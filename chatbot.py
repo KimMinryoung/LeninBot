@@ -133,7 +133,8 @@ def retrieve_node(state: AgentState):
     query = last_message.content
     
     print(f"\n🔍 [검색 중] '{query}'...")
-    
+
+    docs = []
     try:
         # SupabaseVectorStore를 통해 검색 시도
         docs = vectorstore.similarity_search(query, k=5)
