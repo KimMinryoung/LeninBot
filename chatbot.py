@@ -127,33 +127,51 @@ def route_question(state: AgentState):
         print("   👉 '일상적 대화'입니다. (바로 답한다)")
         return "generate"
 
+# Helper: Supabase RPC를 직접 호출하여 similarity search 수행
+# (langchain-community의 SupabaseVectorStore.similarity_search가
+#  postgrest v2.x의 SyncRPCFilterRequestBuilder와 호환되지 않는 문제 우회)
+def _direct_similarity_search(query: str, k: int = 5) -> list:
+    query_embedding = embeddings.embed_query(query)
+    res = supabase.rpc(
+        "match_documents",
+        {"query_embedding": query_embedding},
+    ).limit(k).execute()
+
+    return [
+        Document(
+            page_content=row.get("content", ""),
+            metadata=row.get("metadata", {}),
+        )
+        for row in res.data
+        if row.get("content")
+    ]
+
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     last_message = state["messages"][-1]
     query = last_message.content
-    
+
     print(f"\n🔍 [검색 중] '{query}'...")
 
     docs = []
     try:
-        # SupabaseVectorStore를 통해 검색 시도
-        docs = vectorstore.similarity_search(query, k=5)
-        
+        docs = _direct_similarity_search(query, k=5)
+
         # 검색 결과가 있으면 텍스트로 변환
         if docs:
             print(f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
-            
+
             for i, doc in enumerate(docs, 1):
                 # 1. 메타데이터에서 'source' (파일명) 가져오기
                 source = doc.metadata.get("source", "제목 없음")
 
         else:
             print("⚠️ 레닌 저작 중 관련 문헌이 없습니다.")
-            
+
     except Exception as e:
         print(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
         # 오류가 나도 멈추지 않고, AI의 기본 지식으로 답변하도록 빈 컨텍스트 반환
-    
+
     return {"documents": docs} # Update state with list of docs
 
 # Node: Grade Documents (The Censor)
