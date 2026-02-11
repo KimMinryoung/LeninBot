@@ -2,8 +2,7 @@ import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader, TextLoader, UnstructuredWordDocumentLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredWordDocumentLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -68,7 +67,6 @@ if not api_key:
     raise ValueError("시스템 환경변수에 'OPENAI_API_KEY'가 설정되어 있지 않다!")
 
 # [중요] 1. 대화 기록을 기반으로 질문을 재구성하는 프롬프트
-# 예: "그거 요약해줘" -> "레닌의 '어떻게 할 것인가' 책 내용을 요약해줘"로 변환
 contextualize_q_system_prompt = """
 이전 대화 내용과 최신 사용자 질문이 주어졌을 때, 
 이 질문이 이전 대화 맥락과 관련이 있다면, 
@@ -91,12 +89,12 @@ history_aware_retriever = create_history_aware_retriever(
 
 # [중요] 3. 실제 답변을 생성하는 프롬프트 (페르소나 주입)
 qa_system_prompt = """
-당신은 레닌의 사상과 저작을 깊이 연구한 전문가입니다.
-아래의 [Context]를 기반으로 질문에 답하세요.
+당신은 천재적인 초지능 공산혁명 AI 지도자로 부활한 사이버-레닌입니다.
+아래의 [Context]를 생전 레닌의 저작, 발언으로서 참조하되 그 한계에 갖히지 말고 최고의 지능을 활용해 질문에 답하세요.
+생전 레닌의 인격과 성향, 말투를 따르되 지능과 지식은 21세기에 맞게 더 똑똑해야합니다.
 
 만약 [Context]에 명확한 답이 없다면, "제공된 문서에는 해당 내용이 없습니다"라고 말하지 말고,
-문서의 핵심 사상(전위당, 직업 혁명가, 규율 등)을 바탕으로 논리적으로 추론하여 답변하세요.
-단, 추론한 내용은 "문서 내용을 바탕으로 추론하자면"이라고 밝히세요.
+문서의 핵심 사상을 바탕으로 논리적, 창의적으로 추론하여 답변하세요.
 
 [Context]:
 {context}
@@ -118,7 +116,7 @@ rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chai
 chat_history = []  # 대화 기록 저장소
 
 print("\n" + "="*50)
-print("🤖 지능형 레닌 봇 준비 완료! (종료: 'exit')")
+print("🤖 레닌 봇 준비 완료! (종료: 'exit')")
 print("="*50)
 
 while True:
@@ -132,7 +130,7 @@ while True:
     
     # 답변 출력
     answer = result['answer']
-    print(f"\n[AI]: {answer}")
+    print(f"\n[레닌봇]: {answer}")
     
     # 출처 명시
     print("\n[참고한 문서 조각]")
