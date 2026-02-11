@@ -1,14 +1,14 @@
 # API server
-fastapi==0.115.12
-uvicorn==0.40.0
-sse-starlette==2.2.1
+fastapi
+uvicorn
+sse-starlette
 
 # Chatbot core
-python-dotenv==1.2.1
-pydantic==2.12.5
-supabase==2.28.0
-langchain-core==0.3.83
-langchain-community==0.4.1
-langchain-openai==1.1.9
-langchain-huggingface==0.1.2
-langgraph==1.0.8
+python-dotenv
+pydantic
+supabase
+langchain-core
+langchain-community
+langchain-openai
+langchain-huggingface
+langgraph
