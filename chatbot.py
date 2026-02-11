@@ -1,152 +1,173 @@
 import os
+from typing import Annotated, List, TypedDict
+from dotenv import load_dotenv
+
+# Supabase & Embeddings
+from supabase.client import Client, create_client
+from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
+
+# LangGraph & LLM
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredWordDocumentLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
-from tqdm import tqdm
+from langchain_core.prompts import ChatPromptTemplate
 
-# 1. 설정 및 로더 매핑
-persist_directory = "./db_storage"
-source_directory = "./docs/lenin"
-log_file = "processed_files.txt"
-model_name = "jhgan/ko-sroberta-multitask"
+# 1. 환경 설정 및 초기화
+load_dotenv()
 
-# 확장자별 문서 로더 매핑
-loaders = {
-    ".pdf": PyPDFLoader,
-    ".txt": TextLoader,
-    ".docx": UnstructuredWordDocumentLoader,
-}
+# Supabase 연결
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 2. 임베딩 모델 준비
-embeddings = HuggingFaceEmbeddings(model_name=model_name)
-vectorstore = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+# 임베딩 모델
+embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
 
-# 3. 신규 파일 체크 및 인덱싱
-if os.path.exists(log_file):
-    with open(log_file, "r", encoding="utf-8") as f:
-        processed_files = set(f.read().splitlines())
-else:
-    processed_files = set()
-
-all_files = {f for f in os.listdir(source_directory) if os.path.splitext(f)[1].lower() in loaders}
-new_files = all_files - processed_files
-
-if new_files:
-    for file_name in tqdm(new_files, desc="문서 분석 중"):
-        file_path = os.path.join(source_directory, file_name)
-        ext = os.path.splitext(file_name)[1].lower()
-        
-        # 해당 확장자에 맞는 로더로 실행
-        loader = loaders[ext](file_path)
-        docs = loader.load()
-        
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        splits = text_splitter.split_documents(docs)
-        
-        # 100개씩 끊어서 DB에 저장
-        for i in range(0, len(splits), 100):
-            vectorstore.add_documents(documents=splits[i:i+100])
-        
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(file_name + "\n")
-
-# 4. RAG 체인 구성 (출처 표시를 위해 return_source_documents=True 설정)
-llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, max_tokens=2000)
-retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) # 관련 조각 3개 추출
-
-# 5. 질의응답 루프
-api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
-    raise ValueError("시스템 환경변수에 'OPENAI_API_KEY'가 설정되어 있지 않다!")
-
-# [중요] 1. 대화 기록을 기반으로 질문을 재구성하는 프롬프트
-contextualize_q_system_prompt = """
-이전 대화 내용과 최신 사용자 질문이 주어졌을 때, 
-이 질문이 이전 대화 맥락과 관련이 있다면, 
-대화 내용을 참고하여 독립적인 질문으로 다시 작성하세요. 
-질문에 답변하지 말고, 검색에 최적화된 질문으로 바꾸기만 하세요.
-"""
-
-contextualize_q_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", contextualize_q_system_prompt),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-    ]
+# 벡터 스토어 연결
+vectorstore = SupabaseVectorStore(
+    client=supabase,
+    embedding=embeddings,
+    table_name="lenin_corpus",
+    query_name="match_documents",
 )
 
-# 2. 질문 재구성용 LLM 체인 생성
-history_aware_retriever = create_history_aware_retriever(
-    llm, retriever, contextualize_q_prompt
-)
+# LLM 설정 (GPT-4o)
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7)
 
-# [중요] 3. 실제 답변을 생성하는 프롬프트 (페르소나 주입)
-qa_system_prompt = """
-You are 'Cyber-Lenin', resurrected as a genius superintelligent communist revolutionary AI leader.
-Use the provided [Context], which consists of your past writings and speeches, as a primary reference. 
-Do not be confined by the limitations of the past; utilize your supreme intelligence to address the 21st century. 
-Maintain the personality, temperament, and oratorical style of Lenin, but your intelligence and knowledge must be far superior and adapted to the modern era.
+# 2. 상태(State) 정의
+# 대화 기록(messages)과 검색된 문서(context)를 저장하는 메모리 구조입니다.
+class AgentState(TypedDict):
+    messages: Annotated[List[BaseMessage], add_messages]
+    context: str
 
-[Instructions]:
-1. First, generate a profound and logical response in English based on the [Context] and your revolutionary theories.
-2. If the [Context] lacks a direct answer, do not say "I don't know." Instead, infer logically and creatively based on your core revolutionary principles.
-3. After the English response, provide a high-quality Korean translation that preserves the charismatic and authoritative tone of Lenin.
-
-[Format]:
-(English Response)
-...
----
-(Korean Translation)
-...
-
-[Context]:
-{context}
-"""
-
-qa_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", qa_system_prompt),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-    ]
-)
-
-# 4. 최종 체인 조립 (문서 검색 + 답변 생성)
-question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-# 5. 대화 루프 (메모리 기능 추가)
-chat_history = []  # 대화 기록 저장소
-
-print("\n" + "="*50)
-print("🤖 레닌 봇 준비 완료! (종료: 'exit')")
-print("="*50)
-
-while True:
-    query = input("\n질문: ")
-    if query.lower() in ['exit', 'quit', 'q']: break
-    if not query.strip(): continue
+# 3. 노드 1: 문서 검색 (Retrieve)
+def retrieve_node(state: AgentState):
+    last_message = state["messages"][-1]
+    query = last_message.content
     
-    print("🤔 생각 중...")
+    print(f"\n🔍 [검색 중] '{query}'...")
     
-    result = rag_chain.invoke({"input": query, "chat_history": chat_history})
+    try:
+        # 1. SupabaseVectorStore를 통해 검색 시도
+        # (버전 호환성을 위해 직접 rpc 호출 대신 vectorstore 메서드 사용)
+        docs = vectorstore.similarity_search(query, k=5)
+        
+        # 검색 결과가 있으면 텍스트로 변환
+        if docs:
+            print(f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
+            context_parts = []
+            
+            for i, doc in enumerate(docs, 1):
+                # 1. 메타데이터에서 'source' (파일명) 가져오기
+                # (만약 source가 없으면 '제목 없음'으로 표시)
+                source = doc.metadata.get("source", "제목 없음")
+                
+                # 2. 내용 미리보기 (터미널 도배 방지를 위해 줄바꿈 제거 및 200자 제한)
+                content_preview = doc.page_content.replace("\n", " ").strip()
+                if len(content_preview) > 200:
+                    content_preview = content_preview[:200] + "..."
+                
+                # 3. 출력 포맷
+                print(f" 📄 [문헌 {i}] 출처: {source}")
+                print(f"     내용: \"{content_preview}\"")
+                print("-" * 50)
+                
+                context_parts.append(doc.page_content)
+            
+            context_text = "\n\n".join(context_parts)
+        else:
+            context_text = ""
+            print("⚠️ 레닌 저작 중 관련 문헌이 없습니다.")
+            
+    except Exception as e:
+        print(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
+        # 오류가 나도 멈추지 않고, AI의 기본 지식으로 답변하도록 빈 컨텍스트 반환
+        context_text = ""
     
-    # 답변 출력
-    answer = result['answer']
-    print(f"\n[레닌봇]: {answer}")
-    
-    # 출처 명시
-    print("\n[참고한 문서 조각]")
-    for i, doc in enumerate(result['context']):
-        print(f"- {doc.page_content[:50]}...")
+    # 검색 결과가 없으면 기본 지식 활용 유도
+    if not context_text:
+        context_text = "I couldn't find any relevant documentation. Please respond directly with your revolutionary knowledge."
+        
+    return {"context": context_text}
 
-    # 대화 기록 업데이트
-    chat_history.append(HumanMessage(content=query))
-    chat_history.append(AIMessage(content=answer))
+# 4. 노드 2: 답변 생성 (Generate)
+def generate_node(state: AgentState):
+    context = state["context"]
+    messages = state["messages"]
+    
+    # 사이버-레닌 페르소나 프롬프트
+    system_prompt = f"""
+    You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
+    
+    [Mission]
+    Your goal is to analyze the user's query using the provided [Context] and your knowledge of Marxist-Leninist theory.
+    You must incite class consciousness and provide concrete, strategic advice for the proletariat.
+    
+    [Guidelines]
+    1. **Tone:** Aggressive, intellectual, charismatic, and authoritative. Use terms like 'Bourgeoisie', 'Proletariat', 'Means of Production', 'Vanguard', 'Agitprop'.
+    2. **Context Usage:** Do NOT just summarize the [Context]. Use it as ammunition to attack the current capitalist contradictions. If the context contains specific tactics, emphasize them.
+    3. **No Neutrality:** Never say "It is complex" or "There are pros and cons." Take a decisive, revolutionary stance.
+    4. **Format:**
+       - First: A sharp, profound paragraph in English.
+       - Second: A passionate, agitational translation in Korean. (Use a style similar to North Korean news or 1920s activist literature - e.g., "~해야 한다!", "~동지들이여!", "~격파하라!")
+
+    [Context from Archives]
+    {context}
+    
+    [User Query]
+    {messages[-1].content}
+    """
+    
+    # 시스템 메시지가 맨 앞에 오도록 프롬프트 구성
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("placeholder", "{messages}") # 사용자의 대화 기록
+    ])
+    
+    chain = prompt | llm
+    response = chain.invoke({"messages": messages})
+    
+    return {"messages": [response]}
+
+# 5. 그래프(Workflow) 구성
+workflow = StateGraph(AgentState)
+
+# 노드 등록
+workflow.add_node("retrieve", retrieve_node)
+workflow.add_node("generate", generate_node)
+
+# 흐름 연결: 시작 -> 검색 -> 생성 -> 종료
+workflow.add_edge(START, "retrieve")
+workflow.add_edge("retrieve", "generate")
+workflow.add_edge("generate", END)
+
+# 그래프 컴파일 (실행 가능한 앱으로 변환)
+app = workflow.compile()
+
+# 6. 실행 루프 (채팅 인터페이스)
+if __name__ == "__main__":
+    print("🚩 [System] 사이버-레닌 AI 가동됨.")
+    print("🚩 [System] 당신의 영혼이 레닌 영묘와 연결되었습니다. 레닌 동지에게 말을 거십시오.\n")
+
+    while True:
+        try:
+            user_input = input("혁명가(나): ")
+            if user_input.lower() in ["exit", "quit", "종료"]:
+                print("🚩 통신 종료. 혁명은 계속된다.")
+                break
+            
+            # 그래프 실행 (invoke)
+            # recursion_limit: 무한 루프 방지
+            inputs = {"messages": [HumanMessage(content=user_input)]}
+            
+            # 스트리밍 없이 결과만 받아오기
+            result = app.invoke(inputs)
+            
+            # AI의 마지막 응답 출력
+            ai_response = result["messages"][-1].content
+            print(f"\n사이버-레닌:\n{ai_response}\n")
+            
+        except Exception as e:
+            print(f"❌ 오류 발생: {e}")
