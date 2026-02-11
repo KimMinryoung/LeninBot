@@ -26,6 +26,11 @@ async def health():
     return {"status": "ok"}
 
 
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+async def api_health():
+    return {"status": "ok"}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
