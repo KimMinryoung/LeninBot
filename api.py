@@ -11,6 +11,12 @@ from chatbot import graph
 
 app = FastAPI(title="Cyber-Lenin API")
 
+
+@app.get("/")
+async def health():
+    return {"status": "ok"}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
