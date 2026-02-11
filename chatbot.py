@@ -226,8 +226,9 @@ def generate_node(state: AgentState):
     context = "\n\n".join([d.page_content for d in docs]) if docs else ""
     messages = state["messages"]
     
-    print(f"\n사이버-레닌: ")
-    
+    if __name__ == "__main__":
+        print(f"\n사이버-레닌: ")
+
     # 사이버-레닌 페르소나 프롬프트
     system_prompt = f"""
     You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
@@ -266,11 +267,13 @@ def generate_node(state: AgentState):
     # Use chain.stream to get chunks in real-time
     for chunk in chain.stream({"messages": messages}):
         content = chunk.content
-        print(content, end="", flush=True) # Print each token immediately
+        if __name__ == "__main__":
+            print(content, end="", flush=True) # Print each token only in CLI mode
         full_response += content
-    
-    print("\n" + "-"*50) # End of response
-    
+
+    if __name__ == "__main__":
+        print("\n" + "-"*50) # End of response
+
     # Return the full response to update the state
     return {"messages": [AIMessage(content=full_response)]}
 
@@ -285,7 +288,7 @@ workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "generate",},)
 workflow.add_edge("web_search", "generate")
 workflow.add_edge("generate", END)
-app = workflow.compile()
+graph = workflow.compile()
 
 # 실행 루프 (채팅 인터페이스)
 if __name__ == "__main__":
@@ -303,7 +306,7 @@ if __name__ == "__main__":
             # recursion_limit: 무한 루프 방지
             inputs = {"messages": [HumanMessage(content=user_input)]}
             
-            app.invoke(inputs)
+            graph.invoke(inputs)
             print("\n")
             
         except Exception as e:
