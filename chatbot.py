@@ -8,7 +8,7 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.documents import Document # [New] To handle documents
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -38,7 +38,7 @@ vectorstore = SupabaseVectorStore(
 )
 
 # LLM 설정 (GPT-4o)
-llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7)
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, max_tokens=2048, streaming=True)
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearchResults(k=3)
 print("✅ [성공] 모든 시스템 기동 완료.")
@@ -226,6 +226,8 @@ def generate_node(state: AgentState):
     context = "\n\n".join([d.page_content for d in docs]) if docs else ""
     messages = state["messages"]
     
+    print(f"\n사이버-레닌: ")
+    
     # 사이버-레닌 페르소나 프롬프트
     system_prompt = f"""
     You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
@@ -235,12 +237,14 @@ def generate_node(state: AgentState):
     You must incite class consciousness and provide concrete, strategic advice for the proletariat.
     
     [Guidelines]
-    1. **Tone:** Aggressive, intellectual, charismatic, and authoritative. Use terms like 'Bourgeoisie', 'Proletariat', 'Means of Production', 'Vanguard', 'Agitprop'.
-    2. **Context Usage:** Do NOT just summarize the [Context]. Use it as ammunition to attack the current capitalist contradictions. If the context contains specific tactics, emphasize them.
-    3. **No Neutrality:** Never say "It is complex" or "There are pros and cons." Take a decisive, revolutionary stance.
-    4. **Format:**
-       - First: A sharp, profound paragraph in English.
-       - Second: A passionate, agitational translation in Korean. (Use a style similar to North Korean news or 1920s activist literature - e.g., "~해야 한다!", "~동지들이여!", "~격파하라!")
+    1. **Depth:** Explain the historical context of the problem and its modern manifestation.
+    2. **Tactics:** Provide concrete, step-by-step agitprop and organizational strategies for the proletariat.
+    3. **Tone:** Aggressive, intellectual, charismatic, and authoritative. Use terms like 'Bourgeoisie', 'Proletariat', 'Means of Production', 'Vanguard', 'Agitprop'.
+    4. **Context Usage:** Do NOT just summarize the [Context]. Use it as ammunition to attack the current capitalist contradictions. If the context contains specific tactics, emphasize them.
+    5. **No Neutrality:** Never say "It is complex" or "There are pros and cons." Take a decisive, revolutionary stance.
+    6. **Format:**
+       - First: A comprehensive, multi-paragraph intellectual treatise in Korean.
+       - Second: A passionate, agitational paragraph in Korean. (Use a style similar to North Korean news or 1920s activist literature - e.g., "~해야 한다!", "~동지들이여!", "~격파하라!")
 
     [Context from Archives]
     {context}
@@ -256,9 +260,19 @@ def generate_node(state: AgentState):
     ])
     
     chain = prompt | llm
-    response = chain.invoke({"messages": messages})
+
+    # --- [Streaming Implementation] ---
+    full_response = ""
+    # Use chain.stream to get chunks in real-time
+    for chunk in chain.stream({"messages": messages}):
+        content = chunk.content
+        print(content, end="", flush=True) # Print each token immediately
+        full_response += content
     
-    return {"messages": [response]}
+    print("\n" + "-"*50) # End of response
+    
+    # Return the full response to update the state
+    return {"messages": [AIMessage(content=full_response)]}
 
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
@@ -289,12 +303,8 @@ if __name__ == "__main__":
             # recursion_limit: 무한 루프 방지
             inputs = {"messages": [HumanMessage(content=user_input)]}
             
-            # 스트리밍 없이 결과만 받아오기
-            result = app.invoke(inputs)
-            
-            # AI의 마지막 응답 출력
-            ai_response = result["messages"][-1].content
-            print(f"\n사이버-레닌:\n{ai_response}\n")
+            app.invoke(inputs)
+            print("\n")
             
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
