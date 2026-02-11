@@ -12,6 +12,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.documents import Document # [New] To handle documents
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.tools.tavily_search import TavilySearchResults
 
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -38,6 +39,8 @@ vectorstore = SupabaseVectorStore(
 
 # LLM 설정 (GPT-4o)
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7)
+# 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
+web_search_tool = TavilySearchResults(k=3)
 print("✅ [성공] 모든 시스템 기동 완료.")
 
 # 2. 상태(State) 정의
@@ -52,13 +55,27 @@ class RouteQuery(BaseModel):
     """사용자의 질문을 'vectorstore' 또는 'generate'로 라우팅합니다."""
     datasource: Literal["vectorstore", "generate"] = Field(
         ...,
-        description="혁명 이론, 역사, 마르크스주의, 게임 설정 등에 대한 질문이면 'vectorstore'를, 단순 인사나 잡담이면 'generate'를 선택하세요."
+        description="레닌이 관심있을만한 질문이면 'vectorstore'를, 단순 인사나 잡담이면 'generate'를 선택하세요."
     )
 
 structured_llm_router = llm.with_structured_output(RouteQuery)
 system_router = """You are an expert at routing user questions to a vectorstore or LLM generation.
-The vectorstore contains documents related to revolutionary theory, history, Marxist-Leninist ideology, and game scripts.
-Use the vectorstore for questions on these topics. Otherwise, use generate."""
+
+[Vectorstore Scope]
+The vectorstore contains documents related to:
+1. Revolutionary theory, Marxism-Leninism, and History.
+2. Political Economy, Capitalism, and Labor issues.
+3. **Modern Technology (AI, Automation)** and its impact on society.
+4. Game scripts and lore.
+
+[Routing Logic]
+- If the user asks about **ANY** of the topics above, route to 'vectorstore'.
+- Even if the topic seems modern (like AI), it requires knowledge retrieval.
+- Use 'generate' only for:
+  - Simple greetings (e.g., "Hello", "Hi", "Good morning").
+  - Casual chit-chat without specific information needs.
+
+Be aggressive in choosing 'vectorstore'. When in doubt, choose 'vectorstore'."""
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
@@ -69,7 +86,7 @@ question_router = route_prompt | structured_llm_router
 
 
 # Grader 체인 생성
-# 검색된 문헌이 질문과 연관이 있는지 판단하고 연관 없으면 무시하는 모델
+# 검색된 문헌이 질문과 연관이 있는지 판단하고 연관 없으면 무시
 class GradeDocuments(BaseModel):
     """Boolean check for relevance of retrieved documents."""
     binary_score: Literal["yes", "no"] = Field(
@@ -172,6 +189,37 @@ def grade_documents(state: AgentState):
         
     return {"documents": filtered_docs}
 
+def decide_websearch_need(state: AgentState):
+    """
+    Determines whether to generate an answer or seek external intelligence (Web Search)
+    """
+    print("\n🧐 [판단] 영묘에서 얻은 데이터가 충분한지 평가 중...")
+    filtered_docs = state["documents"]
+    if len(filtered_docs) <= 1:
+        print(f"  👉 관련된 문헌 수가 1개 이하다. 웹 검색을 시작")
+        return "need_web_search"
+    else:
+        print(f"  👉 관련된 문헌 수 ({len(filtered_docs)})가 충분하니 이를 이용해 답을 하겠다")
+        return "no_need_to_search_web"
+
+# Node: Web Search
+def web_search(state: AgentState):
+    """
+    Search the external world to gather more context.
+    """
+    question = state["messages"][-1].content
+    print(f"\n🌐 [웹 검색] 질문과 관련된 외부 세계를 정찰")
+    # Execute Search
+    docs = web_search_tool.invoke({"query": question})
+    # 검색 결과를 Document 오브젝트로 변환
+    web_results = "\n".join([d["content"] for d in docs])
+    web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
+    # Append to existing documents
+    current_docs = state["documents"]
+    current_docs.append(web_results_doc)
+    print("  ✅ 외부 정보가 취합되었다.")
+    return {"documents": current_docs}
+
 # Node: Generate
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
@@ -217,9 +265,11 @@ workflow = StateGraph(AgentState)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents)
+workflow.add_node("web_search", web_search)
 workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
 workflow.add_edge("retrieve", "grade_documents")
-workflow.add_edge("grade_documents", "generate")
+workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "generate",},)
+workflow.add_edge("web_search", "generate")
 workflow.add_edge("generate", END)
 app = workflow.compile()
 
