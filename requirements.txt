@@ -5,13 +5,13 @@ sse-starlette
 
 # Chatbot core
 python-dotenv
-pydantic>=2.0.0
-supabase==2.11.0
-postgrest==0.16.5
+pydantic
+supabase
+postgrest
 
 # LangChain 관련
 langchain-core
-langchain-community>=0.2.0
+langchain-community
 langchain-openai
 langchain-huggingface
 sentence-transformers
