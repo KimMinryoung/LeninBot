@@ -14,6 +14,10 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
+from typing import Literal
+from pydantic import BaseModel, Field
+
+print("\n⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
 # 1. 환경 설정 및 초기화
 load_dotenv()
 
@@ -35,12 +39,57 @@ vectorstore = SupabaseVectorStore(
 
 # LLM 설정 (GPT-4o)
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7)
+print("✅ [성공] 모든 시스템 기동 완료.")
 
 # 2. 상태(State) 정의
 # 대화 기록(messages)과 검색된 문서(context)를 저장하는 메모리 구조입니다.
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     context: str
+
+# 질문을 분석하여 검색이 필요한지 판단하는 데이터 모델
+class RouteQuery(BaseModel):
+    """사용자의 질문을 'vectorstore' 또는 'generate'로 라우팅합니다."""
+    datasource: Literal["vectorstore", "generate"] = Field(
+        ...,
+        description="혁명 이론, 역사, 마르크스주의, 게임 설정 등에 대한 질문이면 'vectorstore'를, 단순 인사나 잡담이면 'generate'를 선택하세요."
+    )
+
+# 라우터 체인 생성 (LLM에게 판단력을 부여)
+structured_llm_router = llm.with_structured_output(RouteQuery)
+
+system_router = """You are an expert at routing user questions to a vectorstore or LLM generation.
+The vectorstore contains documents related to revolutionary theory, history, Marxist-Leninist ideology, and game scripts.
+Use the vectorstore for questions on these topics. Otherwise, use generate."""
+
+route_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_router),
+        ("human", "{question}"),
+    ]
+)
+
+question_router = route_prompt | structured_llm_router
+
+
+# --- 노드 및 엣지 함수 정의 ---
+
+class AgentState(TypedDict):
+    messages: Annotated[List[BaseMessage], add_messages]
+    context: str
+
+# [조건부 엣지] 라우팅 함수
+def route_question(state: AgentState):
+    print("\n🚦 [문지기] 질문의 성격을 분석 중...")
+    question = state["messages"][-1].content
+    source = question_router.invoke({"question": question})
+    
+    if source.datasource == "vectorstore":
+        print("   👉 '혁명적 지식'이 필요합니다. (영묘에서 데이터 검색)")
+        return "retrieve"
+    elif source.datasource == "generate":
+        print("   👉 '일상적 대화'입니다. (바로 답한다)")
+        return "generate"
 
 # 3. 노드 1: 문서 검색 (Retrieve)
 def retrieve_node(state: AgentState):
@@ -94,7 +143,7 @@ def retrieve_node(state: AgentState):
 
 # 4. 노드 2: 답변 생성 (Generate)
 def generate_node(state: AgentState):
-    context = state["context"]
+    context = state.get("context", "")
     messages = state["messages"]
     
     # 사이버-레닌 페르소나 프롬프트
@@ -133,17 +182,11 @@ def generate_node(state: AgentState):
 
 # 5. 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
-
-# 노드 등록
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
-
-# 흐름 연결: 시작 -> 검색 -> 생성 -> 종료
-workflow.add_edge(START, "retrieve")
+workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
 workflow.add_edge("retrieve", "generate")
 workflow.add_edge("generate", END)
-
-# 그래프 컴파일 (실행 가능한 앱으로 변환)
 app = workflow.compile()
 
 # 6. 실행 루프 (채팅 인터페이스)
