@@ -1,0 +1,22 @@
+# 보안 파일
+.env
+
+# 가상환경 폴더
+.venv/
+venv/
+env/
+
+# 파이썬 캐시 파일
+__pycache__/
+*.pyc
+
+# RAG 벡터 DB 데이터
+db_storage/
+chroma_db/
+
+# 로컬 로그 파일
+processed_files.txt
+
+# PDF 문서 파일
+docs/
+*.pdf
