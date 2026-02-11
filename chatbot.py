@@ -6,11 +6,10 @@ from dotenv import load_dotenv
 from supabase.client import Client, create_client
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
-
-# LangGraph & LLM
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.documents import Document # [New] To handle documents
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -47,6 +46,7 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     context: str
 
+# 라우터 체인 생성
 # 질문을 분석하여 검색이 필요한지 판단하는 데이터 모델
 class RouteQuery(BaseModel):
     """사용자의 질문을 'vectorstore' 또는 'generate'로 라우팅합니다."""
@@ -55,30 +55,49 @@ class RouteQuery(BaseModel):
         description="혁명 이론, 역사, 마르크스주의, 게임 설정 등에 대한 질문이면 'vectorstore'를, 단순 인사나 잡담이면 'generate'를 선택하세요."
     )
 
-# 라우터 체인 생성 (LLM에게 판단력을 부여)
 structured_llm_router = llm.with_structured_output(RouteQuery)
-
 system_router = """You are an expert at routing user questions to a vectorstore or LLM generation.
 The vectorstore contains documents related to revolutionary theory, history, Marxist-Leninist ideology, and game scripts.
 Use the vectorstore for questions on these topics. Otherwise, use generate."""
-
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
         ("human", "{question}"),
     ]
 )
-
 question_router = route_prompt | structured_llm_router
 
+
+# Grader 체인 생성
+# 검색된 문헌이 질문과 연관이 있는지 판단하고 연관 없으면 무시하는 모델
+class GradeDocuments(BaseModel):
+    """Boolean check for relevance of retrieved documents."""
+    binary_score: Literal["yes", "no"] = Field(
+        ...,
+        description="Documents are relevant to the question, 'yes' or 'no'"
+    )
+structured_llm_grader = llm.with_structured_output(GradeDocuments)
+system_grader = """You are a strategic revolutionary censor. Your goal is to identify documents that can be used as 'ammunition' for an answer.
+Even if the document doesn't mention modern terms like 'AI' or 'current year', if it discusses:
+1. Economic crisis/panic (as a parallel to current crisis)
+2. Mass psychology and far-right tendencies (reactionary movements)
+3. Agitation, propaganda, and organization tactics
+4. Class struggle and the role of the vanguard
+
+Then grade it as 'yes'. Be generous. If there is ANY historical or theoretical parallel, it is RELEVANT."""
+grade_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_grader),
+    ("human", "Retrieved document: \n\n {document} \n\n User question: {question}"),
+])
+retrieval_grader = grade_prompt | structured_llm_grader
 
 # --- 노드 및 엣지 함수 정의 ---
 
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
-    context: str
+    documents: List[Document]
 
-# [조건부 엣지] 라우팅 함수
+# Node: Router
 def route_question(state: AgentState):
     print("\n🚦 [문지기] 질문의 성격을 분석 중...")
     question = state["messages"][-1].content
@@ -91,7 +110,7 @@ def route_question(state: AgentState):
         print("   👉 '일상적 대화'입니다. (바로 답한다)")
         return "generate"
 
-# 3. 노드 1: 문서 검색 (Retrieve)
+# Node: Retrieve
 def retrieve_node(state: AgentState):
     last_message = state["messages"][-1]
     query = last_message.content
@@ -99,51 +118,64 @@ def retrieve_node(state: AgentState):
     print(f"\n🔍 [검색 중] '{query}'...")
     
     try:
-        # 1. SupabaseVectorStore를 통해 검색 시도
-        # (버전 호환성을 위해 직접 rpc 호출 대신 vectorstore 메서드 사용)
+        # SupabaseVectorStore를 통해 검색 시도
         docs = vectorstore.similarity_search(query, k=5)
         
         # 검색 결과가 있으면 텍스트로 변환
         if docs:
             print(f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
-            context_parts = []
             
             for i, doc in enumerate(docs, 1):
                 # 1. 메타데이터에서 'source' (파일명) 가져오기
-                # (만약 source가 없으면 '제목 없음'으로 표시)
                 source = doc.metadata.get("source", "제목 없음")
-                
-                # 2. 내용 미리보기 (터미널 도배 방지를 위해 줄바꿈 제거 및 200자 제한)
-                content_preview = doc.page_content.replace("\n", " ").strip()
-                if len(content_preview) > 200:
-                    content_preview = content_preview[:200] + "..."
-                
-                # 3. 출력 포맷
-                print(f" 📄 [문헌 {i}] 출처: {source}")
-                print(f"     내용: \"{content_preview}\"")
-                print("-" * 50)
-                
-                context_parts.append(doc.page_content)
-            
-            context_text = "\n\n".join(context_parts)
+
         else:
-            context_text = ""
             print("⚠️ 레닌 저작 중 관련 문헌이 없습니다.")
             
     except Exception as e:
         print(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
         # 오류가 나도 멈추지 않고, AI의 기본 지식으로 답변하도록 빈 컨텍스트 반환
-        context_text = ""
     
-    # 검색 결과가 없으면 기본 지식 활용 유도
-    if not context_text:
-        context_text = "I couldn't find any relevant documentation. Please respond directly with your revolutionary knowledge."
-        
-    return {"context": context_text}
+    return {"documents": docs} # Update state with list of docs
 
-# 4. 노드 2: 답변 생성 (Generate)
+# Node: Grade Documents (The Censor)
+def grade_documents(state: AgentState):
+    print("\n⚖️ [Grader] Evaluating document relevance...")
+    question = state["messages"][-1].content
+    documents = state["documents"]
+    
+    filtered_docs = []
+    
+    for d in documents:
+        score = retrieval_grader.invoke({"question": question, "document": d.page_content})
+        grade = score.binary_score
+        
+        if grade == "yes":
+            print(f"   ✅ 관련있는 문헌: {d.metadata.get('source', '출처미상')}")
+            content_preview = d.page_content.replace("\n", " ").strip()
+            if len(content_preview) > 400:
+                content_preview = content_preview[:400] + "..."
+            print(f"   미리보기: \"{content_preview}\"")
+            print("-" * 50)
+            filtered_docs.append(d)
+        else:
+            print(f"   🗑️ 관련없는 문헌(무시): {d.metadata.get('source', '출처미상')}")
+    
+    # Fallback: If all are filtered, take at least the top 1 document from the original search
+    # Also, if remain doc is one or zero, we will trigger web search
+    if not filtered_docs and documents:
+        print("   ⚠️ All documents were rejected. Forcing fallback to the most similar document.")
+        filtered_docs = [documents[0]]
+    
+    if not filtered_docs:
+        print("   ⚠️ 연관있는 문헌이 없다.")
+        
+    return {"documents": filtered_docs}
+
+# Node: Generate
 def generate_node(state: AgentState):
-    context = state.get("context", "")
+    docs = state.get("documents", [])
+    context = "\n\n".join([d.page_content for d in docs]) if docs else ""
     messages = state["messages"]
     
     # 사이버-레닌 페르소나 프롬프트
@@ -180,16 +212,18 @@ def generate_node(state: AgentState):
     
     return {"messages": [response]}
 
-# 5. 그래프(Workflow) 구성
+# 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
+workflow.add_node("grade_documents", grade_documents)
 workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
-workflow.add_edge("retrieve", "generate")
+workflow.add_edge("retrieve", "grade_documents")
+workflow.add_edge("grade_documents", "generate")
 workflow.add_edge("generate", END)
 app = workflow.compile()
 
-# 6. 실행 루프 (채팅 인터페이스)
+# 실행 루프 (채팅 인터페이스)
 if __name__ == "__main__":
     print("🚩 [System] 사이버-레닌 AI 가동됨.")
     print("🚩 [System] 당신의 영혼이 레닌 영묘와 연결되었습니다. 레닌 동지에게 말을 거십시오.\n")
