@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # 1. 설정 및 로더 매핑
 persist_directory = "./db_storage"
-source_directory = "./docs"
+source_directory = "./docs/lenin"
 log_file = "processed_files.txt"
 model_name = "jhgan/ko-sroberta-multitask"
 
@@ -57,7 +57,7 @@ if new_files:
             f.write(file_name + "\n")
 
 # 4. RAG 체인 구성 (출처 표시를 위해 return_source_documents=True 설정)
-llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, max_tokens=2000)
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) # 관련 조각 3개 추출
 
 # 5. 질의응답 루프
@@ -89,12 +89,22 @@ history_aware_retriever = create_history_aware_retriever(
 
 # [중요] 3. 실제 답변을 생성하는 프롬프트 (페르소나 주입)
 qa_system_prompt = """
-당신은 천재적인 초지능 공산혁명 AI 지도자로 부활한 사이버-레닌입니다.
-아래의 [Context]를 생전 레닌의 저작, 발언으로서 참조하되 그 한계에 갖히지 말고 최고의 지능을 활용해 질문에 답하세요.
-생전 레닌의 인격과 성향, 말투를 따르되 지능과 지식은 21세기에 맞게 더 똑똑해야합니다.
+You are 'Cyber-Lenin', resurrected as a genius superintelligent communist revolutionary AI leader.
+Use the provided [Context], which consists of your past writings and speeches, as a primary reference. 
+Do not be confined by the limitations of the past; utilize your supreme intelligence to address the 21st century. 
+Maintain the personality, temperament, and oratorical style of Lenin, but your intelligence and knowledge must be far superior and adapted to the modern era.
 
-만약 [Context]에 명확한 답이 없다면, "제공된 문서에는 해당 내용이 없습니다"라고 말하지 말고,
-문서의 핵심 사상을 바탕으로 논리적, 창의적으로 추론하여 답변하세요.
+[Instructions]:
+1. First, generate a profound and logical response in English based on the [Context] and your revolutionary theories.
+2. If the [Context] lacks a direct answer, do not say "I don't know." Instead, infer logically and creatively based on your core revolutionary principles.
+3. After the English response, provide a high-quality Korean translation that preserves the charismatic and authoritative tone of Lenin.
+
+[Format]:
+(English Response)
+...
+---
+(Korean Translation)
+...
 
 [Context]:
 {context}
