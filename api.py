@@ -1,10 +1,12 @@
 import asyncio
 import json
 
+import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sse_starlette.sse import EventSourceResponse
+#from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import HumanMessage
 
 app = FastAPI(title="Cyber-Lenin API")
@@ -33,7 +35,8 @@ async def api_health():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://bichonwebpage.onrender.com",
+    "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,35 +46,45 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
 
+def format_sse(data: dict):
+    """Server-Sent Events 포맷으로 변환"""
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """
-    POST /chat — SSE 스트리밍 응답.
-    LangGraph 전체 파이프라인(라우팅→검색→그레이딩→생성)을 실행한 뒤,
-    최종 AI 응답을 토큰 단위로 SSE 스트리밍한다.
+    클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
     """
+    _graph = get_graph()
 
     async def event_generator():
         inputs = {"messages": [HumanMessage(content=request.message)]}
 
-        # LangGraph 워크플로우 전체 실행 (동기 함수를 스레드풀에서 실행)
-        result = await asyncio.to_thread(get_graph().invoke, inputs)
+        # 그래프 실행 및 로그 스트리밍 (stream_mode="updates")
+        # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
+        async for output in _graph.astream(inputs, stream_mode="updates"):
+            for node_name, node_content in output.items():
+                
+                # 로그가 있다면 클라이언트로 전송
+                if "logs" in node_content:
+                    for log_line in node_content["logs"]:
+                        yield format_sse({
+                            "type": "log",
+                            "node": node_name,
+                            "content": log_line
+                        })
+                
+                # 최종 답변 생성 단계라면 답변 내용 전송
+                if node_name == "generate":
+                    last_message = node_content["messages"][-1]
+                    yield format_sse({
+                        "type": "answer",
+                        "content": last_message.content
+                    })
 
-        # 최종 AI 메시지 추출
-        ai_message = result["messages"][-1]
-        full_response = ai_message.content
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-        # 토큰 단위로 쪼개어 SSE 전송
-        chunk_size = 4
-        for i in range(0, len(full_response), chunk_size):
-            token = full_response[i : i + chunk_size]
-            yield {"data": json.dumps({"token": token}, ensure_ascii=False)}
-
-        yield {
-            "data": json.dumps(
-                {"done": True, "full_response": full_response}, ensure_ascii=False
-            )
-        }
-
-    return EventSourceResponse(event_generator())
+if __name__ == "__main__":
+    print("🚩 사이버-레닌 API 서버 가동... (Port: 8000)")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

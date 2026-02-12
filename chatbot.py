@@ -1,5 +1,6 @@
 import os
 from typing import Annotated, List, TypedDict, Optional
+from operator import add
 from dotenv import load_dotenv
 
 # Supabase & Embeddings
@@ -47,6 +48,9 @@ print("✅ [성공] 모든 시스템 기동 완료.")
 # 대화 기록(messages)과 검색된 문서(context)를 저장하는 메모리 구조입니다.
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
+    documents: List[Document]
+    strategy: Optional[str]
+    logs: Annotated[List[str], add]
     context: str
 
 # 라우터 체인 생성
@@ -131,22 +135,18 @@ strategist_chain = strategist_prompt | llm
 
 # --- 노드 및 엣지 함수 정의 ---
 
-class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], add_messages]
-    documents: List[Document]
-    strategy: Optional[str]
-
 # Node: Router
 def route_question(state: AgentState):
-    print("\n🚦 [문지기] 질문의 성격을 분석 중...")
+    logs = []
+    logs.append("\n🚦 [문지기] 질문의 성격을 분석 중...")
     question = state["messages"][-1].content
     source = question_router.invoke({"question": question})
     
     if source.datasource == "vectorstore":
-        print("   👉 '혁명적 지식'이 필요합니다. (영묘에서 데이터 검색)")
+        logs.append("   👉 '혁명적 지식'이 필요합니다. (영묘에서 데이터 검색)")
         return "retrieve"
     elif source.datasource == "generate":
-        print("   👉 '일상적 대화'입니다. (바로 답한다)")
+        logs.append("   👉 '일상적 대화'입니다. (바로 답한다)")
         return "generate"
 
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
@@ -170,77 +170,61 @@ def _direct_similarity_search(query: str, k: int = 5) -> list:
 
 # Node: Retrieve
 def retrieve_node(state: AgentState):
-    last_message = state["messages"][-1]
-    query = last_message.content
-
-    print(f"\n🔍 [검색 중] '{query}'...")
+    query = state["messages"][-1].content
 
     docs = []
     try:
         docs = _direct_similarity_search(query, k=5)
 
-        # 검색 결과가 있으면 텍스트로 변환
         if docs:
-            print(f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
-
-            for i, doc in enumerate(docs, 1):
-                # 1. 메타데이터에서 'source' (파일명) 가져오기
-                source = doc.metadata.get("source", "제목 없음")
-
+            msg = f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50
         else:
-            print("⚠️ 레닌 저작 중 관련 문헌이 없습니다.")
+            msg = "⚠️ 영묘 데이터에 관련된 문헌이 없습니다."
 
     except Exception as e:
-        print(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
-        # 오류가 나도 멈추지 않고, AI의 기본 지식으로 답변하도록 빈 컨텍스트 반환
+        msg = f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}"
 
-    return {"documents": docs} # Update state with list of docs
+    return {"documents": docs, "logs": [msg]}
 
 # Node: Grade Documents (The Censor)
 def grade_documents_node(state: AgentState):
-    print("\n⚖️ [Grader] Evaluating document relevance...")
     question = state["messages"][-1].content
     documents = state["documents"]
-    
     filtered_docs = []
+
+    logs = []
+    logs.append("\n⚖️ [검열관] 문헌의 적절성을 평가 중...")
     
     for d in documents:
         score = retrieval_grader.invoke({"question": question, "document": d.page_content})
         grade = score.binary_score
         
         if grade == "yes":
-            print(f"   ✅ 관련있는 문헌: {d.metadata.get('source', '출처미상')}")
+            logs.append(f"   ✅ 적절한 문헌: {d.metadata.get('source', '출처미상')}")
             content_preview = d.page_content.replace("\n", " ").strip()
             if len(content_preview) > 400:
                 content_preview = content_preview[:400] + "..."
-            print(f"   미리보기: \"{content_preview}\"")
-            print("-" * 50)
+            logs.append(f"   미리보기: \"{content_preview}\"")
+            logs.append("-" * 50)
             filtered_docs.append(d)
         else:
-            print(f"   🗑️ 관련없는 문헌(무시): {d.metadata.get('source', '출처미상')}")
-    
+            logs.append(f"   🗑️ 관련없는 문헌(무시): {d.metadata.get('source', '출처미상')}")
+
     # Fallback: If all are filtered, take at least the top 1 document from the original search
     # Also, if remain doc is one or zero, we will trigger web search
     if not filtered_docs and documents:
-        print("   ⚠️ All documents were rejected. Forcing fallback to the most similar document.")
         filtered_docs = [documents[0]]
     
     if not filtered_docs:
-        print("   ⚠️ 연관있는 문헌이 없다.")
+        logs.append("   ⚠️ 연관있는 문헌이 없다.")
         
-    return {"documents": filtered_docs}
+    return {"documents": filtered_docs, "logs": logs}
 
 def decide_websearch_need(state: AgentState):
-    """
-    Determines whether to generate an answer or seek external intelligence (Web Search)
-    """
-    print("\n🧐 [판단] 영묘에서 얻은 데이터가 충분한지 평가 중...")
     filtered_docs = state["documents"]
     if len(filtered_docs) <= 1:
-        print(f"  👉 관련된 문헌 수가 1개 이하다. 웹 검색을 시작")
         return "need_web_search"
     else:
-        print(f"  👉 관련된 문헌 수 ({len(filtered_docs)})가 충분하니 이를 이용해 답을 하겠다")
         return "no_need_to_search_web"
 
 # Node: Web Search
@@ -249,31 +233,36 @@ def web_search_node(state: AgentState):
     Search the external world to gather more context.
     """
     question = state["messages"][-1].content
-    print(f"\n🌐 [웹 검색] 질문과 관련된 외부 세계를 정찰")
-    # Execute Search
-    docs = web_search_tool.invoke({"query": question})
-    # 검색 결과를 Document 오브젝트로 변환
-    web_results = "\n".join([d["content"] for d in docs])
-    web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
-    # Append to existing documents
-    current_docs = state["documents"]
-    current_docs.append(web_results_doc)
-    print("  ✅ 외부 정보가 취합되었다.")
-    return {"documents": current_docs}
+    current_docs = state.get("documents", [])
+    logs = []
+    logs.append(f"\n🌐 [웹 검색] 질문과 관련된 외부 세계를 정찰")
+    try:
+        # Execute Search
+        docs_from_web = web_search_tool.invoke({"query": question})
+        # 검색 결과를 Document 오브젝트로 변환
+        web_results = "\n".join([d["content"] for d in docs_from_web])
+        web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
+        # Append to existing documents
+        current_docs.append(web_results_doc)
+        logs.append("  ✅ 외부 정보가 취합되었다.")
+    except Exception as e:
+        logs.append(f"⚠️ Web Search Failed: {e}")
+    return {"documents": current_docs, "logs": logs}
 
 def strategize_node(state: AgentState):
-    print("\n🧠 [참모] 변증법적 전술을 고안 중...")
-
     docs = state.get("documents", [])
     context = "\n\n".join([d.page_content for d in docs]) if docs else "No specific documents found."
     question = state["messages"][-1].content
 
+    logs = []
+    logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
+
     response = strategist_chain.invoke({"context": context, "question": question})
     strategy_text = response.content
 
-    print(f"👉 전술 :\n   {strategy_text}")
+    logs.append(f"👉 전술 :\n   {strategy_text}")
     
-    return {"strategy": strategy_text}
+    return {"strategy": strategy_text, "logs": logs}
 
 # Node: Generate
 def generate_node(state: AgentState):
@@ -281,10 +270,9 @@ def generate_node(state: AgentState):
     context = "\n\n".join([d.page_content for d in docs]) if docs else ""
     strategy = state.get("strategy", "No strategy provided.")
     messages = state["messages"]
-    
-    if __name__ == "__main__":
-        print(f"\n💬 사이버-레닌: ")
 
+    logs = []
+    
     # 사이버-레닌 페르소나 프롬프트
     system_prompt = f"""
     You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
@@ -316,19 +304,10 @@ def generate_node(state: AgentState):
     ])
     
     chain = prompt | llm
+    response = chain.invoke({"messages": messages})
+    logs.append("💬 [생성] 답변 생성됨.")
 
-    # --- [Streaming Implementation] ---
-    full_response = ""
-    # Use chain.stream to get chunks in real-time
-    for chunk in chain.stream({"messages": messages}):
-        content = chunk.content
-        print(content, end="", flush=True)
-        full_response += content
-
-    print("\n" + "-"*50)
-
-    # Return the full response to update the state
-    return {"messages": [AIMessage(content=full_response)]}
+    return {"messages": [response], "logs": logs}
 
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
@@ -358,8 +337,15 @@ if __name__ == "__main__":
                 break
             
             inputs = {"messages": [HumanMessage(content=user_input)]}
-            graph.invoke(inputs)
-            print("\n")
+            for output in graph.stream(inputs, stream_mode="updates"):
+                for node_name, node_content in output.items():
+                    if "logs" in node_content:
+                        for log_line in node_content["logs"]:
+                            print(log_line)
+                    if node_name == "generate":
+                        answer = node_content["messages"][-1].content
+                        print(f"\n💬 사이버-레닌: {answer}")
+            print()
             
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
