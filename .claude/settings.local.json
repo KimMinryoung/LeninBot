@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Add FastAPI HTTP API with SSE streaming for web frontend\n\n- Create api.py with POST /chat endpoint and CORS middleware\n- Rename LangGraph `app` to `graph` in chatbot.py to avoid FastAPI collision\n- Guard generate_node print\\(\\) calls with __name__ check for clean API usage\n- Add fastapi and sse-starlette to requirements.txt\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(uvicorn:*)",
+      "Bash(python -m uvicorn:*)",
+      "Bash(.venvScriptspython.exe -m uvicorn api:app --reload)",
+      "Bash(\"C:\\\\Users\\\\DESKTOP\\\\Documents\\\\GitHub\\\\AIChatBot\\\\.venv\\\\Scripts\\\\python.exe\" -m uvicorn api:app --reload --app-dir \"C:\\\\Users\\\\DESKTOP\\\\Documents\\\\GitHub\\\\AIChatBot\")",
+      "Bash(\"C:\\\\Users\\\\DESKTOP\\\\Documents\\\\GitHub\\\\AIChatBot\\\\.venv\\\\Scripts\\\\pip.exe\" install fastapi sse-starlette uvicorn)",
+      "Bash(git commit:*)",
+      "WebSearch"
+    ]
+  }
+}

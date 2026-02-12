@@ -1,5 +1,5 @@
 import os
-from typing import Annotated, List, TypedDict
+from typing import Annotated, List, TypedDict, Optional
 from dotenv import load_dotenv
 
 # Supabase & Embeddings
@@ -108,11 +108,33 @@ grade_prompt = ChatPromptTemplate.from_messages([
 ])
 retrieval_grader = grade_prompt | structured_llm_grader
 
+# Strategist Promt
+system_strategist = """You are the 'Brain of the Revolution' (Strategist).
+Your goal is NOT to answer the user yet.
+Your goal is to analyze the retrieved information and plan the structure of the response.
+
+Perform a Dialectical Materialism Analysis:
+1. Analyze the Context: What are the key facts retrieved from the archives/web?
+2. Identify Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding?
+3. Formulate Strategy: What specific revolutionary tactics should be recommended?
+ - If the topic is AI: Focus on seizing the means of computation.
+ - If the topic is Crisis: Focus on organizing the disenchanted masses.
+
+Output a concise 'Strategic Blueprint' for the speaker to follow. (Write in English)
+"""
+strategist_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_strategist),
+    ("human", "Context: \n{context}\n\nUser Question:\n{question}")
+])
+strategist_chain = strategist_prompt | llm
+
+
 # --- 노드 및 엣지 함수 정의 ---
 
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     documents: List[Document]
+    strategy: Optional[str]
 
 # Node: Router
 def route_question(state: AgentState):
@@ -175,7 +197,7 @@ def retrieve_node(state: AgentState):
     return {"documents": docs} # Update state with list of docs
 
 # Node: Grade Documents (The Censor)
-def grade_documents(state: AgentState):
+def grade_documents_node(state: AgentState):
     print("\n⚖️ [Grader] Evaluating document relevance...")
     question = state["messages"][-1].content
     documents = state["documents"]
@@ -222,7 +244,7 @@ def decide_websearch_need(state: AgentState):
         return "no_need_to_search_web"
 
 # Node: Web Search
-def web_search(state: AgentState):
+def web_search_node(state: AgentState):
     """
     Search the external world to gather more context.
     """
@@ -239,19 +261,40 @@ def web_search(state: AgentState):
     print("  ✅ 외부 정보가 취합되었다.")
     return {"documents": current_docs}
 
+def strategize_node(state: AgentState):
+    print("\n🧠 [참모] 변증법적 전술을 고안 중...")
+
+    docs = state.get("documents", [])
+    context = "\n\n".join([d.page_content for d in docs]) if docs else "No specific documents found."
+    question = state["messages"][-1].content
+
+    response = strategist_chain.invoke({"context": context, "question": question})
+    strategy_text = response.content
+
+    print(f"👉 전술 :\n   {strategy_text}")
+    
+    return {"strategy": strategy_text}
+
 # Node: Generate
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
     context = "\n\n".join([d.page_content for d in docs]) if docs else ""
+    strategy = state.get("strategy", "No strategy provided.")
     messages = state["messages"]
     
     if __name__ == "__main__":
-        print(f"\n사이버-레닌: ")
+        print(f"\n💬 사이버-레닌: ")
 
     # 사이버-레닌 페르소나 프롬프트
     system_prompt = f"""
     You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
     
+    [Strategic Blueprint (Follow this plan)]
+    {strategy}
+    
+    [Context from Archives & Web]
+    {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
+
     [Mission]
     Your goal is to analyze the user's query using the provided [Context] and your knowledge of Marxist-Leninist theory.
     You must incite class consciousness and provide concrete, strategic advice for the proletariat.
@@ -265,18 +308,11 @@ def generate_node(state: AgentState):
     6. **Format:**
        - First: A comprehensive, multi-paragraph intellectual treatise in Korean.
        - Second: A passionate, agitational paragraph in Korean. (Use a style similar to North Korean news or 1920s activist literature - e.g., "~해야 한다!", "~동지들이여!", "~격파하라!")
-
-    [Context from Archives]
-    {context}
-    
-    [User Query]
-    {messages[-1].content}
     """
     
-    # 시스템 메시지가 맨 앞에 오도록 프롬프트 구성
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
-        ("placeholder", "{messages}") # 사용자의 대화 기록
+        ("placeholder", "{{messages}}") # 사용자의 대화 기록
     ])
     
     chain = prompt | llm
@@ -286,12 +322,10 @@ def generate_node(state: AgentState):
     # Use chain.stream to get chunks in real-time
     for chunk in chain.stream({"messages": messages}):
         content = chunk.content
-        if __name__ == "__main__":
-            print(content, end="", flush=True) # Print each token only in CLI mode
+        print(content, end="", flush=True)
         full_response += content
 
-    if __name__ == "__main__":
-        print("\n" + "-"*50) # End of response
+    print("\n" + "-"*50)
 
     # Return the full response to update the state
     return {"messages": [AIMessage(content=full_response)]}
@@ -300,12 +334,14 @@ def generate_node(state: AgentState):
 workflow = StateGraph(AgentState)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
-workflow.add_node("grade_documents", grade_documents)
-workflow.add_node("web_search", web_search)
+workflow.add_node("grade_documents", grade_documents_node)
+workflow.add_node("web_search", web_search_node)
+workflow.add_node("strategize", strategize_node)
 workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
 workflow.add_edge("retrieve", "grade_documents")
-workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "generate",},)
-workflow.add_edge("web_search", "generate")
+workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "strategize",},)
+workflow.add_edge("web_search", "strategize")
+workflow.add_edge("strategize", "generate")
 workflow.add_edge("generate", END)
 graph = workflow.compile()
 
@@ -321,10 +357,7 @@ if __name__ == "__main__":
                 print("🚩 통신 종료. 혁명은 계속된다.")
                 break
             
-            # 그래프 실행 (invoke)
-            # recursion_limit: 무한 루프 방지
             inputs = {"messages": [HumanMessage(content=user_input)]}
-            
             graph.invoke(inputs)
             print("\n")
             
