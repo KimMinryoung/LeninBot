@@ -346,6 +346,48 @@ Rotate between these different response styles unpredictably:
 
     return {"messages": [response], "logs": logs}
 
+# Node: Log Conversation to Supabase
+def log_conversation_node(state: AgentState):
+    logs = []
+    try:
+        messages = state["messages"]
+        # Find the last HumanMessage and AIMessage
+        user_query = ""
+        bot_answer = ""
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and not bot_answer:
+                bot_answer = msg.content
+            elif isinstance(msg, HumanMessage) and not user_query:
+                user_query = msg.content
+            if user_query and bot_answer:
+                break
+
+        docs = state.get("documents", [])
+        strategy = state.get("strategy", None)
+        processing_logs = state.get("logs", [])
+
+        is_casual = not docs and not strategy
+        route = "casual" if is_casual else "vectorstore"
+
+        web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
+
+        row = {
+            "user_query": user_query,
+            "bot_answer": bot_answer,
+            "route": route,
+            "documents_count": len(docs),
+            "web_search_used": web_search_used,
+            "strategy": strategy,
+            "processing_logs": processing_logs,
+        }
+
+        supabase.table("chat_logs").insert(row).execute()
+        logs.append("📝 [로그] 대화가 DB에 기록되었습니다.")
+    except Exception as e:
+        logs.append(f"⚠️ [로그] DB 기록 실패 (무시하고 진행): {e}")
+
+    return {"logs": logs}
+
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
 workflow.add_node("retrieve", retrieve_node)
@@ -353,12 +395,14 @@ workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
+workflow.add_node("log_conversation", log_conversation_node)
 workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
 workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "strategize",},)
 workflow.add_edge("web_search", "strategize")
 workflow.add_edge("strategize", "generate")
-workflow.add_edge("generate", END)
+workflow.add_edge("generate", "log_conversation")
+workflow.add_edge("log_conversation", END)
 graph = workflow.compile()
 
 # 실행 루프 (채팅 인터페이스)
