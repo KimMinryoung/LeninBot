@@ -350,7 +350,7 @@ Rotate between these different response styles unpredictably:
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
-        ("placeholder", "{{messages}}") # 사용자의 대화 기록
+        ("placeholder", "{messages}") # 사용자의 대화 기록
     ])
 
     chain = prompt | llm
