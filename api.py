@@ -1,8 +1,9 @@
 import asyncio
 import json
+import os
 
 import uvicorn
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ app = FastAPI(title="Cyber-Lenin API")
 
 # Lazy-load chatbot so uvicorn can bind the port first
 _graph = None
+_supabase = None
 
 
 def get_graph():
@@ -21,6 +23,14 @@ def get_graph():
         from chatbot import graph
         _graph = graph
     return _graph
+
+
+def get_supabase():
+    global _supabase
+    if _supabase is None:
+        from chatbot import supabase
+        _supabase = supabase
+    return _supabase
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -65,7 +75,10 @@ async def chat(request: ChatRequest):
         # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
         async for output in _graph.astream(inputs, stream_mode="updates"):
             for node_name, node_content in output.items():
-                
+                # log_conversation 노드는 내부 전용이므로 클라이언트에 노출하지 않음
+                if node_name == "log_conversation":
+                    continue
+
                 # 로그가 있다면 클라이언트로 전송
                 if "logs" in node_content:
                     for log_line in node_content["logs"]:
@@ -84,6 +97,26 @@ async def chat(request: ChatRequest):
                     })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/logs")
+async def get_logs(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    Fetch chat logs from Supabase, ordered by most recent first.
+    """
+    sb = get_supabase()
+    result = (
+        sb.table("chat_logs")
+        .select("*")
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return {"logs": result.data, "count": len(result.data)}
+
 
 if __name__ == "__main__":
     print("🚩 사이버-레닌 API 서버 가동... (Port: 8000)")

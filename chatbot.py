@@ -382,11 +382,10 @@ def log_conversation_node(state: AgentState):
         }
 
         supabase.table("chat_logs").insert(row).execute()
-        logs.append("📝 [로그] 대화가 DB에 기록되었습니다.")
     except Exception as e:
-        logs.append(f"⚠️ [로그] DB 기록 실패 (무시하고 진행): {e}")
+        print(f"⚠️ [로그] DB 기록 실패: {e}")
 
-    return {"logs": logs}
+    return {}
 
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
