@@ -20,3 +20,6 @@ processed_files.txt
 # PDF 문서 파일
 docs/
 *.pdf
+
+# CLAUDE가 사용하는 비밀 설정 파일
+.claude/
