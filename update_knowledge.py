@@ -12,7 +12,7 @@ load_dotenv()
 
 # 1. 초기화
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
@@ -32,8 +32,8 @@ LOADER_MAPPING = {
     ".txt": TextLoader
 }
 
-def update_knowledge():
-    print(f"📂 {source_directory} 폴더에서 새 문서를 탐색 중...")
+def update_knowledge(layer="core_theory"):
+    print(f"📂 {source_directory} 폴더에서 새 문서를 탐색 중... (layer: {layer})")
     
     # 로그 파일에서 처리된 파일 목록 읽기
     if os.path.exists(log_file):
@@ -70,7 +70,13 @@ def update_knowledge():
             # 4. 텍스트 분할
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
             splits = text_splitter.split_documents(docs)
-            
+
+            # 4.5. 메타데이터에 layer 및 source 주입
+            source_name = os.path.splitext(file_name)[0]
+            for doc in splits:
+                doc.metadata["layer"] = layer
+                doc.metadata["source"] = source_name
+
             # 5. Supabase 전송 (배치 처리)
             # tqdm을 중첩해서 쓰지 않고 파일 단위로만 표시하거나, 내부 전송도 표시할 수 있습니다.
             for i in range(0, len(splits), 100):
@@ -86,4 +92,13 @@ def update_knowledge():
     print(f"\n✨ 지식 업데이트 완료! 총 {len(new_files)}개의 문서를 추가했습니다.")
 
 if __name__ == "__main__":
-    update_knowledge()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--layer", default="core_theory",
+                        help="Metadata layer tag (e.g. core_theory, modern_analysis)")
+    parser.add_argument("--source-dir",
+                        help="Override source directory (default: ./docs/lenin)")
+    args = parser.parse_args()
+    if args.source_dir:
+        source_directory = args.source_dir
+    update_knowledge(layer=args.layer)

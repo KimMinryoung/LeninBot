@@ -96,6 +96,34 @@ question_router = route_prompt | structured_llm_router
 
 # Grader 체인 생성
 # 검색된 문헌이 질문과 연관이 있는지 판단하고 연관 없으면 무시
+# 레이어 라우터: 질문에 적합한 지식 레이어를 선택
+class LayerRoute(BaseModel):
+    """사용자의 질문에 가장 적합한 지식 레이어를 선택합니다."""
+    layer: Literal["core_theory", "modern_analysis", "all"] = Field(
+        ...,
+        description="'core_theory' for classical Marxist-Leninist texts, 'modern_analysis' for contemporary analysis, 'all' to search everything."
+    )
+
+structured_llm_layer = llm.with_structured_output(LayerRoute)
+system_layer_router = """You are an expert at selecting the right knowledge layer for a question.
+
+Available layers:
+- "core_theory": Classical Marxist-Leninist texts (Lenin's original writings, revolutionary theory, historical documents from early 20th century)
+- "modern_analysis": Contemporary analysis applying Marxist theory to modern issues (AI, tech, current politics, 21st century economics)
+- "all": Search all layers when the question spans both classical and modern topics
+
+Routing rules:
+- Questions about original Lenin texts, historical events (1900s-1920s), classical theory → "core_theory"
+- Questions about modern technology, current events, contemporary politics → "modern_analysis"
+- Questions that need both historical context AND modern application → "all"
+- When unsure, prefer "all"
+"""
+layer_route_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_layer_router),
+    ("human", "{question}"),
+])
+layer_router = layer_route_prompt | structured_llm_layer
+
 class GradeDocuments(BaseModel):
     """Boolean check for relevance of retrieved documents."""
     binary_score: Literal["yes", "no"] = Field(
@@ -157,11 +185,14 @@ def route_question(state: AgentState):
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
 # (langchain-community의 SupabaseVectorStore.similarity_search가
 #  postgrest v2.x의 SyncRPCFilterRequestBuilder와 호환되지 않는 문제 우회)
-def _direct_similarity_search(query: str, k: int = 5) -> list:
+def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list:
     query_embedding = embeddings.embed_query(query)
+    params = {"query_embedding": query_embedding}
+    if layer:
+        params["filter_layer"] = layer
     res = supabase.rpc(
         "match_documents",
-        {"query_embedding": query_embedding},
+        params,
     ).limit(k).execute()
 
     return [
@@ -176,20 +207,32 @@ def _direct_similarity_search(query: str, k: int = 5) -> list:
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
+    logs = []
+
+    # 레이어 라우팅
+    try:
+        layer_result = layer_router.invoke({"question": query})
+        selected_layer = layer_result.layer
+        logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
+    except Exception:
+        selected_layer = "all"
+        logs.append("\n📂 [레이어] 레이어 판별 실패, 전체 검색합니다.")
+
+    layer_filter = None if selected_layer == "all" else selected_layer
 
     docs = []
     try:
-        docs = _direct_similarity_search(query, k=5)
+        docs = _direct_similarity_search(query, k=5, layer=layer_filter)
 
         if docs:
-            msg = f"\n✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50
+            logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
         else:
-            msg = "⚠️ 영묘 데이터에 관련된 문헌이 없습니다."
+            logs.append("⚠️ 영묘 데이터에 관련된 문헌이 없습니다.")
 
     except Exception as e:
-        msg = f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}"
+        logs.append(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
 
-    return {"documents": docs, "logs": [msg]}
+    return {"documents": docs, "logs": logs}
 
 # Node: Grade Documents (The Censor)
 def grade_documents_node(state: AgentState):
