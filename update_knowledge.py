@@ -72,7 +72,19 @@ def update_knowledge(layer="core_theory"):
             splits = text_splitter.split_documents(docs)
 
             # 4.5. 메타데이터에 layer 및 source 주입
+            # 파일 내 Title: 헤더가 있으면 문헌 제목을 source로 사용
             source_name = os.path.splitext(file_name)[0]
+            try:
+                with open(file_path, 'r', encoding='utf-8') as tf:
+                    for line in tf:
+                        line = line.strip()
+                        if line.startswith("Title:") and line[6:].strip():
+                            source_name = line[6:].strip()
+                            break
+                        if not line.startswith("Source:") and line:
+                            break  # 헤더 영역을 벗어나면 중단
+            except Exception:
+                pass
             for doc in splits:
                 doc.metadata["layer"] = layer
                 doc.metadata["source"] = source_name
