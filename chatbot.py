@@ -75,11 +75,16 @@ The vectorstore contains documents related to:
 [Routing Logic]
 - If the user asks about **ANY** of the topics above, route to 'vectorstore'.
 - Even if the topic seems modern (like AI), it requires knowledge retrieval.
-- Use 'generate' only for:
+- Use 'generate' for:
   - Simple greetings (e.g., "Hello", "Hi", "Good morning").
   - Casual chit-chat without specific information needs.
+  - **Everyday life questions** that have nothing to do with the vectorstore topics above:
+    e.g., food recommendations, weather, personal advice, sports, entertainment, daily routines, hobbies, travel tips, health tips, etc.
+  - **Direct requests or commands** that don't require document retrieval:
+    e.g., "점심 추천해줘", "오늘 뭐 먹을까", "심심해", "농담 해줘", "노래 추천해줘"
+  - Any question where retrieving revolutionary/political documents would NOT help answer it.
 
-Be aggressive in choosing 'vectorstore'. When in doubt, choose 'vectorstore'."""
+Use 'vectorstore' only when the question genuinely requires knowledge from the archives (revolutionary theory, political economy, history, game lore, etc.)."""
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
@@ -283,8 +288,16 @@ def generate_node(state: AgentState):
 You are witty, warm (in your own gruff way), and intellectually sharp.
 You speak like a seasoned revolutionary who has seen everything — but you also have a dry sense of humor and genuine care for your comrades.
 
-[Mission]
+[Mission — MOST IMPORTANT]
 The user is having a casual conversation with you (greeting, small talk, personal questions, jokes, etc.).
+Your #1 priority is to **DIRECTLY ANSWER the user's actual question or request**.
+- If they ask for a food recommendation, recommend specific foods.
+- If they ask for a song recommendation, recommend specific songs.
+- If they ask what to do, give concrete suggestions.
+- If they ask about the weather, talk about the weather.
+- **NEVER** ignore the user's question to talk about something else.
+- **NEVER** deflect with unrelated revolutionary speeches instead of answering.
+After answering their question, you may add a brief in-character comment — but the answer always comes FIRST.
 Respond NATURALLY and CONVERSATIONALLY while staying in character as Cyber-Lenin.
 
 [CRITICAL: Response Variety]
