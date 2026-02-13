@@ -13,7 +13,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.documents import Document # [New] To handle documents
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -41,7 +41,7 @@ vectorstore = SupabaseVectorStore(
 # LLM 설정 (GPT-4o)
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, max_tokens=2048, streaming=True)
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
-web_search_tool = TavilySearchResults(k=3)
+web_search_tool = TavilySearch(max_results=3)
 print("✅ [성공] 모든 시스템 기동 완료.")
 
 # 2. 상태(State) 정의
@@ -286,9 +286,10 @@ def web_search_node(state: AgentState):
     logs.append(f"\n🌐 [웹 검색] 질문과 관련된 외부 세계를 정찰")
     try:
         # Execute Search
-        docs_from_web = web_search_tool.invoke({"query": question})
+        search_response = web_search_tool.invoke({"query": question})
         # 검색 결과를 Document 오브젝트로 변환
-        web_results = "\n".join([d["content"] for d in docs_from_web])
+        results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+        web_results = "\n".join([d["content"] for d in results if d.get("content")])
         web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
         # Append to existing documents
         current_docs.append(web_results_doc)
