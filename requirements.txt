@@ -16,5 +16,8 @@ langchain-openai
 langchain-huggingface
 sentence-transformers
 
+# Search
+langchain-tavily
+
 # Workflow
 langgraph
