@@ -197,10 +197,18 @@ def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list
     }
     if layer:
         params["filter_layer"] = layer
-    res = supabase.rpc(
-        "match_documents",
-        params,
-    ).execute()
+    try:
+        res = supabase.rpc(
+            "match_documents",
+            params,
+        ).execute()
+    except Exception as e:
+        error_msg = str(e)
+        if "57014" in error_msg or "timeout" in error_msg.lower():
+            print("⚠️ [검색] Supabase statement timeout 발생. 검색을 건너뜁니다.")
+        else:
+            print(f"⚠️ [검색] RPC 호출 실패: {e}")
+        return []
 
     return [
         Document(
@@ -433,7 +441,7 @@ def log_conversation_node(state: AgentState):
         is_casual = not docs and not strategy
         route = "casual" if is_casual else "vectorstore"
 
-        web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
+        web_search_used = any("웹 검색" in log or "Web Search" in log for log in (processing_logs or []))
 
         row = {
             "user_query": user_query,
@@ -483,7 +491,7 @@ if __name__ == "__main__":
             inputs = {"messages": [HumanMessage(content=user_input)]}
             for output in graph.stream(inputs, stream_mode="updates"):
                 for node_name, node_content in output.items():
-                    if "logs" in node_content:
+                    if node_content and "logs" in node_content:
                         for log_line in node_content["logs"]:
                             print(log_line)
                     if node_name == "generate":
