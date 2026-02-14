@@ -7,6 +7,7 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+import torch
 
 load_dotenv()
 
@@ -15,7 +16,15 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
+# BGE-M3 임베딩 모델 (1024차원, 다국어 지원)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[System] Using device: {device}")
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-m3",
+    model_kwargs={'device': device},
+    encode_kwargs={'normalize_embeddings': True}
+)
 vectorstore = SupabaseVectorStore(
     client=supabase,
     embedding=embeddings,
@@ -68,7 +77,7 @@ def update_knowledge(layer="core_theory"):
             docs = loader.load()
         
             # 4. 텍스트 분할
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             splits = text_splitter.split_documents(docs)
 
             # 4.5. 메타데이터에 layer 및 source 주입

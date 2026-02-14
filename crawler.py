@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 # 1. 설정
 # 가장 방대한 목록이 있는 연도별 색인 페이지를 시작점으로 잡습니다.
 START_URL = "https://www.marxists.org/archive/lenin/works/index.htm"
-OUTPUT_DIR = "./docs/lenin_full_archive"
+OUTPUT_DIR = "./docs/lenin"
 DELAY = 0.3 
 MAX_DEPTH = 3 # 목차 -> 하위 목차 -> 챕터까지 들어갈 수 있도록 설정
 
@@ -60,6 +60,9 @@ def crawl(url, depth):
                 crawl(full_url, depth + 1)
 
 def save_document(url, soup):
+    # 문헌 제목 추출 (nav 제거 전에 수행)
+    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+
     # 내비게이션 요소 제거
     for nav in soup.find_all(['nav', 'header', 'footer', 'table']):
         nav.decompose()
@@ -67,19 +70,19 @@ def save_document(url, soup):
     # 본문 추출
     paragraphs = soup.find_all(['p', 'h3', 'h4', 'blockquote'])
     content = "\n\n".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text()) > 30])
-    
+
     if len(content) < 500: return # 너무 짧은 데이터는 버림
 
     # 파일명 생성 (URL 구조 반영)
     path_part = url.split('works/')[-1]
     file_name = re.sub(r'[/\\?%*:|"<>]', '_', path_part).replace('.htm', '.txt').replace('.html', '.txt')
-    
+
     save_path = os.path.join(OUTPUT_DIR, file_name)
-    
+
     try:
         with open(save_path, 'w', encoding='utf-8') as f:
-            f.write(f"Source: {url}\n\n{content}")
-        print(f"  └─ ✅ 저장 완료: {file_name}")
+            f.write(f"Source: {url}\nTitle: {title}\n\n{content}")
+        print(f"  └─ ✅ 저장 완료: {file_name} ({title})")
     except Exception as e:
         print(f"  └─ ❌ 저장 실패: {e}")
     

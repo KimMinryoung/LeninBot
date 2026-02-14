@@ -28,7 +28,11 @@ SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 임베딩 모델
-embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-m3",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 # 벡터 스토어 연결
 vectorstore = SupabaseVectorStore(
@@ -187,13 +191,16 @@ def route_question(state: AgentState):
 #  postgrest v2.x의 SyncRPCFilterRequestBuilder와 호환되지 않는 문제 우회)
 def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list:
     query_embedding = embeddings.embed_query(query)
-    params = {"query_embedding": query_embedding}
+    params = {
+        "query_embedding": query_embedding,
+        "match_count": k,
+    }
     if layer:
         params["filter_layer"] = layer
     res = supabase.rpc(
         "match_documents",
         params,
-    ).limit(k).execute()
+    ).execute()
 
     return [
         Document(
