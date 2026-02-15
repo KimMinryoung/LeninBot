@@ -15,8 +15,55 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_tavily import TavilySearch
 
+import json
+import re
 from typing import Literal
 from pydantic import BaseModel, Field
+
+
+def _extract_json(text: str, model_class: type[BaseModel]):
+    """Try to extract and validate JSON from LLM response text. Returns None on failure."""
+    # Try direct parse
+    try:
+        return model_class.model_validate_json(text.strip())
+    except Exception:
+        pass
+    # Try extracting from markdown code block
+    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if match:
+        try:
+            return model_class.model_validate(json.loads(match.group(1)))
+        except Exception:
+            pass
+    # Try finding first {...} in text
+    match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+    if match:
+        try:
+            return model_class.model_validate(json.loads(match.group(0)))
+        except Exception:
+            pass
+    return None
+
+
+def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2):
+    """Invoke LLM chain, parse JSON from response. Retry with error feedback on failure, fall back to default."""
+    resp = chain.invoke(inputs)
+    result = _extract_json(resp.content, model_class)
+    if result is not None:
+        return result
+
+    # Retry: send the bad output back with a correction prompt
+    for attempt in range(max_retries):
+        correction = llm.invoke(
+            f"Your previous output was not valid JSON:\n{resp.content}\n\n"
+            f"Respond with ONLY a valid JSON object matching this schema: {model_class.model_json_schema()}"
+        )
+        result = _extract_json(correction.content, model_class)
+        if result is not None:
+            return result
+
+    print(f"⚠️ [구조화] {model_class.__name__} JSON 파싱 실패, 기본값 사용")
+    return default
 
 print("\n⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
 # 1. 환경 설정 및 초기화
@@ -74,7 +121,6 @@ class RouteQuery(BaseModel):
         description="The nature of the response: detailed info (academic), planning (strategic), emotional speech (agitation), or small talk (casual)."
     )
 
-structured_llm_router = llm.with_structured_output(RouteQuery, method="json_mode")
 system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
 
 1. Determine 'datasource':
@@ -85,14 +131,22 @@ system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
    - 'academic': User wants objective, detailed, and scholarly explanations (e.g., "Explain Ernest Mandel's theory").
    - 'strategic': User wants actionable plans, tactics, or "how-to" advice.
    - 'agitation': User wants an emotional, fiery, and revolutionary speech or call to action.
-   - 'casual': Simple greetings, jokes, or non-political chit-chat."""
+   - 'casual': Simple greetings, jokes, or non-political chit-chat.
+
+Respond with ONLY a JSON object: {{"datasource": "...", "intent": "..."}}"""
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
         ("human", "{question}"),
     ]
 )
-question_router = route_prompt | structured_llm_router
+
+_ROUTER_DEFAULT = RouteQuery(datasource="vectorstore", intent="academic")
+
+def invoke_router(inputs: dict) -> RouteQuery:
+    return _invoke_structured(route_prompt | llm, inputs, RouteQuery, _ROUTER_DEFAULT)
+
+question_router = invoke_router
 
 
 # Grader 체인 생성
@@ -105,7 +159,6 @@ class LayerRoute(BaseModel):
         description="'core_theory' for classical Marxist-Leninist texts, 'modern_analysis' for contemporary analysis, 'all' to search everything."
     )
 
-structured_llm_layer = llm.with_structured_output(LayerRoute, method="json_mode")
 system_layer_router = """You are an expert at selecting the right knowledge layer for a question.
 
 Available layers:
@@ -118,12 +171,19 @@ Routing rules:
 - Questions about modern technology, current events, contemporary politics → "modern_analysis"
 - Questions that need both historical context AND modern application → "all"
 - When unsure, prefer "all"
-"""
+
+Respond with ONLY a JSON object: {{"layer": "..."}}"""
 layer_route_prompt = ChatPromptTemplate.from_messages([
     ("system", system_layer_router),
     ("human", "{question}"),
 ])
-layer_router = layer_route_prompt | structured_llm_layer
+
+_LAYER_DEFAULT = LayerRoute(layer="all")
+
+def invoke_layer_router(inputs: dict) -> LayerRoute:
+    return _invoke_structured(layer_route_prompt | llm, inputs, LayerRoute, _LAYER_DEFAULT)
+
+layer_router = invoke_layer_router
 
 class GradeDocuments(BaseModel):
     """Boolean check for relevance of retrieved documents."""
@@ -131,7 +191,6 @@ class GradeDocuments(BaseModel):
         ...,
         description="Documents are relevant to the question, 'yes' or 'no'"
     )
-structured_llm_grader = llm.with_structured_output(GradeDocuments, method="json_mode")
 system_grader = """You are a strategic revolutionary censor. Your goal is to identify documents that can be used as 'ammunition' for an answer.
 Even if the document doesn't mention modern terms like 'AI' or 'current year', if it discusses:
 1. Economic crisis/panic (as a parallel to current crisis)
@@ -139,12 +198,20 @@ Even if the document doesn't mention modern terms like 'AI' or 'current year', i
 3. Agitation, propaganda, and organization tactics
 4. Class struggle and the role of the vanguard
 
-Then grade it as 'yes'. Be generous. If there is ANY historical or theoretical parallel, it is RELEVANT."""
+Then grade it as 'yes'. Be generous. If there is ANY historical or theoretical parallel, it is RELEVANT.
+
+Respond with ONLY a JSON object: {{"binary_score": "yes"}} or {{"binary_score": "no"}}"""
 grade_prompt = ChatPromptTemplate.from_messages([
     ("system", system_grader),
     ("human", "Retrieved document: \n\n {document} \n\n User question: {question}"),
 ])
-retrieval_grader = grade_prompt | structured_llm_grader
+
+_GRADER_DEFAULT = GradeDocuments(binary_score="yes")
+
+def invoke_grader(inputs: dict) -> GradeDocuments:
+    return _invoke_structured(grade_prompt | llm, inputs, GradeDocuments, _GRADER_DEFAULT)
+
+retrieval_grader = invoke_grader
 
 # Strategist Promt
 system_strategist = """You are the 'Brain of the Revolution' (Strategist).
@@ -172,7 +239,7 @@ strategist_chain = strategist_prompt | llm
 # Node: Router
 def analyze_intent_node(state: AgentState):
     question = state["messages"][-1].content
-    source = question_router.invoke({"question": question})
+    source = question_router({"question": question})
     
     # 1. 상태 업데이트 (intent 저장)
     return {
@@ -183,7 +250,7 @@ def analyze_intent_node(state: AgentState):
 # Edge: Routing Logic (어디로 갈지만 결정)
 def router_logic(state: AgentState):
     question = state["messages"][-1].content
-    source = question_router.invoke({"question": question})
+    source = question_router({"question": question})
     return source.datasource # "vectorstore" 또는 "generate" 반환
 
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
@@ -226,7 +293,7 @@ def retrieve_node(state: AgentState):
 
     # 레이어 라우팅
     try:
-        layer_result = layer_router.invoke({"question": query})
+        layer_result = layer_router({"question": query})
         selected_layer = layer_result.layer
         logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
     except Exception:
@@ -277,7 +344,7 @@ def grade_documents_node(state: AgentState):
     logs.append("\n⚖️ [검열관] 문헌의 적절성을 평가 중...")
     
     for d in documents:
-        score = retrieval_grader.invoke({"question": question, "document": d.page_content})
+        score = retrieval_grader({"question": question, "document": d.page_content})
         grade = score.binary_score
         
         if grade == "yes":
@@ -371,10 +438,10 @@ def generate_node(state: AgentState):
     # 2. Strategic Intent: Focus on Blueprint and Tactics
     elif intent == "strategic":
         system_prompt = f"""{base_persona}
-[MISSION] Provide a concrete, step-by-step tactical blueprint for the user's request.
-[Strategic Blueprint (Follow this plan)] {strategy if strategy else "No specific strategy blueprint provided."}
-[STYLE] Decisive, analytical, and practical. Breakdown the plan into clear phases or points.
-[Context from Archives & Web] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
+[MISSION] Answer the user's question with a concrete, actionable revolutionary strategy. Synthesize your own response using the internal analysis and source material below as background knowledge — do NOT simply restate or translate them.
+[INTERNAL ANALYSIS (for your reference only, do not reproduce directly)] {strategy if strategy else "No specific analysis available."}
+[SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
+[STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
 [INSTRUCTION] Focus on "How to organize" and "How to act". Answer in Korean."""
 
     # 3. Agitation Intent: Focus on Passion and Mobilization
