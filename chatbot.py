@@ -235,9 +235,27 @@ def retrieve_node(state: AgentState):
 
     layer_filter = None if selected_layer == "all" else selected_layer
 
+    # core_theory(영어 문헌) 검색 시 한국어 쿼리를 영어로 번역
+    search_query = query
+    if selected_layer in ("core_theory", "all"):
+        try:
+            has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in query)
+            if has_korean:
+                translated = llm.invoke(f"Translate the following query to English. Output ONLY the translated text, nothing else:\n{query}")
+                search_query = translated.content.strip()
+                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query}\"")
+        except Exception:
+            pass
+
     docs = []
     try:
-        docs = _direct_similarity_search(query, k=5, layer=layer_filter)
+        if selected_layer == "all" and search_query != query:
+            # all 레이어: 번역 쿼리로 core_theory + 원본 쿼리로 modern_analysis 병합
+            docs_core = _direct_similarity_search(search_query, k=3, layer="core_theory")
+            docs_modern = _direct_similarity_search(query, k=3, layer="modern_analysis")
+            docs = docs_core + docs_modern
+        else:
+            docs = _direct_similarity_search(search_query, k=5, layer=layer_filter)
 
         if docs:
             logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)

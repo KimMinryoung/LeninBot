@@ -63,19 +63,22 @@ def update_knowledge(layer="core_theory"):
         print("✅ 추가할 새 문서가 없습니다.")
         return
 
-    for file_path in tqdm(new_files, desc="전체 진행률"):
+    total_chunks = 0
+    file_bar = tqdm(new_files, desc="파일 처리", unit="file", position=0)
+    for file_path in file_bar:
         file_name = os.path.basename(file_path)
+        file_bar.set_postfix_str(file_name[:40])
         ext = os.path.splitext(file_name)[1].lower()
-        
+
         try:
             # 3. 단일 파일 로더 실행
             if ext == ".txt":
                 loader = TextLoader(file_path, encoding='utf-8')
             else:
                 loader = LOADER_MAPPING[ext](file_path)
-            
+
             docs = loader.load()
-        
+
             # 4. 텍스트 분할
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             splits = text_splitter.split_documents(docs)
@@ -99,18 +102,20 @@ def update_knowledge(layer="core_theory"):
                 doc.metadata["source"] = source_name
 
             # 5. Supabase 전송 (배치 처리)
-            # tqdm을 중첩해서 쓰지 않고 파일 단위로만 표시하거나, 내부 전송도 표시할 수 있습니다.
-            for i in range(0, len(splits), 100):
-                vectorstore.add_documents(documents=splits[i:i+100])
-            
+            batch_size = 5
+            for i in range(0, len(splits), batch_size):
+                vectorstore.add_documents(documents=splits[i:i+batch_size])
+            total_chunks += len(splits)
+
             # 6. 로그에 추가 (성공 시에만)
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(os.path.normpath(file_path) + "\n")
-                
-        except Exception as e:
-            print(f"❌ 에러 발생 ({file_name}): {e}")
 
-    print(f"\n✨ 지식 업데이트 완료! 총 {len(new_files)}개의 문서를 추가했습니다.")
+        except Exception as e:
+            tqdm.write(f"❌ 에러 발생 ({file_name}): {e}")
+    file_bar.close()
+
+    print(f"\n✨ 지식 업데이트 완료! 총 {len(new_files)}개 문서, {total_chunks}개 청크를 추가했습니다.")
 
 if __name__ == "__main__":
     import argparse
@@ -121,5 +126,5 @@ if __name__ == "__main__":
                         help="Override source directory (default: ./docs/lenin)")
     args = parser.parse_args()
     if args.source_dir:
-        source_directory = args.source_dir
+        source_directory = args.source_dir  # noqa: F841 - used by update_knowledge
     update_knowledge(layer=args.layer)
