@@ -1,10 +1,7 @@
 import os
-import warnings
 from typing import Annotated, List, TypedDict, Optional
 from operator import add
 from dotenv import load_dotenv
-
-warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 # Supabase & Embeddings
 from supabase.client import Client, create_client
@@ -70,7 +67,7 @@ class RouteQuery(BaseModel):
         description="The nature of the response: detailed info (academic), planning (strategic), emotional speech (agitation), or small talk (casual)."
     )
 
-structured_llm_router = llm.with_structured_output(RouteQuery)
+structured_llm_router = llm.with_structured_output(RouteQuery, method="json_mode")
 system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
 
 1. Determine 'datasource':
@@ -101,7 +98,7 @@ class LayerRoute(BaseModel):
         description="'core_theory' for classical Marxist-Leninist texts, 'modern_analysis' for contemporary analysis, 'all' to search everything."
     )
 
-structured_llm_layer = llm.with_structured_output(LayerRoute)
+structured_llm_layer = llm.with_structured_output(LayerRoute, method="json_mode")
 system_layer_router = """You are an expert at selecting the right knowledge layer for a question.
 
 Available layers:
@@ -127,7 +124,7 @@ class GradeDocuments(BaseModel):
         ...,
         description="Documents are relevant to the question, 'yes' or 'no'"
     )
-structured_llm_grader = llm.with_structured_output(GradeDocuments)
+structured_llm_grader = llm.with_structured_output(GradeDocuments, method="json_mode")
 system_grader = """You are a strategic revolutionary censor. Your goal is to identify documents that can be used as 'ammunition' for an answer.
 Even if the document doesn't mention modern terms like 'AI' or 'current year', if it discusses:
 1. Economic crisis/panic (as a parallel to current crisis)
