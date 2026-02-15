@@ -42,8 +42,15 @@ vectorstore = SupabaseVectorStore(
     query_name="match_documents",
 )
 
-# LLM 설정 (GPT-4o)
-llm = ChatOpenAI(model_name="gpt-4o", temperature=0.7, max_tokens=2048, streaming=True)
+# LLM 설정 (Hermes 4 70B via OpenRouter)
+llm = ChatOpenAI(
+    model_name="nousresearch/hermes-4-70b",
+    openai_api_base="https://openrouter.ai/api/v1",
+    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
+    temperature=0.7,
+    max_tokens=2048,
+    streaming=True,
+)
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearch(max_results=3)
 print("✅ [성공] 모든 시스템 기동 완료.")
