@@ -1,13 +1,11 @@
 # API server
 fastapi
 uvicorn
-sse-starlette
 
 # Chatbot core
 python-dotenv
 pydantic
 supabase
-postgrest
 
 # LangChain 관련
 langchain-core
