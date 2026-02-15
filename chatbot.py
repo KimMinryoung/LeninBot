@@ -1,7 +1,10 @@
 import os
+import warnings
 from typing import Annotated, List, TypedDict, Optional
 from operator import add
 from dotenv import load_dotenv
+
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 # Supabase & Embeddings
 from supabase.client import Client, create_client
