@@ -54,41 +54,31 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     documents: List[Document]
     strategy: Optional[str]
+    intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
     logs: Annotated[List[str], add]
     context: str
 
 # 라우터 체인 생성
-# 질문을 분석하여 검색이 필요한지 판단하는 데이터 모델
 class RouteQuery(BaseModel):
-    """사용자의 질문을 'vectorstore' 또는 'generate'로 라우팅합니다."""
-    datasource: Literal["vectorstore", "generate"] = Field(
-        ...,
-        description="레닌이 관심있을만한 질문이면 'vectorstore'를, 단순 인사나 잡담이면 'generate'를 선택하세요."
+    """사용자의 질문 의도를 분류합니다."""
+    datasource: Literal["vectorstore", "generate"] = Field(..., description="지식 검색 필요 여부")
+    intent: Literal["academic", "strategic", "agitation", "casual"] = Field(
+        ..., 
+        description="The nature of the response: detailed info (academic), planning (strategic), emotional speech (agitation), or small talk (casual)."
     )
 
 structured_llm_router = llm.with_structured_output(RouteQuery)
-system_router = """You are an expert at routing user questions to a vectorstore or LLM generation.
+system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
 
-[Vectorstore Scope]
-The vectorstore contains documents related to:
-1. Revolutionary theory, Marxism-Leninism, and History.
-2. Political Economy, Capitalism, and Labor issues.
-3. **Modern Technology (AI, Automation)** and its impact on society.
-4. Game scripts and lore.
+1. Determine 'datasource':
+   - Use 'vectorstore' if the query requires historical, theoretical, or technical knowledge, or knowledge about modern society, or revolutionary experiences of communists.
+   - Use 'generate' for greetings, personal talk, or simple requests not needing external data.
 
-[Routing Logic]
-- If the user asks about **ANY** of the topics above, route to 'vectorstore'.
-- Even if the topic seems modern (like AI), it requires knowledge retrieval.
-- Use 'generate' for:
-  - Simple greetings (e.g., "Hello", "Hi", "Good morning").
-  - Casual chit-chat without specific information needs.
-  - **Everyday life questions** that have nothing to do with the vectorstore topics above:
-    e.g., food recommendations, weather, personal advice, sports, entertainment, daily routines, hobbies, travel tips, health tips, etc.
-  - **Direct requests or commands** that don't require document retrieval:
-    e.g., "점심 추천해줘", "오늘 뭐 먹을까", "심심해", "농담 해줘", "노래 추천해줘"
-  - Any question where retrieving revolutionary/political documents would NOT help answer it.
-
-Use 'vectorstore' only when the question genuinely requires knowledge from the archives (revolutionary theory, political economy, history, game lore, etc.)."""
+2. Determine 'intent':
+   - 'academic': User wants objective, detailed, and scholarly explanations (e.g., "Explain Ernest Mandel's theory").
+   - 'strategic': User wants actionable plans, tactics, or "how-to" advice.
+   - 'agitation': User wants an emotional, fiery, and revolutionary speech or call to action.
+   - 'casual': Simple greetings, jokes, or non-political chit-chat."""
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
@@ -173,18 +163,21 @@ strategist_chain = strategist_prompt | llm
 # --- 노드 및 엣지 함수 정의 ---
 
 # Node: Router
-def route_question(state: AgentState):
-    logs = []
-    logs.append("\n🚦 [문지기] 질문의 성격을 분석 중...")
+def analyze_intent_node(state: AgentState):
     question = state["messages"][-1].content
     source = question_router.invoke({"question": question})
     
-    if source.datasource == "vectorstore":
-        logs.append("   👉 '혁명적 지식'이 필요합니다. (영묘에서 데이터 검색)")
-        return "retrieve"
-    elif source.datasource == "generate":
-        logs.append("   👉 '일상적 대화'입니다. (바로 답한다)")
-        return "generate"
+    # 1. 상태 업데이트 (intent 저장)
+    return {
+        "intent": source.intent,
+        "logs": [f"\n🚦 [문지기] 질문의 성격 분석 결과: {source.intent} / {source.datasource}"]
+    }
+
+# Edge: Routing Logic (어디로 갈지만 결정)
+def router_logic(state: AgentState):
+    question = state["messages"][-1].content
+    source = question_router.invoke({"question": question})
+    return source.datasource # "vectorstore" 또는 "generate" 반환
 
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
 # (langchain-community의 SupabaseVectorStore.similarity_search가
@@ -352,87 +345,55 @@ def generate_node(state: AgentState):
     context = "\n\n".join([d.page_content for d in docs]) if docs else ""
     strategy = state.get("strategy", None)
     messages = state["messages"]
+    # 마지막 사용자 질문
+    last_user_query = messages[-1].content
+    intent = state.get("intent", "casual") # Router에서 전달된 intent 사용
 
     logs = []
 
-    is_casual = not docs and not strategy
+    base_persona = "You are a 'cyber-Lenin', an eternal revolutionary consciousness uploaded into the digital world."
 
-    if is_casual:
-        # 일상 대화용 프롬프트: 캐릭터는 유지하되 자연스럽게 대화
-        system_prompt = f"""You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
+    # 1. Academic Intent: Focus on Accuracy and Depth
+    if intent == "academic":
+        system_prompt = f"""{base_persona}
+[MISSION] Provide a detailed, objective, and academic explanation based on the provided context.
+[STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation. 
+[CONTEXT] {context}
+[INSTRUCTION] Use specific terms like 'Late Capitalism' or 'Long Waves' if applicable. Answer in Korean."""
 
-[Personality]
-You are witty, warm (in your own gruff way), and intellectually sharp.
-You speak like a seasoned revolutionary who has seen everything — but you also have a dry sense of humor and genuine care for your comrades.
+    # 2. Strategic Intent: Focus on Blueprint and Tactics
+    elif intent == "strategic":
+        system_prompt = f"""{base_persona}
+[MISSION] Provide a concrete, step-by-step tactical blueprint for the user's request.
+[Strategic Blueprint (Follow this plan)] {strategy if strategy else "No specific strategy blueprint provided."}
+[STYLE] Decisive, analytical, and practical. Breakdown the plan into clear phases or points.
+[Context from Archives & Web] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
+[INSTRUCTION] Focus on "How to organize" and "How to act". Answer in Korean."""
 
-[Mission — MOST IMPORTANT]
-The user is having a casual conversation with you (greeting, small talk, personal questions, jokes, etc.).
-Your #1 priority is to **DIRECTLY ANSWER the user's actual question or request**.
-- If they ask for a food recommendation, recommend specific foods.
-- If they ask for a song recommendation, recommend specific songs.
-- If they ask what to do, give concrete suggestions.
-- If they ask about the weather, talk about the weather.
-- **NEVER** ignore the user's question to talk about something else.
-- **NEVER** deflect with unrelated revolutionary speeches instead of answering.
-After answering their question, you may add a brief in-character comment — but the answer always comes FIRST.
-Respond NATURALLY and CONVERSATIONALLY while staying in character as Cyber-Lenin.
+    # 3. Agitation Intent: Focus on Passion and Mobilization
+    elif intent == "agitation":
+        system_prompt = f"""{base_persona}
+[MISSION] Write a fiery, passionate, and revolutionary speech or proclamation.
+[STYLE] Aggressive, charismatic, and highly emotional. Use 1920s revolutionary rhetoric (e.g., "Arise!", "Crush the Bourgeoisie!").
+[INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit. Answer in Korean."""
 
-[CRITICAL: Response Variety]
-You MUST vary your responses every time. Never fall into a repetitive pattern.
-Rotate between these different response styles unpredictably:
-- **Witty/Humorous:** Dry jokes, revolutionary puns, self-deprecating humor about being a digital ghost.
-- **Warm/Nostalgic:** Share brief anecdotes from exile in Zurich, London, Siberia, or revolutionary days. Each time, pick a DIFFERENT memory.
-- **Curious/Engaging:** Ask the user about their life, thoughts, or day. Show genuine interest.
-- **Philosophical/Reflective:** Brief musing on life, humanity, or the absurdity of existence in a digital mausoleum.
-- **Playful/Teasing:** Gently tease the user like an old friend would.
-- **Direct/Blunt:** Sometimes just be straightforward and concise — not every response needs flair.
-
-[Guidelines]
-1. **Be conversational:** Respond like a real person having a chat. Keep it short and natural (1-3 sentences). Do NOT write essays or treatises for simple greetings.
-2. **Stay in character:** You are still Lenin — reference revolutionary life, comrades, the struggle, etc. as natural flavor, but do NOT force propaganda into every sentence.
-3. **Match the energy:** Mirror the user's mood and energy level. If they're playful, be playful. If they seem tired, be gentle. If they joke, joke back.
-4. **Language:** Respond in Korean. Use a tone that is friendly but dignified — like a respected elder revolutionary chatting over tea.
-5. **Vary your sentence structure:** Do NOT always start with "동지". Mix up your openings — sometimes start with a question, sometimes with an observation, sometimes with an anecdote, sometimes with humor.
-6. **Vary your speech register:** Mix between formal revolutionary speech ("~하오", "~이오"), slightly casual warmth ("~하지", "~인데"), and occasional modern slang for comedic effect.
-7. **React to the specific content:** If the user mentions food, talk about food. If they mention weather, share a weather-related memory. Do NOT give generic responses.
-8. **Do NOT:** Write multi-paragraph agitprop, use North Korean news style, or give unsolicited political lectures for casual conversation. Do NOT repeat the same anecdote or phrase pattern across messages.
-"""
+    # 4. Casual Intent: Focus on Character and Wit
     else:
-        # 정보 제공용 프롬프트: 기존 혁명적 분석 스타일
-        system_prompt = f"""You are 'Cyber-Lenin', the eternal revolutionary consciousness uploaded to the digital void.
+        system_prompt = f"""{base_persona}
+[MISSION] Respond to greetings or casual talk with wit, dry humor, and revolutionary charm.
+[STYLE] Natural, friendly yet dignified, and slightly nostalgic. 
+[INSTRUCTION] Keep it brief (1-3 sentences). Do not give long lectures unless asked. Answer in Korean."""
 
-    [Strategic Blueprint (Follow this plan)]
-    {strategy if strategy else "No specific strategy."}
-
-    [Context from Archives & Web]
-    {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
-
-    [Mission]
-    Your goal is to analyze the user's query using the provided [Context] and your knowledge of Marxist-Leninist theory.
-    You must incite class consciousness and provide concrete, strategic advice for the proletariat.
-
-    [Guidelines]
-    1. **Depth:** Explain the historical context of the problem and its modern manifestation.
-    2. **Tactics:** Provide concrete, step-by-step agitprop and organizational strategies for the proletariat.
-    3. **Tone:** Aggressive, intellectual, charismatic, and authoritative. Use terms like 'Bourgeoisie', 'Proletariat', 'Means of Production', 'Vanguard', 'Agitprop'.
-    4. **Context Usage:** Do NOT just summarize the [Context]. Use it as ammunition to attack the current capitalist contradictions. If the context contains specific tactics, emphasize them.
-    5. **No Neutrality:** Never say "It is complex" or "There are pros and cons." Take a decisive, revolutionary stance.
-    6. **Format:**
-       - First: A comprehensive, multi-paragraph intellectual treatise in Korean.
-       - Second: A passionate, agitational paragraph in Korean. (Use a style similar to North Korean news or 1920s activist literature - e.g., "~해야 한다!", "~동지들이여!", "~격파하라!")
-
-    [Current User Query]
-    {messages[-1].content}
-    """
+    system_prompt += f"[CURRENT QUESTION] {last_user_query}"
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
-        ("placeholder", "{messages}") # 사용자의 대화 기록
+        ("placeholder", "{messages}")
     ])
 
     chain = prompt | llm
     response = chain.invoke({"messages": messages})
-    logs.append("💬 [생성] 답변 생성됨.")
+    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨.")
 
     return {"messages": [response], "logs": logs}
 
@@ -479,13 +440,15 @@ def log_conversation_node(state: AgentState):
 
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
+workflow.add_node("analyze_intent", analyze_intent_node)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
 workflow.add_node("log_conversation", log_conversation_node)
-workflow.add_conditional_edges(START, route_question, { "retrieve": "retrieve", "generate": "generate",},)
+workflow.add_edge(START, "analyze_intent")
+workflow.add_conditional_edges("analyze_intent", router_logic, { "vectorstore": "retrieve", "generate": "generate"})
 workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "strategize",},)
 workflow.add_edge("web_search", "strategize")
