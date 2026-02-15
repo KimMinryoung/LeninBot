@@ -3,18 +3,27 @@ import json
 import os
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 #from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import HumanMessage
+from supabase.client import Client, create_client
+
+load_dotenv()
 
 app = FastAPI(title="Cyber-Lenin API")
 
+# Lightweight Supabase client for /logs (does NOT import chatbot module)
+_supabase_light: Client = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_ANON_KEY"),
+)
+
 # Lazy-load chatbot so uvicorn can bind the port first
 _graph = None
-_supabase = None
 
 
 def get_graph():
@@ -23,14 +32,6 @@ def get_graph():
         from chatbot import graph
         _graph = graph
     return _graph
-
-
-def get_supabase():
-    global _supabase
-    if _supabase is None:
-        from chatbot import supabase
-        _supabase = supabase
-    return _supabase
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -107,7 +108,7 @@ async def get_logs(
     """
     Fetch chat logs from Supabase, ordered by most recent first.
     """
-    sb = get_supabase()
+    sb = _supabase_light
     result = (
         sb.table("chat_logs")
         .select("*")
