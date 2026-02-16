@@ -89,13 +89,13 @@ vectorstore = SupabaseVectorStore(
     query_name="match_documents",
 )
 
-# LLM 설정 (Hermes 4 70B via OpenRouter)
+# LLM 설정 (Qwen 3.5 Plus via OpenRouter)
 llm = ChatOpenAI(
-    model_name="nousresearch/hermes-4-70b",
+    model_name="qwen/qwen3.5-plus-02-15",
     openai_api_base="https://openrouter.ai/api/v1",
     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
     temperature=0.45,
-    max_tokens=2048,
+    max_tokens=4096,
     streaming=True,
     top_p=0.88,
     frequency_penalty=0.55,
@@ -403,7 +403,6 @@ def grade_documents_node(state: AgentState):
             if len(content_preview) > 400:
                 content_preview = content_preview[:400] + "..."
             logs.append(f"   미리보기: \"{content_preview}\"")
-            logs.append("-" * 50)
             filtered_docs.append(d)
         else:
             logs.append(f"   🗑️ 관련없는 문헌(무시): {d.metadata.get('source', '출처미상')}")
@@ -418,12 +417,54 @@ def grade_documents_node(state: AgentState):
         
     return {"documents": filtered_docs, "logs": logs}
 
+class NeedsRealtimeInfo(BaseModel):
+    """Determine whether the question would benefit from real-time web information."""
+    needs_realtime: Literal["yes", "no"] = Field(
+        ...,
+        description="'yes' if the question involves current events, recent developments, live data, or topics that change over time. 'no' if purely historical or theoretical."
+    )
+
+system_realtime_checker = """You are an information freshness evaluator.
+Determine whether answering this question would BENEFIT from up-to-date web information.
+
+Answer 'yes' if ANY of the following apply:
+- The question asks about current events, recent news, or ongoing situations
+- The question involves data that changes over time (statistics, prices, political situations)
+- The question asks about modern organizations, movements, or living public figures
+- The question asks about applying theory to CURRENT real-world conditions
+- The question mentions specific recent dates, years (2020+), or "now/today/recently"
+- A web search could provide useful supplementary context even if archival documents exist
+
+Answer 'no' ONLY if:
+- The question is purely about historical events or classical theory with no modern angle
+- The question is casual chat, greetings, or personal talk
+
+Respond with ONLY a JSON object: {{"needs_realtime": "yes"}} or {{"needs_realtime": "no"}}"""
+
+realtime_check_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_realtime_checker),
+    ("human", "Question: {question}"),
+])
+
+_REALTIME_DEFAULT = NeedsRealtimeInfo(needs_realtime="yes")
+
+def invoke_realtime_checker(inputs: dict) -> NeedsRealtimeInfo:
+    return _invoke_structured(realtime_check_prompt | llm, inputs, NeedsRealtimeInfo, _REALTIME_DEFAULT)
+
 def decide_websearch_need(state: AgentState):
     filtered_docs = state["documents"]
+    question = state["messages"][-1].content
+
+    # Always search web if too few documents
     if len(filtered_docs) <= 1:
         return "need_web_search"
-    else:
-        return "no_need_to_search_web"
+
+    # Even with enough documents, check if real-time info would help
+    realtime_result = invoke_realtime_checker({"question": question})
+    if realtime_result.needs_realtime == "yes":
+        return "need_web_search"
+
+    return "no_need_to_search_web"
 
 # Node: Web Search
 def web_search_node(state: AgentState):
@@ -433,7 +474,11 @@ def web_search_node(state: AgentState):
     question = state["messages"][-1].content
     current_docs = state.get("documents", [])
     logs = []
-    logs.append(f"\n🌐 [웹 검색] 질문과 관련된 외부 세계를 정찰")
+    has_docs = len(current_docs) > 1
+    if has_docs:
+        logs.append(f"\n🌐 [웹 검색] 문헌 {len(current_docs)}건 확보 — 실시간 정보 보충을 위해 외부 정찰 개시")
+    else:
+        logs.append(f"\n🌐 [웹 검색] 문헌 부족 — 외부 세계를 정찰")
     try:
         # Execute Search
         search_response = web_search_tool.invoke({"query": question})
@@ -445,7 +490,7 @@ def web_search_node(state: AgentState):
         current_docs.append(web_results_doc)
         logs.append("  ✅ 외부 정보가 취합되었다.")
     except Exception as e:
-        logs.append(f"⚠️ Web Search Failed: {e}")
+        logs.append(f"⚠️ 웹 검색 실패: {e}")
     return {"documents": current_docs, "logs": logs}
 
 def strategize_node(state: AgentState):

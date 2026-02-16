@@ -14,8 +14,9 @@ __pycache__/
 db_storage/
 chroma_db/
 
-# 로컬 로그 파일
+# 개발용 로컬 문서(진행 상황 기록, 계획 등)
 processed_files.txt
+temp_dev/
 
 # PDF 문서 파일
 docs/
