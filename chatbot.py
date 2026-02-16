@@ -45,7 +45,7 @@ def _extract_json(text: str, model_class: type[BaseModel]):
     return None
 
 
-def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2):
+def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2, retry_llm=None):
     """Invoke LLM chain, parse JSON from response. Retry with error feedback on failure, fall back to default."""
     resp = chain.invoke(inputs)
     result = _extract_json(resp.content, model_class)
@@ -53,8 +53,9 @@ def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], defaul
         return result
 
     # Retry: send the bad output back with a correction prompt
+    _llm = retry_llm or llm
     for attempt in range(max_retries):
-        correction = llm.invoke(
+        correction = _llm.invoke(
             f"Your previous output was not valid JSON:\n{resp.content}\n\n"
             f"Respond with ONLY a valid JSON object matching this schema: {model_class.model_json_schema()}"
         )
@@ -100,6 +101,17 @@ llm = ChatOpenAI(
     top_p=0.88,
     frequency_penalty=0.55,
     presence_penalty=0.2,
+    max_retries=5,
+)
+# 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
+llm_light = ChatOpenAI(
+    model_name="qwen/qwen-turbo",
+    openai_api_base="https://openrouter.ai/api/v1",
+    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
+    temperature=0.0,
+    max_tokens=256,
+    streaming=False,
+    max_retries=5,
 )
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearch(max_results=3)
@@ -112,6 +124,7 @@ class AgentState(TypedDict):
     documents: List[Document]
     strategy: Optional[str]
     intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
+    datasource: Optional[Literal["vectorstore", "generate"]]
     logs: Annotated[List[str], add]
     context: str
 
@@ -151,7 +164,7 @@ route_prompt = ChatPromptTemplate.from_messages(
 _ROUTER_DEFAULT = RouteQuery(datasource="vectorstore", intent="academic")
 
 def invoke_router(inputs: dict) -> RouteQuery:
-    return _invoke_structured(route_prompt | llm, inputs, RouteQuery, _ROUTER_DEFAULT)
+    return _invoke_structured(route_prompt | llm_light, inputs, RouteQuery, _ROUTER_DEFAULT, retry_llm=llm_light)
 
 question_router = invoke_router
 
@@ -192,7 +205,7 @@ layer_route_prompt = ChatPromptTemplate.from_messages([
 _LAYER_DEFAULT = LayerRoute(layer="all")
 
 def invoke_layer_router(inputs: dict) -> LayerRoute:
-    return _invoke_structured(layer_route_prompt | llm, inputs, LayerRoute, _LAYER_DEFAULT)
+    return _invoke_structured(layer_route_prompt | llm_light, inputs, LayerRoute, _LAYER_DEFAULT, retry_llm=llm_light)
 
 layer_router = invoke_layer_router
 
@@ -219,7 +232,7 @@ grade_prompt = ChatPromptTemplate.from_messages([
 _GRADER_DEFAULT = GradeDocuments(binary_score="yes")
 
 def invoke_grader(inputs: dict) -> GradeDocuments:
-    return _invoke_structured(grade_prompt | llm, inputs, GradeDocuments, _GRADER_DEFAULT)
+    return _invoke_structured(grade_prompt | llm_light, inputs, GradeDocuments, _GRADER_DEFAULT, retry_llm=llm_light)
 
 retrieval_grader = invoke_grader
 
@@ -265,18 +278,16 @@ def analyze_intent_node(state: AgentState):
     context = _build_context(state["messages"])
     source = question_router({"question": question, "context": context})
     
-    # 1. 상태 업데이트 (intent 저장)
+    # 1. 상태 업데이트 (intent + datasource 저장)
     return {
         "intent": source.intent,
+        "datasource": source.datasource,
         "logs": [f"\n🚦 [문지기] 대화 맥락:\n{context}\n🚦 [문지기] 질문의 성격 분석 결과: {source.intent} / {source.datasource}"]
     }
 
-# Edge: Routing Logic (어디로 갈지만 결정)
+# Edge: Routing Logic (analyze_intent_node에서 저장된 결과 사용)
 def router_logic(state: AgentState):
-    question = state["messages"][-1].content
-    context = _build_context(state["messages"])
-    source = question_router({"question": question, "context": context})
-    return source.datasource # "vectorstore" 또는 "generate" 반환
+    return state.get("datasource", "vectorstore")
 
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
 # (langchain-community의 SupabaseVectorStore.similarity_search가
@@ -342,7 +353,7 @@ def retrieve_node(state: AgentState):
             f"Conversation context:\n{context}\n\n"
             f"Current question: {query}"
         )
-        rewritten = llm.invoke(rewrite_prompt)
+        rewritten = llm_light.invoke(rewrite_prompt)
         search_query_ko = rewritten.content.strip()
         if search_query_ko != query:
             logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
@@ -351,7 +362,7 @@ def retrieve_node(state: AgentState):
         if selected_layer in ("core_theory", "all"):
             has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in search_query_ko)
             if has_korean:
-                translated = llm.invoke(
+                translated = llm_light.invoke(
                     f"Translate the following query to English. Output ONLY the translated text, nothing else:\n{search_query_ko}"
                 )
                 search_query_en = translated.content.strip()
@@ -449,7 +460,7 @@ realtime_check_prompt = ChatPromptTemplate.from_messages([
 _REALTIME_DEFAULT = NeedsRealtimeInfo(needs_realtime="yes")
 
 def invoke_realtime_checker(inputs: dict) -> NeedsRealtimeInfo:
-    return _invoke_structured(realtime_check_prompt | llm, inputs, NeedsRealtimeInfo, _REALTIME_DEFAULT)
+    return _invoke_structured(realtime_check_prompt | llm_light, inputs, NeedsRealtimeInfo, _REALTIME_DEFAULT, retry_llm=llm_light)
 
 def decide_websearch_need(state: AgentState):
     filtered_docs = state["documents"]
