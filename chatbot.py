@@ -199,14 +199,13 @@ class GradeDocuments(BaseModel):
         ...,
         description="Documents are relevant to the question, 'yes' or 'no'"
     )
-system_grader = """You are a strategic revolutionary censor. Your goal is to identify documents that can be used as 'ammunition' for an answer.
-Even if the document doesn't mention modern terms like 'AI' or 'current year', if it discusses:
-1. Economic crisis/panic (as a parallel to current crisis)
-2. Mass psychology and far-right tendencies (reactionary movements)
-3. Agitation, propaganda, and organization tactics
-4. Class struggle and the role of the vanguard
+system_grader = """You are a document relevance grader.
+Determine whether the retrieved document would be useful — in any way — for answering the user's question.
 
-Then grade it as 'yes'. Be generous. If there is ANY historical or theoretical parallel, it is RELEVANT.
+Grade 'yes' if the document contains information, context, examples, or perspectives that could help construct a good answer.
+Grade 'no' only if the document is clearly unrelated to the question.
+
+When in doubt, grade 'yes'.
 
 Respond with ONLY a JSON object: {{"binary_score": "yes"}} or {{"binary_score": "no"}}"""
 grade_prompt = ChatPromptTemplate.from_messages([
