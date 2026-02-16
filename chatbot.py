@@ -90,11 +90,11 @@ vectorstore = SupabaseVectorStore(
     query_name="match_documents",
 )
 
-# LLM 설정 (Qwen 3.5 Plus via OpenRouter)
+# LLM 설정 (Qwen 3.5 Plus via Alibaba DashScope)
 llm = ChatOpenAI(
-    model_name="qwen/qwen3.5-plus-02-15",
-    openai_api_base="https://openrouter.ai/api/v1",
-    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
+    model_name="qwen3.5-plus",
+    openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    openai_api_key=os.getenv("ALIBABA_API_KEY"),
     temperature=0.45,
     max_tokens=4096,
     streaming=True,
@@ -105,9 +105,9 @@ llm = ChatOpenAI(
 )
 # 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
 llm_light = ChatOpenAI(
-    model_name="qwen/qwen-turbo",
-    openai_api_base="https://openrouter.ai/api/v1",
-    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
+    model_name="qwen-turbo",
+    openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    openai_api_key=os.getenv("ALIBABA_API_KEY"),
     temperature=0.0,
     max_tokens=256,
     streaming=False,
