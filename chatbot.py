@@ -123,6 +123,10 @@ class RouteQuery(BaseModel):
 
 system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
 
+You will receive the current user question along with recent conversation context.
+Use the conversation context to resolve pronouns, references, and follow-up questions
+(e.g., "tell me more about that", "이것에 대해 설명해줘") to understand the TRUE intent.
+
 1. Determine 'datasource':
    - Use 'vectorstore' if the query requires historical, theoretical, or technical knowledge, or knowledge about modern society, or revolutionary experiences of communists.
    - Use 'generate' for greetings, personal talk, or simple requests not needing external data.
@@ -137,7 +141,7 @@ Respond with ONLY a JSON object: {{"datasource": "...", "intent": "..."}}"""
 route_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system_router),
-        ("human", "{question}"),
+        ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
     ]
 )
 
@@ -161,6 +165,10 @@ class LayerRoute(BaseModel):
 
 system_layer_router = """You are an expert at selecting the right knowledge layer for a question.
 
+You will receive the current user question along with recent conversation context.
+Use the conversation context to resolve pronouns, references, and follow-up questions
+to understand what the user is actually asking about.
+
 Available layers:
 - "core_theory": Classical Marxist-Leninist texts (original writings, revolutionary theory, historical documents from early 20th century)
 - "modern_analysis": Contemporary analysis applying Marxist theory to modern issues (AI, tech, current politics, 21st century economics)
@@ -175,7 +183,7 @@ Routing rules:
 Respond with ONLY a JSON object: {{"layer": "..."}}"""
 layer_route_prompt = ChatPromptTemplate.from_messages([
     ("system", system_layer_router),
-    ("human", "{question}"),
+    ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
 ])
 
 _LAYER_DEFAULT = LayerRoute(layer="all")
@@ -236,21 +244,38 @@ strategist_chain = strategist_prompt | llm
 
 # --- 노드 및 엣지 함수 정의 ---
 
+def _build_context(messages: list, max_turns: int = 4) -> str:
+    """Build a brief conversation context string from recent messages (excluding the last one)."""
+    history = messages[:-1] if len(messages) > 1 else []
+    # Take the last `max_turns` messages for context
+    recent = history[-max_turns:]
+    if not recent:
+        return "(no prior context)"
+    lines = []
+    for msg in recent:
+        role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+        # Truncate long messages to keep router prompt concise
+        content = msg.content[:300] + "..." if len(msg.content) > 300 else msg.content
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
 # Node: Router
 def analyze_intent_node(state: AgentState):
     question = state["messages"][-1].content
-    source = question_router({"question": question})
+    context = _build_context(state["messages"])
+    source = question_router({"question": question, "context": context})
     
     # 1. 상태 업데이트 (intent 저장)
     return {
         "intent": source.intent,
-        "logs": [f"\n🚦 [문지기] 질문의 성격 분석 결과: {source.intent} / {source.datasource}"]
+        "logs": [f"\n🚦 [문지기] 대화 맥락:\n{context}\n🚦 [문지기] 질문의 성격 분석 결과: {source.intent} / {source.datasource}"]
     }
 
 # Edge: Routing Logic (어디로 갈지만 결정)
 def router_logic(state: AgentState):
     question = state["messages"][-1].content
-    source = question_router({"question": question})
+    context = _build_context(state["messages"])
+    source = question_router({"question": question, "context": context})
     return source.datasource # "vectorstore" 또는 "generate" 반환
 
 # Helper: Supabase RPC를 직접 호출하여 similarity search 수행
@@ -289,11 +314,12 @@ def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
+    context = _build_context(state["messages"])
     logs = []
 
     # 레이어 라우팅
     try:
-        layer_result = layer_router({"question": query})
+        layer_result = layer_router({"question": query, "context": context})
         selected_layer = layer_result.layer
         logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
     except Exception:
@@ -308,7 +334,15 @@ def retrieve_node(state: AgentState):
         try:
             has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in query)
             if has_korean:
-                translated = llm.invoke(f"Translate the following query to English. Output ONLY the translated text, nothing else:\n{query}")
+                translate_prompt = (
+                    "Given the conversation context and current question, "
+                    "translate the user's CURRENT question into a self-contained English search query. "
+                    "Resolve any pronouns or references using the context. "
+                    "Output ONLY the translated search query, nothing else.\n\n"
+                    f"Conversation context:\n{context}\n\n"
+                    f"Current question: {query}"
+                )
+                translated = llm.invoke(translate_prompt)
                 search_query = translated.content.strip()
                 logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query}\"")
         except Exception:
