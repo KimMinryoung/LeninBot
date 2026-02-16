@@ -10,7 +10,7 @@ supabase
 # LangChain 관련
 langchain-core
 langchain-community
-langchain-openai
+langchain-google-genai
 langchain-huggingface
 sentence-transformers
 

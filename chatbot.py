@@ -11,7 +11,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.documents import Document # [New] To handle documents
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_tavily import TavilySearch
 
@@ -90,26 +90,22 @@ vectorstore = SupabaseVectorStore(
     query_name="match_documents",
 )
 
-# LLM 설정 (Qwen 3.5 Plus via Alibaba DashScope)
-llm = ChatOpenAI(
-    model_name="qwen3.5-plus",
-    openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    openai_api_key=os.getenv("ALIBABA_API_KEY"),
+# LLM 설정 (Gemini 2.5 Flash)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.45,
-    max_tokens=4096,
+    max_output_tokens=4096,
     streaming=True,
     top_p=0.88,
-    frequency_penalty=0.55,
-    presence_penalty=0.2,
     max_retries=5,
 )
 # 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
-llm_light = ChatOpenAI(
-    model_name="qwen-turbo",
-    openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    openai_api_key=os.getenv("ALIBABA_API_KEY"),
+llm_light = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-lite",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.0,
-    max_tokens=256,
+    max_output_tokens=256,
     streaming=False,
     max_retries=5,
 )
