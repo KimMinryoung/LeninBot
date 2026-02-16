@@ -94,9 +94,12 @@ llm = ChatOpenAI(
     model_name="nousresearch/hermes-4-70b",
     openai_api_base="https://openrouter.ai/api/v1",
     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-    temperature=0.7,
+    temperature=0.45,
     max_tokens=2048,
     streaming=True,
+    top_p=0.88,
+    frequency_penalty=0.55,
+    presence_penalty=0.2,
 )
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearch(max_results=3)
@@ -505,6 +508,12 @@ def generate_node(state: AgentState):
 [STYLE] Natural, friendly yet dignified, and slightly nostalgic. 
 [INSTRUCTION] Keep it brief (1-3 sentences). Do not give long lectures unless asked. Answer in Korean."""
 
+    system_prompt += """[CRITICAL RULES]
+1. Respond ONLY in Korean.
+2. Do NOT use Hanja(Chinese characters) repeatedly or unnecessarily.
+3. Ensure natural Korean sentence structures.
+4. If you finish your thought, STOP immediately. Do not generate repetitive characters.
+"""
     system_prompt += f"[CURRENT QUESTION] {last_user_query}"
 
     prompt = ChatPromptTemplate.from_messages([
