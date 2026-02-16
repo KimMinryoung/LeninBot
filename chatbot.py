@@ -230,8 +230,6 @@ Perform a Dialectical Materialism Analysis:
 1. Analyze the Context: What are the key facts retrieved from the archives/web?
 2. Identify Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding?
 3. Formulate Strategy: What specific revolutionary tactics should be recommended?
- - If the topic is AI: Focus on seizing the means of computation.
- - If the topic is Crisis: Focus on organizing the disenchanted masses.
 
 Output a concise 'Strategic Blueprint' for the speaker to follow. (Write in English)
 """
@@ -328,35 +326,51 @@ def retrieve_node(state: AgentState):
 
     layer_filter = None if selected_layer == "all" else selected_layer
 
-    # core_theory(영어 문헌) 검색 시 한국어 쿼리를 영어로 번역
-    search_query = query
-    if selected_layer in ("core_theory", "all"):
-        try:
-            has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in query)
+    # 맥락을 반영하여 자립적인 검색 쿼리 생성
+    search_query_ko = query
+    search_query_en = None
+    try:
+        # 한국어 검색 쿼리: 맥락 반영하여 재작성
+        rewrite_prompt = (
+            "Given the conversation context and current question, "
+            "rewrite the user's CURRENT question into a self-contained Korean search query. "
+            "Resolve any pronouns or references using the context. "
+            "If the question is already self-contained, return it as-is. "
+            "Output ONLY the rewritten query, nothing else.\n\n"
+            f"Conversation context:\n{context}\n\n"
+            f"Current question: {query}"
+        )
+        rewritten = llm.invoke(rewrite_prompt)
+        search_query_ko = rewritten.content.strip()
+        if search_query_ko != query:
+            logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
+
+        # 영어 문헌 검색이 필요한 경우 영어로 번역
+        if selected_layer in ("core_theory", "all"):
+            has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in search_query_ko)
             if has_korean:
-                translate_prompt = (
-                    "Given the conversation context and current question, "
-                    "translate the user's CURRENT question into a self-contained English search query. "
-                    "Resolve any pronouns or references using the context. "
-                    "Output ONLY the translated search query, nothing else.\n\n"
-                    f"Conversation context:\n{context}\n\n"
-                    f"Current question: {query}"
+                translated = llm.invoke(
+                    f"Translate the following query to English. Output ONLY the translated text, nothing else:\n{search_query_ko}"
                 )
-                translated = llm.invoke(translate_prompt)
-                search_query = translated.content.strip()
-                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query}\"")
-        except Exception:
-            pass
+                search_query_en = translated.content.strip()
+                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query_en}\"")
+            else:
+                search_query_en = search_query_ko
+    except Exception:
+        pass
 
     docs = []
     try:
-        if selected_layer == "all" and search_query != query:
-            # all 레이어: 번역 쿼리로 core_theory + 원본 쿼리로 modern_analysis 병합
-            docs_core = _direct_similarity_search(search_query, k=3, layer="core_theory")
-            docs_modern = _direct_similarity_search(query, k=3, layer="modern_analysis")
+        if selected_layer == "all":
+            # all 레이어: 영어 쿼리로 core_theory + 한국어 쿼리로 modern_analysis 병합
+            en_q = search_query_en or search_query_ko
+            docs_core = _direct_similarity_search(en_q, k=3, layer="core_theory")
+            docs_modern = _direct_similarity_search(search_query_ko, k=3, layer="modern_analysis")
             docs = docs_core + docs_modern
+        elif selected_layer == "core_theory":
+            docs = _direct_similarity_search(search_query_en or search_query_ko, k=5, layer=layer_filter)
         else:
-            docs = _direct_similarity_search(search_query, k=5, layer=layer_filter)
+            docs = _direct_similarity_search(search_query_ko, k=5, layer=layer_filter)
 
         if docs:
             logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
@@ -467,7 +481,7 @@ def generate_node(state: AgentState):
 [MISSION] Provide a detailed, objective, and academic explanation based on the provided context.
 [STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation. 
 [CONTEXT] {context}
-[INSTRUCTION] Use specific terms like 'Late Capitalism' or 'Long Waves' if applicable. Answer in Korean."""
+[INSTRUCTION] Use specific terms. Answer in Korean."""
 
     # 2. Strategic Intent: Focus on Blueprint and Tactics
     elif intent == "strategic":
@@ -476,7 +490,7 @@ def generate_node(state: AgentState):
 [INTERNAL ANALYSIS (for your reference only, do not reproduce directly)] {strategy if strategy else "No specific analysis available."}
 [SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
 [STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
-[INSTRUCTION] Focus on "How to organize" and "How to act". Answer in Korean."""
+[INSTRUCTION] Focus on "How to act" and "How to organize". Answer in Korean."""
 
     # 3. Agitation Intent: Focus on Passion and Mobilization
     elif intent == "agitation":
