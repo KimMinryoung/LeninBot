@@ -8,6 +8,7 @@ from supabase.client import Client, create_client
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.documents import Document # [New] To handle documents
@@ -133,7 +134,7 @@ class AgentState(TypedDict):
     # Phase 3: Plan-and-execute
     plan: Optional[List[dict]]        # structured research plan from planner
     current_step: int                 # progress pointer into plan
-    step_results: Annotated[List[str], add]  # accumulated intermediate results
+    step_results: List[str]                   # accumulated intermediate results (manual accumulation for checkpoint reset)
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -291,6 +292,15 @@ def analyze_intent_node(state: AgentState):
         "layer": analysis.layer,
         "sub_queries": sub_queries,
         "logs": logs,
+        # Reset transient per-turn fields to prevent state leakage across checkpointed turns
+        "documents": [],
+        "strategy": None,
+        "feedback": None,
+        "generation_attempts": 0,
+        "plan": None,
+        "current_step": 0,
+        "needs_realtime": None,
+        "step_results": [],
     }
 
 
@@ -902,10 +912,14 @@ def step_executor_node(state: AgentState):
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
 
+    # Manually accumulate step_results (no add reducer — needed for checkpoint reset)
+    current_results = list(state.get("step_results") or [])
+    current_results.append(result_summary)
+
     return {
         "documents": current_docs,
         "current_step": current_step + 1,
-        "step_results": [result_summary],
+        "step_results": current_results,
         "logs": logs,
     }
 
@@ -961,12 +975,14 @@ workflow.add_conditional_edges("step_executor", plan_progress, {
     "continue": "step_executor",
     "done": "strategize",
 })
-graph = workflow.compile()
+graph = workflow.compile(checkpointer=MemorySaver())
 
 # 실행 루프 (채팅 인터페이스)
 if __name__ == "__main__":
     print("🚩 [System] 사이버-레닌 AI 가동됨.")
     print("🚩 [System] 당신의 영혼이 레닌 영묘와 연결되었습니다. 레닌 동지에게 말을 거십시오.\n")
+
+    config = {"configurable": {"thread_id": "cli-session"}}
 
     while True:
         try:
@@ -974,9 +990,9 @@ if __name__ == "__main__":
             if user_input.lower() in ["exit", "quit", "종료"]:
                 print("🚩 통신 종료. 혁명은 계속된다.")
                 break
-            
+
             inputs = {"messages": [HumanMessage(content=user_input)]}
-            for output in graph.stream(inputs, stream_mode="updates"):
+            for output in graph.stream(inputs, config=config, stream_mode="updates"):
                 for node_name, node_content in output.items():
                     if node_content and "logs" in node_content:
                         for log_line in node_content["logs"]:

@@ -56,6 +56,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
+    session_id: str = "default"
 
 def format_sse(data: dict):
     """Server-Sent Events 포맷으로 변환"""
@@ -71,12 +72,13 @@ async def chat(request: ChatRequest):
 
     async def event_generator():
         inputs = {"messages": [HumanMessage(content=request.message)]}
+        config = {"configurable": {"thread_id": request.session_id}}
         # Buffer the latest generate answer; only emit after critic accepts
         pending_answer = None
 
         # 그래프 실행 및 로그 스트리밍 (stream_mode="updates")
         # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
-        async for output in _graph.astream(inputs, stream_mode="updates"):
+        async for output in _graph.astream(inputs, config=config, stream_mode="updates"):
             for node_name, node_content in output.items():
                 # log_conversation 노드는 내부 전용이므로 클라이언트에 노출하지 않음
                 if node_name == "log_conversation":
