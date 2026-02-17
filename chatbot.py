@@ -382,7 +382,7 @@ def retrieve_node(state: AgentState):
             docs = _direct_similarity_search(search_query_ko, k=5, layer=layer_filter)
 
         if docs:
-            logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:\n" + "="*50)
+            logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:")
         else:
             logs.append("⚠️ 영묘 데이터에 관련된 문헌이 없습니다.")
 
@@ -568,8 +568,12 @@ def generate_node(state: AgentState):
 """
     system_prompt += f"[CURRENT QUESTION] {last_user_query}"
 
+    # Escape curly braces so ChatPromptTemplate doesn't interpret them
+    # as template variables (LLM-generated strategy/context may contain {})
+    safe_system_prompt = system_prompt.replace("{", "{{").replace("}", "}}")
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
+        ("system", safe_system_prompt),
         ("placeholder", "{messages}")
     ])
 
