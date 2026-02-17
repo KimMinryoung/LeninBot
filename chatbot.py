@@ -725,42 +725,15 @@ def log_conversation_node(state: AgentState):
 
 # Phase 1: Critic node — evaluates generated answer quality
 def critic_node(state: AgentState):
-    """Evaluate the generated answer for groundedness, relevance, and completeness."""
-    messages = state["messages"]
-    docs = state.get("documents", [])
-    intent = state.get("intent", "casual")
+    """Critic node — disabled to prevent retry loops that exhaust Gemini rate limits.
 
-    logs = []
-
-    # Skip critic for casual intent (no docs to check against)
-    if intent == "casual" or not docs:
-        logs.append("\n✅ [비평관] 간단한 대화 — 검증 생략.")
-        return {"feedback": None, "logs": logs}
-
-    # Get the generated answer (last AI message)
-    answer = ""
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage):
-            answer = msg.content
-            break
-
-    question = ""
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            question = msg.content
-            break
-
-    doc_text = "\n\n".join([_format_doc(d) for d in docs[:5]])  # limit to avoid token overflow
-
-    logs.append("\n🔍 [비평관] 생성된 답변의 품질을 검증 중...")
-    result = invoke_critic({"question": question, "documents": doc_text, "answer": answer})
-
-    if result.verdict == "pass":
-        logs.append("   ✅ 답변이 검증을 통과했습니다.")
-        return {"feedback": None, "logs": logs}
-    else:
-        logs.append(f"   ❌ 답변 부적절: {result.feedback}")
-        return {"feedback": result.feedback, "logs": logs}
+    The critic was too strict (failing valid ideological analysis for not being
+    literally grounded in docs), causing 3 retries per question and cascading
+    429 errors.  The node is kept as a pass-through to preserve graph topology
+    for potential future re-enablement.
+    """
+    logs = ["\n✅ [비평관] 품질 검증 단계 — 통과 (비평 루프 비활성화됨)."]
+    return {"feedback": None, "logs": logs}
 
 
 def should_retry_generation(state: AgentState):
