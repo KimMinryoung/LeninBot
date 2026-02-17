@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Goal
+
+Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomous agent possible, based on CLAW (Planner + ReAct Executor + Critic triad) and other state-of-the-art agent architectures (Reflexion, LATS, Plan-and-Execute). The evolution is incremental — each phase adds a capability layer while preserving existing functionality.
+
+## Development Documentation
+
+- `temp_dev/project_state.md` — Current project state, architecture, capabilities, and limitations snapshot
+- `temp_dev/agent_evolution_plan.md` — Full phased plan for agent evolution (Phase 0-6)
+- `temp_dev/to_agent_AI.txt` — Original CLAW architecture discussion and Gemini's advice
+
+Always consult `temp_dev/agent_evolution_plan.md` before starting new work to understand the current phase and what comes next. Update these documents as phases are completed.
+
 ## Project Overview
 
 

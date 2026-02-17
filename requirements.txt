@@ -19,3 +19,9 @@ langchain-tavily
 
 # Workflow
 langgraph
+
+# Crawlers & ingestion
+requests
+beautifulsoup4
+tqdm
+langchain-text-splitters

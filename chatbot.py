@@ -123,115 +123,92 @@ class AgentState(TypedDict):
     datasource: Optional[Literal["vectorstore", "generate"]]
     logs: Annotated[List[str], add]
     context: str
+    # Phase 1: Self-correction loop
+    feedback: Optional[str]           # critic's feedback for re-generation
+    generation_attempts: int          # loop counter (max 3 total attempts)
+    # Phase 2: Query decomposition
+    sub_queries: Optional[List[str]]  # decomposed sub-queries (None = simple query)
+    layer: Optional[Literal["core_theory", "modern_analysis", "all"]]  # knowledge layer
+    needs_realtime: Optional[Literal["yes", "no"]]  # from batch grading
 
-# 라우터 체인 생성
-class RouteQuery(BaseModel):
-    """사용자의 질문 의도를 분류합니다."""
-    datasource: Literal["vectorstore", "generate"] = Field(..., description="지식 검색 필요 여부")
-    intent: Literal["academic", "strategic", "agitation", "casual"] = Field(
-        ..., 
-        description="The nature of the response: detailed info (academic), planning (strategic), emotional speech (agitation), or small talk (casual)."
-    )
+# Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
+class QueryAnalysis(BaseModel):
+    """Combined intent classification, layer routing, and query decomposition."""
+    datasource: Literal["vectorstore", "generate"] = Field(..., description="Whether knowledge retrieval is needed")
+    intent: Literal["academic", "strategic", "agitation", "casual"] = Field(..., description="Response style")
+    layer: Literal["core_theory", "modern_analysis", "all"] = Field(default="all", description="Which knowledge layer to search")
+    sub_queries: List[str] = Field(default_factory=list, description="Decomposed sub-queries, or single original query")
 
-system_router = """You are an expert intent classifier for the Cyber-Lenin AI.
+system_query_analysis = """You are an expert query analyzer for the Cyber-Lenin AI.
+Analyze the user's question and conversation context to determine ALL of the following in ONE response.
 
-You will receive the current user question along with recent conversation context.
-Use the conversation context to resolve pronouns, references, and follow-up questions
-(e.g., "tell me more about that", "이것에 대해 설명해줘") to understand the TRUE intent.
+Use the conversation context to resolve pronouns, references, and follow-up questions.
 
-1. Determine 'datasource':
-   - Use 'vectorstore' if the query requires historical, theoretical, or technical knowledge, or knowledge about modern society, or revolutionary experiences of communists.
-   - Use 'generate' for greetings, personal talk, or simple requests not needing external data.
+1. **datasource**: Where to look for the answer.
+   - "vectorstore": Query requires historical, theoretical, or technical knowledge, or knowledge about modern society or revolutionary experiences.
+   - "generate": Greetings, personal talk, or simple requests not needing external data.
 
-2. Determine 'intent':
-   - 'academic': User wants objective, detailed, and scholarly explanations (e.g., "Explain Ernest Mandel's theory").
-   - 'strategic': User wants actionable plans, tactics, or "how-to" advice.
-   - 'agitation': User wants an emotional, fiery, and revolutionary speech or call to action.
-   - 'casual': Simple greetings, jokes, or non-political chit-chat.
+2. **intent**: How to respond.
+   - "academic": Objective, detailed, scholarly explanations.
+   - "strategic": Actionable plans, tactics, or "how-to" advice.
+   - "agitation": Emotional, fiery, revolutionary speech or call to action.
+   - "casual": Simple greetings, jokes, or non-political chit-chat.
 
-Respond with ONLY a JSON object: {{"datasource": "...", "intent": "..."}}"""
-route_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system_router),
-        ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
-    ]
-)
+3. **layer**: Which knowledge layer to search (only matters if datasource="vectorstore").
+   - "core_theory": Classical Marxist-Leninist texts (Lenin, Marx, Engels, original writings, early 20th century).
+   - "modern_analysis": Contemporary analysis (AI, tech, current politics, 21st century economics).
+   - "all": When the question spans both classical and modern topics. When unsure, use "all".
 
-_ROUTER_DEFAULT = RouteQuery(datasource="vectorstore", intent="academic")
+4. **sub_queries**: Query decomposition for retrieval (only matters if datasource="vectorstore").
+   - DECOMPOSE ONLY when the question explicitly asks about 2+ DIFFERENT thinkers, theories, or distinct topics that need separate searches.
+   - DO NOT decompose single-topic questions, even if complex. When in doubt, do NOT decompose.
+   - If decomposing: output 2-4 focused sub-queries targeting DIFFERENT search topics.
+   - If NOT decomposing: output the original question as the single item in the list.
 
-def invoke_router(inputs: dict) -> RouteQuery:
-    return _invoke_structured(route_prompt | llm_light, inputs, RouteQuery, _ROUTER_DEFAULT, retry_llm=llm_light)
+Respond with ONLY a JSON object:
+{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."]}}"""
 
-question_router = invoke_router
-
-
-# Grader 체인 생성
-# 검색된 문헌이 질문과 연관이 있는지 판단하고 연관 없으면 무시
-# 레이어 라우터: 질문에 적합한 지식 레이어를 선택
-class LayerRoute(BaseModel):
-    """사용자의 질문에 가장 적합한 지식 레이어를 선택합니다."""
-    layer: Literal["core_theory", "modern_analysis", "all"] = Field(
-        ...,
-        description="'core_theory' for classical Marxist-Leninist texts, 'modern_analysis' for contemporary analysis, 'all' to search everything."
-    )
-
-system_layer_router = """You are an expert at selecting the right knowledge layer for a question.
-
-You will receive the current user question along with recent conversation context.
-Use the conversation context to resolve pronouns, references, and follow-up questions
-to understand what the user is actually asking about.
-
-Available layers:
-- "core_theory": Classical Marxist-Leninist texts (original writings, revolutionary theory, historical documents from early 20th century)
-- "modern_analysis": Contemporary analysis applying Marxist theory to modern issues (AI, tech, current politics, 21st century economics)
-- "all": Search all layers when the question spans both classical and modern topics
-
-Routing rules:
-- Questions about original texts of Lenin, Marx and Engels, historical events (1900s-1920s), classical theory → "core_theory"
-- Questions about modern technology, current events, contemporary politics → "modern_analysis"
-- Questions that need both historical context AND modern application → "all"
-- When unsure, prefer "all"
-
-Respond with ONLY a JSON object: {{"layer": "..."}}"""
-layer_route_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_layer_router),
+query_analysis_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_query_analysis),
     ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
 ])
 
-_LAYER_DEFAULT = LayerRoute(layer="all")
+_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[])
 
-def invoke_layer_router(inputs: dict) -> LayerRoute:
-    return _invoke_structured(layer_route_prompt | llm_light, inputs, LayerRoute, _LAYER_DEFAULT, retry_llm=llm_light)
+def invoke_query_analysis(inputs: dict) -> QueryAnalysis:
+    return _invoke_structured(query_analysis_prompt | llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT, retry_llm=llm_light)
 
-layer_router = invoke_layer_router
 
-class GradeDocuments(BaseModel):
-    """Boolean check for relevance of retrieved documents."""
-    binary_score: Literal["yes", "no"] = Field(
-        ...,
-        description="Documents are relevant to the question, 'yes' or 'no'"
-    )
-system_grader = """You are a document relevance grader.
-Determine whether the retrieved document would be useful — in any way — for answering the user's question.
-Documents may include metadata such as [Author, Year] at the beginning — consider whether the author's perspective and historical period are relevant to the question.
+# Merge 3+4: Batch document grading + realtime check in one LLM call
+class BatchGradeResult(BaseModel):
+    """Batch relevance grading for all documents + realtime info check."""
+    scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each document in order")
+    needs_realtime: Literal["yes", "no"] = Field(default="no", description="Whether the question would benefit from real-time web search")
 
-Grade 'yes' if the document contains information, context, examples, or perspectives that could help construct a good answer.
-Grade 'no' only if the document is clearly unrelated to the question.
+system_batch_grader = """You are a document relevance grader and information freshness evaluator.
+You will receive a user question and multiple retrieved documents (numbered).
 
-When in doubt, grade 'yes'.
+For EACH document, determine if it would be useful for answering the question.
+- Grade "yes" if the document contains relevant information, context, or perspectives.
+- Grade "no" only if the document is clearly unrelated.
+- When in doubt, grade "yes".
 
-Respond with ONLY a JSON object: {{"binary_score": "yes"}} or {{"binary_score": "no"}}"""
-grade_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_grader),
-    ("human", "Retrieved document: \n\n {document} \n\n User question: {question}"),
+Also determine if the question would benefit from real-time web search:
+- "yes" if the question involves current events, recent data (2020+), modern organizations, or applying theory to current conditions.
+- "no" if purely about historical events or classical theory with no modern angle.
+
+Respond with ONLY a JSON object:
+{{"scores": ["yes", "no", ...], "needs_realtime": "yes"|"no"}}"""
+
+batch_grade_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_batch_grader),
+    ("human", "User question: {question}\n\nDocuments:\n{documents}"),
 ])
 
-_GRADER_DEFAULT = GradeDocuments(binary_score="yes")
+_BATCH_GRADE_DEFAULT = None  # handled in node
 
-def invoke_grader(inputs: dict) -> GradeDocuments:
-    return _invoke_structured(grade_prompt | llm_light, inputs, GradeDocuments, _GRADER_DEFAULT, retry_llm=llm_light)
-
-retrieval_grader = invoke_grader
+def invoke_batch_grader(inputs: dict) -> BatchGradeResult | None:
+    return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, retry_llm=llm_light)
 
 # Strategist Promt
 system_strategist = """You are the 'Brain of the Revolution' (Strategist).
@@ -280,20 +257,30 @@ def _build_context(messages: list, max_turns: int = 4) -> str:
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
-# Node: Router
+# Node: Combined Query Analysis (Merge 1: router + layer + decompose in one call)
 def analyze_intent_node(state: AgentState):
     question = state["messages"][-1].content
     context = _build_context(state["messages"])
-    source = question_router({"question": question, "context": context})
-    
-    # 1. 상태 업데이트 (intent + datasource 저장)
+    analysis = invoke_query_analysis({"question": question, "context": context})
+
+    logs = [f"\n🚦 [분석] 대화 맥락:\n{context}\n🚦 [분석] 의도: {analysis.intent} / 경로: {analysis.datasource} / 레이어: {analysis.layer}"]
+
+    sub_queries = analysis.sub_queries if len(analysis.sub_queries) > 1 else None
+    if sub_queries:
+        logs.append(f"🔀 [분해] 복합 질문을 {len(sub_queries)}개의 하위 질문으로 분해:")
+        for i, sq in enumerate(sub_queries, 1):
+            logs.append(f"   {i}. {sq}")
+
     return {
-        "intent": source.intent,
-        "datasource": source.datasource,
-        "logs": [f"\n🚦 [문지기] 대화 맥락:\n{context}\n🚦 [문지기] 질문의 성격 분석 결과: {source.intent} / {source.datasource}"]
+        "intent": analysis.intent,
+        "datasource": analysis.datasource,
+        "layer": analysis.layer,
+        "sub_queries": sub_queries,
+        "logs": logs,
     }
 
-# Edge: Routing Logic (analyze_intent_node에서 저장된 결과 사용)
+
+# Edge: Routing Logic
 def router_logic(state: AgentState):
     return state.get("datasource", "vectorstore")
 
@@ -330,68 +317,121 @@ def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list
         if row.get("content")
     ]
 
+# Helper: Prepare search queries (Merge 2: rewrite + translate in one call)
+def _prepare_search_queries(query: str, context: str, selected_layer: str, logs: list):
+    """Rewrite query for context and translate to English if needed. Returns (ko_query, en_query)."""
+    needs_english = selected_layer in ("core_theory", "all")
+    has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in query)
+
+    try:
+        if needs_english and has_korean:
+            # Single call: rewrite + translate
+            combined_prompt = (
+                "Given the conversation context and current question, do TWO things:\n"
+                "1. Rewrite the question into a self-contained Korean search query (resolve pronouns/references from context).\n"
+                "2. Translate that Korean query into English.\n\n"
+                "If the question is already self-contained, keep it as-is for line 1.\n\n"
+                f"Conversation context:\n{context}\n\n"
+                f"Current question: {query}\n\n"
+                "Output EXACTLY two lines, nothing else:\n"
+                "KO: <korean query>\n"
+                "EN: <english query>"
+            )
+            result = llm_light.invoke(combined_prompt)
+            lines = result.content.strip().split("\n")
+            search_query_ko = query
+            search_query_en = None
+            for line in lines:
+                line = line.strip()
+                if line.upper().startswith("KO:"):
+                    search_query_ko = line[3:].strip()
+                elif line.upper().startswith("EN:"):
+                    search_query_en = line[3:].strip()
+            if search_query_ko != query:
+                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
+            if search_query_en:
+                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query_en}\"")
+            return search_query_ko, search_query_en
+        else:
+            # Only rewrite (no translation needed)
+            rewrite_prompt = (
+                "Given the conversation context and current question, "
+                "rewrite the user's CURRENT question into a self-contained Korean search query. "
+                "Resolve any pronouns or references using the context. "
+                "If the question is already self-contained, return it as-is. "
+                "Output ONLY the rewritten query, nothing else.\n\n"
+                f"Conversation context:\n{context}\n\n"
+                f"Current question: {query}"
+            )
+            rewritten = llm_light.invoke(rewrite_prompt)
+            search_query_ko = rewritten.content.strip()
+            if search_query_ko != query:
+                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
+            # If layer needs English but query is already non-Korean
+            search_query_en = search_query_ko if needs_english else None
+            return search_query_ko, search_query_en
+    except Exception:
+        return query, query if needs_english else None
+
+
+# Helper: Run similarity search for a single query with layer logic
+def _retrieve_for_query(search_query_ko: str, search_query_en: str | None, selected_layer: str) -> list:
+    """Run vector search for one query across the appropriate layer(s)."""
+    layer_filter = None if selected_layer == "all" else selected_layer
+    if selected_layer == "all":
+        en_q = search_query_en or search_query_ko
+        docs_core = _direct_similarity_search(en_q, k=3, layer="core_theory")
+        docs_modern = _direct_similarity_search(search_query_ko, k=3, layer="modern_analysis")
+        return docs_core + docs_modern
+    elif selected_layer == "core_theory":
+        return _direct_similarity_search(search_query_en or search_query_ko, k=5, layer=layer_filter)
+    else:
+        return _direct_similarity_search(search_query_ko, k=5, layer=layer_filter)
+
+
+# Helper: Deduplicate documents by page_content
+def _deduplicate_docs(docs: list) -> list:
+    """Remove duplicate documents based on page_content hash."""
+    seen = set()
+    unique = []
+    for d in docs:
+        h = hash(d.page_content)
+        if h not in seen:
+            seen.add(h)
+            unique.append(d)
+    return unique
+
+
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
     context = _build_context(state["messages"])
+    sub_queries = state.get("sub_queries")
     logs = []
 
-    # 레이어 라우팅
-    try:
-        layer_result = layer_router({"question": query, "context": context})
-        selected_layer = layer_result.layer
-        logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
-    except Exception:
-        selected_layer = "all"
-        logs.append("\n📂 [레이어] 레이어 판별 실패, 전체 검색합니다.")
-
-    layer_filter = None if selected_layer == "all" else selected_layer
-
-    # 맥락을 반영하여 자립적인 검색 쿼리 생성
-    search_query_ko = query
-    search_query_en = None
-    try:
-        # 한국어 검색 쿼리: 맥락 반영하여 재작성
-        rewrite_prompt = (
-            "Given the conversation context and current question, "
-            "rewrite the user's CURRENT question into a self-contained Korean search query. "
-            "Resolve any pronouns or references using the context. "
-            "If the question is already self-contained, return it as-is. "
-            "Output ONLY the rewritten query, nothing else.\n\n"
-            f"Conversation context:\n{context}\n\n"
-            f"Current question: {query}"
-        )
-        rewritten = llm_light.invoke(rewrite_prompt)
-        search_query_ko = rewritten.content.strip()
-        if search_query_ko != query:
-            logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
-
-        # 영어 문헌 검색이 필요한 경우 영어로 번역
-        if selected_layer in ("core_theory", "all"):
-            has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in search_query_ko)
-            if has_korean:
-                translated = llm_light.invoke(
-                    f"Translate the following query to English. Output ONLY the translated text, nothing else:\n{search_query_ko}"
-                )
-                search_query_en = translated.content.strip()
-                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query_en}\"")
-            else:
-                search_query_en = search_query_ko
-    except Exception:
-        pass
+    # Layer already determined by analyze_intent_node (Merge 1)
+    selected_layer = state.get("layer", "all")
+    logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
 
     docs = []
     try:
-        if selected_layer == "all":
-            # all 레이어: 영어 쿼리로 core_theory + 한국어 쿼리로 modern_analysis 병합
-            en_q = search_query_en or search_query_ko
-            docs_core = _direct_similarity_search(en_q, k=3, layer="core_theory")
-            docs_modern = _direct_similarity_search(search_query_ko, k=3, layer="modern_analysis")
-            docs = docs_core + docs_modern
-        elif selected_layer == "core_theory":
-            docs = _direct_similarity_search(search_query_en or search_query_ko, k=5, layer=layer_filter)
+        if sub_queries and len(sub_queries) > 1:
+            # Phase 2: Multi-retrieval — run each sub-query independently
+            for i, sq in enumerate(sub_queries, 1):
+                logs.append(f"\n🔍 [검색 {i}/{len(sub_queries)}] \"{sq}\"")
+                sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, logs)
+                sq_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
+                logs.append(f"   → {len(sq_docs)}건 발견")
+                docs.extend(sq_docs)
+            # Deduplicate across sub-queries
+            before = len(docs)
+            docs = _deduplicate_docs(docs)
+            if before > len(docs):
+                logs.append(f"🔗 [병합] {before}건 → {len(docs)}건 (중복 {before - len(docs)}건 제거)")
         else:
-            docs = _direct_similarity_search(search_query_ko, k=5, layer=layer_filter)
+            # Single query path (original behavior)
+            sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, logs)
+            docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
 
         if docs:
             logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:")
@@ -403,90 +443,105 @@ def retrieve_node(state: AgentState):
 
     return {"documents": docs, "logs": logs}
 
-# Node: Grade Documents (The Censor)
+# Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
 def grade_documents_node(state: AgentState):
     question = state["messages"][-1].content
     documents = state["documents"]
-    filtered_docs = []
-
     logs = []
-    logs.append("\n⚖️ [검열관] 문헌의 적절성을 평가 중...")
-    
-    for d in documents:
-        score = retrieval_grader({"question": question, "document": _format_doc(d)})
-        grade = score.binary_score
+    logs.append("\n⚖️ [검열관] 문헌의 적절성을 일괄 평가 중...")
 
+    if not documents:
+        logs.append("   ⚠️ 연관있는 문헌이 없다.")
+        return {"documents": [], "logs": logs}
+
+    # Build numbered document list for batch grading
+    doc_entries = []
+    for i, d in enumerate(documents, 1):
+        formatted = _format_doc(d)
+        # Truncate each doc to avoid token overflow
+        if len(formatted) > 500:
+            formatted = formatted[:500] + "..."
+        doc_entries.append(f"[Document {i}]\n{formatted}")
+    docs_text = "\n\n".join(doc_entries)
+
+    result = invoke_batch_grader({"question": question, "documents": docs_text})
+
+    # Parse scores — fallback to all "yes" if batch grading fails
+    if result and result.scores:
+        scores = result.scores
+        needs_realtime = result.needs_realtime
+    else:
+        scores = ["yes"] * len(documents)
+        needs_realtime = "yes"
+        logs.append("   ⚠️ 일괄 평가 실패, 모든 문헌을 유지합니다.")
+
+    # Pad or trim scores to match document count
+    while len(scores) < len(documents):
+        scores.append("yes")
+    scores = scores[:len(documents)]
+
+    filtered_docs = []
+    for i, (d, score) in enumerate(zip(documents, scores)):
         meta = d.metadata or {}
         author = meta.get("author", "")
         year = meta.get("year", "")
         source = meta.get("source", "출처미상")
         label = f"{source} ({author}, {year})" if author or year else source
 
-        if grade == "yes":
+        if score == "yes":
             logs.append(f"   ✅ 적절한 문헌: {label}")
-            content_preview = d.page_content.replace("\n", " ").strip()
-            if len(content_preview) > 400:
-                content_preview = content_preview[:400] + "..."
-            logs.append(f"   미리보기: \"{content_preview}\"")
             filtered_docs.append(d)
         else:
             logs.append(f"   🗑️ 관련없는 문헌(무시): {label}")
 
-    # Fallback: If all are filtered, take at least the top 1 document from the original search
-    # Also, if remain doc is one or zero, we will trigger web search
+    # Fallback: keep at least 1 document
     if not filtered_docs and documents:
         filtered_docs = [documents[0]]
-    
-    if not filtered_docs:
-        logs.append("   ⚠️ 연관있는 문헌이 없다.")
-        
-    return {"documents": filtered_docs, "logs": logs}
 
-class NeedsRealtimeInfo(BaseModel):
-    """Determine whether the question would benefit from real-time web information."""
-    needs_realtime: Literal["yes", "no"] = Field(
-        ...,
-        description="'yes' if the question involves current events, recent developments, live data, or topics that change over time. 'no' if purely historical or theoretical."
-    )
+    return {"documents": filtered_docs, "logs": logs, "needs_realtime": needs_realtime}
 
-system_realtime_checker = """You are an information freshness evaluator.
-Determine whether answering this question would BENEFIT from up-to-date web information.
+# Phase 1: Self-correction — Critic evaluates generated answers
+class CriticResult(BaseModel):
+    """Critic evaluation of a generated answer."""
+    verdict: Literal["pass", "fail"] = Field(..., description="'pass' if the answer is acceptable, 'fail' if it needs improvement")
+    feedback: str = Field(default="", description="Specific feedback on what to improve. Empty string if verdict is 'pass'.")
 
-Answer 'yes' if ANY of the following apply:
-- The question asks about current events, recent news, or ongoing situations
-- The question involves data that changes over time (statistics, prices, political situations)
-- The question asks about modern organizations, movements, or living public figures
-- The question asks about applying theory to CURRENT real-world conditions
-- The question mentions specific recent dates, years (2020+), or "now/today/recently"
-- A web search could provide useful supplementary context even if archival documents exist
+system_critic = """You are a strict quality critic for the Cyber-Lenin AI's responses.
+Evaluate the generated answer against the user's question and the source documents.
 
-Answer 'no' ONLY if:
-- The question is purely about historical events or classical theory with no modern angle
-- The question is casual chat, greetings, or personal talk
+Check these axes:
+1. **Groundedness**: Is the answer supported by the provided documents? Does it fabricate facts not in the sources?
+2. **Relevance**: Does the answer actually address what the user asked? Or does it go off-topic?
+3. **Completeness**: For multi-part questions, did the answer address all parts?
 
-Respond with ONLY a JSON object: {{"needs_realtime": "yes"}} or {{"needs_realtime": "no"}}"""
+Verdict rules:
+- 'pass': The answer is grounded, relevant, and reasonably complete. Minor style issues are OK.
+- 'fail': The answer has a clear factual fabrication, misses the user's actual question, or ignores a significant part of a multi-part question.
 
-realtime_check_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_realtime_checker),
-    ("human", "Question: {question}"),
+Do NOT fail answers just because they could be "better". Only fail for concrete, identifiable problems.
+
+Respond with ONLY a JSON object: {{"verdict": "pass"|"fail", "feedback": "..."}}"""
+
+critic_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_critic),
+    ("human", "User question: {question}\n\nSource documents:\n{documents}\n\nGenerated answer:\n{answer}"),
 ])
 
-_REALTIME_DEFAULT = NeedsRealtimeInfo(needs_realtime="yes")
+_CRITIC_DEFAULT = CriticResult(verdict="pass", feedback="")
 
-def invoke_realtime_checker(inputs: dict) -> NeedsRealtimeInfo:
-    return _invoke_structured(realtime_check_prompt | llm_light, inputs, NeedsRealtimeInfo, _REALTIME_DEFAULT, retry_llm=llm_light)
+def invoke_critic(inputs: dict) -> CriticResult:
+    return _invoke_structured(critic_prompt | llm_light, inputs, CriticResult, _CRITIC_DEFAULT, retry_llm=llm_light)
+
 
 def decide_websearch_need(state: AgentState):
     filtered_docs = state["documents"]
-    question = state["messages"][-1].content
 
     # Always search web if too few documents
     if len(filtered_docs) <= 1:
         return "need_web_search"
 
-    # Even with enough documents, check if real-time info would help
-    realtime_result = invoke_realtime_checker({"question": question})
-    if realtime_result.needs_realtime == "yes":
+    # Read realtime decision from batch grading (Merge 4: no separate LLM call)
+    if state.get("needs_realtime") == "yes":
         return "need_web_search"
 
     return "no_need_to_search_web"
@@ -584,6 +639,12 @@ def generate_node(state: AgentState):
 3. Ensure natural Korean sentence structures.
 4. If you finish your thought, STOP immediately. Do not generate repetitive characters.
 """
+    # Phase 1: Inject critic feedback on retry attempts
+    feedback = state.get("feedback")
+    if feedback:
+        system_prompt += f"\n[REVISION REQUIRED] Your previous answer was rejected. Fix the following issue:\n{feedback}\n"
+        logs.append(f"🔄 [재생성] 비평 피드백을 반영하여 답변을 재생성합니다. (시도 {state.get('generation_attempts', 0) + 1}/3)")
+
     system_prompt += f"[CURRENT QUESTION] {last_user_query}"
 
     # Escape curly braces so ChatPromptTemplate doesn't interpret them
@@ -597,9 +658,10 @@ def generate_node(state: AgentState):
 
     chain = prompt | llm
     response = chain.invoke({"messages": messages})
-    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨.")
+    attempts = state.get("generation_attempts", 0) + 1
+    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨. (시도 {attempts}/3)")
 
-    return {"messages": [response], "logs": logs}
+    return {"messages": [response], "logs": logs, "generation_attempts": attempts}
 
 # Node: Log Conversation to Supabase
 def log_conversation_node(state: AgentState):
@@ -642,6 +704,62 @@ def log_conversation_node(state: AgentState):
 
     return {}
 
+# Phase 1: Critic node — evaluates generated answer quality
+def critic_node(state: AgentState):
+    """Evaluate the generated answer for groundedness, relevance, and completeness."""
+    messages = state["messages"]
+    docs = state.get("documents", [])
+    intent = state.get("intent", "casual")
+
+    logs = []
+
+    # Skip critic for casual intent (no docs to check against)
+    if intent == "casual" or not docs:
+        logs.append("\n✅ [비평관] 간단한 대화 — 검증 생략.")
+        return {"feedback": None, "logs": logs}
+
+    # Get the generated answer (last AI message)
+    answer = ""
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            answer = msg.content
+            break
+
+    question = ""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            question = msg.content
+            break
+
+    doc_text = "\n\n".join([_format_doc(d) for d in docs[:5]])  # limit to avoid token overflow
+
+    logs.append("\n🔍 [비평관] 생성된 답변의 품질을 검증 중...")
+    result = invoke_critic({"question": question, "documents": doc_text, "answer": answer})
+
+    if result.verdict == "pass":
+        logs.append("   ✅ 답변이 검증을 통과했습니다.")
+        return {"feedback": None, "logs": logs}
+    else:
+        logs.append(f"   ❌ 답변 부적절: {result.feedback}")
+        return {"feedback": result.feedback, "logs": logs}
+
+
+def should_retry_generation(state: AgentState):
+    """Decide whether to retry generation based on critic feedback."""
+    feedback = state.get("feedback")
+    attempts = state.get("generation_attempts", 0)
+
+    # No feedback = critic passed
+    if not feedback:
+        return "accepted"
+
+    # Max retries reached — accept whatever we have
+    if attempts >= 3:
+        return "accepted"
+
+    return "retry"
+
+
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
 workflow.add_node("analyze_intent", analyze_intent_node)
@@ -650,14 +768,21 @@ workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
+workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
 workflow.add_edge(START, "analyze_intent")
+# Merge 1: analyze_intent now includes layer routing + decomposition, goes directly to retrieve
 workflow.add_conditional_edges("analyze_intent", router_logic, { "vectorstore": "retrieve", "generate": "generate"})
 workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "strategize",},)
 workflow.add_edge("web_search", "strategize")
 workflow.add_edge("strategize", "generate")
-workflow.add_edge("generate", "log_conversation")
+# Phase 1: generate → critic → [accepted → log | retry → generate]
+workflow.add_edge("generate", "critic")
+workflow.add_conditional_edges("critic", should_retry_generation, {
+    "accepted": "log_conversation",
+    "retry": "generate",
+})
 workflow.add_edge("log_conversation", END)
 graph = workflow.compile()
 

@@ -71,6 +71,8 @@ async def chat(request: ChatRequest):
 
     async def event_generator():
         inputs = {"messages": [HumanMessage(content=request.message)]}
+        # Buffer the latest generate answer; only emit after critic accepts
+        pending_answer = None
 
         # 그래프 실행 및 로그 스트리밍 (stream_mode="updates")
         # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
@@ -88,14 +90,21 @@ async def chat(request: ChatRequest):
                             "node": node_name,
                             "content": log_line
                         })
-                
-                # 최종 답변 생성 단계라면 답변 내용 전송
+
+                # Buffer generate answer (may be retried by critic)
                 if node_name == "generate":
                     last_message = node_content["messages"][-1]
-                    yield format_sse({
-                        "type": "answer",
-                        "content": last_message.content
-                    })
+                    pending_answer = last_message.content
+
+                # Emit the answer only after critic accepts (feedback is None)
+                if node_name == "critic" and pending_answer is not None:
+                    feedback = node_content.get("feedback")
+                    if not feedback:
+                        yield format_sse({
+                            "type": "answer",
+                            "content": pending_answer
+                        })
+                        pending_answer = None
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
