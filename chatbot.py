@@ -213,6 +213,7 @@ class GradeDocuments(BaseModel):
     )
 system_grader = """You are a document relevance grader.
 Determine whether the retrieved document would be useful — in any way — for answering the user's question.
+Documents may include metadata such as [Author, Year] at the beginning — consider whether the author's perspective and historical period are relevant to the question.
 
 Grade 'yes' if the document contains information, context, examples, or perspectives that could help construct a good answer.
 Grade 'no' only if the document is clearly unrelated to the question.
@@ -250,6 +251,17 @@ strategist_prompt = ChatPromptTemplate.from_messages([
 ])
 strategist_chain = strategist_prompt | llm
 
+
+# --- 헬퍼 함수 ---
+
+def _format_doc(d: Document) -> str:
+    """Format a document with author/year metadata for LLM consumption."""
+    meta = d.metadata or {}
+    author = meta.get("author")
+    year = meta.get("year")
+    header_parts = [p for p in [author, str(year) if year else None] if p]
+    header = f"[{', '.join(header_parts)}] " if header_parts else ""
+    return f"{header}{d.page_content}"
 
 # --- 노드 및 엣지 함수 정의 ---
 
@@ -401,18 +413,24 @@ def grade_documents_node(state: AgentState):
     logs.append("\n⚖️ [검열관] 문헌의 적절성을 평가 중...")
     
     for d in documents:
-        score = retrieval_grader({"question": question, "document": d.page_content})
+        score = retrieval_grader({"question": question, "document": _format_doc(d)})
         grade = score.binary_score
-        
+
+        meta = d.metadata or {}
+        author = meta.get("author", "")
+        year = meta.get("year", "")
+        source = meta.get("source", "출처미상")
+        label = f"{source} ({author}, {year})" if author or year else source
+
         if grade == "yes":
-            logs.append(f"   ✅ 적절한 문헌: {d.metadata.get('source', '출처미상')}")
+            logs.append(f"   ✅ 적절한 문헌: {label}")
             content_preview = d.page_content.replace("\n", " ").strip()
             if len(content_preview) > 400:
                 content_preview = content_preview[:400] + "..."
             logs.append(f"   미리보기: \"{content_preview}\"")
             filtered_docs.append(d)
         else:
-            logs.append(f"   🗑️ 관련없는 문헌(무시): {d.metadata.get('source', '출처미상')}")
+            logs.append(f"   🗑️ 관련없는 문헌(무시): {label}")
 
     # Fallback: If all are filtered, take at least the top 1 document from the original search
     # Also, if remain doc is one or zero, we will trigger web search
@@ -502,7 +520,7 @@ def web_search_node(state: AgentState):
 
 def strategize_node(state: AgentState):
     docs = state.get("documents", [])
-    context = "\n\n".join([d.page_content for d in docs]) if docs else "No specific documents found."
+    context = "\n\n".join([_format_doc(d) for d in docs]) if docs else "No specific documents found."
     question = state["messages"][-1].content
 
     logs = []
@@ -518,7 +536,7 @@ def strategize_node(state: AgentState):
 # Node: Generate
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
-    context = "\n\n".join([d.page_content for d in docs]) if docs else ""
+    context = "\n\n".join([_format_doc(d) for d in docs]) if docs else ""
     strategy = state.get("strategy", None)
     messages = state["messages"]
     # 마지막 사용자 질문
