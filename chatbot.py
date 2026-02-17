@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 
 # Supabase & Embeddings
 from supabase.client import Client, create_client
-from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -83,14 +82,6 @@ embeddings = HuggingFaceEmbeddings(
     encode_kwargs={'normalize_embeddings': True}
 )
 
-# 벡터 스토어 연결
-vectorstore = SupabaseVectorStore(
-    client=supabase,
-    embedding=embeddings,
-    table_name="lenin_corpus",
-    query_name="match_documents",
-)
-
 # LLM 설정 (Gemini 2.5 Flash)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
@@ -115,7 +106,7 @@ web_search_tool = TavilySearch(max_results=3)
 print("✅ [성공] 모든 시스템 기동 완료.")
 
 # 2. 상태(State) 정의
-# 대화 기록(messages)과 검색된 문서(context)를 저장하는 메모리 구조입니다.
+# 대화 기록(messages)과 검색된 문서를 저장하는 메모리 구조입니다.
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     documents: List[Document]
@@ -123,7 +114,6 @@ class AgentState(TypedDict):
     intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
     datasource: Optional[Literal["vectorstore", "generate"]]
     logs: Annotated[List[str], add]
-    context: str
     # Phase 1: Self-correction loop
     feedback: Optional[str]           # critic's feedback for re-generation
     generation_attempts: int          # loop counter (max 3 total attempts)
@@ -576,7 +566,7 @@ def web_search_node(state: AgentState):
     Search the external world to gather more context.
     """
     question = state["messages"][-1].content
-    current_docs = state.get("documents", [])
+    current_docs = list(state.get("documents", []))
     logs = []
     has_docs = len(current_docs) > 1
     if has_docs:
@@ -590,7 +580,6 @@ def web_search_node(state: AgentState):
         results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
         web_results = "\n".join([d["content"] for d in results if d.get("content")])
         web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
-        # Append to existing documents
         current_docs.append(web_results_doc)
         logs.append("  ✅ 외부 정보가 취합되었다.")
     except Exception as e:
@@ -875,7 +864,7 @@ def step_executor_node(state: AgentState):
     total = len(plan)
     logs.append(f"\n⚡ [실행관] 단계 {step_num}/{total}: {step['description']}")
 
-    current_docs = state.get("documents") or []
+    current_docs = list(state.get("documents") or [])
     selected_layer = state.get("layer", "all")
     context = _build_context(state["messages"])
 

@@ -1,10 +1,9 @@
-import asyncio
 import json
 import os
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Response
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -68,7 +67,7 @@ async def chat(request: ChatRequest):
     """
     클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
     """
-    _graph = get_graph()
+    g = get_graph()
 
     async def event_generator():
         inputs = {"messages": [HumanMessage(content=request.message)]}
@@ -78,7 +77,7 @@ async def chat(request: ChatRequest):
 
         # 그래프 실행 및 로그 스트리밍 (stream_mode="updates")
         # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
-        async for output in _graph.astream(inputs, config=config, stream_mode="updates"):
+        async for output in g.astream(inputs, config=config, stream_mode="updates"):
             for node_name, node_content in output.items():
                 # log_conversation 노드는 내부 전용이므로 클라이언트에 노출하지 않음
                 if node_name == "log_conversation":
