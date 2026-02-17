@@ -72,40 +72,42 @@ async def chat(request: ChatRequest):
     async def event_generator():
         inputs = {"messages": [HumanMessage(content=request.message)]}
         config = {"configurable": {"thread_id": request.session_id}}
-        # Buffer the latest generate answer; only emit after critic accepts
         pending_answer = None
 
-        # 그래프 실행 및 로그 스트리밍 (stream_mode="updates")
-        # 각 노드가 끝날 때마다 그 노드의 출력값(logs 등)을 받아옵니다.
+        print(f"\n{'='*60}", flush=True)
+        print(f"📩 [요청] session={request.session_id} | \"{request.message[:80]}\"", flush=True)
+
         async for output in g.astream(inputs, config=config, stream_mode="updates"):
             for node_name, node_content in output.items():
-                # log_conversation 노드는 내부 전용이므로 클라이언트에 노출하지 않음
                 if node_name == "log_conversation":
                     continue
 
-                # 로그가 있다면 클라이언트로 전송
+                # Stream logs via SSE + print to console
                 if "logs" in node_content:
                     for log_line in node_content["logs"]:
+                        print(f"[{node_name}] {log_line}", flush=True)
                         yield format_sse({
                             "type": "log",
                             "node": node_name,
                             "content": log_line
                         })
 
-                # Buffer generate answer (may be retried by critic)
                 if node_name == "generate":
                     last_message = node_content["messages"][-1]
                     pending_answer = last_message.content
+                    print(f"[generate] 답변 생성 완료 ({len(pending_answer)}자)", flush=True)
 
-                # Emit the answer only after critic accepts (feedback is None)
                 if node_name == "critic" and pending_answer is not None:
                     feedback = node_content.get("feedback")
                     if not feedback:
+                        print(f"[critic] ✅ 답변 승인 — 클라이언트로 전송", flush=True)
                         yield format_sse({
                             "type": "answer",
                             "content": pending_answer
                         })
                         pending_answer = None
+
+        print(f"{'='*60}\n", flush=True)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
