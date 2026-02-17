@@ -130,6 +130,10 @@ class AgentState(TypedDict):
     sub_queries: Optional[List[str]]  # decomposed sub-queries (None = simple query)
     layer: Optional[Literal["core_theory", "modern_analysis", "all"]]  # knowledge layer
     needs_realtime: Optional[Literal["yes", "no"]]  # from batch grading
+    # Phase 3: Plan-and-execute
+    plan: Optional[List[dict]]        # structured research plan from planner
+    current_step: int                 # progress pointer into plan
+    step_results: Annotated[List[str], add]  # accumulated intermediate results
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -138,6 +142,7 @@ class QueryAnalysis(BaseModel):
     intent: Literal["academic", "strategic", "agitation", "casual"] = Field(..., description="Response style")
     layer: Literal["core_theory", "modern_analysis", "all"] = Field(default="all", description="Which knowledge layer to search")
     sub_queries: List[str] = Field(default_factory=list, description="Decomposed sub-queries, or single original query")
+    needs_plan: bool = Field(default=False, description="Whether the query requires multi-step research planning")
 
 system_query_analysis = """You are an expert query analyzer for the Cyber-Lenin AI.
 Analyze the user's question and conversation context to determine ALL of the following in ONE response.
@@ -165,15 +170,19 @@ Use the conversation context to resolve pronouns, references, and follow-up ques
    - If decomposing: output 2-4 focused sub-queries targeting DIFFERENT search topics.
    - If NOT decomposing: output the original question as the single item in the list.
 
+5. **needs_plan**: Whether the query requires multi-step research and synthesis (only matters if datasource="vectorstore").
+   - true: The question requires COMBINING knowledge from multiple angles, building an argument across several research steps, or producing a structured analysis/strategy. Examples: "Analyze X crisis from a Marxist perspective and propose a strategy", "Compare and synthesize theories A, B, C into an actionable framework".
+   - false: The question can be answered with a single retrieval pass (even if complex). Most questions are false. When in doubt, use false.
+
 Respond with ONLY a JSON object:
-{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."]}}"""
+{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."], "needs_plan": true|false}}"""
 
 query_analysis_prompt = ChatPromptTemplate.from_messages([
     ("system", system_query_analysis),
     ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
 ])
 
-_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[])
+_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[], needs_plan=False)
 
 def invoke_query_analysis(inputs: dict) -> QueryAnalysis:
     return _invoke_structured(query_analysis_prompt | llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT, retry_llm=llm_light)
@@ -271,9 +280,14 @@ def analyze_intent_node(state: AgentState):
         for i, sq in enumerate(sub_queries, 1):
             logs.append(f"   {i}. {sq}")
 
+    # Phase 3: Plan-and-execute routing
+    needs_plan = analysis.needs_plan and analysis.datasource == "vectorstore"
+    if needs_plan:
+        logs.append("📋 [계획] 복합 전략 질문 감지 — 연구 계획 수립 경로로 진입합니다.")
+
     return {
         "intent": analysis.intent,
-        "datasource": analysis.datasource,
+        "datasource": "plan" if needs_plan else analysis.datasource,
         "layer": analysis.layer,
         "sub_queries": sub_queries,
         "logs": logs,
@@ -578,6 +592,12 @@ def strategize_node(state: AgentState):
     context = "\n\n".join([_format_doc(d) for d in docs]) if docs else "No specific documents found."
     question = state["messages"][-1].content
 
+    # Phase 3: Include step results summary if from plan path
+    step_results = state.get("step_results", [])
+    if step_results:
+        research_summary = "\n".join(step_results)
+        context = f"=== Research Steps Summary ===\n{research_summary}\n\n=== Source Documents ===\n{context}"
+
     logs = []
     logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
 
@@ -585,7 +605,7 @@ def strategize_node(state: AgentState):
     strategy_text = response.content
 
     logs.append(f"👉 전술 :\n   {strategy_text}")
-    
+
     return {"strategy": strategy_text, "logs": logs}
 
 # Node: Generate
@@ -760,6 +780,146 @@ def should_retry_generation(state: AgentState):
     return "retry"
 
 
+# Phase 3: Plan-and-Execute — multi-step research for complex strategic queries
+
+class PlanStep(BaseModel):
+    """A single step in a research plan."""
+    description: str = Field(..., description="What this step investigates")
+    tool: Literal["retrieve", "web_search"] = Field(..., description="Which tool to use")
+    query: str = Field(..., description="Search query for this step")
+
+class ResearchPlan(BaseModel):
+    """Structured research plan for complex queries."""
+    steps: List[PlanStep] = Field(..., description="Ordered list of research steps (2-4 steps)")
+
+system_planner = """You are a research planner for the Cyber-Lenin AI, a Marxist-Leninist revolutionary intelligence.
+Given a complex question, create a structured research plan of 2-4 steps.
+
+Each step should:
+- Investigate ONE specific angle or topic
+- Use "retrieve" for searching the internal Marxist-Leninist knowledge base (classical texts, modern analysis)
+- Use "web_search" for current events, recent data, or real-world conditions
+- Have a focused search query (in the language best suited for that search — Korean for modern/current topics, English for classical theory)
+
+The plan should build knowledge progressively: foundational theory first, then application, then synthesis.
+
+Respond with ONLY a JSON object:
+{{"steps": [{{"description": "...", "tool": "retrieve"|"web_search", "query": "..."}}, ...]}}"""
+
+planner_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_planner),
+    ("human", "Question: {question}\n\nConversation context:\n{context}"),
+])
+
+_PLAN_DEFAULT = ResearchPlan(steps=[
+    PlanStep(description="General search", tool="retrieve", query=""),
+])
+
+
+def planner_node(state: AgentState):
+    """Create a multi-step research plan for complex strategic queries."""
+    question = state["messages"][-1].content
+    context = _build_context(state["messages"])
+    logs = []
+
+    logs.append("\n📋 [계획관] 연구 계획을 수립 중...")
+
+    result = _invoke_structured(
+        planner_prompt | llm, {"question": question, "context": context},
+        ResearchPlan, _PLAN_DEFAULT, retry_llm=llm
+    )
+
+    # If fallback default was used, set the query to the actual question
+    plan_steps = []
+    for step in result.steps:
+        step_dict = step.model_dump()
+        if not step_dict["query"]:
+            step_dict["query"] = question
+        plan_steps.append(step_dict)
+
+    logs.append(f"📋 [계획관] {len(plan_steps)}단계 연구 계획 수립 완료:")
+    for i, step in enumerate(plan_steps, 1):
+        tool_icon = "📚" if step["tool"] == "retrieve" else "🌐"
+        logs.append(f"   {i}. {tool_icon} {step['description']}")
+        logs.append(f"      쿼리: \"{step['query']}\"")
+
+    return {
+        "plan": plan_steps,
+        "current_step": 0,
+        "logs": logs,
+    }
+
+
+def step_executor_node(state: AgentState):
+    """Execute the current step of the research plan."""
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+    logs = []
+
+    if current_step >= len(plan):
+        logs.append("⚠️ [실행관] 계획의 모든 단계가 이미 완료되었습니다.")
+        return {"logs": logs}
+
+    step = plan[current_step]
+    step_num = current_step + 1
+    total = len(plan)
+    logs.append(f"\n⚡ [실행관] 단계 {step_num}/{total}: {step['description']}")
+
+    current_docs = state.get("documents") or []
+    selected_layer = state.get("layer", "all")
+    context = _build_context(state["messages"])
+
+    if step["tool"] == "retrieve":
+        query = step["query"]
+        sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, logs)
+        new_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
+        logs.append(f"   📚 {len(new_docs)}건의 문헌을 발견했습니다.")
+
+        # Summarize what we found for step_results
+        doc_snippets = []
+        for d in new_docs:
+            snippet = _format_doc(d)[:200]
+            doc_snippets.append(snippet)
+        result_summary = f"[Step {step_num}: {step['description']}] Retrieved {len(new_docs)} docs. Key content: " + " | ".join(doc_snippets[:3])
+
+        current_docs.extend(new_docs)
+
+    elif step["tool"] == "web_search":
+        query = step["query"]
+        logs.append(f"   🌐 웹 검색: \"{query}\"")
+        try:
+            search_response = web_search_tool.invoke({"query": query})
+            results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+            web_results = "\n".join([d["content"] for d in results if d.get("content")])
+            web_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
+            current_docs.append(web_doc)
+            logs.append(f"   ✅ 웹 검색 결과 취합 완료.")
+            result_summary = f"[Step {step_num}: {step['description']}] Web search results: {web_results[:300]}"
+        except Exception as e:
+            logs.append(f"   ⚠️ 웹 검색 실패: {e}")
+            result_summary = f"[Step {step_num}: {step['description']}] Web search failed: {e}"
+
+    # Deduplicate accumulated docs
+    current_docs = _deduplicate_docs(current_docs)
+
+    return {
+        "documents": current_docs,
+        "current_step": current_step + 1,
+        "step_results": [result_summary],
+        "logs": logs,
+    }
+
+
+def plan_progress(state: AgentState):
+    """Check if there are more plan steps to execute."""
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+
+    if current_step < len(plan):
+        return "continue"
+    return "done"
+
+
 # 그래프(Workflow) 구성
 workflow = StateGraph(AgentState)
 workflow.add_node("analyze_intent", analyze_intent_node)
@@ -770,11 +930,22 @@ workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
 workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
+# Phase 3: Plan-and-execute nodes
+workflow.add_node("planner", planner_node)
+workflow.add_node("step_executor", step_executor_node)
+
 workflow.add_edge(START, "analyze_intent")
-# Merge 1: analyze_intent now includes layer routing + decomposition, goes directly to retrieve
-workflow.add_conditional_edges("analyze_intent", router_logic, { "vectorstore": "retrieve", "generate": "generate"})
+# 3-way routing: plan (strategic complex) / vectorstore (standard RAG) / generate (casual)
+workflow.add_conditional_edges("analyze_intent", router_logic, {
+    "vectorstore": "retrieve",
+    "generate": "generate",
+    "plan": "planner",
+})
 workflow.add_edge("retrieve", "grade_documents")
-workflow.add_conditional_edges("grade_documents", decide_websearch_need,{ "need_web_search": "web_search", "no_need_to_search_web": "strategize",},)
+workflow.add_conditional_edges("grade_documents", decide_websearch_need, {
+    "need_web_search": "web_search",
+    "no_need_to_search_web": "strategize",
+})
 workflow.add_edge("web_search", "strategize")
 workflow.add_edge("strategize", "generate")
 # Phase 1: generate → critic → [accepted → log | retry → generate]
@@ -784,6 +955,12 @@ workflow.add_conditional_edges("critic", should_retry_generation, {
     "retry": "generate",
 })
 workflow.add_edge("log_conversation", END)
+# Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
+workflow.add_edge("planner", "step_executor")
+workflow.add_conditional_edges("step_executor", plan_progress, {
+    "continue": "step_executor",
+    "done": "strategize",
+})
 graph = workflow.compile()
 
 # 실행 루프 (채팅 인터페이스)
