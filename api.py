@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+from collections import defaultdict
 
 import uvicorn
 from dotenv import load_dotenv
@@ -20,6 +22,9 @@ _supabase_light: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_ANON_KEY"),
 )
+
+# Per-session locks to prevent concurrent requests from corrupting checkpointed state
+_session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Lazy-load chatbot so uvicorn can bind the port first
 _graph = None
@@ -69,45 +74,53 @@ async def chat(request: ChatRequest):
     """
     g = get_graph()
 
+    lock = _session_locks[request.session_id]
+
     async def event_generator():
-        inputs = {"messages": [HumanMessage(content=request.message)]}
-        config = {"configurable": {"thread_id": request.session_id}}
-        pending_answer = None
+        if lock.locked():
+            print(f"⚠️ [요청 거부] session={request.session_id} — 이전 요청 처리 중", flush=True)
+            yield format_sse({"type": "error", "content": "이전 질문에 대한 답변이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요."})
+            return
 
-        print(f"\n{'='*60}", flush=True)
-        print(f"📩 [요청] session={request.session_id} | \"{request.message[:80]}\"", flush=True)
+        async with lock:
+            inputs = {"messages": [HumanMessage(content=request.message)]}
+            config = {"configurable": {"thread_id": request.session_id}}
+            pending_answer = None
 
-        async for output in g.astream(inputs, config=config, stream_mode="updates"):
-            for node_name, node_content in output.items():
-                if node_name == "log_conversation":
-                    continue
+            print(f"\n{'='*60}", flush=True)
+            print(f"📩 [요청] session={request.session_id} | \"{request.message[:80]}\"", flush=True)
 
-                # Stream logs via SSE + print to console
-                if "logs" in node_content:
-                    for log_line in node_content["logs"]:
-                        print(f"[{node_name}] {log_line}", flush=True)
-                        yield format_sse({
-                            "type": "log",
-                            "node": node_name,
-                            "content": log_line
-                        })
+            async for output in g.astream(inputs, config=config, stream_mode="updates"):
+                for node_name, node_content in output.items():
+                    if node_name == "log_conversation":
+                        continue
 
-                if node_name == "generate":
-                    last_message = node_content["messages"][-1]
-                    pending_answer = last_message.content
-                    print(f"[generate] 답변 생성 완료 ({len(pending_answer)}자)", flush=True)
+                    # Stream logs via SSE + print to console
+                    if "logs" in node_content:
+                        for log_line in node_content["logs"]:
+                            print(f"[{node_name}] {log_line}", flush=True)
+                            yield format_sse({
+                                "type": "log",
+                                "node": node_name,
+                                "content": log_line
+                            })
 
-                if node_name == "critic" and pending_answer is not None:
-                    feedback = node_content.get("feedback")
-                    if not feedback:
-                        print(f"[critic] ✅ 답변 승인 — 클라이언트로 전송", flush=True)
-                        yield format_sse({
-                            "type": "answer",
-                            "content": pending_answer
-                        })
-                        pending_answer = None
+                    if node_name == "generate":
+                        last_message = node_content["messages"][-1]
+                        pending_answer = last_message.content
+                        print(f"[generate] 답변 생성 완료 ({len(pending_answer)}자)", flush=True)
 
-        print(f"{'='*60}\n", flush=True)
+                    if node_name == "critic" and pending_answer is not None:
+                        feedback = node_content.get("feedback")
+                        if not feedback:
+                            print(f"[critic] ✅ 답변 승인 — 클라이언트로 전송", flush=True)
+                            yield format_sse({
+                                "type": "answer",
+                                "content": pending_answer
+                            })
+                            pending_answer = None
+
+            print(f"{'='*60}\n", flush=True)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
