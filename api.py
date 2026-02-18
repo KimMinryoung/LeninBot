@@ -131,6 +131,26 @@ async def get_logs(
     return {"logs": result.data, "count": len(result.data)}
 
 
+@app.delete("/session/{session_id}")
+async def clear_session(session_id: str):
+    """특정 세션의 대화 기록(체크포인트)을 삭제합니다."""
+    g = get_graph()
+    exists = session_id in g.checkpointer.storage
+    if exists:
+        await g.checkpointer.adelete_thread(session_id)
+    return {"session_id": session_id, "cleared": exists}
+
+
+@app.delete("/sessions")
+async def clear_all_sessions():
+    """모든 세션의 대화 기록(체크포인트)을 삭제합니다."""
+    g = get_graph()
+    session_ids = list(g.checkpointer.storage.keys())
+    for sid in session_ids:
+        await g.checkpointer.adelete_thread(sid)
+    return {"cleared_sessions": len(session_ids), "session_ids": session_ids}
+
+
 if __name__ == "__main__":
     print("🚩 사이버-레닌 API 서버 가동... (Port: 8000)")
     uvicorn.run(app, host="0.0.0.0", port=8000)
