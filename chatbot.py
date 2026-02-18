@@ -125,6 +125,7 @@ class AgentState(TypedDict):
     plan: Optional[List[dict]]        # structured research plan from planner
     current_step: int                 # progress pointer into plan
     step_results: List[str]                   # accumulated intermediate results (manual accumulation for checkpoint reset)
+    logs_turn_start: int              # index into logs[] where the current turn begins (for per-turn log slicing)
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -263,6 +264,7 @@ def analyze_intent_node(state: AgentState):
     context = _build_context(state["messages"])
     analysis = invoke_query_analysis({"question": question, "context": context})
 
+    turn_start = len(state.get("logs", []))
     logs = [f"\n🚦 [분석] 대화 맥락:\n{context}\n🚦 [분석] 의도: {analysis.intent} / 경로: {analysis.datasource} / 레이어: {analysis.layer}"]
 
     sub_queries = analysis.sub_queries if len(analysis.sub_queries) > 1 else None
@@ -282,6 +284,7 @@ def analyze_intent_node(state: AgentState):
         "layer": analysis.layer,
         "sub_queries": sub_queries,
         "logs": logs,
+        "logs_turn_start": turn_start,
         # Reset transient per-turn fields to prevent state leakage across checkpointed turns
         "documents": [],
         "strategy": None,
@@ -700,12 +703,13 @@ def log_conversation_node(state: AgentState):
 
         docs = state.get("documents", [])
         strategy = state.get("strategy", None)
-        processing_logs = state.get("logs", [])
+        turn_start = state.get("logs_turn_start", 0)
+        processing_logs = state.get("logs", [])[turn_start:]
 
         is_casual = not docs and not strategy
         route = "casual" if is_casual else "vectorstore"
 
-        web_search_used = any("웹 검색" in log or "Web Search" in log for log in (processing_logs or []))
+        web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
 
         row = {
             "user_query": user_query,
