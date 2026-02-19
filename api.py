@@ -5,7 +5,7 @@ from collections import defaultdict
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -61,6 +61,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
+    fingerprint: str = ""  # Browser fingerprint from localStorage (persistent across server restarts)
 
 def format_sse(data: dict):
     """Server-Sent Events 포맷으로 변환"""
@@ -68,11 +69,15 @@ def format_sse(data: dict):
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_req: Request):
     """
     클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
     """
     g = get_graph()
+    user_agent = http_req.headers.get("user-agent", "")
+    # X-Forwarded-For is set by Render's proxy; fall back to direct client IP
+    forwarded = http_req.headers.get("x-forwarded-for", "")
+    ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host or "")
 
     lock = _session_locks[request.session_id]
 
@@ -84,11 +89,18 @@ async def chat(request: ChatRequest):
 
         async with lock:
             inputs = {"messages": [HumanMessage(content=request.message)]}
-            config = {"configurable": {"thread_id": request.session_id}}
+            config = {
+                "configurable": {
+                    "thread_id": request.session_id,
+                    "fingerprint": request.fingerprint,
+                    "user_agent": user_agent,
+                    "ip_address": ip_address,
+                }
+            }
             pending_answer = None
 
             print(f"\n{'='*60}", flush=True)
-            print(f"📩 [요청] session={request.session_id} | \"{request.message[:80]}\"", flush=True)
+            print(f"📩 [요청] session={request.session_id} fp={request.fingerprint[:8] or 'none'} | \"{request.message[:80]}\"", flush=True)
 
             async for output in g.astream(inputs, config=config, stream_mode="updates"):
                 for node_name, node_content in output.items():
@@ -131,7 +143,7 @@ async def get_logs(
     offset: int = Query(default=0, ge=0),
 ):
     """
-    Fetch chat logs from Supabase, ordered by most recent first.
+    Fetch chat logs from Supabase (admin view — all fields, ordered by most recent first).
     """
     sb = _supabase_light
     result = (
@@ -142,6 +154,27 @@ async def get_logs(
         .execute()
     )
     return {"logs": result.data, "count": len(result.data)}
+
+
+@app.get("/history")
+async def get_history(
+    fingerprint: str = Query(..., description="Browser fingerprint stored in localStorage"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """
+    Fetch conversation history for an end-user identified by browser fingerprint.
+    Returns only user_query, bot_answer, created_at — no processing logs or internal fields.
+    Persistent across server restarts (fingerprint is device-based, not session-based).
+    """
+    result = (
+        _supabase_light.table("chat_logs")
+        .select("user_query, bot_answer, created_at")
+        .eq("fingerprint", fingerprint)
+        .order("created_at", desc=False)
+        .limit(limit)
+        .execute()
+    )
+    return {"history": result.data}
 
 
 @app.delete("/session/{session_id}")

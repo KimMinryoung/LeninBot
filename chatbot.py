@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.documents import Document # [New] To handle documents
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_tavily import TavilySearch
@@ -695,7 +696,7 @@ def generate_node(state: AgentState):
     return {"messages": [response], "logs": logs, "generation_attempts": attempts}
 
 # Node: Log Conversation to Supabase
-def log_conversation_node(state: AgentState):
+def log_conversation_node(state: AgentState, config: RunnableConfig):
     logs = []
     try:
         messages = state["messages"]
@@ -720,7 +721,17 @@ def log_conversation_node(state: AgentState):
 
         web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
 
+        cfg = config.get("configurable", {})
+        session_id = cfg.get("thread_id", "unknown")
+        fingerprint = cfg.get("fingerprint", "")
+        user_agent = cfg.get("user_agent", "")
+        ip_address = cfg.get("ip_address", "")
+
         row = {
+            "session_id": session_id,
+            "fingerprint": fingerprint,
+            "user_agent": user_agent,
+            "ip_address": ip_address,
             "user_query": user_query,
             "bot_answer": bot_answer,
             "route": route,
