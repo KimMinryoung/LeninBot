@@ -17,6 +17,7 @@ from langchain_tavily import TavilySearch
 
 import json
 import re
+import time
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -47,7 +48,11 @@ def _extract_json(text: str, model_class: type[BaseModel]):
 
 def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2, retry_llm=None):
     """Invoke LLM chain, parse JSON from response. Retry with error feedback on failure, fall back to default."""
-    resp = chain.invoke(inputs)
+    try:
+        resp = chain.invoke(inputs)
+    except Exception as e:
+        print(f"⚠️ [구조화] LLM 호출 실패 (기본값 사용): {e}")
+        return default
     result = _extract_json(resp.content, model_class)
     if result is not None:
         return result
@@ -387,7 +392,9 @@ def _prepare_search_queries(query: str, context: str, selected_layer: str, logs:
             # If layer needs English but query is already non-Korean
             search_query_en = search_query_ko if needs_english else None
             return search_query_ko, search_query_en
-    except Exception:
+    except Exception as e:
+        if "429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
+            logs.append("⚠️ [재작성] Gemini 속도 제한(429) — 원본 쿼리로 대체합니다.")
         return query, query if needs_english else None
 
 
@@ -435,6 +442,8 @@ def retrieve_node(state: AgentState):
         if sub_queries and len(sub_queries) > 1:
             # Phase 2: Multi-retrieval — run each sub-query independently
             for i, sq in enumerate(sub_queries, 1):
+                if i > 1:
+                    time.sleep(1)  # Rate-limit guard: avoid flash-lite burst
                 logs.append(f"\n🔍 [검색 {i}/{len(sub_queries)}] \"{sq}\"")
                 sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, logs)
                 sq_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
@@ -847,7 +856,11 @@ def step_executor_node(state: AgentState):
 
     if step["tool"] == "retrieve":
         query = step["query"]
-        sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, logs)
+        # The planner already generates context-resolved queries in the right language.
+        # Skip the extra flash-lite rewrite call to avoid rate-limit cascades.
+        needs_english = selected_layer in ("core_theory", "all")
+        sq_ko = query
+        sq_en = query if needs_english else None
         new_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
         logs.append(f"   📚 {len(new_docs)}건의 문헌을 발견했습니다.")
 
