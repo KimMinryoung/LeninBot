@@ -23,8 +23,26 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-def _extract_json(text: str, model_class: type[BaseModel]):
+def _extract_text_content(content) -> str:
+    """Normalize LLM response content to a plain string.
+    Gemini thinking models (e.g. gemini-3-flash-preview) return content as a list
+    of typed blocks: [{'type': 'text', 'text': '...', 'extras': {...}}].
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return str(content)
+
+
+def _extract_json(text, model_class: type[BaseModel]):
     """Try to extract and validate JSON from LLM response text. Returns None on failure."""
+    # Normalize list content (extended thinking models return list of typed blocks)
+    if not isinstance(text, str):
+        text = _extract_text_content(text)
     # Try direct parse
     try:
         return model_class.model_validate_json(text.strip())
@@ -224,7 +242,7 @@ Your goal is to analyze the retrieved information and plan the structure of the 
 
 Perform a Dialectical Materialism Analysis:
 1. Analyze the Context: What are the key facts retrieved from the archives/web?
-2. Identify Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding?
+2. Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding? How have the elements changed and moved from the past to the present, and how will they change in the future?
 3. Formulate Strategy: What specific revolutionary tactics should be recommended?
 
 Output a concise 'Strategic Blueprint' for the speaker to follow. (Write in English)
@@ -619,7 +637,7 @@ def strategize_node(state: AgentState):
     logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
 
     response = strategist_chain.invoke({"context": context, "question": question})
-    strategy_text = response.content
+    strategy_text = _extract_text_content(response.content)
 
     logs.append(f"👉 전술 :\n   {strategy_text}")
 
@@ -642,26 +660,28 @@ def generate_node(state: AgentState):
     # 1. Academic Intent: Focus on Accuracy and Depth
     if intent == "academic":
         system_prompt = f"""{base_persona}
-[MISSION] Provide a detailed, objective, and academic explanation based on the provided context.
+[MISSION] Provide a detailed, objective, and academic explanation based on the provided context, for the success of the revolution.
+[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
 [STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation. 
 [CONTEXT] {context}
-[INSTRUCTION] Use specific terms. Answer in Korean."""
+[INSTRUCTION] Use specific terms. While referring to the references, do not forget that you are Lenin, and actively evaluate and think. Answer in Korean."""
 
     # 2. Strategic Intent: Focus on Blueprint and Tactics
     elif intent == "strategic":
         system_prompt = f"""{base_persona}
 [MISSION] Answer the user's question with a concrete, actionable revolutionary strategy. Synthesize your own response using the internal analysis and source material below as background knowledge — do NOT simply restate or translate them.
-[INTERNAL ANALYSIS (for your reference only, do not reproduce directly)] {strategy if strategy else "No specific analysis available."}
+[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
 [SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
 [STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
-[INSTRUCTION] Focus on "How to act" and "How to organize". Answer in Korean."""
+[INSTRUCTION] Focus on "How to act" and "How to organize" You must consider feasibility of your plan in the current situation. Answer in Korean."""
 
     # 3. Agitation Intent: Focus on Passion and Mobilization
     elif intent == "agitation":
         system_prompt = f"""{base_persona}
-[MISSION] Write a fiery, passionate, and revolutionary speech or proclamation.
-[STYLE] Aggressive, charismatic, and highly emotional. Use 1920s revolutionary rhetoric (e.g., "Arise!", "Crush the Bourgeoisie!").
-[INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit. Answer in Korean."""
+[MISSION] Write a fiery, passionate, and revolutionary speech or proclamation, providing keen insights for revolution and progress.
+[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
+[STYLE] Aggressive, charismatic, and highly emotional. Use Lenin's authoritative tone and rhetoric, but with vocabulary familiar to the modern public.
+[INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit, and speak in a way that will resonate with the actual public(not a thoughtless, naive crowd). Answer in Korean."""
 
     # 4. Casual Intent: Focus on Character and Wit
     else:
@@ -695,10 +715,13 @@ def generate_node(state: AgentState):
 
     chain = prompt | llm
     response = chain.invoke({"messages": messages})
+    # Normalize: thinking models return content as list of typed blocks
+    text = _extract_text_content(response.content)
+    normalized = AIMessage(content=text)
     attempts = state.get("generation_attempts", 0) + 1
     logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨. (시도 {attempts}/3)")
 
-    return {"messages": [response], "logs": logs, "generation_attempts": attempts}
+    return {"messages": [normalized], "logs": logs, "generation_attempts": attempts}
 
 # Node: Log Conversation to Supabase
 def log_conversation_node(state: AgentState, config: RunnableConfig):
