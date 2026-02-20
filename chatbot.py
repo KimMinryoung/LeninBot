@@ -88,9 +88,9 @@ embeddings = HuggingFaceEmbeddings(
     encode_kwargs={'normalize_embeddings': True}
 )
 
-# LLM 설정 (Gemini 2.5 Flash)
+# LLM 설정 (Gemini 3.0 Flash)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.45,
     max_output_tokens=4096,
@@ -100,12 +100,12 @@ llm = ChatGoogleGenerativeAI(
 )
 # 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
 llm_light = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite",
+    model="gemini-2.5-flash-lite",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.0,
     max_output_tokens=256,
     streaming=False,
-    max_retries=5,
+    max_retries=2,
 )
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearch(max_results=3)
@@ -480,6 +480,11 @@ def grade_documents_node(state: AgentState):
     if not documents:
         logs.append("   ⚠️ 연관있는 문헌이 없다.")
         return {"documents": [], "logs": logs}
+
+    # Rate-limit guard: batch_grader is the heaviest flash-lite call.
+    # Sleep 2s to let the RPM window recover after upstream flash-lite calls
+    # (analyze_intent, prepare_search_queries) that fired in the same turn.
+    time.sleep(2)
 
     # Build numbered document list for batch grading
     doc_entries = []
