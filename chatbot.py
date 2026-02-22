@@ -256,6 +256,21 @@ strategist_chain = strategist_prompt | llm
 
 # --- 헬퍼 함수 ---
 
+def _label_doc(d: Document) -> str:
+    """Short one-line label for a document, used in logs."""
+    meta = d.metadata or {}
+    author = meta.get("author", "")
+    year = meta.get("year", "")
+    source = meta.get("source", "")
+    title = meta.get("title", "")
+    if author or year:
+        suffix = ", ".join(p for p in [author, str(year) if year else ""] if p)
+        return f"{source or '출처미상'} ({suffix})"
+    elif title:
+        return f"{title} — {source}" if source else title
+    return source or "출처미상"
+
+
 def _format_doc(d: Document) -> str:
     """Format a document with metadata header for LLM consumption.
     Vectorstore docs use [author, year]; web docs fall back to [title | url]."""
@@ -474,6 +489,8 @@ def retrieve_node(state: AgentState):
                 sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, logs)
                 sq_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
                 logs.append(f"   → {len(sq_docs)}건 발견")
+                for d in sq_docs:
+                    logs.append(f"      📄 {_label_doc(d)}")
                 docs.extend(sq_docs)
             # Deduplicate across sub-queries
             before = len(docs)
@@ -487,6 +504,8 @@ def retrieve_node(state: AgentState):
 
         if docs:
             logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:")
+            for d in docs:
+                logs.append(f"   📄 {_label_doc(d)}")
         else:
             logs.append("⚠️ 영묘 데이터에 관련된 문헌이 없습니다.")
 
@@ -620,6 +639,8 @@ def _run_web_search(query: str, logs: list) -> list:
                     }
                 ))
         logs.append(f"  ✅ {len(docs)}건의 웹 결과를 확보했습니다.")
+        for doc in docs:
+            logs.append(f"   🌐 {_label_doc(doc)}")
         return docs
     except Exception as e:
         logs.append(f"  ⚠️ 웹 검색 실패: {e}")
@@ -923,6 +944,8 @@ def step_executor_node(state: AgentState):
         sq_en = query if needs_english else None
         new_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
         logs.append(f"   📚 {len(new_docs)}건의 문헌을 발견했습니다.")
+        for d in new_docs:
+            logs.append(f"      📄 {_label_doc(d)}")
 
         # Summarize what we found for step_results
         doc_snippets = []
