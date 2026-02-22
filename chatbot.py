@@ -257,12 +257,19 @@ strategist_chain = strategist_prompt | llm
 # --- 헬퍼 함수 ---
 
 def _format_doc(d: Document) -> str:
-    """Format a document with author/year metadata for LLM consumption."""
+    """Format a document with metadata header for LLM consumption.
+    Vectorstore docs use [author, year]; web docs fall back to [title | url]."""
     meta = d.metadata or {}
     author = meta.get("author")
     year = meta.get("year")
     header_parts = [p for p in [author, str(year) if year else None] if p]
-    header = f"[{', '.join(header_parts)}] " if header_parts else ""
+    if header_parts:
+        header = f"[{', '.join(header_parts)}] "
+    else:
+        title = meta.get("title", "")
+        source = meta.get("source", "")
+        web_label = " | ".join(p for p in [title, source] if p)
+        header = f"[{web_label}] " if web_label else ""
     return f"{header}{d.page_content}"
 
 # --- 노드 및 엣지 함수 정의 ---
@@ -500,9 +507,9 @@ def grade_documents_node(state: AgentState):
         return {"documents": [], "logs": logs}
 
     # Rate-limit guard: batch_grader is the heaviest flash-lite call.
-    # Sleep 2s to let the RPM window recover after upstream flash-lite calls
+    # Sleep 1s to let the RPM window recover after upstream flash-lite calls
     # (analyze_intent, prepare_search_queries) that fired in the same turn.
-    time.sleep(2)
+    time.sleep(1)
 
     # Build numbered document list for batch grading
     doc_entries = []
@@ -596,6 +603,29 @@ def decide_websearch_need(state: AgentState):
 
     return "no_need_to_search_web"
 
+# Helper: Web Search — returns one Document per result with url/title metadata
+def _run_web_search(query: str, logs: list) -> list:
+    """Invoke Tavily and return results as individual Document objects with url/title metadata."""
+    try:
+        search_response = web_search_tool.invoke({"query": query})
+        results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+        docs = []
+        for r in results:
+            if isinstance(r, dict) and r.get("content"):
+                docs.append(Document(
+                    page_content=r["content"],
+                    metadata={
+                        "source": r.get("url", ""),
+                        "title": r.get("title", ""),
+                    }
+                ))
+        logs.append(f"  ✅ {len(docs)}건의 웹 결과를 확보했습니다.")
+        return docs
+    except Exception as e:
+        logs.append(f"  ⚠️ 웹 검색 실패: {e}")
+        return []
+
+
 # Node: Web Search
 def web_search_node(state: AgentState):
     """
@@ -609,17 +639,8 @@ def web_search_node(state: AgentState):
         logs.append(f"\n🌐 [웹 검색] 문헌 {len(current_docs)}건 확보 — 실시간 정보 보충을 위해 외부 정찰 개시")
     else:
         logs.append(f"\n🌐 [웹 검색] 문헌 부족 — 외부 세계를 정찰")
-    try:
-        # Execute Search
-        search_response = web_search_tool.invoke({"query": question})
-        # 검색 결과를 Document 오브젝트로 변환
-        results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
-        web_results = "\n".join([d["content"] for d in results if d.get("content")])
-        web_results_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
-        current_docs.append(web_results_doc)
-        logs.append("  ✅ 외부 정보가 취합되었다.")
-    except Exception as e:
-        logs.append(f"⚠️ 웹 검색 실패: {e}")
+    web_docs = _run_web_search(question, logs)
+    current_docs.extend(web_docs)
     return {"documents": current_docs, "logs": logs}
 
 def strategize_node(state: AgentState):
@@ -915,17 +936,13 @@ def step_executor_node(state: AgentState):
     elif step["tool"] == "web_search":
         query = step["query"]
         logs.append(f"   🌐 웹 검색: \"{query}\"")
-        try:
-            search_response = web_search_tool.invoke({"query": query})
-            results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
-            web_results = "\n".join([d["content"] for d in results if d.get("content")])
-            web_doc = Document(page_content=web_results, metadata={"source": "웹 검색 (Tavily)"})
-            current_docs.append(web_doc)
-            logs.append(f"   ✅ 웹 검색 결과 취합 완료.")
-            result_summary = f"[Step {step_num}: {step['description']}] Web search results: {web_results[:300]}"
-        except Exception as e:
-            logs.append(f"   ⚠️ 웹 검색 실패: {e}")
-            result_summary = f"[Step {step_num}: {step['description']}] Web search failed: {e}"
+        web_docs = _run_web_search(query, logs)
+        current_docs.extend(web_docs)
+        if web_docs:
+            snippets = " | ".join(d.page_content[:200] for d in web_docs[:3])
+            result_summary = f"[Step {step_num}: {step['description']}] Web search found {len(web_docs)} results: {snippets}"
+        else:
+            result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."
 
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
