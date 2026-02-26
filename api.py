@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
@@ -15,7 +16,31 @@ from supabase.client import Client, create_client
 
 load_dotenv()
 
-app = FastAPI(title="Cyber-Lenin API")
+
+# ── Diary scheduler (background task) ─────────────────────────
+async def _diary_scheduler():
+    """2시간마다 일기 자동 작성 (서버 시작 60초 후 첫 실행)."""
+    INTERVAL = 2 * 60 * 60  # 2 hours
+    INITIAL_DELAY = 60      # wait for server init
+
+    await asyncio.sleep(INITIAL_DELAY)
+    while True:
+        try:
+            from diary_writer import write_diary
+            await asyncio.to_thread(write_diary)
+        except Exception as e:
+            print(f"⚠️ [일기 스케줄러] 오류: {e}")
+        await asyncio.sleep(INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_diary_scheduler())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 
 # Lightweight Supabase client for /logs (does NOT import chatbot module)
 _supabase_light: Client = create_client(
