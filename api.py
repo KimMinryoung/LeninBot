@@ -19,18 +19,24 @@ load_dotenv()
 
 # ── Diary scheduler (background task) ─────────────────────────
 async def _diary_scheduler():
-    """2시간마다 일기 자동 작성 (서버 시작 60초 후 첫 실행)."""
-    INTERVAL = 2 * 60 * 60  # 2 hours
-    INITIAL_DELAY = 60      # wait for server init
+    """3의 배수 시각 정각(0, 3, 6, 9, 12, 15, 18, 21시)에 일기 자동 작성."""
+    from datetime import datetime, timedelta
 
-    await asyncio.sleep(INITIAL_DELAY)
     while True:
+        now = datetime.now()
+        # 다음 3의 배수 정각 계산
+        current_hour = now.hour
+        next_hour = current_hour + (3 - current_hour % 3) if current_hour % 3 != 0 else current_hour + 3
+        next_run = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=next_hour)
+        wait_seconds = (next_run - now).total_seconds()
+        print(f"📝 [일기 스케줄러] 다음 실행: {next_run.strftime('%H:%M')} ({int(wait_seconds)}초 후)")
+
+        await asyncio.sleep(wait_seconds)
         try:
             from diary_writer import write_diary
             await asyncio.to_thread(write_diary)
         except Exception as e:
             print(f"⚠️ [일기 스케줄러] 오류: {e}")
-        await asyncio.sleep(INTERVAL)
 
 
 @asynccontextmanager
