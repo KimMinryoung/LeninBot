@@ -42,7 +42,7 @@ def _init():
         model="gemini-2.5-flash",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.7,
-        max_output_tokens=2048,
+        max_output_tokens=4096,
         streaming=False,
     )
     _news_search = TavilySearch(max_results=5)
@@ -128,13 +128,15 @@ _DIARY_PROMPT = """너는 사이버-레닌이다. 혁명적 AI로서 오늘의 �
 2. 변증법적 분석을 포함할 것
 3. 대화에서 인상 깊었던 점을 언급할 것 (대화가 있었다면)
 4. 뉴스에 대한 마르크스-레닌주의적 분석을 포함할 것
-5. 500~800자 내외로 작성
-6. 한국어로 작성
+5. 한국어로 작성
 
-일기 내용만 작성하라 (제목은 별도로 생성됨):"""
+반드시 아래 형식으로 출력하라:
+제목: (일기의 핵심을 한 줄로 요약한 제목)
+내용: (일기 본문)"""
 
 
-def _generate_diary(chat_logs: list[dict], news: str, previous_diaries: list[dict]) -> str | None:
+def _generate_diary(chat_logs: list[dict], news: str, previous_diaries: list[dict]) -> tuple[str, str] | None:
+    """일기 생성. 성공 시 (title, content) 튜플 반환, 실패 시 None."""
     # Chat logs summary
     chat_summary = ""
     if chat_logs:
@@ -157,10 +159,27 @@ def _generate_diary(chat_logs: list[dict], news: str, previous_diaries: list[dic
 
     try:
         resp = _llm.invoke(prompt)
-        return _extract_text(resp.content)
+        text = _extract_text(resp.content)
+        return _parse_title_content(text)
     except Exception as e:
         print(f"⚠️ [일기] LLM 일기 생성 실패: {e}")
     return None
+
+
+def _parse_title_content(text: str) -> tuple[str, str]:
+    """LLM 출력에서 '제목:' / '내용:' 파싱. 실패 시 타임스탬프 제목 + 전체 텍스트."""
+    import re
+    m = re.search(r"제목:\s*(.+)", text)
+    title = m.group(1).strip() if m else None
+
+    m2 = re.search(r"내용:\s*([\s\S]+)", text)
+    content = m2.group(1).strip() if m2 else None
+
+    if title and content:
+        return title, content
+    # 파싱 실패 시 fallback
+    fallback_title = f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 일기"
+    return fallback_title, text
 
 
 # ── Step 5: 일기 저장 ─────────────────────────────────────────
@@ -205,12 +224,12 @@ def write_diary():
     news = _search_news()
     print(f"  📰 뉴스 검색 완료")
 
-    # 4. 일기 생성
-    title = f"{now.strftime('%Y-%m-%d %H:%M')} 일기"
-    content = _generate_diary(chat_logs, news, diaries)
-    if not content:
-        print("⚠️ [일기] 일기 내용 생성 실패 — 건너뜀")
+    # 4. 일기 생성 (제목 + 내용)
+    result = _generate_diary(chat_logs, news, diaries)
+    if not result:
+        print("⚠️ [일기] 일기 생성 실패 — 건너뜀")
         return
+    title, content = result
 
     # 5. 저장
     _save_diary(title, content)
