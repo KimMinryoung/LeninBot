@@ -19,14 +19,15 @@ load_dotenv()
 
 # ── Diary scheduler (background task) ─────────────────────────
 async def _diary_scheduler():
-    """3의 배수 시각 정각(0, 3, 6, 9, 12, 15, 18, 21시)에 일기 자동 작성."""
+    """6의 배수 시각 정각(0, 6, 12, 18시)에 일기 자동 작성."""
     from datetime import datetime, timedelta
 
     while True:
         now = datetime.now()
-        # 다음 3의 배수 정각 계산
+        PERIODHOUR = 6
+        # 다음 6의 배수 정각 계산
         current_hour = now.hour
-        next_hour = current_hour + (3 - current_hour % 3) if current_hour % 3 != 0 else current_hour + 3
+        next_hour = current_hour + (PERIODHOUR - current_hour % PERIODHOUR) if current_hour % PERIODHOUR != 0 else current_hour + PERIODHOUR
         next_run = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=next_hour)
         wait_seconds = (next_run - now).total_seconds()
         print(f"📝 [일기 스케줄러] 다음 실행: {next_run.strftime('%H:%M')} ({int(wait_seconds)}초 후)")
