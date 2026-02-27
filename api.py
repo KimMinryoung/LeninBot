@@ -19,18 +19,20 @@ load_dotenv()
 
 # ── Diary scheduler (background task) ─────────────────────────
 async def _diary_scheduler():
-    """6의 배수 시각 정각(0, 6, 12, 18시)에 일기 자동 작성."""
-    from datetime import datetime, timedelta
+    """6 의 배수 시각 정각 (0, 6, 12, 18 시) 에 일기 자동 작성 (KST 기준)."""
+    from datetime import datetime, timedelta, timezone
+
+    KST = timezone(timedelta(hours=9))
 
     while True:
-        now = datetime.now()
+        now = datetime.now(KST)
         PERIODHOUR = 6
-        # 다음 6의 배수 정각 계산
+        # 다음 6 의 배수 정각 계산
         current_hour = now.hour
         next_hour = current_hour + (PERIODHOUR - current_hour % PERIODHOUR) if current_hour % PERIODHOUR != 0 else current_hour + PERIODHOUR
-        next_run = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=next_hour)
+        next_run = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=(next_hour - current_hour))
         wait_seconds = (next_run - now).total_seconds()
-        print(f"📝 [일기 스케줄러] 다음 실행: {next_run.strftime('%H:%M')} ({int(wait_seconds)}초 후)")
+        print(f"📝 [일기 스케줄러] 다음 실행: {next_run.strftime('%H:%M')} (KST, {int(wait_seconds)}초 후)")
 
         await asyncio.sleep(wait_seconds)
         try:

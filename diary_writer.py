@@ -11,7 +11,7 @@
 import os
 import re
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase.client import Client, create_client
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -238,9 +238,9 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
             # ISO format parsing (handles both 'Z' suffix and '+00:00')
             last_dt_str = last_diary_time.replace("Z", "+00:00")
             last_dt = datetime.fromisoformat(last_dt_str)
-            # Make now timezone-aware if last_dt is
-            now_aware = now.replace(tzinfo=timezone.utc) if last_dt.tzinfo else now
-            delta = now_aware - last_dt
+            # Convert last_dt (UTC) to KST for comparison
+            last_dt_kst = last_dt.astimezone(timezone(timedelta(hours=9)))
+            delta = now - last_dt_kst
             hours = delta.total_seconds() / 3600
             if hours < 1:
                 elapsed_line = "방금 전에 일기를 썼지만, 다시 펜을 들었다."
@@ -355,8 +355,8 @@ def write_diary():
         return
 
     _init()
-    now = datetime.now(timezone.utc)
-    print(f"\n📝 [일기] 자동 일기 작성 시작 — {now.strftime('%Y-%m-%d %H:%M')} UTC")
+    now = datetime.now(timezone(timedelta(hours=9)))
+    print(f"\n📝 [일기] 자동 일기 작성 시작 — {now.strftime('%Y-%m-%d %H:%M')} KST")
 
     # 1. 이전 일기 조회
     diaries = _get_previous_diaries()
