@@ -25,3 +25,6 @@ requests
 beautifulsoup4
 tqdm
 langchain-text-splitters
+
+# Knowledge Graph (Graphiti + Neo4j)
+graphiti-core[google-genai]
