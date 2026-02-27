@@ -178,8 +178,20 @@ class AssetTransfer(BaseModel):
 
 class ThreatAction(BaseModel):
     """
-    위협 행위자 → 대상 간의 공격/적대 활동.
-    사이버 공격, 정보공작, 물리적 위협 등.
+    적대적/공격적 행위 관계.
+
+    Use this for:
+    - 사이버 공격, 군사 타격, 침투, 사보타주, 첩보활동, 강압적 위협
+    - 특정 행위자가 특정 대상을 실제로 타격/표적화/교란한 경우
+
+    Do NOT use for:
+    - 단순 언급, 배경 설명, 일반적 연관성(이 경우 RELATES_TO/MENTIONS로 귀결)
+    - 정책/규제의 제도적 영향(이 경우 PolicyEffect)
+
+    Examples:
+    - "Russia launched missiles at Kyiv" -> ThreatAction
+    - "APT41 infiltrated a semiconductor supplier network" -> ThreatAction
+    - "US sanctions affected Huawei" -> PolicyEffect (not ThreatAction)
     """
     action_type: Optional[str] = Field(
         None,
@@ -260,9 +272,20 @@ class Presence(BaseModel):
 
 class PolicyEffect(BaseModel):
     """
-    정책(Policy) ↔ 엔티티 간 영향 관계.
-    시행↔대상↔영향 삼각관계를 표현.
-    예: 수출통제 → 기업 제재, 조직 → 정책 시행/집행.
+    정책/규제/조약이 엔티티에 미치는 직접적 효과 관계.
+
+    Use this for:
+    - 제재, 수출통제, 법령, 행정명령, 조약의 적용/집행/위반/면제
+    - 정책 주체(정부/조직)와 정책, 정책과 피영향 대상 사이의 직접 연결
+
+    Do NOT use for:
+    - 물리적/사이버 공격 행위 자체(ThreatAction)
+    - 단순 조직 간 협력/연관(OrgRelation/RELATES_TO)
+
+    Examples:
+    - "Entity List designation blocks exports to Company X" -> PolicyEffect
+    - "Ministry Y enforces export controls on dual-use chips" -> PolicyEffect
+    - "Group Z attacked refinery A" -> ThreatAction (not PolicyEffect)
     """
     effect_type: Optional[str] = Field(
         None,
@@ -291,8 +314,13 @@ class PolicyEffect(BaseModel):
 
 class Participation(BaseModel):
     """
-    엔티티 → 캠페인(Campaign) 참여.
-    Involvement(사건 관여)와 구분 — Participation은 지속적 활동에 대한 역할.
+    엔티티의 캠페인 단위 지속 참여 관계.
+
+    Use this for:
+    - 조직/인물이 캠페인을 주도·지원·자금조달·반대 등 지속 역할을 수행
+
+    Do NOT use for:
+    - 단일 사건 1회 관여만 표현할 때(Incident + Involvement 사용)
     """
     role: Optional[str] = Field(
         None,
