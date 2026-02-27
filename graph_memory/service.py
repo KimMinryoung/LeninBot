@@ -10,6 +10,7 @@ chatbot.py와 독립적으로 사용 가능. 통합은 별도 작업.
 
 import os
 from datetime import datetime, timezone
+import re
 
 from dotenv import load_dotenv
 from graphiti_core import Graphiti
@@ -32,7 +33,12 @@ from graphiti_core.search.search_filters import SearchFilters
 
 from .entities import ENTITY_TYPES
 from .edges import EDGE_TYPES
-from .config import EDGE_TYPE_MAP, EPISODE_SOURCE_MAP
+from .config import (
+    EDGE_TYPE_MAP,
+    EPISODE_SOURCE_MAP,
+    EXCLUDED_ENTITY_TYPES,
+    NEWS_PREPROCESS_PROMPT_TEMPLATE,
+)
 
 
 class GraphMemoryService:
@@ -40,6 +46,7 @@ class GraphMemoryService:
 
     def __init__(self):
         self._graphiti: Graphiti | None = None
+        self._llm_client: GeminiClient | None = None
 
     async def initialize(self) -> None:
         """Neo4j 연결 + Gemini LLM 초기화 + 인덱스/제약조건 설정."""
@@ -83,6 +90,8 @@ class GraphMemoryService:
             database=neo4j_database,
         )
 
+        self._llm_client = llm_client
+
         self._graphiti = Graphiti(
             uri=None,
             user=None,
@@ -105,6 +114,31 @@ class GraphMemoryService:
             )
         return self._graphiti
 
+    def _sanitize_episode_name(self, name: str, source_type: str) -> str:
+        """엔티티 오염을 줄이기 위해 에피소드 이름을 중립 ID 형태로 정규화."""
+        clean = name.strip()
+        # day1464, 2026-02-27 같은 메타 패턴은 제거
+        clean = re.sub(r"(?i)day\d+", "", clean)
+        clean = re.sub(r"\d{4}-\d{2}-\d{2}", "", clean)
+        clean = re.sub(r"[^a-zA-Z0-9_-]+", "-", clean).strip("-_")
+
+        if not clean:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            return f"{source_type}-{ts}"
+
+        return clean[:80]
+
+    async def preprocess_news_article(self, raw_article: str) -> str:
+        """뉴스 원문을 그래프 수집 친화적 팩트 목록으로 정제."""
+        self._ensure_initialized()
+        if self._llm_client is None:
+            return raw_article
+
+        prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
+        response = await self._llm_client.generate_response(prompt)
+        processed = (response or "").strip()
+        return processed or raw_article
+
     async def ingest_episode(
         self,
         name: str,
@@ -113,6 +147,7 @@ class GraphMemoryService:
         reference_time: datetime,
         group_id: str,
         source_description: str | None = None,
+        preprocess_news: bool = True,
     ) -> None:
         """정보 에피소드 1건 수집. 엔티티/엣지 자동 추출.
 
@@ -123,6 +158,7 @@ class GraphMemoryService:
             reference_time: 정보의 기준 시각 (timezone-aware).
             group_id: 논리적 그룹 ID (e.g., 'osint_semiconductor').
             source_description: 소스 설명 오버라이드. None이면 SOURCE_MAP에서 자동.
+            preprocess_news: osint_news인 경우 본문을 LLM으로 사전 정제할지 여부.
         """
         graphiti = self._ensure_initialized()
 
@@ -138,9 +174,15 @@ class GraphMemoryService:
             if source_description is None:
                 source_description = f"Unknown source type: {source_type}"
 
+        sanitized_name = self._sanitize_episode_name(name, source_type)
+        ingest_body = body
+
+        if preprocess_news and source_type == "osint_news":
+            ingest_body = await self.preprocess_news_article(body)
+
         await graphiti.add_episode(
-            name=name,
-            episode_body=body,
+            name=sanitized_name,
+            episode_body=ingest_body,
             source=episode_type,
             source_description=source_description,
             reference_time=reference_time,
@@ -148,6 +190,7 @@ class GraphMemoryService:
             entity_types=ENTITY_TYPES,
             edge_types=EDGE_TYPES,
             edge_type_map=EDGE_TYPE_MAP,
+            excluded_entity_types=EXCLUDED_ENTITY_TYPES,
         )
 
     async def ingest_episodes_bulk(self, episodes: list[dict]) -> None:
@@ -166,6 +209,7 @@ class GraphMemoryService:
                 reference_time=ep["reference_time"],
                 group_id=ep["group_id"],
                 source_description=ep.get("source_description"),
+                preprocess_news=ep.get("preprocess_news", True),
             )
 
     async def search(
@@ -316,4 +360,5 @@ class GraphMemoryService:
         if self._graphiti is not None:
             await self._graphiti.close()
             self._graphiti = None
+            self._llm_client = None
             print("✅ [GraphMemory] 지식 그래프 서비스 종료")
