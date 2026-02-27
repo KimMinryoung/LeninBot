@@ -1,4 +1,6 @@
 import os
+import logging
+import hashlib
 from typing import Annotated, List, TypedDict, Optional
 from operator import add
 from dotenv import load_dotenv
@@ -21,6 +23,36 @@ import re
 import time
 from typing import Literal
 from pydantic import BaseModel, Field
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("cyber_lenin")
+
+
+def _require_env(var_name: str) -> str:
+    """Load required environment variable or fail fast with a clear message."""
+    value = os.getenv(var_name)
+    if not value:
+        raise RuntimeError(f"필수 환경변수 누락: {var_name}")
+    return value
+
+
+def _invoke_with_backoff(invoke_fn, max_attempts: int = 3, base_delay: float = 1.0):
+    """Invoke callable with retry/backoff for transient quota/rate-limit errors."""
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            return invoke_fn()
+        except Exception as e:
+            last_error = e
+            msg = str(e).lower()
+            is_retryable = any(k in msg for k in ["429", "quota", "resource_exhausted", "rate limit", "timeout"])
+            if not is_retryable or attempt == max_attempts - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning("LLM 호출 재시도(%s/%s): %s", attempt + 1, max_attempts, e)
+            time.sleep(delay)
+    raise last_error
 
 
 def _extract_text_content(content) -> str:
@@ -55,22 +87,25 @@ def _extract_json(text, model_class: type[BaseModel]):
             return model_class.model_validate(json.loads(match.group(1)))
         except Exception:
             pass
-    # Try finding first {...} in text
-    match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-    if match:
+    # Try scanning for the first decodable JSON object (handles nested objects)
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(text):
+        if ch != "{":
+            continue
         try:
-            return model_class.model_validate(json.loads(match.group(0)))
+            obj, _ = decoder.raw_decode(text[idx:])
+            return model_class.model_validate(obj)
         except Exception:
-            pass
+            continue
     return None
 
 
 def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2, retry_llm=None):
     """Invoke LLM chain, parse JSON from response. Retry with error feedback on failure, fall back to default."""
     try:
-        resp = chain.invoke(inputs)
+        resp = _invoke_with_backoff(lambda: chain.invoke(inputs))
     except Exception as e:
-        print(f"⚠️ [구조화] LLM 호출 실패 (기본값 사용): {e}")
+        logger.warning("[구조화] LLM 호출 실패 (기본값 사용): %s", e)
         return default
     result = _extract_json(resp.content, model_class)
     if result is not None:
@@ -79,25 +114,29 @@ def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], defaul
     # Retry: send the bad output back with a correction prompt
     _llm = retry_llm or llm
     for attempt in range(max_retries):
-        correction = _llm.invoke(
+        correction = _invoke_with_backoff(lambda: _llm.invoke(
             f"Your previous output was not valid JSON:\n{resp.content}\n\n"
             f"Respond with ONLY a valid JSON object matching this schema: {model_class.model_json_schema()}"
-        )
+        ))
         result = _extract_json(correction.content, model_class)
         if result is not None:
             return result
 
-    print(f"⚠️ [구조화] {model_class.__name__} JSON 파싱 실패, 기본값 사용")
+    logger.warning("[구조화] %s JSON 파싱 실패, 기본값 사용", model_class.__name__)
     return default
 
-print("\n⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
+logger.info("⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
 # 1. 환경 설정 및 초기화
 load_dotenv()
 
 # Supabase 연결
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = _require_env("SUPABASE_URL")
+SUPABASE_KEY = _require_env("SUPABASE_ANON_KEY")
+GEMINI_API_KEY = _require_env("GEMINI_API_KEY")
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    raise RuntimeError(f"Supabase 클라이언트 초기화 실패: {e}") from e
 
 # 임베딩 모델
 embeddings = HuggingFaceEmbeddings(
@@ -109,7 +148,7 @@ embeddings = HuggingFaceEmbeddings(
 # LLM 설정 (Gemini 2.5 Flash)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
+    google_api_key=GEMINI_API_KEY,
     temperature=0.45,
     max_output_tokens=4096,
     streaming=True,
@@ -119,7 +158,7 @@ llm = ChatGoogleGenerativeAI(
 # 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
 llm_light = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
+    google_api_key=GEMINI_API_KEY,
     temperature=0.0,
     max_output_tokens=256,
     streaming=False,
@@ -127,7 +166,7 @@ llm_light = ChatGoogleGenerativeAI(
 )
 # 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
 web_search_tool = TavilySearch(max_results=3)
-print("✅ [성공] 모든 시스템 기동 완료.")
+logger.info("✅ [성공] 모든 시스템 기동 완료.")
 
 # 2. 상태(State) 정의
 # 대화 기록(messages)과 검색된 문서를 저장하는 메모리 구조입니다.
@@ -136,7 +175,7 @@ class AgentState(TypedDict):
     documents: List[Document]
     strategy: Optional[str]
     intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
-    datasource: Optional[Literal["vectorstore", "generate"]]
+    datasource: Optional[Literal["vectorstore", "generate", "plan"]]
     logs: Annotated[List[str], add]
     # Phase 1: Self-correction loop
     feedback: Optional[str]           # critic's feedback for re-generation
@@ -460,7 +499,7 @@ def _deduplicate_docs(docs: list) -> list:
     seen = set()
     unique = []
     for d in docs:
-        h = hash(d.page_content)
+        h = hashlib.sha256(d.page_content.encode("utf-8")).hexdigest()
         if h not in seen:
             seen.add(h)
             unique.append(d)
