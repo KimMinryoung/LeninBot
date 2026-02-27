@@ -1,10 +1,13 @@
 """
-정보 에이전트 Graphiti 스키마 — 엣지 타입 매핑 + 설정
-=====================================================
+정보 에이전트 Graphiti 스키마 — 엣지 타입 매핑 + 설정 v2
+=========================================================
 
 어떤 엔티티 쌍 사이에 어떤 관계가 허용되는지 정의.
 Graphiti의 edge_type_map은 LLM의 관계 추출을 안내하는 역할.
 매핑에 없는 쌍은 기본 RELATES_TO로 캡처됨 (정보 손실 없음).
+
+v2 변경: Policy·Campaign 엔티티 추가에 따른 매핑 확장.
+PolicyEffect·Participation 엣지 추가.
 """
 
 # ============================================================
@@ -15,6 +18,7 @@ Graphiti의 edge_type_map은 LLM의 관계 추출을 안내하는 역할.
 #
 # "Entity"는 모든 타입에 매칭되는 와일드카드.
 # 순서: 구체적 매핑이 우선, "Entity" 폴백이 후순위.
+# 동일 키가 중복되면 뒤의 것이 덮어쓰므로, 같은 쌍의 엣지는 하나의 리스트로 병합.
 
 EDGE_TYPE_MAP = {
     # ─── 사람 ↔ 조직 ─────────────────────────────────
@@ -22,6 +26,10 @@ EDGE_TYPE_MAP = {
         "Affiliation",       # 소속 (고용, 멤버십, 자문 등)
         "Funding",           # 자금 지원/수령
         "AssetTransfer",     # 기술/자산 이전
+        "ThreatAction",      # 내부자 위협 등
+    ],
+    ("Organization", "Person"): [
+        "ThreatAction",      # 조직이 개인을 타겟
     ],
 
     # ─── 사람 ↔ 사람 ─────────────────────────────────
@@ -37,15 +45,6 @@ EDGE_TYPE_MAP = {
         "Funding",           # 투자, 보조금, 계약
         "AssetTransfer",     # 기술 이전, 라이선싱
         "ThreatAction",      # 조직 간 적대 행위
-    ],
-
-    # ─── 위협 행위 (방향성 있음) ────────────────────────
-    ("Person", "Organization"): [
-        "Affiliation",
-        "ThreatAction",      # 내부자 위협 등
-    ],
-    ("Organization", "Person"): [
-        "ThreatAction",      # 조직이 개인을 타겟
     ],
 
     # ─── 사건 관여 ───────────────────────────────────
@@ -73,6 +72,48 @@ EDGE_TYPE_MAP = {
     ],
     ("Incident", "Location"): [
         "Presence",          # 사건 발생 장소
+    ],
+
+    # ─── 정책 관련 (v2 신설) ──────────────────────────
+    ("Policy", "Organization"): [
+        "PolicyEffect",      # 정책이 조직에 미치는 영향 (제재 등)
+    ],
+    ("Policy", "Person"): [
+        "PolicyEffect",      # 정책이 개인에 미치는 영향 (입국금지 등)
+    ],
+    ("Policy", "Asset"): [
+        "PolicyEffect",      # 정책이 자산에 미치는 영향 (수출통제 등)
+    ],
+    ("Policy", "Location"): [
+        "PolicyEffect",      # 정책이 지역에 적용 (군사 교리 등)
+    ],
+    ("Organization", "Policy"): [
+        "PolicyEffect",      # 조직이 정책을 시행/집행
+    ],
+
+    # ─── 캠페인 관련 (v2 신설) ────────────────────────
+    ("Person", "Campaign"): [
+        "Participation",     # 인물의 캠페인 참여
+        "Involvement",       # 캠페인 관여 (Participation과 병행 가능)
+    ],
+    ("Organization", "Campaign"): [
+        "Participation",     # 조직의 캠페인 참여
+        "Involvement",       # 캠페인 관여 (Participation과 병행 가능)
+    ],
+    ("Campaign", "Organization"): [
+        "ThreatAction",      # 캠페인이 조직을 공격/타겟
+    ],
+    ("Campaign", "Asset"): [
+        "ThreatAction",      # 캠페인이 자산을 타겟
+    ],
+    ("Campaign", "Location"): [
+        "Presence",          # 캠페인의 지리적 범위
+    ],
+    ("Campaign", "Incident"): [
+        "Involvement",       # 캠페인 내 개별 사건 연결
+    ],
+    ("Campaign", "Policy"): [
+        "PolicyEffect",      # 캠페인과 정책의 관계
     ],
 
     # ─── 폴백 ────────────────────────────────────────

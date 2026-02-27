@@ -1,6 +1,6 @@
 """
-정보 에이전트 Graphiti 스키마 — 엣지(관계/연결선) 정의
-======================================================
+정보 에이전트 Graphiti 스키마 — 엣지(관계/연결선) 정의 v2
+==========================================================
 
 연결선 = 사람↔조직, 조직↔조직, 사람↔사람 등의 관계와 활동.
 Graphiti가 자동으로 바이-템포럴 타임스탬프를 부여:
@@ -8,6 +8,8 @@ Graphiti가 자동으로 바이-템포럴 타임스탬프를 부여:
   - created_at / expired_at : 시스템 수집/갱신 시점
 
 아래 정의는 그 위에 도메인 특화 속성을 추가하는 것.
+
+v2 변경: PolicyEffect·Participation 신설, Involvement 설명 확장. 총 10종.
 """
 
 from pydantic import BaseModel, Field
@@ -211,8 +213,9 @@ class ThreatAction(BaseModel):
 
 class Involvement(BaseModel):
     """
-    엔티티 → 사건(Incident) 관여.
-    누가/어떤 조직이 특이사건에 어떻게 관련되었는가.
+    엔티티 → 사건(Incident) 또는 캠페인(Campaign) 관여.
+    누가/어떤 조직이 사건이나 캠페인에 어떻게 관련되었는가.
+    Campaign 관여 시에는 Participation 엣지와 병행 사용 가능.
     """
     role_in_incident: Optional[str] = Field(
         None,
@@ -252,6 +255,64 @@ class Presence(BaseModel):
 
 
 # ============================================================
+# 9. 정책 효과 (PolicyEffect) — 신설
+# ============================================================
+
+class PolicyEffect(BaseModel):
+    """
+    정책(Policy) ↔ 엔티티 간 영향 관계.
+    시행↔대상↔영향 삼각관계를 표현.
+    예: 수출통제 → 기업 제재, 조직 → 정책 시행/집행.
+    """
+    effect_type: Optional[str] = Field(
+        None,
+        description=(
+            "Type of effect: "
+            "enacts / targets / restricts / enables / exempts / "
+            "circumvents / enforces / violates"
+        )
+    )
+    impact_description: Optional[str] = Field(
+        None,
+        description="Specific description of the impact"
+    )
+    compliance_status: Optional[str] = Field(
+        None,
+        description=(
+            "Compliance status: "
+            "compliant / non_compliant / partially_compliant / exempt / unknown"
+        )
+    )
+
+
+# ============================================================
+# 10. 캠페인 참여 (Participation) — 신설
+# ============================================================
+
+class Participation(BaseModel):
+    """
+    엔티티 → 캠페인(Campaign) 참여.
+    Involvement(사건 관여)와 구분 — Participation은 지속적 활동에 대한 역할.
+    """
+    role: Optional[str] = Field(
+        None,
+        description=(
+            "Role in campaign: "
+            "leads / conducts / participates / supports / opposes / "
+            "targets / funds / unknown"
+        )
+    )
+    contribution: Optional[str] = Field(
+        None,
+        description="Specific contribution or activity within the campaign"
+    )
+    commitment_level: Optional[str] = Field(
+        None,
+        description="Level of commitment: full / partial / token / coerced / unknown"
+    )
+
+
+# ============================================================
 # 엣지 타입 레지스트리
 # ============================================================
 
@@ -264,4 +325,6 @@ EDGE_TYPES = {
     "ThreatAction": ThreatAction,
     "Involvement": Involvement,
     "Presence": Presence,
+    "PolicyEffect": PolicyEffect,
+    "Participation": Participation,
 }
