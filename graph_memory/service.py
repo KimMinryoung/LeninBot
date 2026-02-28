@@ -196,9 +196,11 @@ class GraphMemoryService:
         if self._llm_client is None:
             return raw_article
 
+        print(f"    [preprocess] LLM 전처리 시작 (본문 {len(raw_article)}자)...", flush=True)
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
         response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
         processed = self._extract_text_from_llm_response(response)
+        print(f"    [preprocess] 완료 → {len(processed)}자", flush=True)
         return processed or raw_article
 
     async def ingest_episode(
@@ -210,6 +212,7 @@ class GraphMemoryService:
         group_id: str,
         source_description: str | None = None,
         preprocess_news: bool = True,
+        max_body_chars: int | None = None,
     ) -> None:
         """정보 에피소드 1건 수집. 엔티티/엣지 자동 추출.
 
@@ -221,6 +224,7 @@ class GraphMemoryService:
             group_id: 논리적 그룹 ID (e.g., 'osint_semiconductor').
             source_description: 소스 설명 오버라이드. None이면 SOURCE_MAP에서 자동.
             preprocess_news: osint_news인 경우 본문을 LLM으로 사전 정제할지 여부.
+            max_body_chars: 전처리 후 본문 최대 길이. 초과 시 truncate.
         """
         graphiti = self._ensure_initialized()
 
@@ -242,6 +246,12 @@ class GraphMemoryService:
         if preprocess_news and source_type == "osint_news":
             ingest_body = await self.preprocess_news_article(body)
 
+        # 전처리 후 본문 길이 제한 (Graphiti output token 초과 방지)
+        if max_body_chars and len(ingest_body) > max_body_chars:
+            print(f"    [truncate] {len(ingest_body)}자 → {max_body_chars}자로 잘라냄", flush=True)
+            ingest_body = ingest_body[:max_body_chars]
+
+        print(f"    [graphiti] add_episode 시작 (name={sanitized_name}, body {len(ingest_body)}자)...", flush=True)
         await graphiti.add_episode(
             name=sanitized_name,
             episode_body=ingest_body,
@@ -254,6 +264,7 @@ class GraphMemoryService:
             edge_type_map=EDGE_TYPE_MAP,
             excluded_entity_types=EXCLUDED_ENTITY_TYPES,
         )
+        print(f"    [graphiti] add_episode 완료", flush=True)
 
     async def ingest_episodes_bulk(self, episodes: list[dict]) -> None:
         """대량 에피소드 일괄 수집.
