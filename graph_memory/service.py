@@ -20,6 +20,10 @@ from typing import Any
 os.environ.setdefault("SEMAPHORE_LIMIT", "20")
 
 from dotenv import load_dotenv
+
+from .graphiti_patches import apply_graphiti_patches
+apply_graphiti_patches()
+
 from graphiti_core import Graphiti
 from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.gemini_client import GeminiClient
