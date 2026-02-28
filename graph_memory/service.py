@@ -33,6 +33,8 @@ from graphiti_core.search.search_config import (
 )
 from graphiti_core.search.search_filters import SearchFilters
 
+from graphiti_core.prompts.models import Message
+
 from .entities import ENTITY_TYPES
 from .edges import EDGE_TYPES
 from .config import (
@@ -195,7 +197,7 @@ class GraphMemoryService:
             return raw_article
 
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
-        response = await self._llm_client.generate_response(prompt)
+        response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
         processed = self._extract_text_from_llm_response(response)
         return processed or raw_article
 
@@ -466,7 +468,7 @@ class GraphMemoryService:
             f"{chr(10).join(edge_lines) if edge_lines else '- (없음)'}\n"
         )
 
-        response = await self._llm_client.generate_response(prompt)
+        response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
         answer = self._extract_text_from_llm_response(response)
 
         if not answer:
@@ -511,7 +513,7 @@ class GraphMemoryService:
             f"[edges] {json.dumps(context['edges'], ensure_ascii=False)}\n"
         )
 
-        response = await self._llm_client.generate_response(prompt)
+        response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
         text = self._extract_text_from_llm_response(response)
         parsed = self._parse_json_from_llm_response(text)
 
