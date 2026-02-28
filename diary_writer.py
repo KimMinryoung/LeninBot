@@ -8,6 +8,7 @@
 5. 외부 API에 저장
 """
 
+import asyncio
 import os
 import re
 import requests
@@ -154,9 +155,16 @@ def _generate_search_queries(chat_summary: str, prev_summary: str) -> list[str]:
     return [_FALLBACK_QUERY]
 
 
-def _search_news(queries: list[str]) -> str:
-    """각 쿼리로 뉴스 검색 후 섹션별로 병합."""
+def _search_news(queries: list[str]) -> tuple[str, list[dict]]:
+    """각 쿼리로 뉴스 검색 후 섹션별로 병합.
+
+    Returns:
+        (summary_text, raw_articles) — summary_text는 일기 프롬프트용,
+        raw_articles는 [{"title", "url", "content"}] 형태의 KG 수집용 원문.
+    """
     all_sections = []
+    raw_articles = []
+    seen_urls: set[str] = set()
     for query in queries:
         try:
             search_response = _news_search.invoke({"query": query})
@@ -169,6 +177,7 @@ def _search_news(queries: list[str]) -> str:
             for r in results:
                 if isinstance(r, dict) and r.get("content"):
                     title = r.get("title", "")
+                    url = r.get("url", "")
                     content = r["content"]
                     summary = _summarize(
                         content,
@@ -176,12 +185,53 @@ def _search_news(queries: list[str]) -> str:
                         max_chars=500,
                     )
                     items.append(f"- {title}: {summary}")
+                    # 중복 URL 방지하여 원문 수집
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        raw_articles.append({"title": title, "url": url, "content": content})
             if items:
                 section = f"### {query}\n" + "\n".join(items)
                 all_sections.append(section)
         except Exception as e:
             print(f"⚠️ [일기] 뉴스 검색 실패 ({query}): {e}")
-    return "\n\n".join(all_sections) if all_sections else "(뉴스 검색 결과 없음)"
+    summary_text = "\n\n".join(all_sections) if all_sections else "(뉴스 검색 결과 없음)"
+    return summary_text, raw_articles
+
+
+# ── KG 수집 (best-effort) ─────────────────────────────────────
+def _ingest_news_to_graph(articles: list[dict]) -> None:
+    """검색된 뉴스 원문을 지식그래프에 수집. 실패해도 일기 파이프라인에 영향 없음."""
+    if not articles:
+        return
+    try:
+        from graph_memory.service import GraphMemoryService
+
+        async def _ingest():
+            svc = GraphMemoryService()
+            await svc.initialize()
+            now = datetime.now(timezone.utc)
+            ok, fail = 0, 0
+            for art in articles:
+                try:
+                    body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
+                    await svc.ingest_episode(
+                        name=art["title"][:120],
+                        body=body,
+                        source_type="osint_news",
+                        reference_time=now,
+                        group_id="diary_news",
+                        max_body_chars=1500,
+                    )
+                    ok += 1
+                except Exception as e:
+                    fail += 1
+                    print(f"  ⚠️ [KG] 기사 수집 실패 ({art.get('title', '')[:40]}): {e}")
+            await svc.close()
+            print(f"  📊 [KG] 수집 완료: 성공 {ok}건, 실패 {fail}건")
+
+        asyncio.run(_ingest())
+    except Exception as e:
+        print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")
 
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
@@ -391,8 +441,8 @@ def write_diary():
     queries = _generate_search_queries(chat_brief, prev_brief)
 
     # 5. 뉴스 검색
-    news = _search_news(queries)
-    print(f"  📰 뉴스 검색 완료 ({len(queries)}개 쿼리)")
+    news, raw_articles = _search_news(queries)
+    print(f"  📰 뉴스 검색 완료 ({len(queries)}개 쿼리, 원문 {len(raw_articles)}건)")
 
     # 6. 일기 생성 (시간 맥락 + 요약 기반)
     result = _generate_diary(chat_logs, news, diaries, time_context)
@@ -402,4 +452,9 @@ def write_diary():
     title, content = result
 
     # 7. 저장
-    _save_diary(title, content)
+    saved = _save_diary(title, content)
+
+    # 8. KG 수집 (일기 저장 성공 시에만, best-effort)
+    if saved and raw_articles:
+        print(f"  🧠 [KG] 뉴스 {len(raw_articles)}건 지식그래프 수집 시작...")
+        _ingest_news_to_graph(raw_articles)

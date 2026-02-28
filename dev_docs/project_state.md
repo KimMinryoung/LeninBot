@@ -189,6 +189,11 @@ AIChatBot/
 
 ## Recent Changes
 
+### 2026-02-28 — diary_writer.py 뉴스 → 지식그래프 자동 수집
+- **`diary_writer.py` `_search_news()`**: 반환 타입 `str` → `tuple[str, list[dict]]` — 기존 요약 문자열 + 원문 `[{"title", "url", "content"}]` 함께 반환. URL 중복 제거 포함.
+- **`diary_writer.py` `_ingest_news_to_graph()`** (new): `GraphMemoryService.ingest_episode()`로 뉴스 원문을 KG에 수집. `group_id="diary_news"`, `source_type="osint_news"`, `max_body_chars=1500`. 개별 기사 실패 시 로그 후 계속 (best-effort). 전체 try/except로 KG 장애가 일기 파이프라인에 전파되지 않음.
+- **`diary_writer.py` `write_diary()`**: `_save_diary()` 성공 후에만 `_ingest_news_to_graph()` 호출. 일기 작성할 때마다 검색한 뉴스가 자동으로 지식그래프에 축적됨.
+
 ### 2026-02-28 — 엔티티/관계 정규화 + 런타임 패치 + 성능 최적화
 - **`graph_memory/config.py`**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 상수 추가 — 엔티티 영어 강제, 관계 타입 10종 제한. `NEWS_PREPROCESS_PROMPT_TEMPLATE` 영어 출력으로 변경.
 - **`graph_memory/service.py`**: `add_episode()`에 `custom_extraction_instructions` 전달. `SEMAPHORE_LIMIT` 기본 20으로 설정.
