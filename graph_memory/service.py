@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+# Graphiti 내부 semaphore_gather 동시성 — graphiti import 전에 설정해야 유효.
+# gemini-2.5-flash/lite는 RPM 여유가 있으므로 기본 20 사용.
+# rate limit 발생 시 호출부에서 SEMAPHORE_LIMIT=1 등으로 오버라이드 가능.
+os.environ.setdefault("SEMAPHORE_LIMIT", "20")
+
 from dotenv import load_dotenv
 from graphiti_core import Graphiti
 from graphiti_core.driver.neo4j_driver import Neo4jDriver

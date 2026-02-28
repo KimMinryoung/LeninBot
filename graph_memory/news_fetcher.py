@@ -20,8 +20,8 @@ from .service import GraphMemoryService
 MAX_INGEST_BODY_CHARS = 1500
 
 # Graphiti 에피소드 1건당 ~15-20 LLM 호출 발생.
-# Tier 1 RPM 한도를 고려해 에피소드 간 충분한 대기 필요.
-DEFAULT_DELAY_BETWEEN = 30
+# gemini-2.5-flash/lite는 RPM 여유가 있으므로 딜레이 최소화.
+DEFAULT_DELAY_BETWEEN = 5
 
 # 재시도 가능한 에러 키워드 (Gemini API 에러 메시지 기준)
 _RETRYABLE_KEYWORDS = [
