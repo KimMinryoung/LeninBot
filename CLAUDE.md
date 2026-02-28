@@ -8,10 +8,8 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 
 ## Development Documentation
 
-- `temp_dev/project_state.md` — Current project state, architecture, capabilities, and limitations snapshot
-- `temp_dev/agent_evolution_plan.md` — Full phased plan for agent evolution (Phase 0-6)
-- `temp_dev/to_agent_AI.txt` — Original CLAW architecture discussion and Gemini's advice
-- `temp_dev/knowledge_graph_design.md` — Knowledge graph 설계, 인프라, 제약사항, 변경이력
+- `dev_docs/project_state.md` — Current project state, architecture, capabilities, and limitations snapshot
+- `dev_docs/knowledge_graph_design.md` — Knowledge graph 설계, 인프라, 제약사항, 변경이력
 
 Always consult `temp_dev/agent_evolution_plan.md` before starting new work to understand the current phase and what comes next. Update these documents as phases are completed.
 
