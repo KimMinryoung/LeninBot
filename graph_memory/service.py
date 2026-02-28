@@ -9,8 +9,10 @@ chatbot.py와 독립적으로 사용 가능. 통합은 별도 작업.
 """
 
 import os
+import json
 from datetime import datetime, timezone
 import re
+from typing import Any
 
 from dotenv import load_dotenv
 from graphiti_core import Graphiti
@@ -128,6 +130,64 @@ class GraphMemoryService:
 
         return clean[:80]
 
+    def _extract_text_from_llm_response(self, response: Any) -> str:
+        """LLM 응답 타입별 텍스트 추출(문자열/객체 모두 대응)."""
+        if response is None:
+            return ""
+        if isinstance(response, str):
+            return response.strip()
+
+        for attr in ("text", "content", "output_text", "response"):
+            value = getattr(response, attr, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        # dict 유사 객체 fallback
+        if isinstance(response, dict):
+            for key in ("text", "content", "output_text", "response"):
+                value = response.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+        return str(response).strip()
+
+    def _parse_json_from_llm_response(self, response_text: str) -> dict | list | None:
+        """LLM 텍스트 응답에서 JSON 블록을 안전하게 파싱."""
+        raw = response_text.strip()
+        if not raw:
+            return None
+
+        # ```json ... ``` 코드펜스 제거
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(raw[start:end + 1])
+            except json.JSONDecodeError:
+                return None
+
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(raw[start:end + 1])
+            except json.JSONDecodeError:
+                return None
+
+        return None
+
+
     async def preprocess_news_article(self, raw_article: str) -> str:
         """뉴스 원문을 그래프 수집 친화적 팩트 목록으로 정제."""
         self._ensure_initialized()
@@ -136,6 +196,7 @@ class GraphMemoryService:
 
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
         response = await self._llm_client.generate_response(prompt)
+        processed = self._extract_text_from_llm_response(response)
         processed = (response or "").strip()
         return processed or raw_article
 
@@ -354,6 +415,116 @@ class GraphMemoryService:
         briefing_data["timeline"].sort(key=lambda x: x["date"])
 
         return briefing_data
+
+    async def query_chatbot(
+        self,
+        query: str,
+        group_ids: list[str] | None = None,
+        num_results: int = 12,
+    ) -> dict:
+        """지식그래프 기반 테스트용 챗봇 질의.
+
+        1) 그래프에서 관련 노드/엣지를 검색하고
+        2) 검색 결과만 근거로 LLM이 간단 답변을 생성한다.
+
+        Returns:
+            {
+                "query": str,
+                "answer": str,
+                "context": {"nodes": [...], "edges": [...]},
+            }
+        """
+        context = await self.search(
+            query=query,
+            group_ids=group_ids,
+            num_results=num_results,
+        )
+
+        if self._llm_client is None:
+            return {
+                "query": query,
+                "answer": "LLM client가 초기화되지 않아 검색 결과만 반환합니다.",
+                "context": context,
+            }
+
+        node_lines = [
+            f"- {n['name']} ({', '.join(n['labels'])}) | {n.get('summary') or 'no summary'}"
+            for n in context["nodes"]
+        ]
+        edge_lines = [
+            f"- {e['fact']} | valid_at={e.get('valid_at')}"
+            for e in context["edges"]
+        ]
+
+        prompt = (
+            "너는 지식그래프 기반 분석 보조 챗봇이다.\n"
+            "아래 컨텍스트에 없는 내용은 추정하지 말고 '근거 없음'이라고 답하라.\n"
+            "답변은 한국어로 간결하게 작성하라.\n\n"
+            f"[질문]\n{query}\n\n"
+            "[그래프 노드]\n"
+            f"{chr(10).join(node_lines) if node_lines else '- (없음)'}\n\n"
+            "[그래프 엣지]\n"
+            f"{chr(10).join(edge_lines) if edge_lines else '- (없음)'}\n"
+        )
+
+        response = await self._llm_client.generate_response(prompt)
+        answer = self._extract_text_from_llm_response(response)
+
+        if not answer:
+            answer = "관련 컨텍스트를 찾지 못했거나 답변 생성에 실패했습니다."
+
+        return {
+            "query": query,
+            "answer": answer,
+            "context": context,
+        }
+
+    async def query_active_wars(
+        self,
+        group_ids: list[str] | None = None,
+        num_results: int = 30,
+    ) -> dict:
+        """지식그래프에서 '현재 진행 중인 전쟁'과 개시일을 구조화 추출한다."""
+        context = await self.search(
+            query=(
+                "ongoing war current conflict invasion military campaign "
+                "active hostilities start date belligerents"
+            ),
+            group_ids=group_ids,
+            edge_types=["ThreatAction", "Participation", "Involvement", "Presence"],
+            node_labels=["Campaign", "Incident", "Organization", "Location"],
+            num_results=num_results,
+        )
+
+        if self._llm_client is None:
+            return {
+                "items": [],
+                "note": "LLM client가 초기화되지 않아 구조화 추출을 수행하지 못했습니다.",
+                "context": context,
+            }
+
+        prompt = (
+            "아래 지식그래프 컨텍스트만 사용해서 현재 진행 중인 전쟁 목록을 JSON으로 추출하라.\n"
+            "컨텍스트 밖 지식은 사용 금지. 근거가 부족하면 unknown으로 채워라.\n"
+            "반드시 JSON 배열만 출력하라. 스키마:\n"
+            "[{'war_name': str, 'countries': [str], 'start_date': 'YYYY-MM-DD|YYYY-MM|YYYY|unknown', 'status': 'ongoing|unknown', 'evidence': [str]}]\n\n"
+            f"[nodes] {json.dumps(context['nodes'], ensure_ascii=False)}\n"
+            f"[edges] {json.dumps(context['edges'], ensure_ascii=False)}\n"
+        )
+
+        response = await self._llm_client.generate_response(prompt)
+        text = self._extract_text_from_llm_response(response)
+        parsed = self._parse_json_from_llm_response(text)
+
+        items: list[dict] = []
+        if isinstance(parsed, list):
+            items = [item for item in parsed if isinstance(item, dict)]
+
+        return {
+            "items": items,
+            "raw_response": text,
+            "context": context,
+        }
 
     async def close(self) -> None:
         """Graphiti 연결 종료."""
