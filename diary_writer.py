@@ -53,7 +53,7 @@ def _init():
         model="gemini-2.5-flash",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.7,
-        max_output_tokens=4096,
+        max_output_tokens=16384,
         streaming=False,
     )
     _llm_lite = ChatGoogleGenerativeAI(
@@ -211,7 +211,10 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
             await svc.initialize()
             now = datetime.now(timezone.utc)
             ok, fail = 0, 0
-            for art in articles:
+            total = len(articles)
+            for i, art in enumerate(articles, 1):
+                short_title = art.get("title", "")[:50]
+                print(f"  🔄 [KG] ({i}/{total}) 수집 중: {short_title}")
                 try:
                     body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
                     await svc.ingest_episode(
@@ -223,9 +226,10 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
                         max_body_chars=1500,
                     )
                     ok += 1
+                    print(f"  ✅ [KG] ({i}/{total}) 완료: {short_title}")
                 except Exception as e:
                     fail += 1
-                    print(f"  ⚠️ [KG] 기사 수집 실패 ({art.get('title', '')[:40]}): {e}")
+                    print(f"  ⚠️ [KG] ({i}/{total}) 실패: {short_title} — {e}")
             await svc.close()
             print(f"  📊 [KG] 수집 완료: 성공 {ok}건, 실패 {fail}건")
 
