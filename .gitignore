@@ -18,6 +18,9 @@ chroma_db/
 processed_files.txt
 temp_dev/
 
+데이터 수집용 크롤러 코드
+crawler/
+
 # PDF 문서 파일
 docs/
 *.pdf
