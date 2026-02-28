@@ -40,11 +40,13 @@ Cyber-Lenin의 **정보 에이전트** 기능을 위한 지식 그래프 모듈.
 
 ```
 graph_memory/
-├── __init__.py       # 패키지 exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
-├── entities.py       # 7개 엔티티 타입 정의 (Pydantic) — v2
-├── edges.py          # 10개 엣지 타입 정의 (Pydantic) — v2
-├── config.py         # EDGE_TYPE_MAP, EXCLUDED_ENTITY_TYPES, EPISODE_SOURCE_MAP
-└── service.py        # GraphMemoryService 클래스 (핵심)
+├── __init__.py          # 패키지 exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
+├── entities.py          # 7개 엔티티 타입 정의 (Pydantic) — v2
+├── edges.py             # 10개 엣지 타입 정의 (Pydantic) — v2
+├── config.py            # EDGE_TYPE_MAP, EPISODE_SOURCE_MAP, CUSTOM_EXTRACTION_INSTRUCTIONS
+├── graphiti_patches.py  # Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
+├── service.py           # GraphMemoryService 클래스 (핵심)
+└── news_fetcher.py      # Tavily 뉴스 검색 → 에피소드 수집 유틸리티
 ```
 
 ### GraphMemoryService API
@@ -248,7 +250,7 @@ OPTIONS {indexConfig: {
 - **`add_episode()`에 `uuid` 파라미터 생략 필수** — uuid를 전달하면 Graphiti가 기존 에피소드 조회를 시도하여 `NodeNotFoundError` 발생
 - **`custom_extraction_instructions` 적용** — `CUSTOM_EXTRACTION_INSTRUCTIONS`로 엔티티 영어 통일 + 관계 타입 10종 제한. ~85% 준수율.
 - **에피소드당 ~15-20 LLM 호출** — 엔티티 추출 → 노드 해소 → 속성 추출 → 엣지 추출 → 엣지 해소 → 엣지 속성 추출 → 커뮤니티 감지
-- **Rate limit 주의** — Gemini Free Tier에서 한 에피소드 수집만으로 429 발생 가능. `SEMAPHORE_LIMIT=1`로 낮추거나 에피소드 간 딜레이 추가 필요
+- **Rate limit 주의** — Gemini Free Tier에서 한 에피소드 수집만으로 429 발생 가능. 환경변수 `SEMAPHORE_LIMIT`로 동시성 조절, 에피소드 간 딜레이 추가 필요
 - **벡터 인덱스 없으면 검색 실패** — `entity_name_embedding`, `edge_fact_embedding` 인덱스 수동 생성 필수 (섹션 4 참조)
 - **관계 타입은 `r.name` 프로퍼티** — Neo4j에서 `RELATES_TO` 엣지의 관계 타입은 `r.name` 필드에 저장됨 (`r.relation_type` 아님)
 
@@ -257,6 +259,24 @@ OPTIONS {indexConfig: {
 - `search_()` 메서드 사용 (밑줄 포함) — `SearchConfig(limit=N)` 전달
 - `EpisodeType` enum: `text`, `message`, `json`
 - 엔티티 해소(entity resolution)는 Graphiti가 자동 수행 — 동일 엔티티를 다른 에피소드에서 언급하면 자동 병합
+
+### 런타임 패치 (`graphiti_patches.py`)
+
+`.venv` 파일 수정 대신 런타임 몽키패치로 Render 배포 환경에서도 동작.
+`service.py` import 시 자동 적용 (멱등).
+
+| 패치 | 대상 | 효과 |
+|------|------|------|
+| `to_prompt_json` | `prompt_helpers` + 6개 importing 모듈 | Neo4j DateTime 직렬화 지원 |
+| `Edge.relation_type` | Pydantic 모델 (클래스 수준) | SCREAMING_SNAKE_CASE → PascalCase |
+| `edge()` 함수 | `prompt_library` VersionWrapper.func | RELATION TYPE RULES 프롬프트 교체 |
+
+### 성능 설정
+
+| 파라미터 | 값 | 설명 |
+|----------|-----|------|
+| `SEMAPHORE_LIMIT` | 20 (기본) | Graphiti 내부 LLM/DB 호출 동시성. `service.py`에서 `setdefault`로 설정. |
+| `DEFAULT_DELAY_BETWEEN` | 5초 | `news_fetcher.py` 에피소드 간 대기. rate limit 시 증가 가능. |
 
 ---
 
@@ -322,6 +342,8 @@ OPTIONS {indexConfig: {
 | 2026-02-27 | **Graphiti prompt_helpers.py 패치**: `to_prompt_json()`에 `_Neo4jDateTimeEncoder` 추가. Graphiti 내부 타임스탬프(created_at 등)의 Neo4j DateTime 직렬화 오류 해결. |
 | 2026-02-27 | **LLM 모델 변경**: small_model/reranker `gemini-2.0-flash-lite` → `gemini-2.5-flash-lite` (2.0-flash-lite rate limit 소진). |
 | 2026-02-28 | **엔티티/관계 정규화**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 추가(영어 강제+관계 타입 10종 제한), `NEWS_PREPROCESS_PROMPT_TEMPLATE` 영어 출력 전환. 기존 데이터 전체 삭제 후 재수집. 한국어 엔티티 0개, 관계 타입 85% 정규화 달성. |
+| 2026-02-28 | **런타임 패치**: `graphiti_patches.py` 신규 — .venv 수정 대신 몽키패치로 DateTime 직렬화/엣지 프롬프트 교체. Render 배포 호환. |
+| 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
 
 ---
 

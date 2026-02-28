@@ -144,9 +144,10 @@ AIChatBot/
 ├── cleanup_arxiv.py          # [NEW] Deletes arxiv_* from DB, log, and local files
 ├── graph_memory/             # [NEW] Graphiti knowledge graph module
 │   ├── __init__.py           # Package exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
-│   ├── config.py             # Edge type mapping, excluded types, episode source map
+│   ├── config.py             # Edge type mapping, excluded types, episode source map, extraction instructions
 │   ├── entities.py           # 7 entity types: Person, Organization, Location, Asset, Incident, Policy, Campaign (v2)
 │   ├── edges.py              # 10 edge types: +PolicyEffect, +Participation (v2)
+│   ├── graphiti_patches.py   # [NEW] Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
 │   ├── service.py            # GraphMemoryService class (init, ingest, search, briefing)
 │   └── news_fetcher.py       # [NEW] Tavily 뉴스 검색 → 지식그래프 수집 유틸리티
 ├── docs/                     # Local corpus (~2,316 files, gitignored)
@@ -188,13 +189,16 @@ AIChatBot/
 
 ## Recent Changes
 
-### 2026-02-28 — 엔티티/관계 이름 정규화 (영어 통일 + 관계 타입 제한)
-- **`graph_memory/config.py`**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 상수 추가 — 모든 엔티티 이름 영어 강제, 관계 타입 10가지로 제한
-- **`graph_memory/config.py`**: `NEWS_PREPROCESS_PROMPT_TEMPLATE` 한국어 → 영어 출력으로 변경 — 전처리 결과가 영어이면 LLM 추출 시 영어 이름 확률 극대화
-- **`graph_memory/service.py`**: `ingest_episode()` 내 `add_episode()`에 `custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS` 전달
-- **기존 데이터 재수집**: 에피소드 16건(중복 포함) 전체 삭제 → 10건 재수집 (새 extraction instructions 적용)
-- **결과**: 한국어 엔티티 0개 (100% 영어 정규화), 관계 타입 85% 허용 내 (103/121), 에피소드 10개, 엔티티 132개, 관계 121개
-- **관계 타입 참고**: Graphiti 엣지에서 관계 타입은 `r.name` 프로퍼티에 저장됨 (`r.relation_type` 아님). 15%는 LLM이 SCREAMING_SNAKE_CASE 자유형 생성
+### 2026-02-28 — 엔티티/관계 정규화 + 런타임 패치 + 성능 최적화
+- **`graph_memory/config.py`**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 상수 추가 — 엔티티 영어 강제, 관계 타입 10종 제한. `NEWS_PREPROCESS_PROMPT_TEMPLATE` 영어 출력으로 변경.
+- **`graph_memory/service.py`**: `add_episode()`에 `custom_extraction_instructions` 전달. `SEMAPHORE_LIMIT` 기본 20으로 설정.
+- **`graph_memory/graphiti_patches.py`** (new): Graphiti 런타임 몽키패치 — .venv 수정 없이 Render 등 원격 배포 환경에서도 동작
+  - `to_prompt_json`: Neo4j DateTime JSON 직렬화 (`_Neo4jDateTimeEncoder`)
+  - `extract_edges.Edge`: relation_type SCREAMING_SNAKE_CASE → PascalCase + FACT_TYPES 우선
+  - `extract_edges.edge()`: RELATION TYPE RULES 프롬프트 교체
+- **`graph_memory/news_fetcher.py`**: `DEFAULT_DELAY_BETWEEN` 30→5초
+- **기존 데이터 재수집**: 전체 삭제 후 10건 재수집. 한국어 엔티티 0개, 관계 타입 85%+ 정규화
+- **`requirements.txt`**: 프로덕션 의존성만 유지 (크롤러 전용 4개 패키지 제거)
 
 ### 2026-02-28 — graph_memory/news_fetcher.py 뉴스 자동 수집 함수
 - **`graph_memory/news_fetcher.py`** (new): `fetch_and_ingest_news()` — Tavily 뉴스 검색 → GraphMemoryService 에피소드 자동 수집
