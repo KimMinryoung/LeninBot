@@ -2,29 +2,18 @@
 fastapi
 uvicorn
 
-# Chatbot core
+# Core dependencies
 python-dotenv
 pydantic
 supabase
+requests
 
-# LangChain 관련
+# LangChain / LangGraph
 langchain-core
-langchain-community
 langchain-google-genai
 langchain-huggingface
-sentence-transformers
-
-# Search
 langchain-tavily
-
-# Workflow
 langgraph
-
-# Crawlers & ingestion
-requests
-beautifulsoup4
-tqdm
-langchain-text-splitters
 
 # Knowledge Graph (Graphiti + Neo4j)
 graphiti-core[google-genai]
