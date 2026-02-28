@@ -65,7 +65,7 @@ class GraphMemoryService:
             config=LLMConfig(
                 api_key=gemini_api_key,
                 model="gemini-2.5-flash",
-                small_model="gemini-2.0-flash-lite",
+                small_model="gemini-2.5-flash-lite",
             )
         )
 
@@ -79,7 +79,7 @@ class GraphMemoryService:
         cross_encoder = GeminiRerankerClient(
             config=LLMConfig(
                 api_key=gemini_api_key,
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash-lite",
             )
         )
 
@@ -130,13 +130,16 @@ class GraphMemoryService:
 
     async def preprocess_news_article(self, raw_article: str) -> str:
         """뉴스 원문을 그래프 수집 친화적 팩트 목록으로 정제."""
+        from graphiti_core.prompts.models import Message
+
         self._ensure_initialized()
         if self._llm_client is None:
             return raw_article
 
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
-        response = await self._llm_client.generate_response(prompt)
-        processed = (response or "").strip()
+        messages = [Message(role="user", content=prompt)]
+        response = await self._llm_client.generate_response(messages)
+        processed = (response.get("content") or "").strip()
         return processed or raw_article
 
     async def ingest_episode(

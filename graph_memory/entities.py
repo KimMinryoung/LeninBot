@@ -15,7 +15,6 @@ Graphiti의 Custom Entity Types API를 사용하여 정의.
 """
 
 from pydantic import BaseModel, Field
-from datetime import datetime
 from typing import Optional
 
 
@@ -280,13 +279,13 @@ class Incident(BaseModel):
         None,
         description="Severity: critical / high / medium / low / informational"
     )
-    occurred_at: Optional[datetime] = Field(
+    occurred_at: Optional[str] = Field(
         None,
-        description="When the incident occurred (best estimate)"
+        description="When the incident occurred (best estimate, ISO 8601 string)"
     )
-    detected_at: Optional[datetime] = Field(
+    detected_at: Optional[str] = Field(
         None,
-        description="When the incident was detected or reported"
+        description="When the incident was detected or reported (ISO 8601 string)"
     )
     status: Optional[str] = Field(
         None,
@@ -352,9 +351,9 @@ class Policy(BaseModel):
         None,
         description="Current status: active / expired / under_negotiation / suspended / proposed"
     )
-    effective_date: Optional[datetime] = Field(
+    effective_date: Optional[str] = Field(
         None,
-        description="Date when the policy took or takes effect"
+        description="Date when the policy took or takes effect (ISO 8601 string)"
     )
     strategic_impact: Optional[str] = Field(
         None,
@@ -396,9 +395,9 @@ class Campaign(BaseModel):
         None,
         description="Geographic scale: local / national / regional / global"
     )
-    started_at: Optional[datetime] = Field(
+    started_at: Optional[str] = Field(
         None,
-        description="When the campaign started (best estimate)"
+        description="When the campaign started (best estimate, ISO 8601 string)"
     )
     ideological_framing: Optional[str] = Field(
         None,

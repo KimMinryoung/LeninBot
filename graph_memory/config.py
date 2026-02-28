@@ -132,11 +132,9 @@ EDGE_TYPE_MAP = {
 # 소스 텍스트에 따라 조정 필요.
 
 EXCLUDED_ENTITY_TYPES = [
-    # 뉴스 수집 시 자주 발생하는 노이즈 타입 차단
-    "Date",
-    "Number",
-    "Concept",
-    "Event",
+    # NOTE: Graphiti는 등록된 ENTITY_TYPES의 키만 허용.
+    # Date/Number/Concept/Event는 우리 스키마에 없으므로 사용 불가.
+    # 노이즈 차단은 NEWS_PREPROCESS_PROMPT_TEMPLATE에서 처리.
 ]
 
 
