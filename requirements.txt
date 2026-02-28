@@ -12,6 +12,7 @@ requests
 langchain-core
 langchain-google-genai
 langchain-huggingface
+sentence-transformers
 langchain-tavily
 langgraph
 
