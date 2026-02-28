@@ -197,6 +197,7 @@ class GraphMemoryService:
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
         response = await self._llm_client.generate_response(prompt)
         processed = self._extract_text_from_llm_response(response)
+        processed = (response or "").strip()
         return processed or raw_article
 
     async def ingest_episode(
