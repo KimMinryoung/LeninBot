@@ -42,6 +42,7 @@ from .config import (
     EPISODE_SOURCE_MAP,
     EXCLUDED_ENTITY_TYPES,
     NEWS_PREPROCESS_PROMPT_TEMPLATE,
+    CUSTOM_EXTRACTION_INSTRUCTIONS,
 )
 
 
@@ -263,6 +264,7 @@ class GraphMemoryService:
             edge_types=EDGE_TYPES,
             edge_type_map=EDGE_TYPE_MAP,
             excluded_entity_types=EXCLUDED_ENTITY_TYPES,
+            custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS,
         )
         print(f"    [graphiti] add_episode 완료", flush=True)
 

@@ -188,6 +188,14 @@ AIChatBot/
 
 ## Recent Changes
 
+### 2026-02-28 — 엔티티/관계 이름 정규화 (영어 통일 + 관계 타입 제한)
+- **`graph_memory/config.py`**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 상수 추가 — 모든 엔티티 이름 영어 강제, 관계 타입 10가지로 제한
+- **`graph_memory/config.py`**: `NEWS_PREPROCESS_PROMPT_TEMPLATE` 한국어 → 영어 출력으로 변경 — 전처리 결과가 영어이면 LLM 추출 시 영어 이름 확률 극대화
+- **`graph_memory/service.py`**: `ingest_episode()` 내 `add_episode()`에 `custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS` 전달
+- **기존 데이터 재수집**: 에피소드 16건(중복 포함) 전체 삭제 → 10건 재수집 (새 extraction instructions 적용)
+- **결과**: 한국어 엔티티 0개 (100% 영어 정규화), 관계 타입 85% 허용 내 (103/121), 에피소드 10개, 엔티티 132개, 관계 121개
+- **관계 타입 참고**: Graphiti 엣지에서 관계 타입은 `r.name` 프로퍼티에 저장됨 (`r.relation_type` 아님). 15%는 LLM이 SCREAMING_SNAKE_CASE 자유형 생성
+
 ### 2026-02-28 — graph_memory/news_fetcher.py 뉴스 자동 수집 함수
 - **`graph_memory/news_fetcher.py`** (new): `fetch_and_ingest_news()` — Tavily 뉴스 검색 → GraphMemoryService 에피소드 자동 수집
 - **Tavily → Graphiti 파이프라인**: 검색 → 전처리(LLM) → truncate → add_episode, rate limit 백오프 재시도

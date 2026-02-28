@@ -17,7 +17,7 @@ Cyber-Lenin의 **정보 에이전트** 기능을 위한 지식 그래프 모듈.
 |----------|------|
 | 그래프 프레임워크 | [Graphiti](https://github.com/getzep/graphiti) (바이-템포럴 지식 그래프) |
 | 그래프 DB | Neo4j AuraDB (클라우드 관리형) |
-| LLM | Gemini 2.5 Flash (추출), Gemini 2.0 Flash-Lite (리랭킹) |
+| LLM | Gemini 2.5 Flash (추출), Gemini 2.5 Flash-Lite (리랭킹) |
 | 임베딩 | gemini-embedding-001 (1024차원) |
 | Python 패키지 | `graphiti-core[google-genai]` |
 
@@ -246,9 +246,11 @@ OPTIONS {indexConfig: {
 ### 에피소드 수집
 
 - **`add_episode()`에 `uuid` 파라미터 생략 필수** — uuid를 전달하면 Graphiti가 기존 에피소드 조회를 시도하여 `NodeNotFoundError` 발생
+- **`custom_extraction_instructions` 적용** — `CUSTOM_EXTRACTION_INSTRUCTIONS`로 엔티티 영어 통일 + 관계 타입 10종 제한. ~85% 준수율.
 - **에피소드당 ~15-20 LLM 호출** — 엔티티 추출 → 노드 해소 → 속성 추출 → 엣지 추출 → 엣지 해소 → 엣지 속성 추출 → 커뮤니티 감지
 - **Rate limit 주의** — Gemini Free Tier에서 한 에피소드 수집만으로 429 발생 가능. `SEMAPHORE_LIMIT=1`로 낮추거나 에피소드 간 딜레이 추가 필요
 - **벡터 인덱스 없으면 검색 실패** — `entity_name_embedding`, `edge_fact_embedding` 인덱스 수동 생성 필수 (섹션 4 참조)
+- **관계 타입은 `r.name` 프로퍼티** — Neo4j에서 `RELATES_TO` 엣지의 관계 타입은 `r.name` 필드에 저장됨 (`r.relation_type` 아님)
 
 ### Graphiti 라이브러리 특이사항
 
@@ -264,7 +266,7 @@ OPTIONS {indexConfig: {
 
 > 새 AuraDB 인스턴스로 교체 후 v2 스키마로 초기화 완료.
 
-**통계**: 에피소드 10건, 엔티티 153개, 관계 319개
+**통계**: 에피소드 10건, 엔티티 132개, 관계 121개 (2026-02-28 영어 정규화 재수집 후)
 
 | 엔티티 타입 | 수 |
 |------------|-----|
@@ -319,6 +321,7 @@ OPTIONS {indexConfig: {
 | 2026-02-27 | **엔티티 datetime→str 수정**: Incident.occurred_at/detected_at, Policy.effective_date, Campaign.started_at를 `Optional[str]`로 변경. Neo4j DateTime JSON 직렬화 오류 수정. |
 | 2026-02-27 | **Graphiti prompt_helpers.py 패치**: `to_prompt_json()`에 `_Neo4jDateTimeEncoder` 추가. Graphiti 내부 타임스탬프(created_at 등)의 Neo4j DateTime 직렬화 오류 해결. |
 | 2026-02-27 | **LLM 모델 변경**: small_model/reranker `gemini-2.0-flash-lite` → `gemini-2.5-flash-lite` (2.0-flash-lite rate limit 소진). |
+| 2026-02-28 | **엔티티/관계 정규화**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 추가(영어 강제+관계 타입 10종 제한), `NEWS_PREPROCESS_PROMPT_TEMPLATE` 영어 출력 전환. 기존 데이터 전체 삭제 후 재수집. 한국어 엔티티 0개, 관계 타입 85% 정규화 달성. |
 
 ---
 

@@ -142,26 +142,26 @@ EXCLUDED_ENTITY_TYPES = [
 # 뉴스 전처리/추출 가이드
 # ============================================================
 
-NEWS_PREPROCESS_PROMPT_TEMPLATE = """아래 뉴스 기사에서 지식그래프 축적에 유의미한 사실만 추려라.
+NEWS_PREPROCESS_PROMPT_TEMPLATE = """Extract only knowledge-graph-worthy facts from the news article below.
 
-[포함]
-1) 실명/고유명사로 식별되는 인물, 조직, 국가, 지명
-2) 정책/제재/조약/법령/수출통제의 시행·변경·집행
-3) 군사행동, 사이버공격, 정보작전, 자산·무기·기술 이전
-4) 시점이 있는 사건(공격, 발표, 합의, 배치, 단속)
+[INCLUDE]
+1) Named persons, organizations, countries, locations (use common English names)
+2) Policies, sanctions, treaties, laws, export controls — enactment, amendment, enforcement
+3) Military actions, cyberattacks, information operations, asset/weapon/technology transfers
+4) Time-stamped events (attacks, announcements, agreements, deployments, crackdowns)
 
-[제외]
-1) 익명 일반인(예: "8-year-old child", "local resident", "witness")
-2) 기사 메타데이터(기자명, 섹션명, URL 슬러그)
-3) 감정적 수사, 배경 묘사, 중복 문장
-4) 에피소드 식별자/파일명/캠페인 일차 라벨
+[EXCLUDE]
+1) Anonymous civilians (e.g., "8-year-old child", "local resident", "witness")
+2) Article metadata (reporter name, section name, URL slugs)
+3) Emotional rhetoric, background descriptions, duplicate sentences
+4) Episode identifiers, filenames, campaign day labels
 
-[출력 형식]
-- 번호 목록 (1., 2., 3. ...)
-- 한 줄 한 팩트
-- 주어(행위자)-행동-대상-맥락(시점/장소) 순서로 간결히 작성
+[OUTPUT FORMAT]
+- Numbered list (1., 2., 3. ...)
+- One fact per line, in English
+- Structure: Subject (actor) — Action — Object — Context (time/location)
 
-[기사 원문]
+[ARTICLE]
 {article}
 """
 
@@ -172,6 +172,17 @@ NEWS_PREPROCESS_PROMPT_TEMPLATE = """아래 뉴스 기사에서 지식그래프 
 #
 # Graphiti EpisodeType: text, message, json
 # 정보 소스별 매핑:
+
+CUSTOM_EXTRACTION_INSTRUCTIONS = """\
+## LANGUAGE RULES
+- ALL entity names MUST be in English. Translate non-English names (e.g., 러시아 → Russia, 미국 → USA).
+- Use the most common English name (e.g., "Russia" not "Russian Federation").
+
+## RELATION TYPE RULES (OVERRIDE)
+- relation_type MUST be one of: Affiliation, OrgRelation, PersonalRelation, Funding, AssetTransfer, ThreatAction, Involvement, Presence, PolicyEffect, Participation
+- Pick the closest match. Do NOT invent new types or use SCREAMING_SNAKE_CASE variants.
+"""
+
 
 EPISODE_SOURCE_MAP = {
     # 소스 카테고리        → (EpisodeType, source_description)
