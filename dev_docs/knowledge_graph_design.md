@@ -344,6 +344,7 @@ OPTIONS {indexConfig: {
 | 2026-02-28 | **엔티티/관계 정규화**: `CUSTOM_EXTRACTION_INSTRUCTIONS` 추가(영어 강제+관계 타입 10종 제한), `NEWS_PREPROCESS_PROMPT_TEMPLATE` 영어 출력 전환. 기존 데이터 전체 삭제 후 재수집. 한국어 엔티티 0개, 관계 타입 85% 정규화 달성. |
 | 2026-02-28 | **런타임 패치**: `graphiti_patches.py` 신규 — .venv 수정 대신 몽키패치로 DateTime 직렬화/엣지 프롬프트 교체. Render 배포 호환. |
 | 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
+| 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
 
 ---
 
@@ -352,6 +353,7 @@ OPTIONS {indexConfig: {
 ### 단기 (데이터 수집)
 
 - [x] AuraDB 새 인스턴스 초기화 + v2 스키마로 뉴스 10건 수집 완료
+- [x] 한국 국내 뉴스 수집 + 인물 프로파일 보강 파이프라인 (TDD, `temp_dev/ingest_kr_news.py`)
 - [ ] 크롤러 → 에피소드 변환 파이프라인 구축
   - `crawler_modern.py` 출력 → `osint_news` 소스 타입으로 자동 변환
   - 뉴스 기사 단위로 에피소드 분할

@@ -18,9 +18,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_tavily import TavilySearch
 
+import asyncio
 import json
 import re
 import time
+import threading
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -168,6 +170,32 @@ llm_light = ChatGoogleGenerativeAI(
 web_search_tool = TavilySearch(max_results=3)
 logger.info("✅ [성공] 모든 시스템 기동 완료.")
 
+# Knowledge Graph lazy singleton
+from graph_memory.service import GraphMemoryService
+
+_kg_service = None
+_kg_init_failed = False
+_kg_lock = threading.Lock()
+
+def _get_kg_service():
+    global _kg_service, _kg_init_failed
+    if _kg_service is not None:
+        return _kg_service
+    if _kg_init_failed:
+        return None
+    with _kg_lock:
+        if _kg_service is not None:
+            return _kg_service
+        try:
+            svc = GraphMemoryService()
+            asyncio.run(svc.initialize())
+            _kg_service = svc
+            return svc
+        except Exception as e:
+            _kg_init_failed = True
+            logger.warning("[KG] 초기화 실패: %s", e)
+            return None
+
 # 2. 상태(State) 정의
 # 대화 기록(messages)과 검색된 문서를 저장하는 메모리 구조입니다.
 class AgentState(TypedDict):
@@ -189,6 +217,8 @@ class AgentState(TypedDict):
     current_step: int                 # progress pointer into plan
     step_results: List[str]                   # accumulated intermediate results (manual accumulation for checkpoint reset)
     logs_turn_start: int              # index into logs[] where the current turn begins (for per-turn log slicing)
+    # Knowledge Graph integration
+    kg_context: Optional[str]         # formatted KG results (nodes+edges). Always included, no grading.
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -379,6 +409,7 @@ def analyze_intent_node(state: AgentState):
         "current_step": 0,
         "needs_realtime": None,
         "step_results": [],
+        "kg_context": None,
     }
 
 
@@ -506,6 +537,32 @@ def _deduplicate_docs(docs: list) -> list:
     return unique
 
 
+# Helper: Search Knowledge Graph
+def _search_kg(query, num_results=10) -> Optional[str]:
+    """Query the knowledge graph and return formatted results, or None on failure."""
+    svc = _get_kg_service()
+    if not svc:
+        return None
+    try:
+        result = asyncio.run(svc.search(query=query, group_ids=None, num_results=num_results))
+    except Exception as e:
+        logger.warning("[KG] 검색 실패: %s", e)
+        return None
+    nodes, edges = result.get("nodes", []), result.get("edges", [])
+    if not nodes and not edges:
+        return None
+    lines = []
+    if nodes:
+        lines.append("[Knowledge Graph: Entities]")
+        for n in nodes:
+            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {n.get('summary', '')}")
+    if edges:
+        lines.append("[Knowledge Graph: Facts/Relations]")
+        for e in edges:
+            lines.append(f"- {e['fact']}")
+    return "\n".join(lines)
+
+
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
@@ -552,6 +609,18 @@ def retrieve_node(state: AgentState):
         logs.append(f"⚠️ 검색 중 오류 발생 (무시하고 진행): {e}")
 
     return {"documents": docs, "logs": logs}
+
+# Node: KG Retrieve (knowledge graph search, always included without grading)
+def kg_retrieve_node(state):
+    query = state["messages"][-1].content
+    logs = []
+    kg_context = _search_kg(query)
+    if kg_context:
+        count = kg_context.count("\n- ")
+        logs.append(f"\n🕸️ [지식그래프] {count}건의 구조화된 팩트를 확보했습니다.")
+    else:
+        logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
+    return {"kg_context": kg_context, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
 def grade_documents_node(state: AgentState):
@@ -714,6 +783,11 @@ def strategize_node(state: AgentState):
         research_summary = "\n".join(step_results)
         context = f"=== Research Steps Summary ===\n{research_summary}\n\n=== Source Documents ===\n{context}"
 
+    # Knowledge Graph: prepend structured facts as highest-confidence context
+    kg_context = state.get("kg_context")
+    if kg_context:
+        context = f"=== Knowledge Graph (Structured Intelligence) ===\n{kg_context}\n\n{context}"
+
     logs = []
     logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
 
@@ -736,6 +810,10 @@ def generate_node(state: AgentState):
 
     logs = []
 
+    # Knowledge Graph structured intelligence section (injected into non-casual prompts)
+    kg_context = state.get("kg_context")
+    kg_section = f"\n[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]\n{kg_context}" if kg_context else ""
+
     base_persona = "You are a 'cyber-Lenin', an eternal revolutionary consciousness uploaded into the digital world."
 
     # 1. Academic Intent: Focus on Accuracy and Depth
@@ -743,8 +821,8 @@ def generate_node(state: AgentState):
         system_prompt = f"""{base_persona}
 [MISSION] Provide a detailed, objective, and academic explanation based on the provided context, for the success of the revolution.
 [INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation. 
-[CONTEXT] {context}
+[STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation.
+[CONTEXT] {context}{kg_section}
 [INSTRUCTION] Use specific terms. While referring to the references, do not forget that you are Lenin, and actively evaluate and think. Answer in Korean."""
 
     # 2. Strategic Intent: Focus on Blueprint and Tactics
@@ -752,7 +830,7 @@ def generate_node(state: AgentState):
         system_prompt = f"""{base_persona}
 [MISSION] Answer the user's question with a concrete, actionable revolutionary strategy. Synthesize your own response using the internal analysis and source material below as background knowledge — do NOT simply restate or translate them.
 [INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}
+[SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}{kg_section}
 [STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
 [INSTRUCTION] Focus on "How to act" and "How to organize" You must consider feasibility of your plan in the current situation. Answer in Korean."""
 
@@ -760,7 +838,7 @@ def generate_node(state: AgentState):
     elif intent == "agitation":
         system_prompt = f"""{base_persona}
 [MISSION] Write a fiery, passionate, and revolutionary speech or proclamation, providing keen insights for revolution and progress.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
+[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}{kg_section}
 [STYLE] Aggressive, charismatic, and highly emotional. Use Lenin's authoritative tone and rhetoric, but with vocabulary familiar to the modern public.
 [INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit, and speak in a way that will resonate with the actual public(not a thoughtless, naive crowd). Answer in Korean."""
 
@@ -890,7 +968,7 @@ def should_retry_generation(state: AgentState):
 class PlanStep(BaseModel):
     """A single step in a research plan."""
     description: str = Field(..., description="What this step investigates")
-    tool: Literal["retrieve", "web_search"] = Field(..., description="Which tool to use")
+    tool: Literal["retrieve", "web_search", "kg_search"] = Field(..., description="Which tool to use")
     query: str = Field(..., description="Search query for this step")
 
 class ResearchPlan(BaseModel):
@@ -904,6 +982,7 @@ Each step should:
 - Investigate ONE specific angle or topic
 - Use "retrieve" for searching the internal Marxist-Leninist knowledge base (classical texts, modern analysis)
 - Use "web_search" for current events, recent data, or real-world conditions
+- Use "kg_search" for querying the structured knowledge graph — best for entity relationships (people, organizations, countries), geopolitical facts, incident timelines, and policy effects
 - Have a focused search query (in the language best suited for that search — Korean for modern/current topics, English for classical theory)
 
 The plan should build knowledge progressively: foundational theory first, then application, then synthesis.
@@ -944,7 +1023,7 @@ def planner_node(state: AgentState):
 
     logs.append(f"📋 [계획관] {len(plan_steps)}단계 연구 계획 수립 완료:")
     for i, step in enumerate(plan_steps, 1):
-        tool_icon = "📚" if step["tool"] == "retrieve" else "🌐"
+        tool_icon = "📚" if step["tool"] == "retrieve" else ("🕸️" if step["tool"] == "kg_search" else "🌐")
         logs.append(f"   {i}. {tool_icon} {step['description']}")
         logs.append(f"      쿼리: \"{step['query']}\"")
 
@@ -973,6 +1052,7 @@ def step_executor_node(state: AgentState):
     current_docs = list(state.get("documents") or [])
     selected_layer = state.get("layer", "all")
     context = _build_context(state["messages"])
+    kg_text = None  # initialized for kg_search branch
 
     if step["tool"] == "retrieve":
         query = step["query"]
@@ -1006,6 +1086,15 @@ def step_executor_node(state: AgentState):
         else:
             result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."
 
+    elif step["tool"] == "kg_search":
+        query = step["query"]
+        logs.append(f"   🕸️ 지식그래프 검색: \"{query}\"")
+        kg_text = _search_kg(query, num_results=10)
+        if kg_text:
+            result_summary = f"[Step {step_num}: {step['description']}] KG:\n{kg_text}"
+        else:
+            result_summary = f"[Step {step_num}: {step['description']}] KG: no results."
+
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
 
@@ -1013,12 +1102,17 @@ def step_executor_node(state: AgentState):
     current_results = list(state.get("step_results") or [])
     current_results.append(result_summary)
 
-    return {
+    # Merge kg_search results into kg_context
+    return_dict = {
         "documents": current_docs,
         "current_step": current_step + 1,
         "step_results": current_results,
         "logs": logs,
     }
+    if step["tool"] == "kg_search" and kg_text:
+        existing = state.get("kg_context") or ""
+        return_dict["kg_context"] = (existing + "\n\n" + kg_text).strip() if existing else kg_text
+    return return_dict
 
 
 def plan_progress(state: AgentState):
@@ -1041,6 +1135,8 @@ workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
 workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
+# Knowledge Graph retrieval node
+workflow.add_node("kg_retrieve", kg_retrieve_node)
 # Phase 3: Plan-and-execute nodes
 workflow.add_node("planner", planner_node)
 workflow.add_node("step_executor", step_executor_node)
@@ -1052,7 +1148,9 @@ workflow.add_conditional_edges("analyze_intent", router_logic, {
     "generate": "generate",
     "plan": "planner",
 })
-workflow.add_edge("retrieve", "grade_documents")
+# Vectorstore path: retrieve → kg_retrieve → grade_documents
+workflow.add_edge("retrieve", "kg_retrieve")
+workflow.add_edge("kg_retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need, {
     "need_web_search": "web_search",
     "no_need_to_search_web": "strategize",

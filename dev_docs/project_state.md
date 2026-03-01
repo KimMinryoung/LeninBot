@@ -23,13 +23,13 @@ User ─► FastAPI (api.py) ─► LangGraph StateGraph (chatbot.py) ─► Sup
                                              ─► Gemini 2.0 Flash-Lite (reranking)
 ```
 
-### Current Graph Flow (Phases 0-4 complete)
+### Current Graph Flow (Phases 0-4 + KG integration complete)
 
 ```
 START → analyze_intent
-  ├─[vectorstore]→ retrieve → grade_documents
-  │                              ├─[need_web_search]→ web_search → strategize
-  │                              └─[no_need]→ strategize
+  ├─[vectorstore]→ retrieve → kg_retrieve → grade_documents
+  │                                            ├─[need_web_search]→ web_search → strategize
+  │                                            └─[no_need]→ strategize
   │                           strategize → generate → critic (pass-through)
   │                                                     └─[always accepted]→ log_conversation → END
   ├─[generate]→ generate → critic → log_conversation → END
@@ -39,12 +39,16 @@ START → analyze_intent
                           [done]→ strategize → generate → critic → ... → END
 ```
 
-### 10 Nodes
+Note: kg_retrieve searches Neo4j knowledge graph; results go to `kg_context` (not `documents`), so grade_documents doesn't touch them.
+Plan path's step_executor also supports `kg_search` tool; results merge into `kg_context`.
+
+### 11 Nodes
 
 | Node | LLM | Purpose |
 |------|-----|---------|
 | analyze_intent | flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection |
 | retrieve | flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
+| kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti); results stored in `kg_context`, always included without grading |
 | grade_documents | flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
 | web_search | — | Tavily search, appends results to documents |
 | strategize | flash | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
@@ -52,7 +56,7 @@ START → analyze_intent
 | critic | *(disabled)* | Phase 1: Pass-through — was evaluating groundedness/relevance/completeness but caused rate-limit cascades |
 | log_conversation | — | Writes to Supabase chat_logs |
 | planner | flash | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
-| step_executor | — | Phase 3: Executes plan steps (retrieve or web_search), accumulates results |
+| step_executor | — | Phase 3: Executes plan steps (retrieve, web_search, or kg_search), accumulates results |
 
 ### State Shape (AgentState)
 
@@ -75,6 +79,8 @@ needs_realtime     : Optional[Literal]   # yes|no — from batch grading
 plan               : Optional[List[dict]]# structured research plan from planner
 current_step       : int                 # progress pointer into plan
 step_results       : List[str]           # accumulated intermediate results (manual, no reducer)
+# Knowledge Graph integration
+kg_context         : Optional[str]       # formatted KG results (nodes+edges). Always included, no grading.
 ```
 
 Note: All per-turn transient fields are reset in `analyze_intent_node` to prevent state leakage across checkpointed turns.
@@ -178,6 +184,7 @@ AIChatBot/
 12. Conversation logging to Supabase (per-turn logs only, not full session)
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
+15. Knowledge graph integration: kg_retrieve node in vectorstore path + kg_search tool in plan path; structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
 
 ## Current Limitations
 
@@ -191,6 +198,17 @@ AIChatBot/
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
 
 ## Recent Changes
+
+### 2026-03-01 — chatbot.py 지식그래프 질의 통합
+- **`chatbot.py` AgentState**: `kg_context: Optional[str]` 필드 추가 + `analyze_intent_node` transient reset에 포함
+- **`chatbot.py` KG lazy singleton**: `_get_kg_service()` — `GraphMemoryService` double-checked locking 초기화; 실패 시 `_kg_init_failed` 플래그로 재시도 방지
+- **`chatbot.py` `_search_kg()`**: KG 검색 헬퍼 — 노드/엣지 포맷팅, 실패 시 None 반환
+- **`chatbot.py` `kg_retrieve_node`**: retrieve 뒤, grade_documents 앞에 삽입 — 벡터스토어 경로에서 KG 검색 실행
+- **`chatbot.py` Plan path**: `PlanStep.tool`에 `kg_search` 추가, `system_planner` 프롬프트 확장, `step_executor_node`에 kg_search 분기 + `kg_context` 병합
+- **`chatbot.py` `strategize_node`**: `kg_context`를 컨텍스트 최상단에 삽입 (최고 신뢰도 정보)
+- **`chatbot.py` `generate_node`**: academic/strategic/agitation 프롬프트에 `[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]` 섹션 삽입; casual은 제외
+- **에러 처리**: KG 장애 시 파이프라인 중단 없음 — 기존 벡터스토어+웹검색으로 graceful degradation
+- **그래프 토폴로지**: `retrieve → kg_retrieve → grade_documents` (11 nodes total)
 
 ### 2026-03-01 — temp_dev 코드 → graph_memory 모듈 이전
 - **`graph_memory/kr_news_fetcher.py`** (new): `temp_dev/ingest_kr_news.py` 코드를 패키지 내부로 이전. 상대 임포트(`from .service`) 사용, `sys.path.insert` 제거.
