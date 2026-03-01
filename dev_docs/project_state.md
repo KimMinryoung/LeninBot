@@ -1,4 +1,4 @@
-# Project State Report — 2026-02-27
+# Project State Report — 2026-03-01
 
 ## Identity
 
@@ -144,10 +144,13 @@ AIChatBot/
 ├── cleanup_arxiv.py          # [NEW] Deletes arxiv_* from DB, log, and local files
 ├── graph_memory/             # [NEW] Graphiti knowledge graph module
 │   ├── __init__.py           # Package exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
+│   ├── __main__.py           # python -m graph_memory "query" 엔트리포인트
+│   ├── cli.py                # KG 질의 CLI (run_query, main)
 │   ├── config.py             # Edge type mapping, excluded types, episode source map, extraction instructions
 │   ├── entities.py           # 7 entity types: Person, Organization, Location, Asset, Incident, Policy, Campaign (v2)
 │   ├── edges.py              # 10 edge types: +PolicyEffect, +Participation (v2)
 │   ├── graphiti_patches.py   # [NEW] Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
+│   ├── kr_news_fetcher.py    # 한국 국내 뉴스 수집 + 인물 프로파일 보강 파이프라인
 │   ├── service.py            # GraphMemoryService class (init, ingest, search, briefing)
 │   └── news_fetcher.py       # [NEW] Tavily 뉴스 검색 → 지식그래프 수집 유틸리티
 ├── docs/                     # Local corpus (~2,316 files, gitignored)
@@ -188,6 +191,30 @@ AIChatBot/
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
 
 ## Recent Changes
+
+### 2026-03-01 — temp_dev 코드 → graph_memory 모듈 이전
+- **`graph_memory/kr_news_fetcher.py`** (new): `temp_dev/ingest_kr_news.py` 코드를 패키지 내부로 이전. 상대 임포트(`from .service`) 사용, `sys.path.insert` 제거.
+- **`graph_memory/cli.py`** (new): `temp_dev/query_kg.py` 코드를 패키지 내부로 이전. `run_query()` + `main()` argparse 엔트리포인트.
+- **`graph_memory/__main__.py`** (new): `python -m graph_memory "query"` 실행 지원.
+- **`graph_memory/__init__.py`**: `fetch_kr_news`, `extract_persons_from_articles`, `fetch_person_profile`, `run_full_pipeline`, `cli_main` export 추가.
+- **`temp_dev/ingest_kr_news.py`**: thin wrapper로 교체 — `graph_memory.kr_news_fetcher`에서 re-export.
+- **`temp_dev/query_kg.py`**: thin wrapper로 교체 — `graph_memory.cli.main()` 호출.
+- **`temp_dev/test_kr_news_ingest.py`**: import를 `graph_memory.kr_news_fetcher`로 변경. 테스트 통과 확인.
+
+### 2026-03-01 — 한국 국내 뉴스 + 인물 프로파일 지식그래프 수집 (TDD)
+- **TDD 방식 개발**: `temp_dev/test_kr_news_ingest.py` (6 테스트) 먼저 작성 → 구현 → 전체 통과
+- **`temp_dev/ingest_kr_news.py`** (new): 한국 국내 뉴스 수집 + 인물 추출 + 프로파일 보강 파이프라인
+  - `fetch_kr_news()`: Tavily 뉴스 검색 → 기사 리스트 반환
+  - `extract_persons_from_articles()`: LLM(Gemini)으로 기사에서 한국 인물명 추출 (name_ko, name_en, role)
+  - `fetch_person_profile()`: Tavily 일반 검색 + LLM 종합으로 인물 프로파일 구조화
+  - `ingest_news_to_kg()`: 뉴스 기사를 GraphMemoryService 에피소드로 수집
+  - `ingest_profile_to_kg()`: 인물 프로파일을 KG 에피소드로 수집
+  - `run_full_pipeline()`: 전체 파이프라인 오케스트레이션 (standalone 실행 가능)
+- **수집 결과**: 뉴스 3건 + 이재명(Lee Jae-myung) 프로파일 KG 수집 완료
+  - 노드 15개: South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등
+  - 엣지 15개: 더불어민주당 대표, 성남시장, 경기도지사, 국회의원, 암살 미수 피해 등
+  - `group_id="korea_domestic"` — 기존 국제 뉴스(`geopolitics_*`)와 분리
+- **KG 현황**: 에피소드 14건 (기존 10 + 뉴스 3 + 프로파일 1), 한국 인물/조직 엔티티 추가됨
 
 ### 2026-02-28 — diary_writer.py 뉴스 → 지식그래프 자동 수집
 - **`diary_writer.py` `_search_news()`**: 반환 타입 `str` → `tuple[str, list[dict]]` — 기존 요약 문자열 + 원문 `[{"title", "url", "content"}]` 함께 반환. URL 중복 제거 포함.
