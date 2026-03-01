@@ -23,14 +23,12 @@ Cyber-Lenin의 **정보 에이전트** 기능을 위한 지식 그래프 모듈.
 
 **OpenAI 의존성 없음** — 전부 Gemini 기반.
 
-### chatbot.py 통합 미정 사유
+### chatbot.py 통합 완료 (2026-03-01)
 
-- 지식 그래프 데이터가 아직 테스트 에피소드 수준 (3건)
-- 데이터 수집 파이프라인 미구축 (크롤러 → 에피소드 변환 → ingest)
-- chatbot 통합 시 어떤 노드에서 그래프를 호출할지 설계 필요 (retrieve? 별도 노드?)
-- 그래프 검색 결과와 벡터 검색 결과 병합 전략 미정
-
-→ 독립 모듈로 충분히 성숙시킨 후 통합 예정.
+- Vectorstore 경로: `kg_retrieve` 별도 노드 (retrieve → kg_retrieve → grade_documents)
+- Plan 경로: step_executor 내부 per-step KG 검색 + `_merge_kg_contexts()` 중복 제거
+- KG 결과는 `kg_context`에 저장, `documents`와 분리 (grade_documents 비적용)
+- 남은 과제: 데이터 수집 파이프라인 구축 (크롤러 → 에피소드 변환 → ingest)
 
 ---
 
@@ -345,7 +343,7 @@ OPTIONS {indexConfig: {
 | 2026-02-28 | **런타임 패치**: `graphiti_patches.py` 신규 — .venv 수정 대신 몽키패치로 DateTime 직렬화/엣지 프롬프트 교체. Render 배포 호환. |
 | 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
 | 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
-| 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 `plan_kg_retrieve` 노드 추가. 양쪽 경로 모두 KG 검색이 자동 실행됨. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
+| 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
 
 ---
 
@@ -365,7 +363,7 @@ OPTIONS {indexConfig: {
 
 - [x] chatbot.py KG 질의 통합 완료
   - `kg_retrieve` 노드 (vectorstore 경로): retrieve → kg_retrieve → grade_documents
-  - `plan_kg_retrieve` 노드 (plan 경로): step_executor(done) → plan_kg_retrieve → strategize
+  - plan 경로: step_executor 내부에서 매 단계 KG 검색 (원자화 쿼리), `_merge_kg_contexts()`로 중복 제거
   - KG lazy singleton (`_get_kg_service()`) + persistent event loop (`_kg_loop`)
   - `kg_context`를 strategize/generate 프롬프트에 주입 (casual 제외)
   - KG 장애 시 graceful degradation (파이프라인 중단 없음)

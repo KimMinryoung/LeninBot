@@ -573,6 +573,59 @@ def _search_kg(query, num_results=10) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _merge_kg_contexts(existing: Optional[str], new_text: Optional[str]) -> Optional[str]:
+    """Merge two kg_context strings, deduplicating entities by name and facts by text."""
+    if not new_text:
+        return existing
+    if not existing:
+        return new_text
+
+    # Parse a kg_context block into (entity_dict, fact_set)
+    def _parse(text):
+        entities = {}   # name -> full line
+        facts = set()   # fact text
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("[Knowledge Graph:"):
+                continue
+            if line.startswith("- "):
+                content = line[2:]
+                # Entity line: "Name (Label, ...): summary"
+                if "):  " in content or "): " in content:
+                    paren_idx = content.find(" (")
+                    if paren_idx != -1:
+                        name = content[:paren_idx].strip()
+                        if name not in entities:
+                            entities[name] = content
+                        continue
+                # Fact line
+                facts.add(content)
+        return entities, facts
+
+    old_ents, old_facts = _parse(existing)
+    new_ents, new_facts = _parse(new_text)
+
+    # Merge: existing entries take priority (first seen wins)
+    for name, line in new_ents.items():
+        if name not in old_ents:
+            old_ents[name] = line
+    old_facts.update(new_facts)
+
+    if not old_ents and not old_facts:
+        return None
+
+    lines = []
+    if old_ents:
+        lines.append("[Knowledge Graph: Entities]")
+        for ent_line in old_ents.values():
+            lines.append(f"- {ent_line}")
+    if old_facts:
+        lines.append("[Knowledge Graph: Facts/Relations]")
+        for fact in old_facts:
+            lines.append(f"- {fact}")
+    return "\n".join(lines)
+
+
 # Node: Retrieve
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
@@ -630,21 +683,6 @@ def kg_retrieve_node(state):
         logs.append(f"\n🕸️ [지식그래프] {count}건의 구조화된 팩트를 확보했습니다.")
     else:
         logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
-    return {"kg_context": kg_context, "logs": logs}
-
-# Node: KG Retrieve for plan path (merges with existing kg_context from step_executor)
-def plan_kg_retrieve_node(state):
-    query = state["messages"][-1].content
-    logs = []
-    new_kg = _search_kg(query)
-    existing = state.get("kg_context") or ""
-    if new_kg:
-        count = new_kg.count("\n- ")
-        logs.append(f"\n🕸️ [지식그래프] {count}건의 구조화된 팩트를 확보했습니다.")
-        kg_context = (existing + "\n\n" + new_kg).strip() if existing else new_kg
-    else:
-        logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
-        kg_context = existing or None
     return {"kg_context": kg_context, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
@@ -993,7 +1031,7 @@ def should_retry_generation(state: AgentState):
 class PlanStep(BaseModel):
     """A single step in a research plan."""
     description: str = Field(..., description="What this step investigates")
-    tool: Literal["retrieve", "web_search", "kg_search"] = Field(..., description="Which tool to use")
+    tool: Literal["retrieve", "web_search"] = Field(..., description="Which tool to use")
     query: str = Field(..., description="Search query for this step")
 
 class ResearchPlan(BaseModel):
@@ -1007,7 +1045,6 @@ Each step should:
 - Investigate ONE specific angle or topic
 - Use "retrieve" for searching the internal Marxist-Leninist knowledge base (classical texts, modern analysis)
 - Use "web_search" for current events, recent data, or real-world conditions
-- Use "kg_search" for querying the structured knowledge graph — best for entity relationships (people, organizations, countries), geopolitical facts, incident timelines, and policy effects
 - Have a focused search query (in the language best suited for that search — Korean for modern/current topics, English for classical theory)
 
 The plan should build knowledge progressively: foundational theory first, then application, then synthesis.
@@ -1048,7 +1085,7 @@ def planner_node(state: AgentState):
 
     logs.append(f"📋 [계획관] {len(plan_steps)}단계 연구 계획 수립 완료:")
     for i, step in enumerate(plan_steps, 1):
-        tool_icon = "📚" if step["tool"] == "retrieve" else ("🕸️" if step["tool"] == "kg_search" else "🌐")
+        tool_icon = "📚" if step["tool"] == "retrieve" else "🌐"
         logs.append(f"   {i}. {tool_icon} {step['description']}")
         logs.append(f"      쿼리: \"{step['query']}\"")
 
@@ -1077,10 +1114,9 @@ def step_executor_node(state: AgentState):
     current_docs = list(state.get("documents") or [])
     selected_layer = state.get("layer", "all")
     context = _build_context(state["messages"])
-    kg_text = None  # initialized for kg_search branch
+    query = step["query"]
 
     if step["tool"] == "retrieve":
-        query = step["query"]
         # The planner already generates context-resolved queries in the right language.
         # Skip the extra flash-lite rewrite call to avoid rate-limit cascades.
         needs_english = selected_layer in ("core_theory", "all")
@@ -1101,7 +1137,6 @@ def step_executor_node(state: AgentState):
         current_docs.extend(new_docs)
 
     elif step["tool"] == "web_search":
-        query = step["query"]
         logs.append(f"   🌐 웹 검색: \"{query}\"")
         web_docs = _run_web_search(query, logs)
         current_docs.extend(web_docs)
@@ -1111,14 +1146,13 @@ def step_executor_node(state: AgentState):
         else:
             result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."
 
-    elif step["tool"] == "kg_search":
-        query = step["query"]
-        logs.append(f"   🕸️ 지식그래프 검색: \"{query}\"")
-        kg_text = _search_kg(query, num_results=10)
-        if kg_text:
-            result_summary = f"[Step {step_num}: {step['description']}] KG:\n{kg_text}"
-        else:
-            result_summary = f"[Step {step_num}: {step['description']}] KG: no results."
+    # Always run KG search with the step's atomized query
+    kg_text = _search_kg(query, num_results=10)
+    if kg_text:
+        kg_count = kg_text.count("\n- ")
+        logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
+    else:
+        logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
 
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
@@ -1127,16 +1161,15 @@ def step_executor_node(state: AgentState):
     current_results = list(state.get("step_results") or [])
     current_results.append(result_summary)
 
-    # Merge kg_search results into kg_context
+    # Merge KG results into kg_context (every step)
     return_dict = {
         "documents": current_docs,
         "current_step": current_step + 1,
         "step_results": current_results,
         "logs": logs,
     }
-    if step["tool"] == "kg_search" and kg_text:
-        existing = state.get("kg_context") or ""
-        return_dict["kg_context"] = (existing + "\n\n" + kg_text).strip() if existing else kg_text
+    if kg_text:
+        return_dict["kg_context"] = _merge_kg_contexts(state.get("kg_context"), kg_text)
     return return_dict
 
 
@@ -1160,9 +1193,8 @@ workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
 workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
-# Knowledge Graph retrieval nodes
+# Knowledge Graph retrieval node (vectorstore path only; plan path runs KG per step inside step_executor)
 workflow.add_node("kg_retrieve", kg_retrieve_node)
-workflow.add_node("plan_kg_retrieve", plan_kg_retrieve_node)
 # Phase 3: Plan-and-execute nodes
 workflow.add_node("planner", planner_node)
 workflow.add_node("step_executor", step_executor_node)
@@ -1190,13 +1222,13 @@ workflow.add_conditional_edges("critic", should_retry_generation, {
     "retry": "generate",
 })
 workflow.add_edge("log_conversation", END)
-# Phase 3: planner → step_executor → [continue → step_executor | done → plan_kg_retrieve → strategize]
+# Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
+# (KG search runs inside step_executor per step, not as a separate node)
 workflow.add_edge("planner", "step_executor")
 workflow.add_conditional_edges("step_executor", plan_progress, {
     "continue": "step_executor",
-    "done": "plan_kg_retrieve",
+    "done": "strategize",
 })
-workflow.add_edge("plan_kg_retrieve", "strategize")
 graph = workflow.compile(checkpointer=MemorySaver())
 
 # 실행 루프 (채팅 인터페이스)
