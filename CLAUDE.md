@@ -33,5 +33,8 @@ Transform tasks into verifiable goals.
 ## Environment
 - Always activate the virtual environment before running Python commands: `source .venv/Scripts/activate`
 
+## Testing
+- 테스트 결과는 반드시 사용자가 직접 확인할 수 있도록 CLI에 전체 출력하거나 파일로 저장할 것. 요약만 하지 말 것.
+
 ## Caution
 - When running bash commands on Windows, use /dev/null for output redirection, not nul.

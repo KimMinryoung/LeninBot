@@ -632,6 +632,21 @@ def kg_retrieve_node(state):
         logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
     return {"kg_context": kg_context, "logs": logs}
 
+# Node: KG Retrieve for plan path (merges with existing kg_context from step_executor)
+def plan_kg_retrieve_node(state):
+    query = state["messages"][-1].content
+    logs = []
+    new_kg = _search_kg(query)
+    existing = state.get("kg_context") or ""
+    if new_kg:
+        count = new_kg.count("\n- ")
+        logs.append(f"\n🕸️ [지식그래프] {count}건의 구조화된 팩트를 확보했습니다.")
+        kg_context = (existing + "\n\n" + new_kg).strip() if existing else new_kg
+    else:
+        logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
+        kg_context = existing or None
+    return {"kg_context": kg_context, "logs": logs}
+
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
 def grade_documents_node(state: AgentState):
     question = state["messages"][-1].content
@@ -1145,8 +1160,9 @@ workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
 workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
-# Knowledge Graph retrieval node
+# Knowledge Graph retrieval nodes
 workflow.add_node("kg_retrieve", kg_retrieve_node)
+workflow.add_node("plan_kg_retrieve", plan_kg_retrieve_node)
 # Phase 3: Plan-and-execute nodes
 workflow.add_node("planner", planner_node)
 workflow.add_node("step_executor", step_executor_node)
@@ -1174,12 +1190,13 @@ workflow.add_conditional_edges("critic", should_retry_generation, {
     "retry": "generate",
 })
 workflow.add_edge("log_conversation", END)
-# Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
+# Phase 3: planner → step_executor → [continue → step_executor | done → plan_kg_retrieve → strategize]
 workflow.add_edge("planner", "step_executor")
 workflow.add_conditional_edges("step_executor", plan_progress, {
     "continue": "step_executor",
-    "done": "strategize",
+    "done": "plan_kg_retrieve",
 })
+workflow.add_edge("plan_kg_retrieve", "strategize")
 graph = workflow.compile(checkpointer=MemorySaver())
 
 # 실행 루프 (채팅 인터페이스)
