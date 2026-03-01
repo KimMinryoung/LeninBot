@@ -345,6 +345,7 @@ OPTIONS {indexConfig: {
 | 2026-02-28 | **런타임 패치**: `graphiti_patches.py` 신규 — .venv 수정 대신 몽키패치로 DateTime 직렬화/엣지 프롬프트 교체. Render 배포 호환. |
 | 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
 | 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
+| 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 `plan_kg_retrieve` 노드 추가. 양쪽 경로 모두 KG 검색이 자동 실행됨. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
 
 ---
 
@@ -362,12 +363,12 @@ OPTIONS {indexConfig: {
 
 ### 중기 (chatbot 통합)
 
-- [ ] chatbot.py 통합 조건 정의
-  - 최소 에피소드 수 (예: 50건 이상)
-  - 그래프 검색 품질 기준
-- [ ] 통합 방식 설계
-  - 별도 `graph_retrieve` 노드 vs. 기존 `retrieve` 노드 확장
-  - 벡터 검색 결과 + 그래프 검색 결과 병합 전략
+- [x] chatbot.py KG 질의 통합 완료
+  - `kg_retrieve` 노드 (vectorstore 경로): retrieve → kg_retrieve → grade_documents
+  - `plan_kg_retrieve` 노드 (plan 경로): step_executor(done) → plan_kg_retrieve → strategize
+  - KG lazy singleton (`_get_kg_service()`) + persistent event loop (`_kg_loop`)
+  - `kg_context`를 strategize/generate 프롬프트에 주입 (casual 제외)
+  - KG 장애 시 graceful degradation (파이프라인 중단 없음)
 - [ ] generate_briefing()을 활용한 전략 브리핑 기능
 
 ### 장기 (고도화)

@@ -36,19 +36,20 @@ START → analyze_intent
   └─[plan]→ planner → step_executor ─┐
                         ▲             │
                         └─[continue]──┘
-                          [done]→ strategize → generate → critic → ... → END
+                          [done]→ plan_kg_retrieve → strategize → generate → critic → ... → END
 ```
 
 Note: kg_retrieve searches Neo4j knowledge graph; results go to `kg_context` (not `documents`), so grade_documents doesn't touch them.
-Plan path's step_executor also supports `kg_search` tool; results merge into `kg_context`.
+Plan path: step_executor supports optional `kg_search` tool, and plan_kg_retrieve always runs after all steps complete (merges with any existing kg_context).
+KG failure at any layer results in graceful degradation — pipeline continues with vectorstore + web search only.
 
-### 11 Nodes
+### 12 Nodes
 
 | Node | LLM | Purpose |
 |------|-----|---------|
 | analyze_intent | flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection |
 | retrieve | flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
-| kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti); results stored in `kg_context`, always included without grading |
+| kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti) for vectorstore path; results stored in `kg_context`, always included without grading |
 | grade_documents | flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
 | web_search | — | Tavily search, appends results to documents |
 | strategize | flash | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
@@ -57,6 +58,7 @@ Plan path's step_executor also supports `kg_search` tool; results merge into `kg
 | log_conversation | — | Writes to Supabase chat_logs |
 | planner | flash | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
 | step_executor | — | Phase 3: Executes plan steps (retrieve, web_search, or kg_search), accumulates results |
+| plan_kg_retrieve | — | KG search for plan path; always runs after all plan steps complete, merges with existing kg_context |
 
 ### State Shape (AgentState)
 
@@ -208,7 +210,9 @@ AIChatBot/
 - **`chatbot.py` `strategize_node`**: `kg_context`를 컨텍스트 최상단에 삽입 (최고 신뢰도 정보)
 - **`chatbot.py` `generate_node`**: academic/strategic/agitation 프롬프트에 `[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]` 섹션 삽입; casual은 제외
 - **에러 처리**: KG 장애 시 파이프라인 중단 없음 — 기존 벡터스토어+웹검색으로 graceful degradation
-- **그래프 토폴로지**: `retrieve → kg_retrieve → grade_documents` (11 nodes total)
+- **그래프 토폴로지**: `retrieve → kg_retrieve → grade_documents` + `step_executor(done) → plan_kg_retrieve → strategize` (12 nodes total)
+- **KG 자동검색**: plan 경로에서 플래너의 `kg_search` 선택 여부와 무관하게 `plan_kg_retrieve` 노드가 항상 실행됨. 기존 `kg_context`와 병합.
+- **Graceful degradation 검증**: KG 초기화 실패(`_kg_init_failed=True`) 시 vectorstore/plan 양쪽 경로 모두 답변 정상 생성 확인
 
 ### 2026-03-01 — temp_dev 코드 → graph_memory 모듈 이전
 - **`graph_memory/kr_news_fetcher.py`** (new): `temp_dev/ingest_kr_news.py` 코드를 패키지 내부로 이전. 상대 임포트(`from .service`) 사용, `sys.path.insert` 제거.
