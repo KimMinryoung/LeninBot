@@ -171,11 +171,21 @@ web_search_tool = TavilySearch(max_results=3)
 logger.info("✅ [성공] 모든 시스템 기동 완료.")
 
 # Knowledge Graph lazy singleton
+# Neo4j driver binds Futures to the event loop that created it,
+# so we must reuse a single persistent loop for all KG operations.
 from graph_memory.service import GraphMemoryService
 
 _kg_service = None
 _kg_init_failed = False
 _kg_lock = threading.Lock()
+_kg_loop = None  # persistent event loop for KG operations
+
+def _run_kg_async(coro):
+    """Run a coroutine on the persistent KG event loop."""
+    global _kg_loop
+    if _kg_loop is None or _kg_loop.is_closed():
+        _kg_loop = asyncio.new_event_loop()
+    return _kg_loop.run_until_complete(coro)
 
 def _get_kg_service():
     global _kg_service, _kg_init_failed
@@ -188,7 +198,7 @@ def _get_kg_service():
             return _kg_service
         try:
             svc = GraphMemoryService()
-            asyncio.run(svc.initialize())
+            _run_kg_async(svc.initialize())
             _kg_service = svc
             return svc
         except Exception as e:
@@ -544,7 +554,7 @@ def _search_kg(query, num_results=10) -> Optional[str]:
     if not svc:
         return None
     try:
-        result = asyncio.run(svc.search(query=query, group_ids=None, num_results=num_results))
+        result = _run_kg_async(svc.search(query=query, group_ids=None, num_results=num_results))
     except Exception as e:
         logger.warning("[KG] 검색 실패: %s", e)
         return None
