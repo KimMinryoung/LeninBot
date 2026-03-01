@@ -621,9 +621,14 @@ def _merge_kg_contexts(existing: Optional[str], new_text: Optional[str]) -> Opti
             lines.append(f"- {ent_line}")
     if old_facts:
         lines.append("[Knowledge Graph: Facts/Relations]")
-        for fact in old_facts:
+        for fact in sorted(old_facts):
             lines.append(f"- {fact}")
     return "\n".join(lines)
+
+
+def _count_kg_items(kg_context: str) -> int:
+    """Count entity/fact bullet lines in formatted kg_context text."""
+    return sum(1 for line in kg_context.splitlines() if line.strip().startswith("- "))
 
 
 # Node: Retrieve
@@ -676,14 +681,24 @@ def retrieve_node(state: AgentState):
 # Node: KG Retrieve (knowledge graph search, always included without grading)
 def kg_retrieve_node(state):
     query = state["messages"][-1].content
+    sub_queries = state.get("sub_queries")
     logs = []
-    kg_context = _search_kg(query)
-    if kg_context:
-        count = kg_context.count("\n- ")
-        logs.append(f"\n🕸️ [지식그래프] {count}건의 구조화된 팩트를 확보했습니다.")
+
+    search_queries = sub_queries if sub_queries else [query]
+    merged_kg = None
+    for i, sq in enumerate(search_queries, 1):
+        kg_text = _search_kg(sq)
+        if kg_text:
+            merged_kg = _merge_kg_contexts(merged_kg, kg_text)
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {_count_kg_items(kg_text)}건")
+        else:
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
+
+    if merged_kg:
+        logs.insert(0, f"\n🕸️ [지식그래프] 총 {_count_kg_items(merged_kg)}건의 구조화된 팩트를 확보했습니다.")
     else:
-        logs.append("\n🕸️ [지식그래프] 관련 팩트 없음.")
-    return {"kg_context": kg_context, "logs": logs}
+        logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
+    return {"kg_context": merged_kg, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
 def grade_documents_node(state: AgentState):
@@ -1149,7 +1164,7 @@ def step_executor_node(state: AgentState):
     # Always run KG search with the step's atomized query
     kg_text = _search_kg(query, num_results=10)
     if kg_text:
-        kg_count = kg_text.count("\n- ")
+        kg_count = _count_kg_items(kg_text)
         logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
     else:
         logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
