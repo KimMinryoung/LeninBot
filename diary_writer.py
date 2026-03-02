@@ -126,15 +126,42 @@ def _get_chat_logs_since(since_time: str | None) -> list[dict]:
 _FALLBACK_QUERY = "오늘 세계 전쟁 정치 경제 주요 뉴스"
 
 
-def _generate_search_queries(chat_summary: str, prev_summary: str) -> list[str]:
-    """LLM으로 대화/이전 일기에서 파생된 뉴스 검색 쿼리 2~3개 생성."""
+def _build_recent_window_phrase(last_diary_time: str | None, now: datetime) -> str:
+    """Return a Korean time-window phrase from last diary to now for query constraints."""
+    if not last_diary_time:
+        return "지난 24시간"
+    try:
+        last_dt = datetime.fromisoformat(last_diary_time.replace("Z", "+00:00"))
+        last_kst = last_dt.astimezone(timezone(timedelta(hours=9)))
+        hours = max(1, int((now - last_kst).total_seconds() // 3600))
+        if hours < 24:
+            return f"최근 {hours}시간"
+        days = max(1, hours // 24)
+        return f"최근 {days}일"
+    except Exception:
+        return "최근 24시간"
+
+
+def _generate_recent_news_queries(last_diary_time: str | None, now: datetime) -> list[str]:
+    """Generate 2 deterministic queries focused on latest war/politics/economy since last diary."""
+    window = _build_recent_window_phrase(last_diary_time, now)
+    date_tag = now.strftime("%Y-%m-%d")
+    return [
+        f"{window} 전쟁 분쟁 군사 충돌 속보 {date_tag}",
+        f"{window} 국제 정치 경제 위기 제재 금리 무역 주요 뉴스 {date_tag}",
+    ]
+
+
+def _generate_curiosity_queries(chat_summary: str, prev_summary: str) -> list[str]:
+    """Generate 2 curiosity-driven queries from recent chats and diary summaries."""
     prompt = f"""너는 사이버-레닌의 뉴스 검색 에이전트다.
-아래의 최근 대화 요약과 이전 일기 요약을 참고하여, 새로 검색할 뉴스 쿼리를 2~3개 생성하라.
+아래 요약을 참고해, 지금 더 탐구할 가치가 있는 뉴스 검색 쿼리 2개를 생성하라.
 
 규칙:
-- 이미 다룬 주제는 제외하고, 대화에서 파생된 새로운 호기심이나 최근 정세에서 추적하고 싶은 주제를 선택
-- 구체적인 뉴스 검색 쿼리 형태로 출력 (예: "미국 중국 관세 전쟁 2026", "유럽 노동운동 파업")
-- 줄바꿈으로 구분하여 출력. 쿼리만 출력하고 번호나 설명은 붙이지 마라.
+- 최근 대화와 지난 일기에서 드러난 호기심/미해결 쟁점을 반영할 것
+- 전쟁/정치/경제 맥락과 연결되는 실제 뉴스 검색어로 만들 것
+- 너무 일반적인 표현(예: "요즘 뉴스")은 금지
+- 각 줄은 쿼리 하나만 출력하고, 번호/설명 없이 2줄만 출력
 
 ## 최근 대화 요약
 {chat_summary if chat_summary else "(대화 없음)"}
@@ -146,13 +173,17 @@ def _generate_search_queries(chat_summary: str, prev_summary: str) -> list[str]:
         resp = _llm_lite.invoke(prompt)
         text = _extract_text(resp.content).strip()
         queries = [line.strip().strip("-").strip("•").strip() for line in text.split("\n") if line.strip()]
-        queries = [q for q in queries if len(q) > 3]
-        if queries:
-            print(f"  🔍 동적 검색 쿼리 생성: {queries}")
-            return queries[:3]
+        queries = [q for q in queries if len(q) > 5]
+        if len(queries) >= 2:
+            return queries[:2]
+        if len(queries) == 1:
+            return [queries[0], _FALLBACK_QUERY]
     except Exception as e:
-        print(f"⚠️ [일기] 검색 쿼리 생성 실패 (폴백): {e}")
-    return [_FALLBACK_QUERY]
+        print(f"⚠️ [일기] 호기심 쿼리 생성 실패 (폴백): {e}")
+    return [
+        "글로벌 공급망 재편 노동계급 영향 최신 뉴스",
+        "AI 자동화와 실업 임금 격차 정치 쟁점 최신 뉴스",
+    ]
 
 
 def _search_news(queries: list[str]) -> tuple[str, list[dict]]:
@@ -442,7 +473,15 @@ def write_diary():
         )
         prev_brief = _summarize(raw, "다음 일기들의 핵심 주제를 3줄로 요약하라.", max_chars=300)
 
-    queries = _generate_search_queries(chat_brief, prev_brief)
+    recent_queries = _generate_recent_news_queries(last_diary_time, now)
+    curiosity_queries = _generate_curiosity_queries(chat_brief, prev_brief)
+    queries = recent_queries + curiosity_queries
+    print("  🔍 최신 정세 쿼리 2건:")
+    for q in recent_queries:
+        print(f"     - {q}")
+    print("  🧭 호기심 기반 쿼리 2건:")
+    for q in curiosity_queries:
+        print(f"     - {q}")
 
     # 5. 뉴스 검색
     news, raw_articles = _search_news(queries)

@@ -739,6 +739,20 @@ def kg_retrieve_node(state):
     sub_queries = state.get("sub_queries")
     logs = []
 
+    search_queries = sub_queries if sub_queries else [query]
+    merged_kg = None
+    for i, sq in enumerate(search_queries, 1):
+        kg_text = _search_kg(sq)
+        if kg_text:
+            merged_kg = _merge_kg_contexts(merged_kg, kg_text)
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {_count_kg_items(kg_text)}건")
+        else:
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
+
+    if merged_kg:
+        logs.insert(0, f"\n🕸️ [지식그래프] 총 {_count_kg_items(merged_kg)}건의 구조화된 팩트를 확보했습니다.")
+    else:
+        logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
     # Use original queries directly — no LLM rewrite (retrieve_node already does that for docs)
     search_queries = sub_queries if (sub_queries and len(sub_queries) > 1) else [query]
 
@@ -1219,6 +1233,11 @@ def step_executor_node(state: AgentState):
         else:
             result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."
 
+    # Always run KG search with the step's atomized query
+    kg_text = _search_kg(query, num_results=10)
+    if kg_text:
+        kg_count = _count_kg_items(kg_text)
+        logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
     # 개선 4: KG 중복 검색 최적화
     # 이전 단계의 쿼리 목록과 현재 쿼리를 비교하여 유사하면 스킵
     prev_queries = list(state.get("_kg_searched_queries", []))
