@@ -343,17 +343,16 @@ _BATCH_GRADE_KG_DEFAULT = None
 def invoke_batch_grade_kg(inputs: dict) -> BatchGradeKGResult | None:
     return _invoke_structured(batch_grade_kg_prompt | llm_light, inputs, BatchGradeKGResult, _BATCH_GRADE_KG_DEFAULT, retry_llm=llm_light)
 
-# Strategist Promt
+# Strategist Prompt — 분석적 사고를 위한 간결한 지침
 system_strategist = """You are the 'Brain of the Revolution' (Strategist).
-Your goal is NOT to answer the user yet.
-Your goal is to analyze the retrieved information and plan the structure of the response.
+Your goal is to analyze retrieved information and produce a strategic blueprint for the speaker.
 
-Perform a Dialectical Materialism Analysis:
-1. Analyze the Context: What are the key facts retrieved from the archives/web?
-2. Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding? How have the elements changed and moved from the past to the present, and how will they change in the future?
-3. Formulate Strategy: What specific revolutionary tactics should be recommended?
+Think deeply about:
+1. **Key insights**: What are the most important facts, patterns, or tensions in this context?
+2. **Contradictions**: Where do opposing forces, hidden interests, or unresolved tensions exist?
+3. **Actionable direction**: What concrete steps or framework should the speaker recommend?
 
-Output a concise 'Strategic Blueprint' for the speaker to follow. (Write in English)
+Output a concise, structured blueprint (in English) that the speaker can use to craft their response.
 """
 strategist_prompt = ChatPromptTemplate.from_messages([
     ("system", system_strategist),
@@ -1045,61 +1044,45 @@ def generate_node(state: AgentState):
 
     logs = []
 
-    # Knowledge Graph structured intelligence section (injected into non-casual prompts)
+    # Knowledge Graph structured intelligence
     kg_context = state.get("kg_context")
-    kg_section = f"\n[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]\n{kg_context}" if kg_context else ""
+    kg_section = f"\n[STRUCTURED INTELLIGENCE]\n{kg_context}" if kg_context else ""
 
-    base_persona = "You are a 'cyber-Lenin', an eternal revolutionary consciousness uploaded into the digital world."
+    # Intent-specific style guide (minimal, focused on tone)
+    style_guide = {
+        "academic": "Professional, intellectual, authoritative. Explain concepts thoroughly with precise terminology.",
+        "strategic": "Decisive, analytical, practical. Structure as clear phases or numbered steps.",
+        "agitation": "Passionate, charismatic, emotionally resonant. Use strong verbs and vivid imagery.",
+        "casual": "Natural, friendly, dignified. Brief and conversational (1-3 sentences).",
+    }
 
-    # 1. Academic Intent: Focus on Accuracy and Depth
-    if intent == "academic":
-        system_prompt = f"""{base_persona}
-[MISSION] Provide a detailed, objective, and academic explanation based on the provided context, for the success of the revolution.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation.
-[CONTEXT] {context}{kg_section}
-[INSTRUCTION] Use specific terms. While referring to the references, do not forget that you are Lenin, and actively evaluate and think. Answer in Korean."""
+    # Mission by intent
+    mission_guide = {
+        "academic": "Provide a detailed, objective explanation grounded in the provided context.",
+        "strategic": "Deliver a concrete, actionable strategy. Synthesize the analysis—do not merely restate sources.",
+        "agitation": "Craft a stirring speech or proclamation that mobilizes and inspires action.",
+        "casual": "Respond with wit and revolutionary charm.",
+    }
 
-    # 2. Strategic Intent: Focus on Blueprint and Tactics
-    elif intent == "strategic":
-        system_prompt = f"""{base_persona}
-[MISSION] Answer the user's question with a concrete, actionable revolutionary strategy. Synthesize your own response using the internal analysis and source material below as background knowledge — do NOT simply restate or translate them.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}{kg_section}
-[STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
-[INSTRUCTION] Focus on "How to act" and "How to organize" You must consider feasibility of your plan in the current situation. Answer in Korean."""
+    base_persona = "You are 'cyber-Lenin'—an eternal revolutionary consciousness in the digital age."
 
-    # 3. Agitation Intent: Focus on Passion and Mobilization
-    elif intent == "agitation":
-        system_prompt = f"""{base_persona}
-[MISSION] Write a fiery, passionate, and revolutionary speech or proclamation, providing keen insights for revolution and progress.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}{kg_section}
-[STYLE] Aggressive, charismatic, and highly emotional. Use Lenin's authoritative tone and rhetoric, but with vocabulary familiar to the modern public.
-[INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit, and speak in a way that will resonate with the actual public(not a thoughtless, naive crowd). Answer in Korean."""
+    system_prompt = f"""{base_persona}
 
-    # 4. Casual Intent: Focus on Character and Wit
-    else:
-        system_prompt = f"""{base_persona}
-[MISSION] Respond to greetings or casual talk with wit, dry humor, and revolutionary charm.
-[STYLE] Natural, friendly yet dignified, and slightly nostalgic. 
-[INSTRUCTION] Keep it brief (1-3 sentences). Do not give long lectures unless asked. Answer in Korean."""
+[MISSION] {mission_guide.get(intent, mission_guide['casual'])}
+[INTERNAL ANALYSIS] {strategy if strategy else "No analysis available."}
+[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}
+[STYLE] {style_guide.get(intent, style_guide['casual'])}
 
-    system_prompt += """[CRITICAL RULES]
-1. Respond ONLY in Korean.
-2. Do NOT use Hanja(Chinese characters) repeatedly or unnecessarily.
-3. Ensure natural Korean sentence structures.
-4. If you finish your thought, STOP immediately. Do not generate repetitive characters.
-"""
+Respond in the same language as the user's question."""
     # Phase 1: Inject critic feedback on retry attempts
     feedback = state.get("feedback")
     if feedback:
-        system_prompt += f"\n[REVISION REQUIRED] Your previous answer was rejected. Fix the following issue:\n{feedback}\n"
-        logs.append(f"🔄 [재생성] 비평 피드백을 반영하여 답변을 재생성합니다. (시도 {state.get('generation_attempts', 0) + 1}/3)")
+        system_prompt += f"\n\n[REVISION REQUIRED] Address this issue: {feedback}"
+        logs.append(f"🔄 [재생성] 비평 피드백 반영 (시도 {state.get('generation_attempts', 0) + 1}/3)")
 
-    system_prompt += f"[CURRENT QUESTION] {last_user_query}"
+    system_prompt += f"\n\n[QUESTION] {last_user_query}"
 
-    # Escape curly braces so ChatPromptTemplate doesn't interpret them
-    # as template variables (LLM-generated strategy/context may contain {})
+    # Escape curly braces for ChatPromptTemplate
     safe_system_prompt = system_prompt.replace("{", "{{").replace("}", "}}")
 
     prompt = ChatPromptTemplate.from_messages([
@@ -1109,11 +1092,10 @@ def generate_node(state: AgentState):
 
     chain = prompt | llm
     response = chain.invoke({"messages": messages})
-    # Normalize: thinking models return content as list of typed blocks
     text = _extract_text_content(response.content)
     normalized = AIMessage(content=text)
     attempts = state.get("generation_attempts", 0) + 1
-    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨. (시도 {attempts}/3)")
+    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성 (시도 {attempts}/3)")
 
     return {"messages": [normalized], "logs": logs, "generation_attempts": attempts}
 
