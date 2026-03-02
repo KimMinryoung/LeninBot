@@ -229,6 +229,8 @@ class AgentState(TypedDict):
     logs_turn_start: int              # index into logs[] where the current turn begins (for per-turn log slicing)
     # Knowledge Graph integration
     kg_context: Optional[str]         # formatted KG results (nodes+edges). Always included, no grading.
+    # Internal: Track KG searched queries to avoid duplicates (Plan-and-execute path)
+    _kg_searched_queries: List[str]   # internal state, not exposed to nodes
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -313,6 +315,33 @@ _BATCH_GRADE_DEFAULT = None  # handled in node
 
 def invoke_batch_grader(inputs: dict) -> BatchGradeResult | None:
     return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, retry_llm=llm_light)
+
+# KG Batch Grader — Knowledge Graph 결과의 관련성 평가
+class BatchGradeKGResult(BaseModel):
+    """Batch relevance grading for Knowledge Graph nodes and edges."""
+    node_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each node in order")
+    edge_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each edge/fact in order")
+
+system_batch_grade_kg = """You are a Knowledge Graph relevance grader.
+You will receive a user question and structured KG results (nodes and edges).
+
+For EACH node and edge, determine if it would be useful for answering the question.
+- Grade "yes" if it contains relevant entities, relationships, or facts.
+- Grade "no" only if clearly unrelated or too generic.
+- When in doubt, grade "yes".
+
+Respond with ONLY a JSON object:
+{{"node_scores": ["yes", "no", ...], "edge_scores": ["yes", "no", ...]}}"""
+
+batch_grade_kg_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_batch_grade_kg),
+    ("human", "User question: {question}\n\nKnowledge Graph Nodes:\n{nodes}\n\nKnowledge Graph Edges/Facts:\n{edges}"),
+])
+
+_BATCH_GRADE_KG_DEFAULT = None
+
+def invoke_batch_grade_kg(inputs: dict) -> BatchGradeKGResult | None:
+    return _invoke_structured(batch_grade_kg_prompt | llm_light, inputs, BatchGradeKGResult, _BATCH_GRADE_KG_DEFAULT, retry_llm=llm_light)
 
 # Strategist Promt
 system_strategist = """You are the 'Brain of the Revolution' (Strategist).
@@ -420,6 +449,7 @@ def analyze_intent_node(state: AgentState):
         "needs_realtime": None,
         "step_results": [],
         "kg_context": None,
+        "_kg_searched_queries": [],  # Reset KG query tracking for new turn
     }
 
 
@@ -548,27 +578,56 @@ def _deduplicate_docs(docs: list) -> list:
 
 
 # Helper: Search Knowledge Graph
-def _search_kg(query, num_results=10) -> Optional[str]:
-    """Query the knowledge graph and return formatted results, or None on failure."""
+def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optional[str]:
+    """Query the knowledge graph and return formatted results, or None on failure.
+    
+    Args:
+        query: Primary search query (Korean or English).
+        num_results: Max number of nodes+edges to retrieve.
+        query_en: Optional English query for better matching on English-centric KG.
+                  If provided, searches with both queries and merges results.
+    """
     svc = _get_kg_service()
     if not svc:
         return None
-    try:
-        result = _run_kg_async(svc.search(query=query, group_ids=None, num_results=num_results))
-    except Exception as e:
-        logger.warning("[KG] 검색 실패: %s", e)
+    
+    def _do_search(q):
+        try:
+            return _run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
+        except Exception as e:
+            logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
+            return None
+    
+    # If English query is provided, search with both and merge
+    all_nodes, all_edges = [], []
+    seen_nodes, seen_edges = set(), set()
+    
+    for q in [query, query_en] if query_en and query_en != query else [query]:
+        result = _do_search(q)
+        if not result:
+            continue
+        for n in result.get("nodes", []):
+            if n.get("uuid") and n["uuid"] not in seen_nodes:
+                seen_nodes.add(n["uuid"])
+                all_nodes.append(n)
+        for e in result.get("edges", []):
+            if e.get("uuid") and e["uuid"] not in seen_edges:
+                seen_edges.add(e["uuid"])
+                all_edges.append(e)
+    
+    if not all_nodes and not all_edges:
         return None
-    nodes, edges = result.get("nodes", []), result.get("edges", [])
-    if not nodes and not edges:
-        return None
+    
     lines = []
-    if nodes:
+    if all_nodes:
         lines.append("[Knowledge Graph: Entities]")
-        for n in nodes:
-            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {n.get('summary', '')}")
-    if edges:
+        for n in all_nodes:
+            # Truncate summary to 150 chars for token efficiency (개선 5)
+            summary = (n.get("summary", "") or "")[:150] + ("..." if len(n.get("summary", "") or "") > 150 else "")
+            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
+    if all_edges:
         lines.append("[Knowledge Graph: Facts/Relations]")
-        for e in edges:
+        for e in all_edges:
             lines.append(f"- {e['fact']}")
     return "\n".join(lines)
 
@@ -678,26 +737,124 @@ def retrieve_node(state: AgentState):
 
     return {"documents": docs, "logs": logs}
 
-# Node: KG Retrieve (knowledge graph search, always included without grading)
+# Node: KG Retrieve (knowledge graph search with query optimization + grading)
 def kg_retrieve_node(state):
     query = state["messages"][-1].content
+    context = _build_context(state["messages"])
     sub_queries = state.get("sub_queries")
+    selected_layer = state.get("layer", "all")
     logs = []
 
-    search_queries = sub_queries if sub_queries else [query]
+    # Prepare search queries with translation (개선 2: 쿼리 최적화)
+    needs_english = selected_layer in ("core_theory", "all")
+    
+    search_items = []  # List of (ko_query, en_query_or_none)
+    if sub_queries and len(sub_queries) > 1:
+        for sq in sub_queries:
+            sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, [])
+            search_items.append((sq_ko, sq_en if needs_english else None))
+    else:
+        sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, [])
+        search_items.append((sq_ko, sq_en if needs_english else None))
+
+    # Determine num_results dynamically (개선 5: Token 효율성)
+    # Complex queries (multi sub-query or strategic intent) get more results
+    is_complex = (sub_queries and len(sub_queries) > 1) or state.get("intent") in ("strategic", "academic")
+    num_results = 15 if is_complex else 8
+
     merged_kg = None
-    for i, sq in enumerate(search_queries, 1):
-        kg_text = _search_kg(sq)
+    total_items = 0
+    
+    for i, (ko_q, en_q) in enumerate(search_items, 1):
+        kg_text = _search_kg(ko_q, num_results=num_results, query_en=en_q)
         if kg_text:
             merged_kg = _merge_kg_contexts(merged_kg, kg_text)
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {_count_kg_items(kg_text)}건")
+            count = _count_kg_items(kg_text)
+            total_items += count
+            en_info = f" (+EN)" if en_q else ""
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_items)}] \"{ko_q}\"{en_info} → {count}건")
         else:
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
+            en_info = f" (+EN)" if en_q else ""
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_items)}] \"{ko_q}\"{en_info} → 0건")
 
+    # Grade KG results (개선 1: 관련성 필터링)
     if merged_kg:
-        logs.insert(0, f"\n🕸️ [지식그래프] 총 {_count_kg_items(merged_kg)}건의 구조화된 팩트를 확보했습니다.")
+        logs.insert(0, f"\n🕸️ [지식그래프] 총 {total_items}건의 구조화된 팩트를 확보했습니다.")
+        
+        # Parse nodes/edges for grading
+        kg_lines = merged_kg.splitlines()
+        node_lines = []
+        edge_lines = []
+        in_nodes = False
+        in_edges = False
+        
+        for line in kg_lines:
+            if "[Knowledge Graph: Entities]" in line:
+                in_nodes, in_edges = True, False
+                continue
+            elif "[Knowledge Graph: Facts/Relations]" in line:
+                in_nodes, in_edges = False, True
+                continue
+            if line.startswith("- "):
+                content = line[2:]
+                if in_nodes:
+                    node_lines.append(content)
+                elif in_edges:
+                    edge_lines.append(content)
+        
+        # Batch grade if we have items to grade
+        if node_lines or edge_lines:
+            # Rate-limit guard
+            time.sleep(0.5)
+            
+            nodes_text = "\n".join(node_lines) if node_lines else "(no nodes)"
+            edges_text = "\n".join(edge_lines) if edge_lines else "(no edges)"
+            
+            grade_result = invoke_batch_grade_kg({
+                "question": query,
+                "nodes": nodes_text,
+                "edges": edges_text
+            })
+            
+            if grade_result:
+                node_scores = grade_result.node_scores[:len(node_lines)] if node_lines else []
+                edge_scores = grade_result.edge_scores[:len(edge_lines)] if edge_lines else []
+                
+                # Pad scores if needed
+                while len(node_scores) < len(node_lines):
+                    node_scores.append("yes")
+                while len(edge_scores) < len(edge_lines):
+                    edge_scores.append("yes")
+                
+                # Filter nodes/edges by scores
+                filtered_node_lines = [
+                    line for line, score in zip(node_lines, node_scores) if score == "yes"
+                ]
+                filtered_edge_lines = [
+                    line for line, score in zip(edge_lines, edge_scores) if score == "yes"
+                ]
+                
+                # Rebuild kg_context with filtered results
+                filtered_parts = []
+                if filtered_node_lines:
+                    filtered_parts.append("[Knowledge Graph: Entities]")
+                    filtered_parts.extend(filtered_node_lines)
+                if filtered_edge_lines:
+                    filtered_parts.append("[Knowledge Graph: Facts/Relations]")
+                    filtered_parts.extend(filtered_edge_lines)
+                
+                if filtered_parts:
+                    merged_kg = "\n".join(filtered_parts)
+                    filtered_count = len(filtered_node_lines) + len(filtered_edge_lines)
+                    logs.append(f"   ⚖️ [KG 검열] {total_items}건 → {filtered_count}건 (필터링 {total_items - filtered_count}건)")
+                else:
+                    merged_kg = None
+                    logs.append(f"   ⚖️ [KG 검열] 모든 항목 필터링됨 (0 건)")
+            else:
+                logs.append("   ⚖️ [KG 검열] 평가 실패, 모든 항목 유지")
     else:
         logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
+    
     return {"kg_context": merged_kg, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
@@ -1112,7 +1269,10 @@ def planner_node(state: AgentState):
 
 
 def step_executor_node(state: AgentState):
-    """Execute the current step of the research plan."""
+    """Execute the current step of the research plan.
+    
+    개선 4: KG 중복 검색 최적화 — 이전 단계와 쿼리가 유사하면 KG 검색 스킵.
+    """
     plan = state.get("plan", [])
     current_step = state.get("current_step", 0)
     logs = []
@@ -1161,13 +1321,39 @@ def step_executor_node(state: AgentState):
         else:
             result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."
 
-    # Always run KG search with the step's atomized query
-    kg_text = _search_kg(query, num_results=10)
-    if kg_text:
-        kg_count = _count_kg_items(kg_text)
-        logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
+    # 개선 4: KG 중복 검색 최적화
+    # 이전 단계의 쿼리 목록과 현재 쿼리를 비교하여 유사하면 스킵
+    prev_queries = state.get("_kg_searched_queries", [])
+    should_search_kg = True
+    
+    # Simple similarity check: if current query is substring/superset of previous queries
+    for prev_q in prev_queries:
+        # Check if queries are substantially overlapping (>70% word overlap)
+        curr_words = set(query.lower().split())
+        prev_words = set(prev_q.lower().split())
+        if not curr_words or not prev_words:
+            continue
+        overlap = len(curr_words & prev_words) / max(len(curr_words), len(prev_words))
+        if overlap > 0.7:
+            should_search_kg = False
+            logs.append(f"   🕸️ [지식그래프] 이전 단계와 쿼리 중복 — 스킵 (유사도 {overlap:.0%})")
+            break
+    
+    kg_text = None
+    if should_search_kg:
+        # Determine num_results dynamically (개선 5: Token 효율성)
+        num_results = 12 if step["tool"] == "retrieve" else 8
+        kg_text = _search_kg(query, num_results=num_results)
+        if kg_text:
+            kg_count = _count_kg_items(kg_text)
+            logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
+            # Track this query to avoid future duplicates
+            prev_queries.append(query)
+        else:
+            logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
     else:
-        logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
+        # Reuse previous KG context without adding new results
+        kg_text = state.get("kg_context")
 
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
@@ -1182,6 +1368,7 @@ def step_executor_node(state: AgentState):
         "current_step": current_step + 1,
         "step_results": current_results,
         "logs": logs,
+        "_kg_searched_queries": prev_queries,  # Track searched queries
     }
     if kg_text:
         return_dict["kg_context"] = _merge_kg_contexts(state.get("kg_context"), kg_text)
