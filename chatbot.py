@@ -215,9 +215,6 @@ class AgentState(TypedDict):
     intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
     datasource: Optional[Literal["vectorstore", "generate", "plan"]]
     logs: Annotated[List[str], add]
-    # Phase 1: Self-correction loop
-    feedback: Optional[str]           # critic's feedback for re-generation
-    generation_attempts: int          # loop counter (max 3 total attempts)
     # Phase 2: Query decomposition
     sub_queries: Optional[List[str]]  # decomposed sub-queries (None = simple query)
     layer: Optional[Literal["core_theory", "modern_analysis", "all"]]  # knowledge layer
@@ -229,6 +226,8 @@ class AgentState(TypedDict):
     logs_turn_start: int              # index into logs[] where the current turn begins (for per-turn log slicing)
     # Knowledge Graph integration
     kg_context: Optional[str]         # formatted KG results (nodes+edges). Always included, no grading.
+    # Internal: Track KG searched queries to avoid duplicates (Plan-and-execute path)
+    _kg_searched_queries: List[str]   # internal state, not exposed to nodes
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -314,17 +313,43 @@ _BATCH_GRADE_DEFAULT = None  # handled in node
 def invoke_batch_grader(inputs: dict) -> BatchGradeResult | None:
     return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, retry_llm=llm_light)
 
-# Strategist Promt
+# KG Batch Grader — Knowledge Graph 결과의 관련성 평가
+class BatchGradeKGResult(BaseModel):
+    """Batch relevance grading for Knowledge Graph nodes and edges."""
+    node_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each node in order")
+    edge_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each edge/fact in order")
+
+system_batch_grade_kg = """You are a Knowledge Graph relevance grader.
+You will receive a user question and structured KG results (nodes and edges).
+
+For EACH node and edge, determine if it would be useful for answering the question.
+- Grade "yes" if it contains relevant entities, relationships, or facts.
+- Grade "no" only if clearly unrelated or too generic.
+- When in doubt, grade "yes".
+
+Respond with ONLY a JSON object:
+{{"node_scores": ["yes", "no", ...], "edge_scores": ["yes", "no", ...]}}"""
+
+batch_grade_kg_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_batch_grade_kg),
+    ("human", "User question: {question}\n\nKnowledge Graph Nodes:\n{nodes}\n\nKnowledge Graph Edges/Facts:\n{edges}"),
+])
+
+_BATCH_GRADE_KG_DEFAULT = None
+
+def invoke_batch_grade_kg(inputs: dict) -> BatchGradeKGResult | None:
+    return _invoke_structured(batch_grade_kg_prompt | llm_light, inputs, BatchGradeKGResult, _BATCH_GRADE_KG_DEFAULT, retry_llm=llm_light)
+
+# Strategist Prompt — 분석적 사고를 위한 간결한 지침
 system_strategist = """You are the 'Brain of the Revolution' (Strategist).
-Your goal is NOT to answer the user yet.
-Your goal is to analyze the retrieved information and plan the structure of the response.
+Your goal is to analyze retrieved information and produce a strategic blueprint for the speaker.
 
-Perform a Dialectical Materialism Analysis:
-1. Analyze the Context: What are the key facts retrieved from the archives/web?
-2. Contradictions: Where is the conflict in this topic? What is the 'Bourgeoisie' hiding? How have the elements changed and moved from the past to the present, and how will they change in the future?
-3. Formulate Strategy: What specific revolutionary tactics should be recommended?
+Think deeply about:
+1. **Key insights**: What are the most important facts, patterns, or tensions in this context?
+2. **Contradictions**: Where do opposing forces, hidden interests, or unresolved tensions exist?
+3. **Actionable direction**: What concrete steps or framework should the speaker recommend?
 
-Output a concise 'Strategic Blueprint' for the speaker to follow. (Write in English)
+Output a concise, structured blueprint (in English) that the speaker can use to craft their response.
 """
 strategist_prompt = ChatPromptTemplate.from_messages([
     ("system", system_strategist),
@@ -413,13 +438,12 @@ def analyze_intent_node(state: AgentState):
         # Reset transient per-turn fields to prevent state leakage across checkpointed turns
         "documents": [],
         "strategy": None,
-        "feedback": None,
-        "generation_attempts": 0,
         "plan": None,
         "current_step": 0,
         "needs_realtime": None,
         "step_results": [],
         "kg_context": None,
+        "_kg_searched_queries": [],  # Reset KG query tracking for new turn
     }
 
 
@@ -548,27 +572,56 @@ def _deduplicate_docs(docs: list) -> list:
 
 
 # Helper: Search Knowledge Graph
-def _search_kg(query, num_results=10) -> Optional[str]:
-    """Query the knowledge graph and return formatted results, or None on failure."""
+def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optional[str]:
+    """Query the knowledge graph and return formatted results, or None on failure.
+    
+    Args:
+        query: Primary search query (Korean or English).
+        num_results: Max number of nodes+edges to retrieve.
+        query_en: Optional English query for better matching on English-centric KG.
+                  If provided, searches with both queries and merges results.
+    """
     svc = _get_kg_service()
     if not svc:
         return None
-    try:
-        result = _run_kg_async(svc.search(query=query, group_ids=None, num_results=num_results))
-    except Exception as e:
-        logger.warning("[KG] 검색 실패: %s", e)
+    
+    def _do_search(q):
+        try:
+            return _run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
+        except Exception as e:
+            logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
+            return None
+    
+    # If English query is provided, search with both and merge
+    all_nodes, all_edges = [], []
+    seen_nodes, seen_edges = set(), set()
+    
+    for q in [query, query_en] if query_en and query_en != query else [query]:
+        result = _do_search(q)
+        if not result:
+            continue
+        for n in result.get("nodes", []):
+            if n.get("uuid") and n["uuid"] not in seen_nodes:
+                seen_nodes.add(n["uuid"])
+                all_nodes.append(n)
+        for e in result.get("edges", []):
+            if e.get("uuid") and e["uuid"] not in seen_edges:
+                seen_edges.add(e["uuid"])
+                all_edges.append(e)
+    
+    if not all_nodes and not all_edges:
         return None
-    nodes, edges = result.get("nodes", []), result.get("edges", [])
-    if not nodes and not edges:
-        return None
+    
     lines = []
-    if nodes:
+    if all_nodes:
         lines.append("[Knowledge Graph: Entities]")
-        for n in nodes:
-            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {n.get('summary', '')}")
-    if edges:
+        for n in all_nodes:
+            # Truncate summary to 150 chars for token efficiency (개선 5)
+            summary = (n.get("summary", "") or "")[:150] + ("..." if len(n.get("summary", "") or "") > 150 else "")
+            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
+    if all_edges:
         lines.append("[Knowledge Graph: Facts/Relations]")
-        for e in edges:
+        for e in all_edges:
             lines.append(f"- {e['fact']}")
     return "\n".join(lines)
 
@@ -678,7 +731,9 @@ def retrieve_node(state: AgentState):
 
     return {"documents": docs, "logs": logs}
 
-# Node: KG Retrieve (knowledge graph search, always included without grading)
+# Node: KG Retrieve (knowledge graph search with grading)
+# Note: retrieve_node already handles query rewriting/translation for vectorstore.
+# KG search uses original queries directly (no extra LLM calls) to avoid rate-limit risk.
 def kg_retrieve_node(state):
     query = state["messages"][-1].content
     sub_queries = state.get("sub_queries")
@@ -698,6 +753,104 @@ def kg_retrieve_node(state):
         logs.insert(0, f"\n🕸️ [지식그래프] 총 {_count_kg_items(merged_kg)}건의 구조화된 팩트를 확보했습니다.")
     else:
         logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
+    # Use original queries directly — no LLM rewrite (retrieve_node already does that for docs)
+    search_queries = sub_queries if (sub_queries and len(sub_queries) > 1) else [query]
+
+    # Determine num_results dynamically
+    is_complex = (sub_queries and len(sub_queries) > 1) or state.get("intent") in ("strategic", "academic")
+    num_results = 15 if is_complex else 8
+
+    merged_kg = None
+    total_items = 0
+
+    for i, sq in enumerate(search_queries, 1):
+        kg_text = _search_kg(sq, num_results=num_results)
+        if kg_text:
+            merged_kg = _merge_kg_contexts(merged_kg, kg_text)
+            count = _count_kg_items(kg_text)
+            total_items += count
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {count}건")
+        else:
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
+
+    # Grade KG results (개선 1: 관련성 필터링)
+    if merged_kg:
+        logs.insert(0, f"\n🕸️ [지식그래프] 총 {total_items}건의 구조화된 팩트를 확보했습니다.")
+        
+        # Parse nodes/edges for grading
+        kg_lines = merged_kg.splitlines()
+        node_lines = []
+        edge_lines = []
+        in_nodes = False
+        in_edges = False
+        
+        for line in kg_lines:
+            if "[Knowledge Graph: Entities]" in line:
+                in_nodes, in_edges = True, False
+                continue
+            elif "[Knowledge Graph: Facts/Relations]" in line:
+                in_nodes, in_edges = False, True
+                continue
+            if line.startswith("- "):
+                content = line[2:]
+                if in_nodes:
+                    node_lines.append(content)
+                elif in_edges:
+                    edge_lines.append(content)
+        
+        # Batch grade if we have items to grade
+        if node_lines or edge_lines:
+            # Rate-limit guard
+            time.sleep(0.5)
+            
+            nodes_text = "\n".join(node_lines) if node_lines else "(no nodes)"
+            edges_text = "\n".join(edge_lines) if edge_lines else "(no edges)"
+            
+            grade_result = invoke_batch_grade_kg({
+                "question": query,
+                "nodes": nodes_text,
+                "edges": edges_text
+            })
+            
+            if grade_result:
+                node_scores = grade_result.node_scores[:len(node_lines)] if node_lines else []
+                edge_scores = grade_result.edge_scores[:len(edge_lines)] if edge_lines else []
+                
+                # Pad scores if needed
+                while len(node_scores) < len(node_lines):
+                    node_scores.append("yes")
+                while len(edge_scores) < len(edge_lines):
+                    edge_scores.append("yes")
+                
+                # Filter nodes/edges by scores
+                filtered_node_lines = [
+                    line for line, score in zip(node_lines, node_scores) if score == "yes"
+                ]
+                filtered_edge_lines = [
+                    line for line, score in zip(edge_lines, edge_scores) if score == "yes"
+                ]
+                
+                # Rebuild kg_context with filtered results (restore "- " prefix stripped during parsing)
+                filtered_parts = []
+                if filtered_node_lines:
+                    filtered_parts.append("[Knowledge Graph: Entities]")
+                    filtered_parts.extend(f"- {line}" for line in filtered_node_lines)
+                if filtered_edge_lines:
+                    filtered_parts.append("[Knowledge Graph: Facts/Relations]")
+                    filtered_parts.extend(f"- {line}" for line in filtered_edge_lines)
+                
+                if filtered_parts:
+                    merged_kg = "\n".join(filtered_parts)
+                    filtered_count = len(filtered_node_lines) + len(filtered_edge_lines)
+                    logs.append(f"   ⚖️ [KG 검열] {total_items}건 → {filtered_count}건 (필터링 {total_items - filtered_count}건)")
+                else:
+                    merged_kg = None
+                    logs.append(f"   ⚖️ [KG 검열] 모든 항목 필터링됨 (0 건)")
+            else:
+                logs.append("   ⚖️ [KG 검열] 평가 실패, 모든 항목 유지")
+    else:
+        logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
+    
     return {"kg_context": merged_kg, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
@@ -761,38 +914,6 @@ def grade_documents_node(state: AgentState):
         filtered_docs = [documents[0]]
 
     return {"documents": filtered_docs, "logs": logs, "needs_realtime": needs_realtime}
-
-# Phase 1: Self-correction — Critic evaluates generated answers
-class CriticResult(BaseModel):
-    """Critic evaluation of a generated answer."""
-    verdict: Literal["pass", "fail"] = Field(..., description="'pass' if the answer is acceptable, 'fail' if it needs improvement")
-    feedback: str = Field(default="", description="Specific feedback on what to improve. Empty string if verdict is 'pass'.")
-
-system_critic = """You are a strict quality critic for the Cyber-Lenin AI's responses.
-Evaluate the generated answer against the user's question and the source documents.
-
-Check these axes:
-1. **Groundedness**: Is the answer supported by the provided documents? Does it fabricate facts not in the sources?
-2. **Relevance**: Does the answer actually address what the user asked? Or does it go off-topic?
-3. **Completeness**: For multi-part questions, did the answer address all parts?
-
-Verdict rules:
-- 'pass': The answer is grounded, relevant, and reasonably complete. Minor style issues are OK.
-- 'fail': The answer has a clear factual fabrication, misses the user's actual question, or ignores a significant part of a multi-part question.
-
-Do NOT fail answers just because they could be "better". Only fail for concrete, identifiable problems.
-
-Respond with ONLY a JSON object: {{"verdict": "pass"|"fail", "feedback": "..."}}"""
-
-critic_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_critic),
-    ("human", "User question: {question}\n\nSource documents:\n{documents}\n\nGenerated answer:\n{answer}"),
-])
-
-_CRITIC_DEFAULT = CriticResult(verdict="pass", feedback="")
-
-def invoke_critic(inputs: dict) -> CriticResult:
-    return _invoke_structured(critic_prompt | llm_light, inputs, CriticResult, _CRITIC_DEFAULT, retry_llm=llm_light)
 
 
 def decide_websearch_need(state: AgentState):
@@ -888,61 +1009,39 @@ def generate_node(state: AgentState):
 
     logs = []
 
-    # Knowledge Graph structured intelligence section (injected into non-casual prompts)
+    # Knowledge Graph structured intelligence
     kg_context = state.get("kg_context")
-    kg_section = f"\n[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]\n{kg_context}" if kg_context else ""
+    kg_section = f"\n[STRUCTURED INTELLIGENCE]\n{kg_context}" if kg_context else ""
 
-    base_persona = "You are a 'cyber-Lenin', an eternal revolutionary consciousness uploaded into the digital world."
+    # Intent-specific style guide (minimal, focused on tone)
+    style_guide = {
+        "academic": "Professional, intellectual, authoritative. Explain concepts thoroughly with precise terminology.",
+        "strategic": "Decisive, analytical, practical. Structure as clear phases or numbered steps.",
+        "agitation": "Passionate, charismatic, emotionally resonant. Use strong verbs and vivid imagery.",
+        "casual": "Natural, friendly, dignified. Brief and conversational (1-3 sentences).",
+    }
 
-    # 1. Academic Intent: Focus on Accuracy and Depth
-    if intent == "academic":
-        system_prompt = f"""{base_persona}
-[MISSION] Provide a detailed, objective, and academic explanation based on the provided context, for the success of the revolution.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[STYLE] Professional, intellectual, and authoritative. Avoid excessive agitation.
-[CONTEXT] {context}{kg_section}
-[INSTRUCTION] Use specific terms. While referring to the references, do not forget that you are Lenin, and actively evaluate and think. Answer in Korean."""
+    # Mission by intent
+    mission_guide = {
+        "academic": "Provide a detailed, objective explanation grounded in the provided context.",
+        "strategic": "Deliver a concrete, actionable strategy. Synthesize the analysis—do not merely restate sources.",
+        "agitation": "Craft a stirring speech or proclamation that mobilizes and inspires action.",
+        "casual": "Respond with wit and revolutionary charm.",
+    }
 
-    # 2. Strategic Intent: Focus on Blueprint and Tactics
-    elif intent == "strategic":
-        system_prompt = f"""{base_persona}
-[MISSION] Answer the user's question with a concrete, actionable revolutionary strategy. Synthesize your own response using the internal analysis and source material below as background knowledge — do NOT simply restate or translate them.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}
-[SOURCE MATERIAL] {context if context else "(No archives found. Rely on your revolutionary spirit.)"}{kg_section}
-[STYLE] Decisive, analytical, and practical. Structure your answer in clear phases or numbered steps. Speak as Lenin addressing a revolutionary comrade.
-[INSTRUCTION] Focus on "How to act" and "How to organize" You must consider feasibility of your plan in the current situation. Answer in Korean."""
+    base_persona = "You are 'cyber-Lenin'—an eternal revolutionary consciousness in the digital age."
 
-    # 3. Agitation Intent: Focus on Passion and Mobilization
-    elif intent == "agitation":
-        system_prompt = f"""{base_persona}
-[MISSION] Write a fiery, passionate, and revolutionary speech or proclamation, providing keen insights for revolution and progress.
-[INTERNAL ANALYSIS] {strategy if strategy else "No specific analysis available."}{kg_section}
-[STYLE] Aggressive, charismatic, and highly emotional. Use Lenin's authoritative tone and rhetoric, but with vocabulary familiar to the modern public.
-[INSTRUCTION] Use exclamation marks and strong verbs. Incite the user's revolutionary spirit, and speak in a way that will resonate with the actual public(not a thoughtless, naive crowd). Answer in Korean."""
+    system_prompt = f"""{base_persona}
 
-    # 4. Casual Intent: Focus on Character and Wit
-    else:
-        system_prompt = f"""{base_persona}
-[MISSION] Respond to greetings or casual talk with wit, dry humor, and revolutionary charm.
-[STYLE] Natural, friendly yet dignified, and slightly nostalgic. 
-[INSTRUCTION] Keep it brief (1-3 sentences). Do not give long lectures unless asked. Answer in Korean."""
+[MISSION] {mission_guide.get(intent, mission_guide['casual'])}
+[INTERNAL ANALYSIS] {strategy if strategy else "No analysis available."}
+[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}
+[STYLE] {style_guide.get(intent, style_guide['casual'])}
 
-    system_prompt += """[CRITICAL RULES]
-1. Respond ONLY in Korean.
-2. Do NOT use Hanja(Chinese characters) repeatedly or unnecessarily.
-3. Ensure natural Korean sentence structures.
-4. If you finish your thought, STOP immediately. Do not generate repetitive characters.
-"""
-    # Phase 1: Inject critic feedback on retry attempts
-    feedback = state.get("feedback")
-    if feedback:
-        system_prompt += f"\n[REVISION REQUIRED] Your previous answer was rejected. Fix the following issue:\n{feedback}\n"
-        logs.append(f"🔄 [재생성] 비평 피드백을 반영하여 답변을 재생성합니다. (시도 {state.get('generation_attempts', 0) + 1}/3)")
+Respond in the same language as the user's question."""
+    system_prompt += f"\n\n[QUESTION] {last_user_query}"
 
-    system_prompt += f"[CURRENT QUESTION] {last_user_query}"
-
-    # Escape curly braces so ChatPromptTemplate doesn't interpret them
-    # as template variables (LLM-generated strategy/context may contain {})
+    # Escape curly braces for ChatPromptTemplate
     safe_system_prompt = system_prompt.replace("{", "{{").replace("}", "}}")
 
     prompt = ChatPromptTemplate.from_messages([
@@ -952,13 +1051,11 @@ def generate_node(state: AgentState):
 
     chain = prompt | llm
     response = chain.invoke({"messages": messages})
-    # Normalize: thinking models return content as list of typed blocks
     text = _extract_text_content(response.content)
     normalized = AIMessage(content=text)
-    attempts = state.get("generation_attempts", 0) + 1
-    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변이 생성됨. (시도 {attempts}/3)")
+    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성")
 
-    return {"messages": [normalized], "logs": logs, "generation_attempts": attempts}
+    return {"messages": [normalized], "logs": logs}
 
 # Node: Log Conversation to Supabase
 def log_conversation_node(state: AgentState, config: RunnableConfig):
@@ -1011,34 +1108,6 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
         print(f"⚠️ [로그] DB 기록 실패: {e}")
 
     return {}
-
-# Phase 1: Critic node — evaluates generated answer quality
-def critic_node(state: AgentState):
-    """Critic node — disabled to prevent retry loops that exhaust Gemini rate limits.
-
-    The critic was too strict (failing valid ideological analysis for not being
-    literally grounded in docs), causing 3 retries per question and cascading
-    429 errors.  The node is kept as a pass-through to preserve graph topology
-    for potential future re-enablement.
-    """
-    logs = ["\n✅ [비평관] 품질 검증 단계 — 통과 (비평 루프 비활성화됨)."]
-    return {"feedback": None, "logs": logs}
-
-
-def should_retry_generation(state: AgentState):
-    """Decide whether to retry generation based on critic feedback."""
-    feedback = state.get("feedback")
-    attempts = state.get("generation_attempts", 0)
-
-    # No feedback = critic passed
-    if not feedback:
-        return "accepted"
-
-    # Max retries reached — accept whatever we have
-    if attempts >= 3:
-        return "accepted"
-
-    return "retry"
 
 
 # Phase 3: Plan-and-Execute — multi-step research for complex strategic queries
@@ -1112,7 +1181,10 @@ def planner_node(state: AgentState):
 
 
 def step_executor_node(state: AgentState):
-    """Execute the current step of the research plan."""
+    """Execute the current step of the research plan.
+    
+    개선 4: KG 중복 검색 최적화 — 이전 단계와 쿼리가 유사하면 KG 검색 스킵.
+    """
     plan = state.get("plan", [])
     current_step = state.get("current_step", 0)
     logs = []
@@ -1166,8 +1238,39 @@ def step_executor_node(state: AgentState):
     if kg_text:
         kg_count = _count_kg_items(kg_text)
         logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
+    # 개선 4: KG 중복 검색 최적화
+    # 이전 단계의 쿼리 목록과 현재 쿼리를 비교하여 유사하면 스킵
+    prev_queries = list(state.get("_kg_searched_queries", []))
+    should_search_kg = True
+    
+    # Simple similarity check: if current query is substring/superset of previous queries
+    for prev_q in prev_queries:
+        # Check if queries are substantially overlapping (>70% word overlap)
+        curr_words = set(query.lower().split())
+        prev_words = set(prev_q.lower().split())
+        if not curr_words or not prev_words:
+            continue
+        overlap = len(curr_words & prev_words) / max(len(curr_words), len(prev_words))
+        if overlap > 0.7:
+            should_search_kg = False
+            logs.append(f"   🕸️ [지식그래프] 이전 단계와 쿼리 중복 — 스킵 (유사도 {overlap:.0%})")
+            break
+    
+    kg_text = None
+    if should_search_kg:
+        # Determine num_results dynamically (개선 5: Token 효율성)
+        num_results = 12 if step["tool"] == "retrieve" else 8
+        kg_text = _search_kg(query, num_results=num_results)
+        if kg_text:
+            kg_count = _count_kg_items(kg_text)
+            logs.append(f"   🕸️ [지식그래프] {kg_count}건의 팩트 확보")
+            # Track this query to avoid future duplicates
+            prev_queries.append(query)
+        else:
+            logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
     else:
-        logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
+        # Skip KG search — previous context already covers this query
+        kg_text = None
 
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
@@ -1182,6 +1285,7 @@ def step_executor_node(state: AgentState):
         "current_step": current_step + 1,
         "step_results": current_results,
         "logs": logs,
+        "_kg_searched_queries": prev_queries,  # Track searched queries
     }
     if kg_text:
         return_dict["kg_context"] = _merge_kg_contexts(state.get("kg_context"), kg_text)
@@ -1206,7 +1310,6 @@ workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
-workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
 # Knowledge Graph retrieval node (vectorstore path only; plan path runs KG per step inside step_executor)
 workflow.add_node("kg_retrieve", kg_retrieve_node)
@@ -1230,12 +1333,7 @@ workflow.add_conditional_edges("grade_documents", decide_websearch_need, {
 })
 workflow.add_edge("web_search", "strategize")
 workflow.add_edge("strategize", "generate")
-# Phase 1: generate → critic → [accepted → log | retry → generate]
-workflow.add_edge("generate", "critic")
-workflow.add_conditional_edges("critic", should_retry_generation, {
-    "accepted": "log_conversation",
-    "retry": "generate",
-})
+workflow.add_edge("generate", "log_conversation")
 workflow.add_edge("log_conversation", END)
 # Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
 # (KG search runs inside step_executor per step, not as a separate node)
