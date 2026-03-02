@@ -736,45 +736,33 @@ def retrieve_node(state: AgentState):
 
     return {"documents": docs, "logs": logs}
 
-# Node: KG Retrieve (knowledge graph search with query optimization + grading)
+# Node: KG Retrieve (knowledge graph search with grading)
+# Note: retrieve_node already handles query rewriting/translation for vectorstore.
+# KG search uses original queries directly (no extra LLM calls) to avoid rate-limit risk.
 def kg_retrieve_node(state):
     query = state["messages"][-1].content
-    context = _build_context(state["messages"])
     sub_queries = state.get("sub_queries")
-    selected_layer = state.get("layer", "all")
     logs = []
 
-    # Prepare search queries with translation (개선 2: 쿼리 최적화)
-    needs_english = selected_layer in ("core_theory", "all")
-    
-    search_items = []  # List of (ko_query, en_query_or_none)
-    if sub_queries and len(sub_queries) > 1:
-        for sq in sub_queries:
-            sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, [])
-            search_items.append((sq_ko, sq_en if needs_english else None))
-    else:
-        sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, [])
-        search_items.append((sq_ko, sq_en if needs_english else None))
+    # Use original queries directly — no LLM rewrite (retrieve_node already does that for docs)
+    search_queries = sub_queries if (sub_queries and len(sub_queries) > 1) else [query]
 
-    # Determine num_results dynamically (개선 5: Token 효율성)
-    # Complex queries (multi sub-query or strategic intent) get more results
+    # Determine num_results dynamically
     is_complex = (sub_queries and len(sub_queries) > 1) or state.get("intent") in ("strategic", "academic")
     num_results = 15 if is_complex else 8
 
     merged_kg = None
     total_items = 0
-    
-    for i, (ko_q, en_q) in enumerate(search_items, 1):
-        kg_text = _search_kg(ko_q, num_results=num_results, query_en=en_q)
+
+    for i, sq in enumerate(search_queries, 1):
+        kg_text = _search_kg(sq, num_results=num_results)
         if kg_text:
             merged_kg = _merge_kg_contexts(merged_kg, kg_text)
             count = _count_kg_items(kg_text)
             total_items += count
-            en_info = f" (+EN)" if en_q else ""
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_items)}] \"{ko_q}\"{en_info} → {count}건")
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {count}건")
         else:
-            en_info = f" (+EN)" if en_q else ""
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_items)}] \"{ko_q}\"{en_info} → 0건")
+            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
 
     # Grade KG results (개선 1: 관련성 필터링)
     if merged_kg:
@@ -833,14 +821,14 @@ def kg_retrieve_node(state):
                     line for line, score in zip(edge_lines, edge_scores) if score == "yes"
                 ]
                 
-                # Rebuild kg_context with filtered results
+                # Rebuild kg_context with filtered results (restore "- " prefix stripped during parsing)
                 filtered_parts = []
                 if filtered_node_lines:
                     filtered_parts.append("[Knowledge Graph: Entities]")
-                    filtered_parts.extend(filtered_node_lines)
+                    filtered_parts.extend(f"- {line}" for line in filtered_node_lines)
                 if filtered_edge_lines:
                     filtered_parts.append("[Knowledge Graph: Facts/Relations]")
-                    filtered_parts.extend(filtered_edge_lines)
+                    filtered_parts.extend(f"- {line}" for line in filtered_edge_lines)
                 
                 if filtered_parts:
                     merged_kg = "\n".join(filtered_parts)
@@ -1305,7 +1293,7 @@ def step_executor_node(state: AgentState):
 
     # 개선 4: KG 중복 검색 최적화
     # 이전 단계의 쿼리 목록과 현재 쿼리를 비교하여 유사하면 스킵
-    prev_queries = state.get("_kg_searched_queries", [])
+    prev_queries = list(state.get("_kg_searched_queries", []))
     should_search_kg = True
     
     # Simple similarity check: if current query is substring/superset of previous queries
@@ -1334,8 +1322,8 @@ def step_executor_node(state: AgentState):
         else:
             logs.append(f"   🕸️ [지식그래프] 관련 팩트 없음")
     else:
-        # Reuse previous KG context without adding new results
-        kg_text = state.get("kg_context")
+        # Skip KG search — previous context already covers this query
+        kg_text = None
 
     # Deduplicate accumulated docs
     current_docs = _deduplicate_docs(current_docs)
