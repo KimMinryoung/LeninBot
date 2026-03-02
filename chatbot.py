@@ -215,9 +215,6 @@ class AgentState(TypedDict):
     intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
     datasource: Optional[Literal["vectorstore", "generate", "plan"]]
     logs: Annotated[List[str], add]
-    # Phase 1: Self-correction loop
-    feedback: Optional[str]           # critic's feedback for re-generation
-    generation_attempts: int          # loop counter (max 3 total attempts)
     # Phase 2: Query decomposition
     sub_queries: Optional[List[str]]  # decomposed sub-queries (None = simple query)
     layer: Optional[Literal["core_theory", "modern_analysis", "all"]]  # knowledge layer
@@ -441,8 +438,6 @@ def analyze_intent_node(state: AgentState):
         # Reset transient per-turn fields to prevent state leakage across checkpointed turns
         "documents": [],
         "strategy": None,
-        "feedback": None,
-        "generation_attempts": 0,
         "plan": None,
         "current_step": 0,
         "needs_realtime": None,
@@ -906,38 +901,6 @@ def grade_documents_node(state: AgentState):
 
     return {"documents": filtered_docs, "logs": logs, "needs_realtime": needs_realtime}
 
-# Phase 1: Self-correction — Critic evaluates generated answers
-class CriticResult(BaseModel):
-    """Critic evaluation of a generated answer."""
-    verdict: Literal["pass", "fail"] = Field(..., description="'pass' if the answer is acceptable, 'fail' if it needs improvement")
-    feedback: str = Field(default="", description="Specific feedback on what to improve. Empty string if verdict is 'pass'.")
-
-system_critic = """You are a strict quality critic for the Cyber-Lenin AI's responses.
-Evaluate the generated answer against the user's question and the source documents.
-
-Check these axes:
-1. **Groundedness**: Is the answer supported by the provided documents? Does it fabricate facts not in the sources?
-2. **Relevance**: Does the answer actually address what the user asked? Or does it go off-topic?
-3. **Completeness**: For multi-part questions, did the answer address all parts?
-
-Verdict rules:
-- 'pass': The answer is grounded, relevant, and reasonably complete. Minor style issues are OK.
-- 'fail': The answer has a clear factual fabrication, misses the user's actual question, or ignores a significant part of a multi-part question.
-
-Do NOT fail answers just because they could be "better". Only fail for concrete, identifiable problems.
-
-Respond with ONLY a JSON object: {{"verdict": "pass"|"fail", "feedback": "..."}}"""
-
-critic_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_critic),
-    ("human", "User question: {question}\n\nSource documents:\n{documents}\n\nGenerated answer:\n{answer}"),
-])
-
-_CRITIC_DEFAULT = CriticResult(verdict="pass", feedback="")
-
-def invoke_critic(inputs: dict) -> CriticResult:
-    return _invoke_structured(critic_prompt | llm_light, inputs, CriticResult, _CRITIC_DEFAULT, retry_llm=llm_light)
-
 
 def decide_websearch_need(state: AgentState):
     filtered_docs = state["documents"]
@@ -1062,12 +1025,6 @@ def generate_node(state: AgentState):
 [STYLE] {style_guide.get(intent, style_guide['casual'])}
 
 Respond in the same language as the user's question."""
-    # Phase 1: Inject critic feedback on retry attempts
-    feedback = state.get("feedback")
-    if feedback:
-        system_prompt += f"\n\n[REVISION REQUIRED] Address this issue: {feedback}"
-        logs.append(f"🔄 [재생성] 비평 피드백 반영 (시도 {state.get('generation_attempts', 0) + 1}/3)")
-
     system_prompt += f"\n\n[QUESTION] {last_user_query}"
 
     # Escape curly braces for ChatPromptTemplate
@@ -1082,10 +1039,9 @@ Respond in the same language as the user's question."""
     response = chain.invoke({"messages": messages})
     text = _extract_text_content(response.content)
     normalized = AIMessage(content=text)
-    attempts = state.get("generation_attempts", 0) + 1
-    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성 (시도 {attempts}/3)")
+    logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성")
 
-    return {"messages": [normalized], "logs": logs, "generation_attempts": attempts}
+    return {"messages": [normalized], "logs": logs}
 
 # Node: Log Conversation to Supabase
 def log_conversation_node(state: AgentState, config: RunnableConfig):
@@ -1138,34 +1094,6 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
         print(f"⚠️ [로그] DB 기록 실패: {e}")
 
     return {}
-
-# Phase 1: Critic node — evaluates generated answer quality
-def critic_node(state: AgentState):
-    """Critic node — disabled to prevent retry loops that exhaust Gemini rate limits.
-
-    The critic was too strict (failing valid ideological analysis for not being
-    literally grounded in docs), causing 3 retries per question and cascading
-    429 errors.  The node is kept as a pass-through to preserve graph topology
-    for potential future re-enablement.
-    """
-    logs = ["\n✅ [비평관] 품질 검증 단계 — 통과 (비평 루프 비활성화됨)."]
-    return {"feedback": None, "logs": logs}
-
-
-def should_retry_generation(state: AgentState):
-    """Decide whether to retry generation based on critic feedback."""
-    feedback = state.get("feedback")
-    attempts = state.get("generation_attempts", 0)
-
-    # No feedback = critic passed
-    if not feedback:
-        return "accepted"
-
-    # Max retries reached — accept whatever we have
-    if attempts >= 3:
-        return "accepted"
-
-    return "retry"
 
 
 # Phase 3: Plan-and-Execute — multi-step research for complex strategic queries
@@ -1363,7 +1291,6 @@ workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
 workflow.add_node("strategize", strategize_node)
-workflow.add_node("critic", critic_node)
 workflow.add_node("log_conversation", log_conversation_node)
 # Knowledge Graph retrieval node (vectorstore path only; plan path runs KG per step inside step_executor)
 workflow.add_node("kg_retrieve", kg_retrieve_node)
@@ -1387,12 +1314,7 @@ workflow.add_conditional_edges("grade_documents", decide_websearch_need, {
 })
 workflow.add_edge("web_search", "strategize")
 workflow.add_edge("strategize", "generate")
-# Phase 1: generate → critic → [accepted → log | retry → generate]
-workflow.add_edge("generate", "critic")
-workflow.add_conditional_edges("critic", should_retry_generation, {
-    "accepted": "log_conversation",
-    "retry": "generate",
-})
+workflow.add_edge("generate", "log_conversation")
 workflow.add_edge("log_conversation", END)
 # Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
 # (KG search runs inside step_executor per step, not as a separate node)
