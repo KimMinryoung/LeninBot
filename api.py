@@ -153,18 +153,12 @@ async def chat(request: ChatRequest, http_req: Request):
 
                     if node_name == "generate":
                         last_message = node_content["messages"][-1]
-                        pending_answer = last_message.content
-                        print(f"[generate] 답변 생성 완료 ({len(pending_answer)}자)", flush=True)
-
-                    if node_name == "critic" and pending_answer is not None:
-                        feedback = node_content.get("feedback")
-                        if not feedback:
-                            print(f"[critic] ✅ 답변 승인 — 클라이언트로 전송", flush=True)
-                            yield format_sse({
-                                "type": "answer",
-                                "content": pending_answer
-                            })
-                            pending_answer = None
+                        answer = last_message.content
+                        print(f"[generate] 답변 생성 완료 ({len(answer)}자)", flush=True)
+                        yield format_sse({
+                            "type": "answer",
+                            "content": answer
+                        })
 
             print(f"{'='*60}\n", flush=True)
 
