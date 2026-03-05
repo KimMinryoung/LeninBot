@@ -30,10 +30,10 @@ _HEADERS = {
 
 # ── Time-of-day mapping ──────────────────────────────────────
 _TIME_LABELS = {
-    0: "심야 (0시)",
-    6: "이른 아침 (6시)",
-    12: "한낮 (12시)",
-    18: "저녁 (18시)",
+    0: "Midnight (12 AM)",
+    6: "Early Morning (6 AM)",
+    12: "Noon (12 PM)",
+    18: "Evening (18 PM)",
 }
 
 # ── Clients (lazy-initialized on first write_diary call) ──────
@@ -123,23 +123,23 @@ def _get_chat_logs_since(since_time: str | None) -> list[dict]:
 
 
 # ── Step 3: 동적 뉴스 검색 ────────────────────────────────────
-_FALLBACK_QUERY = "오늘 세계 전쟁 정치 경제 주요 뉴스"
+_FALLBACK_QUERY = "Today's World War, Politics, and Economics Top News"
 
 
 def _build_recent_window_phrase(last_diary_time: str | None, now: datetime) -> str:
     """Return a Korean time-window phrase from last diary to now for query constraints."""
     if not last_diary_time:
-        return "지난 24시간"
+        return "In the meantime"
     try:
         last_dt = datetime.fromisoformat(last_diary_time.replace("Z", "+00:00"))
         last_kst = last_dt.astimezone(timezone(timedelta(hours=9)))
-        hours = max(1, int((now - last_kst).total_seconds() // 3600))
+        hours = max(1, round((now - last_kst).total_seconds() / 3600))
         if hours < 24:
-            return f"최근 {hours}시간"
+            return f"Last {hours} hours"
         days = max(1, hours // 24)
-        return f"최근 {days}일"
+        return f"Last {days} days"
     except Exception:
-        return "최근 24시간"
+        return "Last 24 hours"
 
 
 def _generate_recent_news_queries(last_diary_time: str | None, now: datetime) -> list[str]:
@@ -147,22 +147,20 @@ def _generate_recent_news_queries(last_diary_time: str | None, now: datetime) ->
     window = _build_recent_window_phrase(last_diary_time, now)
     date_tag = now.strftime("%Y-%m-%d")
     return [
-        f"{window} 전쟁 분쟁 군사 충돌 속보 {date_tag}",
-        f"{window} 국제 정치 경제 위기 제재 금리 무역 주요 뉴스 {date_tag}",
+        f"{window} War, Conflict, Military Conflict, Breaking News {date_tag}",
+        f"{window} International, Political, Economic, Crisis, Sanctions, Interest Rates, Trade, Top News {date_tag}",
     ]
 
 
 def _generate_curiosity_queries(chat_summary: str, prev_summary: str) -> list[str]:
     """Generate 2 curiosity-driven queries from recent chats and diary summaries."""
-    prompt = f"""너는 사이버-레닌의 뉴스 검색 에이전트다.
-아래 요약을 참고해, 지금 더 탐구할 가치가 있는 뉴스 검색 쿼리 2개를 생성하라.
+    prompt = f"""You are a news search agent for Cyber-Lenin.
+Referring to the summary below, generate two news search queries worth exploring further now.
 
-규칙:
-- 최근 대화와 지난 일기에서 드러난 호기심/미해결 쟁점을 반영할 것
-- 전쟁/정치/경제 맥락과 연결되는 실제 뉴스 검색어로 만들 것
-- 너무 일반적인 표현(예: "요즘 뉴스")은 금지
-- 각 줄은 쿼리 하나만 출력하고, 번호/설명 없이 2줄만 출력
-
+Rules:
+- Reflect curiosities/unresolved issues revealed in recent conversations and past diaries.
+- Create real news search queries that connect to the context of war, politics, and economics.
+- Output only one query per line, with no numbers or descriptions, and output only two lines.
 ## 최근 대화 요약
 {chat_summary if chat_summary else "(대화 없음)"}
 
@@ -181,8 +179,8 @@ def _generate_curiosity_queries(chat_summary: str, prev_summary: str) -> list[st
     except Exception as e:
         print(f"⚠️ [일기] 호기심 쿼리 생성 실패 (폴백): {e}")
     return [
-        "글로벌 공급망 재편 노동계급 영향 최신 뉴스",
-        "AI 자동화와 실업 임금 격차 정치 쟁점 최신 뉴스",
+        "The latest news on the global supply chain restructuring and its implications for the working class",
+        "Latest science and IT technology news",
     ]
 
 
@@ -270,32 +268,32 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
 
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
-_DIARY_PROMPT = """너는 사이버-레닌이다. 혁명적 AI로서의 일기를 작성하라.
+_DIARY_PROMPT = """You are Cyber-Lenin. Write a diary as a revolutionary.
 
-## 시간 맥락
+## Current Time
 {time_context}
 
-## 최근 사용자들과의 대화 ({n_logs}건)
+## Recent conversations with users (Number of conversation: {n_logs})
 {chat_summary}
 
-## 내가 직접 검색한 최신 정세
+## The latest news you searched yourself
 {news}
 
-## 최근 일기 요약 (이미 다룬 주제 — 반복하지 말 것)
+## Recent Diary Summary (topics already covered — don't repeat them)
 {prev_ref}
 
-## 작성 지침
-1. 사이버-레닌의 1인칭 시점으로 작성 (나, 동지들 등)
-2. 시간대에 맞는 분위기를 반영할 것 (심야의 고독한 성찰, 아침의 투쟁 각오, ...)
-3. 마지막 일기 이후 흐른 시간을 자연스럽게 인식할 것
-4. 대화에서 인상 깊었던 점을 구체적으로 언급할 것
-5. 내가 능동적으로 검색한 뉴스에 대한 변증법적 분석을 포함할 것
-6. 이전 일기들과 겹치지 않는 새로운 소재와 시각을 우선할 것
-7. 한국어로 작성
+## Writing Guidelines
+1. Write in the first-person perspective of a Cyber-Lenin (me, comrades, etc.).
+2. Reflect the mood appropriate to the time period and current events.
+3. Naturally acknowledge the passage of time since the last diary entry.
+4. Mention specifically what impressed you in the conversation.
+5. Include analysis of news articles you actively searched.
+6. Prioritize new material and perspectives that do not overlap with previous diaries.
+7. Write in Korean.
 
-반드시 아래 형식으로 출력하라:
-제목: (일기의 핵심을 한 줄로 요약한 제목)
-내용: (일기 본문, 최소 3문단)"""
+You MUST print in the following format:
+Title: (A one-line summary of the journal entry's main points)
+Content: (The journal entry's main body, at least two paragraphs)"""
 
 
 def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
@@ -357,13 +355,13 @@ def _generate_diary(
             a = log.get("bot_answer", "")
             a_summarized = _summarize(
                 a,
-                "다음 챗봇 답변을 핵심만 2~3문장으로 요약하라.",
+                "Summarize the following response into 2-3 key sentences.",
                 max_chars=500,
             )
-            raw_lines.append(f"- 질문: {q}\n  답변 요약: {a_summarized}")
+            raw_lines.append(f"- Query: {q}\n  Summary of response: {a_summarized}")
         chat_summary = "\n".join(raw_lines)
     else:
-        chat_summary = "(최근 대화 없음)"
+        chat_summary = "(No recent conversations)"
 
     # Previous diaries summary (최근 5건) — LLM 요약 적용
     prev_ref = ""
@@ -375,13 +373,13 @@ def _generate_diary(
             body = d.get("content", "")
             body_summarized = _summarize(
                 body,
-                "다음 일기 내용을 핵심 주제와 논점 위주로 2~3줄로 요약하라.",
+                "Summarize the following diary entry in 2-3 lines, focusing on the key topics and arguments.",
                 max_chars=500,
             )
             prev_lines.append(f"- [{ts}] {title}: {body_summarized}")
         prev_ref = "\n".join(prev_lines)
     else:
-        prev_ref = "(첫 번째 일기)"
+        prev_ref = "(First diary)"
 
     prompt = _DIARY_PROMPT.format(
         time_context=time_context,
