@@ -136,29 +136,36 @@ async def chat(request: ChatRequest, http_req: Request):
             print(f"\n{'='*60}", flush=True)
             print(f"📩 [요청] session={request.session_id} fp={request.fingerprint[:8] or 'none'} | \"{request.message[:80]}\"", flush=True)
 
-            async for output in g.astream(inputs, config=config, stream_mode="updates"):
-                for node_name, node_content in output.items():
-                    if node_name == "log_conversation":
-                        continue
+            try:
+                async for output in g.astream(inputs, config=config, stream_mode="updates"):
+                    for node_name, node_content in output.items():
+                        if node_name == "log_conversation":
+                            continue
 
-                    # Stream logs via SSE + print to console
-                    if "logs" in node_content:
-                        for log_line in node_content["logs"]:
-                            print(f"[{node_name}] {log_line}", flush=True)
+                        # Stream logs via SSE + print to console
+                        if "logs" in node_content:
+                            for log_line in node_content["logs"]:
+                                print(f"[{node_name}] {log_line}", flush=True)
+                                yield format_sse({
+                                    "type": "log",
+                                    "node": node_name,
+                                    "content": log_line
+                                })
+
+                        if node_name == "generate":
+                            last_message = node_content["messages"][-1]
+                            answer = last_message.content
+                            print(f"[generate] 답변 생성 완료 ({len(answer)}자)", flush=True)
                             yield format_sse({
-                                "type": "log",
-                                "node": node_name,
-                                "content": log_line
+                                "type": "answer",
+                                "content": answer
                             })
-
-                    if node_name == "generate":
-                        last_message = node_content["messages"][-1]
-                        answer = last_message.content
-                        print(f"[generate] 답변 생성 완료 ({len(answer)}자)", flush=True)
-                        yield format_sse({
-                            "type": "answer",
-                            "content": answer
-                        })
+            except Exception as e:
+                print(f"❌ [오류] 그래프 실행 중 예외 발생: {e}", flush=True)
+                yield format_sse({
+                    "type": "error",
+                    "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."
+                })
 
             print(f"{'='*60}\n", flush=True)
 

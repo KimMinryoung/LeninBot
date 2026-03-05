@@ -48,7 +48,7 @@ def _invoke_with_backoff(invoke_fn, max_attempts: int = 3, base_delay: float = 1
         except Exception as e:
             last_error = e
             msg = str(e).lower()
-            is_retryable = any(k in msg for k in ["429", "quota", "resource_exhausted", "rate limit", "timeout"])
+            is_retryable = any(k in msg for k in ["429", "503", "quota", "resource_exhausted", "rate limit", "timeout", "unavailable"])
             if not is_retryable or attempt == max_attempts - 1:
                 raise
             delay = base_delay * (2 ** attempt)
@@ -504,7 +504,7 @@ def _prepare_search_queries(query: str, context: str, selected_layer: str, logs:
                 "KO: <korean query>\n"
                 "EN: <english query>"
             )
-            result = llm_light.invoke(combined_prompt)
+            result = _invoke_with_backoff(lambda: llm_light.invoke(combined_prompt))
             lines = result.content.strip().split("\n")
             search_query_ko = query
             search_query_en = None
@@ -530,7 +530,7 @@ def _prepare_search_queries(query: str, context: str, selected_layer: str, logs:
                 f"Conversation context:\n{context}\n\n"
                 f"Current question: {query}"
             )
-            rewritten = llm_light.invoke(rewrite_prompt)
+            rewritten = _invoke_with_backoff(lambda: llm_light.invoke(rewrite_prompt))
             search_query_ko = rewritten.content.strip()
             if search_query_ko != query:
                 logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
@@ -589,7 +589,11 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
         try:
             return _run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
         except Exception as e:
-            logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
+            err_msg = str(e).lower()
+            if "connection reset" in err_msg or "defunct" in err_msg or "connectionreseterror" in err_msg:
+                logger.warning("[KG] 검색 실패 — Neo4j 유휴 연결 리셋 (무시 가능, 자동 복구됨). query=%s", q[:50])
+            else:
+                logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
             return None
     
     # If English query is provided, search with both and merge
@@ -990,7 +994,7 @@ def strategize_node(state: AgentState):
     logs = []
     logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
 
-    response = strategist_chain.invoke({"context": context, "question": question})
+    response = _invoke_with_backoff(lambda: strategist_chain.invoke({"context": context, "question": question}))
     strategy_text = _extract_text_content(response.content)
 
     logs.append(f"👉 전술 :\n   {strategy_text}")
@@ -1050,7 +1054,7 @@ Respond in the same language as the user's question."""
     ])
 
     chain = prompt | llm
-    response = chain.invoke({"messages": messages})
+    response = _invoke_with_backoff(lambda: chain.invoke({"messages": messages}))
     text = _extract_text_content(response.content)
     normalized = AIMessage(content=text)
     logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성")
