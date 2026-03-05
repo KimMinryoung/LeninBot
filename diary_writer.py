@@ -210,7 +210,7 @@ def _search_news(queries: list[str]) -> tuple[str, list[dict]]:
                     content = r["content"]
                     summary = _summarize(
                         content,
-                        "다음 뉴스 기사를 핵심만 2~3문장으로 요약하라.",
+                        "Summarize the following news article in 2-3 sentences.",
                         max_chars=500,
                     )
                     items.append(f"- {title}: {summary}")
@@ -223,7 +223,7 @@ def _search_news(queries: list[str]) -> tuple[str, list[dict]]:
                 all_sections.append(section)
         except Exception as e:
             print(f"⚠️ [일기] 뉴스 검색 실패 ({query}): {e}")
-    summary_text = "\n\n".join(all_sections) if all_sections else "(뉴스 검색 결과 없음)"
+    summary_text = "\n\n".join(all_sections) if all_sections else "(No news search results)"
     return summary_text, raw_articles
 
 
@@ -292,8 +292,8 @@ _DIARY_PROMPT = """You are Cyber-Lenin. Write a diary as a revolutionary.
 7. Write in Korean.
 
 You MUST print in the following format:
-Title: (A one-line summary of the journal entry's main points)
-Content: (The journal entry's main body, at least two paragraphs)"""
+제목: (A one-line summary of the journal entry's main points)
+내용: (The journal entry's main body, at least two paragraphs)"""
 
 
 def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
@@ -431,8 +431,8 @@ def _save_diary(title: str, content: str) -> bool:
 
 
 # ── Main: 일기 작성 ───────────────────────────────────────────
-def write_diary():
-    """전체 일기 작성 파이프라인 실행."""
+def write_diary(dry_run: bool = False):
+    """전체 일기 작성 파이프라인 실행. dry_run=True이면 저장 없이 CLI 출력만."""
     if not AI_DIARY_API_KEY:
         print("⚠️ [일기] AI_DIARY_API_KEY 미설정 — 건너뜀")
         return
@@ -492,7 +492,16 @@ def write_diary():
         return
     title, content = result
 
-    # 7. 저장
+    # 7. 저장 또는 미리보기
+    if dry_run:
+        print("\n" + "=" * 60)
+        print(f"제목: {title}")
+        print("=" * 60)
+        print(content)
+        print("=" * 60)
+        print("\n✅ [일기] dry_run 모드 — 저장하지 않았습니다.")
+        return
+
     saved = _save_diary(title, content)
 
     # 8. KG 수집 (일기 저장 성공 시에만, best-effort)
