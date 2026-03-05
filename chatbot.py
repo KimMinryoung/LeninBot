@@ -322,9 +322,12 @@ class BatchGradeKGResult(BaseModel):
 system_batch_grade_kg = """You are a Knowledge Graph relevance grader.
 You will receive a user question and structured KG results (nodes and edges).
 
-For EACH node and edge, determine if it would be useful for answering the question.
-- Grade "yes" if it contains relevant entities, relationships, or facts.
-- Grade "no" only if clearly unrelated or too generic.
+For EACH node and edge, determine if it would add **meaningful, non-obvious information** for answering the question.
+- Grade "yes" if it contains specific, informative facts that help answer the question.
+- Grade "no" if it is:
+  - Clearly unrelated to the question.
+  - Tautological or self-evident (e.g. "X is a party to the X-Y War", "Country A is involved in conflict with Country B" when that is the premise of the question).
+  - A mere restatement of the question or its obvious assumptions.
 - When in doubt, grade "yes".
 
 Respond with ONLY a JSON object:
