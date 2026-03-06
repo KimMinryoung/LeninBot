@@ -78,7 +78,7 @@ class GraphMemoryService:
         llm_client = GeminiClient(
             config=LLMConfig(
                 api_key=gemini_api_key,
-                model="gemini-3.1-flash-lite-latest",
+                model="gemini-3.1-flash-lite-preview",
                 small_model="gemini-2.5-flash-lite",
             )
         )
