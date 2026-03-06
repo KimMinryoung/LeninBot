@@ -136,7 +136,7 @@ def _build_recent_window_phrase(last_diary_time: str | None, now: datetime) -> s
         hours = max(1, round((now - last_kst).total_seconds() / 3600))
         if hours < 24:
             return f"Last {hours} hours"
-        days = max(1, hours // 24)
+        days = max(1, round(hours / 24))
         return f"Last {days} days"
     except Exception:
         return "Last 24 hours"
@@ -328,7 +328,7 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
             if hours < 1:
                 elapsed_line = "방금 전에 일기를 썼지만, 다시 펜을 들었다."
             elif hours < 24:
-                elapsed_line = f"마지막 일기를 쓴 지 약 {int(hours)}시간이 흘렀다."
+                elapsed_line = f"마지막 일기를 쓴 지 약 {round(hours)}시간이 흘렀다."
             else:
                 days = int(hours / 24)
                 elapsed_line = f"{days}일 만에 다시 앉았다."
