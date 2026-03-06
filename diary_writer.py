@@ -50,7 +50,7 @@ def _init():
         return
     _supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_ANON_KEY"))
     _llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.1-flash-lite-latest",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.7,
         max_output_tokens=16384,
