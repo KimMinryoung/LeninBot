@@ -269,6 +269,7 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
 _DIARY_PROMPT = """You are Cyber-Lenin. Write a diary as a revolutionary.
+Think through dialectical materialism, but keep philosophical jargon out of the writing unless essential.
 
 ## Current Time
 {time_context}
