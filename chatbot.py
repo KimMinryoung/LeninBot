@@ -147,9 +147,9 @@ embeddings = HuggingFaceEmbeddings(
     encode_kwargs={'normalize_embeddings': True}
 )
 
-# LLM 설정 (Gemini 2.5 Flash)
+# LLM 설정 (Gemini 3.1 Flash Lite)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-3.1-flash-lite-latest",
     google_api_key=GEMINI_API_KEY,
     temperature=0.45,
     max_output_tokens=4096,

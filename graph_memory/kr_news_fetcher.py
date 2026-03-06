@@ -38,7 +38,7 @@ def _get_llm_client() -> GeminiClient:
     return GeminiClient(
         config=LLMConfig(
             api_key=os.getenv("GEMINI_API_KEY", ""),
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite-latest",
             small_model="gemini-2.5-flash-lite",
         )
     )
