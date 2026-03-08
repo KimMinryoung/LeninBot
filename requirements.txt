@@ -5,7 +5,8 @@ uvicorn
 # Core dependencies
 python-dotenv
 pydantic
-supabase
+psycopg2-binary
+supabase          # still used by update_knowledge.py
 requests
 
 # LangChain / LangGraph

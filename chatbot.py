@@ -5,8 +5,8 @@ from typing import Annotated, List, TypedDict, Optional
 from operator import add
 from dotenv import load_dotenv
 
-# Supabase & Embeddings
-from supabase.client import Client, create_client
+# Database & Embeddings
+from db import query as db_query, execute as db_execute
 from langchain_huggingface import HuggingFaceEmbeddings
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -131,14 +131,7 @@ logger.info("⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
 # 1. 환경 설정 및 초기화
 load_dotenv()
 
-# Supabase 연결
-SUPABASE_URL = _require_env("SUPABASE_URL")
-SUPABASE_KEY = _require_env("SUPABASE_ANON_KEY")
 GEMINI_API_KEY = _require_env("GEMINI_API_KEY")
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    raise RuntimeError(f"Supabase 클라이언트 초기화 실패: {e}") from e
 
 # 임베딩 모델
 embeddings = HuggingFaceEmbeddings(
@@ -462,21 +455,16 @@ def router_logic(state: AgentState):
 #  postgrest v2.x의 SyncRPCFilterRequestBuilder와 호환되지 않는 문제 우회)
 def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list:
     query_embedding = embeddings.embed_query(query)
-    params = {
-        "query_embedding": query_embedding,
-        "match_count": k,
-    }
-    if layer:
-        params["filter_layer"] = layer
+    embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
     try:
-        res = supabase.rpc(
-            "match_documents",
-            params,
-        ).execute()
+        rows = db_query(
+            "SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)",
+            (embedding_str, k, layer),
+        )
     except Exception as e:
         error_msg = str(e)
         if "57014" in error_msg or "timeout" in error_msg.lower():
-            print("⚠️ [검색] Supabase statement timeout 발생. 검색을 건너뜁니다.")
+            print("⚠️ [검색] statement timeout 발생. 검색을 건너뜁니다.")
         else:
             print(f"⚠️ [검색] RPC 호출 실패: {e}")
         return []
@@ -486,7 +474,7 @@ def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list
             page_content=row.get("content", ""),
             metadata=row.get("metadata", {}),
         )
-        for row in res.data
+        for row in rows
         if row.get("content")
     ]
 
@@ -1117,7 +1105,17 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
             "processing_logs": processing_logs,
         }
 
-        supabase.table("chat_logs").insert(row).execute()
+        db_execute(
+            """INSERT INTO chat_logs
+               (session_id, fingerprint, user_agent, ip_address,
+                user_query, bot_answer, route, documents_count,
+                web_search_used, strategy, processing_logs)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (row["session_id"], row["fingerprint"], row["user_agent"],
+             row["ip_address"], row["user_query"], row["bot_answer"],
+             row["route"], row["documents_count"], row["web_search_used"],
+             row["strategy"], row["processing_logs"]),
+        )
     except Exception as e:
         print(f"⚠️ [로그] DB 기록 실패: {e}")
 

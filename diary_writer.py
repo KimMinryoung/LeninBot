@@ -14,7 +14,7 @@ import re
 import requests
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from supabase.client import Client, create_client
+from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_tavily import TavilySearch
 
@@ -37,18 +37,18 @@ _TIME_LABELS = {
 }
 
 # ── Clients (lazy-initialized on first write_diary call) ──────
-_supabase: Client | None = None
 _llm = None
 _llm_lite = None
 _news_search = None
+_initialized = False
 
 
 def _init():
     """Lazy-initialize heavy clients on first use."""
-    global _supabase, _llm, _llm_lite, _news_search
-    if _supabase is not None:
+    global _llm, _llm_lite, _news_search, _initialized
+    if _initialized:
         return
-    _supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_ANON_KEY"))
+    _initialized = True
     _llm = ChatGoogleGenerativeAI(
         model="gemini-3.1-flash-lite-preview",
         google_api_key=os.getenv("GEMINI_API_KEY"),
@@ -108,15 +108,22 @@ def _get_previous_diaries() -> list[dict]:
 # ── Step 2: 채팅 로그 수집 ─────────────────────────────────────
 def _get_chat_logs_since(since_time: str | None) -> list[dict]:
     try:
-        query = (
-            _supabase.table("chat_logs")
-            .select("user_query, bot_answer, created_at")
-            .order("created_at", desc=False)
-        )
         if since_time:
-            query = query.gt("created_at", since_time)
-        result = query.limit(100).execute()
-        return result.data
+            return db_query(
+                """SELECT user_query, bot_answer, created_at
+                   FROM chat_logs
+                   WHERE created_at > %s
+                   ORDER BY created_at ASC
+                   LIMIT 100""",
+                (since_time,),
+            )
+        else:
+            return db_query(
+                """SELECT user_query, bot_answer, created_at
+                   FROM chat_logs
+                   ORDER BY created_at ASC
+                   LIMIT 100""",
+            )
     except Exception as e:
         print(f"⚠️ [일기] 채팅 로그 수집 실패: {e}")
     return []

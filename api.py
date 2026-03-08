@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 #from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import HumanMessage
-from supabase.client import Client, create_client
+from db import query as db_query
 
 load_dotenv()
 
@@ -51,11 +51,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 
-# Lightweight Supabase client for /logs (does NOT import chatbot module)
-_supabase_light: Client = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_ANON_KEY"),
-)
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state
 _session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -178,17 +173,13 @@ async def get_logs(
     offset: int = Query(default=0, ge=0),
 ):
     """
-    Fetch chat logs from Supabase (admin view — all fields, ordered by most recent first).
+    Fetch chat logs (admin view — all fields, ordered by most recent first).
     """
-    sb = _supabase_light
-    result = (
-        sb.table("chat_logs")
-        .select("*")
-        .order("created_at", desc=True)
-        .range(offset, offset + limit - 1)
-        .execute()
+    rows = db_query(
+        "SELECT * FROM chat_logs ORDER BY created_at DESC LIMIT %s OFFSET %s",
+        (limit, offset),
     )
-    return {"logs": result.data, "count": len(result.data)}
+    return {"logs": rows, "count": len(rows)}
 
 
 @app.get("/history")
@@ -201,15 +192,15 @@ async def get_history(
     Returns only user_query, bot_answer, created_at — no processing logs or internal fields.
     Persistent across server restarts (fingerprint is device-based, not session-based).
     """
-    result = (
-        _supabase_light.table("chat_logs")
-        .select("user_query, bot_answer, created_at")
-        .eq("fingerprint", fingerprint)
-        .order("created_at", desc=False)
-        .limit(limit)
-        .execute()
+    rows = db_query(
+        """SELECT user_query, bot_answer, created_at
+           FROM chat_logs
+           WHERE fingerprint = %s
+           ORDER BY created_at ASC
+           LIMIT %s""",
+        (fingerprint, limit),
     )
-    return {"history": result.data}
+    return {"history": rows}
 
 
 @app.delete("/session/{session_id}")
