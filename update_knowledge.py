@@ -1,23 +1,18 @@
 import os
 import glob
 import re
+import json
 from dotenv import load_dotenv
 from tqdm import tqdm
-from supabase.client import Client, create_client
-from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from db import get_conn
 import torch
 
 load_dotenv()
 
 # 1. 초기화
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# BGE-M3 임베딩 모델 (1024차원, 다국어 지원)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"[System] Using device: {device}")
 
@@ -25,12 +20,6 @@ embeddings = HuggingFaceEmbeddings(
     model_name="BAAI/bge-m3",
     model_kwargs={'device': device},
     encode_kwargs={'normalize_embeddings': True}
-)
-vectorstore = SupabaseVectorStore(
-    client=supabase,
-    embedding=embeddings,
-    table_name="lenin_corpus",
-    query_name="match_documents",
 )
 
 source_directory = "./docs/lenin"
@@ -149,9 +138,25 @@ def _extract_author_year(file_path, source_dir):
     return author, year
 
 
+def _insert_documents_batch(splits):
+    """Embed documents and INSERT into lenin_corpus in a single transaction."""
+    texts = [doc.page_content for doc in splits]
+    metadatas = [doc.metadata for doc in splits]
+    vectors = embeddings.embed_documents(texts)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for text, metadata, vec in zip(texts, metadatas, vectors):
+                embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
+                cur.execute(
+                    "INSERT INTO lenin_corpus (content, metadata, embedding) VALUES (%s, %s, %s::vector)",
+                    (text, json.dumps(metadata), embedding_str),
+                )
+
+
 def update_knowledge(layer="core_theory"):
     print(f"📂 {source_directory} 폴더에서 새 문서를 탐색 중... (layer: {layer})")
-    
+
     # 로그 파일에서 처리된 파일 목록 읽기
     if os.path.exists(log_file):
         with open(log_file, "r", encoding="utf-8") as f:
@@ -216,10 +221,10 @@ def update_knowledge(layer="core_theory"):
                 if year:
                     doc.metadata["year"] = year
 
-            # 5. Supabase 전송 (배치 처리)
+            # 5. DB 전송 (배치 처리)
             batch_size = 5
             for i in range(0, len(splits), batch_size):
-                vectorstore.add_documents(documents=splits[i:i+batch_size])
+                _insert_documents_batch(splits[i:i+batch_size])
             total_chunks += len(splits)
 
             # 6. 로그에 추가 (성공 시에만)

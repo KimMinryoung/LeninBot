@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-01
+# Project State Report — 2026-03-08
 
 ## Identity
 
@@ -10,7 +10,7 @@ Deployed at Render.com, frontend at `bichonwebpage.onrender.com`.
 ## Architecture Summary
 
 ```
-User ─► FastAPI (api.py) ─► LangGraph StateGraph (chatbot.py) ─► Supabase pgvector (direct RPC)
+User ─► FastAPI (api.py) ─► LangGraph StateGraph (chatbot.py) ─► PostgreSQL/pgvector (direct psycopg2)
                                                                  ─► Gemini 2.5 Flash (gen/strategist/planner)
                                                                  ─► Gemini 2.0 Flash-Lite (routing/grading/critic)
                                                                  ─► Tavily Web Search
@@ -55,7 +55,7 @@ KG failure at any layer results in graceful degradation — pipeline continues w
 | strategize | flash | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
 | generate | flash (streaming) | Final answer with intent-specific system prompt; incorporates critic feedback on retries |
 | critic | *(disabled)* | Phase 1: Pass-through — was evaluating groundedness/relevance/completeness but caused rate-limit cascades |
-| log_conversation | — | Writes to Supabase chat_logs |
+| log_conversation | — | Writes to PostgreSQL chat_logs (direct psycopg2) |
 | planner | flash | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
 | step_executor | — | Phase 3: Executes plan steps (retrieve or web_search) + KG search per step; deduplicates facts via `_merge_kg_contexts()` |
 
@@ -141,7 +141,8 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
 ├── chatbot.py                # Core LangGraph agent pipeline (~975 lines)
-├── update_knowledge.py       # Vector DB ingestion script
+├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
+├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
 ├── crawler.py                # Lenin corpus (marxists.org)
 ├── crawler_marx.py           # Marx/Engels corpus
 ├── crawler_theorists.py      # Trotsky, Luxemburg, Gramsci, Bukharin, Mao (Trotsky url_filter fixed)
@@ -182,7 +183,7 @@ AIChatBot/
 9. Plan-and-execute for complex strategic queries (Phase 3)
 10. Short-term conversation memory via LangGraph checkpointing (Phase 4)
 11. SSE streaming API with answer buffering (only emits after critic accepts)
-12. Conversation logging to Supabase (per-turn logs only, not full session)
+12. Conversation logging to PostgreSQL via direct connection (per-turn logs only, not full session)
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
@@ -199,6 +200,16 @@ AIChatBot/
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
 
 ## Recent Changes
+
+### 2026-03-08 — Supabase REST API → Direct PostgreSQL 마이그레이션
+- **`db.py`** (new): `psycopg2` 커넥션 풀 모듈 — `query()`, `execute()`, `get_conn()` 헬퍼 제공. `SimpleConnectionPool(1-5)`, SSL require, `RealDictCursor`.
+- **`chatbot.py`**: Supabase 클라이언트 제거. `_direct_similarity_search()` — `supabase.rpc("match_documents")` → `SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)` 직접 SQL. `log_conversation_node` — `supabase.table().insert()` → `db_execute()` INSERT.
+- **`api.py`**: `_supabase_light` 클라이언트 제거. `/logs` — `sb.table("chat_logs").select("*").order().range()` → `db_query("SELECT * ... ORDER BY ... LIMIT ... OFFSET ...")`. `/history` — 동일 패턴 직접 SQL.
+- **`diary_writer.py`**: `_supabase` 클라이언트 제거, lazy-init을 `_initialized` 플래그로 전환. `_get_chat_logs_since()` → 직접 SQL.
+- **`requirements.txt`**: `psycopg2-binary` 추가. `supabase`는 `update_knowledge.py`용으로 유지.
+- **`.env`**: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` 추가 (Supabase Session Pooler 사용).
+- **동기**: anon key + PostgREST 패턴에서 직접 PostgreSQL 연결로 전환하여 per-service 접근 제어 가능 (향후 PostgreSQL role 기반 GRANT/RLS 적용 대비).
+- **검증**: 벡터 검색 (`match_documents`), chat_logs INSERT/SELECT, datetime 직렬화 모두 정상 동작 확인.
 
 ### 2026-03-01 — chatbot.py 지식그래프 질의 통합
 - **`chatbot.py` AgentState**: `kg_context: Optional[str]` 필드 추가 + `analyze_intent_node` transient reset에 포함
