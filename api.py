@@ -44,9 +44,13 @@ async def _diary_scheduler():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_diary_scheduler())
+    diary_task = asyncio.create_task(_diary_scheduler())
+    # Start Telegram bot alongside the API server
+    from telegram_bot import bot_main
+    bot_task = asyncio.create_task(bot_main())
     yield
-    task.cancel()
+    bot_task.cancel()
+    diary_task.cancel()
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
