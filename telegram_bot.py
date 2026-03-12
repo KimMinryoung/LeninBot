@@ -1,7 +1,7 @@
 """telegram_bot.py — Telegram bot interface (aiogram 3.x).
 
 Features:
-- General messages → Gemini API chat with per-user history
+- General messages → Claude Haiku API chat with per-user history
 - /task <content> → Save to PostgreSQL queue, background worker processes, push on completion
 - /status → Show last 5 tasks
 - /clear → Reset chat history
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
-import google.generativeai as genai
+import anthropic
 
 load_dotenv()
 
@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 
 # ── Config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ALLOWED_USER_IDS: set[int] = {
     int(uid.strip())
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
@@ -108,9 +108,10 @@ def _ensure_table():
     """)
 
 
-# ── Gemini client ────────────────────────────────────────────────────
-genai.configure(api_key=GEMINI_API_KEY)
-_gemini_model = genai.GenerativeModel("gemini-2.5-flash-lite")
+# ── Claude client ────────────────────────────────────────────────────
+_claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+_CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+_CLAUDE_MAX_TOKENS = 4096
 
 # Per-user chat history (in-memory, lost on restart)
 _chat_history: dict[int, list[dict]] = {}
@@ -152,7 +153,7 @@ async def cmd_start(message: Message):
         return
     await message.answer(
         "레닌봇 텔레그램 인터페이스입니다.\n\n"
-        "메시지를 보내면 Gemini 기반 대화를 할 수 있습니다.\n"
+        "메시지를 보내면 Claude 기반 대화를 할 수 있습니다.\n"
         "/task <내용> — 백그라운드 태스크 등록\n"
         "/status — 최근 태스크 상태 확인\n"
         "/clear — 대화 히스토리 초기화"
@@ -217,7 +218,7 @@ async def handle_message(message: Message):
     if user_id not in _chat_history:
         _chat_history[user_id] = []
     history = _chat_history[user_id]
-    history.append({"role": "user", "parts": [user_text]})
+    history.append({"role": "user", "content": user_text})
 
     # Trim to last N turns
     if len(history) > MAX_HISTORY_TURNS * 2:
@@ -225,13 +226,17 @@ async def handle_message(message: Message):
         _chat_history[user_id] = history
 
     try:
-        response = await asyncio.to_thread(_gemini_model.generate_content, history)
-        reply = response.text
+        response = await _claude.messages.create(
+            model=_CLAUDE_MODEL,
+            max_tokens=_CLAUDE_MAX_TOKENS,
+            messages=history,
+        )
+        reply = response.content[0].text
     except Exception as e:
-        logger.error("Gemini API error: %s", e)
+        logger.error("Claude API error: %s", e)
         reply = f"오류가 발생했습니다: {e}"
 
-    history.append({"role": "model", "parts": [reply]})
+    history.append({"role": "assistant", "content": reply})
 
     for chunk in _split_message(reply):
         await message.answer(chunk)
@@ -239,16 +244,18 @@ async def handle_message(message: Message):
 
 # ── Background Task Worker ───────────────────────────────────────────
 async def _process_task(bot: Bot, task: dict):
-    """Process a single task via Gemini and push result to user."""
+    """Process a single task via Claude and push result to user."""
     task_id = task["id"]
     user_id = task["user_id"]
     content = task["content"]
 
     try:
-        response = await asyncio.to_thread(
-            _gemini_model.generate_content, content
+        response = await _claude.messages.create(
+            model=_CLAUDE_MODEL,
+            max_tokens=_CLAUDE_MAX_TOKENS,
+            messages=[{"role": "user", "content": content}],
         )
-        result = response.text
+        result = response.content[0].text
 
         await asyncio.to_thread(
             _execute,
