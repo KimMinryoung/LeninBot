@@ -2,6 +2,7 @@
 
 Features:
 - General messages → Claude Haiku API chat with per-user history
+- /chat <message> → CLAW pipeline (LangGraph agent: intent→retrieve→KG→strategize→generate)
 - /task <content> → Save to PostgreSQL queue, background worker processes, push on completion
 - /status → Show last 5 tasks
 - /clear → Reset chat history
@@ -118,6 +119,17 @@ _chat_history: dict[int, list[dict]] = {}
 
 MAX_HISTORY_TURNS = 20  # 20 pairs = 40 messages
 
+# ── CLAW pipeline (lazy-loaded) ──────────────────────────────────────
+_graph = None
+
+
+def _get_graph():
+    global _graph
+    if _graph is None:
+        from chatbot import graph
+        _graph = graph
+    return _graph
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 def _split_message(text: str, max_len: int = 4096) -> list[str]:
@@ -154,6 +166,7 @@ async def cmd_start(message: Message):
     await message.answer(
         "레닌봇 텔레그램 인터페이스입니다.\n\n"
         "메시지를 보내면 Claude 기반 대화를 할 수 있습니다.\n"
+        "/chat <메시지> — CLAW 파이프라인으로 질의 (RAG+KG+전략)\n"
         "/task <내용> — 백그라운드 태스크 등록\n"
         "/status — 최근 태스크 상태 확인\n"
         "/clear — 대화 히스토리 초기화"
@@ -166,6 +179,55 @@ async def cmd_clear(message: Message):
         return
     _chat_history.pop(message.from_user.id, None)
     await message.answer("대화 히스토리가 초기화되었습니다.")
+
+
+@router.message(Command("chat"))
+async def cmd_chat(message: Message):
+    """Route message through the CLAW pipeline (LangGraph agent)."""
+    if not _is_allowed(message.from_user.id):
+        return
+    content = (message.text or "").removeprefix("/chat").strip()
+    if not content:
+        await message.answer("사용법: /chat <메시지>")
+        return
+
+    user_id = message.from_user.id
+    await message.answer("CLAW 파이프라인 처리 중...")
+
+    try:
+        from langchain_core.messages import HumanMessage
+
+        g = _get_graph()
+        thread_id = f"tg_{user_id}"
+        inputs = {"messages": [HumanMessage(content=content)]}
+        config = {"configurable": {"thread_id": thread_id}}
+
+        answer = None
+        logs: list[str] = []
+        async for output in g.astream(inputs, config=config, stream_mode="updates"):
+            for node_name, node_content in output.items():
+                if node_name == "log_conversation":
+                    continue
+                if "logs" in node_content:
+                    logs.extend(node_content["logs"])
+                if node_name == "generate":
+                    last_msg = node_content["messages"][-1]
+                    answer = last_msg.content
+
+        if answer:
+            for chunk in _split_message(answer):
+                await message.answer(chunk)
+        else:
+            await message.answer("파이프라인에서 답변을 생성하지 못했습니다.")
+
+        if logs:
+            log_summary = "\n".join(logs[-10:])  # last 10 log lines
+            for chunk in _split_message(f"[처리 로그]\n{log_summary}"):
+                await message.answer(chunk)
+
+    except Exception as e:
+        logger.error("CLAW pipeline error: %s", e)
+        await message.answer(f"CLAW 파이프라인 오류: {e}")
 
 
 @router.message(Command("task"))
@@ -303,11 +365,14 @@ async def _task_worker(bot: Bot):
 
 
 # ── Entry Point ──────────────────────────────────────────────────────
-async def main():
+async def bot_main():
+    """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+        logger.warning("TELEGRAM_BOT_TOKEN not set, skipping bot")
+        return
     if not ALLOWED_USER_IDS:
-        raise RuntimeError("ALLOWED_USER_IDS is not set")
+        logger.warning("ALLOWED_USER_IDS not set, skipping bot")
+        return
 
     # Ensure task table exists
     await asyncio.to_thread(_ensure_table)
@@ -324,4 +389,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(bot_main())
