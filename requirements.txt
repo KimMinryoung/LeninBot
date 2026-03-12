@@ -18,3 +18,7 @@ langgraph
 
 # Knowledge Graph (Graphiti + Neo4j)
 graphiti-core[google-genai]
+
+# Telegram bot
+aiogram>=3.0,<4.0
+google-generativeai
