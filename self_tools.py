@@ -159,6 +159,26 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "read_render_status",
+        "description": (
+            "Check your own deployment status on Render. Shows recent deploys "
+            "(status, commit message, timestamps) and events (build started, "
+            "deploy ended, etc.). Use this to know if you are currently being "
+            "updated, if a deploy failed, or when you were last restarted."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "deploy_limit": {
+                    "type": "integer",
+                    "description": "Number of recent deploys to retrieve (1-10).",
+                    "default": 5,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "read_recent_updates",
         "description": (
             "Read your own recent feature updates and changelog. Shows what new "
@@ -427,6 +447,57 @@ async def _exec_read_system_status() -> str:
     return "=== SYSTEM STATUS ===\n\n" + "\n\n".join(status_parts)
 
 
+async def _exec_read_render_status(deploy_limit: int = 5) -> str:
+    from shared import fetch_render_status
+
+    data = await asyncio.to_thread(fetch_render_status, deploy_limit)
+
+    if "error" in data:
+        return f"Render status check failed: {data['error']}"
+
+    parts = []
+
+    # Deploys
+    deploys = data.get("deploys", [])
+    if deploys:
+        parts.append(f"Recent deploys ({len(deploys)}):")
+        for d in deploys:
+            created = d.get("created_at", "?")[:19].replace("T", " ")
+            finished = d.get("finished_at") or ""
+            if finished:
+                finished = finished[:19].replace("T", " ")
+            commit = d.get("commit_message", "?")
+            parts.append(
+                f"  [{d.get('status', '?')}] {created}"
+                f"{' -> ' + finished if finished else ''}"
+                f"\n    commit: {commit}"
+            )
+    else:
+        parts.append("No recent deploys found.")
+
+    # Events
+    events = data.get("events", [])
+    if events:
+        parts.append(f"\nRecent events ({len(events)}):")
+        for ev in events:
+            ts = ev.get("timestamp", "?")[:19].replace("T", " ")
+            ev_type = ev.get("type", "?")
+            details = ev.get("details", {})
+            # Extract useful detail fields
+            detail_str = ""
+            if "deployStatus" in details:
+                detail_str = f" (deploy: {details['deployStatus']})"
+            elif "trigger" in details:
+                trigger = details["trigger"]
+                if trigger.get("manual"):
+                    detail_str = " (manual)"
+                elif trigger.get("envUpdated"):
+                    detail_str = " (env updated)"
+            parts.append(f"  {ts} | {ev_type}{detail_str}")
+
+    return "=== RENDER DEPLOYMENT STATUS ===\n\n" + "\n".join(parts)
+
+
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
     from shared import fetch_recent_updates
 
@@ -514,6 +585,7 @@ SELF_TOOL_HANDLERS = {
     "read_task_reports": _exec_read_task_reports,
     "read_kg_status": _exec_read_kg_status,
     "read_system_status": _exec_read_system_status,
+    "read_render_status": _exec_read_render_status,
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
 }

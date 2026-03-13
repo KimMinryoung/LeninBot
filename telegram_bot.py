@@ -147,6 +147,7 @@ information not likely in the document DB or KG.
 - **read_task_reports**: Review intelligence task reports from /task queue (pending, done, failed).
 - **read_kg_status**: Check knowledge graph statistics (entity counts, recent episodes).
 - **read_system_status**: Comprehensive self-diagnosis — diary, chats, tasks, KG, architecture.
+- **read_render_status**: Check your Render deployment status — recent deploys, build events, restarts.
 - **read_recent_updates**: Read your own recent feature changelog — what new capabilities you gained.
 - **read_source_code**: Read your own source code files. List available files or read a specific file with line ranges.
 

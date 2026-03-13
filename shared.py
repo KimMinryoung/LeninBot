@@ -324,6 +324,64 @@ def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:
     return result
 
 
+def fetch_render_status(deploy_limit: int = 5) -> dict:
+    """Fetch deployment status and recent events from Render API.
+
+    Returns dict with 'deploys' and 'events' lists.
+    Requires RENDER_API_KEY and RENDER_SERVICE_ID env vars.
+    """
+    api_key = os.getenv("RENDER_API_KEY", "")
+    service_id = os.getenv("RENDER_SERVICE_ID", "")
+    if not api_key or not service_id:
+        return {"error": "RENDER_API_KEY or RENDER_SERVICE_ID not set"}
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    base = "https://api.render.com/v1"
+    result = {"deploys": [], "events": []}
+
+    # Fetch recent deploys
+    try:
+        resp = requests.get(
+            f"{base}/services/{service_id}/deploys",
+            params={"limit": deploy_limit},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            for item in resp.json():
+                d = item.get("deploy", item)
+                result["deploys"].append({
+                    "id": d.get("id", ""),
+                    "status": d.get("status", ""),
+                    "created_at": d.get("createdAt", ""),
+                    "finished_at": d.get("finishedAt", ""),
+                    "commit_message": d.get("commit", {}).get("message", "")[:100],
+                })
+    except Exception as e:
+        logger.error("[shared] fetch_render_status deploys error: %s", e)
+
+    # Fetch recent events
+    try:
+        resp = requests.get(
+            f"{base}/services/{service_id}/events",
+            params={"limit": 10},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            for item in resp.json():
+                ev = item.get("event", item)
+                result["events"].append({
+                    "type": ev.get("type", ""),
+                    "timestamp": ev.get("timestamp", ""),
+                    "details": ev.get("details", {}),
+                })
+    except Exception as e:
+        logger.error("[shared] fetch_render_status events error: %s", e)
+
+    return result
+
+
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Cyber-Lenin System Architecture
