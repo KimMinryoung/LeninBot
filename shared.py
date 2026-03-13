@@ -285,6 +285,45 @@ def fetch_kg_stats() -> dict:
         return {"error": str(e)}
 
 
+def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:
+    """Read recent feature updates from dev_docs/project_state.md.
+
+    Parses the '## Recent Changes' section and returns the latest entries.
+    """
+    import pathlib
+    import re
+
+    state_file = pathlib.Path(__file__).resolve().parent / "dev_docs" / "project_state.md"
+    if not state_file.exists():
+        return "(No update log found)"
+
+    try:
+        text = state_file.read_text("utf-8")
+    except Exception as e:
+        logger.error("[shared] fetch_recent_updates read error: %s", e)
+        return "(Failed to read update log)"
+
+    # Find "## Recent Changes" section
+    rc_match = re.search(r"^## Recent Changes\s*$", text, re.MULTILINE)
+    if not rc_match:
+        return "(No recent changes section found)"
+
+    changes_text = text[rc_match.end():]
+
+    # Split into entries by "### YYYY-MM-DD — Title"
+    entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", changes_text, flags=re.MULTILINE)
+    entries = [e.strip() for e in entries if e.strip()]
+
+    if not entries:
+        return "(No update entries found)"
+
+    selected = entries[:max_entries]
+    result = "\n\n".join(selected)
+    if len(result) > max_chars:
+        result = result[:max_chars] + "\n... (truncated)"
+    return result
+
+
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Cyber-Lenin System Architecture

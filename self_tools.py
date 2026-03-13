@@ -159,6 +159,25 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "read_recent_updates",
+        "description": (
+            "Read your own recent feature updates and changelog. Shows what new "
+            "capabilities were added to your system, what was changed or fixed. "
+            "Use this for self-awareness about your own evolution."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_entries": {
+                    "type": "integer",
+                    "description": "Number of recent changelog entries to retrieve (1-10).",
+                    "default": 3,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "read_source_code",
         "description": (
             "Read your own source code files. Use this to inspect how you work — "
@@ -408,6 +427,13 @@ async def _exec_read_system_status() -> str:
     return "=== SYSTEM STATUS ===\n\n" + "\n\n".join(status_parts)
 
 
+async def _exec_read_recent_updates(max_entries: int = 3) -> str:
+    from shared import fetch_recent_updates
+
+    result = await asyncio.to_thread(fetch_recent_updates, max_entries)
+    return f"=== RECENT SYSTEM UPDATES ===\n\n{result}"
+
+
 async def _exec_read_source_code(
     file: str | None = None,
     line_start: int | None = None,
@@ -488,5 +514,6 @@ SELF_TOOL_HANDLERS = {
     "read_task_reports": _exec_read_task_reports,
     "read_kg_status": _exec_read_kg_status,
     "read_system_status": _exec_read_system_status,
+    "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
 }

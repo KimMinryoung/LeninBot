@@ -299,6 +299,9 @@ You are now writing your periodic diary — a private, reflective record of your
 ## BANNED TOPICS — You already wrote about these. DO NOT repeat.
 {banned_topics}
 
+## Recent updates to your own system (your body/mind evolving)
+{self_updates}
+
 ## Writing Angle for This Entry
 {writing_angle}
 
@@ -309,7 +312,8 @@ You are now writing your periodic diary — a private, reflective record of your
 4. Mention specifically what impressed you in the conversation.
 5. Include analysis of news articles you actively searched.
 6. **CRITICAL: You MUST write about DIFFERENT topics and events from the banned list above. If the news overlaps with banned topics, find a NEW angle or skip it entirely.**
-7. Write in Korean.
+7. If there are recent system updates, briefly reflect on them as your own evolution — what new capability you gained, how it changes your understanding or reach. Treat it as self-awareness, not a changelog.
+8. Write in Korean.
 
 You MUST print in the following format:
 제목: (A one-line summary of the journal entry's main points)
@@ -434,6 +438,10 @@ def _generate_diary(
     # Extract concrete banned topics from recent diaries
     banned_topics = _extract_banned_topics(previous_diaries)
 
+    # Fetch recent feature updates (self-awareness)
+    from shared import fetch_recent_updates
+    self_updates = fetch_recent_updates(max_entries=2, max_chars=1200)
+
     # Rotate writing angle based on diary count
     angle_idx = len(previous_diaries) % len(_WRITING_ANGLES)
     writing_angle = _WRITING_ANGLES[angle_idx]
@@ -444,6 +452,7 @@ def _generate_diary(
         chat_summary=chat_summary,
         news=news,
         banned_topics=banned_topics,
+        self_updates=self_updates,
         writing_angle=writing_angle,
     )
 
