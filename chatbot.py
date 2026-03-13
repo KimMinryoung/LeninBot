@@ -16,14 +16,17 @@ from langchain_core.documents import Document # [New] To handle documents
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_tavily import TavilySearch
 
 import asyncio
 import json
 import re
 import time
-import threading
 from typing import Literal
+
+from shared import (
+    extract_text_content, MODEL_MAIN, MODEL_LIGHT,
+    get_tavily_search, get_kg_service, run_kg_async,
+)
 from pydantic import BaseModel, Field
 
 
@@ -57,26 +60,12 @@ def _invoke_with_backoff(invoke_fn, max_attempts: int = 3, base_delay: float = 1
     raise last_error
 
 
-def _extract_text_content(content) -> str:
-    """Normalize LLM response content to a plain string.
-    Gemini thinking models (e.g. gemini-3-flash-preview) return content as a list
-    of typed blocks: [{'type': 'text', 'text': '...', 'extras': {...}}].
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content)
-
 
 def _extract_json(text, model_class: type[BaseModel]):
     """Try to extract and validate JSON from LLM response text. Returns None on failure."""
     # Normalize list content (extended thinking models return list of typed blocks)
     if not isinstance(text, str):
-        text = _extract_text_content(text)
+        text = extract_text_content(text)
     # Try direct parse
     try:
         return model_class.model_validate_json(text.strip())
@@ -142,7 +131,7 @@ embeddings = HuggingFaceEmbeddings(
 
 # LLM 설정 (Gemini 3.1 Flash Lite)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.1-flash-lite-preview",
+    model=MODEL_MAIN,
     google_api_key=GEMINI_API_KEY,
     temperature=0.45,
     max_output_tokens=4096,
@@ -152,52 +141,18 @@ llm = ChatGoogleGenerativeAI(
 )
 # 경량 LLM (라우팅, 그레이딩 등 유틸리티 작업용)
 llm_light = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model=MODEL_LIGHT,
     google_api_key=GEMINI_API_KEY,
     temperature=0.0,
     max_output_tokens=256,
     streaming=False,
     max_retries=2,
 )
-# 내부 문헌에 질문에 관한 정보가 충분치 않을 경우 웹 검색을 할 수 있도록 Tavily 툴 초기화
-web_search_tool = TavilySearch(max_results=3)
+web_search_tool = get_tavily_search()
 logger.info("✅ [성공] 모든 시스템 기동 완료.")
 
-# Knowledge Graph lazy singleton
-# Neo4j driver binds Futures to the event loop that created it,
-# so we must reuse a single persistent loop for all KG operations.
-from graph_memory.service import GraphMemoryService
 
-_kg_service = None
-_kg_init_failed = False
-_kg_lock = threading.Lock()
-_kg_loop = None  # persistent event loop for KG operations
 
-def _run_kg_async(coro):
-    """Run a coroutine on the persistent KG event loop."""
-    global _kg_loop
-    if _kg_loop is None or _kg_loop.is_closed():
-        _kg_loop = asyncio.new_event_loop()
-    return _kg_loop.run_until_complete(coro)
-
-def _get_kg_service():
-    global _kg_service, _kg_init_failed
-    if _kg_service is not None:
-        return _kg_service
-    if _kg_init_failed:
-        return None
-    with _kg_lock:
-        if _kg_service is not None:
-            return _kg_service
-        try:
-            svc = GraphMemoryService()
-            _run_kg_async(svc.initialize())
-            _kg_service = svc
-            return svc
-        except Exception as e:
-            _kg_init_failed = True
-            logger.warning("[KG] 초기화 실패: %s", e)
-            return None
 
 # 2. 상태(State) 정의
 # 대화 기록(messages)과 검색된 문서를 저장하는 메모리 구조입니다.
@@ -575,13 +530,13 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
         query_en: Optional English query for better matching on English-centric KG.
                   If provided, searches with both queries and merges results.
     """
-    svc = _get_kg_service()
+    svc = get_kg_service()
     if not svc:
         return None
     
     def _do_search(q):
         try:
-            return _run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
+            return run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
         except Exception as e:
             err_msg = str(e).lower()
             if "connection reset" in err_msg or "defunct" in err_msg or "connectionreseterror" in err_msg:
@@ -989,7 +944,7 @@ def strategize_node(state: AgentState):
     logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
 
     response = _invoke_with_backoff(lambda: strategist_chain.invoke({"context": context, "question": question}))
-    strategy_text = _extract_text_content(response.content)
+    strategy_text = extract_text_content(response.content)
 
     logs.append(f"👉 전술 :\n   {strategy_text}")
 
@@ -1053,7 +1008,7 @@ Respond in the same language as the user's question."""
 
     chain = prompt | llm
     response = _invoke_with_backoff(lambda: chain.invoke({"messages": messages}))
-    text = _extract_text_content(response.content)
+    text = extract_text_content(response.content)
     normalized = AIMessage(content=text)
     logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성")
 

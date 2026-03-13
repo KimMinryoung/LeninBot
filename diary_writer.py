@@ -8,7 +8,6 @@
 5. 외부 API에 저장
 """
 
-import asyncio
 import os
 import re
 import requests
@@ -16,7 +15,10 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_tavily import TavilySearch
+from shared import (
+    extract_text_content, KST, MODEL_MAIN, MODEL_LIGHT,
+    get_tavily_search, get_kg_service, run_kg_async,
+)
 
 load_dotenv()
 
@@ -39,44 +41,30 @@ _TIME_LABELS = {
 # ── Clients (lazy-initialized on first write_diary call) ──────
 _llm = None
 _llm_lite = None
-_news_search = None
 _initialized = False
 
 
 def _init():
     """Lazy-initialize heavy clients on first use."""
-    global _llm, _llm_lite, _news_search, _initialized
+    global _llm, _llm_lite, _initialized
     if _initialized:
         return
     _initialized = True
     _llm = ChatGoogleGenerativeAI(
-        model="gemini-3.1-flash-lite-preview",
+        model=MODEL_MAIN,
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.7,
         max_output_tokens=16384,
         streaming=False,
     )
     _llm_lite = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model=MODEL_LIGHT,
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0,
         max_output_tokens=512,
         streaming=False,
     )
-    _news_search = TavilySearch(max_results=3)
     print("✅ [일기] 일기 작성 모듈 초기화 완료")
-
-
-def _extract_text(content) -> str:
-    """Normalize LLM response content (handles Gemini thinking model list format)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content)
 
 
 # ── Summarization helper ─────────────────────────────────────
@@ -88,7 +76,7 @@ def _summarize(text: str, instruction: str, max_chars: int = 500) -> str:
     try:
         prompt = f"{instruction}\n\n---\n{text}"
         resp = _llm_lite.invoke(prompt)
-        return _extract_text(resp.content).strip()
+        return extract_text_content(resp.content).strip()
     except Exception as e:
         print(f"⚠️ [일기] 요약 실패 (폴백: truncation): {e}")
         return text[:max_chars]
@@ -139,7 +127,7 @@ def _build_recent_window_phrase(last_diary_time: str | None, now: datetime) -> s
         return "In the meantime"
     try:
         last_dt = datetime.fromisoformat(last_diary_time.replace("Z", "+00:00"))
-        last_kst = last_dt.astimezone(timezone(timedelta(hours=9)))
+        last_kst = last_dt.astimezone(KST)
         hours = max(1, round((now - last_kst).total_seconds() / 3600))
         if hours < 24:
             return f"Last {hours} hours"
@@ -176,7 +164,7 @@ Rules:
 
     try:
         resp = _llm_lite.invoke(prompt)
-        text = _extract_text(resp.content).strip()
+        text = extract_text_content(resp.content).strip()
         queries = [line.strip().strip("-").strip("•").strip() for line in text.split("\n") if line.strip()]
         queries = [q for q in queries if len(q) > 5]
         if len(queries) >= 2:
@@ -203,7 +191,7 @@ def _search_news(queries: list[str]) -> tuple[str, list[dict]]:
     seen_urls: set[str] = set()
     for query in queries:
         try:
-            search_response = _news_search.invoke({"query": query})
+            search_response = get_tavily_search().invoke({"query": query})
             results = (
                 search_response.get("results", [])
                 if isinstance(search_response, dict)
@@ -240,36 +228,32 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
     if not articles:
         return
     try:
-        from graph_memory.service import GraphMemoryService
-
-        async def _ingest():
-            svc = GraphMemoryService()
-            await svc.initialize()
-            now = datetime.now(timezone.utc)
-            ok, fail = 0, 0
-            total = len(articles)
-            for i, art in enumerate(articles, 1):
-                short_title = art.get("title", "")[:50]
-                print(f"  🔄 [KG] ({i}/{total}) 수집 중: {short_title}")
-                try:
-                    body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
-                    await svc.ingest_episode(
-                        name=art["title"][:120],
-                        body=body,
-                        source_type="osint_news",
-                        reference_time=now,
-                        group_id="diary_news",
-                        max_body_chars=1500,
-                    )
-                    ok += 1
-                    print(f"  ✅ [KG] ({i}/{total}) 완료: {short_title}")
-                except Exception as e:
-                    fail += 1
-                    print(f"  ⚠️ [KG] ({i}/{total}) 실패: {short_title} — {e}")
-            await svc.close()
-            print(f"  📊 [KG] 수집 완료: 성공 {ok}건, 실패 {fail}건")
-
-        asyncio.run(_ingest())
+        svc = get_kg_service()
+        if svc is None:
+            print("  ⚠️ [KG] 서비스 초기화 실패 — 수집 건너뜀")
+            return
+        now = datetime.now(timezone.utc)
+        ok, fail = 0, 0
+        total = len(articles)
+        for i, art in enumerate(articles, 1):
+            short_title = art.get("title", "")[:50]
+            print(f"  🔄 [KG] ({i}/{total}) 수집 중: {short_title}")
+            try:
+                body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
+                run_kg_async(svc.ingest_episode(
+                    name=art["title"][:120],
+                    body=body,
+                    source_type="osint_news",
+                    reference_time=now,
+                    group_id="diary_news",
+                    max_body_chars=1500,
+                ))
+                ok += 1
+                print(f"  ✅ [KG] ({i}/{total}) 완료: {short_title}")
+            except Exception as e:
+                fail += 1
+                print(f"  ⚠️ [KG] ({i}/{total}) 실패: {short_title} — {e}")
+        print(f"  📊 [KG] 수집 완료: 성공 {ok}건, 실패 {fail}건")
     except Exception as e:
         print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")
 
@@ -330,7 +314,7 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
             last_dt_str = last_diary_time.replace("Z", "+00:00")
             last_dt = datetime.fromisoformat(last_dt_str)
             # Convert last_dt (UTC) to KST for comparison
-            last_dt_kst = last_dt.astimezone(timezone(timedelta(hours=9)))
+            last_dt_kst = last_dt.astimezone(KST)
             delta = now - last_dt_kst
             hours = delta.total_seconds() / 3600
             if hours < 1:
@@ -399,7 +383,7 @@ def _generate_diary(
 
     try:
         resp = _llm.invoke(prompt)
-        text = _extract_text(resp.content)
+        text = extract_text_content(resp.content)
         return _parse_title_content(text)
     except Exception as e:
         print(f"⚠️ [일기] LLM 일기 생성 실패: {e}")
@@ -446,7 +430,7 @@ def write_diary(dry_run: bool = False):
         return
 
     _init()
-    now = datetime.now(timezone(timedelta(hours=9)))
+    now = datetime.now(KST)
     print(f"\n📝 [일기] 자동 일기 작성 시작 — {now.strftime('%Y-%m-%d %H:%M')} KST")
 
     # 1. 이전 일기 조회

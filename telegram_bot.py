@@ -15,8 +15,9 @@ import os
 import json
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from contextlib import contextmanager
+from shared import KST
 
 import psycopg2
 from psycopg2 import pool
@@ -116,11 +117,8 @@ def _ensure_table():
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 _CLAUDE_MAX_TOKENS = 4096
-_KST = timezone(timedelta(hours=9))
-
-
 def _current_datetime_str() -> str:
-    return datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+    return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
 _SYSTEM_PROMPT_TEMPLATE = """\
