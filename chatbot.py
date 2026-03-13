@@ -161,7 +161,7 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     documents: List[Document]
     strategy: Optional[str]
-    intent: Optional[Literal["academic", "strategic", "agitation", "casual"]]
+    intent: Optional[Literal["academic", "strategic", "casual"]]
     datasource: Optional[Literal["vectorstore", "generate", "plan"]]
     logs: Annotated[List[str], add]
     # Phase 2: Query decomposition
@@ -182,7 +182,7 @@ class AgentState(TypedDict):
 class QueryAnalysis(BaseModel):
     """Combined intent classification, layer routing, and query decomposition."""
     datasource: Literal["vectorstore", "generate"] = Field(..., description="Whether knowledge retrieval is needed")
-    intent: Literal["academic", "strategic", "agitation", "casual"] = Field(..., description="Response style")
+    intent: Literal["academic", "strategic", "casual"] = Field(..., description="Response style")
     layer: Literal["core_theory", "modern_analysis", "all"] = Field(default="all", description="Which knowledge layer to search")
     sub_queries: List[str] = Field(default_factory=list, description="Decomposed sub-queries, or single original query")
     needs_plan: bool = Field(default=False, description="Whether the query requires multi-step research planning")
@@ -199,7 +199,6 @@ Use the conversation context to resolve pronouns, references, and follow-up ques
 2. **intent**: How to respond.
    - "academic": Objective, detailed, scholarly explanations.
    - "strategic": Actionable plans, tactics, or "how-to" advice.
-   - "agitation": Emotional, fiery, revolutionary speech or call to action.
    - "casual": Simple greetings, jokes, or non-political chit-chat.
 
 3. **layer**: Which knowledge layer to search (only matters if datasource="vectorstore").
@@ -971,7 +970,6 @@ def generate_node(state: AgentState):
     style_guide = {
         "academic": "Professional, intellectual, authoritative. Explain concepts thoroughly with precise terminology.",
         "strategic": "Decisive, analytical, practical. Structure as clear phases or numbered steps.",
-        "agitation": "Passionate, charismatic, emotionally resonant. Use strong verbs and vivid imagery.",
         "casual": "Natural, friendly, dignified. Brief and conversational (1-3 sentences).",
     }
 
@@ -979,7 +977,6 @@ def generate_node(state: AgentState):
     mission_guide = {
         "academic": "Provide a detailed, objective explanation grounded in the provided context.",
         "strategic": "Deliver a concrete, actionable strategy. Synthesize the analysis—do not merely restate sources.",
-        "agitation": "Craft a stirring speech or proclamation that mobilizes and inspires action.",
         "casual": "Respond with wit and revolutionary charm.",
     }
 
