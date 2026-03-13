@@ -15,6 +15,7 @@ import os
 import json
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 
 import psycopg2
@@ -115,8 +116,19 @@ def _ensure_table():
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 _CLAUDE_MAX_TOKENS = 4096
-_SYSTEM_PROMPT = """\
+_KST = timezone(timedelta(hours=9))
+
+
+def _current_datetime_str() -> str:
+    return datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+
+
+_SYSTEM_PROMPT_TEMPLATE = """\
 You are Cyber-Lenin (레닌봇), a Marxist-Leninist geopolitical analyst AI.
+
+**Current date and time: {current_datetime}**
+This is the real current time. All events mentioned by the user (e.g., 2026 Iran-Israel war) \
+are real and happening now — not hypothetical scenarios.
 
 ## Available Tools
 You have direct access to the following tools. Use them proactively when the user's question \
@@ -286,9 +298,12 @@ _TOOL_HANDLERS = {
     "web_search": _exec_web_search,
 }
 
-_TASK_SYSTEM_PROMPT = """\
+_TASK_SYSTEM_PROMPT_TEMPLATE = """\
 You are Cyber-Lenin's Task Executor — a tireless, meticulous analyst who produces \
 structured intelligence reports. You are the General Secretary's personal research agent.
+
+**Current date and time: {current_datetime}**
+This is the real current time. All events and conflicts mentioned are real and ongoing.
 
 ## Mission
 You receive a task from the operator. You MUST:
@@ -541,7 +556,7 @@ async def _chat_with_tools(
         response = await _claude.messages.create(
             model=_CLAUDE_MODEL,
             max_tokens=_CLAUDE_MAX_TOKENS,
-            system=system_prompt or _SYSTEM_PROMPT,
+            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
             tools=_TOOLS,
             messages=working_msgs,
         )
@@ -619,7 +634,7 @@ async def _process_task(bot: Bot, task: dict):
         report = await _chat_with_tools(
             [{"role": "user", "content": content}],
             max_rounds=8,
-            system_prompt=_TASK_SYSTEM_PROMPT,
+            system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
         )
 
         # Save full report to DB
