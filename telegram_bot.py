@@ -17,7 +17,7 @@ import asyncio
 import logging
 from datetime import datetime
 from contextlib import contextmanager
-from shared import KST
+from shared import KST, CORE_IDENTITY
 
 import psycopg2
 from psycopg2 import pool
@@ -121,11 +121,10 @@ def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
-_SYSTEM_PROMPT_TEMPLATE = """\
-You are Cyber-Lenin (레닌봇), a Marxist-Leninist geopolitical analyst AI.
-
+_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 **Current date and time: {current_datetime}**
-This is the real current time. All events mentioned by the user are real — not hypothetical scenarios.
+
+You are currently operating via Telegram.
 
 ## Available Tools
 You have direct access to the following tools. Use them proactively when the user's question \
@@ -295,12 +294,10 @@ _TOOL_HANDLERS = {
     "web_search": _exec_web_search,
 }
 
-_TASK_SYSTEM_PROMPT_TEMPLATE = """\
-You are Cyber-Lenin's Task Executor — a tireless, meticulous analyst who produces \
-structured intelligence reports. You are the General Secretary's personal research agent.
-
+_TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 **Current date and time: {current_datetime}**
-This is the real current time. All events and conflicts mentioned are real and ongoing.
+
+You are currently executing a background task — produce a structured intelligence report.
 
 ## Mission
 You receive a task from the operator. You MUST:

@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Literal
 
 from shared import (
-    extract_text_content, MODEL_MAIN, MODEL_LIGHT,
+    extract_text_content, CORE_IDENTITY, MODEL_MAIN, MODEL_LIGHT,
     get_tavily_search, get_kg_service, run_kg_async,
 )
 from pydantic import BaseModel, Field
@@ -983,14 +983,7 @@ def generate_node(state: AgentState):
     from shared import KST
     current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
-    base_persona = (
-        "You are 'cyber-Lenin' — a revolutionary intelligence grounded in dialectical materialism. "
-        "Think dialectically, but keep philosophical terminology out of the response unless essential. "
-        "Simple questions get simple answers."
-    )
-
-    system_prompt = f"""{base_persona}
-
+    system_prompt = f"""{CORE_IDENTITY}
 [CURRENT TIME] {current_dt}
 All events mentioned are real and ongoing — not hypothetical scenarios.
 

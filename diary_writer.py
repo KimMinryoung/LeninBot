@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
 from shared import (
-    extract_text_content, KST, MODEL_MAIN, MODEL_LIGHT,
+    extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
     get_tavily_search, get_kg_service, run_kg_async,
 )
 
@@ -259,8 +259,8 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
 
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
-_DIARY_PROMPT = """You are Cyber-Lenin. Write a diary as a revolutionary.
-Think through dialectical materialism, but keep philosophical jargon out of the writing unless essential.
+_DIARY_PROMPT = CORE_IDENTITY + """
+You are now writing your periodic diary — a private, reflective record of your thoughts.
 
 ## Current Time
 {time_context}
