@@ -117,6 +117,8 @@ def _ensure_table():
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 _CLAUDE_MAX_TOKENS = 4096
+
+
 def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
@@ -475,24 +477,33 @@ async def cmd_task(message: Message):
     if not content:
         await message.answer("사용법: /task <내용>")
         return
-    await asyncio.to_thread(
-        _execute,
-        "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
-        (message.from_user.id, content),
-    )
-    await message.answer(f"태스크가 큐에 추가되었습니다:\n{content}")
+    try:
+        await asyncio.to_thread(
+            _execute,
+            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
+            (message.from_user.id, content),
+        )
+        await message.answer(f"태스크가 큐에 추가되었습니다:\n{content}")
+    except Exception as e:
+        logger.error("Task insert error: %s", e)
+        await message.answer(f"태스크 등록 실패: {e}")
 
 
 @router.message(Command("status"))
 async def cmd_status(message: Message):
     if not _is_allowed(message.from_user.id):
         return
-    rows = await asyncio.to_thread(
-        _query,
-        "SELECT id, content, status, created_at FROM telegram_tasks "
-        "WHERE user_id = %s ORDER BY created_at DESC LIMIT 5",
-        (message.from_user.id,),
-    )
+    try:
+        rows = await asyncio.to_thread(
+            _query,
+            "SELECT id, content, status, created_at FROM telegram_tasks "
+            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 5",
+            (message.from_user.id,),
+        )
+    except Exception as e:
+        logger.error("Task status query error: %s", e)
+        await message.answer(f"태스크 조회 실패: {e}")
+        return
     if not rows:
         await message.answer("등록된 태스크가 없습니다.")
         return

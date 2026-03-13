@@ -400,7 +400,7 @@ def _parse_title_content(text: str) -> tuple[str, str]:
 
     if title and content:
         return title, content
-    fallback_title = f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 일기"
+    fallback_title = f"{datetime.now(KST).strftime('%Y-%m-%d %H:%M')} 일기"
     return fallback_title, text
 
 

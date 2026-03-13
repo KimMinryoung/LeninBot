@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Literal
 
 from shared import (
-    extract_text_content, CORE_IDENTITY, MODEL_MAIN, MODEL_LIGHT,
+    extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
     get_tavily_search, get_kg_service, run_kg_async,
 )
 from pydantic import BaseModel, Field
@@ -980,7 +980,6 @@ def generate_node(state: AgentState):
         "casual": "Respond with wit and revolutionary charm.",
     }
 
-    from shared import KST
     current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
     system_prompt = f"""{CORE_IDENTITY}
