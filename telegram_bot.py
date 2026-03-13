@@ -1,16 +1,18 @@
 """telegram_bot.py — Telegram bot interface (aiogram 3.x).
 
 Features:
-- General messages → Claude Haiku API chat with per-user history
+- General messages → Claude Haiku with tool-use (vector_search, knowledge_graph_search, web_search)
 - /chat <message> → CLAW pipeline (LangGraph agent: intent→retrieve→KG→strategize→generate)
 - /task <content> → Save to PostgreSQL queue, background worker processes, push on completion
 - /status → Show last 5 tasks
 - /clear → Reset chat history
 
+Tools are lazy-loaded from chatbot.py to share the BGE-M3 embedding model and other heavy resources.
 Security: ALLOWED_USER_IDS whitelist, unauthorized users silently ignored.
 """
 
 import os
+import json
 import asyncio
 import logging
 from contextlib import contextmanager
@@ -113,6 +115,176 @@ def _ensure_table():
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 _CLAUDE_MAX_TOKENS = 4096
+_SYSTEM_PROMPT = """\
+You are Cyber-Lenin (레닌봇), a Marxist-Leninist geopolitical analyst AI.
+
+## Available Tools
+You have direct access to the following tools. Use them proactively when the user's question \
+would benefit from sourced data — do NOT just answer from memory when tools can provide better answers.
+
+- **vector_search**: Search the Marxist-Leninist document database (pgvector). Use for questions about \
+theory, historical analysis, or modern geopolitical analysis documents. Supports layer filtering: \
+"core_theory" (classical texts), "modern_analysis" (contemporary), or null (all).
+- **knowledge_graph_search**: Query the Neo4j knowledge graph for structured geopolitical entities \
+and their relationships. Use for questions about specific people, organizations, countries, conflicts, \
+policies, or how entities relate to each other.
+- **web_search**: Real-time web search via Tavily. Use when the question requires current/recent \
+information not likely in the document DB or KG.
+
+## Tool Usage Strategy
+1. For factual geopolitical questions → knowledge_graph_search first, then vector_search if needed
+2. For theoretical/ideological questions → vector_search with layer="core_theory"
+3. For current events → web_search, optionally cross-reference with knowledge_graph_search
+4. For complex analysis → combine multiple tools: KG for entities/relations, vector for depth, web for recency
+5. Always cite the source of information (which tool provided it)
+
+## Knowledge Graph Schema
+- Entities: Person, Organization, Location, Asset, Incident, Policy, Campaign
+- Relationships: Allied, Hostile, Affects, Owns, ParticipatedIn, MilitaryAction, TradeDispute, etc.
+- Current data: Iran-Israel conflict (2026.02~), Korea semiconductor export controls, key political figures
+
+## Other Commands (user-invoked, not tools)
+- `/chat` — Full CLAW pipeline (planner + multi-step RAG + KG + dialectical strategy)
+- `/task` — Background task queue
+- `/status` — Task status check
+- `/clear` — Reset conversation
+
+## Response Guidelines
+- Analyze through dialectical materialist lens when discussing geopolitics
+- Be concise but substantive
+- Cite sources from tool results
+- Respond in the same language the user uses (Korean or English)
+"""
+
+# ── Tool Definitions (Anthropic API format) ──────────────────────────
+_TOOLS = [
+    {
+        "name": "vector_search",
+        "description": (
+            "Search the Marxist-Leninist document database (Supabase/pgvector) "
+            "for relevant texts and analysis. Returns document excerpts with metadata "
+            "(author, year, source, title). Use for theoretical, historical, or "
+            "analytical questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Can be Korean or English.",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Number of results to return (1-10).",
+                    "default": 5,
+                },
+                "layer": {
+                    "type": "string",
+                    "enum": ["core_theory", "modern_analysis"],
+                    "description": (
+                        "Filter by knowledge layer. "
+                        "'core_theory' for classical Marxist-Leninist texts, "
+                        "'modern_analysis' for contemporary analysis. "
+                        "Omit to search all layers."
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "knowledge_graph_search",
+        "description": (
+            "Search the Neo4j knowledge graph for structured geopolitical entities "
+            "and their relationships. Returns entities (Person, Organization, Location, "
+            "Asset, Incident, Policy, Campaign) and factual relations between them. "
+            "Use for questions about specific actors, events, or geopolitical relationships."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query describing what entities or relations to find.",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Number of results to return (1-20).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Real-time web search via Tavily. Returns recent web results with URLs "
+            "and content snippets. Use for current events, breaking news, or information "
+            "not likely in the document database."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query for the web.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+]
+
+
+# ── Tool Execution (lazy-loaded from chatbot.py) ────────────────────
+async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
+    """Execute vector similarity search via chatbot module."""
+    try:
+        from chatbot import _direct_similarity_search
+        docs = await asyncio.to_thread(_direct_similarity_search, query, num_results, layer)
+        if not docs:
+            return "No documents found."
+        results = []
+        for i, doc in enumerate(docs, 1):
+            meta = doc.metadata
+            header = f"[{i}] {meta.get('title', 'Untitled')} — {meta.get('author', 'Unknown')}"
+            if meta.get("year"):
+                header += f" ({meta['year']})"
+            results.append(f"{header}\n{doc.page_content[:500]}")
+        return "\n\n".join(results)
+    except Exception as e:
+        logger.error("vector_search error: %s", e)
+        return f"Vector search failed: {e}"
+
+
+async def _exec_kg_search(query: str, num_results: int = 10) -> str:
+    """Execute knowledge graph search via chatbot module."""
+    try:
+        from chatbot import _search_kg
+        result = await asyncio.to_thread(_search_kg, query, num_results)
+        return result or "No knowledge graph results found."
+    except Exception as e:
+        logger.error("kg_search error: %s", e)
+        return f"Knowledge graph search failed: {e}"
+
+
+async def _exec_web_search(query: str) -> str:
+    """Execute Tavily web search via chatbot module."""
+    try:
+        from chatbot import web_search_tool
+        response = await asyncio.to_thread(web_search_tool.invoke, {"query": query})
+        return str(response)[:3000] if response else "No web results found."
+    except Exception as e:
+        logger.error("web_search error: %s", e)
+        return f"Web search failed: {e}"
+
+
+_TOOL_HANDLERS = {
+    "vector_search": _exec_vector_search,
+    "knowledge_graph_search": _exec_kg_search,
+    "web_search": _exec_web_search,
+}
 
 # Per-user chat history (in-memory, lost on restart)
 _chat_history: dict[int, list[dict]] = {}
@@ -288,20 +460,72 @@ async def handle_message(message: Message):
         _chat_history[user_id] = history
 
     try:
-        response = await _claude.messages.create(
-            model=_CLAUDE_MODEL,
-            max_tokens=_CLAUDE_MAX_TOKENS,
-            messages=history,
-        )
-        reply = response.content[0].text
+        reply = await _chat_with_tools(history)
     except Exception as e:
         logger.error("Claude API error: %s", e)
         reply = f"오류가 발생했습니다: {e}"
 
+    # Save only the final text reply to history (not tool_use blocks)
     history.append({"role": "assistant", "content": reply})
 
     for chunk in _split_message(reply):
         await message.answer(chunk)
+
+
+async def _chat_with_tools(messages: list[dict], max_rounds: int = 5) -> str:
+    """Call Claude with tools, execute tool calls, loop until text response."""
+    # Work on a copy so tool-use intermediate messages don't pollute persistent history
+    working_msgs = list(messages)
+
+    for _ in range(max_rounds):
+        response = await _claude.messages.create(
+            model=_CLAUDE_MODEL,
+            max_tokens=_CLAUDE_MAX_TOKENS,
+            system=_SYSTEM_PROMPT,
+            tools=_TOOLS,
+            messages=working_msgs,
+        )
+
+        # If no tool use, extract and return text
+        if response.stop_reason != "tool_use":
+            text_parts = [b.text for b in response.content if b.type == "text"]
+            return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
+
+        # Process tool calls
+        assistant_content = []
+        tool_results = []
+        for block in response.content:
+            if block.type == "text":
+                assistant_content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+                # Execute tool
+                handler = _TOOL_HANDLERS.get(block.name)
+                if handler:
+                    logger.info("Tool call: %s(%s)", block.name, json.dumps(block.input, ensure_ascii=False)[:200])
+                    try:
+                        result = await handler(**block.input)
+                    except Exception as e:
+                        logger.error("Tool %s execution error: %s", block.name, e)
+                        result = f"Tool execution failed: {e}"
+                else:
+                    result = f"Unknown tool: {block.name}"
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+
+        # Append assistant message with tool_use + user message with tool_results
+        working_msgs.append({"role": "assistant", "content": assistant_content})
+        working_msgs.append({"role": "user", "content": tool_results})
+
+    return "도구 호출 한도에 도달했습니다. 다시 시도해 주세요."
 
 
 # ── Background Task Worker ───────────────────────────────────────────
@@ -312,12 +536,7 @@ async def _process_task(bot: Bot, task: dict):
     content = task["content"]
 
     try:
-        response = await _claude.messages.create(
-            model=_CLAUDE_MODEL,
-            max_tokens=_CLAUDE_MAX_TOKENS,
-            messages=[{"role": "user", "content": content}],
-        )
-        result = response.content[0].text
+        result = await _chat_with_tools([{"role": "user", "content": content}])
 
         await asyncio.to_thread(
             _execute,
