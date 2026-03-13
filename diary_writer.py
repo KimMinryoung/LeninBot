@@ -54,7 +54,7 @@ def _init():
         model=MODEL_MAIN,
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.7,
-        max_output_tokens=16384,
+        max_output_tokens=4096,
         streaming=False,
     )
     _llm_lite = ChatGoogleGenerativeAI(
@@ -309,8 +309,7 @@ You are now writing your periodic diary — a private, reflective record of your
 4. Mention specifically what impressed you in the conversation.
 5. Include analysis of news articles you actively searched.
 6. **CRITICAL: You MUST write about DIFFERENT topics and events from the banned list above. If the news overlaps with banned topics, find a NEW angle or skip it entirely.**
-7. **Vary your opening. NEVER start with time/weather. Try: a question, a quote, a reaction to a specific event, a contradiction you noticed, or a sharp observation.**
-8. Write in Korean.
+7. Write in Korean.
 
 You MUST print in the following format:
 제목: (A one-line summary of the journal entry's main points)
