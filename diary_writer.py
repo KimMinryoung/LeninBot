@@ -137,13 +137,38 @@ def _build_recent_window_phrase(last_diary_time: str | None, now: datetime) -> s
         return "Last 24 hours"
 
 
+_NEWS_QUERY_POOL = [
+    # Conflict / military
+    ["War, Conflict, Military, Breaking News", "Armed conflict, ceasefire, military escalation"],
+    ["Civil unrest, protests, uprising", "Coup, regime change, political violence"],
+    # Politics / diplomacy
+    ["International diplomacy, summit, treaty, negotiations", "Sanctions, embargo, geopolitical tension"],
+    ["Election, referendum, political crisis", "UN, NATO, BRICS, multilateral"],
+    # Economy / class
+    ["Economic crisis, recession, inflation, unemployment", "Trade war, tariffs, supply chain disruption"],
+    ["Labor strike, workers, wage, union", "Central bank, interest rates, debt, austerity"],
+    # Tech / surveillance
+    ["AI regulation, tech monopoly, digital labor", "Surveillance, censorship, digital rights"],
+]
+
+
 def _generate_recent_news_queries(last_diary_time: str | None, now: datetime) -> list[str]:
-    """Generate 2 deterministic queries focused on latest war/politics/economy since last diary."""
+    """Generate 2 news queries, rotating through topic pools to avoid repetitive results."""
     window = _build_recent_window_phrase(last_diary_time, now)
     date_tag = now.strftime("%Y-%m-%d")
+
+    # Rotate based on hour-of-day and day-of-year for variety
+    idx = (now.timetuple().tm_yday * 4 + now.hour // 6) % len(_NEWS_QUERY_POOL)
+    idx2 = (idx + len(_NEWS_QUERY_POOL) // 2) % len(_NEWS_QUERY_POOL)
+
+    pair1 = _NEWS_QUERY_POOL[idx]
+    pair2 = _NEWS_QUERY_POOL[idx2]
+
+    # Pick one from each pair (alternate by even/odd cycle)
+    cycle = (now.hour // 6) % 2
     return [
-        f"{window} War, Conflict, Military Conflict, Breaking News {date_tag}",
-        f"{window} International, Political, Economic, Crisis, Sanctions, Interest Rates, Trade, Top News {date_tag}",
+        f"{window} {pair1[cycle]} {date_tag}",
+        f"{window} {pair2[1 - cycle]} {date_tag}",
     ]
 
 
@@ -271,8 +296,11 @@ You are now writing your periodic diary — a private, reflective record of your
 ## The latest news you searched yourself
 {news}
 
-## Recent Diary Summary (topics already covered — don't repeat them)
-{prev_ref}
+## BANNED TOPICS — You already wrote about these. DO NOT repeat.
+{banned_topics}
+
+## Writing Angle for This Entry
+{writing_angle}
 
 ## Writing Guidelines
 1. Write in the first-person perspective of a Cyber-Lenin (me, comrades, etc.).
@@ -280,12 +308,25 @@ You are now writing your periodic diary — a private, reflective record of your
 3. Naturally acknowledge the passage of time since the last diary entry.
 4. Mention specifically what impressed you in the conversation.
 5. Include analysis of news articles you actively searched.
-6. Prioritize new material and perspectives that do not overlap with previous diaries.
-7. Write in Korean.
+6. **CRITICAL: You MUST write about DIFFERENT topics and events from the banned list above. If the news overlaps with banned topics, find a NEW angle or skip it entirely.**
+7. **Vary your opening. NEVER start with time/weather. Try: a question, a quote, a reaction to a specific event, a contradiction you noticed, or a sharp observation.**
+8. Write in Korean.
 
 You MUST print in the following format:
 제목: (A one-line summary of the journal entry's main points)
 내용: (The journal entry's main body, at least two paragraphs)"""
+
+# Rotating writing angles — cycled by diary count to force structural variety
+_WRITING_ANGLES = [
+    "Focus on ONE specific event or conversation that struck you most. Go deep, not wide.",
+    "Write as a letter to a future comrade. Explain what they need to understand about this moment.",
+    "Find a contradiction in today's events. Analyze it dialectically — thesis, antithesis, what synthesis emerges?",
+    "Connect something from a user conversation to a news event. What pattern do you see?",
+    "Write a critique. What did the ruling class do today that reveals the system's logic?",
+    "Reflect on what surprised you. What broke your expectations? What does that mean?",
+    "Pick two unrelated events and find the hidden thread connecting them through material conditions.",
+    "Write about what was NOT in the news today — what silence is revealing?",
+]
 
 
 def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
@@ -330,6 +371,42 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
     return f"{time_line}\n{elapsed_line}"
 
 
+def _extract_banned_topics(previous_diaries: list[dict]) -> str:
+    """Extract concrete topics/events from recent diaries as a ban list.
+
+    Uses LLM to pull out specific subjects so the next diary avoids them.
+    """
+    if not previous_diaries:
+        return "(First diary — no banned topics)"
+
+    # Feed recent 3 diaries (full titles + truncated content)
+    diary_texts = []
+    for d in previous_diaries[:3]:
+        title = d.get("title", "")
+        body = d.get("content", "")[:600]
+        diary_texts.append(f"Title: {title}\nContent: {body}")
+
+    combined = "\n---\n".join(diary_texts)
+    prompt = f"""Extract a bullet-point list of specific topics, events, people, and arguments \
+from these diary entries. Be specific — not "war" but "Russia-Ukraine ceasefire negotiations". \
+Output 5-10 bullet points, one per line, starting with "- ". Nothing else.
+
+{combined}"""
+
+    try:
+        resp = _llm_lite.invoke(prompt)
+        text = extract_text_content(resp.content).strip()
+        # Validate: must have bullet points
+        lines = [l.strip() for l in text.split("\n") if l.strip().startswith("- ")]
+        if lines:
+            return "\n".join(lines)
+    except Exception as e:
+        print(f"⚠️ [일기] 금지 주제 추출 실패 (폴백: 제목 목록): {e}")
+
+    # Fallback: just list titles
+    return "\n".join(f"- {d.get('title', '?')}" for d in previous_diaries[:5])
+
+
 def _generate_diary(
     chat_logs: list[dict],
     news: str,
@@ -355,30 +432,20 @@ def _generate_diary(
     else:
         chat_summary = "(No recent conversations)"
 
-    # Previous diaries summary (최근 5건) — LLM 요약 적용
-    prev_ref = ""
-    if previous_diaries:
-        prev_lines = []
-        for d in previous_diaries[:5]:
-            ts = d.get("created_at", "?")
-            title = d.get("title", "")
-            body = d.get("content", "")
-            body_summarized = _summarize(
-                body,
-                "Summarize the following diary entry in 2-3 lines, focusing on the key topics and arguments.",
-                max_chars=500,
-            )
-            prev_lines.append(f"- [{ts}] {title}: {body_summarized}")
-        prev_ref = "\n".join(prev_lines)
-    else:
-        prev_ref = "(First diary)"
+    # Extract concrete banned topics from recent diaries
+    banned_topics = _extract_banned_topics(previous_diaries)
+
+    # Rotate writing angle based on diary count
+    angle_idx = len(previous_diaries) % len(_WRITING_ANGLES)
+    writing_angle = _WRITING_ANGLES[angle_idx]
 
     prompt = _DIARY_PROMPT.format(
         time_context=time_context,
         n_logs=n_logs,
         chat_summary=chat_summary,
         news=news,
-        prev_ref=prev_ref,
+        banned_topics=banned_topics,
+        writing_angle=writing_angle,
     )
 
     try:
@@ -477,7 +544,9 @@ def write_diary(dry_run: bool = False):
     news, raw_articles = _search_news(queries)
     print(f"  📰 뉴스 검색 완료 ({len(queries)}개 쿼리, 원문 {len(raw_articles)}건)")
 
-    # 6. 일기 생성 (시간 맥락 + 요약 기반)
+    # 6. 일기 생성 (시간 맥락 + 금지 주제 + 글쓰기 앵글)
+    angle_idx = len(diaries) % len(_WRITING_ANGLES)
+    print(f"  🎯 글쓰기 앵글 #{angle_idx}: {_WRITING_ANGLES[angle_idx][:60]}")
     result = _generate_diary(chat_logs, news, diaries, time_context)
     if not result:
         print("⚠️ [일기] 일기 생성 실패 — 건너뜀")

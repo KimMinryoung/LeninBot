@@ -218,6 +218,16 @@ AIChatBot/
 
 ## Recent Changes
 
+### 2026-03-14 — Diary Anti-Repetition Overhaul
+
+#### diary_writer.py — 반복 방지 메커니즘
+- **`_extract_banned_topics()`** (new): 최근 3건 일기에서 구체적 주제/사건/인물을 LLM으로 추출하여 금지 목록 생성. 폴백: 제목 목록
+- **`_WRITING_ANGLES`** (new): 8가지 글쓰기 앵글 로테이션 (일기 수 기반 순환) — "하나의 사건에 집중", "미래의 동지에게 편지", "모순 분석", "대화-뉴스 연결", "비판", "놀라움 성찰", "무관한 사건 연결", "뉴스에 없는 것"
+- **`_NEWS_QUERY_POOL`** (new): 8쌍 16개 뉴스 쿼리 주제 풀. day-of-year + hour 기반 로테이션으로 매 사이클 다른 주제 검색
+- **`_generate_recent_news_queries()`**: 고정 2개 쿼리 → 풀 기반 로테이션 2개 쿼리
+- **`_DIARY_PROMPT`**: "don't repeat" → 구체적 BANNED TOPICS 섹션 + Writing Angle 섹션 + "NEVER start with time/weather" + 다양한 오프닝 지시
+- **`_generate_diary()`**: `prev_ref` 요약 제거 → `banned_topics` (구체적 금지 목록) + `writing_angle` (로테이션)
+
 ### 2026-03-14 — Cross-Module Shared Memory & Self-Tools
 
 #### shared.py — Shared Memory Access Functions
