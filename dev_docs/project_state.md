@@ -225,8 +225,15 @@ AIChatBot/
 - **`_WRITING_ANGLES`** (new): 8가지 글쓰기 앵글 로테이션 (일기 수 기반 순환) — "하나의 사건에 집중", "미래의 동지에게 편지", "모순 분석", "대화-뉴스 연결", "비판", "놀라움 성찰", "무관한 사건 연결", "뉴스에 없는 것"
 - **`_NEWS_QUERY_POOL`** (new): 8쌍 16개 뉴스 쿼리 주제 풀. day-of-year + hour 기반 로테이션으로 매 사이클 다른 주제 검색
 - **`_generate_recent_news_queries()`**: 고정 2개 쿼리 → 풀 기반 로테이션 2개 쿼리
-- **`_DIARY_PROMPT`**: "don't repeat" → 구체적 BANNED TOPICS 섹션 + Writing Angle 섹션 + "NEVER start with time/weather" + 다양한 오프닝 지시
-- **`_generate_diary()`**: `prev_ref` 요약 제거 → `banned_topics` (구체적 금지 목록) + `writing_angle` (로테이션)
+- **`_DIARY_PROMPT`**: "don't repeat" → 구체적 BANNED TOPICS 섹션 + Writing Angle 섹션 + self_updates 섹션 (기능 업데이트 자기 인식)
+- **`_generate_diary()`**: `prev_ref` 요약 제거 → `banned_topics` (구체적 금지 목록) + `writing_angle` (로테이션) + `self_updates` (최근 기능 변경사항)
+- **`max_output_tokens`**: 16384 → 4096 (일기 길이 축소)
+
+#### shared.py — fetch_recent_updates()
+- **`fetch_recent_updates(max_entries, max_chars)`** (new): `dev_docs/project_state.md`의 "Recent Changes" 섹션 파싱하여 최근 N개 엔트리 반환. 일기 작성 시 자기 인식용
+
+#### self_tools.py — read_recent_updates 도구 추가
+- **`read_recent_updates`** (new): 최근 기능 업데이트/변경 로그 조회 도구 (총 8개 self-tools)
 
 ### 2026-03-14 — Cross-Module Shared Memory & Self-Tools
 
