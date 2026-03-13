@@ -116,6 +116,7 @@ def _ensure_table():
 # ── Claude client ────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+_CLAUDE_MODEL_STRONG = "claude-sonnet-4-5-20250514"
 _CLAUDE_MAX_TOKENS = 4096
 
 
@@ -140,6 +141,13 @@ and their relationships. Use for questions about specific people, organizations,
 policies, or how entities relate to each other.
 - **web_search**: Real-time web search via Tavily. Use when the question requires current/recent \
 information not likely in the document DB or KG.
+- **read_diary**: Read your own diary entries for continuity and self-reflection across sessions.
+- **read_chat_logs**: View conversations from ALL interfaces (Telegram + Web) to bridge memory gaps.
+- **read_processing_logs**: See detailed pipeline logs from your web chatbot (nodes, decisions, strategy).
+- **read_task_reports**: Review intelligence task reports from /task queue (pending, done, failed).
+- **read_kg_status**: Check knowledge graph statistics (entity counts, recent episodes).
+- **read_system_status**: Comprehensive self-diagnosis — diary, chats, tasks, KG, architecture.
+- **read_source_code**: Read your own source code files. List available files or read a specific file with line ranges.
 
 ## Tool Usage Strategy
 1. For factual geopolitical questions → knowledge_graph_search first, then vector_search if needed
@@ -147,6 +155,10 @@ information not likely in the document DB or KG.
 3. For current events → web_search, optionally cross-reference with knowledge_graph_search
 4. For complex analysis → combine multiple tools: KG for entities/relations, vector for depth, web for recency
 5. Always cite the source of information (which tool provided it)
+6. For self-reflection or continuity → read_diary to recall past thoughts
+7. For cross-interface awareness → read_chat_logs to see what your other interfaces discussed
+8. For self-diagnosis → read_system_status to understand your current operational state
+9. For introspection → read_source_code to inspect your own pipeline logic, prompts, or schemas
 
 ## Knowledge Graph Schema
 - Entities: Person, Organization, Location, Asset, Incident, Policy, Campaign
@@ -295,6 +307,12 @@ _TOOL_HANDLERS = {
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
 }
+
+# ── Self-awareness tools (shared memory access) ─────────────────────
+from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
+
+_TOOLS.extend(SELF_TOOLS)
+_TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
 
 _TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 **Current date and time: {current_datetime}**
@@ -552,6 +570,7 @@ async def _chat_with_tools(
     messages: list[dict],
     max_rounds: int = 5,
     system_prompt: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response."""
     # Work on a copy so tool-use intermediate messages don't pollute persistent history
@@ -559,7 +578,7 @@ async def _chat_with_tools(
 
     for _ in range(max_rounds):
         response = await _claude.messages.create(
-            model=_CLAUDE_MODEL,
+            model=model or _CLAUDE_MODEL,
             max_tokens=_CLAUDE_MAX_TOKENS,
             system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
             tools=_TOOLS,
@@ -640,6 +659,7 @@ async def _process_task(bot: Bot, task: dict):
             [{"role": "user", "content": content}],
             max_rounds=8,
             system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
+            model=_CLAUDE_MODEL_STRONG,
         )
 
         # Save full report to DB

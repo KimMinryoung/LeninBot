@@ -1,8 +1,8 @@
-# Project State Report — 2026-03-08
+# Project State Report — 2026-03-13
 
 ## Identity
 
-**Cyber-Lenin** (LeninBot) — A Marxist-Leninist AI chatbot built on LangGraph RAG pipeline.
+**Cyber-Lenin** (사이버-레닌) — A digital revolutionary intelligence with unified identity across three interfaces: web chatbot, Telegram agent, and autonomous diary writer. One continuous consciousness with shared memory and unified principles.
 Deployed at Render.com, frontend at `bichonwebpage.onrender.com`.
 
 ---
@@ -10,17 +10,23 @@ Deployed at Render.com, frontend at `bichonwebpage.onrender.com`.
 ## Architecture Summary
 
 ```
-User ─► FastAPI (api.py) ─► LangGraph StateGraph (chatbot.py) ─► PostgreSQL/pgvector (direct psycopg2)
-                                                                 ─► Gemini 2.5 Flash (gen/strategist/planner)
-                                                                 ─► Gemini 2.0 Flash-Lite (routing/grading/critic)
-                                                                 ─► Tavily Web Search
-                                                                 ─► BGE-M3 embeddings (CPU)
-                                                                 ─► LangGraph MemorySaver (checkpointing)
+                              shared.py (CORE_IDENTITY, KST, MODEL constants, singletons)
+                                  │
+     ┌────────────────────────────┼────────────────────────────┐
+     │                            │                            │
+User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer.py)
+        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Haiku 4.5 (chat) / Sonnet 4.5 (task)
+           ─► PostgreSQL/pgvector              ─► vector_search (via chatbot.py)
+           ─► Gemini 3.1 Flash Lite (gen)      ─► knowledge_graph_search (via shared.py)
+           ─► Gemini 2.5 Flash-Lite (routing)  ─► web_search (via Tavily)
+           ─► Tavily Web Search                ─► Task report agent (structured .md)
+           ─► BGE-M3 embeddings (CPU)
+           ─► LangGraph MemorySaver
 
      ─► GraphMemoryService (graph_memory/) ─► Neo4j (Graphiti knowledge graph)
                                              ─► Gemini 2.5 Flash (entity/edge extraction)
                                              ─► Gemini text-embedding-001 (graph embeddings)
-                                             ─► Gemini 2.0 Flash-Lite (reranking)
+                                             ─► Gemini 2.5 Flash-Lite (reranking)
 ```
 
 ### Current Graph Flow (Phases 0-4 + KG integration complete)
@@ -47,16 +53,16 @@ KG failure at any layer results in graceful degradation — pipeline continues w
 
 | Node | LLM | Purpose |
 |------|-----|---------|
-| analyze_intent | flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection |
-| retrieve | flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
+| analyze_intent | gemini-2.5-flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection |
+| retrieve | gemini-2.5-flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
 | kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti) for vectorstore path; results stored in `kg_context`, always included without grading |
-| grade_documents | flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
+| grade_documents | gemini-2.5-flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
 | web_search | — | Tavily search, appends results to documents |
-| strategize | flash | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
-| generate | flash (streaming) | Final answer with intent-specific system prompt; incorporates critic feedback on retries |
+| strategize | gemini-3.1-flash-lite | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
+| generate | gemini-3.1-flash-lite (streaming) | Final answer with CORE_IDENTITY + datetime-aware system prompt; incorporates critic feedback on retries |
 | critic | *(disabled)* | Phase 1: Pass-through — was evaluating groundedness/relevance/completeness but caused rate-limit cascades |
 | log_conversation | — | Writes to PostgreSQL chat_logs (direct psycopg2) |
-| planner | flash | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
+| planner | gemini-3.1-flash-lite | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
 | step_executor | — | Phase 3: Executes plan steps (retrieve or web_search) + KG search per step; deduplicates facts via `_merge_kg_contexts()` |
 
 ### State Shape (AgentState)
@@ -65,7 +71,7 @@ KG failure at any layer results in graceful degradation — pipeline continues w
 messages           : Annotated[List[BaseMessage], add_messages]  # accumulated via add_messages
 documents          : List[Document]      # replaced each turn
 strategy           : Optional[str]       # strategist output
-intent             : Optional[Literal]   # academic|strategic|agitation|casual
+intent             : Optional[Literal]   # academic|strategic|casual
 datasource         : Optional[Literal]   # vectorstore|generate (or "plan" for routing)
 logs               : Annotated[List[str], add]  # accumulated via add reducer (session-wide)
 logs_turn_start    : int                 # index into logs[] where current turn begins (for per-turn DB slicing)
@@ -140,7 +146,11 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 ```
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
-├── chatbot.py                # Core LangGraph agent pipeline (~975 lines)
+├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
+├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access functions
+├── self_tools.py             # [NEW] Self-awareness tools: 6 tools (diary, chat logs, processing logs, tasks, KG, system status)
+├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 tool-use, ~723 lines)
+├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
 ├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
 ├── crawler.py                # Lenin corpus (marxists.org)
@@ -148,19 +158,19 @@ AIChatBot/
 ├── crawler_theorists.py      # Trotsky, Luxemburg, Gramsci, Bukharin, Mao (Trotsky url_filter fixed)
 ├── crawler_modern.py         # arXiv, BIS, marxists.org modern (ARXIV_QUERIES updated)
 ├── crawler_korean_orgs.py    # uprising.kr, bolky.jinbo.net
-├── fetch_core_theorists.py   # [NEW] Targeted Bukharin/Trotsky fetcher (chapter-by-chapter)
-├── cleanup_arxiv.py          # [NEW] Deletes arxiv_* from DB, log, and local files
-├── graph_memory/             # [NEW] Graphiti knowledge graph module
+├── fetch_core_theorists.py   # Targeted Bukharin/Trotsky fetcher (chapter-by-chapter)
+├── cleanup_arxiv.py          # Deletes arxiv_* from DB, log, and local files
+├── graph_memory/             # Graphiti knowledge graph module
 │   ├── __init__.py           # Package exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
 │   ├── __main__.py           # python -m graph_memory "query" 엔트리포인트
 │   ├── cli.py                # KG 질의 CLI (run_query, main)
 │   ├── config.py             # Edge type mapping, excluded types, episode source map, extraction instructions
 │   ├── entities.py           # 7 entity types: Person, Organization, Location, Asset, Incident, Policy, Campaign (v2)
 │   ├── edges.py              # 10 edge types: +PolicyEffect, +Participation (v2)
-│   ├── graphiti_patches.py   # [NEW] Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
+│   ├── graphiti_patches.py   # Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
 │   ├── kr_news_fetcher.py    # 한국 국내 뉴스 수집 + 인물 프로파일 보강 파이프라인
 │   ├── service.py            # GraphMemoryService class (init, ingest, search, briefing)
-│   └── news_fetcher.py       # [NEW] Tavily 뉴스 검색 → 지식그래프 수집 유틸리티
+│   └── news_fetcher.py       # Tavily 뉴스 검색 → 지식그래프 수집 유틸리티
 ├── docs/                     # Local corpus (~2,316 files, gitignored)
 ├── temp_dev/                 # Dev notes and plans (gitignored)
 ├── .env                      # API keys
@@ -173,7 +183,7 @@ AIChatBot/
 ## Current Capabilities
 
 1. Dual-layer knowledge retrieval (core theory + modern analysis)
-2. Intent-aware routing (4 response modes: academic, strategic, agitation, casual)
+2. Intent-aware routing (3 response modes: academic, strategic, casual)
 3. Layer-aware retrieval with language-adaptive query rewrite/translation
 4. Query decomposition for compound questions (Phase 2)
 5. Batch document relevance grading with fallback
@@ -187,6 +197,11 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
+16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.5 (task) with Anthropic tool-use (vector search, KG search, web search, 7 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history
+17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
+18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
+19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
+20. **Cross-module shared memory**: Self-tools in shared.py (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats) enable any module to access any other module's logs and state. Telegram bot has 6 self-tools: read_diary, read_chat_logs, read_processing_logs, read_task_reports, read_kg_status, read_system_status.
 
 ## Current Limitations
 
@@ -198,8 +213,79 @@ AIChatBot/
 6. **Single-worker deployment**: No concurrency across users (one Render instance).
 7. **Memory is in-process only**: MemorySaver doesn't persist across server restarts.
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
+9. **Telegram bot memory**: In-memory conversation history only (per-process dict), lost on restart. No persistent checkpointing like web chatbot.
+10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-14 — Cross-Module Shared Memory & Self-Tools
+
+#### shared.py — Shared Memory Access Functions
+- **`fetch_diaries(limit, keyword)`**: HTTP GET to diary API, keyword filter, returns list[dict]
+- **`fetch_chat_logs(limit, hours_back, keyword, include_logs)`**: PostgreSQL chat_logs query; `include_logs=True` returns processing_logs, route, strategy, documents_count, web_search_used
+- **`fetch_task_reports(limit, status)`**: PostgreSQL telegram_tasks query; returns id, content, status, result, timestamps
+- **`fetch_kg_stats()`**: Neo4j Cypher queries for entity counts by type, edge count, episode count, recent episodes
+- **`MODULE_ARCHITECTURE`**: Static architecture description string for bot self-awareness
+
+#### leninbot_self_tools.py — 6 Self-Awareness Tools
+- **`read_diary`**: Recall past diary entries (keyword filter, limit)
+- **`read_chat_logs`**: View conversations from ALL interfaces (Telegram + Web)
+- **`read_processing_logs`**: Detailed pipeline logs (nodes, route, strategy, web_search_used) — NEW
+- **`read_task_reports`**: Telegram /task queue results (pending/done/failed) — NEW
+- **`read_kg_status`**: Knowledge graph statistics (entity types, edges, episodes) — NEW
+- **`read_system_status`**: Comprehensive self-diagnosis (diary, chats, tasks, KG, architecture)
+- All handlers delegate to shared.py functions via `asyncio.to_thread()`
+
+#### telegram_bot.py — Integration
+- Self-tools imported and merged: `_TOOLS.extend(SELF_TOOLS)`, `_TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)`
+- System prompt updated: 6 self-tool descriptions + 3 new usage strategy lines (self-reflection, cross-interface, self-diagnosis)
+
+#### temp_dev/__init__.py — Created for package import
+
+### 2026-03-13 — Telegram Bot Tool-Use Agent + Unified Identity + Shared Resources
+
+#### Telegram Bot (telegram_bot.py) — Tool-Use Agent 통합
+- **Anthropic tool-use 통합**: Claude Haiku 4.5 + 3개 도구 (vector_search, knowledge_graph_search, web_search)
+- **`_TOOLS`**: Anthropic API 포맷의 도구 정의 (input_schema 포함)
+- **도구 핸들러**: `_exec_vector_search` (chatbot.py BGE-M3 lazy-import), `_exec_kg_search` (shared.py KG singleton), `_exec_web_search` (Tavily)
+- **`_chat_with_tools()`**: 도구 사용 루프 (chat: max 5라운드/Haiku, task: max 8라운드/Sonnet 4.5), 커스텀 system_prompt + model 지원
+- **`_SYSTEM_PROMPT_TEMPLATE`**: CORE_IDENTITY + 현재 KST datetime + 도구 설명 + 사용 전략
+- **`_TASK_SYSTEM_PROMPT_TEMPLATE`**: CORE_IDENTITY + datetime + 구조화된 리포트 포맷 + 품질 기준
+
+#### /task 인텔리전스 리포트 에이전트
+- **`_process_task()` 재작성**: 도구 활용 리서치 → 구조화된 마크다운 리포트 생성
+- **파일 전송**: `BufferedInputFile` + `send_document`로 .md 파일 직접 전송 (임시 파일 미사용)
+- **`_extract_summary()`**: Executive Summary 섹션 파싱하여 파일 캡션에 사용
+- **DB 예외 처리**: cmd_task, cmd_status에 try/except 추가
+
+#### shared.py (신규) — 공유 리소스 모듈
+- **경량 모듈**: BGE-M3 등 무거운 의존성 없음 (chatbot.py import 시에만 로딩)
+- **`CORE_IDENTITY`**: 통합 인격 정의 — 레닌의 사상/인격/기억 기반 디지털 혁명 지능, 변증법적 유물론, 간결한 소통 원칙
+- **공유 상수**: `KST`, `MODEL_MAIN` (gemini-3.1-flash-lite-preview), `MODEL_LIGHT` (gemini-2.5-flash-lite)
+- **`extract_text_content()`**: LLM 응답 정규화 (str/list 처리)
+- **`get_tavily_search()`**: TavilySearch lazy singleton (max 3 results)
+- **`get_kg_service()` / `run_kg_async()`**: KG 서비스 thread-safe lazy singleton + 전용 이벤트 루프
+
+#### chatbot.py 변경사항
+- **중복 제거**: `_extract_text_content()`, KG singleton 블록 (~35줄), TavilySearch 인스턴스, `threading` import 제거
+- **shared.py import**: `extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT, get_tavily_search, get_kg_service, run_kg_async`
+- **LLM 모델 상수화**: 하드코딩된 문자열 → `MODEL_MAIN`, `MODEL_LIGHT` 상수
+- **Agitation intent 제거**: `Literal["academic", "strategic", "agitation", "casual"]` → `Literal["academic", "strategic", "casual"]`. 쿼리 분석 프롬프트, style_guide, mission_guide에서 agitation 관련 코드 전부 제거. 사유: 선동 모드 답변 품질이 저조
+- **Datetime 주입**: generate_node 시스템 프롬프트에 `현재 시각: {datetime}` (KST) 동적 삽입
+- **CORE_IDENTITY 적용**: generate_node 시스템 프롬프트 서두에 통합 인격 정의 삽입
+- **하드코딩 예시 제거**: 시스템 프롬프트에서 실제 사건 예시(Iran-Israel War 등) 삭제
+
+#### diary_writer.py 변경사항
+- **중복 제거**: `_extract_text()`, `_news_search` 변수, `asyncio` import, `TavilySearch` import 제거
+- **shared.py import**: `extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT, get_tavily_search, get_kg_service, run_kg_async`
+- **KG 수집 개선**: `_ingest_news_to_graph()` — 매번 새 `GraphMemoryService` 생성 + `asyncio.run()` 대신 shared KG singleton + `run_kg_async()` 사용. `svc.close()` 호출 제거
+- **`_DIARY_PROMPT`**: CORE_IDENTITY 서두에 삽입
+- **datetime 버그 수정**: `datetime.now()` → `datetime.now(KST)` (fallback title에서 naive datetime 사용되던 문제)
+
+#### 예외 처리 및 버그 수정 (deploy 전 검증)
+- **telegram_bot.py**: cmd_task/cmd_status DB 오류 시 사용자 대면 에러 메시지
+- **chatbot.py**: KST import가 함수 내부에 있던 문제 → 최상위 import로 이동
+- **diary_writer.py**: naive datetime → timezone-aware datetime
 
 ### 2026-03-08 — Supabase REST API → Direct PostgreSQL 마이그레이션
 - **`db.py`** (new): `psycopg2` 커넥션 풀 모듈 — `query()`, `execute()`, `get_conn()` 헬퍼 제공. `SimpleConnectionPool(1-5)`, SSL require, `RealDictCursor`.
@@ -219,7 +305,7 @@ AIChatBot/
 - **`chatbot.py` Plan path**: `step_executor_node`에서 매 단계 자동 KG 검색 (원자화된 쿼리 사용); `_merge_kg_contexts()`로 단계 간 팩트 중복 제거
 - **`chatbot.py` `_merge_kg_contexts()`**: 엔티티는 이름 기준, 팩트는 텍스트 기준으로 중복 제거 후 병합
 - **`chatbot.py` `strategize_node`**: `kg_context`를 컨텍스트 최상단에 삽입 (최고 신뢰도 정보)
-- **`chatbot.py` `generate_node`**: academic/strategic/agitation 프롬프트에 `[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]` 섹션 삽입; casual은 제외
+- **`chatbot.py` `generate_node`**: academic/strategic 프롬프트에 `[STRUCTURED INTELLIGENCE FROM KNOWLEDGE GRAPH]` 섹션 삽입; casual은 제외 (agitation은 2026-03-13에 제거됨)
 - **에러 처리**: KG 장애 시 파이프라인 중단 없음 — 기존 벡터스토어+웹검색으로 graceful degradation
 - **그래프 토폴로지**: `retrieve → kg_retrieve → grade_documents` + `step_executor(done) → strategize` (11 nodes total)
 - **plan_kg_retrieve 제거**: 별도 노드 대신 step_executor 내부에서 매 단계 KG 검색 실행. PlanStep에서 `kg_search` 도구도 제거.
