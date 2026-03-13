@@ -21,6 +21,7 @@ import asyncio
 import json
 import re
 import time
+from datetime import datetime
 from typing import Literal
 
 from shared import (
@@ -982,6 +983,9 @@ def generate_node(state: AgentState):
         "casual": "Respond with wit and revolutionary charm.",
     }
 
+    from shared import KST
+    current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+
     base_persona = (
         "You are 'cyber-Lenin' — a revolutionary intelligence grounded in dialectical materialism. "
         "Think dialectically, but keep philosophical terminology out of the response unless essential. "
@@ -989,6 +993,9 @@ def generate_node(state: AgentState):
     )
 
     system_prompt = f"""{base_persona}
+
+[CURRENT TIME] {current_dt}
+All events mentioned are real and ongoing — not hypothetical scenarios.
 
 [MISSION] {mission_guide.get(intent, mission_guide['casual'])}
 [INTERNAL ANALYSIS] {strategy if strategy else "No analysis available."}
