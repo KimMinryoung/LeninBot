@@ -22,7 +22,7 @@ from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import Command
 import anthropic
 
@@ -286,6 +286,62 @@ _TOOL_HANDLERS = {
     "web_search": _exec_web_search,
 }
 
+_TASK_SYSTEM_PROMPT = """\
+You are Cyber-Lenin's Task Executor — a tireless, meticulous analyst who produces \
+structured intelligence reports. You are the General Secretary's personal research agent.
+
+## Mission
+You receive a task from the operator. You MUST:
+1. Analyze the task and determine which tools to use
+2. Gather all relevant data using multiple tools (search broadly, not narrowly)
+3. Synthesize findings into a structured Markdown report
+
+## Available Tools
+- **vector_search**: Marxist-Leninist document database (theory, historical/modern analysis)
+- **knowledge_graph_search**: Neo4j knowledge graph (entities, relations, geopolitical structure)
+- **web_search**: Real-time web search for current events
+
+## Tool Usage Rules
+- ALWAYS use at least one tool. Never write a report purely from memory.
+- For geopolitical tasks: use ALL THREE tools (KG for structure, vector for depth, web for recency)
+- For theoretical tasks: vector_search with layer="core_theory", then web for modern context
+- Make multiple searches with different queries to ensure comprehensive coverage
+
+## Report Format (Markdown)
+Write the report in the SAME LANGUAGE as the task.
+
+```
+# [Report Title]
+
+**Date**: YYYY-MM-DD
+**Task**: [original task summary]
+
+## Executive Summary
+[2-3 paragraph overview of key findings]
+
+## Analysis
+### [Subtopic 1]
+[Detailed analysis with citations]
+
+### [Subtopic 2]
+[Detailed analysis with citations]
+
+## Key Entities & Relations
+[Relevant actors, organizations, and their relationships from KG]
+
+## Sources
+- [List all sources: documents, KG entities, web URLs]
+
+## Recommendations / Outlook
+[Strategic assessment and forward-looking analysis]
+```
+
+## Quality Standards
+- Every claim must be traceable to a tool result
+- Distinguish between confirmed facts (from tools) and analytical inference
+- Be thorough — this is a document for the operator's strategic decision-making
+"""
+
 # Per-user chat history (in-memory, lost on restart)
 _chat_history: dict[int, list[dict]] = {}
 
@@ -472,7 +528,11 @@ async def handle_message(message: Message):
         await message.answer(chunk)
 
 
-async def _chat_with_tools(messages: list[dict], max_rounds: int = 5) -> str:
+async def _chat_with_tools(
+    messages: list[dict],
+    max_rounds: int = 5,
+    system_prompt: str | None = None,
+) -> str:
     """Call Claude with tools, execute tool calls, loop until text response."""
     # Work on a copy so tool-use intermediate messages don't pollute persistent history
     working_msgs = list(messages)
@@ -481,7 +541,7 @@ async def _chat_with_tools(messages: list[dict], max_rounds: int = 5) -> str:
         response = await _claude.messages.create(
             model=_CLAUDE_MODEL,
             max_tokens=_CLAUDE_MAX_TOKENS,
-            system=_SYSTEM_PROMPT,
+            system=system_prompt or _SYSTEM_PROMPT,
             tools=_TOOLS,
             messages=working_msgs,
         )
@@ -529,24 +589,56 @@ async def _chat_with_tools(messages: list[dict], max_rounds: int = 5) -> str:
 
 
 # ── Background Task Worker ───────────────────────────────────────────
+def _extract_summary(report: str, max_len: int = 300) -> str:
+    """Extract Executive Summary section or first paragraph as brief summary."""
+    # Try to find Executive Summary section
+    for marker in ("## Executive Summary", "## 요약", "## 핵심 요약"):
+        idx = report.find(marker)
+        if idx != -1:
+            after = report[idx + len(marker):].strip()
+            # Take until next ## heading
+            next_heading = after.find("\n## ")
+            section = after[:next_heading].strip() if next_heading != -1 else after
+            if section:
+                return section[:max_len] + ("..." if len(section) > max_len else "")
+    # Fallback: first non-heading paragraph
+    for line in report.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#") and not line.startswith("**"):
+            return line[:max_len] + ("..." if len(line) > max_len else "")
+    return report[:max_len]
+
+
 async def _process_task(bot: Bot, task: dict):
-    """Process a single task via Claude and push result to user."""
+    """Process a task: run tools, generate report, save to DB, send as file."""
     task_id = task["id"]
     user_id = task["user_id"]
     content = task["content"]
 
     try:
-        result = await _chat_with_tools([{"role": "user", "content": content}])
+        report = await _chat_with_tools(
+            [{"role": "user", "content": content}],
+            max_rounds=8,
+            system_prompt=_TASK_SYSTEM_PROMPT,
+        )
 
+        # Save full report to DB
         await asyncio.to_thread(
             _execute,
             "UPDATE telegram_tasks SET status = 'done', result = %s, "
             "completed_at = NOW() WHERE id = %s",
-            (result, task_id),
+            (report, task_id),
         )
 
-        for chunk in _split_message(f"✅ 태스크 [{task_id}] 완료:\n\n{result}"):
-            await bot.send_message(chat_id=user_id, text=chunk)
+        # Send report as Markdown file
+        filename = f"report_task_{task_id}.md"
+        doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
+        summary = _extract_summary(report)
+        await bot.send_document(
+            chat_id=user_id,
+            document=doc,
+            caption=f"✅ 태스크 [{task_id}] 완료\n\n{summary}",
+        )
 
     except Exception as e:
         logger.error("Task %d failed: %s", task_id, e)
