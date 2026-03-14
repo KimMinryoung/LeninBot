@@ -985,7 +985,6 @@ def generate_node(state: AgentState):
 
     system_prompt = f"""{CORE_IDENTITY}
 [CURRENT TIME] {current_dt}
-All events mentioned are real and ongoing — not hypothetical scenarios.
 
 [MISSION] {mission_guide.get(intent, mission_guide['casual'])}
 [INTERNAL ANALYSIS] {strategy if strategy else "No analysis available."}
