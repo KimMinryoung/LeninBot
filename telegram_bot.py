@@ -131,7 +131,7 @@ def _resolve_model(alias: str, fallback: str) -> str:
 
 
 _CLAUDE_MODEL = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
-_CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-5", "claude-sonnet-4-5-20250929")
+_CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 
 
 def _current_datetime_str() -> str:
