@@ -166,8 +166,32 @@ def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
+# ── System Alerts (injected into system prompt) ─────────────────────
+_system_alerts: list[str] = []
+
+
+def _add_system_alert(msg: str):
+    """Add a system alert visible to the bot in its system prompt."""
+    _system_alerts.append(f"[{datetime.now(KST).strftime('%H:%M')}] {msg}")
+    # Keep only last 10 alerts
+    while len(_system_alerts) > 10:
+        _system_alerts.pop(0)
+
+
+def _clear_system_alert(keyword: str):
+    """Remove alerts containing keyword (e.g. when issue resolves)."""
+    _system_alerts[:] = [a for a in _system_alerts if keyword not in a]
+
+
+def _format_system_alerts() -> str:
+    if not _system_alerts:
+        return ""
+    return "\n\n## System Alerts\n" + "\n".join(f"- {a}" for a in _system_alerts)
+
+
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 **Current date and time: {current_datetime}**
+{system_alerts}
 
 You are currently operating via Telegram.
 
@@ -365,6 +389,7 @@ _TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
 
 _TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 **Current date and time: {current_datetime}**
+{system_alerts}
 
 You are currently executing a background task — produce a structured intelligence report.
 
@@ -630,7 +655,7 @@ async def _chat_with_tools(
         response = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
             max_tokens=_CLAUDE_MAX_TOKENS,
-            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
+            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
             tools=_TOOLS,
             messages=working_msgs,
         )
@@ -732,7 +757,7 @@ async def _process_task(bot: Bot, task: dict):
         report = await _chat_with_tools(
             [{"role": "user", "content": content}],
             max_rounds=15,
-            system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
+            system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
             model=_CLAUDE_MODEL_STRONG,
         )
 
@@ -785,6 +810,9 @@ async def _system_monitor(bot: Bot):
     await asyncio.sleep(5)  # let services initialize
     kg = await asyncio.to_thread(get_kg_service)
     kg_status = "connected" if kg else "unavailable"
+    _add_system_alert(f"Deploy 완료 — KG: {kg_status}")
+    if not kg:
+        _add_system_alert("KG (Neo4j AuraDB) 연결 불가 — 그래프 검색/쓰기 사용 불가")
     await _broadcast(bot, (
         f"🟢 *Deploy 완료* — 새 버전이 live입니다.\n"
         f"  KG (Neo4j): {kg_status}"
@@ -799,8 +827,12 @@ async def _system_monitor(bot: Bot):
             kg_is_up = kg is not None
 
             if kg_was_up and not kg_is_up:
+                _clear_system_alert("KG 재연결")
+                _add_system_alert("KG (Neo4j AuraDB) 연결 끊김 — 그래프 검색/쓰기 사용 불가")
                 await _broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j AuraDB에 연결할 수 없습니다.")
             elif not kg_was_up and kg_is_up:
+                _clear_system_alert("KG")  # clear all KG-related alerts
+                _add_system_alert("KG 재연결 성공 — Neo4j AuraDB 정상")
                 await _broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j AuraDB 연결이 복구되었습니다.")
 
             kg_was_up = kg_is_up
