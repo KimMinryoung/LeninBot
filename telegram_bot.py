@@ -167,26 +167,39 @@ def _current_datetime_str() -> str:
 
 
 # ── System Alerts (injected into system prompt) ─────────────────────
-_system_alerts: list[str] = []
+import time as _time
+
+_MAX_ALERTS = 5
+_ALERT_TTL = 30 * 60  # 30 minutes
+
+# Each alert: (monotonic_timestamp, formatted_string)
+_system_alerts: list[tuple[float, str]] = []
+
+
+def _prune_alerts():
+    """Remove expired alerts and trim to max count."""
+    now = _time.monotonic()
+    _system_alerts[:] = [(t, m) for t, m in _system_alerts if now - t < _ALERT_TTL]
+    while len(_system_alerts) > _MAX_ALERTS:
+        _system_alerts.pop(0)
 
 
 def _add_system_alert(msg: str):
     """Add a system alert visible to the bot in its system prompt."""
-    _system_alerts.append(f"[{datetime.now(KST).strftime('%H:%M')}] {msg}")
-    # Keep only last 10 alerts
-    while len(_system_alerts) > 10:
-        _system_alerts.pop(0)
+    _system_alerts.append((_time.monotonic(), f"[{datetime.now(KST).strftime('%H:%M')}] {msg}"))
+    _prune_alerts()
 
 
 def _clear_system_alert(keyword: str):
     """Remove alerts containing keyword (e.g. when issue resolves)."""
-    _system_alerts[:] = [a for a in _system_alerts if keyword not in a]
+    _system_alerts[:] = [(t, m) for t, m in _system_alerts if keyword not in m]
 
 
 def _format_system_alerts() -> str:
+    _prune_alerts()
     if not _system_alerts:
         return ""
-    return "\n\n## System Alerts\n" + "\n".join(f"- {a}" for a in _system_alerts)
+    return "\n\n## System Alerts\n" + "\n".join(f"- {m}" for _, m in _system_alerts)
 
 
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
