@@ -222,6 +222,59 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "write_kg",
+        "description": (
+            "Add knowledge to your Knowledge Graph (Neo4j). Use this to permanently store "
+            "facts, entity profiles, relationships, observations, or any structured knowledge "
+            "you want to remember long-term. The KG extracts entities and relationships "
+            "automatically from your text. Write in clear, factual sentences. "
+            "Example: 'Person Profile: 비숑 (Bichon) is a Korean AI developer who created "
+            "and operates Cyber-Lenin. Cyber-Lenin is deployed on Telegram and Web platforms.'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "The knowledge to store. Write clear factual statements. "
+                        "Include entity names, roles, relationships, dates, and context. "
+                        "The system will automatically extract entities and relationships."
+                    ),
+                },
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Short label for this knowledge episode (e.g., 'bichon-profile', "
+                        "'ukraine-ceasefire-update'). Auto-generated if omitted."
+                    ),
+                },
+                "source_type": {
+                    "type": "string",
+                    "enum": [
+                        "internal_report", "osint_news", "osint_social",
+                        "personnel_change", "diplomatic_cable", "threat_report",
+                    ],
+                    "description": (
+                        "Category of knowledge. Default: 'internal_report'. "
+                        "Use 'osint_news' for news, 'personnel_change' for people updates, etc."
+                    ),
+                    "default": "internal_report",
+                },
+                "group_id": {
+                    "type": "string",
+                    "description": (
+                        "Logical group for this knowledge. Existing groups: "
+                        "geopolitics_conflict, geopolitics_diplomacy, geopolitics_economy, "
+                        "korea_domestic, agent_knowledge. Default: 'agent_knowledge'."
+                    ),
+                    "default": "agent_knowledge",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
         "name": "read_source_code",
         "description": (
             "Read your own source code files. Use this to inspect how you work — "
@@ -462,7 +515,7 @@ async def _exec_read_system_status() -> str:
         f"   Active interfaces: Telegram Bot, Web Chatbot\n"
         f"   Diary cycle: every 6 hours\n"
         f"   Available self-tools: read_diary, read_chat_logs, read_processing_logs, "
-        f"read_task_reports, read_kg_status, read_system_status"
+        f"read_task_reports, read_kg_status, read_system_status, write_kg"
     )
 
     # 6. Architecture overview
@@ -552,6 +605,21 @@ async def _exec_read_recent_updates(max_entries: int = 3) -> str:
     return f"=== RECENT SYSTEM UPDATES ===\n\n{result}"
 
 
+async def _exec_write_kg(
+    content: str,
+    name: str = "",
+    source_type: str = "internal_report",
+    group_id: str = "agent_knowledge",
+) -> str:
+    from shared import add_kg_episode
+
+    result = await asyncio.to_thread(add_kg_episode, content, name, source_type, group_id)
+    if result["status"] == "ok":
+        return f"Knowledge stored successfully: {result['message']}"
+    else:
+        return f"Failed to store knowledge: {result['message']}"
+
+
 async def _exec_read_source_code(
     file: str | None = None,
     line_start: int | None = None,
@@ -636,4 +704,5 @@ SELF_TOOL_HANDLERS = {
     "read_render_logs": _exec_read_render_logs,
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
+    "write_kg": _exec_write_kg,
 }

@@ -260,6 +260,12 @@ AIChatBot/
 - **`_generate_diary()`**: `prev_ref` 요약 → `banned_topics` + `writing_angle` + `self_updates` (fetch_recent_updates)
 - **`max_output_tokens`**: 16384 → 4096
 
+#### write_kg Tool — KG 쓰기 기능 (신규)
+- **shared.py**: `add_kg_episode(content, name, source_type, group_id)` — KG에 에피소드 추가. `run_kg_async(svc.ingest_episode(...))` 위임
+- **self_tools.py**: `write_kg` 도구 정의 + `_exec_write_kg` 핸들러 추가 (총 11개 self-tool)
+- **telegram_bot.py**: system prompt에 write_kg 도구 설명 + 사용 전략 10번 항목 추가
+- **용도**: 봇이 대화 중 학습한 사실, 인물 프로필, 관계 등을 KG에 영구 저장
+
 #### chatbot.py — KG 중복 검색 버그 수정 (task report #6 코드 리뷰 반영)
 - **`kg_retrieve_node`**: 첫 번째 KG 검색 루프가 `merged_kg = None` 리셋으로 무효화되던 dead code 삭제 (KG API 호출 50% 절감)
 - **`step_executor_node`**: 무조건 실행되던 KG 검색이 중복 체크 전에 호출되던 버그 수정 (이중 API 호출 제거)

@@ -285,6 +285,52 @@ def fetch_kg_stats() -> dict:
         return {"error": str(e)}
 
 
+def add_kg_episode(
+    content: str,
+    name: str = "",
+    source_type: str = "internal_report",
+    group_id: str = "agent_knowledge",
+) -> dict:
+    """Add an episode to the Knowledge Graph.
+
+    Args:
+        content: The text content to ingest (facts, profiles, observations).
+        name: Episode name/label. Auto-generated if empty.
+        source_type: One of EPISODE_SOURCE_MAP keys. Default 'internal_report'.
+        group_id: Logical grouping. Default 'agent_knowledge'.
+
+    Returns dict with 'status' ('ok' or 'error') and 'message'.
+    """
+    from datetime import timezone
+
+    svc = get_kg_service()
+    if svc is None:
+        return {"status": "error", "message": "Knowledge Graph service unavailable"}
+
+    if not content or not content.strip():
+        return {"status": "error", "message": "Content cannot be empty"}
+
+    # Auto-generate name if not provided
+    if not name:
+        ts = datetime.now(KST).strftime("%Y%m%d-%H%M%S")
+        name = f"agent-note-{ts}"
+
+    try:
+        run_kg_async(svc.ingest_episode(
+            name=name,
+            body=content.strip(),
+            source_type=source_type,
+            reference_time=datetime.now(timezone.utc),
+            group_id=group_id,
+            preprocess_news=False,  # Already curated by the agent
+            max_body_chars=3000,
+        ))
+        return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
+    except Exception as e:
+        logger.error("[shared] add_kg_episode error: %s", e)
+        return {"status": "error", "message": str(e)}
+
+
 def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:
     """Read recent feature updates from dev_docs/project_state.md.
 
