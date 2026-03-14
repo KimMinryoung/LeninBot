@@ -116,7 +116,7 @@ def _ensure_table():
 # ── Claude client ────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-_CLAUDE_MODEL_STRONG = "claude-sonnet-4-5-20250514"
+_CLAUDE_MODEL_STRONG = "claude-sonnet-4-5-20250929"
 _CLAUDE_MAX_TOKENS = 4096
 
 
@@ -148,6 +148,7 @@ information not likely in the document DB or KG.
 - **read_kg_status**: Check knowledge graph statistics (entity counts, recent episodes).
 - **read_system_status**: Comprehensive self-diagnosis — diary, chats, tasks, KG, architecture.
 - **read_render_status**: Check your Render deployment status — recent deploys, build events, restarts.
+- **read_render_logs**: Read your live service logs from Render — stdout, errors, warnings. For troubleshooting.
 - **read_recent_updates**: Read your own recent feature changelog — what new capabilities you gained.
 - **read_source_code**: Read your own source code files. List available files or read a specific file with line ranges.
 

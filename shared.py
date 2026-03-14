@@ -382,6 +382,92 @@ def fetch_render_status(deploy_limit: int = 5) -> dict:
     return result
 
 
+_render_owner_id: str | None = None
+
+
+def fetch_render_logs(minutes_back: int = 10, limit: int = 50) -> list[dict]:
+    """Fetch live service logs from Render API.
+
+    Args:
+        minutes_back: How far back to fetch logs (1-60 minutes).
+        limit: Max log entries (1-100).
+
+    Returns list of dicts: timestamp, level, message.
+    Requires RENDER_API_KEY, RENDER_SERVICE_ID env vars.
+    """
+    global _render_owner_id
+
+    api_key = os.getenv("RENDER_API_KEY", "")
+    service_id = os.getenv("RENDER_SERVICE_ID", "")
+    if not api_key or not service_id:
+        return [{"error": "RENDER_API_KEY or RENDER_SERVICE_ID not set"}]
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    base = "https://api.render.com/v1"
+
+    # Resolve owner ID (cached after first call)
+    if _render_owner_id is None:
+        try:
+            resp = requests.get(
+                f"{base}/services/{service_id}",
+                headers=headers, timeout=10,
+            )
+            if resp.status_code == 200:
+                svc = resp.json()
+                _render_owner_id = svc.get("ownerId") or svc.get("service", {}).get("ownerId", "")
+        except Exception as e:
+            logger.error("[shared] fetch_render_logs owner resolve error: %s", e)
+            return [{"error": f"Failed to resolve owner ID: {e}"}]
+
+    if not _render_owner_id:
+        return [{"error": "Could not resolve Render owner ID"}]
+
+    # Clamp parameters
+    minutes_back = max(1, min(60, minutes_back))
+    limit = max(1, min(100, limit))
+
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(minutes=minutes_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        resp = requests.get(
+            f"{base}/logs",
+            params={
+                "ownerId": _render_owner_id,
+                "resource": service_id,
+                "startTime": start,
+                "endTime": end,
+                "limit": limit,
+            },
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return [{"error": f"Render logs API returned {resp.status_code}"}]
+
+        data = resp.json()
+        entries = []
+        # Strip ANSI escape codes from messages
+        import re
+        ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+
+        for log in data.get("logs", []):
+            labels = {l["name"]: l["value"] for l in log.get("labels", [])}
+            msg = ansi_re.sub("", log.get("message", ""))
+            entries.append({
+                "timestamp": log.get("timestamp", ""),
+                "level": labels.get("level", ""),
+                "type": labels.get("type", ""),
+                "message": msg,
+            })
+        return entries
+
+    except Exception as e:
+        logger.error("[shared] fetch_render_logs error: %s", e)
+        return [{"error": str(e)}]
+
+
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Cyber-Lenin System Architecture

@@ -179,6 +179,30 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "read_render_logs",
+        "description": (
+            "Read your own live service logs from Render. Shows recent stdout/stderr "
+            "output including errors, warnings, request logs, and startup messages. "
+            "Use this for troubleshooting after deploy or diagnosing runtime issues."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "minutes_back": {
+                    "type": "integer",
+                    "description": "How many minutes back to fetch logs (1-60). Default 10.",
+                    "default": 10,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max number of log entries (1-100). Default 50.",
+                    "default": 50,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "read_recent_updates",
         "description": (
             "Read your own recent feature updates and changelog. Shows what new "
@@ -498,6 +522,29 @@ async def _exec_read_render_status(deploy_limit: int = 5) -> str:
     return "=== RENDER DEPLOYMENT STATUS ===\n\n" + "\n".join(parts)
 
 
+async def _exec_read_render_logs(minutes_back: int = 10, limit: int = 50) -> str:
+    from shared import fetch_render_logs
+
+    entries = await asyncio.to_thread(fetch_render_logs, minutes_back, limit)
+
+    if entries and "error" in entries[0]:
+        return f"Render logs fetch failed: {entries[0]['error']}"
+
+    if not entries:
+        return f"No logs found in the last {minutes_back} minutes."
+
+    lines = []
+    for e in entries:
+        ts = e.get("timestamp", "")[:19].replace("T", " ")
+        level = e.get("level", "")
+        msg = e.get("message", "")
+        prefix = f"[{level}]" if level else ""
+        lines.append(f"{ts} {prefix} {msg}")
+
+    header = f"=== RENDER LOGS (last {minutes_back}min, {len(entries)} entries) ===\n"
+    return header + "\n".join(lines)
+
+
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
     from shared import fetch_recent_updates
 
@@ -586,6 +633,7 @@ SELF_TOOL_HANDLERS = {
     "read_kg_status": _exec_read_kg_status,
     "read_system_status": _exec_read_system_status,
     "read_render_status": _exec_read_render_status,
+    "read_render_logs": _exec_read_render_logs,
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
 }
