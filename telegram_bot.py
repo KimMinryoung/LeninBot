@@ -127,7 +127,7 @@ def _query_one(sql: str, params: tuple | None = None) -> dict | None:
 
 
 def _ensure_table():
-    """Create telegram_tasks table if not exists."""
+    """Create telegram_tasks and telegram_chat_history tables if not exists."""
     _execute("""
         CREATE TABLE IF NOT EXISTS telegram_tasks (
             id          SERIAL PRIMARY KEY,
@@ -138,6 +138,20 @@ def _ensure_table():
             created_at  TIMESTAMPTZ DEFAULT NOW(),
             completed_at TIMESTAMPTZ
         )
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_chat_history (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            role        VARCHAR(10) NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    # Index for fast user_id lookups
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_chat_history_user_id
+        ON telegram_chat_history (user_id, id DESC)
     """)
 
 
@@ -170,7 +184,7 @@ def _current_datetime_str() -> str:
 import time as _time
 
 _MAX_ALERTS = 5
-_ALERT_TTL = 30 * 60  # 30 minutes
+_ALERT_TTL = 24 * 60 * 60  # 24 hours
 
 # Each alert: (monotonic_timestamp, formatted_string)
 _system_alerts: list[tuple[float, str]] = []
@@ -459,9 +473,35 @@ Write the report in the SAME LANGUAGE as the task.
 """
 
 # Per-user chat history (in-memory, lost on restart)
-_chat_history: dict[int, list[dict]] = {}
-
 MAX_HISTORY_TURNS = 20  # 20 pairs = 40 messages
+
+
+def _load_chat_history(user_id: int) -> list[dict]:
+    """Load recent chat history from DB for a user."""
+    limit = MAX_HISTORY_TURNS * 2
+    with _get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT role, content FROM ("
+                "  SELECT role, content, id FROM telegram_chat_history"
+                "  WHERE user_id = %s ORDER BY id DESC LIMIT %s"
+                ") sub ORDER BY id ASC",
+                (user_id, limit),
+            )
+            return [{"role": r["role"], "content": r["content"]} for r in cur.fetchall()]
+
+
+def _save_chat_message(user_id: int, role: str, content: str):
+    """Append a single message to DB chat history."""
+    _execute(
+        "INSERT INTO telegram_chat_history (user_id, role, content) VALUES (%s, %s, %s)",
+        (user_id, role, content),
+    )
+
+
+def _clear_chat_history(user_id: int):
+    """Delete all chat history for a user."""
+    _execute("DELETE FROM telegram_chat_history WHERE user_id = %s", (user_id,))
 
 # ── CLAW pipeline (lazy-loaded) ──────────────────────────────────────
 _graph = None
@@ -521,7 +561,7 @@ async def cmd_start(message: Message):
 async def cmd_clear(message: Message):
     if not _is_allowed(message.from_user.id):
         return
-    _chat_history.pop(message.from_user.id, None)
+    await asyncio.to_thread(_clear_chat_history, message.from_user.id)
     await message.answer("대화 히스토리가 초기화되었습니다.")
 
 
@@ -629,16 +669,9 @@ async def handle_message(message: Message):
     user_id = message.from_user.id
     user_text = message.text
 
-    # Build / retrieve history
-    if user_id not in _chat_history:
-        _chat_history[user_id] = []
-    history = _chat_history[user_id]
-    history.append({"role": "user", "content": user_text})
-
-    # Trim to last N turns
-    if len(history) > MAX_HISTORY_TURNS * 2:
-        history = history[-(MAX_HISTORY_TURNS * 2):]
-        _chat_history[user_id] = history
+    # Save user message to DB and load history
+    await asyncio.to_thread(_save_chat_message, user_id, "user", user_text)
+    history = await asyncio.to_thread(_load_chat_history, user_id)
 
     try:
         reply = await _chat_with_tools(history)
@@ -646,8 +679,8 @@ async def handle_message(message: Message):
         logger.error("Claude API error: %s", e)
         reply = f"오류가 발생했습니다: {e}"
 
-    # Save only the final text reply to history (not tool_use blocks)
-    history.append({"role": "assistant", "content": reply})
+    # Save assistant reply to DB
+    await asyncio.to_thread(_save_chat_message, user_id, "assistant", reply)
 
     for chunk in _split_message(reply):
         await message.answer(chunk)
