@@ -750,26 +750,33 @@ async def _chat_with_tools(
         working_msgs.append({"role": "assistant", "content": assistant_content})
         working_msgs.append({"role": "user", "content": tool_results})
 
-    # Build diagnostic message showing what happened
-    log_detail = "\n".join(tool_call_log) if tool_call_log else "  (기록 없음)"
-    # Collect any partial text the model produced in the last round
-    partial_text = ""
-    for block in response.content:
-        if block.type == "text" and block.text.strip():
-            partial_text = block.text.strip()
-            break
+    # Limit reached — force a final response WITHOUT tools so the model
+    # summarizes everything it has gathered instead of discarding it.
+    log_detail = "\n".join(tool_call_log) if tool_call_log else ""
+    logger.warning("Tool round limit (%d) reached. Forcing final response. Calls:\n%s", max_rounds, log_detail)
 
-    parts = [
-        f"⚠️ 도구 호출 한도({max_rounds}회)에 도달했습니다.",
-        f"\n📋 호출 이력:\n{log_detail}",
-    ]
-    if partial_text:
-        if len(partial_text) > 500:
-            partial_text = partial_text[:500] + "..."
-        parts.append(f"\n💬 마지막 중간 응답:\n{partial_text}")
-    parts.append("\n💡 요청을 더 작은 단위로 나누어 다시 시도해 주세요.")
-
-    return "\n".join(parts)
+    # Inject a nudge so the model knows it must answer now
+    working_msgs.append({
+        "role": "user",
+        "content": (
+            "[SYSTEM] 도구 호출 한도에 도달했습니다. 추가 도구를 사용하지 말고, "
+            "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
+        ),
+    })
+    try:
+        final = await _claude.messages.create(
+            model=model or _CLAUDE_MODEL,
+            max_tokens=_CLAUDE_MAX_TOKENS,
+            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
+                current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts(),
+            ),
+            messages=working_msgs,  # no tools parameter — forces text-only response
+        )
+        text_parts = [b.text for b in final.content if b.type == "text"]
+        return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
+    except Exception as e:
+        logger.error("Final forced response failed: %s", e)
+        return f"⚠️ 도구 호출 한도({max_rounds}회) 도달 후 응답 생성 실패: {e}"
 
 
 # ── Background Task Worker ───────────────────────────────────────────
