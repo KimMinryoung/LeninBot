@@ -153,6 +153,17 @@ def _ensure_table():
         CREATE INDEX IF NOT EXISTS idx_chat_history_user_id
         ON telegram_chat_history (user_id, id DESC)
     """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_schedules (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            content     TEXT NOT NULL,
+            cron_expr   VARCHAR(100) NOT NULL,
+            enabled     BOOLEAN DEFAULT TRUE,
+            created_at  TIMESTAMPTZ DEFAULT NOW(),
+            last_run_at TIMESTAMPTZ
+        )
+    """)
 
 
 # ── Claude client ────────────────────────────────────────────────────
@@ -557,6 +568,12 @@ async def cmd_start(message: Message):
         "/chat <메시지> — CLAW 파이프라인으로 질의 (RAG+KG+전략)\n"
         "/task <내용> — 백그라운드 태스크 등록\n"
         "/status — 최근 태스크 상태 확인\n"
+        "/status_auto — 자율 생성 태스크 확인\n"
+        "/report <id> — 태스크 리포트 파일 재전송 (DB 원문)\n"
+        "/kg — 지식그래프 현황 직접 조회\n"
+        "/schedule <cron> | <내용> — 정기 태스크 등록\n"
+        "/schedules — 등록된 스케줄 목록\n"
+        "/unschedule <id> — 스케줄 삭제\n"
         "/clear — 대화 히스토리 초기화"
     )
 
@@ -666,6 +683,202 @@ async def cmd_status(message: Message):
     await message.answer("\n\n".join(lines))
 
 
+@router.message(Command("kg"))
+async def cmd_kg(message: Message):
+    """Directly show KG stats — no LLM involved."""
+    if not _is_allowed(message.from_user.id):
+        return
+    from shared import fetch_kg_stats
+    await message.answer("KG 조회 중...")
+    try:
+        stats = await asyncio.to_thread(fetch_kg_stats)
+    except Exception as e:
+        await message.answer(f"KG 조회 실패: {e}")
+        return
+    if "error" in stats:
+        await message.answer(f"⚠️ KG 오류: {stats['error']}")
+        return
+
+    lines = ["📊 *지식그래프 현황* (Neo4j AuraDB)\n"]
+    lines.append(f"엔티티: {sum(v for v in stats.get('entity_types', {}).values())}개")
+    for label, cnt in stats.get("entity_types", {}).items():
+        lines.append(f"  {label}: {cnt}")
+    lines.append(f"관계(엣지): {stats.get('edge_count', 0)}개")
+    lines.append(f"에피소드: {stats.get('episode_count', 0)}건")
+    episodes = stats.get("recent_episodes", [])
+    if episodes:
+        lines.append("\n*최근 에피소드:*")
+        for ep in episodes:
+            lines.append(f"  • {ep.get('name', '?')} [{ep.get('group_id', '')}]")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("report"))
+async def cmd_report(message: Message):
+    """Directly fetch a task report from DB and send as file — no LLM involved."""
+    if not _is_allowed(message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/report").strip()
+    if not arg:
+        await message.answer("사용법: /report <task_id>")
+        return
+    try:
+        task_id = int(arg)
+    except ValueError:
+        await message.answer("task_id는 숫자여야 합니다.")
+        return
+    try:
+        row = await asyncio.to_thread(
+            _query_one,
+            "SELECT id, content, status, result FROM telegram_tasks WHERE id = %s",
+            (task_id,),
+        )
+    except Exception as e:
+        await message.answer(f"조회 실패: {e}")
+        return
+    if not row:
+        await message.answer(f"태스크 #{task_id}을(를) 찾을 수 없습니다.")
+        return
+    if row["status"] != "done" or not row.get("result"):
+        await message.answer(f"태스크 #{task_id} 상태: {row['status']} — 완료된 리포트가 없습니다.")
+        return
+    report = row["result"]
+    doc = BufferedInputFile(report.encode("utf-8"), filename=f"report_task_{task_id}.md")
+    await message.answer_document(doc, caption=f"태스크 #{task_id} 리포트 (DB 원문, {len(report)}자)")
+
+
+@router.message(Command("status_auto"))
+async def cmd_status_auto(message: Message):
+    """Show recent self-generated (autonomous) tasks."""
+    if not _is_allowed(message.from_user.id):
+        return
+    try:
+        rows = await asyncio.to_thread(
+            _query,
+            "SELECT id, content, status, created_at FROM telegram_tasks "
+            "WHERE user_id = 0 ORDER BY created_at DESC LIMIT 10",
+        )
+    except Exception as e:
+        logger.error("Auto-task status query error: %s", e)
+        await message.answer(f"조회 실패: {e}")
+        return
+    if not rows:
+        await message.answer("자율 생성된 태스크가 없습니다.")
+        return
+    status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌"}
+    lines = ["🤖 *자율 생성 태스크* (최근 10건)\n"]
+    for r in rows:
+        icon = status_icons.get(r["status"], "❓")
+        ts = r["created_at"].strftime("%m/%d %H:%M")
+        preview = r["content"][:60]
+        lines.append(f"{icon} [{r['id']}] {preview}\n   상태: {r['status']} | {ts}")
+    await message.answer("\n\n".join(lines))
+
+
+@router.message(Command("schedule"))
+async def cmd_schedule(message: Message):
+    """Add a cron schedule: /schedule <cron_expr> | <task content>"""
+    if not _is_allowed(message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/schedule").strip()
+    if not arg or "|" not in arg:
+        await message.answer(
+            "사용법: /schedule <cron식> | <태스크 내용>\n\n"
+            "예시:\n"
+            "  /schedule 0 9 * * * | 오늘의 국제 뉴스 브리핑\n"
+            "  /schedule 0 8 * * 1 | 주간 지정학 정세 분석\n"
+            "  /schedule 0 */6 * * * | 6시간마다 KG 상태 점검\n\n"
+            "cron 형식: 분 시 일 월 요일 (KST 기준)"
+        )
+        return
+    parts = arg.split("|", 1)
+    cron_expr = parts[0].strip()
+    content = parts[1].strip()
+    if not content:
+        await message.answer("태스크 내용이 비어있습니다.")
+        return
+    # Validate cron expression
+    try:
+        from croniter import croniter
+        croniter(cron_expr)
+    except (ValueError, KeyError) as e:
+        await message.answer(f"잘못된 cron 표현식: {cron_expr}\n오류: {e}")
+        return
+    try:
+        await asyncio.to_thread(
+            _execute,
+            "INSERT INTO telegram_schedules (user_id, content, cron_expr) VALUES (%s, %s, %s)",
+            (message.from_user.id, content, cron_expr),
+        )
+        await message.answer(
+            f"✅ 스케줄 등록 완료\n"
+            f"  cron: `{cron_expr}` (KST)\n"
+            f"  내용: {content[:100]}"
+        )
+    except Exception as e:
+        await message.answer(f"스케줄 등록 실패: {e}")
+
+
+@router.message(Command("schedules"))
+async def cmd_schedules(message: Message):
+    """List all schedules for the user."""
+    if not _is_allowed(message.from_user.id):
+        return
+    try:
+        rows = await asyncio.to_thread(
+            _query,
+            "SELECT id, content, cron_expr, enabled, last_run_at "
+            "FROM telegram_schedules WHERE user_id = %s ORDER BY id",
+            (message.from_user.id,),
+        )
+    except Exception as e:
+        await message.answer(f"조회 실패: {e}")
+        return
+    if not rows:
+        await message.answer("등록된 스케줄이 없습니다.")
+        return
+    lines = ["📅 *등록된 스케줄*\n"]
+    for r in rows:
+        status = "✅" if r["enabled"] else "⏸️"
+        last = r["last_run_at"].strftime("%m/%d %H:%M") if r["last_run_at"] else "미실행"
+        preview = r["content"][:60]
+        lines.append(
+            f"{status} [{r['id']}] `{r['cron_expr']}`\n"
+            f"   {preview}\n"
+            f"   마지막 실행: {last}"
+        )
+    await message.answer("\n\n".join(lines))
+
+
+@router.message(Command("unschedule"))
+async def cmd_unschedule(message: Message):
+    """Delete a schedule: /unschedule <id>"""
+    if not _is_allowed(message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/unschedule").strip()
+    if not arg:
+        await message.answer("사용법: /unschedule <schedule_id>")
+        return
+    try:
+        sched_id = int(arg)
+    except ValueError:
+        await message.answer("schedule_id는 숫자여야 합니다.")
+        return
+    try:
+        row = await asyncio.to_thread(
+            _query_one,
+            "DELETE FROM telegram_schedules WHERE id = %s AND user_id = %s RETURNING id",
+            (sched_id, message.from_user.id),
+        )
+    except Exception as e:
+        await message.answer(f"삭제 실패: {e}")
+        return
+    if row:
+        await message.answer(f"🗑️ 스케줄 [{sched_id}] 삭제 완료")
+    else:
+        await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
+
+
 @router.message(F.text)
 async def handle_message(message: Message):
     if not _is_allowed(message.from_user.id):
@@ -714,6 +927,8 @@ async def _chat_with_tools(
 
         # If no tool use, extract and return text
         if response.stop_reason != "tool_use":
+            if response.stop_reason == "max_tokens":
+                logger.warning("Response truncated by max_tokens (%d) at round %d/%d", effective_max_tokens, round_num, max_rounds)
             text_parts = [b.text for b in response.content if b.type == "text"]
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
@@ -778,6 +993,8 @@ async def _chat_with_tools(
             ),
             messages=working_msgs,  # no tools parameter — forces text-only response
         )
+        if final.stop_reason == "max_tokens":
+            logger.warning("Forced final response truncated by max_tokens (%d)", effective_max_tokens)
         text_parts = [b.text for b in final.content if b.type == "text"]
         return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
     except Exception as e:
@@ -948,6 +1165,55 @@ async def _task_worker(bot: Bot):
             await asyncio.sleep(10)
 
 
+async def _schedule_worker(bot: Bot):
+    """Check cron schedules every 60s, create tasks when due."""
+    from croniter import croniter
+    from shared import KST
+
+    logger.info("Schedule worker started")
+    await asyncio.sleep(10)  # let other services init first
+    while True:
+        try:
+            schedules = await asyncio.to_thread(
+                _query,
+                "SELECT id, user_id, content, cron_expr, last_run_at "
+                "FROM telegram_schedules WHERE enabled = TRUE",
+            )
+            now_kst = datetime.now(KST)
+            for sched in schedules:
+                try:
+                    cron = croniter(sched["cron_expr"], now_kst)
+                    prev_fire = cron.get_prev(datetime)
+                    # Should fire if prev_fire is after last_run_at (or never run)
+                    last_run = sched["last_run_at"]
+                    if last_run is None or prev_fire > last_run:
+                        # Create a task
+                        await asyncio.to_thread(
+                            _execute,
+                            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
+                            (sched["user_id"], sched["content"]),
+                        )
+                        await asyncio.to_thread(
+                            _execute,
+                            "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
+                            (now_kst, sched["id"]),
+                        )
+                        logger.info("Schedule #%d fired → task created: %.50s", sched["id"], sched["content"])
+                        # Notify the user
+                        try:
+                            await bot.send_message(
+                                chat_id=sched["user_id"],
+                                text=f"⏰ 스케줄 [{sched['id']}] 실행 → 태스크 생성됨\n{sched['content'][:100]}",
+                            )
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.error("Schedule #%d check error: %s", sched["id"], e)
+        except Exception as e:
+            logger.error("Schedule worker error: %s", e)
+        await asyncio.sleep(60)
+
+
 # ── Entry Point ──────────────────────────────────────────────────────
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
@@ -968,6 +1234,7 @@ async def bot_main():
     # Start background workers
     asyncio.create_task(_task_worker(bot))
     asyncio.create_task(_system_monitor(bot))
+    asyncio.create_task(_schedule_worker(bot))
 
     # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
     import signal

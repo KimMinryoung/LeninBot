@@ -22,3 +22,4 @@ graphiti-core[google-genai]
 # Telegram bot
 aiogram>=3.0,<4.0
 anthropic
+croniter

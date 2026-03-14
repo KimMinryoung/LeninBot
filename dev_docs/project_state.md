@@ -148,8 +148,8 @@ AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
 ├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
 ├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, Render API
-├── self_tools.py             # Self-awareness tools: 10 tools (diary, chat logs, processing logs, tasks, KG, system status, render status/logs, recent updates, source code)
-├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~750 lines)
+├── self_tools.py             # Self-awareness tools: 12 tools (+write_kg, +create_task)
+├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~870 lines)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
 ├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
@@ -213,10 +213,42 @@ AIChatBot/
 6. **Single-worker deployment**: No concurrency across users (one Render instance).
 7. **Memory is in-process only**: MemorySaver doesn't persist across server restarts.
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
-9. **Telegram bot memory**: In-memory conversation history only (per-process dict), lost on restart. No persistent checkpointing like web chatbot.
+9. ~~**Telegram bot memory**~~: Fixed — PostgreSQL `telegram_chat_history` 테이블로 영구 저장 (20턴/40메시지 복원).
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-14 — Resilience, Persistence, Autonomous Tasks, Truncation Fix
+
+#### telegram_bot.py — 안정성 + 지속성 + 자율 태스크
+- **TelegramConflictError 억제**: `_ConflictFilter` — aiogram 로그에서 ConflictError 메시지 필터링 (배포 시 중복 폴링 충돌 방지)
+- **Neo4j 로그 스팸 억제**: `_ThrottleFilter` — 동일 메시지 60초 간격 제한 (DNS retry 100회/초 → 1회/60초)
+- **SIGTERM graceful shutdown**: `dp.stop_polling()` + 종료 알림 브로드캐스트, `drop_pending_updates=True`
+- **시스템 알림**: `_system_alerts` (24h TTL, max 5) — 배포/KG 상태 변화를 시스템 프롬프트 `{system_alerts}`에 주입
+- **`_system_monitor()`**: 2분 간격 KG 헬스 체크 + startup/disconnect/reconnect 알림
+- **`_broadcast()`**: 모든 ALLOWED_USER_IDS에 메시지 전송
+- **대화 이력 DB 영구 저장**: `telegram_chat_history` PostgreSQL 테이블 — 재배포 후에도 유지 (20턴/40메시지 로드)
+- **도구 호출 한도 개선**: `max_rounds` 도달 시 축적된 컨텍스트로 도구 없이 최종 응답 강제 생성 (이전: 전부 버림)
+- **Task max_tokens**: `_CLAUDE_MAX_TOKENS_TASK = 16384` (이전 4096 → 보고서 truncation 해결)
+- **stop_reason 경고**: `max_tokens` truncation 시 로그 경고 추가
+- **자율 태스크 broadcast**: `user_id=0` (봇 자율 생성) 태스크 결과를 전체 사용자에게 broadcast, 우선순위 아이콘 (🔴/🟡/🟢)
+
+#### shared.py — KG 복원력
+- **`_kg_init_cooldown`**: `_kg_init_failed` (영구 차단) → 120초 쿨다운 기반 재시도로 변경
+- **`reset_kg_service()`**: KG 싱글톤 초기화 (AuraDB 재연결 후 자동 복구)
+- **`add_kg_episode()`**: KG 에피소드 추가 wrapper, 연결 오류 시 자동 reset
+- **`create_task_in_db()`**: 태스크 DB 삽입 (user_id=0 자율 생성 지원)
+
+#### self_tools.py — 12개 도구로 확장
+- **`write_kg`**: KG 에피소드 추가 + `[KG AUDIT]` 감시 로그
+- **`create_task`**: 봇 자율 태스크 생성 도구
+- **`_to_kst()`**: 모든 self-tool 타임스탬프 UTC→KST 변환
+
+#### graph_memory/service.py
+- **`graphiti` property**: `_graphiti` private 속성 → public property (shared.py 접근 오류 수정)
+
+#### chatbot.py — KG 연결 복원
+- **`_search_kg`**: 연결 오류 시 `reset_kg_service()` 호출
 
 ### 2026-03-14 — Cross-Module Shared Memory, Self-Tools, Diary Overhaul, Sonnet 4.6
 
