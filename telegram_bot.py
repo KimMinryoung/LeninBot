@@ -158,6 +158,7 @@ def _ensure_table():
 # ── Claude client ────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MAX_TOKENS = 4096
+_CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 
 
 def _resolve_model(alias: str, fallback: str) -> str:
@@ -694,16 +695,18 @@ async def _chat_with_tools(
     max_rounds: int = 5,
     system_prompt: str | None = None,
     model: str | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response."""
     # Work on a copy so tool-use intermediate messages don't pollute persistent history
     working_msgs = list(messages)
     tool_call_log = []  # Track tool calls for diagnostic output
+    effective_max_tokens = max_tokens or _CLAUDE_MAX_TOKENS
 
     for round_num in range(1, max_rounds + 1):
         response = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
-            max_tokens=_CLAUDE_MAX_TOKENS,
+            max_tokens=effective_max_tokens,
             system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
             tools=_TOOLS,
             messages=working_msgs,
@@ -769,7 +772,7 @@ async def _chat_with_tools(
     try:
         final = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
-            max_tokens=_CLAUDE_MAX_TOKENS,
+            max_tokens=effective_max_tokens,
             system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts(),
             ),
@@ -830,6 +833,7 @@ async def _process_task(bot: Bot, task: dict):
             max_rounds=15,
             system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
             model=_CLAUDE_MODEL_STRONG,
+            max_tokens=_CLAUDE_MAX_TOKENS_TASK,
         )
 
         # Save full report to DB
