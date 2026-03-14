@@ -557,6 +557,9 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
                 logger.warning("[KG] 검색 실패 — Neo4j 유휴 연결 리셋 (무시 가능, 자동 복구됨). query=%s", q[:50])
             else:
                 logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
+            if any(k in err_msg for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+                from shared import reset_kg_service
+                reset_kg_service()
             return None
     
     # If English query is provided, search with both and merge

@@ -62,6 +62,11 @@ class GraphMemoryService:
         self._graphiti: Graphiti | None = None
         self._llm_client: GeminiClient | None = None
 
+    @property
+    def graphiti(self) -> Graphiti:
+        """Public access to the Graphiti instance (e.g. for driver access)."""
+        return self._ensure_initialized()
+
     async def initialize(self) -> None:
         """Neo4j 연결 + Gemini LLM 초기화 + 인덱스/제약조건 설정."""
         if self._graphiti is not None:

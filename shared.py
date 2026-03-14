@@ -124,6 +124,18 @@ def get_kg_service():
             return None
 
 
+def reset_kg_service():
+    """Reset the KG singleton so next get_kg_service() retries initialization.
+
+    Call this when KG operations fail due to connection issues (e.g. AuraDB paused).
+    """
+    global _kg_service, _kg_init_cooldown
+    with _kg_lock:
+        _kg_service = None
+        _kg_init_cooldown = 0.0
+        logger.info("[KG] service reset — will retry on next access")
+
+
 # ── Shared Memory Access ────────────────────────────────────────────
 # Reusable query functions for cross-module memory retrieval.
 # Used by self-tools (telegram, chatbot) and diary_writer.
@@ -292,6 +304,10 @@ def fetch_kg_stats() -> dict:
         }
     except Exception as e:
         logger.error("[shared] fetch_kg_stats error: %s", e)
+        # Reset service on connection-related errors so it retries
+        err_str = str(e).lower()
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti", "初期化")):
+            reset_kg_service()
         return {"error": str(e)}
 
 
@@ -338,6 +354,9 @@ def add_kg_episode(
         return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
     except Exception as e:
         logger.error("[shared] add_kg_episode error: %s", e)
+        err_str = str(e).lower()
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+            reset_kg_service()
         return {"status": "error", "message": str(e)}
 
 
