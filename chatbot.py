@@ -468,8 +468,24 @@ def _prepare_search_queries(query: str, context: str, selected_layer: str, logs:
             if search_query_en:
                 logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query_en}\"")
             return search_query_ko, search_query_en
+        elif needs_english and not has_korean:
+            # Query is already English — rewrite for context resolution, use as-is for English search
+            rewrite_prompt = (
+                "Given the conversation context and current question, "
+                "rewrite the user's CURRENT question into a self-contained English search query. "
+                "Resolve any pronouns or references using the context. "
+                "If the question is already self-contained, return it as-is. "
+                "Output ONLY the rewritten query, nothing else.\n\n"
+                f"Conversation context:\n{context}\n\n"
+                f"Current question: {query}"
+            )
+            rewritten = _invoke_with_backoff(lambda: llm_light.invoke(rewrite_prompt))
+            search_query_en = rewritten.content.strip()
+            if search_query_en != query:
+                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_en}\"")
+            return search_query_en, search_query_en
         else:
-            # Only rewrite (no translation needed)
+            # Only rewrite in Korean (no translation needed)
             rewrite_prompt = (
                 "Given the conversation context and current question, "
                 "rewrite the user's CURRENT question into a self-contained Korean search query. "
@@ -483,9 +499,7 @@ def _prepare_search_queries(query: str, context: str, selected_layer: str, logs:
             search_query_ko = rewritten.content.strip()
             if search_query_ko != query:
                 logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
-            # If layer needs English but query is already non-Korean
-            search_query_en = search_query_ko if needs_english else None
-            return search_query_ko, search_query_en
+            return search_query_ko, None
     except Exception as e:
         if "429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
             logs.append("⚠️ [재작성] Gemini 속도 제한(429) — 원본 쿼리로 대체합니다.")
@@ -939,6 +953,7 @@ def strategize_node(state: AgentState):
 # Node: Generate
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
+    docs = docs[:12]  # Cap document count to prevent prompt size blowup in plan-and-execute
     context = "\n\n".join([_format_doc(d) for d in docs]) if docs else ""
     strategy = state.get("strategy", None)
     messages = state["messages"]
@@ -1017,8 +1032,8 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
         turn_start = state.get("logs_turn_start", 0)
         processing_logs = state.get("logs", [])[turn_start:]
 
-        is_casual = not docs and not strategy
-        route = "casual" if is_casual else "vectorstore"
+        datasource = state.get("datasource", "generate")
+        route = datasource if datasource else ("casual" if not docs and not strategy else "vectorstore")
 
         web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
 
