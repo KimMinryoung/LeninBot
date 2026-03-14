@@ -85,12 +85,20 @@ _kg_lock = threading.Lock()
 _kg_loop = None
 
 
+_kg_run_lock = threading.Lock()
+
+
 def run_kg_async(coro):
-    """Run a coroutine on the persistent KG event loop."""
+    """Run a coroutine on the persistent KG event loop.
+
+    Thread-safe: serialized via _kg_run_lock because asyncio event loops
+    are NOT thread-safe and concurrent run_until_complete() calls crash.
+    """
     global _kg_loop
-    if _kg_loop is None or _kg_loop.is_closed():
-        _kg_loop = asyncio.new_event_loop()
-    return _kg_loop.run_until_complete(coro)
+    with _kg_run_lock:
+        if _kg_loop is None or _kg_loop.is_closed():
+            _kg_loop = asyncio.new_event_loop()
+        return _kg_loop.run_until_complete(coro)
 
 
 def get_kg_service():
