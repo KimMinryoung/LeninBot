@@ -596,8 +596,9 @@ async def _chat_with_tools(
     """Call Claude with tools, execute tool calls, loop until text response."""
     # Work on a copy so tool-use intermediate messages don't pollute persistent history
     working_msgs = list(messages)
+    tool_call_log = []  # Track tool calls for diagnostic output
 
-    for _ in range(max_rounds):
+    for round_num in range(1, max_rounds + 1):
         response = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
             max_tokens=_CLAUDE_MAX_TOKENS,
@@ -640,12 +641,36 @@ async def _chat_with_tools(
                     "tool_use_id": block.id,
                     "content": result,
                 })
+                # Log for diagnostics
+                input_summary = json.dumps(block.input, ensure_ascii=False)
+                if len(input_summary) > 120:
+                    input_summary = input_summary[:120] + "..."
+                tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}({input_summary})")
 
         # Append assistant message with tool_use + user message with tool_results
         working_msgs.append({"role": "assistant", "content": assistant_content})
         working_msgs.append({"role": "user", "content": tool_results})
 
-    return "도구 호출 한도에 도달했습니다. 다시 시도해 주세요."
+    # Build diagnostic message showing what happened
+    log_detail = "\n".join(tool_call_log) if tool_call_log else "  (기록 없음)"
+    # Collect any partial text the model produced in the last round
+    partial_text = ""
+    for block in response.content:
+        if block.type == "text" and block.text.strip():
+            partial_text = block.text.strip()
+            break
+
+    parts = [
+        f"⚠️ 도구 호출 한도({max_rounds}회)에 도달했습니다.",
+        f"\n📋 호출 이력:\n{log_detail}",
+    ]
+    if partial_text:
+        if len(partial_text) > 500:
+            partial_text = partial_text[:500] + "..."
+        parts.append(f"\n💬 마지막 중간 응답:\n{partial_text}")
+    parts.append("\n💡 요청을 더 작은 단위로 나누어 다시 시도해 주세요.")
+
+    return "\n".join(parts)
 
 
 # ── Background Task Worker ───────────────────────────────────────────
