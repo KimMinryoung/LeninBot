@@ -41,6 +41,26 @@ class _ConflictFilter(logging.Filter):
 logging.getLogger("aiogram.dispatcher").addFilter(_ConflictFilter())
 logging.getLogger("aiogram.event").addFilter(_ConflictFilter())
 
+# Throttle Neo4j DNS/connection retry spam (100s of warnings per second when AuraDB is down)
+class _ThrottleFilter(logging.Filter):
+    def __init__(self, interval: float = 60.0):
+        super().__init__()
+        self._last: dict[str, float] = {}
+        self._interval = interval
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        import time
+        # Group by first 80 chars of message to dedup similar warnings
+        key = record.getMessage()[:80]
+        now = time.monotonic()
+        last = self._last.get(key, 0.0)
+        if now - last < self._interval:
+            return False
+        self._last[key] = now
+        return True
+
+logging.getLogger("neo4j").addFilter(_ThrottleFilter(60.0))
+
 # ── Config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
