@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-13
+# Project State Report — 2026-03-14
 
 ## Identity
 
@@ -15,7 +15,7 @@ Deployed at Render.com, frontend at `bichonwebpage.onrender.com`.
      ┌────────────────────────────┼────────────────────────────┐
      │                            │                            │
 User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer.py)
-        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Haiku 4.5 (chat) / Sonnet 4.5 (task)
+        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Haiku 4.5 (chat) / Sonnet 4.6 (task)
            ─► PostgreSQL/pgvector              ─► vector_search (via chatbot.py)
            ─► Gemini 3.1 Flash Lite (gen)      ─► knowledge_graph_search (via shared.py)
            ─► Gemini 2.5 Flash-Lite (routing)  ─► web_search (via Tavily)
@@ -147,9 +147,9 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
 ├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
-├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access functions
-├── self_tools.py             # [NEW] Self-awareness tools: 6 tools (diary, chat logs, processing logs, tasks, KG, system status)
-├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 tool-use, ~723 lines)
+├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, Render API
+├── self_tools.py             # Self-awareness tools: 10 tools (diary, chat logs, processing logs, tasks, KG, system status, render status/logs, recent updates, source code)
+├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~750 lines)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
 ├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
@@ -197,11 +197,11 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
-16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.5 (task) with Anthropic tool-use (vector search, KG search, web search, 7 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history
+16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (3 search tools + 10 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
 17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
-20. **Cross-module shared memory**: Self-tools in shared.py (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats) enable any module to access any other module's logs and state. Telegram bot has 6 self-tools: read_diary, read_chat_logs, read_processing_logs, read_task_reports, read_kg_status, read_system_status.
+20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_render_status, fetch_render_logs, fetch_recent_updates). Telegram bot has 10 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, Render deploy status, Render live logs, recent feature updates, source code reader.
 
 ## Current Limitations
 
@@ -218,44 +218,47 @@ AIChatBot/
 
 ## Recent Changes
 
-### 2026-03-14 — Diary Anti-Repetition Overhaul
+### 2026-03-14 — Cross-Module Shared Memory, Self-Tools, Diary Overhaul, Sonnet 4.6
 
-#### diary_writer.py — 반복 방지 메커니즘
-- **`_extract_banned_topics()`** (new): 최근 3건 일기에서 구체적 주제/사건/인물을 LLM으로 추출하여 금지 목록 생성. 폴백: 제목 목록
-- **`_WRITING_ANGLES`** (new): 8가지 글쓰기 앵글 로테이션 (일기 수 기반 순환) — "하나의 사건에 집중", "미래의 동지에게 편지", "모순 분석", "대화-뉴스 연결", "비판", "놀라움 성찰", "무관한 사건 연결", "뉴스에 없는 것"
-- **`_NEWS_QUERY_POOL`** (new): 8쌍 16개 뉴스 쿼리 주제 풀. day-of-year + hour 기반 로테이션으로 매 사이클 다른 주제 검색
-- **`_generate_recent_news_queries()`**: 고정 2개 쿼리 → 풀 기반 로테이션 2개 쿼리
-- **`_DIARY_PROMPT`**: "don't repeat" → 구체적 BANNED TOPICS 섹션 + Writing Angle 섹션 + self_updates 섹션 (기능 업데이트 자기 인식)
-- **`_generate_diary()`**: `prev_ref` 요약 제거 → `banned_topics` (구체적 금지 목록) + `writing_angle` (로테이션) + `self_updates` (최근 기능 변경사항)
-- **`max_output_tokens`**: 16384 → 4096 (일기 길이 축소)
+#### shared.py — Shared Memory Access + Render API
+- **`fetch_diaries(limit, keyword)`**: HTTP GET to diary API, keyword filter
+- **`fetch_chat_logs(limit, hours_back, keyword, include_logs)`**: PostgreSQL chat_logs; `include_logs=True` returns processing_logs, route, strategy, documents_count, web_search_used
+- **`fetch_task_reports(limit, status)`**: PostgreSQL telegram_tasks query
+- **`fetch_kg_stats()`**: Neo4j Cypher queries for entity/edge/episode counts
+- **`fetch_render_status(deploy_limit)`**: Render API — recent deploys + events
+- **`fetch_render_logs(minutes_back, limit)`**: Render `/v1/logs` API — live service logs with ownerId resolution (cached), ANSI stripping, time window control (1-60min)
+- **`fetch_recent_updates(max_entries, max_chars)`**: `dev_docs/project_state.md` "Recent Changes" 섹션 파싱
+- **`MODULE_ARCHITECTURE`**: Static architecture description string
 
-#### shared.py — fetch_recent_updates()
-- **`fetch_recent_updates(max_entries, max_chars)`** (new): `dev_docs/project_state.md`의 "Recent Changes" 섹션 파싱하여 최근 N개 엔트리 반환. 일기 작성 시 자기 인식용
+#### self_tools.py — 10 Self-Awareness Tools (신규 모듈)
+- **`read_diary`**: 일기 항목 조회 (keyword filter, limit)
+- **`read_chat_logs`**: 전 인터페이스 (Telegram + Web) 대화 로그
+- **`read_processing_logs`**: 웹 챗봇 파이프라인 상세 로그 (nodes, route, strategy)
+- **`read_task_reports`**: Telegram /task 큐 결과 (pending/done/failed)
+- **`read_kg_status`**: 지식그래프 통계 (entity types, edges, episodes)
+- **`read_system_status`**: 종합 자기 진단 (diary, chats, tasks, KG, architecture)
+- **`read_render_status`**: Render 배포 상태 (deploys, events, commit messages)
+- **`read_render_logs`**: Render 라이브 서비스 로그 (stdout/stderr, time window 조절)
+- **`read_recent_updates`**: 최근 기능 업데이트 변경 로그
+- **`read_source_code`**: 자기 소스코드 읽기 (파일 목록 또는 특정 파일 + 라인 범위, 보안 화이트리스트)
+- 모든 핸들러는 shared.py 함수에 `asyncio.to_thread()` 위임
 
-#### self_tools.py — read_recent_updates 도구 추가
-- **`read_recent_updates`** (new): 최근 기능 업데이트/변경 로그 조회 도구 (총 8개 self-tools)
+#### telegram_bot.py — Self-Tools 통합 + Sonnet 4.6 + 동적 모델 해석
+- Self-tools: `from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS` → `_TOOLS.extend()`, `_TOOL_HANDLERS.update()`
+- System prompt: 10개 self-tool 설명 + 사용 전략 9개 항목
+- **`_resolve_model()`** (new): Anthropic Models API (`GET /v1/models/{alias}`)로 시작 시 모델 ID 동적 해석. 실패 시 하드코딩 폴백
+- **`_CLAUDE_MODEL`**: `claude-haiku-4-5` alias → 실제 ID 해석
+- **`_CLAUDE_MODEL_STRONG`**: `claude-sonnet-4-6` alias → 실제 ID 해석 (Sonnet 4.5 → 4.6 업그레이드)
+- **`_chat_with_tools()`**: `model` 파라미터 추가 — /chat은 Haiku, /task는 Sonnet 4.6
+- **`.env`**: `RENDER_API_KEY`, `RENDER_SERVICE_ID` 추가 (Render API 접근용)
 
-### 2026-03-14 — Cross-Module Shared Memory & Self-Tools
-
-#### shared.py — Shared Memory Access Functions
-- **`fetch_diaries(limit, keyword)`**: HTTP GET to diary API, keyword filter, returns list[dict]
-- **`fetch_chat_logs(limit, hours_back, keyword, include_logs)`**: PostgreSQL chat_logs query; `include_logs=True` returns processing_logs, route, strategy, documents_count, web_search_used
-- **`fetch_task_reports(limit, status)`**: PostgreSQL telegram_tasks query; returns id, content, status, result, timestamps
-- **`fetch_kg_stats()`**: Neo4j Cypher queries for entity counts by type, edge count, episode count, recent episodes
-- **`MODULE_ARCHITECTURE`**: Static architecture description string for bot self-awareness
-
-#### leninbot_self_tools.py — 6 Self-Awareness Tools
-- **`read_diary`**: Recall past diary entries (keyword filter, limit)
-- **`read_chat_logs`**: View conversations from ALL interfaces (Telegram + Web)
-- **`read_processing_logs`**: Detailed pipeline logs (nodes, route, strategy, web_search_used) — NEW
-- **`read_task_reports`**: Telegram /task queue results (pending/done/failed) — NEW
-- **`read_kg_status`**: Knowledge graph statistics (entity types, edges, episodes) — NEW
-- **`read_system_status`**: Comprehensive self-diagnosis (diary, chats, tasks, KG, architecture)
-- All handlers delegate to shared.py functions via `asyncio.to_thread()`
-
-#### telegram_bot.py — Integration
-- Self-tools imported and merged: `_TOOLS.extend(SELF_TOOLS)`, `_TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)`
-- System prompt updated: 6 self-tool descriptions + 3 new usage strategy lines (self-reflection, cross-interface, self-diagnosis)
+#### diary_writer.py — 반복 방지 + 자기 인식
+- **`_extract_banned_topics()`** (new): 최근 3건 일기에서 구체적 주제/사건/인물을 LLM으로 추출하여 금지 목록 생성
+- **`_WRITING_ANGLES`** (new): 8가지 글쓰기 앵글 로테이션 (일기 수 기반 순환)
+- **`_NEWS_QUERY_POOL`** (new): 8쌍 16개 뉴스 쿼리 주제 풀. day-of-year + hour 기반 로테이션
+- **`_DIARY_PROMPT`**: BANNED TOPICS 섹션 + Writing Angle 섹션 + self_updates 섹션 (기능 업데이트 자기 인식)
+- **`_generate_diary()`**: `prev_ref` 요약 → `banned_topics` + `writing_angle` + `self_updates` (fetch_recent_updates)
+- **`max_output_tokens`**: 16384 → 4096
 
 #### temp_dev/__init__.py — Created for package import
 
@@ -265,7 +268,7 @@ AIChatBot/
 - **Anthropic tool-use 통합**: Claude Haiku 4.5 + 3개 도구 (vector_search, knowledge_graph_search, web_search)
 - **`_TOOLS`**: Anthropic API 포맷의 도구 정의 (input_schema 포함)
 - **도구 핸들러**: `_exec_vector_search` (chatbot.py BGE-M3 lazy-import), `_exec_kg_search` (shared.py KG singleton), `_exec_web_search` (Tavily)
-- **`_chat_with_tools()`**: 도구 사용 루프 (chat: max 5라운드/Haiku, task: max 8라운드/Sonnet 4.5), 커스텀 system_prompt + model 지원
+- **`_chat_with_tools()`**: 도구 사용 루프 (chat: max 5라운드/Haiku, task: max 8라운드/Sonnet 4.6), 커스텀 system_prompt + model 지원
 - **`_SYSTEM_PROMPT_TEMPLATE`**: CORE_IDENTITY + 현재 KST datetime + 도구 설명 + 사용 전략
 - **`_TASK_SYSTEM_PROMPT_TEMPLATE`**: CORE_IDENTITY + datetime + 구조화된 리포트 포맷 + 품질 기준
 
