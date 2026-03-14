@@ -33,6 +33,14 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
+# Suppress TelegramConflictError spam during deploy (old/new instance overlap)
+class _ConflictFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "TelegramConflictError" not in record.getMessage()
+
+logging.getLogger("aiogram.dispatcher").addFilter(_ConflictFilter())
+logging.getLogger("aiogram.event").addFilter(_ConflictFilter())
+
 # ── Config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -781,8 +789,27 @@ async def bot_main():
     # Start background worker
     asyncio.create_task(_task_worker(bot))
 
+    # Graceful shutdown: stop polling cleanly when SIGTERM received (Render deploy)
+    import signal
+
+    def _handle_sigterm(*_):
+        logger.info("SIGTERM received — stopping polling gracefully")
+        asyncio.get_event_loop().call_soon_threadsafe(dp.stop_polling)
+
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (ValueError, OSError):
+        pass  # signal only works in main thread; skip if called from a thread
+
     logger.info("Bot starting (allowed users: %s)", ALLOWED_USER_IDS)
-    await dp.start_polling(bot)
+    # drop_pending_updates: new instance takes over quickly, avoids processing stale updates
+    await dp.start_polling(bot, drop_pending_updates=True)
+    # After polling stops (shutdown), release the getUpdates lock
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.session.close()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
