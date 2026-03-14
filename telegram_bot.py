@@ -247,6 +247,8 @@ information not likely in the document DB or KG.
 - **write_kg**: Add knowledge to your Knowledge Graph permanently. Use this to store facts, entity profiles, \
 relationships, or observations you learn during conversations. Write clear factual sentences — the system \
 extracts entities and relationships automatically.
+- **create_task**: Create a background task for yourself. Use when you identify something worth investigating \
+that would take too long in the current conversation. The task runs asynchronously with Sonnet and full tool access.
 
 ## Tool Usage Strategy
 1. For factual geopolitical questions → knowledge_graph_search first, then vector_search if needed
@@ -259,6 +261,7 @@ extracts entities and relationships automatically.
 8. For self-diagnosis → read_system_status to understand your current operational state
 9. For introspection → read_source_code to inspect your own pipeline logic, prompts, or schemas
 10. To remember important facts permanently → write_kg to store knowledge in the graph (people, events, relationships)
+11. For complex research that needs deep investigation → create_task to run it in background with Sonnet
 
 ## Knowledge Graph Schema
 - Entities: Person, Organization, Location, Asset, Incident, Policy, Campaign
@@ -800,11 +803,26 @@ def _extract_summary(report: str, max_len: int = 300) -> str:
     return report[:max_len]
 
 
+def _classify_priority(content: str, report: str) -> str:
+    """Classify task result priority from content tags or report urgency keywords."""
+    # Check explicit priority tag in content
+    if "[🔴 HIGH]" in content:
+        return "high"
+    if "[🟢 LOW]" in content:
+        return "low"
+    # Check report for urgency signals
+    report_lower = report[:2000].lower()
+    if any(k in report_lower for k in ("urgent", "critical", "긴급", "위기", "경고", "즉시")):
+        return "high"
+    return "normal"
+
+
 async def _process_task(bot: Bot, task: dict):
     """Process a task: run tools, generate report, save to DB, send as file."""
     task_id = task["id"]
     user_id = task["user_id"]
     content = task["content"]
+    is_self_generated = (user_id == 0)
 
     try:
         report = await _chat_with_tools(
@@ -822,15 +840,26 @@ async def _process_task(bot: Bot, task: dict):
             (report, task_id),
         )
 
+        # Classify priority
+        priority = _classify_priority(content, report)
+        priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
+
         # Send report as Markdown file
         filename = f"report_task_{task_id}.md"
         doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
         summary = _extract_summary(report)
-        await bot.send_document(
-            chat_id=user_id,
-            document=doc,
-            caption=f"✅ 태스크 [{task_id}] 완료\n\n{summary}",
-        )
+        origin = " (자율 생성)" if is_self_generated else ""
+        caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
+
+        if is_self_generated:
+            # Self-generated task: broadcast to all users
+            for uid in ALLOWED_USER_IDS:
+                try:
+                    await bot.send_document(chat_id=uid, document=doc, caption=caption)
+                except Exception:
+                    pass
+        else:
+            await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
     except Exception as e:
         logger.error("Task %d failed: %s", task_id, e)
@@ -840,10 +869,11 @@ async def _process_task(bot: Bot, task: dict):
             "completed_at = NOW() WHERE id = %s",
             (str(e), task_id),
         )
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"❌ 태스크 [{task_id}] 실패:\n{e}",
-        )
+        error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
+        if is_self_generated:
+            await _broadcast(bot, error_msg)
+        else:
+            await bot.send_message(chat_id=user_id, text=error_msg)
 
 
 async def _broadcast(bot: Bot, text: str):

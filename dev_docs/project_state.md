@@ -260,6 +260,14 @@ AIChatBot/
 - **`_generate_diary()`**: `prev_ref` 요약 → `banned_topics` + `writing_angle` + `self_updates` (fetch_recent_updates)
 - **`max_output_tokens`**: 16384 → 4096
 
+#### Autonomous Task System + KG Audit + Diary Integration
+- **self_tools.py**: `create_task` 도구 추가 (총 12개 self-tool) — 봇이 자율적으로 백그라운드 태스크 생성
+- **shared.py**: `create_task_in_db(content, user_id=0, priority)` — user_id=0은 봇 자율 생성
+- **telegram_bot.py**: `_process_task` 개선 — 결과 자동 분류 (🔴HIGH/🟡NORMAL/🟢LOW), 자율 생성 태스크는 전체 broadcast
+- **self_tools.py**: `write_kg` 감시 로그 추가 — `[KG AUDIT]` 로그로 모든 자동 KG 쓰기 기록
+- **diary_writer.py**: 일기 작성 시 최근 완료 태스크 결과 3건 참조 (`{task_summary}` 섹션)
+- **시스템 프롬프트**: create_task 도구 설명 + 사용 전략 11번 항목 추가
+
 #### write_kg Tool — KG 쓰기 기능 (신규)
 - **shared.py**: `add_kg_episode(content, name, source_type, group_id)` — KG에 에피소드 추가. `run_kg_async(svc.ingest_episode(...))` 위임
 - **self_tools.py**: `write_kg` 도구 정의 + `_exec_write_kg` 핸들러 추가 (총 11개 self-tool)

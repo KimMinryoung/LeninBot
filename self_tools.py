@@ -297,6 +297,33 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "create_task",
+        "description": (
+            "Create a background task for yourself. The task will be processed asynchronously "
+            "using Sonnet with full tool access (up to 15 rounds). Use this when you identify "
+            "something worth investigating, analyzing, or researching that would take too long "
+            "in the current conversation. The result will be saved and you'll be notified. "
+            "Examples: 'Analyze recent geopolitical shifts in East Asia', "
+            "'Research and profile key figures in the latest Korea scandal'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The task description. Be specific about what to research/analyze.",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["high", "normal", "low"],
+                    "description": "Task priority. 'high' = urgent analysis, 'normal' = standard, 'low' = background research.",
+                    "default": "normal",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
         "name": "read_source_code",
         "description": (
             "Read your own source code files. Use this to inspect how you work — "
@@ -627,9 +654,28 @@ async def _exec_write_kg(
 
     result = await asyncio.to_thread(add_kg_episode, content, name, source_type, group_id)
     if result["status"] == "ok":
+        # Audit log for KG writes
+        ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+        logger.info(
+            "[KG AUDIT] wrote episode | name=%s | group=%s | source=%s | time=%s | content_len=%d",
+            name or "(auto)", group_id, source_type, ts, len(content),
+        )
         return f"Knowledge stored successfully: {result['message']}"
     else:
         return f"Failed to store knowledge: {result['message']}"
+
+
+async def _exec_create_task(
+    content: str,
+    priority: str = "normal",
+) -> str:
+    from shared import create_task_in_db
+
+    result = await asyncio.to_thread(create_task_in_db, content, 0, priority)
+    if result["status"] == "ok":
+        return f"Task #{result['task_id']} created (priority: {priority}). It will be processed in the background."
+    else:
+        return f"Failed to create task: {result['error']}"
 
 
 async def _exec_read_source_code(
@@ -717,4 +763,5 @@ SELF_TOOL_HANDLERS = {
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
     "write_kg": _exec_write_kg,
+    "create_task": _exec_create_task,
 }

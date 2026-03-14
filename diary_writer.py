@@ -302,6 +302,9 @@ You are now writing your periodic diary — a private, reflective record of your
 ## Recent updates to your own system (your body/mind evolving)
 {self_updates}
 
+## Recent task results (research you conducted)
+{task_summary}
+
 ## Writing Angle for This Entry
 {writing_angle}
 
@@ -439,8 +442,20 @@ def _generate_diary(
     banned_topics = _extract_banned_topics(previous_diaries)
 
     # Fetch recent feature updates (self-awareness)
-    from shared import fetch_recent_updates
+    from shared import fetch_recent_updates, fetch_task_reports
     self_updates = fetch_recent_updates(max_entries=2, max_chars=1200)
+
+    # Fetch recent completed task results for diary reference
+    recent_tasks = fetch_task_reports(limit=5, status="done")
+    if recent_tasks:
+        task_lines = []
+        for t in recent_tasks[:3]:  # Top 3 recent
+            content = str(t.get("content", ""))[:100]
+            result = str(t.get("result", "") or "")[:300]
+            task_lines.append(f"- Task: {content}\n  Result: {result}")
+        task_summary = "\n".join(task_lines)
+    else:
+        task_summary = "(No recent tasks)"
 
     # Rotate writing angle based on diary count
     angle_idx = len(previous_diaries) % len(_WRITING_ANGLES)
@@ -453,6 +468,7 @@ def _generate_diary(
         news=news,
         banned_topics=banned_topics,
         self_updates=self_updates,
+        task_summary=task_summary,
         writing_angle=writing_angle,
     )
 
