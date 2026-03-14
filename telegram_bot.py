@@ -115,9 +115,23 @@ def _ensure_table():
 
 # ── Claude client ────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-_CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-_CLAUDE_MODEL_STRONG = "claude-sonnet-4-5-20250929"
 _CLAUDE_MAX_TOKENS = 4096
+
+
+def _resolve_model(alias: str, fallback: str) -> str:
+    """Resolve a Claude model alias to its actual ID via the Models API."""
+    try:
+        _sync = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        model = _sync.models.retrieve(model_id=alias)
+        logger.info("Resolved model %s => %s", alias, model.id)
+        return model.id
+    except Exception as e:
+        logger.warning("Model resolve failed for %s, using fallback %s: %s", alias, fallback, e)
+        return fallback
+
+
+_CLAUDE_MODEL = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
+_CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-5", "claude-sonnet-4-5-20250929")
 
 
 def _current_datetime_str() -> str:
