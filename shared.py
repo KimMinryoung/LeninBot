@@ -291,10 +291,15 @@ def fetch_kg_stats() -> dict:
 
     try:
         from neo4j import GraphDatabase
-        driver = svc.graphiti.driver
+        # Graphiti uses an async driver — create a sync driver for direct Cypher queries
+        neo4j_uri = os.getenv("NEO4J_URI", "")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "")
+        neo4j_db = os.getenv("NEO4J_DATABASE", "neo4j")
+        sync_driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
         def _run_cypher(query):
-            with driver.session(database=os.getenv("NEO4J_DATABASE", "neo4j")) as s:
+            with sync_driver.session(database=neo4j_db) as s:
                 return [dict(r) for r in s.run(query)]
 
         entity_counts = _run_cypher(
@@ -313,6 +318,8 @@ def fetch_kg_stats() -> dict:
             "e.created_at AS created_at, e.group_id AS group_id "
             "ORDER BY e.created_at DESC LIMIT 5"
         )
+
+        sync_driver.close()
 
         return {
             "entity_types": {
