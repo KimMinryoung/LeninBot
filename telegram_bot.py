@@ -768,6 +768,46 @@ async def _process_task(bot: Bot, task: dict):
         )
 
 
+async def _broadcast(bot: Bot, text: str):
+    """Send a message to all allowed users. For system event notifications."""
+    for uid in ALLOWED_USER_IDS:
+        try:
+            await bot.send_message(chat_id=uid, text=text)
+        except Exception as e:
+            logger.warning("Broadcast to %s failed: %s", uid, e)
+
+
+async def _system_monitor(bot: Bot):
+    """Background loop: monitor system events and broadcast notifications."""
+    from shared import get_kg_service
+
+    # 1. Startup notification
+    await asyncio.sleep(5)  # let services initialize
+    kg = await asyncio.to_thread(get_kg_service)
+    kg_status = "connected" if kg else "unavailable"
+    await _broadcast(bot, (
+        f"🟢 *Deploy 완료* — 새 버전이 live입니다.\n"
+        f"  KG (Neo4j): {kg_status}"
+    ))
+
+    # 2. Periodic KG health check (every 2 minutes)
+    kg_was_up = kg is not None
+    while True:
+        await asyncio.sleep(120)
+        try:
+            kg = await asyncio.to_thread(get_kg_service)
+            kg_is_up = kg is not None
+
+            if kg_was_up and not kg_is_up:
+                await _broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j AuraDB에 연결할 수 없습니다.")
+            elif not kg_was_up and kg_is_up:
+                await _broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j AuraDB 연결이 복구되었습니다.")
+
+            kg_was_up = kg_is_up
+        except Exception as e:
+            logger.error("System monitor error: %s", e)
+
+
 async def _task_worker(bot: Bot):
     """Poll DB for pending tasks and process them one at a time."""
     logger.info("Task worker started")
@@ -806,14 +846,22 @@ async def bot_main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    # Start background worker
+    # Start background workers
     asyncio.create_task(_task_worker(bot))
+    asyncio.create_task(_system_monitor(bot))
 
-    # Graceful shutdown: stop polling cleanly when SIGTERM received (Render deploy)
+    # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
     import signal
 
     def _handle_sigterm(*_):
         logger.info("SIGTERM received — stopping polling gracefully")
+        # Schedule shutdown notification before stopping
+        async def _shutdown_notify():
+            await _broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.")
+        try:
+            asyncio.get_event_loop().create_task(_shutdown_notify())
+        except Exception:
+            pass
         asyncio.get_event_loop().call_soon_threadsafe(dp.stop_polling)
 
     try:
