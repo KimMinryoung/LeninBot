@@ -703,7 +703,7 @@ async def _process_task(bot: Bot, task: dict):
     try:
         report = await _chat_with_tools(
             [{"role": "user", "content": content}],
-            max_rounds=8,
+            max_rounds=15,
             system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str()),
             model=_CLAUDE_MODEL_STRONG,
         )
