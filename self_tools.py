@@ -11,9 +11,31 @@ Integration in telegram_bot.py:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _to_kst(ts) -> str:
+    """Convert a timestamp (datetime or ISO string) to KST formatted string."""
+    if ts is None:
+        return "?"
+    if isinstance(ts, str):
+        if not ts or ts == "?":
+            return ts
+        # ISO string from APIs (e.g. "2026-03-14T03:00:57Z")
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt.astimezone(_KST).strftime("%m/%d %H:%M KST")
+        except (ValueError, TypeError):
+            return ts[:19].replace("T", " ")
+    if hasattr(ts, "astimezone"):
+        return ts.astimezone(_KST).strftime("%m/%d %H:%M KST")
+    if hasattr(ts, "strftime"):
+        return ts.strftime("%m/%d %H:%M")
+    return str(ts)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -321,7 +343,7 @@ async def _exec_read_diary(limit: int = 5, keyword: str | None = None) -> str:
 
     results = []
     for i, d in enumerate(diaries, 1):
-        ts = d.get("created_at", "unknown time")
+        ts = _to_kst(d.get("created_at"))
         title = d.get("title", "Untitled")
         content = d.get("content", "")
         if len(content) > 800:
@@ -342,9 +364,7 @@ async def _exec_read_chat_logs(
 
     results = []
     for i, row in enumerate(rows, 1):
-        ts = row.get("created_at", "?")
-        if hasattr(ts, "strftime"):
-            ts = ts.strftime("%m/%d %H:%M")
+        ts = _to_kst(row.get("created_at"))
         q = str(row.get("user_query", ""))[:200]
         a = str(row.get("bot_answer", ""))[:300]
         results.append(f"[{i}] {ts}\n  User: {q}\n  Bot: {a}")
@@ -365,9 +385,7 @@ async def _exec_read_processing_logs(
 
     results = []
     for i, row in enumerate(rows, 1):
-        ts = row.get("created_at", "?")
-        if hasattr(ts, "strftime"):
-            ts = ts.strftime("%m/%d %H:%M")
+        ts = _to_kst(row.get("created_at"))
         q = str(row.get("user_query", ""))[:150]
         route = row.get("route", "?")
         doc_cnt = row.get("documents_count", 0)
@@ -400,12 +418,8 @@ async def _exec_read_task_reports(
 
     results = []
     for i, row in enumerate(rows, 1):
-        ts = row.get("created_at", "?")
-        if hasattr(ts, "strftime"):
-            ts = ts.strftime("%m/%d %H:%M")
-        completed = row.get("completed_at", "")
-        if hasattr(completed, "strftime"):
-            completed = completed.strftime("%m/%d %H:%M")
+        ts = _to_kst(row.get("created_at"))
+        completed = _to_kst(row.get("completed_at")) if row.get("completed_at") else ""
         content = str(row.get("content", ""))[:200]
         st = row.get("status", "?")
         result = str(row.get("result", "") or "")
@@ -450,7 +464,7 @@ async def _exec_read_kg_status() -> str:
             parts.append(
                 f"  - {ep.get('name', '?')} "
                 f"(group: {ep.get('group_id', '?')}, "
-                f"at: {ep.get('created_at', '?')})"
+                f"at: {_to_kst(ep.get('created_at'))})"
             )
 
     return "=== KNOWLEDGE GRAPH STATUS ===\n\n" + "\n".join(parts)
@@ -470,7 +484,7 @@ async def _exec_read_system_status() -> str:
     if diaries:
         last = diaries[0]
         status_parts.append(
-            f"Last diary: {last.get('created_at', '?')}\n"
+            f"Last diary: {_to_kst(last.get('created_at'))}\n"
             f"   Title: {last.get('title', 'N/A')}"
         )
     else:
@@ -539,10 +553,8 @@ async def _exec_read_render_status(deploy_limit: int = 5) -> str:
     if deploys:
         parts.append(f"Recent deploys ({len(deploys)}):")
         for d in deploys:
-            created = d.get("created_at", "?")[:19].replace("T", " ")
-            finished = d.get("finished_at") or ""
-            if finished:
-                finished = finished[:19].replace("T", " ")
+            created = _to_kst(d.get("created_at"))
+            finished = _to_kst(d.get("finished_at")) if d.get("finished_at") else ""
             commit = d.get("commit_message", "?")
             parts.append(
                 f"  [{d.get('status', '?')}] {created}"
@@ -557,7 +569,7 @@ async def _exec_read_render_status(deploy_limit: int = 5) -> str:
     if events:
         parts.append(f"\nRecent events ({len(events)}):")
         for ev in events:
-            ts = ev.get("timestamp", "?")[:19].replace("T", " ")
+            ts = _to_kst(ev.get("timestamp"))
             ev_type = ev.get("type", "?")
             details = ev.get("details", {})
             # Extract useful detail fields
@@ -588,7 +600,7 @@ async def _exec_read_render_logs(minutes_back: int = 10, limit: int = 50) -> str
 
     lines = []
     for e in entries:
-        ts = e.get("timestamp", "")[:19].replace("T", " ")
+        ts = _to_kst(e.get("timestamp"))
         level = e.get("level", "")
         msg = e.get("message", "")
         prefix = f"[{level}]" if level else ""
