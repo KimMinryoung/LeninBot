@@ -79,7 +79,8 @@ def get_tavily_search():
 # Neo4j driver binds Futures to the event loop that created it,
 # so we must reuse a single persistent loop for all KG operations.
 _kg_service = None
-_kg_init_failed = False
+_kg_init_cooldown = 0.0  # monotonic timestamp when retry is allowed
+_KG_RETRY_INTERVAL = 120  # seconds before retrying after init failure
 _kg_lock = threading.Lock()
 _kg_loop = None
 
@@ -93,24 +94,33 @@ def run_kg_async(coro):
 
 
 def get_kg_service():
-    """Lazy singleton for GraphMemoryService (Neo4j/Graphiti)."""
-    global _kg_service, _kg_init_failed
+    """Lazy singleton for GraphMemoryService (Neo4j/Graphiti).
+
+    Retries after _KG_RETRY_INTERVAL seconds if init previously failed
+    (e.g. AuraDB was paused and later resumed).
+    """
+    import time
+
+    global _kg_service, _kg_init_cooldown
     if _kg_service is not None:
         return _kg_service
-    if _kg_init_failed:
+    if time.monotonic() < _kg_init_cooldown:
         return None
     with _kg_lock:
         if _kg_service is not None:
             return _kg_service
+        if time.monotonic() < _kg_init_cooldown:
+            return None
         try:
             from graph_memory.service import GraphMemoryService
             svc = GraphMemoryService()
             run_kg_async(svc.initialize())
             _kg_service = svc
+            logger.info("[KG] init succeeded")
             return svc
         except Exception as e:
-            _kg_init_failed = True
-            logger.warning("[KG] init failed: %s", e)
+            _kg_init_cooldown = time.monotonic() + _KG_RETRY_INTERVAL
+            logger.warning("[KG] init failed (retry in %ds): %s", _KG_RETRY_INTERVAL, e)
             return None
 
 
