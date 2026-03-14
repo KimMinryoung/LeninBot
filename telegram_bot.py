@@ -805,9 +805,11 @@ async def cmd_schedule(message: Message):
         await message.answer(f"잘못된 cron 표현식: {cron_expr}\n오류: {e}")
         return
     try:
+        # Set last_run_at = NOW() so the first fire waits for the next cron window
         await asyncio.to_thread(
             _execute,
-            "INSERT INTO telegram_schedules (user_id, content, cron_expr) VALUES (%s, %s, %s)",
+            "INSERT INTO telegram_schedules (user_id, content, cron_expr, last_run_at) "
+            "VALUES (%s, %s, %s, NOW())",
             (message.from_user.id, content, cron_expr),
         )
         await message.answer(
