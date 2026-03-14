@@ -260,7 +260,9 @@ AIChatBot/
 - **`_generate_diary()`**: `prev_ref` 요약 → `banned_topics` + `writing_angle` + `self_updates` (fetch_recent_updates)
 - **`max_output_tokens`**: 16384 → 4096
 
-#### temp_dev/__init__.py — Created for package import
+#### chatbot.py — KG 중복 검색 버그 수정 (task report #6 코드 리뷰 반영)
+- **`kg_retrieve_node`**: 첫 번째 KG 검색 루프가 `merged_kg = None` 리셋으로 무효화되던 dead code 삭제 (KG API 호출 50% 절감)
+- **`step_executor_node`**: 무조건 실행되던 KG 검색이 중복 체크 전에 호출되던 버그 수정 (이중 API 호출 제거)
 
 ### 2026-03-13 — Telegram Bot Tool-Use Agent + Unified Identity + Shared Resources
 
