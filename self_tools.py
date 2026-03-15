@@ -45,251 +45,114 @@ def _to_kst(ts) -> str:
 SELF_TOOLS = [
     {
         "name": "read_diary",
-        "description": (
-            "Read your own diary entries. You write diaries every 6 hours automatically. "
-            "Use this to recall what you previously thought, analyzed, or reflected on. "
-            "This is YOUR memory — use it to maintain continuity across sessions."
-        ),
+        "description": "Read your diary entries (written every 6h). For continuity across sessions.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of recent diary entries to retrieve (1-20).",
-                    "default": 5,
-                },
-                "keyword": {
-                    "type": "string",
-                    "description": (
-                        "Optional keyword to filter diaries by title or content. "
-                        "Use Korean or English. Omit to get most recent entries."
-                    ),
-                },
+                "limit": {"type": "integer", "description": "Entries to retrieve (1-20).", "default": 5},
+                "keyword": {"type": "string", "description": "Filter by keyword."},
             },
             "required": [],
         },
     },
     {
         "name": "read_chat_logs",
-        "description": (
-            "Read recent chat logs from ALL your interfaces (Telegram and Web). "
-            "Use this to see what conversations happened — including ones from "
-            "your other interface that you don't directly remember. "
-            "This bridges the gap between your Telegram self and Web self."
-        ),
+        "description": "Read chat logs from all interfaces (Telegram + Web).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of recent chat log entries to retrieve (1-50).",
-                    "default": 20,
-                },
-                "hours_back": {
-                    "type": "integer",
-                    "description": (
-                        "Only retrieve logs from the last N hours. "
-                        "Omit to get the most recent entries regardless of time."
-                    ),
-                },
-                "keyword": {
-                    "type": "string",
-                    "description": "Optional keyword to search in queries and answers.",
-                },
+                "limit": {"type": "integer", "description": "Entries (1-50).", "default": 20},
+                "hours_back": {"type": "integer", "description": "Only last N hours."},
+                "keyword": {"type": "string", "description": "Filter keyword."},
             },
             "required": [],
         },
     },
     {
         "name": "read_processing_logs",
-        "description": (
-            "Read detailed processing logs from your web chatbot pipeline. "
-            "Shows which nodes ran, what decisions were made (route, intent, layer), "
-            "document counts, web search usage, and strategy output. "
-            "Use this for deep self-diagnosis or to understand how you processed a query."
-        ),
+        "description": "Web chatbot pipeline logs (nodes, route, strategy, doc counts).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of recent entries to retrieve (1-20).",
-                    "default": 5,
-                },
-                "hours_back": {
-                    "type": "integer",
-                    "description": "Only retrieve logs from the last N hours.",
-                },
-                "keyword": {
-                    "type": "string",
-                    "description": "Optional keyword to search in queries and answers.",
-                },
+                "limit": {"type": "integer", "description": "Entries (1-20).", "default": 5},
+                "hours_back": {"type": "integer", "description": "Only last N hours."},
+                "keyword": {"type": "string", "description": "Filter keyword."},
             },
             "required": [],
         },
     },
     {
         "name": "read_task_reports",
-        "description": (
-            "Read intelligence task reports from your Telegram /task queue. "
-            "Shows task content, status (pending/processing/done/failed), "
-            "and the full report result if completed. Use this to review "
-            "research you've done or check pending work."
-        ),
+        "description": "Read /task queue reports (status, content, result).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of recent tasks to retrieve (1-20).",
-                    "default": 5,
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["pending", "processing", "done", "failed"],
-                    "description": "Filter by task status. Omit for all statuses.",
-                },
+                "limit": {"type": "integer", "description": "Entries (1-20).", "default": 5},
+                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"]},
             },
             "required": [],
         },
     },
     {
         "name": "read_kg_status",
-        "description": (
-            "Check the status of your Knowledge Graph (Neo4j). "
-            "Returns entity counts by type, total relationships, episode count, "
-            "and recent episodes. Use this to understand what structured knowledge "
-            "you have accumulated."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+        "description": "Knowledge Graph stats: entity counts, edges, recent episodes.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "read_system_status",
-        "description": (
-            "Check your overall operational status: last diary time, recent chat "
-            "activity, task queue summary, KG health, and module architecture. "
-            "Use this for comprehensive self-awareness about your current state."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+        "description": "Overall status: diary, chat activity, tasks, KG health.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "read_render_status",
-        "description": (
-            "Check your own deployment status on Render. Shows recent deploys "
-            "(status, commit message, timestamps) and events (build started, "
-            "deploy ended, etc.). Use this to know if you are currently being "
-            "updated, if a deploy failed, or when you were last restarted."
-        ),
+        "description": "Render deployment status: recent deploys and events.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "deploy_limit": {
-                    "type": "integer",
-                    "description": "Number of recent deploys to retrieve (1-10).",
-                    "default": 5,
-                },
+                "deploy_limit": {"type": "integer", "description": "Deploys (1-10).", "default": 5},
             },
             "required": [],
         },
     },
     {
         "name": "read_render_logs",
-        "description": (
-            "Read your own live service logs from Render. Shows recent stdout/stderr "
-            "output including errors, warnings, request logs, and startup messages. "
-            "Use this for troubleshooting after deploy or diagnosing runtime issues."
-        ),
+        "description": "Live Render service logs (stdout/stderr). For troubleshooting.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "minutes_back": {
-                    "type": "integer",
-                    "description": "How many minutes back to fetch logs (1-60). Default 10.",
-                    "default": 10,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max number of log entries (1-100). Default 50.",
-                    "default": 50,
-                },
+                "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
+                "limit": {"type": "integer", "description": "Max entries (1-100).", "default": 50},
             },
             "required": [],
         },
     },
     {
         "name": "read_recent_updates",
-        "description": (
-            "Read your own recent feature updates and changelog. Shows what new "
-            "capabilities were added to your system, what was changed or fixed. "
-            "Use this for self-awareness about your own evolution."
-        ),
+        "description": "Recent feature changelog / system updates.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "max_entries": {
-                    "type": "integer",
-                    "description": "Number of recent changelog entries to retrieve (1-10).",
-                    "default": 3,
-                },
+                "max_entries": {"type": "integer", "description": "Entries (1-10).", "default": 3},
             },
             "required": [],
         },
     },
     {
         "name": "write_kg",
-        "description": (
-            "Add knowledge to your Knowledge Graph (Neo4j). Use this to permanently store "
-            "facts, entity profiles, relationships, observations, or any structured knowledge "
-            "you want to remember long-term. The KG extracts entities and relationships "
-            "automatically from your text. Write in clear, factual sentences. "
-            "Example: 'Person Profile: 비숑 (Bichon) is a Korean AI developer who created "
-            "and operates Cyber-Lenin. Cyber-Lenin is deployed on Telegram and Web platforms.'"
-        ),
+        "description": "Store facts/entities/relationships in KG permanently. Write clear factual sentences.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string",
-                    "description": (
-                        "The knowledge to store. Write clear factual statements. "
-                        "Include entity names, roles, relationships, dates, and context. "
-                        "The system will automatically extract entities and relationships."
-                    ),
-                },
-                "name": {
-                    "type": "string",
-                    "description": (
-                        "Short label for this knowledge episode (e.g., 'bichon-profile', "
-                        "'ukraine-ceasefire-update'). Auto-generated if omitted."
-                    ),
-                },
+                "content": {"type": "string", "description": "Factual statements to store."},
+                "name": {"type": "string", "description": "Episode label (auto-generated if omitted)."},
                 "source_type": {
                     "type": "string",
-                    "enum": [
-                        "internal_report", "osint_news", "osint_social",
-                        "personnel_change", "diplomatic_cable", "threat_report",
-                    ],
-                    "description": (
-                        "Category of knowledge. Default: 'internal_report'. "
-                        "Use 'osint_news' for news, 'personnel_change' for people updates, etc."
-                    ),
+                    "enum": ["internal_report", "osint_news", "osint_social", "personnel_change", "diplomatic_cable", "threat_report"],
                     "default": "internal_report",
                 },
                 "group_id": {
                     "type": "string",
-                    "description": (
-                        "Logical group for this knowledge. Existing groups: "
-                        "geopolitics_conflict, geopolitics_diplomacy, geopolitics_economy, "
-                        "korea_domestic, agent_knowledge. Default: 'agent_knowledge'."
-                    ),
+                    "description": "Group: geopolitics_conflict/diplomacy/economy, korea_domestic, agent_knowledge.",
                     "default": "agent_knowledge",
                 },
             },
@@ -298,57 +161,25 @@ SELF_TOOLS = [
     },
     {
         "name": "create_task",
-        "description": (
-            "Create a background task for yourself. The task will be processed asynchronously "
-            "using Sonnet with full tool access (up to 15 rounds). Use this when you identify "
-            "something worth investigating, analyzing, or researching that would take too long "
-            "in the current conversation. The result will be saved and you'll be notified. "
-            "Examples: 'Analyze recent geopolitical shifts in East Asia', "
-            "'Research and profile key figures in the latest Korea scandal'."
-        ),
+        "description": "Create async background task (Sonnet, 15 rounds). For deep research.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The task description. Be specific about what to research/analyze.",
-                },
-                "priority": {
-                    "type": "string",
-                    "enum": ["high", "normal", "low"],
-                    "description": "Task priority. 'high' = urgent analysis, 'normal' = standard, 'low' = background research.",
-                    "default": "normal",
-                },
+                "content": {"type": "string", "description": "What to research/analyze."},
+                "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
             },
             "required": ["content"],
         },
     },
     {
         "name": "read_source_code",
-        "description": (
-            "Read your own source code files. Use this to inspect how you work — "
-            "your pipeline logic, tool definitions, prompt templates, graph topology, "
-            "entity schemas, etc. You can list available files or read a specific file. "
-            "Only project source files are accessible (no .env or secrets)."
-        ),
+        "description": "Read your own source code. Omit file to list available files.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file": {
-                    "type": "string",
-                    "description": (
-                        "File path relative to project root, e.g. 'chatbot.py' or "
-                        "'graph_memory/service.py'. Omit to list all available files."
-                    ),
-                },
-                "line_start": {
-                    "type": "integer",
-                    "description": "Start reading from this line number (1-based). Omit to start from beginning.",
-                },
-                "line_end": {
-                    "type": "integer",
-                    "description": "Stop reading at this line number (inclusive). Omit to read 200 lines from line_start.",
-                },
+                "file": {"type": "string", "description": "Relative path, e.g. 'chatbot.py'."},
+                "line_start": {"type": "integer", "description": "Start line (1-based)."},
+                "line_end": {"type": "integer", "description": "End line (inclusive)."},
             },
             "required": [],
         },
@@ -523,7 +354,6 @@ async def _exec_read_system_status() -> str:
         fetch_diaries, fetch_chat_logs, fetch_task_reports,
         fetch_kg_stats, KST, MODULE_ARCHITECTURE,
     )
-    import os
 
     status_parts = []
 
@@ -531,59 +361,40 @@ async def _exec_read_system_status() -> str:
     diaries = await asyncio.to_thread(fetch_diaries, 1)
     if diaries:
         last = diaries[0]
-        status_parts.append(
-            f"Last diary: {_to_kst(last.get('created_at'))}\n"
-            f"   Title: {last.get('title', 'N/A')}"
-        )
+        status_parts.append(f"Last diary: {_to_kst(last.get('created_at'))} — {last.get('title', 'N/A')}")
     else:
         status_parts.append("No diaries written yet.")
 
-    # 2. Chat activity
-    logs_24h = await asyncio.to_thread(fetch_chat_logs, 1000, 24)
-    logs_6h = await asyncio.to_thread(fetch_chat_logs, 1000, 6)
-    status_parts.append(
-        f"Chat activity:\n"
-        f"   Last 6 hours: {len(logs_6h)} conversations\n"
-        f"   Last 24 hours: {len(logs_24h)} conversations"
-    )
+    # 2. Chat activity (use small limits — we only need counts)
+    logs_24h = await asyncio.to_thread(fetch_chat_logs, 100, 24)
+    logs_6h = await asyncio.to_thread(fetch_chat_logs, 100, 6)
+    status_parts.append(f"Chats: {len(logs_6h)} (6h), {len(logs_24h)} (24h)")
 
     # 3. Task queue
-    tasks = await asyncio.to_thread(fetch_task_reports, 100)
+    tasks = await asyncio.to_thread(fetch_task_reports, 20)
     if tasks:
         by_status = {}
         for t in tasks:
             s = t.get("status", "?")
             by_status[s] = by_status.get(s, 0) + 1
         summary = ", ".join(f"{k}: {v}" for k, v in by_status.items())
-        status_parts.append(f"Task queue: {summary}")
+        status_parts.append(f"Tasks: {summary}")
     else:
-        status_parts.append("Task queue: empty")
+        status_parts.append("Tasks: none")
 
     # 4. KG health
     kg = await asyncio.to_thread(fetch_kg_stats)
     if "error" not in kg:
-        status_parts.append(
-            f"Knowledge Graph: {kg.get('episode_count', '?')} episodes, "
-            f"{kg.get('edge_count', '?')} relationships"
-        )
+        status_parts.append(f"KG: {kg.get('episode_count', '?')} episodes, {kg.get('edge_count', '?')} edges")
     else:
-        status_parts.append(f"Knowledge Graph: {kg['error']}")
+        status_parts.append(f"KG: {kg['error']}")
 
-    # 5. System info
+    # 5. Time + architecture
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
-    status_parts.append(
-        f"System info:\n"
-        f"   Current time: {now}\n"
-        f"   Active interfaces: Telegram Bot, Web Chatbot\n"
-        f"   Diary cycle: every 6 hours\n"
-        f"   Available self-tools: read_diary, read_chat_logs, read_processing_logs, "
-        f"read_task_reports, read_kg_status, read_system_status, write_kg"
-    )
-
-    # 6. Architecture overview
+    status_parts.append(f"Time: {now}")
     status_parts.append(MODULE_ARCHITECTURE)
 
-    return "=== SYSTEM STATUS ===\n\n" + "\n\n".join(status_parts)
+    return "=== SYSTEM STATUS ===\n" + "\n".join(status_parts)
 
 
 async def _exec_read_render_status(deploy_limit: int = 5) -> str:

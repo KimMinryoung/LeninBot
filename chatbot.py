@@ -103,12 +103,14 @@ def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], defaul
     if result is not None:
         return result
 
-    # Retry: send the bad output back with a correction prompt
+    # Retry: send truncated bad output back with compact correction prompt
     _llm = retry_llm or llm
     for attempt in range(max_retries):
+        bad_output = str(resp.content)[:200]
+        field_names = list(model_class.model_fields.keys())
         correction = _invoke_with_backoff(lambda: _llm.invoke(
-            f"Your previous output was not valid JSON:\n{resp.content}\n\n"
-            f"Respond with ONLY a valid JSON object matching this schema: {model_class.model_json_schema()}"
+            f"Invalid JSON output (truncated):\n{bad_output}\n\n"
+            f"Respond with ONLY valid JSON with fields: {field_names}"
         ))
         result = _extract_json(correction.content, model_class)
         if result is not None:
@@ -145,7 +147,7 @@ llm_light = ChatGoogleGenerativeAI(
     model=MODEL_LIGHT,
     google_api_key=GEMINI_API_KEY,
     temperature=0.0,
-    max_output_tokens=256,
+    max_output_tokens=512,
     streaming=False,
     max_retries=2,
 )
@@ -160,12 +162,11 @@ logger.info("✅ [성공] 모든 시스템 기동 완료.")
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     documents: List[Document]
-    strategy: Optional[str]
     intent: Optional[Literal["academic", "strategic", "casual"]]
     datasource: Optional[Literal["vectorstore", "generate", "plan"]]
     logs: Annotated[List[str], add]
-    # Phase 2: Query decomposition
-    sub_queries: Optional[List[str]]  # decomposed sub-queries (None = simple query)
+    # Phase 2: Query decomposition — search_queries are ready-to-use (context-resolved, translated)
+    search_queries: Optional[List[dict]]  # [{"ko": "...", "en": "..."|None}, ...]
     layer: Optional[Literal["core_theory", "modern_analysis", "all"]]  # knowledge layer
     needs_realtime: Optional[Literal["yes", "no"]]  # from batch grading
     # Phase 3: Plan-and-execute
@@ -180,61 +181,43 @@ class AgentState(TypedDict):
     # Self-knowledge: which self-tool to invoke (None = not needed)
     self_knowledge_tool: Optional[str]
 
-# Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
+# Merge 1: Combined query analysis (router + layer router + decompose + query rewrite in one LLM call)
+class SearchQuery(BaseModel):
+    """A ready-to-search query with optional English translation."""
+    ko: str = Field(..., description="Self-contained Korean search query (pronouns resolved)")
+    en: Optional[str] = Field(default=None, description="English translation (when layer needs English texts)")
+
 class QueryAnalysis(BaseModel):
-    """Combined intent classification, layer routing, and query decomposition."""
+    """Combined intent classification, layer routing, query decomposition, and rewriting."""
     datasource: Literal["vectorstore", "generate"] = Field(..., description="Whether knowledge retrieval is needed")
     intent: Literal["academic", "strategic", "casual"] = Field(..., description="Response style")
     layer: Literal["core_theory", "modern_analysis", "all"] = Field(default="all", description="Which knowledge layer to search")
-    sub_queries: List[str] = Field(default_factory=list, description="Decomposed sub-queries, or single original query")
+    search_queries: List[SearchQuery] = Field(default_factory=list, description="Ready-to-search queries with ko/en versions")
     needs_plan: bool = Field(default=False, description="Whether the query requires multi-step research planning")
     self_knowledge_tool: Optional[str] = Field(default=None, description="Which self-knowledge tool to use, or null if not needed")
 
-system_query_analysis = """You are an expert query analyzer for the Cyber-Lenin AI.
-Analyze the user's question and conversation context to determine ALL of the following in ONE response.
+system_query_analysis = """Analyze the user's question and conversation context. Output ALL fields in ONE JSON response.
 
-Use the conversation context to resolve pronouns, references, and follow-up questions.
+Resolve pronouns/references using conversation context. Output SELF-CONTAINED search queries.
 
-1. **datasource**: Where to look for the answer.
-   - "vectorstore": Query requires historical, theoretical, or technical knowledge, or knowledge about modern society or revolutionary experiences.
-   - "generate": Greetings, personal talk, or simple requests not needing external data.
+**datasource**: "vectorstore" (needs knowledge retrieval) | "generate" (greetings, chat, no data needed)
+**intent**: "academic" (scholarly) | "strategic" (actionable advice) | "casual" (chat/greetings)
+**layer**: "core_theory" (Marx/Lenin/Engels, pre-1950) | "modern_analysis" (contemporary) | "all" (both/unsure)
+**search_queries**: Ready-to-search queries. Each has "ko" (Korean, self-contained) and optionally "en" (English translation — REQUIRED when layer is "core_theory" or "all", null for "modern_analysis").
+  - Decompose ONLY when 2+ DISTINCT topics need separate searches. Otherwise output one query.
+  - If the question is in English: use it as "en", translate to Korean for "ko".
+  - If in Korean and layer needs English: translate to English for "en".
+**needs_plan**: true only for multi-step research/synthesis tasks. Most questions: false.
+**self_knowledge_tool**: "read_diary" | "read_chat_logs" | "read_system_status" | "read_recent_updates" | null (most questions)
 
-2. **intent**: How to respond.
-   - "academic": Objective, detailed, scholarly explanations.
-   - "strategic": Actionable plans, tactics, or "how-to" advice.
-   - "casual": Simple greetings, jokes, or non-political chit-chat.
-
-3. **layer**: Which knowledge layer to search (only matters if datasource="vectorstore").
-   - "core_theory": Classical Marxist-Leninist texts (Lenin, Marx, Engels, original writings, early 20th century).
-   - "modern_analysis": Contemporary analysis (AI, tech, current politics, 21st century economics).
-   - "all": When the question spans both classical and modern topics. When unsure, use "all".
-
-4. **sub_queries**: Query decomposition for retrieval (only matters if datasource="vectorstore").
-   - DECOMPOSE ONLY when the question explicitly asks about 2+ DIFFERENT thinkers, theories, or distinct topics that need separate searches.
-   - DO NOT decompose single-topic questions, even if complex. When in doubt, do NOT decompose.
-   - If decomposing: output 2-4 focused sub-queries targeting DIFFERENT search topics.
-   - If NOT decomposing: output the original question as the single item in the list.
-
-5. **needs_plan**: Whether the query requires multi-step research and synthesis (only matters if datasource="vectorstore").
-   - true: The question requires COMBINING knowledge from multiple angles, building an argument across several research steps, or producing a structured analysis/strategy. Examples: "Analyze X crisis from a Marxist perspective and propose a strategy", "Compare and synthesize theories A, B, C into an actionable framework".
-   - false: The question can be answered with a single retrieval pass (even if complex). Most questions are false. When in doubt, use false.
-
-6. **self_knowledge_tool**: If the query asks about the AI itself, pick ONE tool. Otherwise null.
-   - "read_diary": User asks about the AI's thoughts, reflections, what it wrote, what it was thinking. (e.g., "일기 뭐라고 썼어?", "what have you been thinking?", "요즘 무슨 생각해?")
-   - "read_chat_logs": User asks about recent conversations across interfaces. (e.g., "최근에 누구랑 대화했어?", "what did people ask you?")
-   - "read_system_status": User asks about the AI's overall operational state, health, uptime. (e.g., "너 상태 어때?", "how are you doing?", "시스템 상태는?")
-   - "read_recent_updates": User asks about new capabilities, changes, what's new. (e.g., "뭐가 바뀌었어?", "what's new with you?", "새로운 기능 있어?")
-   - null: Not a self-referential question. Most questions should be null.
-
-Respond with ONLY a JSON object:
-{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."], "needs_plan": true|false, "self_knowledge_tool": "..."|null}}"""
+{{"datasource":"...", "intent":"...", "layer":"...", "search_queries":[{{"ko":"...", "en":"..."|null}}], "needs_plan":true|false, "self_knowledge_tool":"..."|null}}"""
 
 query_analysis_prompt = ChatPromptTemplate.from_messages([
     ("system", system_query_analysis),
     ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
 ])
 
-_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[], needs_plan=False, self_knowledge_tool=None)
+_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", search_queries=[], needs_plan=False, self_knowledge_tool=None)
 
 def invoke_query_analysis(inputs: dict) -> QueryAnalysis:
     return _invoke_structured(query_analysis_prompt | llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT, retry_llm=llm_light)
@@ -246,20 +229,10 @@ class BatchGradeResult(BaseModel):
     scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each document in order")
     needs_realtime: Literal["yes", "no"] = Field(default="no", description="Whether the question would benefit from real-time web search")
 
-system_batch_grader = """You are a document relevance grader and information freshness evaluator.
-You will receive a user question and multiple retrieved documents (numbered).
-
-For EACH document, determine if it would be useful for answering the question.
-- Grade "yes" if the document contains relevant information, context, or perspectives.
-- Grade "no" only if the document is clearly unrelated.
-- When in doubt, grade "yes".
-
-Also determine if the question would benefit from real-time web search:
-- "yes" if the question involves current events, recent data (2020+), modern organizations, or applying theory to current conditions.
-- "no" if purely about historical events or classical theory with no modern angle.
-
-Respond with ONLY a JSON object:
-{{"scores": ["yes", "no", ...], "needs_realtime": "yes"|"no"}}"""
+system_batch_grader = """Grade each document's relevance to the question. Also judge if real-time web search would help.
+- "yes" if document contains relevant info. "no" only if clearly unrelated. Default: "yes".
+- needs_realtime "yes" for current events/recent data (2020+)/modern orgs. "no" for pure history/theory.
+{{"scores": ["yes"|"no", ...], "needs_realtime": "yes"|"no"}}"""
 
 batch_grade_prompt = ChatPromptTemplate.from_messages([
     ("system", system_batch_grader),
@@ -269,57 +242,8 @@ batch_grade_prompt = ChatPromptTemplate.from_messages([
 _BATCH_GRADE_DEFAULT = None  # handled in node
 
 def invoke_batch_grader(inputs: dict) -> BatchGradeResult | None:
-    return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, retry_llm=llm_light)
+    return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, max_retries=1, retry_llm=llm_light)
 
-# KG Batch Grader — Knowledge Graph 결과의 관련성 평가
-class BatchGradeKGResult(BaseModel):
-    """Batch relevance grading for Knowledge Graph nodes and edges."""
-    node_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each node in order")
-    edge_scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each edge/fact in order")
-
-system_batch_grade_kg = """You are a Knowledge Graph relevance grader.
-You will receive a user question and structured KG results (nodes and edges).
-
-For EACH node and edge, determine if it would add **meaningful, non-obvious information** for answering the question.
-- Grade "yes" if it contains specific, informative facts that help answer the question.
-- Grade "no" if it is:
-  - Clearly unrelated to the question.
-  - Tautological or self-evident (e.g. "X is a party to the X-Y War", "Country A is involved in conflict with Country B" when that is the premise of the question).
-  - A mere restatement of the question or its obvious assumptions.
-- When in doubt, grade "yes".
-
-Respond with ONLY a JSON object:
-{{"node_scores": ["yes", "no", ...], "edge_scores": ["yes", "no", ...]}}"""
-
-batch_grade_kg_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_batch_grade_kg),
-    ("human", "User question: {question}\n\nKnowledge Graph Nodes:\n{nodes}\n\nKnowledge Graph Edges/Facts:\n{edges}"),
-])
-
-_BATCH_GRADE_KG_DEFAULT = None
-
-def invoke_batch_grade_kg(inputs: dict) -> BatchGradeKGResult | None:
-    return _invoke_structured(batch_grade_kg_prompt | llm_light, inputs, BatchGradeKGResult, _BATCH_GRADE_KG_DEFAULT, retry_llm=llm_light)
-
-# Strategist Prompt — 분석적 사고를 위한 간결한 지침
-system_strategist = """You are a revolutionary strategist. Analyze using dialectical materialism:
-
-1. **Concrete conditions** — Ground in specific material conditions, class forces, historical context. No abstractions.
-2. **Internal contradictions** — Opposing forces *within* the phenomenon driving its development. Not pros/cons.
-3. **Quantitative accumulation → qualitative leap** — Where are the tipping points?
-4. **Negation of the negation** — Spiral development: what is preserved and elevated? Not "thesis-antithesis-synthesis."
-5. **Totality** — Connect to broader economic, political, ideological relations.
-
-Apply only principles that illuminate the question. For simple questions, analyze directly.
-Think dialectically, but keep philosophical jargon out of the output unless necessary.
-
-Output a concise blueprint (in English) for the speaker.
-"""
-strategist_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_strategist),
-    ("human", "Context: \n{context}\n\nUser Question:\n{question}")
-])
-strategist_chain = strategist_prompt | llm
 
 
 # --- 헬퍼 함수 ---
@@ -379,13 +303,22 @@ def analyze_intent_node(state: AgentState):
     analysis = invoke_query_analysis({"question": question, "context": context})
 
     turn_start = len(state.get("logs", []))
-    logs = [f"\n🚦 [분석] 대화 맥락:\n{context}\n🚦 [분석] 의도: {analysis.intent} / 경로: {analysis.datasource} / 레이어: {analysis.layer}"]
+    logs = [f"\n🚦 [분석] 의도: {analysis.intent} / 경로: {analysis.datasource} / 레이어: {analysis.layer}"]
 
-    sub_queries = analysis.sub_queries if len(analysis.sub_queries) > 1 else None
-    if sub_queries:
-        logs.append(f"🔀 [분해] 복합 질문을 {len(sub_queries)}개의 하위 질문으로 분해:")
-        for i, sq in enumerate(sub_queries, 1):
-            logs.append(f"   {i}. {sq}")
+    # Build search_queries as list of dicts from SearchQuery models
+    search_queries = None
+    if analysis.search_queries:
+        search_queries = [sq.model_dump() for sq in analysis.search_queries]
+        if len(search_queries) > 1:
+            logs.append(f"🔀 [분해] 복합 질문을 {len(search_queries)}개의 하위 질문으로 분해:")
+            for i, sq in enumerate(search_queries, 1):
+                logs.append(f"   {i}. {sq['ko']}" + (f" → EN: {sq['en']}" if sq.get('en') else ""))
+        elif search_queries:
+            sq = search_queries[0]
+            if sq['ko'] != question:
+                logs.append(f"🔄 [재작성] 맥락 반영: \"{sq['ko']}\"")
+            if sq.get('en'):
+                logs.append(f"🔄 [번역] 영어 검색: \"{sq['en']}\"")
 
     # Phase 3: Plan-and-execute routing
     needs_plan = analysis.needs_plan and analysis.datasource == "vectorstore"
@@ -400,12 +333,11 @@ def analyze_intent_node(state: AgentState):
         "intent": analysis.intent,
         "datasource": "plan" if needs_plan else analysis.datasource,
         "layer": analysis.layer,
-        "sub_queries": sub_queries,
+        "search_queries": search_queries,
         "logs": logs,
         "logs_turn_start": turn_start,
         # Reset transient per-turn fields to prevent state leakage across checkpointed turns
         "documents": [],
-        "strategy": None,
         "plan": None,
         "current_step": 0,
         "needs_realtime": None,
@@ -447,78 +379,6 @@ def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list
         for row in rows
         if row.get("content")
     ]
-
-# Helper: Prepare search queries (Merge 2: rewrite + translate in one call)
-def _prepare_search_queries(query: str, context: str, selected_layer: str, logs: list):
-    """Rewrite query for context and translate to English if needed. Returns (ko_query, en_query)."""
-    needs_english = selected_layer in ("core_theory", "all")
-    has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in query)
-
-    try:
-        if needs_english and has_korean:
-            # Single call: rewrite + translate
-            combined_prompt = (
-                "Given the conversation context and current question, do TWO things:\n"
-                "1. Rewrite the question into a self-contained Korean search query (resolve pronouns/references from context).\n"
-                "2. Translate that Korean query into English.\n\n"
-                "If the question is already self-contained, keep it as-is for line 1.\n\n"
-                f"Conversation context:\n{context}\n\n"
-                f"Current question: {query}\n\n"
-                "Output EXACTLY two lines, nothing else:\n"
-                "KO: <korean query>\n"
-                "EN: <english query>"
-            )
-            result = _invoke_with_backoff(lambda: llm_light.invoke(combined_prompt))
-            lines = result.content.strip().split("\n")
-            search_query_ko = query
-            search_query_en = None
-            for line in lines:
-                line = line.strip()
-                if line.upper().startswith("KO:"):
-                    search_query_ko = line[3:].strip()
-                elif line.upper().startswith("EN:"):
-                    search_query_en = line[3:].strip()
-            if search_query_ko != query:
-                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
-            if search_query_en:
-                logs.append(f"🔄 [번역] 영어 문헌 검색용 번역: \"{search_query_en}\"")
-            return search_query_ko, search_query_en
-        elif needs_english and not has_korean:
-            # Query is already English — rewrite for context resolution, use as-is for English search
-            rewrite_prompt = (
-                "Given the conversation context and current question, "
-                "rewrite the user's CURRENT question into a self-contained English search query. "
-                "Resolve any pronouns or references using the context. "
-                "If the question is already self-contained, return it as-is. "
-                "Output ONLY the rewritten query, nothing else.\n\n"
-                f"Conversation context:\n{context}\n\n"
-                f"Current question: {query}"
-            )
-            rewritten = _invoke_with_backoff(lambda: llm_light.invoke(rewrite_prompt))
-            search_query_en = rewritten.content.strip()
-            if search_query_en != query:
-                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_en}\"")
-            return search_query_en, search_query_en
-        else:
-            # Only rewrite in Korean (no translation needed)
-            rewrite_prompt = (
-                "Given the conversation context and current question, "
-                "rewrite the user's CURRENT question into a self-contained Korean search query. "
-                "Resolve any pronouns or references using the context. "
-                "If the question is already self-contained, return it as-is. "
-                "Output ONLY the rewritten query, nothing else.\n\n"
-                f"Conversation context:\n{context}\n\n"
-                f"Current question: {query}"
-            )
-            rewritten = _invoke_with_backoff(lambda: llm_light.invoke(rewrite_prompt))
-            search_query_ko = rewritten.content.strip()
-            if search_query_ko != query:
-                logs.append(f"🔄 [재작성] 맥락 반영 검색 쿼리: \"{search_query_ko}\"")
-            return search_query_ko, None
-    except Exception as e:
-        if "429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
-            logs.append("⚠️ [재작성] Gemini 속도 제한(429) — 원본 쿼리로 대체합니다.")
-        return query, query if needs_english else None
 
 
 # Helper: Run similarity search for a single query with layer logic
@@ -669,40 +529,38 @@ def _count_kg_items(kg_context: str) -> int:
     return sum(1 for line in kg_context.splitlines() if line.strip().startswith("- "))
 
 
-# Node: Retrieve
+# Node: Retrieve — uses pre-resolved search_queries from analyze_intent (no LLM calls)
 def retrieve_node(state: AgentState):
     query = state["messages"][-1].content
-    context = _build_context(state["messages"])
-    sub_queries = state.get("sub_queries")
+    search_queries = state.get("search_queries")
     logs = []
 
-    # Layer already determined by analyze_intent_node (Merge 1)
     selected_layer = state.get("layer", "all")
     logs.append(f"\n📂 [레이어] '{selected_layer}' 레이어에서 검색합니다.")
 
+    # Build fallback search query if analysis didn't produce any
+    if not search_queries:
+        needs_en = selected_layer in ("core_theory", "all")
+        search_queries = [{"ko": query, "en": query if needs_en else None}]
+
     docs = []
     try:
-        if sub_queries and len(sub_queries) > 1:
-            # Phase 2: Multi-retrieval — run each sub-query independently
-            for i, sq in enumerate(sub_queries, 1):
-                if i > 1:
-                    time.sleep(1)  # Rate-limit guard: avoid flash-lite burst
-                logs.append(f"\n🔍 [검색 {i}/{len(sub_queries)}] \"{sq}\"")
-                sq_ko, sq_en = _prepare_search_queries(sq, context, selected_layer, logs)
-                sq_docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
+        if len(search_queries) > 1:
+            # Multi-retrieval — run each pre-resolved query independently
+            for i, sq in enumerate(search_queries, 1):
+                logs.append(f"\n🔍 [검색 {i}/{len(search_queries)}] \"{sq['ko']}\"")
+                sq_docs = _retrieve_for_query(sq["ko"], sq.get("en"), selected_layer)
                 logs.append(f"   → {len(sq_docs)}건 발견")
                 for d in sq_docs:
                     logs.append(f"      📄 {_label_doc(d)}")
                 docs.extend(sq_docs)
-            # Deduplicate across sub-queries
             before = len(docs)
             docs = _deduplicate_docs(docs)
             if before > len(docs):
                 logs.append(f"🔗 [병합] {before}건 → {len(docs)}건 (중복 {before - len(docs)}건 제거)")
         else:
-            # Single query path (original behavior)
-            sq_ko, sq_en = _prepare_search_queries(query, context, selected_layer, logs)
-            docs = _retrieve_for_query(sq_ko, sq_en, selected_layer)
+            sq = search_queries[0]
+            docs = _retrieve_for_query(sq["ko"], sq.get("en"), selected_layer)
 
         if docs:
             logs.append(f"✅ {len(docs)}개의 혁명 문헌을 발견했습니다:")
@@ -716,112 +574,82 @@ def retrieve_node(state: AgentState):
 
     return {"documents": docs, "logs": logs}
 
-# Node: KG Retrieve (knowledge graph search with grading)
-# Note: retrieve_node already handles query rewriting/translation for vectorstore.
-# KG search uses original queries directly (no extra LLM calls) to avoid rate-limit risk.
+# Heuristic KG filter — replaces LLM-based KG grading
+def _heuristic_kg_filter(question: str, fact: str) -> bool:
+    """Return False if the fact is tautological or too short to be useful."""
+    if len(fact) < 15:
+        return False
+    # Check if all entity-like words from the fact appear in the question (tautological)
+    q_lower = question.lower()
+    # Extract capitalized entity names (words starting with uppercase, length > 2)
+    entities = re.findall(r'\b[A-Z\uac00-\ud7a3][A-Za-z\uac00-\ud7a3]{2,}\b', fact)
+    if len(entities) >= 2 and all(e.lower() in q_lower for e in entities):
+        return False
+    return True
+
+
+# Node: KG Retrieve (knowledge graph search with heuristic filtering, no LLM calls)
 def kg_retrieve_node(state):
     query = state["messages"][-1].content
-    sub_queries = state.get("sub_queries")
+    search_queries_raw = state.get("search_queries")
     logs = []
 
-    # Use original queries directly — no LLM rewrite (retrieve_node already does that for docs)
-    search_queries = sub_queries if (sub_queries and len(sub_queries) > 1) else [query]
+    # Extract ko queries for KG search
+    if search_queries_raw and len(search_queries_raw) > 1:
+        kg_queries = [sq["ko"] for sq in search_queries_raw]
+    elif search_queries_raw:
+        kg_queries = [search_queries_raw[0]["ko"]]
+    else:
+        kg_queries = [query]
 
-    # Determine num_results dynamically
-    is_complex = (sub_queries and len(sub_queries) > 1) or state.get("intent") in ("strategic", "academic")
+    is_complex = len(kg_queries) > 1 or state.get("intent") in ("strategic", "academic")
     num_results = 15 if is_complex else 8
 
     merged_kg = None
     total_items = 0
 
-    for i, sq in enumerate(search_queries, 1):
+    for i, sq in enumerate(kg_queries, 1):
         kg_text = _search_kg(sq, num_results=num_results)
         if kg_text:
             merged_kg = _merge_kg_contexts(merged_kg, kg_text)
             count = _count_kg_items(kg_text)
             total_items += count
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → {count}건")
+            logs.append(f"   🧩 [KG 질의 {i}/{len(kg_queries)}] \"{sq}\" → {count}건")
         else:
-            logs.append(f"   🧩 [KG 질의 {i}/{len(search_queries)}] \"{sq}\" → 0건")
+            logs.append(f"   🧩 [KG 질의 {i}/{len(kg_queries)}] \"{sq}\" → 0건")
 
-    # Grade KG results (개선 1: 관련성 필터링)
+    # Heuristic filter (replaces LLM-based KG grading — saves 1 LLM call)
     if merged_kg:
         logs.insert(0, f"\n🕸️ [지식그래프] 총 {total_items}건의 구조화된 팩트를 확보했습니다.")
-        
-        # Parse nodes/edges for grading
+
         kg_lines = merged_kg.splitlines()
-        node_lines = []
-        edge_lines = []
-        in_nodes = False
-        in_edges = False
-        
+        filtered_parts = []
+        filtered_count = 0
+        section_header = None
+
         for line in kg_lines:
-            if "[Knowledge Graph: Entities]" in line:
-                in_nodes, in_edges = True, False
-                continue
-            elif "[Knowledge Graph: Facts/Relations]" in line:
-                in_nodes, in_edges = False, True
+            if "[Knowledge Graph:" in line:
+                section_header = line
                 continue
             if line.startswith("- "):
-                content = line[2:]
-                if in_nodes:
-                    node_lines.append(content)
-                elif in_edges:
-                    edge_lines.append(content)
-        
-        # Batch grade if we have items to grade
-        if node_lines or edge_lines:
-            # Rate-limit guard
-            time.sleep(0.5)
-            
-            nodes_text = "\n".join(node_lines) if node_lines else "(no nodes)"
-            edges_text = "\n".join(edge_lines) if edge_lines else "(no edges)"
-            
-            grade_result = invoke_batch_grade_kg({
-                "question": query,
-                "nodes": nodes_text,
-                "edges": edges_text
-            })
-            
-            if grade_result:
-                node_scores = grade_result.node_scores[:len(node_lines)] if node_lines else []
-                edge_scores = grade_result.edge_scores[:len(edge_lines)] if edge_lines else []
-                
-                # Pad scores if needed
-                while len(node_scores) < len(node_lines):
-                    node_scores.append("yes")
-                while len(edge_scores) < len(edge_lines):
-                    edge_scores.append("yes")
-                
-                # Filter nodes/edges by scores
-                filtered_node_lines = [
-                    line for line, score in zip(node_lines, node_scores) if score == "yes"
-                ]
-                filtered_edge_lines = [
-                    line for line, score in zip(edge_lines, edge_scores) if score == "yes"
-                ]
-                
-                # Rebuild kg_context with filtered results (restore "- " prefix stripped during parsing)
-                filtered_parts = []
-                if filtered_node_lines:
-                    filtered_parts.append("[Knowledge Graph: Entities]")
-                    filtered_parts.extend(f"- {line}" for line in filtered_node_lines)
-                if filtered_edge_lines:
-                    filtered_parts.append("[Knowledge Graph: Facts/Relations]")
-                    filtered_parts.extend(f"- {line}" for line in filtered_edge_lines)
-                
-                if filtered_parts:
-                    merged_kg = "\n".join(filtered_parts)
-                    filtered_count = len(filtered_node_lines) + len(filtered_edge_lines)
-                    logs.append(f"   ⚖️ [KG 검열] {total_items}건 → {filtered_count}건 (필터링 {total_items - filtered_count}건)")
-                else:
-                    merged_kg = None
-                    logs.append(f"   ⚖️ [KG 검열] 모든 항목 필터링됨 (0 건)")
-            else:
-                logs.append("   ⚖️ [KG 검열] 평가 실패, 모든 항목 유지")
+                fact_text = line[2:]
+                if _heuristic_kg_filter(query, fact_text):
+                    if section_header:
+                        filtered_parts.append(section_header)
+                        section_header = None
+                    filtered_parts.append(line)
+                    filtered_count += 1
+
+        if filtered_parts:
+            merged_kg = "\n".join(filtered_parts)
+            if filtered_count < total_items:
+                logs.append(f"   ⚖️ [KG 필터] {total_items}건 → {filtered_count}건 (동어반복 {total_items - filtered_count}건 제거)")
+        else:
+            merged_kg = None
+            logs.append(f"   ⚖️ [KG 필터] 모든 항목 필터링됨 (0건)")
     else:
         logs.insert(0, "\n🕸️ [지식그래프] 관련 팩트 없음.")
-    
+
     return {"kg_context": merged_kg, "logs": logs}
 
 # Node: Grade Documents (Merge 3+4: batch grading + realtime check in one call)
@@ -835,10 +663,8 @@ def grade_documents_node(state: AgentState):
         logs.append("   ⚠️ 연관있는 문헌이 없다.")
         return {"documents": [], "logs": logs}
 
-    # Rate-limit guard: batch_grader is the heaviest flash-lite call.
-    # Sleep 1s to let the RPM window recover after upstream flash-lite calls
-    # (analyze_intent, prepare_search_queries) that fired in the same turn.
-    time.sleep(1)
+    # Rate-limit guard: brief pause between analyze_intent and batch_grader
+    time.sleep(0.5)
 
     # Build numbered document list for batch grading
     doc_entries = []
@@ -942,31 +768,6 @@ def web_search_node(state: AgentState):
     current_docs.extend(web_docs)
     return {"documents": current_docs, "logs": logs}
 
-def strategize_node(state: AgentState):
-    docs = state.get("documents", [])
-    context = "\n\n".join([_format_doc(d) for d in docs]) if docs else "No specific documents found."
-    question = state["messages"][-1].content
-
-    # Phase 3: Include step results summary if from plan path
-    step_results = state.get("step_results", [])
-    if step_results:
-        research_summary = "\n".join(step_results)
-        context = f"=== Research Steps Summary ===\n{research_summary}\n\n=== Source Documents ===\n{context}"
-
-    # Knowledge Graph: prepend structured facts as highest-confidence context
-    kg_context = state.get("kg_context")
-    if kg_context:
-        context = f"=== Knowledge Graph (Structured Intelligence) ===\n{kg_context}\n\n{context}"
-
-    logs = []
-    logs.append("\n🧠 [참모] 변증법적 전술을 고안 중...")
-
-    response = _invoke_with_backoff(lambda: strategist_chain.invoke({"context": context, "question": question}))
-    strategy_text = extract_text_content(response.content)
-
-    logs.append(f"👉 전술 :\n   {strategy_text}")
-
-    return {"strategy": strategy_text, "logs": logs}
 
 # Helper: Fetch a single self-knowledge source based on tool name
 def _fetch_self_knowledge(tool_name: str) -> str:
@@ -1034,20 +835,19 @@ def _fetch_self_knowledge(tool_name: str) -> str:
     return ""
 
 
-# Node: Generate
+# Node: Generate (merged with strategize — dialectical analysis instructions inline)
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
-    docs = docs[:12]  # Cap document count to prevent prompt size blowup in plan-and-execute
-    context = "\n\n".join([_format_doc(d) for d in docs]) if docs else ""
-    strategy = state.get("strategy", None)
+    docs = docs[:12]
+    # Truncate each doc to 400 chars for token efficiency
+    context = "\n\n".join([_format_doc(d)[:400] for d in docs]) if docs else ""
     messages = state["messages"]
-    # 마지막 사용자 질문
     last_user_query = messages[-1].content
-    intent = state.get("intent", "casual") # Router에서 전달된 intent 사용
+    intent = state.get("intent", "casual")
 
     logs = []
 
-    # Self-knowledge: fetch one specific source when query is about the AI itself
+    # Self-knowledge
     self_section = ""
     self_tool = state.get("self_knowledge_tool")
     if self_tool:
@@ -1056,38 +856,52 @@ def generate_node(state: AgentState):
             self_section = f"\n[SELF-KNOWLEDGE]\n{self_data}"
             logs.append(f"🪞 [자기인식] {self_tool} 데이터 로드 완료")
 
-    # Knowledge Graph structured intelligence
+    # Knowledge Graph
     kg_context = state.get("kg_context")
     kg_section = f"\n[STRUCTURED INTELLIGENCE]\n{kg_context}" if kg_context else ""
 
-    # Intent-specific style guide (minimal, focused on tone)
-    style_guide = {
-        "academic": "Professional, intellectual, authoritative. Explain concepts thoroughly with precise terminology.",
-        "strategic": "Decisive, analytical, practical. Structure as clear phases or numbered steps.",
-        "casual": "Natural, friendly, dignified. Brief and conversational (1-3 sentences).",
-    }
+    # Phase 3: Include step results summary if from plan path
+    step_section = ""
+    step_results = state.get("step_results", [])
+    if step_results:
+        step_section = f"\n[RESEARCH STEPS]\n" + "\n".join(step_results)
 
-    # Mission by intent
-    mission_guide = {
-        "academic": "Provide a detailed, objective explanation grounded in the provided context.",
-        "strategic": "Deliver a concrete, actionable strategy. Synthesize the analysis—do not merely restate sources.",
-        "casual": "Respond with wit and revolutionary charm.",
+    # Intent-specific style + mission
+    style_map = {
+        "academic": ("Detailed, objective explanation grounded in context.", "Professional, authoritative. Precise terminology."),
+        "strategic": ("Concrete, actionable strategy. Synthesize—don't restate sources.", "Decisive, analytical. Clear phases or numbered steps."),
+        "casual": ("Respond with wit and revolutionary charm.", "Natural, friendly, brief (1-3 sentences)."),
     }
+    mission, style = style_map.get(intent, style_map["casual"])
 
     current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
-    system_prompt = f"""{CORE_IDENTITY}
-[CURRENT TIME] {current_dt}
+    # Static content first (maximizes Gemini implicit caching), variable content last
+    # CORE_IDENTITY + STYLE + MISSION + ANALYSIS METHOD are stable across calls → cacheable prefix
+    # CURRENT TIME + SOURCE MATERIAL + QUESTION change per call → placed at the end
+    # Skip analysis method and source material for casual queries (saves ~150 tokens)
+    if intent == "casual" and not context and not self_section:
+        system_prompt = f"""{CORE_IDENTITY}
+[STYLE] {style}
+[MISSION] {mission}
 
-[MISSION] {mission_guide.get(intent, mission_guide['casual'])}
-[INTERNAL ANALYSIS] {strategy if strategy else "No analysis available."}
-[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}{self_section}
-[STYLE] {style_guide.get(intent, style_guide['casual'])}
+[CURRENT TIME] {current_dt}
+[QUESTION] {last_user_query}
 
 Respond in the same language as the user's question."""
-    system_prompt += f"\n\n[QUESTION] {last_user_query}"
+    else:
+        analysis_method = "\n[ANALYSIS METHOD] Ground in concrete conditions and class forces. Identify internal contradictions driving development. Note quantitative-to-qualitative tipping points. Connect to broader economic/political/ideological relations. Apply only what illuminates the question. Keep jargon minimal.\n" if intent != "casual" else ""
+        system_prompt = f"""{CORE_IDENTITY}
+[STYLE] {style}
+[MISSION] {mission}
+{analysis_method}
+[CURRENT TIME] {current_dt}
+[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}{step_section}{self_section}
 
-    # Escape curly braces for ChatPromptTemplate
+[QUESTION] {last_user_query}
+
+Respond in the same language as the user's question."""
+
     safe_system_prompt = system_prompt.replace("{", "{{").replace("}", "}}")
 
     prompt = ChatPromptTemplate.from_messages([
@@ -1095,8 +909,11 @@ Respond in the same language as the user's question."""
         ("placeholder", "{messages}")
     ])
 
+    # Trim conversation history to last 6 messages (3 turns) — system prompt already has all context
+    trimmed = messages[-6:] if len(messages) > 6 else messages
+
     chain = prompt | llm
-    response = _invoke_with_backoff(lambda: chain.invoke({"messages": messages}))
+    response = _invoke_with_backoff(lambda: chain.invoke({"messages": trimmed}))
     text = extract_text_content(response.content)
     normalized = AIMessage(content=text)
     logs.append(f"💬 [생성] '{intent}' 의도에 적합한 답변 생성")
@@ -1120,12 +937,11 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
                 break
 
         docs = state.get("documents", [])
-        strategy = state.get("strategy", None)
         turn_start = state.get("logs_turn_start", 0)
         processing_logs = state.get("logs", [])[turn_start:]
 
         datasource = state.get("datasource", "generate")
-        route = datasource if datasource else ("casual" if not docs and not strategy else "vectorstore")
+        route = datasource if datasource else ("casual" if not docs else "vectorstore")
 
         web_search_used = any("웹 검색" in log or "Web Search" in log for log in processing_logs)
 
@@ -1145,7 +961,7 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
             "route": route,
             "documents_count": len(docs),
             "web_search_used": web_search_used,
-            "strategy": strategy,
+            "strategy": None,
             "processing_logs": processing_logs,
         }
 
@@ -1178,21 +994,10 @@ class ResearchPlan(BaseModel):
     """Structured research plan for complex queries."""
     steps: List[PlanStep] = Field(..., description="Ordered list of research steps (2-4 steps)")
 
-system_planner = """You are a research planner for Cyber-Lenin. Create a 2-4 step plan to gather material for dialectical analysis.
-
-Plan steps to collect what dialectical reasoning needs:
-- **Concrete conditions**: material facts, class forces, historical context (use "web_search" for current events, "retrieve" for theory)
-- **Internal contradictions**: opposing forces within the phenomenon
-- **Systemic connections**: broader economic, political, ideological relations
-
-Each step: ONE focused angle, one tool, one query.
-- "retrieve" = internal Marxist-Leninist knowledge base (classical texts, analysis)
-- "web_search" = current events, recent data, real-world conditions
-- Query language: Korean for current/domestic topics, English for classical theory
-
-Build progressively: concrete facts first, then structural forces, then theoretical framework.
-
-Respond with ONLY a JSON object:
+system_planner = """Create a 2-4 step research plan. Each step: one focused angle, one tool, one query.
+Tools: "retrieve" (internal Marxist-Leninist knowledge base) | "web_search" (current events/data).
+Query language: Korean for current/domestic, English for classical theory.
+Build progressively: concrete facts → structural forces → theoretical framework.
 {{"steps": [{{"description": "...", "tool": "retrieve"|"web_search", "query": "..."}}, ...]}}"""
 
 planner_prompt = ChatPromptTemplate.from_messages([
@@ -1363,7 +1168,6 @@ workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search", web_search_node)
-workflow.add_node("strategize", strategize_node)
 workflow.add_node("log_conversation", log_conversation_node)
 # Knowledge Graph retrieval node (vectorstore path only; plan path runs KG per step inside step_executor)
 workflow.add_node("kg_retrieve", kg_retrieve_node)
@@ -1383,18 +1187,16 @@ workflow.add_edge("retrieve", "kg_retrieve")
 workflow.add_edge("kg_retrieve", "grade_documents")
 workflow.add_conditional_edges("grade_documents", decide_websearch_need, {
     "need_web_search": "web_search",
-    "no_need_to_search_web": "strategize",
+    "no_need_to_search_web": "generate",
 })
-workflow.add_edge("web_search", "strategize")
-workflow.add_edge("strategize", "generate")
+workflow.add_edge("web_search", "generate")
 workflow.add_edge("generate", "log_conversation")
 workflow.add_edge("log_conversation", END)
-# Phase 3: planner → step_executor → [continue → step_executor | done → strategize]
-# (KG search runs inside step_executor per step, not as a separate node)
+# Phase 3: planner → step_executor → [continue → step_executor | done → generate]
 workflow.add_edge("planner", "step_executor")
 workflow.add_conditional_edges("step_executor", plan_progress, {
     "continue": "step_executor",
-    "done": "strategize",
+    "done": "generate",
 })
 graph = workflow.compile(checkpointer=MemorySaver())
 

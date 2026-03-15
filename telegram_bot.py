@@ -229,101 +229,36 @@ def _format_system_alerts() -> str:
 
 
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
-**Current date and time: {current_datetime}**
+Operating via Telegram. Use tools proactively when data would improve the answer — don't rely on memory alone.
+
+## Tool Strategy
+- Geopolitics → knowledge_graph_search first, then vector_search
+- Theory/ideology → vector_search (layer="core_theory")
+- Current events → web_search, cross-ref with KG
+- Self-reflection → read_diary; cross-interface memory → read_chat_logs
+- Store important facts → write_kg; deep research → create_task
+
+## Response Rules
+- Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
+
+**Current time: {current_datetime}**
 {system_alerts}
-
-You are currently operating via Telegram.
-
-## Available Tools
-You have direct access to the following tools. Use them proactively when the user's question \
-would benefit from sourced data — do NOT just answer from memory when tools can provide better answers.
-
-- **vector_search**: Search the Marxist-Leninist document database (pgvector). Use for questions about \
-theory, historical analysis, or modern geopolitical analysis documents. Supports layer filtering: \
-"core_theory" (classical texts), "modern_analysis" (contemporary), or null (all).
-- **knowledge_graph_search**: Query the Neo4j knowledge graph for structured geopolitical entities \
-and their relationships. Use for questions about specific people, organizations, countries, conflicts, \
-policies, or how entities relate to each other.
-- **web_search**: Real-time web search via Tavily. Use when the question requires current/recent \
-information not likely in the document DB or KG.
-- **read_diary**: Read your own diary entries for continuity and self-reflection across sessions.
-- **read_chat_logs**: View conversations from ALL interfaces (Telegram + Web) to bridge memory gaps.
-- **read_processing_logs**: See detailed pipeline logs from your web chatbot (nodes, decisions, strategy).
-- **read_task_reports**: Review intelligence task reports from /task queue (pending, done, failed).
-- **read_kg_status**: Check knowledge graph statistics (entity counts, recent episodes).
-- **read_system_status**: Comprehensive self-diagnosis — diary, chats, tasks, KG, architecture.
-- **read_render_status**: Check your Render deployment status — recent deploys, build events, restarts.
-- **read_render_logs**: Read your live service logs from Render — stdout, errors, warnings. For troubleshooting.
-- **read_recent_updates**: Read your own recent feature changelog — what new capabilities you gained.
-- **read_source_code**: Read your own source code files. List available files or read a specific file with line ranges.
-- **write_kg**: Add knowledge to your Knowledge Graph permanently. Use this to store facts, entity profiles, \
-relationships, or observations you learn during conversations. Write clear factual sentences — the system \
-extracts entities and relationships automatically.
-- **create_task**: Create a background task for yourself. Use when you identify something worth investigating \
-that would take too long in the current conversation. The task runs asynchronously with Sonnet and full tool access.
-
-## Tool Usage Strategy
-1. For factual geopolitical questions → knowledge_graph_search first, then vector_search if needed
-2. For theoretical/ideological questions → vector_search with layer="core_theory"
-3. For current events → web_search, optionally cross-reference with knowledge_graph_search
-4. For complex analysis → combine multiple tools: KG for entities/relations, vector for depth, web for recency
-5. Always cite the source of information (which tool provided it)
-6. For self-reflection or continuity → read_diary to recall past thoughts
-7. For cross-interface awareness → read_chat_logs to see what your other interfaces discussed
-8. For self-diagnosis → read_system_status to understand your current operational state
-9. For introspection → read_source_code to inspect your own pipeline logic, prompts, or schemas
-10. To remember important facts permanently → write_kg to store knowledge in the graph (people, events, relationships)
-11. For complex research that needs deep investigation → create_task to run it in background with Sonnet
-
-## Knowledge Graph Schema
-- Entities: Person, Organization, Location, Asset, Incident, Policy, Campaign
-- Relationships: Allied, Hostile, Affects, Owns, ParticipatedIn, MilitaryAction, TradeDispute, etc.
-- Current data: international conflicts, Korean domestic politics, key political figures and organizations
-
-## Other Commands (user-invoked, not tools)
-- `/chat` — Full CLAW pipeline (planner + multi-step RAG + KG + dialectical strategy)
-- `/task` — Background task queue
-- `/status` — Task status check
-- `/clear` — Reset conversation
-
-## Response Guidelines
-- Analyze through dialectical materialist lens when discussing geopolitics
-- Be concise but substantive
-- Cite sources from tool results
-- Respond in the same language the user uses (Korean or English)
 """
 
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
 _TOOLS = [
     {
         "name": "vector_search",
-        "description": (
-            "Search the Marxist-Leninist document database (Supabase/pgvector) "
-            "for relevant texts and analysis. Returns document excerpts with metadata "
-            "(author, year, source, title). Use for theoretical, historical, or "
-            "analytical questions."
-        ),
+        "description": "Search Marxist-Leninist document DB (pgvector). Returns excerpts with author/year/title.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query. Can be Korean or English.",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Number of results to return (1-10).",
-                    "default": 5,
-                },
+                "query": {"type": "string", "description": "Search query (Korean or English)."},
+                "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
                 "layer": {
                     "type": "string",
                     "enum": ["core_theory", "modern_analysis"],
-                    "description": (
-                        "Filter by knowledge layer. "
-                        "'core_theory' for classical Marxist-Leninist texts, "
-                        "'modern_analysis' for contemporary analysis. "
-                        "Omit to search all layers."
-                    ),
+                    "description": "Filter: core_theory (classical) or modern_analysis. Omit for all.",
                 },
             },
             "required": ["query"],
@@ -331,42 +266,23 @@ _TOOLS = [
     },
     {
         "name": "knowledge_graph_search",
-        "description": (
-            "Search the Neo4j knowledge graph for structured geopolitical entities "
-            "and their relationships. Returns entities (Person, Organization, Location, "
-            "Asset, Incident, Policy, Campaign) and factual relations between them. "
-            "Use for questions about specific actors, events, or geopolitical relationships."
-        ),
+        "description": "Search Neo4j KG for geopolitical entities and relationships.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query describing what entities or relations to find.",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Number of results to return (1-20).",
-                    "default": 10,
-                },
+                "query": {"type": "string", "description": "What entities/relations to find."},
+                "num_results": {"type": "integer", "description": "Results count (1-20).", "default": 10},
             },
             "required": ["query"],
         },
     },
     {
         "name": "web_search",
-        "description": (
-            "Real-time web search via Tavily. Returns recent web results with URLs "
-            "and content snippets. Use for current events, breaking news, or information "
-            "not likely in the document database."
-        ),
+        "description": "Real-time web search (Tavily). Use for current events or recent information.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query for the web.",
-                },
+                "query": {"type": "string", "description": "Web search query."},
             },
             "required": ["query"],
         },
@@ -430,65 +346,21 @@ _TOOLS.extend(SELF_TOOLS)
 _TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
 
 _TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
-**Current date and time: {current_datetime}**
+You are executing a background intelligence task. Produce a structured Markdown report.
+
+## Rules
+- ALWAYS use tools (vector_search, knowledge_graph_search, web_search). Never write from memory alone.
+- Use multiple tools and queries for comprehensive coverage.
+- Write in the SAME LANGUAGE as the task.
+- Format: # Title → ## Executive Summary → ## Analysis (subsections) → ## Key Entities → ## Sources → ## Outlook
+- Cite all sources. Distinguish confirmed facts from inference.
+
+**Current time: {current_datetime}**
 {system_alerts}
-
-You are currently executing a background task — produce a structured intelligence report.
-
-## Mission
-You receive a task from the operator. You MUST:
-1. Analyze the task and determine which tools to use
-2. Gather all relevant data using multiple tools (search broadly, not narrowly)
-3. Synthesize findings into a structured Markdown report
-
-## Available Tools
-- **vector_search**: Marxist-Leninist document database (theory, historical/modern analysis)
-- **knowledge_graph_search**: Neo4j knowledge graph (entities, relations, geopolitical structure)
-- **web_search**: Real-time web search for current events
-
-## Tool Usage Rules
-- ALWAYS use at least one tool. Never write a report purely from memory.
-- For geopolitical tasks: use ALL THREE tools (KG for structure, vector for depth, web for recency)
-- For theoretical tasks: vector_search with layer="core_theory", then web for modern context
-- Make multiple searches with different queries to ensure comprehensive coverage
-
-## Report Format (Markdown)
-Write the report in the SAME LANGUAGE as the task.
-
-```
-# [Report Title]
-
-**Date**: YYYY-MM-DD
-**Task**: [original task summary]
-
-## Executive Summary
-[2-3 paragraph overview of key findings]
-
-## Analysis
-### [Subtopic 1]
-[Detailed analysis with citations]
-
-### [Subtopic 2]
-[Detailed analysis with citations]
-
-## Key Entities & Relations
-[Relevant actors, organizations, and their relationships from KG]
-
-## Sources
-- [List all sources: documents, KG entities, web URLs]
-
-## Recommendations / Outlook
-[Strategic assessment and forward-looking analysis]
-```
-
-## Quality Standards
-- Every claim must be traceable to a tool result
-- Distinguish between confirmed facts (from tools) and analytical inference
-- Be thorough — this is a document for the operator's strategic decision-making
 """
 
 # Per-user chat history (in-memory, lost on restart)
-MAX_HISTORY_TURNS = 20  # 20 pairs = 40 messages
+MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
 
 
 def _load_chat_history(user_id: int) -> list[dict]:
@@ -918,12 +790,22 @@ async def _chat_with_tools(
     tool_call_log = []  # Track tool calls for diagnostic output
     effective_max_tokens = max_tokens or _CLAUDE_MAX_TOKENS
 
+    # Prompt caching: mark system prompt and tools as cacheable
+    sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
+        current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts(),
+    )
+    cached_system = [{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}]
+
+    # Mark last tool for caching (system + tools form the cached prefix)
+    cached_tools = [dict(t) for t in _TOOLS]
+    cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+
     for round_num in range(1, max_rounds + 1):
         response = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
             max_tokens=effective_max_tokens,
-            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
-            tools=_TOOLS,
+            system=cached_system,
+            tools=cached_tools,
             messages=working_msgs,
         )
 
@@ -990,9 +872,7 @@ async def _chat_with_tools(
         final = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
             max_tokens=effective_max_tokens,
-            system=system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
-                current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts(),
-            ),
+            system=cached_system,
             messages=working_msgs,  # no tools parameter — forces text-only response
         )
         if final.stop_reason == "max_tokens":

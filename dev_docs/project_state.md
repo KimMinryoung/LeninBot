@@ -29,57 +29,52 @@ User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer
                                              ─► Gemini 2.5 Flash-Lite (reranking)
 ```
 
-### Current Graph Flow (Phases 0-4 + KG integration complete)
+### Current Graph Flow (Phases 0-4 + KG integration + Token Optimization)
 
 ```
 START → analyze_intent
   ├─[vectorstore]→ retrieve → kg_retrieve → grade_documents
-  │                                            ├─[need_web_search]→ web_search → strategize
-  │                                            └─[no_need]→ strategize
-  │                           strategize → generate → critic (pass-through)
-  │                                                     └─[always accepted]→ log_conversation → END
-  ├─[generate]→ generate → critic → log_conversation → END
+  │                                            ├─[need_web_search]→ web_search → generate
+  │                                            └─[no_need]→ generate
+  │                           generate → log_conversation → END
+  ├─[generate]→ generate → log_conversation → END
   └─[plan]→ planner → step_executor ─┐
                         ▲             │
                         └─[continue]──┘
-                          [done]→ strategize → generate → critic → ... → END
+                          [done]→ generate → log_conversation → END
 ```
 
-Note: kg_retrieve searches Neo4j knowledge graph; results go to `kg_context` (not `documents`), so grade_documents doesn't touch them.
+Token optimization (2026-03-15): Merged strategize into generate (dialectical analysis instructions inline in system prompt). Merged query rewrite into analyze_intent (search_queries output ready-to-use). Replaced KG LLM grading with heuristic filter. Reduced LLM calls from 6→3 on common vectorstore path.
+
+Note: kg_retrieve searches Neo4j knowledge graph with heuristic filtering (no LLM); results go to `kg_context` (not `documents`).
 Plan path: step_executor runs KG search per step with atomized queries, deduplicating facts across steps via `_merge_kg_contexts()`.
 KG failure at any layer results in graceful degradation — pipeline continues with vectorstore + web search only.
 
-### 11 Nodes
+### 9 Nodes (optimized from 11)
 
 | Node | LLM | Purpose |
 |------|-----|---------|
-| analyze_intent | gemini-2.5-flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection, self-knowledge tool selection |
-| retrieve | gemini-2.5-flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
-| kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti) for vectorstore path; results stored in `kg_context`, always included without grading |
-| grade_documents | gemini-2.5-flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
+| analyze_intent | gemini-2.5-flash-lite | Combined: route, classify intent, layer routing, query decomposition, query rewrite+translate, plan detection, self-knowledge tool selection. Outputs ready-to-search `search_queries` with ko/en. |
+| retrieve | — (no LLM) | Uses pre-resolved search_queries directly. Multi-query retrieval + deduplication. |
+| kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti) with heuristic filter (tautology/short-fact removal, no LLM). |
+| grade_documents | gemini-2.5-flash-lite | Batch document relevance grading + realtime info need check (single LLM call, max_retries=1) |
 | web_search | — | Tavily search, appends results to documents |
-| strategize | gemini-3.1-flash-lite | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
-| generate | gemini-3.1-flash-lite (streaming) | Final answer with CORE_IDENTITY + datetime-aware system prompt; self-knowledge injection when self_knowledge_tool is set; incorporates critic feedback on retries |
-| critic | *(disabled)* | Phase 1: Pass-through — was evaluating groundedness/relevance/completeness but caused rate-limit cascades |
+| generate | gemini-3.1-flash-lite (streaming) | Final answer with merged dialectical analysis instructions, CORE_IDENTITY, datetime. Trims history to last 6 messages. Truncates docs to 400 chars. |
 | log_conversation | — | Writes to PostgreSQL chat_logs (direct psycopg2) |
-| planner | gemini-3.1-flash-lite | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
-| step_executor | — | Phase 3: Executes plan steps (retrieve or web_search) + KG search per step; deduplicates facts via `_merge_kg_contexts()` |
+| planner | gemini-3.1-flash-lite | Phase 3: Creates 2-4 step structured research plan |
+| step_executor | — | Phase 3: Executes plan steps (retrieve or web_search) + KG search per step |
 
 ### State Shape (AgentState)
 
 ```python
 messages           : Annotated[List[BaseMessage], add_messages]  # accumulated via add_messages
 documents          : List[Document]      # replaced each turn
-strategy           : Optional[str]       # strategist output
 intent             : Optional[Literal]   # academic|strategic|casual
 datasource         : Optional[Literal]   # vectorstore|generate (or "plan" for routing)
 logs               : Annotated[List[str], add]  # accumulated via add reducer (session-wide)
 logs_turn_start    : int                 # index into logs[] where current turn begins (for per-turn DB slicing)
-# Phase 1: Self-correction
-feedback           : Optional[str]       # critic's feedback for re-generation
-generation_attempts: int                 # loop counter (max 3 total attempts)
-# Phase 2: Query decomposition
-sub_queries        : Optional[List[str]] # decomposed sub-queries (None = simple query)
+# Phase 2: Query decomposition (search_queries are ready-to-use, context-resolved, translated)
+search_queries     : Optional[List[dict]]# [{"ko": "...", "en": "..."|None}, ...] — ready for retrieval
 layer              : Optional[Literal]   # core_theory|modern_analysis|all
 needs_realtime     : Optional[Literal]   # yes|no — from batch grading
 # Phase 3: Plan-and-execute
@@ -87,7 +82,7 @@ plan               : Optional[List[dict]]# structured research plan from planner
 current_step       : int                 # progress pointer into plan
 step_results       : List[str]           # accumulated intermediate results (manual, no reducer)
 # Knowledge Graph integration
-kg_context         : Optional[str]       # formatted KG results (nodes+edges). Always included, no grading.
+kg_context         : Optional[str]       # formatted KG results (nodes+edges). Heuristic-filtered, no LLM grading.
 # Self-knowledge
 self_knowledge_tool: Optional[str]       # which self-tool to invoke (read_diary/read_chat_logs/read_system_status/read_recent_updates/None)
 ```
