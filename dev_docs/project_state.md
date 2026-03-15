@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-14
+# Project State Report — 2026-03-15
 
 ## Identity
 
@@ -53,13 +53,13 @@ KG failure at any layer results in graceful degradation — pipeline continues w
 
 | Node | LLM | Purpose |
 |------|-----|---------|
-| analyze_intent | gemini-2.5-flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection |
+| analyze_intent | gemini-2.5-flash-lite | Combined: route (vectorstore/generate/plan), classify intent, layer routing, query decomposition, plan detection, self-knowledge tool selection |
 | retrieve | gemini-2.5-flash-lite | Query rewrite (Korean), optional English translation, multi-query retrieval for decomposed queries, deduplication |
 | kg_retrieve | — | Knowledge graph search (Neo4j/Graphiti) for vectorstore path; results stored in `kg_context`, always included without grading |
 | grade_documents | gemini-2.5-flash-lite | Batch document relevance grading + realtime info need check (single LLM call) |
 | web_search | — | Tavily search, appends results to documents |
 | strategize | gemini-3.1-flash-lite | Dialectical materialist analysis → internal strategic blueprint; includes step_results summary for plan path |
-| generate | gemini-3.1-flash-lite (streaming) | Final answer with CORE_IDENTITY + datetime-aware system prompt; incorporates critic feedback on retries |
+| generate | gemini-3.1-flash-lite (streaming) | Final answer with CORE_IDENTITY + datetime-aware system prompt; self-knowledge injection when self_knowledge_tool is set; incorporates critic feedback on retries |
 | critic | *(disabled)* | Phase 1: Pass-through — was evaluating groundedness/relevance/completeness but caused rate-limit cascades |
 | log_conversation | — | Writes to PostgreSQL chat_logs (direct psycopg2) |
 | planner | gemini-3.1-flash-lite | Phase 3: Creates 2-4 step structured research plan for complex strategic queries |
@@ -88,6 +88,8 @@ current_step       : int                 # progress pointer into plan
 step_results       : List[str]           # accumulated intermediate results (manual, no reducer)
 # Knowledge Graph integration
 kg_context         : Optional[str]       # formatted KG results (nodes+edges). Always included, no grading.
+# Self-knowledge
+self_knowledge_tool: Optional[str]       # which self-tool to invoke (read_diary/read_chat_logs/read_system_status/read_recent_updates/None)
 ```
 
 Note: All per-turn transient fields are reset in `analyze_intent_node` to prevent state leakage across checkpointed turns.
@@ -202,6 +204,7 @@ AIChatBot/
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
 20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_render_status, fetch_render_logs, fetch_recent_updates). Telegram bot has 10 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, Render deploy status, Render live logs, recent feature updates, source code reader.
+21. **Web chatbot self-knowledge**: analyze_intent selects one self-knowledge tool (read_diary/read_chat_logs/read_system_status/read_recent_updates) for self-referential queries; generate_node fetches and injects as [SELF-KNOWLEDGE] context.
 
 ## Current Limitations
 
@@ -217,6 +220,17 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-15 — Web Chatbot Self-Knowledge + Diary Update Dedup
+
+#### chatbot.py — Self-Knowledge Access
+- **`self_knowledge_tool` field**: Added to `QueryAnalysis` and `AgentState` — analyzer picks ONE specific self-tool per query (read_diary, read_chat_logs, read_system_status, read_recent_updates, or null)
+- **`_fetch_self_knowledge(tool_name)`** (new): Dispatches to the selected shared.py function, returns formatted text for prompt injection
+- **`generate_node`**: When `self_knowledge_tool` is set, fetches data and injects as `[SELF-KNOWLEDGE]` section in system prompt (works on all routing paths)
+- **Query analysis prompt**: Extended with `self_knowledge_tool` field — 4 tool options with example trigger phrases
+
+#### diary_writer.py — Update Dedup
+- **`_filter_unseen_updates()`** (new): Cross-references update entry headers (date + title keywords) against previous diary content; returns only the first unseen update so each system update is mentioned in exactly one diary entry
 
 ### 2026-03-14 — Resilience, Persistence, Autonomous Tasks, Truncation Fix
 
