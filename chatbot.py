@@ -177,8 +177,8 @@ class AgentState(TypedDict):
     kg_context: Optional[str]         # formatted KG results (nodes+edges). Always included, no grading.
     # Internal: Track KG searched queries to avoid duplicates (Plan-and-execute path)
     _kg_searched_queries: List[str]   # internal state, not exposed to nodes
-    # Self-knowledge: when True, generate_node fetches diary/status for self-referential answers
-    needs_self_knowledge: Optional[bool]
+    # Self-knowledge: which self-tool to invoke (None = not needed)
+    self_knowledge_tool: Optional[str]
 
 # Merge 1: Combined query analysis (router + layer router + decompose in one LLM call)
 class QueryAnalysis(BaseModel):
@@ -188,7 +188,7 @@ class QueryAnalysis(BaseModel):
     layer: Literal["core_theory", "modern_analysis", "all"] = Field(default="all", description="Which knowledge layer to search")
     sub_queries: List[str] = Field(default_factory=list, description="Decomposed sub-queries, or single original query")
     needs_plan: bool = Field(default=False, description="Whether the query requires multi-step research planning")
-    needs_self_knowledge: bool = Field(default=False, description="Whether the query asks about the AI itself")
+    self_knowledge_tool: Optional[str] = Field(default=None, description="Which self-knowledge tool to use, or null if not needed")
 
 system_query_analysis = """You are an expert query analyzer for the Cyber-Lenin AI.
 Analyze the user's question and conversation context to determine ALL of the following in ONE response.
@@ -219,19 +219,22 @@ Use the conversation context to resolve pronouns, references, and follow-up ques
    - true: The question requires COMBINING knowledge from multiple angles, building an argument across several research steps, or producing a structured analysis/strategy. Examples: "Analyze X crisis from a Marxist perspective and propose a strategy", "Compare and synthesize theories A, B, C into an actionable framework".
    - false: The question can be answered with a single retrieval pass (even if complex). Most questions are false. When in doubt, use false.
 
-6. **needs_self_knowledge**: Whether the query asks about the AI itself — its thoughts, diary, status, capabilities, recent activity, or self-reflection.
-   - true: Questions like "what have you been thinking?", "how are you?", "what did you do recently?", "tell me about yourself", "what's your status?", "what news did you find?", "요즘 뭐해?", "일기 뭐라고 썼어?", "너 상태 어때?", references to the AI's diary, memory, or internal state.
-   - false: Questions about external topics (politics, theory, etc.) even if addressed to the AI. Most questions are false.
+6. **self_knowledge_tool**: If the query asks about the AI itself, pick ONE tool. Otherwise null.
+   - "read_diary": User asks about the AI's thoughts, reflections, what it wrote, what it was thinking. (e.g., "일기 뭐라고 썼어?", "what have you been thinking?", "요즘 무슨 생각해?")
+   - "read_chat_logs": User asks about recent conversations across interfaces. (e.g., "최근에 누구랑 대화했어?", "what did people ask you?")
+   - "read_system_status": User asks about the AI's overall operational state, health, uptime. (e.g., "너 상태 어때?", "how are you doing?", "시스템 상태는?")
+   - "read_recent_updates": User asks about new capabilities, changes, what's new. (e.g., "뭐가 바뀌었어?", "what's new with you?", "새로운 기능 있어?")
+   - null: Not a self-referential question. Most questions should be null.
 
 Respond with ONLY a JSON object:
-{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."], "needs_plan": true|false, "needs_self_knowledge": true|false}}"""
+{{"datasource": "...", "intent": "...", "layer": "...", "sub_queries": ["..."], "needs_plan": true|false, "self_knowledge_tool": "..."|null}}"""
 
 query_analysis_prompt = ChatPromptTemplate.from_messages([
     ("system", system_query_analysis),
     ("human", "Conversation context:\n{context}\n\nCurrent question: {question}"),
 ])
 
-_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[], needs_plan=False, needs_self_knowledge=False)
+_ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", sub_queries=[], needs_plan=False, self_knowledge_tool=None)
 
 def invoke_query_analysis(inputs: dict) -> QueryAnalysis:
     return _invoke_structured(query_analysis_prompt | llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT, retry_llm=llm_light)
@@ -389,8 +392,9 @@ def analyze_intent_node(state: AgentState):
     if needs_plan:
         logs.append("📋 [계획] 복합 전략 질문 감지 — 연구 계획 수립 경로로 진입합니다.")
 
-    if analysis.needs_self_knowledge:
-        logs.append("🪞 [분석] 자기 인식 질문 감지 — 자체 지식(일기/상태) 조회 예정")
+    self_tool = analysis.self_knowledge_tool
+    if self_tool:
+        logs.append(f"🪞 [분석] 자기 인식 질문 감지 — {self_tool} 조회 예정")
 
     return {
         "intent": analysis.intent,
@@ -408,7 +412,7 @@ def analyze_intent_node(state: AgentState):
         "step_results": [],
         "kg_context": None,
         "_kg_searched_queries": [],  # Reset KG query tracking for new turn
-        "needs_self_knowledge": analysis.needs_self_knowledge,
+        "self_knowledge_tool": self_tool,
     }
 
 
@@ -964,51 +968,70 @@ def strategize_node(state: AgentState):
 
     return {"strategy": strategy_text, "logs": logs}
 
-# Helper: Fetch self-knowledge (diary, system status) for self-referential queries
-def _fetch_self_knowledge(question: str) -> str:
-    """Fetch diary entries and system status for self-referential answers."""
-    from shared import fetch_diaries, fetch_chat_logs, fetch_recent_updates
-
-    sections = []
-
-    # Recent diary entries (last 3)
+# Helper: Fetch a single self-knowledge source based on tool name
+def _fetch_self_knowledge(tool_name: str) -> str:
+    """Fetch one specific self-knowledge source. Returns formatted text or empty string."""
     try:
-        diaries = fetch_diaries(3)
-        if diaries:
-            diary_lines = []
+        if tool_name == "read_diary":
+            from shared import fetch_diaries
+            diaries = fetch_diaries(3)
+            if not diaries:
+                return "(No diary entries yet.)"
+            lines = []
             for d in diaries:
                 ts = d.get("created_at", "?")
                 if isinstance(ts, str) and len(ts) > 16:
                     ts = ts[:16].replace("T", " ")
                 title = d.get("title", "Untitled")
                 content = d.get("content", "")[:600]
-                diary_lines.append(f"[{ts}] {title}\n{content}")
-            sections.append("[MY RECENT DIARY ENTRIES]\n" + "\n---\n".join(diary_lines))
-    except Exception as e:
-        logger.warning("[자기인식] 일기 조회 실패: %s", e)
+                lines.append(f"[{ts}] {title}\n{content}")
+            return "[MY DIARY ENTRIES]\n" + "\n---\n".join(lines)
 
-    # Recent chat activity (last 10 from all interfaces)
-    try:
-        logs = fetch_chat_logs(10, hours_back=24)
-        if logs:
-            log_lines = []
-            for row in logs:
+        elif tool_name == "read_chat_logs":
+            from shared import fetch_chat_logs
+            rows = fetch_chat_logs(15, hours_back=24)
+            if not rows:
+                return "(No recent conversations.)"
+            lines = []
+            for row in rows:
                 q = str(row.get("user_query", ""))[:100]
                 a = str(row.get("bot_answer", ""))[:150]
-                log_lines.append(f"- User: {q}\n  Me: {a}")
-            sections.append(f"[MY RECENT CONVERSATIONS ({len(logs)} in last 24h)]\n" + "\n".join(log_lines))
-    except Exception as e:
-        logger.warning("[자기인식] 채팅 로그 조회 실패: %s", e)
+                lines.append(f"- User: {q}\n  Me: {a}")
+            return f"[MY RECENT CONVERSATIONS ({len(rows)} in last 24h)]\n" + "\n".join(lines)
 
-    # Recent system updates
-    try:
-        updates = fetch_recent_updates(max_entries=2, max_chars=800)
-        if updates and not updates.startswith("("):
-            sections.append(f"[MY RECENT SYSTEM UPDATES]\n{updates}")
-    except Exception as e:
-        logger.warning("[자기인식] 업데이트 조회 실패: %s", e)
+        elif tool_name == "read_system_status":
+            from shared import fetch_diaries, fetch_chat_logs, fetch_task_reports
+            parts = []
+            diaries = fetch_diaries(1)
+            if diaries:
+                last = diaries[0]
+                ts = last.get("created_at", "?")
+                if isinstance(ts, str) and len(ts) > 16:
+                    ts = ts[:16].replace("T", " ")
+                parts.append(f"Last diary: {ts} — {last.get('title', 'N/A')}")
+            logs_24h = fetch_chat_logs(1000, hours_back=24)
+            parts.append(f"Chat activity (24h): {len(logs_24h)} conversations")
+            tasks = fetch_task_reports(20)
+            if tasks:
+                by_status = {}
+                for t in tasks:
+                    s = t.get("status", "?")
+                    by_status[s] = by_status.get(s, 0) + 1
+                parts.append("Tasks: " + ", ".join(f"{k}: {v}" for k, v in by_status.items()))
+            current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+            parts.append(f"Current time: {current_dt}")
+            return "[MY SYSTEM STATUS]\n" + "\n".join(parts)
 
-    return "\n\n".join(sections) if sections else ""
+        elif tool_name == "read_recent_updates":
+            from shared import fetch_recent_updates
+            updates = fetch_recent_updates(max_entries=3, max_chars=1200)
+            if updates and not updates.startswith("("):
+                return f"[MY RECENT SYSTEM UPDATES]\n{updates}"
+            return "(No recent updates.)"
+
+    except Exception as e:
+        logger.warning("[자기인식] %s 조회 실패: %s", tool_name, e)
+    return ""
 
 
 # Node: Generate
@@ -1024,13 +1047,14 @@ def generate_node(state: AgentState):
 
     logs = []
 
-    # Self-knowledge: fetch diary/status when query is about the AI itself
+    # Self-knowledge: fetch one specific source when query is about the AI itself
     self_section = ""
-    if state.get("needs_self_knowledge"):
-        self_data = _fetch_self_knowledge(last_user_query)
+    self_tool = state.get("self_knowledge_tool")
+    if self_tool:
+        self_data = _fetch_self_knowledge(self_tool)
         if self_data:
-            self_section = f"\n[SELF-KNOWLEDGE — Your own memory and state]\n{self_data}"
-            logs.append("🪞 [자기인식] 일기/상태 데이터 로드 완료")
+            self_section = f"\n[SELF-KNOWLEDGE]\n{self_data}"
+            logs.append(f"🪞 [자기인식] {self_tool} 데이터 로드 완료")
 
     # Knowledge Graph structured intelligence
     kg_context = state.get("kg_context")
