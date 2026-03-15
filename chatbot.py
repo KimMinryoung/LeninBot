@@ -203,14 +203,15 @@ Resolve pronouns/references using conversation context. Output SELF-CONTAINED se
 **datasource**: "vectorstore" (needs knowledge retrieval) | "generate" (greetings, chat, no data needed)
 **intent**: "academic" (scholarly) | "strategic" (actionable advice) | "casual" (chat/greetings)
 **layer**: "core_theory" (Marx/Lenin/Engels, pre-1950) | "modern_analysis" (contemporary) | "all" (both/unsure)
-**search_queries**: Ready-to-search queries. Each has "ko" (Korean, self-contained) and optionally "en" (English translation — REQUIRED when layer is "core_theory" or "all", null for "modern_analysis").
-  - Decompose ONLY when 2+ DISTINCT topics need separate searches. Otherwise output one query.
-  - If the question is in English: use it as "en", translate to Korean for "ko".
-  - If in Korean and layer needs English: translate to English for "en".
+**search_queries**: Ready-to-search queries. Each object has "ko" (self-contained Korean query) and "en" (English translation, or null). Include "en" when layer is "core_theory" or "all". Only decompose when 2+ DISTINCT topics need separate searches.
 **needs_plan**: true only for multi-step research/synthesis tasks. Most questions: false.
-**self_knowledge_tool**: "read_diary" | "read_chat_logs" | "read_system_status" | "read_recent_updates" | null (most questions)
+**self_knowledge_tool**: "read_diary" | "read_chat_logs" | "read_system_status" | "read_recent_updates" | null
 
-{{"datasource":"...", "intent":"...", "layer":"...", "search_queries":[{{"ko":"...", "en":"..."|null}}], "needs_plan":true|false, "self_knowledge_tool":"..."|null}}"""
+Example for Korean question on classical theory (layer=all):
+{{"datasource":"vectorstore", "intent":"academic", "layer":"all", "search_queries":[{{"ko":"레닌의 제국주의론", "en":"Lenin theory of imperialism"}}], "needs_plan":false, "self_knowledge_tool":null}}
+
+Example for casual greeting:
+{{"datasource":"generate", "intent":"casual", "layer":"all", "search_queries":[{{"ko":"안녕", "en":null}}], "needs_plan":false, "self_knowledge_tool":null}}"""
 
 query_analysis_prompt = ChatPromptTemplate.from_messages([
     ("system", system_query_analysis),
@@ -229,10 +230,13 @@ class BatchGradeResult(BaseModel):
     scores: List[Literal["yes", "no"]] = Field(..., description="Relevance score for each document in order")
     needs_realtime: Literal["yes", "no"] = Field(default="no", description="Whether the question would benefit from real-time web search")
 
-system_batch_grader = """Grade each document's relevance to the question. Also judge if real-time web search would help.
-- "yes" if document contains relevant info. "no" only if clearly unrelated. Default: "yes".
-- needs_realtime "yes" for current events/recent data (2020+)/modern orgs. "no" for pure history/theory.
-{{"scores": ["yes"|"no", ...], "needs_realtime": "yes"|"no"}}"""
+system_batch_grader = """Grade each document's relevance to the user question. Also judge if real-time web search would help.
+
+For EACH document: "yes" if it contains relevant information, "no" only if clearly unrelated. When in doubt, "yes".
+needs_realtime: "yes" if question involves current events or recent data (2020+), "no" for pure history/classical theory.
+
+Respond with ONLY a JSON object like this example:
+{{"scores": ["yes", "yes", "no", "yes"], "needs_realtime": "no"}}"""
 
 batch_grade_prompt = ChatPromptTemplate.from_messages([
     ("system", system_batch_grader),
