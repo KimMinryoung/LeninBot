@@ -18,7 +18,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
 import asyncio
-import json
 import re
 import time
 from datetime import datetime
@@ -62,62 +61,16 @@ def _invoke_with_backoff(invoke_fn, max_attempts: int = 3, base_delay: float = 1
 
 
 
-def _extract_json(text, model_class: type[BaseModel]):
-    """Try to extract and validate JSON from LLM response text. Returns None on failure."""
-    # Normalize list content (extended thinking models return list of typed blocks)
-    if not isinstance(text, str):
-        text = extract_text_content(text)
-    # Try direct parse
-    try:
-        return model_class.model_validate_json(text.strip())
-    except Exception:
-        pass
-    # Try extracting from markdown code block
-    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if match:
-        try:
-            return model_class.model_validate(json.loads(match.group(1)))
-        except Exception:
-            pass
-    # Try scanning for the first decodable JSON object (handles nested objects)
-    decoder = json.JSONDecoder()
-    for idx, ch in enumerate(text):
-        if ch != "{":
-            continue
-        try:
-            obj, _ = decoder.raw_decode(text[idx:])
-            return model_class.model_validate(obj)
-        except Exception:
-            continue
-    return None
 
-
-def _invoke_structured(chain, inputs: dict, model_class: type[BaseModel], default, max_retries: int = 2, retry_llm=None):
-    """Invoke LLM chain, parse JSON from response. Retry with error feedback on failure, fall back to default."""
+def _structured_call(prompt, llm_instance, inputs: dict, model_class: type[BaseModel], default):
+    """Invoke LLM with schema-constrained decoding. Falls back to default on any failure."""
     try:
-        resp = _invoke_with_backoff(lambda: chain.invoke(inputs))
+        structured_llm = llm_instance.with_structured_output(model_class)
+        chain = prompt | structured_llm
+        return _invoke_with_backoff(lambda: chain.invoke(inputs))
     except Exception as e:
-        logger.warning("[구조화] LLM 호출 실패 (기본값 사용): %s", e)
+        logger.warning("[구조화] %s 호출 실패 (기본값 사용): %s", model_class.__name__, e)
         return default
-    result = _extract_json(resp.content, model_class)
-    if result is not None:
-        return result
-
-    # Retry: send truncated bad output back with compact correction prompt
-    _llm = retry_llm or llm
-    for attempt in range(max_retries):
-        bad_output = str(resp.content)[:200]
-        field_names = list(model_class.model_fields.keys())
-        correction = _invoke_with_backoff(lambda: _llm.invoke(
-            f"Invalid JSON output (truncated):\n{bad_output}\n\n"
-            f"Respond with ONLY valid JSON with fields: {field_names}"
-        ))
-        result = _extract_json(correction.content, model_class)
-        if result is not None:
-            return result
-
-    logger.warning("[구조화] %s JSON 파싱 실패, 기본값 사용", model_class.__name__)
-    return default
 
 logger.info("⚙️ [시스템] 사이버-레닌의 지능망 기동 중...")
 # 1. 환경 설정 및 초기화
@@ -221,7 +174,7 @@ query_analysis_prompt = ChatPromptTemplate.from_messages([
 _ANALYSIS_DEFAULT = QueryAnalysis(datasource="vectorstore", intent="academic", layer="all", search_queries=[], needs_plan=False, self_knowledge_tool=None)
 
 def invoke_query_analysis(inputs: dict) -> QueryAnalysis:
-    return _invoke_structured(query_analysis_prompt | llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT, retry_llm=llm_light)
+    return _structured_call(query_analysis_prompt, llm_light, inputs, QueryAnalysis, _ANALYSIS_DEFAULT)
 
 
 # Merge 3+4: Batch document grading + realtime check in one LLM call
@@ -246,7 +199,7 @@ batch_grade_prompt = ChatPromptTemplate.from_messages([
 _BATCH_GRADE_DEFAULT = None  # handled in node
 
 def invoke_batch_grader(inputs: dict) -> BatchGradeResult | None:
-    return _invoke_structured(batch_grade_prompt | llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT, max_retries=1, retry_llm=llm_light)
+    return _structured_call(batch_grade_prompt, llm_light, inputs, BatchGradeResult, _BATCH_GRADE_DEFAULT)
 
 
 
@@ -1022,9 +975,9 @@ def planner_node(state: AgentState):
 
     logs.append("\n📋 [계획관] 연구 계획을 수립 중...")
 
-    result = _invoke_structured(
-        planner_prompt | llm, {"question": question, "context": context},
-        ResearchPlan, _PLAN_DEFAULT, retry_llm=llm
+    result = _structured_call(
+        planner_prompt, llm, {"question": question, "context": context},
+        ResearchPlan, _PLAN_DEFAULT
     )
 
     # If fallback default was used, set the query to the actual question
