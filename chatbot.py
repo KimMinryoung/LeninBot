@@ -376,23 +376,40 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
         query_en: Optional English query for better matching on English-centric KG.
                   If provided, searches with both queries and merges results.
     """
-    svc = get_kg_service()
-    if not svc:
+    _svc = [get_kg_service()]
+    if not _svc[0]:
         return None
-    
+
     def _do_search(q):
-        try:
-            return run_kg_async(svc.search(query=q, group_ids=None, num_results=num_results))
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "connection reset" in err_msg or "defunct" in err_msg or "connectionreseterror" in err_msg:
-                logger.warning("[KG] 검색 실패 — Neo4j 유휴 연결 리셋 (무시 가능, 자동 복구됨). query=%s", q[:50])
-            else:
-                logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
-            if any(k in err_msg for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
-                from shared import reset_kg_service
-                reset_kg_service()
-            return None
+        _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
+        _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
+
+        for attempt in range(2):
+            try:
+                return run_kg_async(_svc[0].search(query=q, group_ids=None, num_results=num_results))
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_conn_error = any(k in err_msg for k in _CONN_ERRORS)
+
+                if is_conn_error and attempt == 0:
+                    # Stale connection — reset and retry once
+                    logger.info("[KG] 유휴 연결 리셋 감지, 재연결 시도... query=%s", q[:50])
+                    from shared import reset_kg_service
+                    reset_kg_service()
+                    _svc[0] = get_kg_service()
+                    if not _svc[0]:
+                        return None
+                    continue
+
+                if is_conn_error:
+                    logger.warning("[KG] 재시도 후에도 연결 실패. query=%s", q[:50])
+                else:
+                    logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
+                if any(k in err_msg for k in _RESET_KEYWORDS):
+                    from shared import reset_kg_service
+                    reset_kg_service()
+                return None
+        return None
     
     # If English query is provided, search with both and merge
     all_nodes, all_edges = [], []
