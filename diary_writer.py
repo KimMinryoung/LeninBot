@@ -283,6 +283,55 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
         print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")
 
 
+# ── Update dedup helper ───────────────────────────────────────
+def _filter_unseen_updates(updates_text: str, previous_diaries: list[dict]) -> str:
+    """Filter out system update entries that were already mentioned in previous diaries.
+
+    Each update entry starts with '### YYYY-MM-DD — Title'.
+    If a previous diary's content contains the date+title, consider it already covered.
+    Returns only unseen entries (max 1) so the diary mentions each update only once.
+    """
+    if not updates_text or updates_text.startswith("("):
+        return updates_text
+    if not previous_diaries:
+        # First diary — show the most recent update only
+        entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
+        entries = [e.strip() for e in entries if e.strip()]
+        return entries[0] if entries else updates_text
+
+    # Build a combined text of recent diary content for matching
+    prev_text = "\n".join(
+        d.get("content", "") + " " + d.get("title", "")
+        for d in previous_diaries[:5]
+    ).lower()
+
+    # Split into individual update entries
+    entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
+    entries = [e.strip() for e in entries if e.strip()]
+
+    unseen = []
+    for entry in entries:
+        # Extract the date+title line for matching
+        header_match = re.match(r"### (\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+)", entry)
+        if header_match:
+            date_str = header_match.group(1)
+            title_keywords = header_match.group(2).lower().strip()
+            # Check if this update's key terms appear in previous diaries
+            # Use date + first significant keyword as fingerprint
+            words = [w for w in re.split(r"[\s,;/]+", title_keywords) if len(w) > 2]
+            # If the date AND at least half the title words appear, it's already covered
+            if date_str in prev_text:
+                matches = sum(1 for w in words if w in prev_text)
+                if words and matches >= max(1, len(words) // 2):
+                    continue  # Already mentioned — skip
+        unseen.append(entry)
+
+    if not unseen:
+        return "(No new system updates since last diary)"
+    # Return only the first unseen update to keep it focused
+    return unseen[0]
+
+
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
 _DIARY_PROMPT = CORE_IDENTITY + """
 You are now writing your periodic diary — a private, reflective record of your thoughts.
@@ -441,9 +490,12 @@ def _generate_diary(
     # Extract concrete banned topics from recent diaries
     banned_topics = _extract_banned_topics(previous_diaries)
 
-    # Fetch recent feature updates (self-awareness)
+    # Fetch recent feature updates (self-awareness), excluding already-mentioned ones
     from shared import fetch_recent_updates, fetch_task_reports
-    self_updates = fetch_recent_updates(max_entries=2, max_chars=1200)
+    self_updates = _filter_unseen_updates(
+        fetch_recent_updates(max_entries=5, max_chars=2000),
+        previous_diaries,
+    )
 
     # Fetch recent completed task results for diary reference
     recent_tasks = fetch_task_reports(limit=5, status="done")
