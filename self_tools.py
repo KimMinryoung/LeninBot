@@ -491,11 +491,29 @@ async def _exec_read_kg_status() -> str:
             source = ep.get("source", "")
             source_tag = f" [{source}]" if source else ""
             parts.append(
-                f"  - [{_to_kst(ep.get('created_at'))}] "
+                f"\n  📌 [{_to_kst(ep.get('created_at'))}] "
                 f"{ep.get('name', '?')}"
                 f"{source_tag} "
                 f"(group: {ep.get('group_id', '?')})"
             )
+            # Show extracted entities
+            entities = ep.get("entities", [])
+            if entities:
+                ent_strs = [
+                    f"{e['name']} ({','.join(l for l in e.get('labels', []) if l != 'Entity')})"
+                    if any(l != 'Entity' for l in e.get('labels', []))
+                    else e['name']
+                    for e in entities[:8]
+                ]
+                more = f" +{len(entities) - 8} more" if len(entities) > 8 else ""
+                parts.append(f"    Entities: {', '.join(ent_strs)}{more}")
+            # Show extracted facts
+            facts = ep.get("facts", [])
+            if facts:
+                for f in facts[:5]:
+                    parts.append(f"    → {f.get('fact', '?')}")
+                if len(facts) > 5:
+                    parts.append(f"    ... +{len(facts) - 5} more facts")
 
     return "=== KNOWLEDGE GRAPH STATUS ===\n\n" + "\n".join(parts)
 

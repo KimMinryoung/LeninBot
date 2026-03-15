@@ -287,48 +287,89 @@ def create_task_in_db(content: str, user_id: int = 0, priority: str = "normal") 
         return {"status": "error", "error": str(e)}
 
 
+def _get_neo4j_sync_driver():
+    """Create a lightweight sync Neo4j driver for direct Cypher queries.
+
+    Does NOT trigger Graphiti async init — avoids 'no running event loop' errors.
+    Returns (driver, database_name) or raises on missing config.
+    """
+    from neo4j import GraphDatabase
+
+    uri = os.getenv("NEO4J_URI", "")
+    if not uri:
+        raise RuntimeError("NEO4J_URI not configured")
+    user = os.getenv("NEO4J_USER", "neo4j")
+    password = os.getenv("NEO4J_PASSWORD", "")
+    db = os.getenv("NEO4J_DATABASE", "neo4j")
+    driver = GraphDatabase.driver(uri, auth=(user, password))
+    return driver, db
+
+
 def fetch_kg_stats() -> dict:
     """Get knowledge graph statistics from Neo4j.
 
+    Uses a direct sync Neo4j driver (not Graphiti) to avoid async init errors.
     Returns dict with entity_count, edge_count, episode_count,
-    entity_types breakdown, and recent_episodes.
+    entity_types breakdown, and recent_episodes with their extracted knowledge.
     """
-    svc = get_kg_service()
-    if svc is None:
-        return {"error": "Knowledge graph service unavailable"}
-
     try:
-        from neo4j import GraphDatabase
-        # Graphiti uses an async driver — create a sync driver for direct Cypher queries
-        neo4j_uri = os.getenv("NEO4J_URI", "")
-        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-        neo4j_password = os.getenv("NEO4J_PASSWORD", "")
-        neo4j_db = os.getenv("NEO4J_DATABASE", "neo4j")
-        sync_driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+        sync_driver, neo4j_db = _get_neo4j_sync_driver()
 
         def _run_cypher(query):
             with sync_driver.session(database=neo4j_db) as s:
                 return [dict(r) for r in s.run(query)]
 
         entity_counts = _run_cypher(
-            "MATCH (n) WHERE n:Entity OR n:EntityNode "
+            "MATCH (n:Entity) "
             "RETURN labels(n) AS labels, count(n) AS cnt"
         )
         edge_count_rows = _run_cypher(
-            "MATCH ()-[r]->() WHERE r.name IS NOT NULL "
+            "MATCH ()-[r:RELATES_TO]->() "
             "RETURN count(r) AS cnt"
         )
         episode_rows = _run_cypher(
             "MATCH (e:Episodic) RETURN count(e) AS cnt"
         )
-        recent_episodes = _run_cypher(
-            "MATCH (e:Episodic) RETURN e.name AS name, "
-            "e.created_at AS created_at, e.group_id AS group_id, "
-            "e.source AS source "
+
+        # Recent episodes WITH their mentioned entities and linked facts
+        recent_episodes_raw = _run_cypher(
+            "MATCH (e:Episodic) "
+            "OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity) "
+            "WITH e, collect(DISTINCT {name: n.name, labels: labels(n)}) AS entities "
+            "OPTIONAL MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
+            "  WHERE e.uuid IN r.episodes "
+            "WITH e, entities, "
+            "  collect(DISTINCT {fact: r.fact, from: a.name, to: b.name}) AS facts "
+            "RETURN e.name AS name, e.created_at AS created_at, "
+            "  e.group_id AS group_id, e.source AS source, "
+            "  entities, facts "
             "ORDER BY e.created_at DESC LIMIT 10"
         )
 
         sync_driver.close()
+
+        # Format recent episodes with knowledge detail
+        recent_episodes = []
+        for ep in recent_episodes_raw:
+            # Filter out null entries from OPTIONAL MATCH
+            entities = [
+                {"name": e["name"], "labels": e["labels"]}
+                for e in ep.get("entities", [])
+                if e.get("name")
+            ]
+            facts = [
+                {"fact": f["fact"], "from": f["from"], "to": f["to"]}
+                for f in ep.get("facts", [])
+                if f.get("fact")
+            ]
+            recent_episodes.append({
+                "name": str(ep.get("name", ""))[:100],
+                "group_id": str(ep.get("group_id", "")),
+                "source": str(ep.get("source", "")),
+                "created_at": str(ep.get("created_at", "")),
+                "entities": entities,
+                "facts": facts,
+            })
 
         return {
             "entity_types": {
@@ -337,22 +378,10 @@ def fetch_kg_stats() -> dict:
             },
             "edge_count": edge_count_rows[0]["cnt"] if edge_count_rows else 0,
             "episode_count": episode_rows[0]["cnt"] if episode_rows else 0,
-            "recent_episodes": [
-                {
-                    "name": str(ep.get("name", ""))[:100],
-                    "group_id": str(ep.get("group_id", "")),
-                    "source": str(ep.get("source", "")),
-                    "created_at": str(ep.get("created_at", "")),
-                }
-                for ep in recent_episodes
-            ],
+            "recent_episodes": recent_episodes,
         }
     except Exception as e:
         logger.error("[shared] fetch_kg_stats error: %s", e)
-        # Reset service on connection-related errors so it retries
-        err_str = str(e).lower()
-        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti", "初期化")):
-            reset_kg_service()
         return {"error": str(e)}
 
 
