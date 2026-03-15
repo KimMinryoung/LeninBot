@@ -319,12 +319,13 @@ def fetch_kg_stats() -> dict:
             "RETURN count(r) AS cnt"
         )
         episode_rows = _run_cypher(
-            "MATCH (e:EpisodicNode) RETURN count(e) AS cnt"
+            "MATCH (e:Episodic) RETURN count(e) AS cnt"
         )
         recent_episodes = _run_cypher(
-            "MATCH (e:EpisodicNode) RETURN e.name AS name, "
-            "e.created_at AS created_at, e.group_id AS group_id "
-            "ORDER BY e.created_at DESC LIMIT 5"
+            "MATCH (e:Episodic) RETURN e.name AS name, "
+            "e.created_at AS created_at, e.group_id AS group_id, "
+            "e.source AS source "
+            "ORDER BY e.created_at DESC LIMIT 10"
         )
 
         sync_driver.close()
@@ -340,6 +341,7 @@ def fetch_kg_stats() -> dict:
                 {
                     "name": str(ep.get("name", ""))[:100],
                     "group_id": str(ep.get("group_id", "")),
+                    "source": str(ep.get("source", "")),
                     "created_at": str(ep.get("created_at", "")),
                 }
                 for ep in recent_episodes

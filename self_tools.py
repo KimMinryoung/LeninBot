@@ -486,12 +486,15 @@ async def _exec_read_kg_status() -> str:
 
     recent = stats.get("recent_episodes", [])
     if recent:
-        parts.append("Recent episodes:")
+        parts.append(f"\nRecent episodes ({len(recent)} most recent):")
         for ep in recent:
+            source = ep.get("source", "")
+            source_tag = f" [{source}]" if source else ""
             parts.append(
-                f"  - {ep.get('name', '?')} "
-                f"(group: {ep.get('group_id', '?')}, "
-                f"at: {_to_kst(ep.get('created_at'))})"
+                f"  - [{_to_kst(ep.get('created_at'))}] "
+                f"{ep.get('name', '?')}"
+                f"{source_tag} "
+                f"(group: {ep.get('group_id', '?')})"
             )
 
     return "=== KNOWLEDGE GRAPH STATUS ===\n\n" + "\n".join(parts)
