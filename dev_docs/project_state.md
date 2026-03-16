@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-15
+# Project State Report — 2026-03-16
 
 ## Identity
 
@@ -85,6 +85,8 @@ step_results       : List[str]           # accumulated intermediate results (man
 kg_context         : Optional[str]       # formatted KG results (nodes+edges). Heuristic-filtered, no LLM grading.
 # Self-knowledge
 self_knowledge_tool: Optional[str]       # which self-tool to invoke (read_diary/read_chat_logs/read_system_status/read_recent_updates/None)
+# URL content fetching
+url_documents  : List[Document]          # documents fetched from URLs in user's question
 ```
 
 Note: All per-turn transient fields are reset in `analyze_intent_node` to prevent state leakage across checkpointed turns.
@@ -144,7 +146,7 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
 ├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
-├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, Render API
+├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, Render API, URL fetching
 ├── self_tools.py             # Self-awareness tools: 12 tools (+write_kg, +create_task)
 ├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~870 lines)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
@@ -194,12 +196,13 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
-16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (3 search tools + 10 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
+16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (4 search tools + 10 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
 17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
 20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_render_status, fetch_render_logs, fetch_recent_updates). Telegram bot has 10 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, Render deploy status, Render live logs, recent feature updates, source code reader.
 21. **Web chatbot self-knowledge**: analyze_intent selects one self-knowledge tool (read_diary/read_chat_logs/read_system_status/read_recent_updates) for self-referential queries; generate_node fetches and injects as [SELF-KNOWLEDGE] context.
+22. **URL content fetching**: 질문에 URL이 포함되면 실제 페이지 본문 추출 (Tavily Extract + BS4 fallback, 최대 10,000자). Web chatbot은 자동 감지, Telegram은 `fetch_url` 도구로 지원. `shared.py` 공통 모듈.
 
 ## Current Limitations
 
@@ -227,6 +230,28 @@ AIChatBot/
   - `_generate_diary()` → `(title, content, headers)` 3-튜플 반환
   - `_mark_updates_consumed()`: 일기 저장 성공 시에만 소비 기록
   - `.gitignore`에 런타임 상태 파일 추가
+
+### 2026-03-16 — URL Content Fetching (shared skill)
+
+#### shared.py — URL 유틸리티 3개 함수 추가 (공통 모듈)
+- **`extract_urls(text)`**: 텍스트에서 HTTP/HTTPS URL 추출 (regex 기반)
+- **`fetch_url_content(url, max_chars=10000)`**: URL에서 본문 최대 10,000자 추출. Tavily Extract 우선 시도, 실패 시 requests + BeautifulSoup fallback. 보일러플레이트 공격적 제거 (16개 class/id 패턴, 12개 HTML 태그, HTML 코멘트). 7단계 우선순위 본문 컨테이너 탐색 (article → main → article_body/post_body → content/article → id 매칭).
+- **`fetch_urls_as_documents(urls, logs)`**: URL 리스트 → Document 객체 리스트 반환 (최대 3개). langchain Document 사용 가능 시 Document 객체, 없으면 dict fallback.
+
+#### chatbot.py — URL 감지 + 자동 fetch
+- **`AgentState`**: `url_documents: List[Document]` 필드 추가
+- **`analyze_intent_node`**: 질문에서 URL 감지 시 즉시 `fetch_urls_as_documents()` 호출, `url_documents` state에 저장. URL이 있는데 `generate` 경로였으면 `vectorstore`로 전환 (분석 컨텍스트 확보).
+- **`generate_node`**: `url_documents`를 `[USER-REFERENCED URL: ...]` 헤더와 함께 SOURCE MATERIAL 최상단에 배치 (전체 본문 전달, fetch 시점에서 이미 10,000자 제한).
+- 기존 로컬 URL 함수 삭제 → `shared.py`에서 import
+
+#### telegram_bot.py — `fetch_url` 도구 추가
+- **`_TOOLS`**: `fetch_url` 도구 정의 추가 (Anthropic API format) — URL을 받아 본문 텍스트 반환
+- **`_exec_fetch_url`**: `shared.fetch_url_content()`를 `asyncio.to_thread()`로 호출
+- **시스템 프롬프트**: Tool Strategy에 "URL in message → fetch_url" 지침 추가
+
+#### 효과
+- 이전: URL이 포함된 질문에 대해 URL 텍스트만 보고 환각 생성
+- 이후: 실제 페이지 본문을 최대 10,000자까지 읽고 분석. 웹 챗봇(자동), 텔레그램(도구 호출) 양쪽 지원.
 
 ### 2026-03-15 — Web Chatbot Self-Knowledge + Diary Update Dedup
 

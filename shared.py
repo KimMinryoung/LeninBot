@@ -602,6 +602,142 @@ def fetch_render_logs(minutes_back: int = 10, limit: int = 50) -> list[dict]:
         return [{"error": str(e)}]
 
 
+# ── URL Content Fetching ────────────────────────────────────────────
+# Shared across chatbot (web RAG) and telegram_bot (Claude agent).
+
+import re as _re
+from typing import Optional as _Optional
+from urllib.parse import urlparse as _urlparse
+
+_URL_PATTERN = _re.compile(r'https?://[^\s<>\"\')]+')
+
+
+def extract_urls(text: str) -> list[str]:
+    """Extract HTTP/HTTPS URLs from text."""
+    return _URL_PATTERN.findall(text)
+
+
+def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Fetch and extract main body text from a URL (up to 10,000 chars).
+
+    Tries Tavily Extract first (handles JS-rendered pages),
+    falls back to requests + BeautifulSoup with aggressive boilerplate removal.
+    """
+    def _clean_text(raw: str) -> str:
+        """Strip boilerplate noise and keep only substantive paragraphs."""
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        cleaned = []
+        for line in lines:
+            if len(line) < 4 and not any(c.isalpha() for c in line):
+                continue
+            cleaned.append(line)
+        return "\n".join(cleaned)
+
+    # Try Tavily Extract first
+    try:
+        from langchain_tavily import TavilyExtract
+        extractor = TavilyExtract()
+        result = extractor.invoke({"urls": [url]})
+        items = []
+        if isinstance(result, dict) and result.get("results"):
+            items = result["results"]
+        elif isinstance(result, list):
+            items = result
+        if items:
+            item = items[0] if isinstance(items[0], dict) else {"content": str(items[0])}
+            content = item.get("raw_content", "") or item.get("content", "")
+            if content and len(content) > 50:
+                return _clean_text(content)[:max_chars]
+    except Exception as e:
+        logger.info("[URL] Tavily Extract 실패 (%s), fallback 시도: %s", url[:60], e)
+
+    # Fallback: requests + BeautifulSoup
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+        }
+        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding or "utf-8"
+
+        from bs4 import BeautifulSoup, Comment
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Remove non-content elements aggressively
+        for tag in soup(["script", "style", "nav", "header", "footer", "aside",
+                         "iframe", "noscript", "form", "button", "svg", "img"]):
+            tag.decompose()
+        for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
+            comment.extract()
+        # Remove common boilerplate classes/ids
+        _BOILERPLATE = _re.compile(
+            r"(sidebar|widget|advert|banner|cookie|popup|modal|share|social|"
+            r"related|recommend|comment|reply|breadcrumb|pagination|menu|"
+            r"toolbar|tooltip|disclaimer|copyright|footer|signup|login|"
+            r"newsletter|promo)", _re.I
+        )
+        for el in soup.find_all(attrs={"class": _BOILERPLATE}):
+            el.decompose()
+        for el in soup.find_all(attrs={"id": _BOILERPLATE}):
+            el.decompose()
+
+        # Try to find the main content container (priority order)
+        main = (
+            soup.find("article")
+            or soup.find("main")
+            or soup.find(class_=_re.compile(r"(article[_-]?body|post[_-]?(body|content)|entry[_-]?content|se-main-container)", _re.I))
+            or soup.find(class_=_re.compile(r"(content|article|post|entry)", _re.I))
+            or soup.find(id=_re.compile(r"(content|article|post|main)", _re.I))
+        )
+        if main:
+            text = main.get_text(separator="\n", strip=True)
+        else:
+            text = soup.body.get_text(separator="\n", strip=True) if soup.body else soup.get_text(separator="\n", strip=True)
+
+        text = _clean_text(text)
+
+        if len(text) > 50:
+            return text[:max_chars]
+    except Exception as e:
+        logger.warning("[URL] requests fallback도 실패 (%s): %s", url[:60], e)
+
+    return None
+
+
+def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:
+    """Fetch content from multiple URLs and return as Document-compatible dicts.
+
+    Returns list of dicts with 'page_content' and 'metadata' keys.
+    If langchain Document class is available, returns Document objects.
+    Accepts optional logs list to append progress messages.
+    """
+    if logs is None:
+        logs = []
+    results = []
+    for url in urls[:3]:  # Limit to 3 URLs max
+        logs.append(f"🔗 [URL] 웹 페이지 내용 확인 중: {url[:80]}...")
+        content = fetch_url_content(url)
+        if content:
+            domain = _urlparse(url).netloc
+            try:
+                from langchain_core.documents import Document
+                doc = Document(
+                    page_content=content,
+                    metadata={"source": url, "title": f"[{domain}] URL 직접 참조"},
+                )
+            except ImportError:
+                doc = {
+                    "page_content": content,
+                    "metadata": {"source": url, "title": f"[{domain}] URL 직접 참조"},
+                }
+            results.append(doc)
+            logs.append(f"   ✅ {len(content)}자의 본문 내용을 확보했습니다.")
+        else:
+            logs.append(f"   ⚠️ 페이지 내용을 가져올 수 없습니다.")
+    return results
+
+
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Architecture

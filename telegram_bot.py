@@ -235,6 +235,7 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
+- URL in message → fetch_url to read the page, then analyze with context from other tools
 - Self-reflection → read_diary; cross-interface memory → read_chat_logs
 - Store important facts → write_kg; deep research → create_task
 
@@ -287,6 +288,17 @@ _TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "fetch_url",
+        "description": "Fetch and extract body text from a URL. Use when the user shares a link and asks about its content. Returns up to 10,000 chars of cleaned body text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch content from."},
+            },
+            "required": ["url"],
+        },
+    },
 ]
 
 
@@ -333,10 +345,22 @@ async def _exec_web_search(query: str) -> str:
         return f"Web search failed: {e}"
 
 
+async def _exec_fetch_url(url: str) -> str:
+    """Fetch and extract main body text from a URL."""
+    try:
+        from shared import fetch_url_content
+        content = await asyncio.to_thread(fetch_url_content, url)
+        return content or "Failed to extract content from this URL."
+    except Exception as e:
+        logger.error("fetch_url error: %s", e)
+        return f"URL fetch failed: {e}"
+
+
 _TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
+    "fetch_url": _exec_fetch_url,
 }
 
 # ── Self-awareness tools (shared memory access) ─────────────────────

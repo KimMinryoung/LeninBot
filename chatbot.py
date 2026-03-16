@@ -26,6 +26,7 @@ from typing import Literal
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
     get_tavily_search, get_kg_service, run_kg_async,
+    extract_urls, fetch_urls_as_documents,
 )
 from pydantic import BaseModel, Field
 
@@ -133,6 +134,8 @@ class AgentState(TypedDict):
     _kg_searched_queries: List[str]   # internal state, not exposed to nodes
     # Self-knowledge: which self-tool to invoke (None = not needed)
     self_knowledge_tool: Optional[str]
+    # URL content: documents fetched from URLs in user's question
+    url_documents: List[Document]
 
 # Merge 1: Combined query analysis (router + layer router + decompose + query rewrite in one LLM call)
 class SearchQuery(BaseModel):
@@ -286,9 +289,24 @@ def analyze_intent_node(state: AgentState):
     if self_tool:
         logs.append(f"🪞 [분석] 자기 인식 질문 감지 — {self_tool} 조회 예정")
 
+    # URL detection: fetch content from URLs in the question
+    urls = extract_urls(question)
+    url_docs = []
+    if urls:
+        logs.append(f"🔗 [분석] 질문에서 URL {len(urls)}개 감지")
+        url_docs = fetch_urls_as_documents(urls, logs)
+        # Force vectorstore path if URLs found (need context for analysis)
+        if url_docs and analysis.datasource == "generate":
+            analysis_datasource = "vectorstore"
+            logs.append("🔗 [분석] URL 내용 분석을 위해 vectorstore 경로로 전환")
+        else:
+            analysis_datasource = analysis.datasource
+    else:
+        analysis_datasource = analysis.datasource
+
     return {
         "intent": analysis.intent,
-        "datasource": "plan" if needs_plan else analysis.datasource,
+        "datasource": "plan" if needs_plan else analysis_datasource,
         "layer": analysis.layer,
         "search_queries": search_queries,
         "logs": logs,
@@ -302,6 +320,7 @@ def analyze_intent_node(state: AgentState):
         "kg_context": None,
         "_kg_searched_queries": [],  # Reset KG query tracking for new turn
         "self_knowledge_tool": self_tool,
+        "url_documents": url_docs,
     }
 
 
@@ -815,6 +834,13 @@ def generate_node(state: AgentState):
     docs = docs[:12]
     # Truncate each doc to 400 chars for token efficiency
     context = "\n\n".join([_format_doc(d)[:400] for d in docs]) if docs else ""
+
+    # URL documents: include with higher char limit (user explicitly referenced these)
+    url_docs = state.get("url_documents", [])
+    if url_docs:
+        url_context = "\n\n".join([f"[USER-REFERENCED URL: {d.metadata.get('source', '')}]\n{d.page_content}" for d in url_docs])
+        context = f"{url_context}\n\n{context}" if context else url_context
+
     messages = state["messages"]
     last_user_query = messages[-1].content
     intent = state.get("intent", "casual")
