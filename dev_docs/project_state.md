@@ -197,7 +197,7 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
-16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (4 search tools + 10 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
+16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (4 search tools + 11 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
 17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
@@ -231,9 +231,20 @@ AIChatBot/
 - **의미적 중복 제거**: 새 항목의 임베딩과 최근 30일 항목을 코사인 유사도 비교 (>0.85 = 중복 스킵)
 - **이중 실행 방지**: period_end 기준 중복 체크
 
+#### shared.py — 공통 경험 검색 함수
+- **`search_experiential_memory(query, k=5)`**: pgvector 코사인 유사도 검색 (threshold 0.5). BGE-M3 lazy-load, `set_shared_embeddings()`로 기존 인스턴스 재사용 가능.
+- chatbot.py, telegram_bot (self_tools), experience_writer 모두에서 공용
+
 #### chatbot.py — 경험 메모리 검색 통합
-- **`_search_experiential_memory(query, k=3)`**: pgvector 코사인 유사도 검색 (threshold 0.5)
-- **`generate_node`**: academic/strategic 의도 시 관련 경험 검색 → `[PAST EXPERIENCE]` 섹션으로 프롬프트에 주입
+- **`generate_node`**: academic/strategic 의도 시 `search_experiential_memory()` 호출 → `[PAST EXPERIENCE]` 섹션으로 프롬프트에 주입
+- **`set_shared_embeddings(embeddings)`**: 초기화 시 BGE-M3 인스턴스를 shared에 등록 (중복 로딩 방지)
+
+#### self_tools.py — `recall_experience` 도구 추가
+- **도구 정의**: 의미 검색 쿼리 + limit 파라미터
+- **`_exec_recall_experience`**: `shared.search_experiential_memory()` 호출, 유사도/카테고리/날짜 포맷팅
+
+#### telegram_bot.py — Tool Strategy 업데이트
+- "Past lessons/mistakes → recall_experience" 지침 추가
 
 #### api.py — 스케줄러 추가
 - **`_experience_scheduler()`**: 매일 00:30 KST에 `write_experiences()` 호출, lifespan에 등록

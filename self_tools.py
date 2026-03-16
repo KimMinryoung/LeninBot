@@ -172,6 +172,18 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "recall_experience",
+        "description": "Search your experiential memory (past lessons, mistakes, insights, patterns). Stored daily from all conversations and tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What experience to recall (semantic search)."},
+                "limit": {"type": "integer", "description": "Max results (1-10).", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "read_source_code",
         "description": "Read your own source code. Omit file to list available files.",
         "input_schema": {
@@ -583,6 +595,23 @@ async def _exec_read_source_code(
 # 3. HANDLER MAP
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+async def _exec_recall_experience(query: str, limit: int = 5) -> str:
+    from shared import search_experiential_memory
+
+    limit = max(1, min(10, limit))
+    rows = await asyncio.to_thread(search_experiential_memory, query, limit)
+    if not rows:
+        return "No relevant experiential memories found."
+    lines = []
+    for r in rows:
+        sim = f"{r.get('similarity', 0):.0%}"
+        cat = r.get("category", "?")
+        src = r.get("source_type", "?")
+        ts = str(r.get("created_at", ""))[:10]
+        lines.append(f"[{cat}|{src}|{ts}|sim={sim}] {r['content']}")
+    return f"Found {len(rows)} experience(s):\n" + "\n\n".join(lines)
+
+
 SELF_TOOL_HANDLERS = {
     "read_diary": _exec_read_diary,
     "read_chat_logs": _exec_read_chat_logs,
@@ -594,6 +623,7 @@ SELF_TOOL_HANDLERS = {
     "read_render_logs": _exec_read_render_logs,
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
+    "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
     "create_task": _exec_create_task,
 }

@@ -602,6 +602,56 @@ def fetch_render_logs(minutes_back: int = 10, limit: int = 50) -> list[dict]:
         return [{"error": str(e)}]
 
 
+# ── Experiential Memory Search ──────────────────────────────────────
+# Shared across chatbot (generate_node) and telegram_bot (self-tool).
+# Embedding model is lazy-loaded to avoid heavy init in lightweight imports.
+
+_exp_embeddings = None
+
+
+def set_shared_embeddings(emb):
+    """Allow modules that already have BGE-M3 loaded (e.g. chatbot.py) to share it."""
+    global _exp_embeddings
+    _exp_embeddings = emb
+
+
+def _get_exp_embeddings():
+    global _exp_embeddings
+    if _exp_embeddings is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        _exp_embeddings = HuggingFaceEmbeddings(
+            model_name="BAAI/bge-m3",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    return _exp_embeddings
+
+
+def search_experiential_memory(query: str, k: int = 5) -> list[dict]:
+    """Search experiential_memory by vector similarity.
+
+    Returns list of dicts: {category, content, similarity, created_at}.
+    """
+    from db import query as db_query
+
+    try:
+        emb = _get_exp_embeddings()
+        vec = emb.embed_query(query)
+        embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
+        rows = db_query(
+            """SELECT content, category, source_type, created_at,
+                      1 - (embedding <=> %s::vector) AS similarity
+               FROM experiential_memory
+               ORDER BY embedding <=> %s::vector
+               LIMIT %s""",
+            (embedding_str, embedding_str, k),
+        )
+        return [r for r in rows if r.get("similarity", 0) > 0.5]
+    except Exception as e:
+        logger.warning("[shared] search_experiential_memory error: %s", e)
+        return []
+
+
 # ── URL Content Fetching ────────────────────────────────────────────
 # Shared across chatbot (web RAG) and telegram_bot (Claude agent).
 

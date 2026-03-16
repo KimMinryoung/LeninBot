@@ -27,6 +27,7 @@ from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
     get_tavily_search, get_kg_service, run_kg_async,
     extract_urls, fetch_urls_as_documents,
+    search_experiential_memory, set_shared_embeddings,
 )
 from pydantic import BaseModel, Field
 
@@ -85,6 +86,7 @@ embeddings = HuggingFaceEmbeddings(
     model_kwargs={'device': 'cpu'},
     encode_kwargs={'normalize_embeddings': True}
 )
+set_shared_embeddings(embeddings)  # Share with shared.py to avoid duplicate loading
 
 # LLM 설정 (Gemini 3.1 Flash Lite)
 llm = ChatGoogleGenerativeAI(
@@ -383,25 +385,6 @@ def _deduplicate_docs(docs: list) -> list:
             seen.add(h)
             unique.append(d)
     return unique
-
-
-# Helper: Search Experiential Memory
-def _search_experiential_memory(query: str, k: int = 3) -> list[str]:
-    """Search experiential_memory by vector similarity. Returns formatted strings."""
-    try:
-        query_embedding = embeddings.embed_query(query)
-        embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
-        rows = db_query(
-            """SELECT content, category,
-                      1 - (embedding <=> %s::vector) AS similarity
-               FROM experiential_memory
-               ORDER BY embedding <=> %s::vector
-               LIMIT %s""",
-            (embedding_str, embedding_str, k),
-        )
-        return [f"[{r['category']}] {r['content']}" for r in rows if r.get("similarity", 0) > 0.5]
-    except Exception:
-        return []
 
 
 # Helper: Search Knowledge Graph
@@ -888,10 +871,11 @@ def generate_node(state: AgentState):
     # Experiential memory — past lessons/patterns relevant to this query
     exp_section = ""
     if intent != "casual":
-        exp_results = _search_experiential_memory(last_user_query, k=3)
-        if exp_results:
-            exp_section = "\n[PAST EXPERIENCE]\n" + "\n".join(exp_results)
-            logs.append(f"🧠 [경험] 관련 경험 {len(exp_results)}건 로드")
+        exp_rows = search_experiential_memory(last_user_query, k=3)
+        if exp_rows:
+            exp_lines = [f"[{r['category']}] {r['content']}" for r in exp_rows]
+            exp_section = "\n[PAST EXPERIENCE]\n" + "\n".join(exp_lines)
+            logs.append(f"🧠 [경험] 관련 경험 {len(exp_rows)}건 로드")
 
     # Intent-specific style + mission
     style_map = {
