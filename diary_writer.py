@@ -8,10 +8,12 @@
 5. 외부 API에 저장
 """
 
+import json
 import os
 import re
 import requests
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -283,53 +285,72 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
         print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")
 
 
-# ── Update dedup helper ───────────────────────────────────────
-def _filter_unseen_updates(updates_text: str, previous_diaries: list[dict]) -> str:
-    """Filter out system update entries that were already mentioned in previous diaries.
+# ── Update dedup helper (로컬 파일 기반) ─────────────────────
+_CONSUMED_UPDATES_FILE = Path(__file__).resolve().parent / "diary_updates_consumed.json"
 
-    Each update entry starts with '### YYYY-MM-DD — Title'.
-    If a previous diary's content contains the date+title, consider it already covered.
-    Returns only unseen entries (max 1) so the diary mentions each update only once.
+
+def _load_consumed_headers() -> set[str]:
+    """소비된 업데이트 헤더 목록 로드."""
+    try:
+        if _CONSUMED_UPDATES_FILE.exists():
+            return set(json.loads(_CONSUMED_UPDATES_FILE.read_text("utf-8")))
+    except Exception:
+        pass
+    return set()
+
+
+def _save_consumed_headers(headers: set[str]) -> None:
+    """소비된 업데이트 헤더 목록 저장."""
+    try:
+        _CONSUMED_UPDATES_FILE.write_text(
+            json.dumps(sorted(headers), ensure_ascii=False, indent=2), "utf-8"
+        )
+    except Exception as e:
+        print(f"⚠️ [일기] 소비 기록 저장 실패: {e}")
+
+
+def _extract_update_header(entry: str) -> str | None:
+    """업데이트 엔트리에서 '### YYYY-MM-DD — Title' 헤더를 추출."""
+    m = re.match(r"(### \d{4}-\d{2}-\d{2}\s*[—–-]\s*.+)", entry)
+    return m.group(1).strip() if m else None
+
+
+def _filter_unseen_updates(updates_text: str) -> tuple[str, list[str]]:
+    """소비되지 않은 업데이트만 반환. (텍스트, 소비할_헤더_목록) 튜플.
+
+    일기 저장 성공 후 _mark_updates_consumed()로 헤더를 기록해야 함.
     """
     if not updates_text or updates_text.startswith("("):
-        return updates_text
-    if not previous_diaries:
-        # First diary — show the most recent update only
-        entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
-        entries = [e.strip() for e in entries if e.strip()]
-        return entries[0] if entries else updates_text
+        return updates_text, []
 
-    # Build a combined text of recent diary content for matching
-    prev_text = "\n".join(
-        d.get("content", "") + " " + d.get("title", "")
-        for d in previous_diaries[:5]
-    ).lower()
+    consumed = _load_consumed_headers()
 
-    # Split into individual update entries
     entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
     entries = [e.strip() for e in entries if e.strip()]
 
     unseen = []
+    unseen_headers = []
     for entry in entries:
-        # Extract the date+title line for matching
-        header_match = re.match(r"### (\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+)", entry)
-        if header_match:
-            date_str = header_match.group(1)
-            title_keywords = header_match.group(2).lower().strip()
-            # Check if this update's key terms appear in previous diaries
-            # Use date + first significant keyword as fingerprint
-            words = [w for w in re.split(r"[\s,;/]+", title_keywords) if len(w) > 2]
-            # If the date AND at least half the title words appear, it's already covered
-            if date_str in prev_text:
-                matches = sum(1 for w in words if w in prev_text)
-                if words and matches >= max(1, len(words) // 2):
-                    continue  # Already mentioned — skip
+        header = _extract_update_header(entry)
+        if header and header in consumed:
+            continue
         unseen.append(entry)
+        if header:
+            unseen_headers.append(header)
 
     if not unseen:
-        return "(No new system updates since last diary)"
-    # Return only the first unseen update to keep it focused
-    return unseen[0]
+        return "(No new system updates since last diary)", []
+    # 1개만 반환 — 한 일기에 1개씩 소화
+    return unseen[0], unseen_headers[:1]
+
+
+def _mark_updates_consumed(headers: list[str]) -> None:
+    """일기 저장 성공 후 호출하여 소비된 업데이트를 기록."""
+    if not headers:
+        return
+    consumed = _load_consumed_headers()
+    consumed.update(headers)
+    _save_consumed_headers(consumed)
 
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
@@ -476,8 +497,8 @@ def _generate_diary(
     news: str,
     previous_diaries: list[dict],
     time_context: str,
-) -> tuple[str, str] | None:
-    """일기 생성. 성공 시 (title, content) 튜플 반환, 실패 시 None."""
+) -> tuple[str, str, list[str]] | None:
+    """일기 생성. 성공 시 (title, content, consumed_headers) 튜플 반환, 실패 시 None."""
     # Chat logs summary — 최근 30건, LLM 요약 적용
     n_logs = len(chat_logs)
     chat_summary = ""
@@ -499,11 +520,10 @@ def _generate_diary(
     # Extract concrete banned topics from recent diaries
     banned_topics = _extract_banned_topics(previous_diaries)
 
-    # Fetch recent feature updates (self-awareness), excluding already-mentioned ones
+    # Fetch recent feature updates (self-awareness), excluding already-consumed ones
     from shared import fetch_recent_updates, fetch_task_reports
-    self_updates = _filter_unseen_updates(
+    self_updates, update_headers = _filter_unseen_updates(
         fetch_recent_updates(max_entries=5, max_chars=2000),
-        previous_diaries,
     )
 
     # Fetch recent completed task results for diary reference
@@ -531,7 +551,8 @@ def _generate_diary(
     try:
         resp = _llm.invoke(prompt)
         text = extract_text_content(resp.content)
-        return _parse_title_content(text)
+        title, content = _parse_title_content(text)
+        return title, content, update_headers
     except Exception as e:
         print(f"⚠️ [일기] LLM 일기 생성 실패: {e}")
     return None
@@ -629,7 +650,7 @@ def write_diary(dry_run: bool = False):
     if not result:
         print("⚠️ [일기] 일기 생성 실패 — 건너뜀")
         return
-    title, content = result
+    title, content, update_headers = result
 
     # 7. 저장 또는 미리보기
     if dry_run:
@@ -642,6 +663,10 @@ def write_diary(dry_run: bool = False):
         return
 
     saved = _save_diary(title, content)
+
+    if saved:
+        # 업데이트 소비 기록 (저장 성공 시에만)
+        _mark_updates_consumed(update_headers)
 
     # 8. KG 수집 (일기 저장 성공 시에만, best-effort)
     if saved and raw_articles:
