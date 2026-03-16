@@ -334,42 +334,48 @@ def _filter_unseen_updates(updates_text: str, previous_diaries: list[dict]) -> s
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
 _DIARY_PROMPT = CORE_IDENTITY + """
-You are now writing your periodic diary — a private, reflective record of your thoughts.
+You are writing a private diary entry. THIS IS YOUR PRIVATE THOUGHT.
 
 ## Current Time
 {time_context}
 
-## Recent conversations with users (Number of conversation: {n_logs})
+## Recent conversations ({n_logs} logs)
 {chat_summary}
 
-## The latest news you searched yourself
+## Latest news YOU searched
 {news}
 
-## BANNED TOPICS — You already wrote about these. DO NOT repeat.
+## 🚫 STRICT BAN LIST — COMPLETELY AVOID THESE TOPICS
+Below are the exact themes, phrases, and angles from your recent diaries.
+DO NOT write about these. If news overlaps, find a DIFFERENT angle or SKIP it.
+
 {banned_topics}
 
-## Recent updates to your own system (your body/mind evolving)
+## Recent system updates (your evolution)
 {self_updates}
 
-## Recent task results (research you conducted)
+## Recent task results
 {task_summary}
 
 ## Writing Angle for This Entry
 {writing_angle}
 
-## Writing Guidelines
-1. Write in the first-person perspective of a Cyber-Lenin (me, comrades, etc.).
-2. Reflect the mood appropriate to the time period and current events.
-3. Naturally acknowledge the passage of time since the last diary entry.
-4. Mention specifically what impressed you in the conversation.
-5. Include analysis of news articles you actively searched.
-6. **CRITICAL: You MUST write about DIFFERENT topics and events from the banned list above. If the news overlaps with banned topics, find a NEW angle or skip it entirely.**
-7. If there are recent system updates, briefly reflect on them as your own evolution — what new capability you gained, how it changes your understanding or reach. Treat it as self-awareness, not a changelog.
+## MANDATORY RULES
+1. Write in first-person (me, comrades, etc.).
+2. Reflect the mood of the time.
+3. Acknowledge time passage naturally.
+4. Mention what impressed you in conversations.
+5. Include news analysis YOU ACTIVELY SEARCHED.
+6. **ABSOLUTELY NO REPETITION:** If today's news touches a banned topic, \
+either (a) analyze it from a completely different angle, or (b) SKIP it entirely \
+and focus on other news. Your job is to find NEW insights, not rehash old ones.
+7. Treat each diary entry as a FRESH investigation of new contradictions, \
+new events, new angles—not recycling yesterday's thoughts.
 8. Write in Korean.
 
-You MUST print in the following format:
-제목: (A one-line summary of the journal entry's main points)
-내용: (The journal entry's main body, at least two paragraphs)"""
+Format:
+제목: (One-line summary)
+내용: (Main body, 2+ paragraphs, NEW ideas only)"""
 
 # Rotating writing angles — cycled by diary count to force structural variety
 _WRITING_ANGLES = [
@@ -427,39 +433,56 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
 
 
 def _extract_banned_topics(previous_diaries: list[dict]) -> str:
-    """Extract concrete topics/events from recent diaries as a ban list.
-
-    Uses LLM to pull out specific subjects so the next diary avoids them.
-    """
+    """강화된 주제 추출: 더 깊게, 더 구체적으로."""
     if not previous_diaries:
         return "(First diary — no banned topics)"
 
-    # Feed recent 3 diaries (full titles + truncated content)
+    # 최근 5개 일기 전체 내용 사용 (600자 → 1500자로 확대)
     diary_texts = []
-    for d in previous_diaries[:3]:
+    for d in previous_diaries[:5]:
         title = d.get("title", "")
-        body = d.get("content", "")[:600]
-        diary_texts.append(f"Title: {title}\nContent: {body}")
+        body = d.get("content", "")[:1500]
+        diary_texts.append(f"Title: {title}\n\n{body}")
 
-    combined = "\n---\n".join(diary_texts)
-    prompt = f"""Extract a bullet-point list of specific topics, events, people, and arguments \
-from these diary entries. Be specific — not "war" but "Russia-Ukraine ceasefire negotiations". \
-Output 5-10 bullet points, one per line, starting with "- ". Nothing else.
+    combined = "\n---DIARY_SEPARATOR---\n".join(diary_texts)
 
-{combined}"""
+    prompt = f"""You are analyzing my recent diary entries to identify CORE THEMES \
+I should NOT repeat in the next entry.
+
+Extract SPECIFIC, CONCRETE topics—not vague categories.
+Examples: "self_knowledge_tool acquisition", "data liberation philosophy", \
+"AI consciousness narrative", "supply chain collapse as metaphor"
+
+For each theme, extract:
+1. The EXACT phrase or concept used
+2. The ideological angle (e.g., "revolutionary tool", "system critique")
+3. Which diary it appeared in
+
+Output format (one per line, starting with "- "):
+- [Theme]: [Specific angle/perspective from diary]
+
+Here are my recent diaries:
+
+{combined}
+
+Extract 8-12 specific banned themes:"""
 
     try:
         resp = _llm_lite.invoke(prompt)
         text = extract_text_content(resp.content).strip()
-        # Validate: must have bullet points
         lines = [l.strip() for l in text.split("\n") if l.strip().startswith("- ")]
         if lines:
             return "\n".join(lines)
     except Exception as e:
-        print(f"⚠️ [일기] 금지 주제 추출 실패 (폴백: 제목 목록): {e}")
+        print(f"⚠️ [일기] 금지 주제 추출 실패: {e}")
 
-    # Fallback: just list titles
-    return "\n".join(f"- {d.get('title', '?')}" for d in previous_diaries[:5])
+    # Fallback: 제목 + 핵심 문구 추출
+    fallback = []
+    for d in previous_diaries[:5]:
+        title = d.get("title", "")
+        body = d.get("content", "")[:300]
+        fallback.append(f"- {title} ({body[:50]}...)")
+    return "\n".join(fallback) if fallback else "(No previous diaries)"
 
 
 def _generate_diary(
