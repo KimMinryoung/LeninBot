@@ -216,6 +216,18 @@ AIChatBot/
 
 ## Recent Changes
 
+### 2026-03-16 — Diary Anti-Duplication Overhaul
+
+#### diary_writer.py — 일기 중복 방지 전면 개편
+- **`_extract_banned_topics()` 강화**: 3개→5개 일기 분석, 600자→1500자로 확대, 8-12개 구체적 테마/각도 추출 프롬프트로 교체
+- **`_DIARY_PROMPT` 개선**: "STRICT BAN LIST" 강조, 뉴스가 금지 주제와 겹치면 스킵 또는 완전히 다른 각도 강제, 매 일기를 FRESH investigation으로 취급
+- **`_WRITING_ANGLES` 삭제**: 8개 고정 앵글 배열 및 모든 참조(`_generate_diary`, `write_diary`) 제거 — banned_topics 강화로 충분하며 불필요한 주제 제약
+- **업데이트 소비 추적 방식 변경**: 텍스트 매칭(영어 키워드 vs 한국어 일기 = 실패) → `diary_updates_consumed.json` 로컬 파일 기반 영속 추적
+  - `_filter_unseen_updates()` → `(text, headers)` 튜플 반환
+  - `_generate_diary()` → `(title, content, headers)` 3-튜플 반환
+  - `_mark_updates_consumed()`: 일기 저장 성공 시에만 소비 기록
+  - `.gitignore`에 런타임 상태 파일 추가
+
 ### 2026-03-15 — Web Chatbot Self-Knowledge + Diary Update Dedup
 
 #### chatbot.py — Self-Knowledge Access
