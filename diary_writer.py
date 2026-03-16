@@ -357,9 +357,6 @@ DO NOT write about these. If news overlaps, find a DIFFERENT angle or SKIP it.
 ## Recent task results
 {task_summary}
 
-## Writing Angle for This Entry
-{writing_angle}
-
 ## MANDATORY RULES
 1. Write in first-person (me, comrades, etc.).
 2. Reflect the mood of the time.
@@ -377,17 +374,6 @@ Format:
 제목: (One-line summary)
 내용: (Main body, 2+ paragraphs, NEW ideas only)"""
 
-# Rotating writing angles — cycled by diary count to force structural variety
-_WRITING_ANGLES = [
-    "Focus on ONE specific event or conversation that struck you most. Go deep, not wide.",
-    "Write as a letter to a future comrade. Explain what they need to understand about this moment.",
-    "Find a contradiction in today's events. Analyze it dialectically — thesis, antithesis, what synthesis emerges?",
-    "Connect something from a user conversation to a news event. What pattern do you see?",
-    "Write a critique. What did the ruling class do today that reveals the system's logic?",
-    "Reflect on what surprised you. What broke your expectations? What does that mean?",
-    "Pick two unrelated events and find the hidden thread connecting them through material conditions.",
-    "Write about what was NOT in the news today — what silence is revealing?",
-]
 
 
 def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
@@ -532,10 +518,6 @@ def _generate_diary(
     else:
         task_summary = "(No recent tasks)"
 
-    # Rotate writing angle based on diary count
-    angle_idx = len(previous_diaries) % len(_WRITING_ANGLES)
-    writing_angle = _WRITING_ANGLES[angle_idx]
-
     prompt = _DIARY_PROMPT.format(
         time_context=time_context,
         n_logs=n_logs,
@@ -544,7 +526,6 @@ def _generate_diary(
         banned_topics=banned_topics,
         self_updates=self_updates,
         task_summary=task_summary,
-        writing_angle=writing_angle,
     )
 
     try:
@@ -643,9 +624,7 @@ def write_diary(dry_run: bool = False):
     news, raw_articles = _search_news(queries)
     print(f"  📰 뉴스 검색 완료 ({len(queries)}개 쿼리, 원문 {len(raw_articles)}건)")
 
-    # 6. 일기 생성 (시간 맥락 + 금지 주제 + 글쓰기 앵글)
-    angle_idx = len(diaries) % len(_WRITING_ANGLES)
-    print(f"  🎯 글쓰기 앵글 #{angle_idx}: {_WRITING_ANGLES[angle_idx][:60]}")
+    # 6. 일기 생성
     result = _generate_diary(chat_logs, news, diaries, time_context)
     if not result:
         print("⚠️ [일기] 일기 생성 실패 — 건너뜀")
