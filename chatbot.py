@@ -385,6 +385,25 @@ def _deduplicate_docs(docs: list) -> list:
     return unique
 
 
+# Helper: Search Experiential Memory
+def _search_experiential_memory(query: str, k: int = 3) -> list[str]:
+    """Search experiential_memory by vector similarity. Returns formatted strings."""
+    try:
+        query_embedding = embeddings.embed_query(query)
+        embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
+        rows = db_query(
+            """SELECT content, category,
+                      1 - (embedding <=> %s::vector) AS similarity
+               FROM experiential_memory
+               ORDER BY embedding <=> %s::vector
+               LIMIT %s""",
+            (embedding_str, embedding_str, k),
+        )
+        return [f"[{r['category']}] {r['content']}" for r in rows if r.get("similarity", 0) > 0.5]
+    except Exception:
+        return []
+
+
 # Helper: Search Knowledge Graph
 def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optional[str]:
     """Query the knowledge graph and return formatted results, or None on failure.
@@ -866,6 +885,14 @@ def generate_node(state: AgentState):
     if step_results:
         step_section = f"\n[RESEARCH STEPS]\n" + "\n".join(step_results)
 
+    # Experiential memory — past lessons/patterns relevant to this query
+    exp_section = ""
+    if intent != "casual":
+        exp_results = _search_experiential_memory(last_user_query, k=3)
+        if exp_results:
+            exp_section = "\n[PAST EXPERIENCE]\n" + "\n".join(exp_results)
+            logs.append(f"🧠 [경험] 관련 경험 {len(exp_results)}건 로드")
+
     # Intent-specific style + mission
     style_map = {
         "academic": ("Detailed, objective explanation grounded in context.", "Professional, authoritative. Precise terminology."),
@@ -896,7 +923,7 @@ Respond in the same language as the user's question."""
 [MISSION] {mission}
 {analysis_method}
 [CURRENT TIME] {current_dt}
-[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}{step_section}{self_section}
+[SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}{step_section}{exp_section}{self_section}
 
 [QUESTION] {last_user_query}
 

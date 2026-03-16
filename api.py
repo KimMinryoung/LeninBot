@@ -42,14 +42,38 @@ async def _diary_scheduler():
             print(f"⚠️ [일기 스케줄러] 오류: {e}")
 
 
+async def _experience_scheduler():
+    """매일 00:30 KST — 경험 메모리 압축 및 저장."""
+    from datetime import datetime, timedelta, timezone
+
+    KST = timezone(timedelta(hours=9))
+
+    while True:
+        now = datetime.now(KST)
+        target = now.replace(hour=0, minute=30, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        print(f"🧠 [경험 스케줄러] 다음 실행: {target.strftime('%Y-%m-%d %H:%M')} KST ({int(wait_seconds)}초 후)")
+
+        await asyncio.sleep(wait_seconds)
+        try:
+            from experience_writer import write_experiences
+            await asyncio.to_thread(write_experiences)
+        except Exception as e:
+            print(f"⚠️ [경험 스케줄러] 오류: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     diary_task = asyncio.create_task(_diary_scheduler())
+    experience_task = asyncio.create_task(_experience_scheduler())
     # Start Telegram bot alongside the API server
     from telegram_bot import bot_main
     bot_task = asyncio.create_task(bot_main())
     yield
     bot_task.cancel()
+    experience_task.cancel()
     diary_task.cancel()
 
 

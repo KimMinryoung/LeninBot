@@ -150,6 +150,7 @@ AIChatBot/
 ├── self_tools.py             # Self-awareness tools: 12 tools (+write_kg, +create_task)
 ├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~870 lines)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
+├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
 ├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
 ├── crawler.py                # Lenin corpus (marxists.org)
@@ -203,6 +204,7 @@ AIChatBot/
 20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_render_status, fetch_render_logs, fetch_recent_updates). Telegram bot has 10 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, Render deploy status, Render live logs, recent feature updates, source code reader.
 21. **Web chatbot self-knowledge**: analyze_intent selects one self-knowledge tool (read_diary/read_chat_logs/read_system_status/read_recent_updates) for self-referential queries; generate_node fetches and injects as [SELF-KNOWLEDGE] context.
 22. **URL content fetching**: 질문에 URL이 포함되면 실제 페이지 본문 추출 (Tavily Extract + BS4 fallback, 최대 10,000자). Web chatbot은 자동 감지, Telegram은 `fetch_url` 도구로 지원. `shared.py` 공통 모듈.
+23. **Experiential memory**: 매일 00:30 KST에 24시간 활동(web/telegram 대화, 완료 태스크)을 LLM으로 압축하여 pgvector에 저장. 교훈/실수/인사이트/패턴/관찰을 원자적 항목으로 축적. generate_node에서 유사도 검색으로 관련 경험을 `[PAST EXPERIENCE]`로 주입.
 
 ## Current Limitations
 
@@ -218,6 +220,28 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-16 — Experiential Memory System
+
+#### experience_writer.py (신규) — 경험 메모리 압축 및 축적
+- **매일 00:30 KST 자동 실행**: api.py `_experience_scheduler()`로 스케줄링
+- **3개 데이터 소스 수집**: chat_logs (web), telegram_chat_history, telegram_tasks (completed)
+- **LLM 압축**: 24시간 활동을 3-8개 원자적 경험 항목으로 압축 (lesson/mistake/insight/pattern/observation)
+- **pgvector 저장**: `experiential_memory` 테이블, BGE-M3 1024차원 임베딩
+- **의미적 중복 제거**: 새 항목의 임베딩과 최근 30일 항목을 코사인 유사도 비교 (>0.85 = 중복 스킵)
+- **이중 실행 방지**: period_end 기준 중복 체크
+
+#### chatbot.py — 경험 메모리 검색 통합
+- **`_search_experiential_memory(query, k=3)`**: pgvector 코사인 유사도 검색 (threshold 0.5)
+- **`generate_node`**: academic/strategic 의도 시 관련 경험 검색 → `[PAST EXPERIENCE]` 섹션으로 프롬프트에 주입
+
+#### api.py — 스케줄러 추가
+- **`_experience_scheduler()`**: 매일 00:30 KST에 `write_experiences()` 호출, lifespan에 등록
+
+#### 테이블 스키마
+```sql
+experiential_memory: id, content, category, source_type, embedding(vector 1024), period_start, period_end, created_at
+```
 
 ### 2026-03-16 — Diary Anti-Duplication Overhaul
 
