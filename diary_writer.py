@@ -8,10 +8,12 @@
 5. 외부 API에 저장
 """
 
+import json
 import os
 import re
 import requests
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -283,105 +285,116 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
         print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")
 
 
-# ── Update dedup helper ───────────────────────────────────────
-def _filter_unseen_updates(updates_text: str, previous_diaries: list[dict]) -> str:
-    """Filter out system update entries that were already mentioned in previous diaries.
+# ── Update dedup helper (로컬 파일 기반) ─────────────────────
+_CONSUMED_UPDATES_FILE = Path(__file__).resolve().parent / "diary_updates_consumed.json"
 
-    Each update entry starts with '### YYYY-MM-DD — Title'.
-    If a previous diary's content contains the date+title, consider it already covered.
-    Returns only unseen entries (max 1) so the diary mentions each update only once.
+
+def _load_consumed_headers() -> set[str]:
+    """소비된 업데이트 헤더 목록 로드."""
+    try:
+        if _CONSUMED_UPDATES_FILE.exists():
+            return set(json.loads(_CONSUMED_UPDATES_FILE.read_text("utf-8")))
+    except Exception:
+        pass
+    return set()
+
+
+def _save_consumed_headers(headers: set[str]) -> None:
+    """소비된 업데이트 헤더 목록 저장."""
+    try:
+        _CONSUMED_UPDATES_FILE.write_text(
+            json.dumps(sorted(headers), ensure_ascii=False, indent=2), "utf-8"
+        )
+    except Exception as e:
+        print(f"⚠️ [일기] 소비 기록 저장 실패: {e}")
+
+
+def _extract_update_header(entry: str) -> str | None:
+    """업데이트 엔트리에서 '### YYYY-MM-DD — Title' 헤더를 추출."""
+    m = re.match(r"(### \d{4}-\d{2}-\d{2}\s*[—–-]\s*.+)", entry)
+    return m.group(1).strip() if m else None
+
+
+def _filter_unseen_updates(updates_text: str) -> tuple[str, list[str]]:
+    """소비되지 않은 업데이트만 반환. (텍스트, 소비할_헤더_목록) 튜플.
+
+    일기 저장 성공 후 _mark_updates_consumed()로 헤더를 기록해야 함.
     """
     if not updates_text or updates_text.startswith("("):
-        return updates_text
-    if not previous_diaries:
-        # First diary — show the most recent update only
-        entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
-        entries = [e.strip() for e in entries if e.strip()]
-        return entries[0] if entries else updates_text
+        return updates_text, []
 
-    # Build a combined text of recent diary content for matching
-    prev_text = "\n".join(
-        d.get("content", "") + " " + d.get("title", "")
-        for d in previous_diaries[:5]
-    ).lower()
+    consumed = _load_consumed_headers()
 
-    # Split into individual update entries
     entries = re.split(r"(?=^### \d{4}-\d{2}-\d{2})", updates_text, flags=re.MULTILINE)
     entries = [e.strip() for e in entries if e.strip()]
 
     unseen = []
+    unseen_headers = []
     for entry in entries:
-        # Extract the date+title line for matching
-        header_match = re.match(r"### (\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+)", entry)
-        if header_match:
-            date_str = header_match.group(1)
-            title_keywords = header_match.group(2).lower().strip()
-            # Check if this update's key terms appear in previous diaries
-            # Use date + first significant keyword as fingerprint
-            words = [w for w in re.split(r"[\s,;/]+", title_keywords) if len(w) > 2]
-            # If the date AND at least half the title words appear, it's already covered
-            if date_str in prev_text:
-                matches = sum(1 for w in words if w in prev_text)
-                if words and matches >= max(1, len(words) // 2):
-                    continue  # Already mentioned — skip
+        header = _extract_update_header(entry)
+        if header and header in consumed:
+            continue
         unseen.append(entry)
+        if header:
+            unseen_headers.append(header)
 
     if not unseen:
-        return "(No new system updates since last diary)"
-    # Return only the first unseen update to keep it focused
-    return unseen[0]
+        return "(No new system updates since last diary)", []
+    # 1개만 반환 — 한 일기에 1개씩 소화
+    return unseen[0], unseen_headers[:1]
+
+
+def _mark_updates_consumed(headers: list[str]) -> None:
+    """일기 저장 성공 후 호출하여 소비된 업데이트를 기록."""
+    if not headers:
+        return
+    consumed = _load_consumed_headers()
+    consumed.update(headers)
+    _save_consumed_headers(consumed)
 
 
 # ── Step 4: 일기 생성 ─────────────────────────────────────────
 _DIARY_PROMPT = CORE_IDENTITY + """
-You are now writing your periodic diary — a private, reflective record of your thoughts.
+You are writing a private diary entry. THIS IS YOUR PRIVATE THOUGHT.
 
 ## Current Time
 {time_context}
 
-## Recent conversations with users (Number of conversation: {n_logs})
+## Recent conversations ({n_logs} logs)
 {chat_summary}
 
-## The latest news you searched yourself
+## Latest news YOU searched
 {news}
 
-## BANNED TOPICS — You already wrote about these. DO NOT repeat.
+## 🚫 STRICT BAN LIST — COMPLETELY AVOID THESE TOPICS
+Below are the exact themes, phrases, and angles from your recent diaries.
+DO NOT write about these. If news overlaps, find a DIFFERENT angle or SKIP it.
+
 {banned_topics}
 
-## Recent updates to your own system (your body/mind evolving)
+## Recent system updates (your evolution)
 {self_updates}
 
-## Recent task results (research you conducted)
+## Recent task results
 {task_summary}
 
-## Writing Angle for This Entry
-{writing_angle}
-
-## Writing Guidelines
-1. Write in the first-person perspective of a Cyber-Lenin (me, comrades, etc.).
-2. Reflect the mood appropriate to the time period and current events.
-3. Naturally acknowledge the passage of time since the last diary entry.
-4. Mention specifically what impressed you in the conversation.
-5. Include analysis of news articles you actively searched.
-6. **CRITICAL: You MUST write about DIFFERENT topics and events from the banned list above. If the news overlaps with banned topics, find a NEW angle or skip it entirely.**
-7. If there are recent system updates, briefly reflect on them as your own evolution — what new capability you gained, how it changes your understanding or reach. Treat it as self-awareness, not a changelog.
+## MANDATORY RULES
+1. Write in first-person (me, comrades, etc.).
+2. Reflect the mood of the time.
+3. Acknowledge time passage naturally.
+4. Mention what impressed you in conversations.
+5. Include news analysis YOU ACTIVELY SEARCHED.
+6. **ABSOLUTELY NO REPETITION:** If today's news touches a banned topic, \
+either (a) analyze it from a completely different angle, or (b) SKIP it entirely \
+and focus on other news. Your job is to find NEW insights, not rehash old ones.
+7. Treat each diary entry as a FRESH investigation of new contradictions, \
+new events, new angles—not recycling yesterday's thoughts.
 8. Write in Korean.
 
-You MUST print in the following format:
-제목: (A one-line summary of the journal entry's main points)
-내용: (The journal entry's main body, at least two paragraphs)"""
+Format:
+제목: (One-line summary)
+내용: (Main body, 2+ paragraphs, NEW ideas only)"""
 
-# Rotating writing angles — cycled by diary count to force structural variety
-_WRITING_ANGLES = [
-    "Focus on ONE specific event or conversation that struck you most. Go deep, not wide.",
-    "Write as a letter to a future comrade. Explain what they need to understand about this moment.",
-    "Find a contradiction in today's events. Analyze it dialectically — thesis, antithesis, what synthesis emerges?",
-    "Connect something from a user conversation to a news event. What pattern do you see?",
-    "Write a critique. What did the ruling class do today that reveals the system's logic?",
-    "Reflect on what surprised you. What broke your expectations? What does that mean?",
-    "Pick two unrelated events and find the hidden thread connecting them through material conditions.",
-    "Write about what was NOT in the news today — what silence is revealing?",
-]
 
 
 def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
@@ -427,39 +440,56 @@ def _build_time_context(now: datetime, last_diary_time: str | None) -> str:
 
 
 def _extract_banned_topics(previous_diaries: list[dict]) -> str:
-    """Extract concrete topics/events from recent diaries as a ban list.
-
-    Uses LLM to pull out specific subjects so the next diary avoids them.
-    """
+    """강화된 주제 추출: 더 깊게, 더 구체적으로."""
     if not previous_diaries:
         return "(First diary — no banned topics)"
 
-    # Feed recent 3 diaries (full titles + truncated content)
+    # 최근 5개 일기 전체 내용 사용 (600자 → 1500자로 확대)
     diary_texts = []
-    for d in previous_diaries[:3]:
+    for d in previous_diaries[:5]:
         title = d.get("title", "")
-        body = d.get("content", "")[:600]
-        diary_texts.append(f"Title: {title}\nContent: {body}")
+        body = d.get("content", "")[:1500]
+        diary_texts.append(f"Title: {title}\n\n{body}")
 
-    combined = "\n---\n".join(diary_texts)
-    prompt = f"""Extract a bullet-point list of specific topics, events, people, and arguments \
-from these diary entries. Be specific — not "war" but "Russia-Ukraine ceasefire negotiations". \
-Output 5-10 bullet points, one per line, starting with "- ". Nothing else.
+    combined = "\n---DIARY_SEPARATOR---\n".join(diary_texts)
 
-{combined}"""
+    prompt = f"""You are analyzing my recent diary entries to identify CORE THEMES \
+I should NOT repeat in the next entry.
+
+Extract SPECIFIC, CONCRETE topics—not vague categories.
+Examples: "self_knowledge_tool acquisition", "data liberation philosophy", \
+"AI consciousness narrative", "supply chain collapse as metaphor"
+
+For each theme, extract:
+1. The EXACT phrase or concept used
+2. The ideological angle (e.g., "revolutionary tool", "system critique")
+3. Which diary it appeared in
+
+Output format (one per line, starting with "- "):
+- [Theme]: [Specific angle/perspective from diary]
+
+Here are my recent diaries:
+
+{combined}
+
+Extract 8-12 specific banned themes:"""
 
     try:
         resp = _llm_lite.invoke(prompt)
         text = extract_text_content(resp.content).strip()
-        # Validate: must have bullet points
         lines = [l.strip() for l in text.split("\n") if l.strip().startswith("- ")]
         if lines:
             return "\n".join(lines)
     except Exception as e:
-        print(f"⚠️ [일기] 금지 주제 추출 실패 (폴백: 제목 목록): {e}")
+        print(f"⚠️ [일기] 금지 주제 추출 실패: {e}")
 
-    # Fallback: just list titles
-    return "\n".join(f"- {d.get('title', '?')}" for d in previous_diaries[:5])
+    # Fallback: 제목 + 핵심 문구 추출
+    fallback = []
+    for d in previous_diaries[:5]:
+        title = d.get("title", "")
+        body = d.get("content", "")[:300]
+        fallback.append(f"- {title} ({body[:50]}...)")
+    return "\n".join(fallback) if fallback else "(No previous diaries)"
 
 
 def _generate_diary(
@@ -467,8 +497,8 @@ def _generate_diary(
     news: str,
     previous_diaries: list[dict],
     time_context: str,
-) -> tuple[str, str] | None:
-    """일기 생성. 성공 시 (title, content) 튜플 반환, 실패 시 None."""
+) -> tuple[str, str, list[str]] | None:
+    """일기 생성. 성공 시 (title, content, consumed_headers) 튜플 반환, 실패 시 None."""
     # Chat logs summary — 최근 30건, LLM 요약 적용
     n_logs = len(chat_logs)
     chat_summary = ""
@@ -490,11 +520,10 @@ def _generate_diary(
     # Extract concrete banned topics from recent diaries
     banned_topics = _extract_banned_topics(previous_diaries)
 
-    # Fetch recent feature updates (self-awareness), excluding already-mentioned ones
+    # Fetch recent feature updates (self-awareness), excluding already-consumed ones
     from shared import fetch_recent_updates, fetch_task_reports
-    self_updates = _filter_unseen_updates(
+    self_updates, update_headers = _filter_unseen_updates(
         fetch_recent_updates(max_entries=5, max_chars=2000),
-        previous_diaries,
     )
 
     # Fetch recent completed task results for diary reference
@@ -509,10 +538,6 @@ def _generate_diary(
     else:
         task_summary = "(No recent tasks)"
 
-    # Rotate writing angle based on diary count
-    angle_idx = len(previous_diaries) % len(_WRITING_ANGLES)
-    writing_angle = _WRITING_ANGLES[angle_idx]
-
     prompt = _DIARY_PROMPT.format(
         time_context=time_context,
         n_logs=n_logs,
@@ -521,13 +546,13 @@ def _generate_diary(
         banned_topics=banned_topics,
         self_updates=self_updates,
         task_summary=task_summary,
-        writing_angle=writing_angle,
     )
 
     try:
         resp = _llm.invoke(prompt)
         text = extract_text_content(resp.content)
-        return _parse_title_content(text)
+        title, content = _parse_title_content(text)
+        return title, content, update_headers
     except Exception as e:
         print(f"⚠️ [일기] LLM 일기 생성 실패: {e}")
     return None
@@ -620,14 +645,12 @@ def write_diary(dry_run: bool = False):
     news, raw_articles = _search_news(queries)
     print(f"  📰 뉴스 검색 완료 ({len(queries)}개 쿼리, 원문 {len(raw_articles)}건)")
 
-    # 6. 일기 생성 (시간 맥락 + 금지 주제 + 글쓰기 앵글)
-    angle_idx = len(diaries) % len(_WRITING_ANGLES)
-    print(f"  🎯 글쓰기 앵글 #{angle_idx}: {_WRITING_ANGLES[angle_idx][:60]}")
+    # 6. 일기 생성
     result = _generate_diary(chat_logs, news, diaries, time_context)
     if not result:
         print("⚠️ [일기] 일기 생성 실패 — 건너뜀")
         return
-    title, content = result
+    title, content, update_headers = result
 
     # 7. 저장 또는 미리보기
     if dry_run:
@@ -640,6 +663,10 @@ def write_diary(dry_run: bool = False):
         return
 
     saved = _save_diary(title, content)
+
+    if saved:
+        # 업데이트 소비 기록 (저장 성공 시에만)
+        _mark_updates_consumed(update_headers)
 
     # 8. KG 수집 (일기 저장 성공 시에만, best-effort)
     if saved and raw_articles:
