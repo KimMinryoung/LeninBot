@@ -23,12 +23,11 @@ logger = logging.getLogger("experience_writer")
 
 # ── Lazy-initialized clients ────────────────────────────────────
 _llm = None
-_embeddings = None
 _initialized = False
 
 
 def _init():
-    global _llm, _embeddings, _initialized
+    global _llm, _initialized
     if _initialized:
         return
     _initialized = True
@@ -41,14 +40,14 @@ def _init():
         max_output_tokens=4096,
         streaming=False,
     )
-
-    from langchain_huggingface import HuggingFaceEmbeddings
-    _embeddings = HuggingFaceEmbeddings(
-        model_name="BAAI/bge-m3",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
     logger.info("✅ [경험] 경험 기록 모듈 초기화 완료")
+
+
+def _get_embeddings():
+    """Reuse the shared BGE-M3 instance (registered by chatbot.py at startup).
+    On the 4GB server, only one BGE-M3 (~2GB) instance must exist."""
+    from shared import _get_exp_embeddings
+    return _get_exp_embeddings()
 
 
 # ── Table setup ─────────────────────────────────────────────────
@@ -256,7 +255,7 @@ def _store_entries(entries: list[dict], period_start: str, period_end: str) -> i
     stored = 0
     for entry in entries:
         try:
-            vec = _embeddings.embed_query(entry["content"])
+            vec = _get_embeddings().embed_query(entry["content"])
             embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
 
             if _is_duplicate(embedding_str):
