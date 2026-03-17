@@ -25,7 +25,7 @@ from typing import Literal
 
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
-    get_tavily_search, get_kg_service, run_kg_async,
+    get_kg_service, run_kg_async,
     extract_urls, fetch_urls_as_documents,
     search_experiential_memory, set_shared_embeddings,
 )
@@ -107,7 +107,6 @@ llm_light = ChatGoogleGenerativeAI(
     streaming=False,
     max_retries=2,
 )
-web_search_tool = get_tavily_search()
 logger.info("✅ [성공] 모든 시스템 기동 완료.")
 
 
@@ -722,22 +721,55 @@ def decide_websearch_need(state: AgentState):
 
     return "no_need_to_search_web"
 
-# Helper: Web Search — returns one Document per result with url/title metadata
+# Gemini Google Search grounding LLM (single instance, reused across calls)
+_gemini_search_llm = ChatGoogleGenerativeAI(
+    model=MODEL_MAIN,
+    google_api_key=GEMINI_API_KEY,
+    temperature=0.0,
+    max_output_tokens=2048,
+    streaming=False,
+    max_retries=3,
+).bind(tools=[{"google_search": {}}])
+
+
+# Helper: Web Search — uses Gemini API Google Search grounding
 def _run_web_search(query: str, logs: list) -> list:
-    """Invoke Tavily and return results as individual Document objects with url/title metadata."""
+    """Invoke Gemini with Google Search grounding and return results as Document objects."""
     try:
-        search_response = web_search_tool.invoke({"query": query})
-        results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+        response = _invoke_with_backoff(
+            lambda: _gemini_search_llm.invoke(query)
+        )
+        content = extract_text_content(response.content) if hasattr(response, "content") else str(response)
+        if not content or not content.strip():
+            logs.append("  ⚠️ 웹 검색 결과 없음")
+            return []
+
+        # Extract grounding metadata (sources) if available
+        grounding_meta = getattr(response, "response_metadata", {}).get("grounding_metadata", {})
+        grounding_chunks = grounding_meta.get("grounding_chunks", [])
+        # Also check additional_kwargs
+        if not grounding_chunks:
+            additional = getattr(response, "additional_kwargs", {})
+            grounding_chunks = additional.get("grounding_metadata", {}).get("grounding_chunks", [])
+
         docs = []
-        for r in results:
-            if isinstance(r, dict) and r.get("content"):
+        if grounding_chunks:
+            for chunk in grounding_chunks:
+                web_info = chunk.get("web", {})
                 docs.append(Document(
-                    page_content=r["content"],
+                    page_content=content if len(grounding_chunks) == 1 else content[:500],
                     metadata={
-                        "source": r.get("url", ""),
-                        "title": r.get("title", ""),
+                        "source": web_info.get("uri", ""),
+                        "title": web_info.get("title", ""),
                     }
                 ))
+        else:
+            # No grounding metadata — wrap the whole response as a single Document
+            docs.append(Document(
+                page_content=content,
+                metadata={"source": "gemini_search", "title": query}
+            ))
+
         logs.append(f"  ✅ {len(docs)}건의 웹 결과를 확보했습니다.")
         for doc in docs:
             logs.append(f"   🌐 {_label_doc(doc)}")
