@@ -205,6 +205,60 @@ async def handle_sync_pull(data_type: str, params: dict | None = None) -> str:
         return f"Sync pull error: {e}"
 
 
+# ── Python Code Execution ────────────────────────────────────────────
+
+async def handle_execute_python(code: str, timeout: int = 30) -> str:
+    """Write code to a temp file, execute it, return output."""
+    import asyncio
+    import subprocess
+    import sys
+    import tempfile
+
+    timeout = max(5, min(timeout, 300))  # clamp 5-300s
+
+    def _run():
+        # Write to temp file in project root so relative imports work
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", dir=project_root,
+            delete=False, encoding="utf-8",
+        ) as f:
+            f.write(code)
+            tmp_path = f.name
+
+        try:
+            result = subprocess.run(
+                [sys.executable, tmp_path],
+                capture_output=True, text=True, timeout=timeout,
+                cwd=project_root,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
+            output_parts = []
+            if result.stdout.strip():
+                output_parts.append(result.stdout.strip())
+            if result.stderr.strip():
+                output_parts.append(f"[stderr]\n{result.stderr.strip()}")
+            if result.returncode != 0:
+                output_parts.append(f"[exit code: {result.returncode}]")
+            output = "\n\n".join(output_parts) if output_parts else "(no output)"
+
+            # Truncate if too large
+            if len(output) > 50000:
+                output = output[:50000] + f"\n\n... [truncated, total {len(output)} chars]"
+            return output
+        except subprocess.TimeoutExpired:
+            return f"Error: Execution timed out after {timeout}s."
+        except Exception as e:
+            return f"Error: {e}"
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return await asyncio.to_thread(_run)
+
+
 # ── Vector DB Ingest ─────────────────────────────────────────────────
 
 _embeddings = None
@@ -383,6 +437,7 @@ LOCAL_TOOL_HANDLERS = {
     "manage_task": handle_manage_task,
     "sync_push": handle_sync_push,
     "sync_pull": handle_sync_pull,
+    "execute_python": handle_execute_python,
     "vectordb_ingest": handle_vectordb_ingest,
     "crawl_site": handle_crawl_site,
 }

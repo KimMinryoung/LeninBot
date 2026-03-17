@@ -142,6 +142,18 @@ LOCAL_TOOLS = [
         },
     },
     {
+        "name": "execute_python",
+        "description": "Write and execute Python code on the fly. Creates a temp file, runs it, and returns stdout/stderr. Use for data processing, calculations, file manipulation, analysis, or any task that benefits from code. The code runs in the same Python environment (has access to installed packages, project files, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute."},
+                "timeout": {"type": "integer", "description": "Max execution time in seconds. Default: 30."},
+            },
+            "required": ["code"],
+        },
+    },
+    {
         "name": "sync_pull",
         "description": "Pull data from the central server. Types: diaries, chat_logs, task_reports, kg_stats, experience.",
         "input_schema": {
