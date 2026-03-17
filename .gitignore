@@ -28,5 +28,8 @@ crawler/
 docs/
 *.pdf
 
+# 로컬 에이전트 런타임 데이터 (SQLite, 쿠키, 캐시)
+local_agent/data/
+
 # CLAUDE가 사용하는 비밀 설정 파일
 .claude/

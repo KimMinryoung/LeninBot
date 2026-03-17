@@ -297,8 +297,9 @@ def analyze_intent_node(state: AgentState):
     if urls:
         logs.append(f"🔗 [분석] 질문에서 URL {len(urls)}개 감지")
         url_docs = fetch_urls_as_documents(urls, logs)
-        # Force vectorstore path if URLs found (need context for analysis)
-        if url_docs and analysis.datasource == "generate":
+        # Force vectorstore path only if we actually got content (not just failure docs)
+        has_real_content = any(not d.metadata.get("fetch_failed") for d in url_docs)
+        if has_real_content and analysis.datasource == "generate":
             analysis_datasource = "vectorstore"
             logs.append("🔗 [분석] URL 내용 분석을 위해 vectorstore 경로로 전환")
         else:

@@ -683,6 +683,17 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
             cleaned.append(line)
         return "\n".join(cleaned)
 
+    # Sites that load content in iframes — Tavily/BS4 can't extract, go to Playwright directly
+    _IFRAME_SITES = ("cafe.naver.com", "blog.naver.com")
+    if any(site in url for site in _IFRAME_SITES):
+        try:
+            result = _playwright_fetch(url, max_chars)
+            if result and len(result) > 50:
+                return result
+        except Exception as e:
+            logger.info("[URL] Playwright direct 실패 (%s): %s", url[:60], e)
+        return None
+
     # Try Tavily Extract first
     try:
         from langchain_tavily import TavilyExtract
@@ -752,6 +763,63 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     except Exception as e:
         logger.warning("[URL] requests fallback도 실패 (%s): %s", url[:60], e)
 
+    # Final fallback: Playwright (handles JS-rendered pages, iframes like Naver Cafe)
+    try:
+        result = _playwright_fetch(url, max_chars)
+        if result and len(result) > 50:
+            return result
+    except Exception as e:
+        logger.info("[URL] Playwright fallback 실패 (%s): %s", url[:60], e)
+
+    return None
+
+
+def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Fetch URL content via Playwright (sync). Handles JS + iframe (e.g. Naver Cafe)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                locale="ko-KR",
+            )
+            page.goto(url, wait_until="networkidle", timeout=30000)
+
+            # Naver Cafe/Blog: content is inside an iframe
+            target = page
+            if "cafe.naver.com" in url or "blog.naver.com" in url:
+                page.wait_for_timeout(3000)
+                for frame in page.frames:
+                    if any(p in frame.url for p in ("/ca-fe/cafes/", "ArticleRead", "PostView.naver")):
+                        target = frame
+                        break
+
+            text = target.evaluate("""() => {
+                ['nav','header','footer','aside','.sidebar','.menu',
+                 '.advertisement','.ad','#comments','.comment','script','style']
+                .forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
+                const containers = ['article','main','[role="main"]',
+                    '.post-content','.article-content','.entry-content',
+                    '.se-main-container','.ContentRenderer','#content','.content'];
+                for (const sel of containers) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText.trim().length > 100) return el.innerText.trim();
+                }
+                return document.body ? document.body.innerText.trim() : '';
+            }""")
+
+            page.close()
+            if text and len(text) > 50:
+                logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))
+                return text[:max_chars]
+        finally:
+            browser.close()
+
     return None
 
 
@@ -785,6 +853,27 @@ def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:
             logs.append(f"   ✅ {len(content)}자의 본문 내용을 확보했습니다.")
         else:
             logs.append(f"   ⚠️ 페이지 내용을 가져올 수 없습니다.")
+            # Create a failure document so the LLM knows the fetch failed
+            # (prevents hallucination from URL text alone)
+            fail_msg = (
+                f"[FETCH FAILED] URL: {url}\n"
+                "이 URL의 본문을 가져오는 데 실패했습니다. "
+                "URL 텍스트만으로 내용을 추측하거나 환각하지 마세요. "
+                "사용자에게 페이지 접근에 실패했음을 알리고, "
+                "직접 내용을 복사해서 붙여넣거나 다른 URL을 제공하도록 안내하세요."
+            )
+            try:
+                from langchain_core.documents import Document
+                doc = Document(
+                    page_content=fail_msg,
+                    metadata={"source": url, "title": "[FETCH FAILED]", "fetch_failed": True},
+                )
+            except ImportError:
+                doc = {
+                    "page_content": fail_msg,
+                    "metadata": {"source": url, "title": "[FETCH FAILED]", "fetch_failed": True},
+                }
+            results.append(doc)
     return results
 
 

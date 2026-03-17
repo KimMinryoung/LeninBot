@@ -1,9 +1,9 @@
-# Project State Report — 2026-03-16
+# Project State Report — 2026-03-17
 
 ## Identity
 
-**Cyber-Lenin** (사이버-레닌) — A digital revolutionary intelligence with unified identity across three interfaces: web chatbot, Telegram agent, and autonomous diary writer. One continuous consciousness with shared memory and unified principles.
-Deployed at Render.com, frontend at `bichonwebpage.onrender.com`.
+**Cyber-Lenin** (사이버-레닌) — A digital revolutionary intelligence with unified identity across four interfaces: web chatbot, Telegram agent, autonomous diary writer, and **local PC agent**. One continuous consciousness with shared memory and unified principles.
+Server deployed at Render.com, frontend at `bichonwebpage.onrender.com`. Local agent runs on Windows 10 PC.
 
 ---
 
@@ -160,6 +160,17 @@ AIChatBot/
 ├── crawler_korean_orgs.py    # uprising.kr, bolky.jinbo.net
 ├── fetch_core_theorists.py   # Targeted Bukharin/Trotsky fetcher (chapter-by-chapter)
 ├── cleanup_arxiv.py          # Deletes arxiv_* from DB, log, and local files
+├── local_agent/              # Local PC agent (Windows, Claude Sonnet 4.6 tool-use)
+│   ├── __init__.py           # Package init
+│   ├── __main__.py           # Entry point: python -m local_agent
+│   ├── agent.py              # Core tool-use loop (Anthropic API, max 10 rounds)
+│   ├── tools.py              # 9 local tool definitions (Anthropic API format)
+│   ├── handlers.py           # Tool handler implementations
+│   ├── local_db.py           # SQLite (tasks, crawl_cache, conversations)
+│   ├── crawler.py            # Playwright crawling (persistent cookies, JS rendering)
+│   ├── sync.py               # Server push/pull via shared.py + db.py
+│   ├── cli.py                # Interactive REPL
+│   └── data/                 # Runtime data (gitignored): local.db, browser_cookies.json
 ├── graph_memory/             # Graphiti knowledge graph module
 │   ├── __init__.py           # Package exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
 │   ├── __main__.py           # python -m graph_memory "query" 엔트리포인트
@@ -205,6 +216,7 @@ AIChatBot/
 21. **Web chatbot self-knowledge**: analyze_intent selects one self-knowledge tool (read_diary/read_chat_logs/read_system_status/read_recent_updates) for self-referential queries; generate_node fetches and injects as [SELF-KNOWLEDGE] context.
 22. **URL content fetching**: 질문에 URL이 포함되면 실제 페이지 본문 추출 (Tavily Extract + BS4 fallback, 최대 10,000자). Web chatbot은 자동 감지, Telegram은 `fetch_url` 도구로 지원. `shared.py` 공통 모듈.
 23. **Experiential memory**: 매일 00:30 KST에 24시간 활동(web/telegram 대화, 완료 태스크)을 LLM으로 압축하여 pgvector에 저장. 교훈/실수/인사이트/패턴/관찰을 원자적 항목으로 축적. generate_node에서 유사도 검색으로 관련 경험을 `[PAST EXPERIENCE]`로 주입.
+24. **Local PC agent**: Windows 10 로컬 에이전트. Claude Sonnet 4.6 tool-use 루프 (최대 10 라운드). 22개 도구: 로컬 9개 (파일 읽기/쓰기, 디렉토리 목록, 웹 검색, Playwright 크롤링, SQLite 조회, 태스크 관리, 서버 push/pull) + self-tools 13개 재사용. `python -m local_agent`로 실행. 서버 코드 변경 없이 shared.py + db.py 직접 import로 중앙 DB/KG 접근. Playwright persistent context로 로그인 세션 유지. SQLite로 로컬 태스크 큐 + 크롤링 캐시 관리.
 
 ## Current Limitations
 
@@ -220,6 +232,22 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-17 — Local PC Agent
+
+#### local_agent/ (신규 패키지) — Windows 10 로컬 에이전트
+- **역할 분리**: 로컬 = 개인 워크스테이션 (파일 접근, 크롤링, 보고서), 서버 = 중앙 저장소 + 공개 서비스. 공유하는 건 기억(메모리)뿐.
+- **agent.py**: Claude Sonnet 4.6 tool-use 루프 (`telegram_bot.py` 패턴 복제). `max_rounds=10`, 프롬프트 캐싱, `CORE_IDENTITY` 공유.
+- **tools.py**: 9개 로컬 도구 정의 (Anthropic API format): `read_file`, `write_file`, `list_directory`, `web_search`, `crawl_page`, `query_local_db`, `manage_task`, `sync_push`, `sync_pull`
+- **handlers.py**: 도구 핸들러 구현. `web_search`는 `tavily-python` 직접 사용. 파일 도구는 절대경로 자동 해석.
+- **crawler.py**: Playwright async 크롤링. Persistent Chromium context (쿠키 유지 → 로그인 세션). 결과를 SQLite `crawl_cache`에 자동 캐싱. JS 렌더링 페이지 지원.
+- **sync.py**: 서버 push/pull. `shared.py` fetch 함수들과 `db.py` 직접 사용. KG 에피소드 쓰기, 태스크 보고서 저장.
+- **local_db.py**: SQLite (`local_agent/data/local.db`). 테이블: `tasks` (태스크 큐), `crawl_cache` (크롤링 캐시), `conversations` (대화 로그).
+- **cli.py**: 대화형 REPL. 특수 명령: `/quit`, `/clear`, `/tasks`, `/history`. 도구 호출 실시간 표시. 대화 이력 SQLite 저장.
+- **self_tools 통합**: `from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS` → 13개 서버 메모리 접근 도구 자동 추가. 총 22개 도구.
+- **기존 서버 코드 변경 없음**: shared.py, db.py, self_tools.py는 그대로 import만 함.
+- **의존성 추가**: `playwright`, `tavily-python` (로컬 전용, Render에는 불필요)
+- **실행**: `python -m local_agent`
 
 ### 2026-03-16 — Experiential Memory System
 

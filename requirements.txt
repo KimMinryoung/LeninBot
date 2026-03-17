@@ -19,6 +19,9 @@ langgraph
 # Knowledge Graph (Graphiti + Neo4j)
 graphiti-core[google-genai]
 
+# Browser automation (JS-rendered page crawling: Naver Cafe/Blog etc.)
+playwright
+
 # Telegram bot
 aiogram>=3.0,<4.0
 anthropic
