@@ -778,6 +778,49 @@ async def cmd_unschedule(message: Message):
         await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
 
 
+@router.message(Command("deploy"))
+async def cmd_deploy(message: Message):
+    """Run deploy.sh — git pull + restart services. Output sent back via Telegram."""
+    if not _is_allowed(message.from_user.id):
+        return
+    deploy_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy.sh")
+    if not os.path.isfile(deploy_script):
+        await message.answer("deploy.sh를 찾을 수 없습니다.")
+        return
+
+    status_msg = await message.answer("🚀 Deploy 시작...")
+    try:
+        # Run deploy.sh detached (setsid) so it survives bot restart
+        log_path = "/tmp/leninbot-deploy.log"
+        # Clear old log
+        open(log_path, "w").close()
+        proc = await asyncio.create_subprocess_exec(
+            "setsid", "bash", deploy_script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        # Read output until process exits or bot gets killed by restart
+        output_lines: list[str] = []
+        try:
+            async for line in proc.stdout:
+                output_lines.append(line.decode(errors="replace").rstrip())
+            await proc.wait()
+        except asyncio.CancelledError:
+            pass  # bot is being restarted by deploy.sh — expected
+
+        result = "\n".join(output_lines[-30:])  # last 30 lines
+        if proc.returncode == 0:
+            await status_msg.edit_text(f"✅ Deploy 완료\n```\n{result}\n```", parse_mode="Markdown")
+        else:
+            await status_msg.edit_text(f"❌ Deploy 실패 (exit {proc.returncode})\n```\n{result}\n```", parse_mode="Markdown")
+    except Exception as e:
+        try:
+            await status_msg.edit_text(f"❌ Deploy 오류: {e}")
+        except Exception:
+            pass  # bot may already be dead from restart
+
+
 @router.message(F.text)
 async def handle_message(message: Message):
     if not _is_allowed(message.from_user.id):
