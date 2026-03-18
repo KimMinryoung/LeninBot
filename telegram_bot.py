@@ -1164,6 +1164,36 @@ async def _schedule_worker(bot: Bot):
         await asyncio.sleep(60)
 
 
+# ── Deploy detection ─────────────────────────────────────────────────
+_DEPLOY_META_PATH = "/tmp/leninbot-deploy-meta.json"
+
+
+async def _check_deploy_meta(bot: Bot):
+    """On startup, check if we were just deployed. Inject into system alerts."""
+    try:
+        if not os.path.isfile(_DEPLOY_META_PATH):
+            return
+        with open(_DEPLOY_META_PATH, "r") as f:
+            meta = json.load(f)
+        # Consume the file so we don't re-trigger on manual restart
+        os.remove(_DEPLOY_META_PATH)
+
+        changes = meta.get("changes", "")
+        new_commit = meta.get("new_commit", "")[:7]
+        prev_commit = meta.get("prev_commit", "")[:7]
+        deps = " (의존성 업데이트됨)" if meta.get("deps_updated") else ""
+        ts = meta.get("timestamp", "")
+
+        alert_msg = (
+            f"Deploy 완료: {prev_commit}→{new_commit}{deps}. "
+            f"변경: {changes}"
+        )
+        _add_system_alert(alert_msg)
+        logger.info("Deploy detected: %s → %s", prev_commit, new_commit)
+    except Exception as e:
+        logger.warning("Deploy meta check failed: %s", e)
+
+
 # ── Entry Point ──────────────────────────────────────────────────────
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
@@ -1180,6 +1210,9 @@ async def bot_main():
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
+
+    # Detect fresh deploy — inject context so the bot knows it was just updated
+    await _check_deploy_meta(bot)
 
     # Start background workers
     asyncio.create_task(_task_worker(bot))

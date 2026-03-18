@@ -39,8 +39,39 @@ else
     echo "의존성 변경 없음 → 스킵"
 fi
 
-# 3. 서비스 재시작 (API 먼저, 텔레그램은 마지막)
+# 3. Deploy 메타데이터 저장 (새 봇 인스턴스가 읽음)
+DEPLOY_META="/tmp/leninbot-deploy-meta.json"
+cat > "$DEPLOY_META" <<METAEOF
+{
+  "timestamp": "$(date -Iseconds)",
+  "prev_commit": "$LOCAL",
+  "new_commit": "$REMOTE",
+  "changes": $(echo "$CHANGES" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))'),
+  "deps_updated": $(git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements" && echo "true" || echo "false")
+}
+METAEOF
+
+# 4. 서비스 재시작 (API 먼저, 텔레그램은 마지막)
 echo "서비스 재시작..."
 sudo systemctl restart leninbot-api
 sudo systemctl restart leninbot-telegram
-echo "=== Deploy 완료: $(git log --oneline -1) ==="
+
+# 5. 텔레그램 알림 (봇이 죽은 후이므로 curl로 직접 전송)
+SUMMARY=$(git log --oneline -1)
+source "$DEPLOY_DIR/.env" 2>/dev/null
+if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$ALLOWED_USER_IDS" ]; then
+    MSG="✅ *Deploy 완료*
+\`$SUMMARY\`
+변경 커밋:
+\`\`\`
+$CHANGES
+\`\`\`"
+    IFS=',' read -ra UIDS <<< "$ALLOWED_USER_IDS"
+    for uid in "${UIDS[@]}"; do
+        uid=$(echo "$uid" | tr -d ' ')
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="$uid" -d text="$MSG" -d parse_mode="Markdown" > /dev/null 2>&1 || true
+    done
+fi
+
+echo "=== Deploy 완료: $SUMMARY ==="
