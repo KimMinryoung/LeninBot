@@ -1,0 +1,14 @@
+[Unit]
+Description=LeninBot API (FastAPI + Uvicorn)
+After=network.target
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

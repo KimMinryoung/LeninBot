@@ -1,0 +1,14 @@
+[Unit]
+Description=LeninBot Telegram Bot (aiogram)
+After=network.target
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python telegram_bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
