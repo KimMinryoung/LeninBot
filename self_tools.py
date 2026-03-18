@@ -103,30 +103,25 @@ SELF_TOOLS = [
         "description": "Overall status: diary, chat activity, tasks, KG health.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
-    # Render tools disabled — migrated to Hetzner VPS (2026-03-18)
-    # {
-    #     "name": "read_render_status",
-    #     "description": "Render deployment status: recent deploys and events.",
-    #     "input_schema": {
-    #         "type": "object",
-    #         "properties": {
-    #             "deploy_limit": {"type": "integer", "description": "Deploys (1-10).", "default": 5},
-    #         },
-    #         "required": [],
-    #     },
-    # },
-    # {
-    #     "name": "read_render_logs",
-    #     "description": "Live Render service logs (stdout/stderr). For troubleshooting.",
-    #     "input_schema": {
-    #         "type": "object",
-    #         "properties": {
-    #             "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
-    #             "limit": {"type": "integer", "description": "Max entries (1-100).", "default": 50},
-    #         },
-    #         "required": [],
-    #     },
-    # },
+    {
+        "name": "read_server_logs",
+        "description": "Read server logs from journald (systemd). For troubleshooting and self-monitoring.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "enum": ["telegram", "api", "nginx"],
+                    "description": "Which service: telegram (bot), api (FastAPI), nginx.",
+                    "default": "telegram",
+                },
+                "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
+                "limit": {"type": "integer", "description": "Max log lines (1-200).", "default": 50},
+                "grep": {"type": "string", "description": "Optional: filter lines containing this text."},
+            },
+            "required": [],
+        },
+    },
     {
         "name": "read_recent_updates",
         "description": "Recent feature changelog / system updates.",
@@ -410,11 +405,37 @@ async def _exec_read_system_status() -> str:
     return "=== SYSTEM STATUS ===\n" + "\n".join(status_parts)
 
 
-# Render tools disabled — migrated to Hetzner VPS (2026-03-18)
-# async def _exec_read_render_status(deploy_limit: int = 5) -> str:
-#     ...
-# async def _exec_read_render_logs(minutes_back: int = 10, limit: int = 50) -> str:
-#     ...
+async def _exec_read_server_logs(
+    service: str = "telegram", minutes_back: int = 10, limit: int = 50, grep: str = "",
+) -> str:
+    """Read journald logs for a systemd service."""
+    import subprocess
+
+    service_map = {
+        "telegram": "leninbot-telegram",
+        "api": "leninbot-api",
+        "nginx": "nginx",
+    }
+    unit = service_map.get(service, "leninbot-telegram")
+    minutes_back = max(1, min(60, minutes_back))
+    limit = max(1, min(200, limit))
+
+    cmd = ["journalctl", "-u", unit, f"--since={minutes_back} min ago", "--no-pager", "-n", str(limit)]
+    if grep:
+        cmd.extend(["--grep", grep])
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, text=True, timeout=10,
+        )
+        output = result.stdout.strip() if result.stdout else "(no output)"
+        if result.returncode != 0 and result.stderr:
+            output += f"\n[stderr] {result.stderr.strip()}"
+        return f"=== SERVER LOGS ({unit}, last {minutes_back}min) ===\n{output}"
+    except subprocess.TimeoutExpired:
+        return f"Log fetch timed out for {unit}."
+    except Exception as e:
+        return f"Log fetch failed: {e}"
 
 
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
@@ -555,8 +576,7 @@ SELF_TOOL_HANDLERS = {
     "read_task_reports": _exec_read_task_reports,
     "read_kg_status": _exec_read_kg_status,
     "read_system_status": _exec_read_system_status,
-    # "read_render_status": _exec_read_render_status,  # Render → Hetzner 이전
-    # "read_render_logs": _exec_read_render_logs,      # Render → Hetzner 이전
+    "read_server_logs": _exec_read_server_logs,
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
     "recall_experience": _exec_recall_experience,
