@@ -1,7 +1,7 @@
 """telegram_bot.py — Telegram bot interface (aiogram 3.x).
 
 Features:
-- General messages → Claude Haiku with tool-use (vector_search, knowledge_graph_search, web_search)
+- General messages → Claude Sonnet 4.6 with tool-use (vector_search, knowledge_graph_search, web_search, file system, execute_python)
 - /chat <message> → CLAW pipeline (LangGraph agent: intent→retrieve→KG→strategize→generate)
 - /task <content> → Save to PostgreSQL queue, background worker processes, push on completion
 - /status → Show last 5 tasks
@@ -184,7 +184,7 @@ def _resolve_model(alias: str, fallback: str) -> str:
         return fallback
 
 
-_CLAUDE_MODEL = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
+_CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 _CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 
 
@@ -300,6 +300,58 @@ _TOOLS = [
             "required": ["url"],
         },
     },
+    # ── File system tools (Hetzner VPS) ──
+    {
+        "name": "read_file",
+        "description": "Read a file on the server. Returns content with line numbers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path (absolute or relative to project root)."},
+                "line_start": {"type": "integer", "description": "Start line (1-based). Omit for beginning."},
+                "line_end": {"type": "integer", "description": "End line (inclusive). Omit for end."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to a file on the server. Creates parent directories if needed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to write."},
+                "content": {"type": "string", "description": "Content to write."},
+                "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "Write mode. Default: overwrite."},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "list_directory",
+        "description": "List files and directories on the server. Supports glob patterns.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Directory path. Default: project root."},
+                "pattern": {"type": "string", "description": "Glob pattern filter. Default: * (all)."},
+                "recursive": {"type": "boolean", "description": "Search recursively. Default: false."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "execute_python",
+        "description": "Execute Python code on the server. Returns stdout/stderr. Use for data processing, calculations, or system tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute."},
+                "timeout": {"type": "integer", "description": "Max execution time in seconds (5-300). Default: 30."},
+            },
+            "required": ["code"],
+        },
+    },
 ]
 
 
@@ -357,11 +409,128 @@ async def _exec_fetch_url(url: str) -> str:
         return f"URL fetch failed: {e}"
 
 
+async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None) -> str:
+    """Read a file on the server."""
+    import glob as _glob
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isabs(path):
+        path = os.path.join(project_root, path)
+    if not os.path.exists(path):
+        return f"Error: File not found: {path}"
+    if os.path.isdir(path):
+        return f"Error: Path is a directory: {path}"
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        total = len(lines)
+        start = max(1, line_start or 1)
+        end = min(total, line_end or total)
+        selected = lines[start - 1 : end]
+        numbered = [f"{start + i:>6}\t{line.rstrip()}" for i, line in enumerate(selected)]
+        return f"[{path}] lines {start}-{end} of {total}\n" + "\n".join(numbered)
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> str:
+    """Write content to a file on the server."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isabs(path):
+        path = os.path.join(project_root, path)
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        write_mode = "a" if mode == "append" else "w"
+        with open(path, write_mode, encoding="utf-8") as f:
+            f.write(content)
+        size = os.path.getsize(path)
+        return f"Written {len(content)} chars to {path} (total size: {size} bytes, mode: {mode})"
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+
+async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bool = False) -> str:
+    """List files and directories on the server."""
+    import glob as _glob
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if not path:
+        path = project_root
+    elif not os.path.isabs(path):
+        path = os.path.join(project_root, path)
+    if not os.path.isdir(path):
+        return f"Error: Not a directory: {path}"
+    try:
+        if recursive:
+            search = os.path.join(path, "**", pattern)
+            entries = _glob.glob(search, recursive=True)
+        else:
+            search = os.path.join(path, pattern)
+            entries = _glob.glob(search)
+        entries.sort()
+        lines = []
+        for entry in entries[:200]:
+            try:
+                stat = os.stat(entry)
+                kind = "DIR " if os.path.isdir(entry) else "FILE"
+                size = f"{stat.st_size:>10,}" if not os.path.isdir(entry) else "         -"
+                mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                rel = os.path.relpath(entry, path)
+                lines.append(f"  {kind} {size}  {mtime}  {rel}")
+            except OSError:
+                lines.append(f"  ???? {os.path.relpath(entry, path)}")
+        header = f"[{path}] {len(entries)} entries"
+        if len(entries) > 200:
+            header += f" (showing first 200)"
+        return header + "\n" + "\n".join(lines)
+    except Exception as e:
+        return f"Error listing directory: {e}"
+
+
+async def _exec_execute_python(code: str, timeout: int = 30) -> str:
+    """Execute Python code on the server."""
+    import subprocess
+    import sys
+    import tempfile
+
+    timeout = max(5, min(timeout, 300))
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    def _run():
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", dir=project_root,
+            delete=False, encoding="utf-8",
+        ) as f:
+            f.write(code)
+            tmp_path = f.name
+        try:
+            result = subprocess.run(
+                [sys.executable, tmp_path],
+                capture_output=True, text=True, timeout=timeout,
+                cwd=project_root,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
+            parts = []
+            if result.stdout.strip():
+                parts.append(result.stdout.strip())
+            if result.stderr.strip():
+                parts.append(f"[stderr]\n{result.stderr.strip()}")
+            return "\n".join(parts) if parts else "(no output)"
+        except subprocess.TimeoutExpired:
+            return f"Execution timed out after {timeout}s."
+        finally:
+            os.unlink(tmp_path)
+
+    return await asyncio.to_thread(_run)
+
+
 _TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
+    "read_file": _exec_read_file,
+    "write_file": _exec_write_file,
+    "list_directory": _exec_list_directory,
+    "execute_python": _exec_execute_python,
 }
 
 # ── Self-awareness tools (shared memory access) ─────────────────────
