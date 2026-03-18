@@ -962,8 +962,8 @@ async def cmd_deploy(message: Message):
             async for line in proc.stdout:
                 output_lines.append(line.decode(errors="replace").rstrip())
             await proc.wait()
-        except asyncio.CancelledError:
-            pass  # bot is being restarted by deploy.sh — expected
+        except (asyncio.CancelledError, ConnectionError, OSError):
+            return  # bot is being restarted by deploy.sh — expected, curl handles notification
 
         result = "\n".join(output_lines[-30:])  # last 30 lines
         if proc.returncode == 0:
@@ -971,10 +971,13 @@ async def cmd_deploy(message: Message):
         else:
             await status_msg.edit_text(f"❌ Deploy 실패 (exit {proc.returncode})\n```\n{result}\n```", parse_mode="Markdown")
     except Exception as e:
+        # ServerDisconnectedError / CancelledError = bot killed by deploy restart — expected
+        if "Disconnect" in type(e).__name__ or isinstance(e, (asyncio.CancelledError, ConnectionError, OSError)):
+            return  # deploy.sh curl handles notification
         try:
             await status_msg.edit_text(f"❌ Deploy 오류: {e}")
         except Exception:
-            pass  # bot may already be dead from restart
+            pass
 
 
 @router.message(F.text)
