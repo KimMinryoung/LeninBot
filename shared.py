@@ -882,4 +882,7 @@ MODULE_ARCHITECTURE = """\
 ## Architecture
 Modules: chatbot.py (LangGraph web pipeline), telegram_bot.py (Claude Haiku agent), \
 diary_writer.py (6h cron), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
-Data: PostgreSQL (Supabase), Neo4j AuraDB, external diary API."""
+Data: PostgreSQL (Supabase), Neo4j AuraDB, external diary API.
+## Infrastructure
+Server: Hetzner VPS (Ubuntu 24.04, 16 GB RAM), HTTPS via Nginx + Let's Encrypt (leninbot.duckdns.org). \
+Deploy: git pull + systemctl restart, triggered by Telegram /deploy command."""

@@ -103,29 +103,30 @@ SELF_TOOLS = [
         "description": "Overall status: diary, chat activity, tasks, KG health.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
-    {
-        "name": "read_render_status",
-        "description": "Render deployment status: recent deploys and events.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "deploy_limit": {"type": "integer", "description": "Deploys (1-10).", "default": 5},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_render_logs",
-        "description": "Live Render service logs (stdout/stderr). For troubleshooting.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
-                "limit": {"type": "integer", "description": "Max entries (1-100).", "default": 50},
-            },
-            "required": [],
-        },
-    },
+    # Render tools disabled — migrated to Hetzner VPS (2026-03-18)
+    # {
+    #     "name": "read_render_status",
+    #     "description": "Render deployment status: recent deploys and events.",
+    #     "input_schema": {
+    #         "type": "object",
+    #         "properties": {
+    #             "deploy_limit": {"type": "integer", "description": "Deploys (1-10).", "default": 5},
+    #         },
+    #         "required": [],
+    #     },
+    # },
+    # {
+    #     "name": "read_render_logs",
+    #     "description": "Live Render service logs (stdout/stderr). For troubleshooting.",
+    #     "input_schema": {
+    #         "type": "object",
+    #         "properties": {
+    #             "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
+    #             "limit": {"type": "integer", "description": "Max entries (1-100).", "default": 50},
+    #         },
+    #         "required": [],
+    #     },
+    # },
     {
         "name": "read_recent_updates",
         "description": "Recent feature changelog / system updates.",
@@ -409,76 +410,11 @@ async def _exec_read_system_status() -> str:
     return "=== SYSTEM STATUS ===\n" + "\n".join(status_parts)
 
 
-async def _exec_read_render_status(deploy_limit: int = 5) -> str:
-    from shared import fetch_render_status
-
-    data = await asyncio.to_thread(fetch_render_status, deploy_limit)
-
-    if "error" in data:
-        return f"Render status check failed: {data['error']}"
-
-    parts = []
-
-    # Deploys
-    deploys = data.get("deploys", [])
-    if deploys:
-        parts.append(f"Recent deploys ({len(deploys)}):")
-        for d in deploys:
-            created = _to_kst(d.get("created_at"))
-            finished = _to_kst(d.get("finished_at")) if d.get("finished_at") else ""
-            commit = d.get("commit_message", "?")
-            parts.append(
-                f"  [{d.get('status', '?')}] {created}"
-                f"{' -> ' + finished if finished else ''}"
-                f"\n    commit: {commit}"
-            )
-    else:
-        parts.append("No recent deploys found.")
-
-    # Events
-    events = data.get("events", [])
-    if events:
-        parts.append(f"\nRecent events ({len(events)}):")
-        for ev in events:
-            ts = _to_kst(ev.get("timestamp"))
-            ev_type = ev.get("type", "?")
-            details = ev.get("details", {})
-            # Extract useful detail fields
-            detail_str = ""
-            if "deployStatus" in details:
-                detail_str = f" (deploy: {details['deployStatus']})"
-            elif "trigger" in details:
-                trigger = details["trigger"]
-                if trigger.get("manual"):
-                    detail_str = " (manual)"
-                elif trigger.get("envUpdated"):
-                    detail_str = " (env updated)"
-            parts.append(f"  {ts} | {ev_type}{detail_str}")
-
-    return "=== RENDER DEPLOYMENT STATUS ===\n\n" + "\n".join(parts)
-
-
-async def _exec_read_render_logs(minutes_back: int = 10, limit: int = 50) -> str:
-    from shared import fetch_render_logs
-
-    entries = await asyncio.to_thread(fetch_render_logs, minutes_back, limit)
-
-    if entries and "error" in entries[0]:
-        return f"Render logs fetch failed: {entries[0]['error']}"
-
-    if not entries:
-        return f"No logs found in the last {minutes_back} minutes."
-
-    lines = []
-    for e in entries:
-        ts = _to_kst(e.get("timestamp"))
-        level = e.get("level", "")
-        msg = e.get("message", "")
-        prefix = f"[{level}]" if level else ""
-        lines.append(f"{ts} {prefix} {msg}")
-
-    header = f"=== RENDER LOGS (last {minutes_back}min, {len(entries)} entries) ===\n"
-    return header + "\n".join(lines)
+# Render tools disabled — migrated to Hetzner VPS (2026-03-18)
+# async def _exec_read_render_status(deploy_limit: int = 5) -> str:
+#     ...
+# async def _exec_read_render_logs(minutes_back: int = 10, limit: int = 50) -> str:
+#     ...
 
 
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
@@ -619,8 +555,8 @@ SELF_TOOL_HANDLERS = {
     "read_task_reports": _exec_read_task_reports,
     "read_kg_status": _exec_read_kg_status,
     "read_system_status": _exec_read_system_status,
-    "read_render_status": _exec_read_render_status,
-    "read_render_logs": _exec_read_render_logs,
+    # "read_render_status": _exec_read_render_status,  # Render → Hetzner 이전
+    # "read_render_logs": _exec_read_render_logs,      # Render → Hetzner 이전
     "read_recent_updates": _exec_read_recent_updates,
     "read_source_code": _exec_read_source_code,
     "recall_experience": _exec_recall_experience,
