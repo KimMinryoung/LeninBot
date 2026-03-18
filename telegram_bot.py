@@ -186,6 +186,7 @@ def _resolve_model(alias: str, fallback: str) -> str:
 
 _CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 _CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
+_CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
 
 
 def _current_datetime_str() -> str:
@@ -279,15 +280,9 @@ _TOOLS = [
         },
     },
     {
+        "type": "web_search_20250305",
         "name": "web_search",
-        "description": "Real-time web search (Tavily). Use for current events or recent information.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Web search query."},
-            },
-            "required": ["query"],
-        },
+        "max_uses": 5,
     },
     {
         "name": "fetch_url",
@@ -386,16 +381,6 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
         logger.error("kg_search error: %s", e)
         return f"Knowledge graph search failed: {e}"
 
-
-async def _exec_web_search(query: str) -> str:
-    """Execute Tavily web search via chatbot module."""
-    try:
-        from chatbot import web_search_tool
-        response = await asyncio.to_thread(web_search_tool.invoke, {"query": query})
-        return str(response)[:3000] if response else "No web results found."
-    except Exception as e:
-        logger.error("web_search error: %s", e)
-        return f"Web search failed: {e}"
 
 
 async def _exec_fetch_url(url: str) -> str:
@@ -525,7 +510,6 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
 _TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
-    "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,
@@ -1033,9 +1017,13 @@ async def _chat_with_tools(
     )
     cached_system = [{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}]
 
-    # Mark last tool for caching (system + tools form the cached prefix)
+    # Mark last custom tool for caching (skip server-side tools like web_search)
     cached_tools = [dict(t) for t in _TOOLS]
-    cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+    for i in range(len(cached_tools) - 1, -1, -1):
+        if cached_tools[i].get("type", "").startswith("web_search"):
+            continue  # server-side tool — can't add cache_control
+        cached_tools[i] = {**cached_tools[i], "cache_control": {"type": "ephemeral"}}
+        break
 
     for round_num in range(1, max_rounds + 1):
         response = await _claude.messages.create(
@@ -1046,19 +1034,32 @@ async def _chat_with_tools(
             messages=working_msgs,
         )
 
-        # If no tool use, extract and return text
-        if response.stop_reason != "tool_use":
+        # If no custom tool use, extract and return text
+        # (server-side tools like web_search are auto-handled, stop_reason is "end_turn")
+        if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens (%d) at round %d/%d", effective_max_tokens, round_num, max_rounds)
             text_parts = [b.text for b in response.content if b.type == "text"]
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
-        # Process tool calls
+        # Process tool calls (custom tools only; server-side blocks pass through)
         assistant_content = []
         tool_results = []
         for block in response.content:
             if block.type == "text":
                 assistant_content.append({"type": "text", "text": block.text})
+            elif block.type == "server_tool_use":
+                # Server-side tool (web_search) — pass through as-is
+                assistant_content.append({
+                    "type": "server_tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+                tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}(server-side)")
+            elif block.type == "web_search_tool_result":
+                # Server-side search result — pass through
+                assistant_content.append(block.model_dump())
             elif block.type == "tool_use":
                 assistant_content.append({
                     "type": "tool_use",
@@ -1066,7 +1067,7 @@ async def _chat_with_tools(
                     "name": block.name,
                     "input": block.input,
                 })
-                # Execute tool
+                # Execute custom tool
                 handler = _TOOL_HANDLERS.get(block.name)
                 if handler:
                     logger.info("Tool call: %s(%s)", block.name, json.dumps(block.input, ensure_ascii=False)[:200])
@@ -1090,7 +1091,11 @@ async def _chat_with_tools(
 
         # Append assistant message with tool_use + user message with tool_results
         working_msgs.append({"role": "assistant", "content": assistant_content})
-        working_msgs.append({"role": "user", "content": tool_results})
+        if tool_results:
+            working_msgs.append({"role": "user", "content": tool_results})
+        elif response.stop_reason == "pause_turn":
+            # Server-side tool paused (>10 iterations) — send empty to continue
+            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
 
     # Limit reached — force a final response WITHOUT tools so the model
     # summarizes everything it has gathered instead of discarding it.
