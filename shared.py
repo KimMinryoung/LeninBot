@@ -683,9 +683,8 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
             cleaned.append(line)
         return "\n".join(cleaned)
 
-    # Sites that load content in iframes — Tavily/BS4 can't extract, go to Playwright directly
-    _IFRAME_SITES = ("cafe.naver.com", "blog.naver.com")
-    if any(site in url for site in _IFRAME_SITES):
+    # Sites that need Playwright directly (JS-rendered, iframe, or API-gated)
+    if any(site in url for site in _PLAYWRIGHT_DIRECT_SITES):
         try:
             result = _playwright_fetch(url, max_chars)
             if result and len(result) > 50:
@@ -774,38 +773,91 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     return None
 
 
+# ── Playwright Browser Pool (async, singleton) ──────────────────────
+_pw_instance = None
+_pw_browser = None
+_pw_lock = threading.Lock()
+
+
+def _get_pw_browser():
+    """Lazy singleton: one persistent Chromium instance, reused across calls."""
+    global _pw_instance, _pw_browser
+    if _pw_browser is not None:
+        try:
+            # Check if browser is still alive
+            _pw_browser.contexts  # noqa — will raise if dead
+            return _pw_browser
+        except Exception:
+            _pw_browser = None
+            _pw_instance = None
+
+    with _pw_lock:
+        if _pw_browser is not None:
+            return _pw_browser
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return None
+        _pw_instance = sync_playwright().start()
+        _pw_browser = _pw_instance.chromium.launch(headless=True)
+        logger.info("[Playwright] Browser pool started")
+        return _pw_browser
+
+
+# Sites that need Playwright directly (JS-rendered or iframe-based)
+_PLAYWRIGHT_DIRECT_SITES = (
+    "cafe.naver.com", "blog.naver.com", "m.blog.naver.com",
+    "twitter.com", "x.com",
+    "instagram.com",
+    "youtube.com", "youtu.be",
+    "threads.net",
+)
+
+# Sites with content in iframes
+_IFRAME_SITES = ("cafe.naver.com", "blog.naver.com", "m.blog.naver.com")
+
+
 def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fetch URL content via Playwright (sync). Handles JS + iframe (e.g. Naver Cafe)."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
+    """Fetch URL content via Playwright (persistent browser pool). Handles JS + iframe."""
+    browser = _get_pw_browser()
+    if browser is None:
         return None
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                locale="ko-KR",
-            )
-            page.goto(url, wait_until="networkidle", timeout=30000)
+    page = None
+    try:
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            locale="ko-KR",
+        )
+        page.goto(url, wait_until="networkidle", timeout=30000)
 
-            # Naver Cafe/Blog: content is inside an iframe
-            target = page
-            if "cafe.naver.com" in url or "blog.naver.com" in url:
-                page.wait_for_timeout(3000)
-                for frame in page.frames:
-                    if any(p in frame.url for p in ("/ca-fe/cafes/", "ArticleRead", "PostView.naver")):
-                        target = frame
-                        break
+        # Naver Cafe/Blog: content is inside an iframe
+        target = page
+        if any(site in url for site in _IFRAME_SITES):
+            page.wait_for_timeout(3000)
+            for frame in page.frames:
+                if any(p in frame.url for p in ("/ca-fe/cafes/", "ArticleRead", "PostView.naver")):
+                    target = frame
+                    break
 
+        # YouTube: extract video title + description
+        if "youtube.com" in url or "youtu.be" in url:
+            text = page.evaluate("""() => {
+                const title = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1')?.innerText || '';
+                const desc = document.querySelector('#description-inline-expander, #description')?.innerText || '';
+                const chapters = [...document.querySelectorAll('ytd-macro-markers-list-item-renderer')]
+                    .map(el => el.innerText.trim()).join('\\n');
+                return [title, desc, chapters].filter(Boolean).join('\\n\\n');
+            }""")
+        else:
             text = target.evaluate("""() => {
                 ['nav','header','footer','aside','.sidebar','.menu',
                  '.advertisement','.ad','#comments','.comment','script','style']
                 .forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
                 const containers = ['article','main','[role="main"]',
                     '.post-content','.article-content','.entry-content',
-                    '.se-main-container','.ContentRenderer','#content','.content'];
+                    '.se-main-container','.ContentRenderer','#content','.content',
+                    '[data-testid="tweetText"]', '.tweet-text'];
                 for (const sel of containers) {
                     const el = document.querySelector(sel);
                     if (el && el.innerText.trim().length > 100) return el.innerText.trim();
@@ -813,12 +865,17 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
                 return document.body ? document.body.innerText.trim() : '';
             }""")
 
-            page.close()
-            if text and len(text) > 50:
-                logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))
-                return text[:max_chars]
-        finally:
-            browser.close()
+        if text and len(text) > 50:
+            logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))
+            return text[:max_chars]
+    except Exception as e:
+        logger.warning("[URL] Playwright page error (%s): %s", url[:60], e)
+    finally:
+        if page:
+            try:
+                page.close()
+            except Exception:
+                pass
 
     return None
 
