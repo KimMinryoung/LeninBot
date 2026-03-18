@@ -26,6 +26,9 @@ cd "$DEPLOY_DIR"
 sudo -u "$DEPLOY_USER" python3 -m venv venv
 sudo -u "$DEPLOY_USER" venv/bin/pip install -r requirements.txt --quiet
 
+echo "=== 4.5. Playwright 브라우저 설치 ==="
+sudo -u "$DEPLOY_USER" venv/bin/playwright install --with-deps chromium
+
 echo "=== 5. .env 파일 ==="
 if [ ! -f "$DEPLOY_DIR/.env" ]; then
     echo "⚠️  .env 파일을 직접 생성하세요: $DEPLOY_DIR/.env"

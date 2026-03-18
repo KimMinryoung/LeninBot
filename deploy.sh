@@ -35,6 +35,11 @@ if git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements"; then
     echo "의존성 변경 감지 → pip install"
     source "$VENV/bin/activate"
     pip install -r requirements.txt --quiet
+    # Playwright 브라우저 설치 (chromium만, 이미 있으면 스킵)
+    if pip show playwright > /dev/null 2>&1; then
+        echo "Playwright chromium 설치 확인..."
+        playwright install --with-deps chromium 2>/dev/null || true
+    fi
 else
     echo "의존성 변경 없음 → 스킵"
 fi
