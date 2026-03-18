@@ -179,19 +179,6 @@ SELF_TOOLS = [
             "required": ["query"],
         },
     },
-    {
-        "name": "read_source_code",
-        "description": "Read your own source code. Omit file to list available files.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file": {"type": "string", "description": "Relative path, e.g. 'chatbot.py'."},
-                "line_start": {"type": "integer", "description": "Start line (1-based)."},
-                "line_end": {"type": "integer", "description": "End line (inclusive)."},
-            },
-            "required": [],
-        },
-    },
 ]
 
 
@@ -479,73 +466,7 @@ async def _exec_create_task(
         return f"Failed to create task: {result['error']}"
 
 
-async def _exec_read_source_code(
-    file: str | None = None,
-    line_start: int | None = None,
-    line_end: int | None = None,
-) -> str:
-    import os
-    import pathlib
-
-    project_root = pathlib.Path(__file__).resolve().parent
-
-    # Allowed source file patterns (relative to project root)
-    _ALLOWED_FILES = [
-        "api.py", "chatbot.py", "db.py", "diary_writer.py",
-        "self_tools.py", "shared.py", "telegram_bot.py",
-        "update_knowledge.py", "render.yaml", "requirements.txt",
-        "graph_memory/__init__.py", "graph_memory/__main__.py",
-        "graph_memory/cli.py", "graph_memory/config.py",
-        "graph_memory/edges.py", "graph_memory/entities.py",
-        "graph_memory/graphiti_patches.py", "graph_memory/kr_news_fetcher.py",
-        "graph_memory/news_fetcher.py", "graph_memory/service.py",
-    ]
-
-    # List mode
-    if not file:
-        lines = ["Available source files:\n"]
-        for f in _ALLOWED_FILES:
-            full = project_root / f
-            if full.exists():
-                size = full.stat().st_size
-                lines.append(f"  {f}  ({size:,} bytes)")
-            else:
-                lines.append(f"  {f}  (not found)")
-        return "\n".join(lines)
-
-    # Normalize path separators
-    file = file.replace("\\", "/").strip("/")
-
-    # Security: block path traversal and sensitive files
-    if ".." in file or file.startswith("/"):
-        return "Error: invalid path."
-    if file not in _ALLOWED_FILES:
-        return (
-            f"Error: '{file}' is not a readable source file.\n"
-            f"Use read_source_code without arguments to list available files."
-        )
-
-    full_path = project_root / file
-    if not full_path.exists():
-        return f"Error: '{file}' not found."
-
-    try:
-        text = await asyncio.to_thread(full_path.read_text, "utf-8")
-    except Exception as e:
-        return f"Error reading '{file}': {e}"
-
-    lines = text.splitlines()
-    total = len(lines)
-
-    # Apply line range (1-based)
-    start = max(1, line_start or 1)
-    end = min(total, line_end or (start + 199))
-
-    selected = lines[start - 1 : end]
-    numbered = [f"{start + i:4d}  {line}" for i, line in enumerate(selected)]
-
-    header = f"=== {file} ({total} lines total, showing {start}-{end}) ===\n"
-    return header + "\n".join(numbered)
+    # read_source_code removed — replaced by read_file tool in telegram_bot.py
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -578,7 +499,6 @@ SELF_TOOL_HANDLERS = {
     "read_system_status": _exec_read_system_status,
     "read_server_logs": _exec_read_server_logs,
     "read_recent_updates": _exec_read_recent_updates,
-    "read_source_code": _exec_read_source_code,
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
     "create_task": _exec_create_task,
