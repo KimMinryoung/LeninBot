@@ -1,9 +1,9 @@
-# Project State Report — 2026-03-17
+# Project State Report — 2026-03-18
 
 ## Identity
 
 **Cyber-Lenin** (사이버-레닌) — A digital revolutionary intelligence with unified identity across four interfaces: web chatbot, Telegram agent, autonomous diary writer, and **local PC agent**. One continuous consciousness with shared memory and unified principles.
-Server deployed at Render.com, frontend at `bichonwebpage.onrender.com`. Local agent runs on Windows 10 PC.
+Server deployed at **Hetzner VPS** (Ubuntu 24.04, 16GB RAM), HTTPS via `leninbot.duckdns.org` (Nginx + Let's Encrypt). Frontend at `bichonwebpage.onrender.com`. Local agent runs on Windows 10 PC.
 
 ---
 
@@ -15,13 +15,12 @@ Server deployed at Render.com, frontend at `bichonwebpage.onrender.com`. Local a
      ┌────────────────────────────┼────────────────────────────┐
      │                            │                            │
 User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer.py)
-        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Haiku 4.5 (chat) / Sonnet 4.6 (task)
-           ─► PostgreSQL/pgvector              ─► vector_search (via chatbot.py)
-           ─► Gemini 3.1 Flash Lite (gen)      ─► knowledge_graph_search (via shared.py)
-           ─► Gemini 2.5 Flash-Lite (routing)  ─► web_search (via Tavily)
-           ─► Tavily Web Search                ─► Task report agent (structured .md)
-           ─► BGE-M3 embeddings (CPU)
-           ─► LangGraph MemorySaver
+        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Sonnet 4.6 (chat + task)
+           ─► PostgreSQL/pgvector              ─► Claude Haiku 4.5 (light, reserved)
+           ─► Gemini 3.1 Flash Lite (gen)      ─► vector_search (via chatbot.py)
+           ─► Gemini 2.5 Flash-Lite (routing)  ─► knowledge_graph_search (via shared.py)
+           ─► BGE-M3 embeddings (CPU)          ─► web_search (Claude built-in, server-side)
+           ─► LangGraph MemorySaver            ─► File system tools (read/write/list/execute_python)
 
      ─► GraphMemoryService (graph_memory/) ─► Neo4j (Graphiti knowledge graph)
                                              ─► Gemini 2.5 Flash (entity/edge extraction)
@@ -146,9 +145,9 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
 ├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
-├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, Render API, URL fetching
-├── self_tools.py             # Self-awareness tools: 12 tools (+write_kg, +create_task)
-├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Haiku 4.5 chat / Sonnet 4.6 task, ~870 lines)
+├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, URL fetching
+├── self_tools.py             # Self-awareness tools: 11 tools (+write_kg, +create_task, +read_server_logs, -render tools)
+├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Sonnet 4.6 chat/task + file system tools)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
@@ -208,11 +207,11 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
-16. **Telegram bot** (aiogram 3.x): Claude Haiku 4.5 (chat) / Sonnet 4.6 (task) with Anthropic tool-use (4 search tools + 11 self-tools); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), in-memory conversation history. Model IDs resolved dynamically via Anthropic Models API at startup.
+16. **Telegram bot** (aiogram 3.x): Claude Sonnet 4.6 (chat + task) with Anthropic tool-use (7 tools + 11 self-tools); Claude built-in web search (server-side); file system tools (read/write/list/execute_python); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), `/deploy` remote deployment trigger. Model IDs resolved dynamically via Anthropic Models API at startup.
 17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
-20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_render_status, fetch_render_logs, fetch_recent_updates). Telegram bot has 10 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, Render deploy status, Render live logs, recent feature updates, source code reader.
+20. **Cross-module shared memory**: shared.py provides unified memory access (fetch_diaries, fetch_chat_logs, fetch_task_reports, fetch_kg_stats, fetch_recent_updates). Telegram bot has 11 self-tools for full self-awareness: diary, chat logs, processing logs, task reports, KG status, system status, server logs (journalctl), recent feature updates, source code reader, write_kg, create_task.
 21. **Web chatbot self-knowledge**: analyze_intent selects one self-knowledge tool (read_diary/read_chat_logs/read_system_status/read_recent_updates) for self-referential queries; generate_node fetches and injects as [SELF-KNOWLEDGE] context.
 22. **URL content fetching**: 질문에 URL이 포함되면 실제 페이지 본문 추출 (Tavily Extract + BS4 fallback, 최대 10,000자). Web chatbot은 자동 감지, Telegram은 `fetch_url` 도구로 지원. `shared.py` 공통 모듈.
 23. **Experiential memory**: 매일 00:30 KST에 24시간 활동(web/telegram 대화, 완료 태스크)을 LLM으로 압축하여 pgvector에 저장. 교훈/실수/인사이트/패턴/관찰을 원자적 항목으로 축적. generate_node에서 유사도 검색으로 관련 경험을 `[PAST EXPERIENCE]`로 주입.
@@ -224,14 +223,38 @@ AIChatBot/
 2. **No long-term learning**: Stateless — doesn't improve from past interactions.
 3. **BGE-M3 on CPU**: Slow embeddings in production.
 4. **Bukharin missing**: 0 files — correct marxists.org URLs not yet found.
-5. **Stale render.yaml**: References OPENAI_API_KEY instead of GEMINI_API_KEY.
-6. **Single-worker deployment**: No concurrency across users (one Render instance).
-7. **Memory is in-process only**: MemorySaver doesn't persist across server restarts.
+5. **Stale render.yaml**: References OPENAI_API_KEY instead of GEMINI_API_KEY (Render no longer primary).
+6. **Memory is in-process only**: MemorySaver doesn't persist across server restarts.
 8. **Old junk arXiv in DB**: ~3,455 rows from math/telecom papers; semantically isolated.
 9. ~~**Telegram bot memory**~~: Fixed — PostgreSQL `telegram_chat_history` 테이블로 영구 저장 (20턴/40메시지 복원).
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-18 — Hetzner Migration + Telegram Bot Upgrade
+
+#### Infrastructure: Render → Hetzner VPS
+- **서버**: Hetzner VPS (Ubuntu 24.04, 16GB RAM) — Render 4GB 제한 탈피
+- **HTTPS**: DuckDNS (`leninbot.duckdns.org`) + Nginx reverse proxy + Let's Encrypt
+- **systemd 서비스**: `leninbot-api` (FastAPI port 8000), `leninbot-telegram` (aiogram)
+- **차분 배포**: `deploy.sh` — git diff → pull → conditional pip install → systemctl restart
+- **배포 알림 이중 경로**: deploy.sh가 curl로 Telegram 알림 + 새 봇이 deploy-meta.json 읽어 system_alert 주입
+- **`/deploy` 명령**: 텔레그램에서 원격 배포 트리거 (setsid로 분리 실행)
+- **파일**: `deploy.sh`, `setup-server.sh`, `systemd/leninbot-api.service`, `systemd/leninbot-telegram.service`, `doc/hetzner_deploy_guide.md`
+
+#### Telegram Bot: Sonnet 4.6 + File System + Claude Web Search
+- **Main LLM**: Claude Haiku 4.5 → **Claude Sonnet 4.6** (chat + task 통합)
+- **Light LLM**: `_CLAUDE_MODEL_LIGHT` (Haiku 4.5) 등록 — 향후 경량 작업용
+- **Web Search**: Tavily 커스텀 도구 → **Claude built-in** (`web_search_20250305`, 서버 사이드)
+- **파일 시스템 도구 추가**: `read_file`, `write_file`, `list_directory`, `execute_python` — 서버 직접 접근
+- **`_chat_with_tools()` 업데이트**: `server_tool_use`, `web_search_tool_result` 블록 처리, `pause_turn` 지원
+
+#### self_tools.py — Render → Hetzner 전환
+- **제거**: `read_render_status`, `read_render_logs` (주석처리)
+- **추가**: `read_server_logs` — journalctl로 telegram/api/nginx 서비스 로그 조회 (minutes_back, limit, grep 필터)
+
+#### shared.py — Infrastructure Self-Knowledge
+- **`MODULE_ARCHITECTURE`**: Hetzner VPS 인프라 정보 추가 (Ubuntu 24.04, 16GB, Nginx, /deploy)
 
 ### 2026-03-17 — Local PC Agent
 
