@@ -5,7 +5,7 @@
 set -e
 
 DEPLOY_USER="grass"
-REPO_URL="https://github.com/KimMinryoung/AIChatBot.git"
+REPO_URL="https://github.com/KimMinryoung/LeninBot.git"
 DEPLOY_DIR="/home/$DEPLOY_USER/leninbot"
 
 echo "=== 1. 시스템 패키지 설치 ==="

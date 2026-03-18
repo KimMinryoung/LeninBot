@@ -1,5 +1,15 @@
 # Hetzner 배포 가이드
 
+## 서버 정보
+
+| 항목 | 값 |
+|------|------|
+| IP | `37.27.33.127` |
+| 도메인 | `leninbot.duckdns.org` (DuckDNS) |
+| HTTPS | Nginx reverse proxy + Let's Encrypt |
+| API 접근 | `https://leninbot.duckdns.org` → Nginx → `localhost:8000` |
+| SSH 접속 | `ssh -i C:\Users\DESKTOP\leninbot root@37.27.33.127` |
+
 ## 파일 구성
 
 | 파일 | 용도 |
@@ -195,6 +205,17 @@ journalctl -u leninbot-telegram -f
 cat /tmp/leninbot-deploy.log
 ```
 
+## HTTPS 구성 (Nginx + Let's Encrypt)
+
+- **DuckDNS**: `leninbot.duckdns.org` → `37.27.33.127`
+- **Nginx config**: `/etc/nginx/sites-available/leninbot`
+- **SSL 인증서**: certbot 자동 갱신 (Let's Encrypt)
+- **흐름**: 외부 HTTPS 요청 → Nginx (443) → FastAPI (localhost:8000)
+
+BichonWebsite에서의 연결:
+- Render 환경변수: `CHAT_API_URL=https://leninbot.duckdns.org`
+- CSP connectSrc: `https://leninbot.duckdns.org` 허용
+
 ## 트러블슈팅
 
 | 증상 | 확인 |
@@ -205,3 +226,5 @@ cat /tmp/leninbot-deploy.log
 | 봇 기동 안 됨 | `.env` 파일의 `TELEGRAM_BOT_TOKEN` 확인 |
 | curl 알림 안 옴 | `.env`에 `ALLOWED_USER_IDS` 설정 확인 |
 | sudoers 권한 오류 | `visudo`로 `grass` 유저의 systemctl 권한 확인 |
+| 웹 채팅 연결 실패 | Mixed Content (HTTP/HTTPS) 확인, Nginx 상태 확인 (`systemctl status nginx`) |
+| SSL 인증서 만료 | `certbot renew --dry-run` 으로 갱신 테스트 |
