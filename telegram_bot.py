@@ -1223,6 +1223,97 @@ async def handle_message(message: Message):
         await message.answer(chunk)
 
 
+def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
+    """Ensure every tool_use/server_tool_use in assistant messages has a matching
+    tool_result/web_search_tool_result in the immediately following user message.
+
+    Missing results are injected as dummies to prevent 400 errors from the API.
+    Operates on a copy to avoid mutating the original list.
+    """
+    msgs = [dict(m) for m in msgs]  # shallow copy each message
+    i = 0
+    injected = 0
+    while i < len(msgs):
+        msg = msgs[i]
+        if msg.get("role") != "assistant":
+            i += 1
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            i += 1
+            continue
+
+        # Collect all tool IDs that need results
+        custom_ids = [
+            b["id"] for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_use"
+        ]
+        server_ids = [
+            b["id"] for b in content
+            if isinstance(b, dict) and b.get("type") == "server_tool_use"
+        ]
+        if not custom_ids and not server_ids:
+            i += 1
+            continue
+
+        # Check the next message for existing results
+        resolved_custom: set = set()
+        resolved_server: set = set()
+        next_content: list = []
+        if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
+            nc = msgs[i + 1].get("content", [])
+            if isinstance(nc, list):
+                next_content = nc
+                resolved_custom = {
+                    b.get("tool_use_id") for b in nc
+                    if isinstance(b, dict) and b.get("type") == "tool_result"
+                }
+                resolved_server = {
+                    b.get("tool_use_id") for b in nc
+                    if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+                }
+
+        # Build dummy results for unresolved IDs
+        dummies = []
+        for tid in custom_ids:
+            if tid not in resolved_custom:
+                dummies.append({
+                    "type": "tool_result",
+                    "tool_use_id": tid,
+                    "content": "[tool result unavailable]",
+                })
+        for tid in server_ids:
+            if tid not in resolved_server:
+                dummies.append({
+                    "type": "web_search_tool_result",
+                    "tool_use_id": tid,
+                    "content": [],
+                })
+
+        if dummies:
+            injected += len(dummies)
+            if next_content:
+                # Prepend dummies to existing user message content
+                msgs[i + 1] = {**msgs[i + 1], "content": dummies + next_content}
+            elif i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
+                # User message has string content — wrap into list
+                old = msgs[i + 1].get("content", "")
+                msgs[i + 1] = {
+                    "role": "user",
+                    "content": dummies + [{"type": "text", "text": str(old)}],
+                }
+            else:
+                # No user message after assistant — insert one
+                msgs.insert(i + 1, {"role": "user", "content": dummies})
+
+        i += 1  # move past assistant message
+        i += 1  # move past user message (existing or inserted)
+
+    if injected:
+        logger.warning("_ensure_tool_results: injected %d dummy result(s)", injected)
+    return msgs
+
+
 async def _chat_with_tools(
     messages: list[dict],
     max_rounds: int = 15,
@@ -1251,6 +1342,8 @@ async def _chat_with_tools(
         break
 
     for round_num in range(1, max_rounds + 1):
+        # Sanitize message structure before every API call
+        working_msgs = _ensure_tool_results(working_msgs)
         response = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
             max_tokens=effective_max_tokens,
@@ -1349,61 +1442,6 @@ async def _chat_with_tools(
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
     logger.warning("Tool round limit (%d) reached. Forcing final response. Calls:\n%s", max_rounds, log_detail)
 
-    # Fix: scan ALL assistant messages in working_msgs for unresolved server_tool_use
-    # (web_search) blocks. The old check only looked at working_msgs[-1], which missed
-    # cases where a user tool_result message was appended after the assistant turn —
-    # leaving the server_tool_use without a matching web_search_tool_result → 400.
-    _injected_dummy_count = 0
-    for _i, _msg in enumerate(working_msgs):
-        if _msg.get("role") != "assistant":
-            continue
-        _content = _msg.get("content", [])
-        if not isinstance(_content, list):
-            continue
-        _server_ids = [
-            b["id"] for b in _content
-            if isinstance(b, dict) and b.get("type") == "server_tool_use"
-        ]
-        if not _server_ids:
-            continue
-        # Collect IDs already resolved in the immediately following user message
-        _resolved_ids: set = set()
-        if _i + 1 < len(working_msgs):
-            _next = working_msgs[_i + 1]
-            if _next.get("role") == "user":
-                _next_content = _next.get("content", [])
-                if isinstance(_next_content, list):
-                    _resolved_ids = {
-                        b.get("tool_use_id")
-                        for b in _next_content
-                        if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-                    }
-        _unresolved = [sid for sid in _server_ids if sid not in _resolved_ids]
-        if not _unresolved:
-            continue
-        # Build dummy results for unresolved IDs
-        _dummy_results = [
-            {
-                "type": "web_search_tool_result",
-                "tool_use_id": _sid,
-                "content": [],  # empty result — search timed out / limit reached
-            }
-            for _sid in _unresolved
-        ]
-        # Insert or append the user message right after this assistant message
-        if _i + 1 < len(working_msgs) and working_msgs[_i + 1].get("role") == "user":
-            # Prepend to existing user message content list
-            _existing = working_msgs[_i + 1].get("content", [])
-            if isinstance(_existing, list):
-                working_msgs[_i + 1]["content"] = _dummy_results + _existing
-            else:
-                working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
-        else:
-            working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
-        _injected_dummy_count += len(_unresolved)
-    if _injected_dummy_count:
-        logger.warning("Post-loop: injected %d dummy web_search_tool_result(s) for unresolved server_tool_use blocks", _injected_dummy_count)
-
     # Inject a nudge so the model knows it must answer now
     working_msgs.append({
         "role": "user",
@@ -1412,6 +1450,8 @@ async def _chat_with_tools(
             "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
         ),
     })
+    # Sanitize: ensure ALL tool_use/server_tool_use have matching results
+    working_msgs = _ensure_tool_results(working_msgs)
     try:
         final = await _claude.messages.create(
             model=model or _CLAUDE_MODEL,
