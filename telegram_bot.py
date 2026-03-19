@@ -252,6 +252,7 @@ async def _ollama_generate(prompt: str, max_tokens: int = 512) -> str | None:
                     "model": _OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
+                    "think": False,  # disable thinking for speed on CPU
                     "options": {"num_predict": max_tokens, "temperature": 0.3},
                 },
             )
