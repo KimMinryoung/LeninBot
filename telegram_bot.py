@@ -1379,6 +1379,83 @@ async def handle_message(message: Message):
         task_id = task_row["id"] if task_row else "?"
         await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{task_id}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
 
+    # Auto-reflection: every 5 exchanges, reflect on recent conversations
+    _reflection_counter[user_id] = _reflection_counter.get(user_id, 0) + 1
+    if _reflection_counter[user_id] >= 5:
+        _reflection_counter[user_id] = 0
+        asyncio.create_task(_reflect_on_recent(user_id))
+
+
+# ── Auto-Reflection (experiential learning) ──────────────────────────
+_reflection_counter: dict[int, int] = {}
+
+_REFLECTION_PROMPT = """\
+아래 대화에서 배울 점을 추출해라. 다음 카테고리별로 1개씩만 (해당 없으면 생략):
+
+- **lesson**: 새로 배운 사실이나 지식
+- **mistake**: 잘못된 답변, 도구 오용, 사용자 수정이 있었던 부분
+- **pattern**: 반복적인 사용자 요구나 질문 패턴
+- **insight**: 분석/논의에서 도출된 깊은 통찰
+- **observation**: 기술적 발견이나 시스템 동작에 대한 관찰
+
+각 항목을 한 줄로, 앞에 카테고리를 붙여 작성. 예:
+lesson: 시리아 내전에서 러시아의 군사 개입은 2015년부터이며...
+mistake: 사용자가 물어본 것은 경제 제재인데 군사적 측면만 답변했음
+pattern: 사용자는 자주 한국 정치와 국제 정세의 연관성을 묻는다
+
+배울 게 없으면 "NONE"이라고만 답해.
+
+대화:
+"""
+
+
+async def _reflect_on_recent(user_id: int):
+    """Background task: reflect on recent conversations and save insights."""
+    try:
+        history = await asyncio.to_thread(_load_chat_history, user_id)
+        if len(history) < 4:
+            return  # too little to reflect on
+
+        # Build conversation text for reflection
+        conv_text = "\n".join(
+            f"[{m['role']}] {m['content'][:500]}" for m in history
+        )
+        prompt = _REFLECTION_PROMPT + conv_text
+
+        resp = await _claude.messages.create(
+            model=_CLAUDE_MODEL_LIGHT,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result = resp.content[0].text.strip()
+
+        if result.upper() == "NONE":
+            logger.info("Reflection: nothing to learn from recent conversation")
+            return
+
+        # Parse and save each insight
+        from shared import save_experiential_memory
+        valid_categories = {"lesson", "mistake", "pattern", "insight", "observation"}
+        saved = 0
+        for line in result.split("\n"):
+            line = line.strip().lstrip("- ")
+            if ":" not in line:
+                continue
+            cat, content = line.split(":", 1)
+            cat = cat.strip().lower()
+            content = content.strip()
+            if cat in valid_categories and len(content) > 10:
+                success = await asyncio.to_thread(
+                    save_experiential_memory, content, cat, "auto_reflection"
+                )
+                if success:
+                    saved += 1
+
+        if saved:
+            logger.info("Reflection: saved %d experience(s) from user %d conversation", saved, user_id)
+    except Exception as e:
+        logger.warning("Reflection failed: %s", e)
+
 
 def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
     """Ensure every tool_use/server_tool_use in assistant messages has a matching

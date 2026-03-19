@@ -652,6 +652,41 @@ def search_experiential_memory(query: str, k: int = 5) -> list[dict]:
         return []
 
 
+def save_experiential_memory(
+    content: str,
+    category: str,
+    source_type: str = "auto_reflection",
+) -> bool:
+    """Save an insight/lesson/pattern to experiential_memory with embedding.
+
+    Args:
+        content: The insight text.
+        category: One of: lesson, mistake, pattern, insight, observation.
+        source_type: Origin — auto_reflection, telegram_chat, web_chat, etc.
+
+    Returns:
+        True on success, False on failure.
+    """
+    from db import execute as db_execute
+
+    try:
+        emb = _get_exp_embeddings()
+        vec = emb.embed_query(content)
+        embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
+        now = datetime.now()
+        db_execute(
+            "INSERT INTO experiential_memory "
+            "(content, category, source_type, embedding, period_start, period_end) "
+            "VALUES (%s, %s, %s, %s::vector, %s, %s)",
+            (content, category, source_type, embedding_str, now, now),
+        )
+        logger.info("[shared] Saved experience: [%s] %s", category, content[:80])
+        return True
+    except Exception as e:
+        logger.warning("[shared] save_experiential_memory error: %s", e)
+        return False
+
+
 # ── URL Content Fetching ────────────────────────────────────────────
 # Shared across chatbot (web RAG) and telegram_bot (Claude agent).
 
