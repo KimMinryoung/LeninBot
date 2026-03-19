@@ -1010,7 +1010,7 @@ async def handle_message(message: Message):
 
 async def _chat_with_tools(
     messages: list[dict],
-    max_rounds: int = 5,
+    max_rounds: int = 15,
     system_prompt: str | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
@@ -1101,7 +1101,27 @@ async def _chat_with_tools(
 
         # Append assistant message with tool_use + user message with tool_results
         working_msgs.append({"role": "assistant", "content": assistant_content})
-        if tool_results:
+
+        # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
+        # EVERY round, not just at limit — missing result → 400 on next API call
+        pending_server_ids = [
+            b["id"] for b in assistant_content
+            if isinstance(b, dict) and b.get("type") == "server_tool_use"
+        ]
+        if pending_server_ids:
+            dummy_results = [
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": tid,
+                    "content": [],
+                }
+                for tid in pending_server_ids
+            ]
+            # Merge with any custom tool_results
+            user_content = dummy_results + tool_results
+            working_msgs.append({"role": "user", "content": user_content})
+            logger.debug("Injected %d dummy web_search_tool_result(s) mid-loop", len(pending_server_ids))
+        elif tool_results:
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             # Server-side tool paused (>10 iterations) — send empty to continue
@@ -1111,6 +1131,61 @@ async def _chat_with_tools(
     # summarizes everything it has gathered instead of discarding it.
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
     logger.warning("Tool round limit (%d) reached. Forcing final response. Calls:\n%s", max_rounds, log_detail)
+
+    # Fix: scan ALL assistant messages in working_msgs for unresolved server_tool_use
+    # (web_search) blocks. The old check only looked at working_msgs[-1], which missed
+    # cases where a user tool_result message was appended after the assistant turn —
+    # leaving the server_tool_use without a matching web_search_tool_result → 400.
+    _injected_dummy_count = 0
+    for _i, _msg in enumerate(working_msgs):
+        if _msg.get("role") != "assistant":
+            continue
+        _content = _msg.get("content", [])
+        if not isinstance(_content, list):
+            continue
+        _server_ids = [
+            b["id"] for b in _content
+            if isinstance(b, dict) and b.get("type") == "server_tool_use"
+        ]
+        if not _server_ids:
+            continue
+        # Collect IDs already resolved in the immediately following user message
+        _resolved_ids: set = set()
+        if _i + 1 < len(working_msgs):
+            _next = working_msgs[_i + 1]
+            if _next.get("role") == "user":
+                _next_content = _next.get("content", [])
+                if isinstance(_next_content, list):
+                    _resolved_ids = {
+                        b.get("tool_use_id")
+                        for b in _next_content
+                        if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+                    }
+        _unresolved = [sid for sid in _server_ids if sid not in _resolved_ids]
+        if not _unresolved:
+            continue
+        # Build dummy results for unresolved IDs
+        _dummy_results = [
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": _sid,
+                "content": [],  # empty result — search timed out / limit reached
+            }
+            for _sid in _unresolved
+        ]
+        # Insert or append the user message right after this assistant message
+        if _i + 1 < len(working_msgs) and working_msgs[_i + 1].get("role") == "user":
+            # Prepend to existing user message content list
+            _existing = working_msgs[_i + 1].get("content", [])
+            if isinstance(_existing, list):
+                working_msgs[_i + 1]["content"] = _dummy_results + _existing
+            else:
+                working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
+        else:
+            working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
+        _injected_dummy_count += len(_unresolved)
+    if _injected_dummy_count:
+        logger.warning("Post-loop: injected %d dummy web_search_tool_result(s) for unresolved server_tool_use blocks", _injected_dummy_count)
 
     # Inject a nudge so the model knows it must answer now
     working_msgs.append({
