@@ -1714,22 +1714,40 @@ async def _chat_with_tools(
                     logger.info("Tool call: %s(%s)", block.name, json.dumps(block.input, ensure_ascii=False)[:200])
                     try:
                         result = await handler(**block.input)
+                        is_error = False
                     except Exception as e:
                         logger.error("Tool %s execution error: %s", block.name, e)
                         _log_event("warning", "tool", f"Tool {block.name} failed: {e}")
                         result = f"Tool execution failed: {e}"
+                        is_error = True
                 else:
                     result = f"Unknown tool: {block.name}"
-                tool_results.append({
+                    is_error = True
+                tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": result,
-                })
+                }
+                if is_error:
+                    tool_result_block["is_error"] = True
+                tool_results.append(tool_result_block)
                 # Log for diagnostics
                 input_summary = json.dumps(block.input, ensure_ascii=False)
                 if len(input_summary) > 120:
                     input_summary = input_summary[:120] + "..."
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}({input_summary})")
+
+        # Safety net: ensure EVERY tool_use block has a matching tool_result
+        resolved_ids = {r["tool_use_id"] for r in tool_results}
+        for block in assistant_content:
+            if isinstance(block, dict) and block.get("type") == "tool_use" and block["id"] not in resolved_ids:
+                logger.warning("Safety net: missing tool_result for tool_use id=%s name=%s", block["id"], block.get("name"))
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block["id"],
+                    "content": f"Tool execution skipped (internal error): no result was produced for {block.get('name', 'unknown')}",
+                    "is_error": True,
+                })
 
         # Append assistant message with tool_use + user message with tool_results
         working_msgs.append({"role": "assistant", "content": assistant_content})
