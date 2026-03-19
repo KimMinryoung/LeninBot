@@ -282,6 +282,11 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - Server file management → list_directory, read_file, write_file
 - Data processing / automation → execute_python
 
+## Workload Management
+- 복잡한 리서치(여러 소스 비교, 장문 분석, 대량 데이터 처리)는 **처음부터 create_task**를 사용해라. 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 태스크로 전환.
+- 도구 한도에 도달하면 시스템이 자동으로 백그라운드 태스크를 생성할 수 있다. 하지만 사전에 판단해서 선제적으로 create_task를 쓰는 것이 더 좋다.
+- 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 작업을 이어가라.
+
 ## Response Rules
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
 
@@ -1216,11 +1221,35 @@ async def handle_message(message: Message):
         _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
         reply = f"오류가 발생했습니다: {e}"
 
+    # Auto-escalation: extract [CONTINUE_TASK: ...] marker and create background task
+    continuation_task = None
+    if "[CONTINUE_TASK:" in reply:
+        import re
+        match = re.search(r"\[CONTINUE_TASK:\s*(.+?)\]", reply, re.DOTALL)
+        if match:
+            continuation_task = match.group(1).strip()
+            # Remove the marker from the reply shown to user
+            reply = reply[:match.start()].rstrip()
+
     # Save assistant reply to DB
     await asyncio.to_thread(_save_chat_message, user_id, "assistant", reply)
 
     for chunk in _split_message(reply):
         await message.answer(chunk)
+
+    # Create background task for unfinished work
+    if continuation_task:
+        task_content = f"[자동 승격] 대화 중 미완료 작업 이어서 수행:\n{continuation_task}\n\n원래 질문: {user_text[:500]}"
+        await asyncio.to_thread(
+            _execute,
+            "INSERT INTO telegram_tasks (user_id, content, status) VALUES (%s, %s, 'pending')",
+            (user_id, task_content),
+        )
+        task_row = await asyncio.to_thread(
+            _query_one, "SELECT id FROM telegram_tasks WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,),
+        )
+        task_id = task_row["id"] if task_row else "?"
+        await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{task_id}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
 
 
 def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
@@ -1437,17 +1466,26 @@ async def _chat_with_tools(
             # Server-side tool paused (>10 iterations) — send empty to continue
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
 
-    # Limit reached — force a final response WITHOUT tools so the model
-    # summarizes everything it has gathered instead of discarding it.
+    # Limit reached — check if we should auto-escalate to background task
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
-    logger.warning("Tool round limit (%d) reached. Forcing final response. Calls:\n%s", max_rounds, log_detail)
+    was_still_working = response.stop_reason in ("tool_use", "pause_turn")
+    logger.warning("Tool round limit (%d) reached (still_working=%s). Forcing final response. Calls:\n%s",
+                    max_rounds, was_still_working, log_detail)
 
     # Inject a nudge so the model knows it must answer now
+    escalation_hint = ""
+    if was_still_working:
+        escalation_hint = (
+            " 미완료 작업이 있다면, 응답 맨 끝에 "
+            "\"[CONTINUE_TASK: 남은 작업 설명]\" 형식으로 한 줄 추가하세요. "
+            "시스템이 자동으로 백그라운드 태스크를 생성합니다."
+        )
     working_msgs.append({
         "role": "user",
         "content": (
             "[SYSTEM] 도구 호출 한도에 도달했습니다. 추가 도구를 사용하지 말고, "
             "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
+            + escalation_hint
         ),
     })
     # Sanitize: ensure ALL tool_use/server_tool_use have matching results
