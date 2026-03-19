@@ -1367,7 +1367,10 @@ async def cmd_deploy(message: Message):
             await status_msg.edit_text(f"❌ Deploy 실패 (exit {proc.returncode})\n```\n{result}\n```", parse_mode="Markdown")
     except Exception as e:
         # ServerDisconnectedError / CancelledError = bot killed by deploy restart — expected
-        if "Disconnect" in type(e).__name__ or isinstance(e, (asyncio.CancelledError, ConnectionError, OSError)):
+        err_name = type(e).__name__
+        err_str = str(e)
+        if ("Disconnect" in err_name or "Disconnect" in err_str
+                or isinstance(e, (asyncio.CancelledError, ConnectionError, OSError))):
             return  # deploy.sh curl handles notification
         try:
             await status_msg.edit_text(f"❌ Deploy 오류: {e}")
