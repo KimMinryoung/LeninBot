@@ -167,6 +167,40 @@ def _ensure_table():
             last_run_at TIMESTAMPTZ
         )
     """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_error_log (
+            id          SERIAL PRIMARY KEY,
+            level       VARCHAR(10) NOT NULL DEFAULT 'error',
+            source      VARCHAR(100) NOT NULL,
+            message     TEXT NOT NULL,
+            detail      TEXT,
+            task_id     INTEGER,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_error_log_created
+        ON telegram_error_log (created_at DESC)
+    """)
+
+
+# ── Error/Warning Logger ────────────────────────────────────────────
+def _log_event(
+    level: str,        # "error" | "warning"
+    source: str,       # e.g. "chat", "task", "tool", "final_response"
+    message: str,
+    detail: str | None = None,
+    task_id: int | None = None,
+) -> None:
+    """Persist an error or warning event to telegram_error_log."""
+    try:
+        _execute(
+            "INSERT INTO telegram_error_log (level, source, message, detail, task_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (level[:10], source[:100], message[:2000], detail[:4000] if detail else None, task_id),
+        )
+    except Exception as _le:
+        logger.warning("_log_event DB write failed: %s", _le)
 
 
 # ── Claude client ────────────────────────────────────────────────────
@@ -631,6 +665,7 @@ async def cmd_start(message: Message):
         "/schedule <cron> | <내용> — 정기 태스크 등록\n"
         "/schedules — 등록된 스케줄 목록\n"
         "/unschedule <id> — 스케줄 삭제\n"
+        "/errors — 최근 에러/경고 로그 조회\n"
         "/clear — 대화 히스토리 초기화"
     )
 
@@ -641,6 +676,57 @@ async def cmd_clear(message: Message):
         return
     await asyncio.to_thread(_clear_chat_history, message.from_user.id)
     await message.answer("대화 히스토리가 초기화되었습니다.")
+
+
+@router.message(Command("errors"))
+async def cmd_errors(message: Message):
+    """Show recent error/warning log entries."""
+    if not _is_allowed(message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/errors").strip()
+    # Parse optional limit and level filter
+    # Usage: /errors [n] [error|warning|all]
+    limit = 20
+    level_filter = None
+    for token in arg.split():
+        if token.isdigit():
+            limit = min(int(token), 50)
+        elif token.lower() in ("error", "warning", "warn"):
+            level_filter = "error" if token.lower() == "error" else "warning"
+    try:
+        if level_filter:
+            rows = await asyncio.to_thread(
+                _query,
+                "SELECT id, level, source, message, detail, task_id, created_at "
+                "FROM telegram_error_log WHERE level = %s "
+                "ORDER BY created_at DESC LIMIT %s",
+                (level_filter, limit),
+            )
+        else:
+            rows = await asyncio.to_thread(
+                _query,
+                "SELECT id, level, source, message, detail, task_id, created_at "
+                "FROM telegram_error_log ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+    except Exception as e:
+        await message.answer(f"에러 로그 조회 실패: {e}")
+        return
+    if not rows:
+        await message.answer("✅ 기록된 에러/경고 없음.")
+        return
+    level_icons = {"error": "🔴", "warning": "🟡"}
+    lines = [f"🗒️ *에러/경고 로그* (최근 {len(rows)}건)\n"]
+    for r in rows:
+        icon = level_icons.get(r["level"], "❓")
+        ts = r["created_at"].strftime("%m/%d %H:%M:%S")
+        task_info = f" [태스크#{r['task_id']}]" if r["task_id"] else ""
+        lines.append(
+            f"{icon} `{ts}` [{r['source']}]{task_info}\n"
+            f"   {r['message'][:120]}"
+        )
+    for chunk in _split_message("\n\n".join(lines)):
+        await message.answer(chunk, parse_mode="Markdown")
 
 
 @router.message(Command("chat"))
@@ -999,6 +1085,7 @@ async def handle_message(message: Message):
         reply = await _chat_with_tools(history)
     except Exception as e:
         logger.error("Claude API error: %s", e)
+        _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
         reply = f"오류가 발생했습니다: {e}"
 
     # Save assistant reply to DB
@@ -1049,6 +1136,7 @@ async def _chat_with_tools(
         if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens (%d) at round %d/%d", effective_max_tokens, round_num, max_rounds)
+                _log_event("warning", "chat", f"Response truncated by max_tokens ({effective_max_tokens}) at round {round_num}/{max_rounds}")
             text_parts = [b.text for b in response.content if b.type == "text"]
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
@@ -1085,6 +1173,7 @@ async def _chat_with_tools(
                         result = await handler(**block.input)
                     except Exception as e:
                         logger.error("Tool %s execution error: %s", block.name, e)
+                        _log_event("warning", "tool", f"Tool {block.name} failed: {e}")
                         result = f"Tool execution failed: {e}"
                 else:
                     result = f"Unknown tool: {block.name}"
@@ -1208,6 +1297,7 @@ async def _chat_with_tools(
         return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
     except Exception as e:
         logger.error("Final forced response failed: %s", e)
+        _log_event("error", "final_response", f"Final forced response failed: {e}")
         return f"⚠️ 도구 호출 한도({max_rounds}회) 도달 후 응답 생성 실패: {e}"
 
 
@@ -1314,6 +1404,11 @@ async def _process_task(bot: Bot, task: dict):
 
             # Final failure or non-rate-limit error
             logger.error("Task %d failed: %s", task_id, e)
+            await asyncio.to_thread(
+                _log_event, "error", "task",
+                f"Task {task_id} failed: {e}",
+                detail=content[:500], task_id=task_id,
+            )
             await asyncio.to_thread(
                 _execute,
                 "UPDATE telegram_tasks SET status = 'failed', result = %s, "
