@@ -24,7 +24,10 @@ from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import (
+    Message, BufferedInputFile,
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+)
 from aiogram.filters import Command
 import anthropic
 
@@ -164,6 +167,40 @@ def _ensure_table():
             last_run_at TIMESTAMPTZ
         )
     """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_error_log (
+            id          SERIAL PRIMARY KEY,
+            level       VARCHAR(10) NOT NULL DEFAULT 'error',
+            source      VARCHAR(100) NOT NULL,
+            message     TEXT NOT NULL,
+            detail      TEXT,
+            task_id     INTEGER,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_error_log_created
+        ON telegram_error_log (created_at DESC)
+    """)
+
+
+# ── Error/Warning Logger ────────────────────────────────────────────
+def _log_event(
+    level: str,        # "error" | "warning"
+    source: str,       # e.g. "chat", "task", "tool", "final_response"
+    message: str,
+    detail: str | None = None,
+    task_id: int | None = None,
+) -> None:
+    """Persist an error or warning event to telegram_error_log."""
+    try:
+        _execute(
+            "INSERT INTO telegram_error_log (level, source, message, detail, task_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (level[:10], source[:100], message[:2000], detail[:4000] if detail else None, task_id),
+        )
+    except Exception as _le:
+        logger.warning("_log_event DB write failed: %s", _le)
 
 
 # ── Claude client ────────────────────────────────────────────────────
@@ -608,6 +645,7 @@ def _is_allowed(user_id: int) -> bool:
 
 
 # ── Router & Handlers ───────────────────────────────────────────────
+_pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → entry)
 router = Router()
 
 
@@ -627,6 +665,7 @@ async def cmd_start(message: Message):
         "/schedule <cron> | <내용> — 정기 태스크 등록\n"
         "/schedules — 등록된 스케줄 목록\n"
         "/unschedule <id> — 스케줄 삭제\n"
+        "/errors — 최근 에러/경고 로그 조회\n"
         "/clear — 대화 히스토리 초기화"
     )
 
@@ -637,6 +676,57 @@ async def cmd_clear(message: Message):
         return
     await asyncio.to_thread(_clear_chat_history, message.from_user.id)
     await message.answer("대화 히스토리가 초기화되었습니다.")
+
+
+@router.message(Command("errors"))
+async def cmd_errors(message: Message):
+    """Show recent error/warning log entries."""
+    if not _is_allowed(message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/errors").strip()
+    # Parse optional limit and level filter
+    # Usage: /errors [n] [error|warning|all]
+    limit = 20
+    level_filter = None
+    for token in arg.split():
+        if token.isdigit():
+            limit = min(int(token), 50)
+        elif token.lower() in ("error", "warning", "warn"):
+            level_filter = "error" if token.lower() == "error" else "warning"
+    try:
+        if level_filter:
+            rows = await asyncio.to_thread(
+                _query,
+                "SELECT id, level, source, message, detail, task_id, created_at "
+                "FROM telegram_error_log WHERE level = %s "
+                "ORDER BY created_at DESC LIMIT %s",
+                (level_filter, limit),
+            )
+        else:
+            rows = await asyncio.to_thread(
+                _query,
+                "SELECT id, level, source, message, detail, task_id, created_at "
+                "FROM telegram_error_log ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+    except Exception as e:
+        await message.answer(f"에러 로그 조회 실패: {e}")
+        return
+    if not rows:
+        await message.answer("✅ 기록된 에러/경고 없음.")
+        return
+    level_icons = {"error": "🔴", "warning": "🟡"}
+    lines = [f"🗒️ *에러/경고 로그* (최근 {len(rows)}건)\n"]
+    for r in rows:
+        icon = level_icons.get(r["level"], "❓")
+        ts = r["created_at"].strftime("%m/%d %H:%M:%S")
+        task_info = f" [태스크#{r['task_id']}]" if r["task_id"] else ""
+        lines.append(
+            f"{icon} `{ts}` [{r['source']}]{task_info}\n"
+            f"   {r['message'][:120]}"
+        )
+    for chunk in _split_message("\n\n".join(lines)):
+        await message.answer(chunk, parse_mode="Markdown")
 
 
 @router.message(Command("chat"))
@@ -995,6 +1085,7 @@ async def handle_message(message: Message):
         reply = await _chat_with_tools(history)
     except Exception as e:
         logger.error("Claude API error: %s", e)
+        _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
         reply = f"오류가 발생했습니다: {e}"
 
     # Save assistant reply to DB
@@ -1006,7 +1097,7 @@ async def handle_message(message: Message):
 
 async def _chat_with_tools(
     messages: list[dict],
-    max_rounds: int = 5,
+    max_rounds: int = 15,
     system_prompt: str | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
@@ -1045,6 +1136,7 @@ async def _chat_with_tools(
         if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens (%d) at round %d/%d", effective_max_tokens, round_num, max_rounds)
+                _log_event("warning", "chat", f"Response truncated by max_tokens ({effective_max_tokens}) at round {round_num}/{max_rounds}")
             text_parts = [b.text for b in response.content if b.type == "text"]
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
@@ -1081,6 +1173,7 @@ async def _chat_with_tools(
                         result = await handler(**block.input)
                     except Exception as e:
                         logger.error("Tool %s execution error: %s", block.name, e)
+                        _log_event("warning", "tool", f"Tool {block.name} failed: {e}")
                         result = f"Tool execution failed: {e}"
                 else:
                     result = f"Unknown tool: {block.name}"
@@ -1097,7 +1190,27 @@ async def _chat_with_tools(
 
         # Append assistant message with tool_use + user message with tool_results
         working_msgs.append({"role": "assistant", "content": assistant_content})
-        if tool_results:
+
+        # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
+        # EVERY round, not just at limit — missing result → 400 on next API call
+        pending_server_ids = [
+            b["id"] for b in assistant_content
+            if isinstance(b, dict) and b.get("type") == "server_tool_use"
+        ]
+        if pending_server_ids:
+            dummy_results = [
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": tid,
+                    "content": [],
+                }
+                for tid in pending_server_ids
+            ]
+            # Merge with any custom tool_results
+            user_content = dummy_results + tool_results
+            working_msgs.append({"role": "user", "content": user_content})
+            logger.debug("Injected %d dummy web_search_tool_result(s) mid-loop", len(pending_server_ids))
+        elif tool_results:
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             # Server-side tool paused (>10 iterations) — send empty to continue
@@ -1107,6 +1220,61 @@ async def _chat_with_tools(
     # summarizes everything it has gathered instead of discarding it.
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
     logger.warning("Tool round limit (%d) reached. Forcing final response. Calls:\n%s", max_rounds, log_detail)
+
+    # Fix: scan ALL assistant messages in working_msgs for unresolved server_tool_use
+    # (web_search) blocks. The old check only looked at working_msgs[-1], which missed
+    # cases where a user tool_result message was appended after the assistant turn —
+    # leaving the server_tool_use without a matching web_search_tool_result → 400.
+    _injected_dummy_count = 0
+    for _i, _msg in enumerate(working_msgs):
+        if _msg.get("role") != "assistant":
+            continue
+        _content = _msg.get("content", [])
+        if not isinstance(_content, list):
+            continue
+        _server_ids = [
+            b["id"] for b in _content
+            if isinstance(b, dict) and b.get("type") == "server_tool_use"
+        ]
+        if not _server_ids:
+            continue
+        # Collect IDs already resolved in the immediately following user message
+        _resolved_ids: set = set()
+        if _i + 1 < len(working_msgs):
+            _next = working_msgs[_i + 1]
+            if _next.get("role") == "user":
+                _next_content = _next.get("content", [])
+                if isinstance(_next_content, list):
+                    _resolved_ids = {
+                        b.get("tool_use_id")
+                        for b in _next_content
+                        if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+                    }
+        _unresolved = [sid for sid in _server_ids if sid not in _resolved_ids]
+        if not _unresolved:
+            continue
+        # Build dummy results for unresolved IDs
+        _dummy_results = [
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": _sid,
+                "content": [],  # empty result — search timed out / limit reached
+            }
+            for _sid in _unresolved
+        ]
+        # Insert or append the user message right after this assistant message
+        if _i + 1 < len(working_msgs) and working_msgs[_i + 1].get("role") == "user":
+            # Prepend to existing user message content list
+            _existing = working_msgs[_i + 1].get("content", [])
+            if isinstance(_existing, list):
+                working_msgs[_i + 1]["content"] = _dummy_results + _existing
+            else:
+                working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
+        else:
+            working_msgs.insert(_i + 1, {"role": "user", "content": _dummy_results})
+        _injected_dummy_count += len(_unresolved)
+    if _injected_dummy_count:
+        logger.warning("Post-loop: injected %d dummy web_search_tool_result(s) for unresolved server_tool_use blocks", _injected_dummy_count)
 
     # Inject a nudge so the model knows it must answer now
     working_msgs.append({
@@ -1129,6 +1297,7 @@ async def _chat_with_tools(
         return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
     except Exception as e:
         logger.error("Final forced response failed: %s", e)
+        _log_event("error", "final_response", f"Final forced response failed: {e}")
         return f"⚠️ 도구 호출 한도({max_rounds}회) 도달 후 응답 생성 실패: {e}"
 
 
@@ -1174,57 +1343,83 @@ async def _process_task(bot: Bot, task: dict):
     content = task["content"]
     is_self_generated = (user_id == 0)
 
-    try:
-        report = await _chat_with_tools(
-            [{"role": "user", "content": content}],
-            max_rounds=15,
-            system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
-            model=_CLAUDE_MODEL_STRONG,
-            max_tokens=_CLAUDE_MAX_TOKENS_TASK,
-        )
+    max_retries = 10
+    retry_delay = 60  # seconds
 
-        # Save full report to DB
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET status = 'done', result = %s, "
-            "completed_at = NOW() WHERE id = %s",
-            (report, task_id),
-        )
+    for attempt in range(max_retries):
+        try:
+            report = await _chat_with_tools(
+                [{"role": "user", "content": content}],
+                max_rounds=15,
+                system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
+                model=_CLAUDE_MODEL_STRONG,
+                max_tokens=_CLAUDE_MAX_TOKENS_TASK,
+            )
 
-        # Classify priority
-        priority = _classify_priority(content, report)
-        priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
+            # Save full report to DB
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET status = 'done', result = %s, "
+                "completed_at = NOW() WHERE id = %s",
+                (report, task_id),
+            )
 
-        # Send report as Markdown file
-        filename = f"report_task_{task_id}.md"
-        doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
-        summary = _extract_summary(report)
-        origin = " (자율 생성)" if is_self_generated else ""
-        caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
+            # Classify priority
+            priority = _classify_priority(content, report)
+            priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
 
-        if is_self_generated:
-            # Self-generated task: broadcast to all users
-            for uid in ALLOWED_USER_IDS:
-                try:
-                    await bot.send_document(chat_id=uid, document=doc, caption=caption)
-                except Exception:
-                    pass
-        else:
-            await bot.send_document(chat_id=user_id, document=doc, caption=caption)
+            # Send report as Markdown file
+            filename = f"report_task_{task_id}.md"
+            doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
+            summary = _extract_summary(report)
+            origin = " (자율 생성)" if is_self_generated else ""
+            caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
 
-    except Exception as e:
-        logger.error("Task %d failed: %s", task_id, e)
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET status = 'failed', result = %s, "
-            "completed_at = NOW() WHERE id = %s",
-            (str(e), task_id),
-        )
-        error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
-        if is_self_generated:
-            await _broadcast(bot, error_msg)
-        else:
-            await bot.send_message(chat_id=user_id, text=error_msg)
+            if is_self_generated:
+                # Self-generated task: broadcast to all users
+                for uid in ALLOWED_USER_IDS:
+                    try:
+                        await bot.send_document(chat_id=uid, document=doc, caption=caption)
+                    except Exception:
+                        pass
+            else:
+                await bot.send_document(chat_id=user_id, document=doc, caption=caption)
+
+            return  # success
+
+        except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = (
+                "rate_limit" in err_str or
+                "overloaded" in err_str or
+                "529" in err_str or
+                "429" in err_str or
+                "too many requests" in err_str
+            )
+
+            if is_rate_limit and attempt < max_retries - 1:
+                logger.warning("Task %d rate limited (attempt %d/%d), retrying in %ds...", task_id, attempt + 1, max_retries, retry_delay)
+                await asyncio.sleep(retry_delay)
+                continue
+
+            # Final failure or non-rate-limit error
+            logger.error("Task %d failed: %s", task_id, e)
+            await asyncio.to_thread(
+                _log_event, "error", "task",
+                f"Task {task_id} failed: {e}",
+                detail=content[:500], task_id=task_id,
+            )
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET status = 'failed', result = %s, "
+                "completed_at = NOW() WHERE id = %s",
+                (str(e), task_id),
+            )
+            error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
+            if is_self_generated:
+                await _broadcast(bot, error_msg)
+            else:
+                await bot.send_message(chat_id=user_id, text=error_msg)
 
 
 async def _broadcast(bot: Bot, text: str):
@@ -1375,6 +1570,145 @@ async def _check_deploy_meta(bot: Bot):
 
 
 # ── Entry Point ──────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════
+#  자가수정 핸들러 — Telegram 전용 (chatbot.py에는 없음)
+# ═══════════════════════════════════════════════════════════════
+
+@router.message(Command("modify"))
+async def cmd_modify(message: Message):
+    """자가수정 명령어 — 허가된 Telegram 사용자만"""
+    if not _is_allowed(message.from_user.id):
+        return
+    import os as _os, time as _time, uuid as _uuid
+    content = (message.text or "").removeprefix("/modify").strip()
+    parts = content.split("|", 2)
+    if len(parts) != 3:
+        await message.answer(
+            "사용법:\n`/modify <파일경로> | <수정이유> | <새 내용 전체>`",
+            parse_mode="Markdown"
+        )
+        return
+
+    filepath, reason, new_content = [p.strip() for p in parts]
+
+    # 경로 보안: leninbot 디렉토리 밖 거부
+    base = "/home/grass/leninbot"
+    abs_path = _os.path.realpath(_os.path.join(base, filepath))
+    if not abs_path.startswith(base):
+        await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
+        return
+    if not _os.path.isfile(abs_path):
+        await message.answer(f"❌ 파일을 찾을 수 없어: `{filepath}`", parse_mode="Markdown")
+        return
+
+    # diff 생성
+    import difflib as _dl
+    try:
+        with open(abs_path, "r", encoding="utf-8") as _f:
+            old_content = _f.read()
+        diff_lines = list(_dl.unified_diff(
+            old_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{filepath}",
+            tofile=f"b/{filepath}",
+            lineterm=""
+        ))
+        diff_text = "".join(diff_lines)
+        insertions = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+        deletions  = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+    except Exception as e:
+        await message.answer(f"❌ diff 생성 실패: {e}")
+        return
+
+    if not diff_lines:
+        await message.answer("ℹ️ 변경사항 없음. 현재 파일과 동일해.")
+        return
+
+    # 승인 대기 등록 (5분 유효)
+    approval_id = str(_uuid.uuid4())[:8]
+    _pending_approvals[approval_id] = {
+        "filepath": abs_path,
+        "new_content": new_content,
+        "reason": reason,
+        "expire": _time.time() + 300,
+    }
+
+    diff_preview = diff_text[:3000] + ("\n…(생략)…" if len(diff_text) > 3000 else "")
+    summary = (
+        f"📝 *자가수정 요청*\n"
+        f"파일: `{filepath}`\n"
+        f"이유: {reason}\n"
+        f"변경: +{insertions} / -{deletions} 라인\n\n"
+        f"```\n{diff_preview}\n```"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ 승인", callback_data=f"selfmod_approve:{approval_id}"),
+        InlineKeyboardButton(text="❌ 거부", callback_data=f"selfmod_reject:{approval_id}"),
+    ]])
+    await message.answer(summary, parse_mode="Markdown", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("selfmod_approve:"))
+async def cb_modify_approve(callback: CallbackQuery):
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    import time as _time
+    approval_id = callback.data.split(":", 1)[1]
+    entry = _pending_approvals.pop(approval_id, None)
+    if entry is None:
+        await callback.message.edit_text("⚠️ 승인 정보를 찾을 수 없어. 만료됐거나 이미 처리됨.")
+        return
+    if _time.time() > entry["expire"]:
+        await callback.message.edit_text("⏰ 승인 시간 초과 (5분). 다시 `/modify`를 실행해.")
+        return
+
+    await callback.message.edit_text("⚙️ 패치 적용 중…")
+    await callback.answer()
+
+    sys.path.insert(0, "/home/grass/leninbot")
+    from self_modification_core import self_modify_with_safety
+    try:
+        result = await self_modify_with_safety(
+            filepath=entry["filepath"],
+            new_content=entry["new_content"],
+            reason=entry["reason"],
+            request_approval=False,
+            skip_tests=False,
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ 패치 적용 중 예외 발생:\n`{e}`", parse_mode="Markdown"
+        )
+        return
+
+    if result.status == "success":
+        commit_info = f"\n커밋: `{result.commit_hash}`" if result.commit_hash else ""
+        await callback.message.edit_text(
+            f"✅ *패치 완료*\n"
+            f"파일: `{result.filepath}`\n"
+            f"변경: {result.changes_count} 라인{commit_info}\n"
+            f"⚠️ 재시작 후 적용됩니다.",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ *패치 실패* ({result.status})\n`{result.error}`",
+            parse_mode="Markdown"
+        )
+
+
+@router.callback_query(F.data.startswith("selfmod_reject:"))
+async def cb_modify_reject(callback: CallbackQuery):
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    approval_id = callback.data.split(":", 1)[1]
+    _pending_approvals.pop(approval_id, None)
+    await callback.message.edit_text("❌ 수정 거부됨. 원본 파일 유지.")
+    await callback.answer()
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
