@@ -1342,8 +1342,17 @@ async def handle_message(message: Message):
     history = await asyncio.to_thread(_load_chat_history, user_id)
     history = await _compress_history(history)
 
+    # Auto-recall: fetch relevant past experiences for context injection
+    experience_context = await _fetch_relevant_experiences(user_text)
+
     try:
-        reply = await _chat_with_tools(history)
+        system_override = None
+        if experience_context:
+            system_override = _SYSTEM_PROMPT_TEMPLATE.format(
+                current_datetime=_current_datetime_str(),
+                system_alerts=_format_system_alerts(),
+            ) + experience_context
+        reply = await _chat_with_tools(history, system_prompt=system_override)
     except Exception as e:
         logger.error("Claude API error: %s", e)
         _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
@@ -1386,8 +1395,31 @@ async def handle_message(message: Message):
         asyncio.create_task(_reflect_on_recent(user_id))
 
 
-# ── Auto-Reflection (experiential learning) ──────────────────────────
+# ── Auto-Recall & Reflection (experiential learning) ─────────────────
 _reflection_counter: dict[int, int] = {}
+
+
+async def _fetch_relevant_experiences(user_text: str) -> str:
+    """Search experiential_memory for insights relevant to the user's message.
+
+    Returns a formatted context string to inject into the system prompt,
+    or empty string if nothing relevant found.
+    """
+    try:
+        from shared import search_experiential_memory
+        results = await asyncio.to_thread(search_experiential_memory, user_text, 3)
+        if not results:
+            return ""
+        lines = ["\n## Past Experiences (auto-recalled)"]
+        for r in results:
+            cat = r.get("category", "?")
+            sim = r.get("similarity", 0)
+            lines.append(f"- [{cat}] {r['content']}")
+        lines.append("위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("Experience recall failed (non-critical): %s", e)
+        return ""
 
 _REFLECTION_PROMPT = """\
 아래 대화에서 배울 점을 추출해라. 다음 카테고리별로 1개씩만 (해당 없으면 생략):
