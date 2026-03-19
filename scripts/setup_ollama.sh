@@ -29,16 +29,29 @@ fi
 echo "Qwen3.5:4b 다운로드 중... (약 2.5GB)"
 ollama pull qwen3.5:4b
 
-# 4. 동작 확인
+# 4. nothink 커스텀 모델 생성 (thinking 비활성화 — CPU 속도 최적화)
+echo "nothink 모델 생성 중..."
+cat > /tmp/Modelfile << 'MODELEOF'
+FROM qwen3.5:4b
+PARAMETER num_predict 512
+PARAMETER temperature 0.3
+TEMPLATE "{{- if .System }}{{ .System }}{{ end }}{{ .Prompt }}"
+MODELEOF
+
+ollama create qwen3.5-nothink -f /tmp/Modelfile
+rm -f /tmp/Modelfile
+echo "qwen3.5-nothink 생성 완료"
+
+# 5. 동작 확인
 echo ""
 echo "=== 설치 검증 ==="
 ollama list
 echo ""
-echo "테스트 실행..."
-RESPONSE=$(ollama run qwen3.5:4b "Say 'Hello' in Korean. Reply in one word only." 2>/dev/null | head -1)
+echo "테스트 실행 (nothink)..."
+RESPONSE=$(ollama run qwen3.5-nothink "Say 'Hello' in Korean. Reply in one word only." 2>/dev/null | head -1)
 echo "모델 응답: $RESPONSE"
 
-# 5. API 접근 확인
+# 6. API 접근 확인
 echo ""
 echo "API 확인 (localhost:11434)..."
 curl -s http://localhost:11434/api/tags | python3 -c "
@@ -50,5 +63,6 @@ for m in data.get('models', []):
 
 echo ""
 echo "=== 설치 완료 ==="
-echo "사용법: ollama run qwen3.5:4b"
+echo "사용법: ollama run qwen3.5-nothink"
 echo "API: http://localhost:11434"
+echo "telegram_bot.py 기본 모델: qwen3.5-nothink"
