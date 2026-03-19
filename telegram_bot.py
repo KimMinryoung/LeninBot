@@ -463,18 +463,101 @@ async def _exec_read_file(path: str, line_start: int | None = None, line_end: in
         return f"Error reading file: {e}"
 
 
+_WRITE_ALLOWED_DIRS = ["research", "docs", "logs", "temp_dev", "data"]
+_WRITE_ALLOWED_EXTENSIONS = [".md", ".txt", ".json", ".csv", ".log", ".yaml", ".yml"]
+
+
 async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> str:
-    """Write content to a file on the server."""
+    """Write content to a file on the server.
+
+    Safety rules:
+    - .py files → routed through self_modification_core (Git backup + syntax check)
+    - Other files in allowed dirs → written directly
+    - Files outside project root → blocked
+    """
     project_root = os.path.dirname(os.path.abspath(__file__))
     if not os.path.isabs(path):
         path = os.path.join(project_root, path)
+    abs_path = os.path.realpath(path)
+
+    # Block writes outside project root
+    if not (abs_path == project_root or abs_path.startswith(project_root + "/")):
+        return f"❌ Write denied: path is outside project root"
+
+    rel_path = os.path.relpath(abs_path, project_root)
+    ext = os.path.splitext(abs_path)[1].lower()
+
+    # .py files → safe modification path (Git backup + syntax check)
+    if ext == ".py":
+        try:
+            sys.path.insert(0, project_root)
+            from self_modification_core import (
+                git_backup_before_modification,
+                generate_line_patch,
+                apply_line_patch_safe,
+                run_sandbox_tests,
+                git_reset_to_commit,
+            )
+            # Read original (if exists)
+            old_content = ""
+            if os.path.isfile(abs_path):
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    old_content = f.read()
+
+            # Syntax check new content first
+            import ast
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                return f"❌ Syntax error in new content: {e}"
+
+            # Git backup
+            if os.path.isfile(abs_path):
+                commit_hash = git_backup_before_modification(abs_path)
+            else:
+                commit_hash = None
+
+            # Write the file
+            os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # Run sandbox tests
+            test_results = run_sandbox_tests(abs_path)
+            if test_results.status == "fail":
+                # Rollback
+                if commit_hash:
+                    git_reset_to_commit(commit_hash)
+                elif os.path.isfile(abs_path):
+                    os.unlink(abs_path)
+                return f"❌ Sandbox tests failed — rolled back.\n{test_results}"
+
+            size = os.path.getsize(abs_path)
+            backup_info = f", git backup: {commit_hash[:7]}" if commit_hash else ""
+            return f"✅ Written {len(content)} chars to {rel_path} (size: {size}B{backup_info}, tests: PASS)"
+        except Exception as e:
+            return f"Error writing .py file safely: {e}"
+
+    # Non-code files: allow in specific dirs or with safe extensions
+    rel_parts = rel_path.replace("\\", "/").split("/")
+    in_allowed_dir = any(rel_parts[0] == d for d in _WRITE_ALLOWED_DIRS) if rel_parts else False
+    has_safe_ext = ext in _WRITE_ALLOWED_EXTENSIONS
+
+    if not (in_allowed_dir or has_safe_ext):
+        return (
+            f"❌ Write denied: {rel_path}\n"
+            f"Allowed dirs: {_WRITE_ALLOWED_DIRS}\n"
+            f"Allowed extensions: {_WRITE_ALLOWED_EXTENSIONS}\n"
+            f"For .py files, write is allowed with automatic safety checks."
+        )
+
     try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
         write_mode = "a" if mode == "append" else "w"
-        with open(path, write_mode, encoding="utf-8") as f:
+        with open(abs_path, write_mode, encoding="utf-8") as f:
             f.write(content)
-        size = os.path.getsize(path)
-        return f"Written {len(content)} chars to {path} (total size: {size} bytes, mode: {mode})"
+        size = os.path.getsize(abs_path)
+        return f"Written {len(content)} chars to {rel_path} (size: {size}B, mode: {mode})"
     except Exception as e:
         return f"Error writing file: {e}"
 
@@ -516,14 +599,56 @@ async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bo
         return f"Error listing directory: {e}"
 
 
+_BLOCKED_CODE_PATTERNS = [
+    # Destructive file operations
+    "shutil.rmtree", "os.rmdir", "os.removedirs",
+    # System-level danger
+    "os.system(", "os.exec",
+    # Credential/env exfiltration
+    "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
+    "GEMINI_API_KEY", "OPENAI_API_KEY",
+]
+
+
+def _check_code_safety(code: str) -> str | None:
+    """Return error message if code contains blocked patterns, None if safe."""
+    import ast
+
+    # 1. Syntax check
+    try:
+        ast.parse(code)
+    except SyntaxError as e:
+        return f"Syntax error: {e}"
+
+    # 2. Blocked string patterns (credentials, destructive ops)
+    for pattern in _BLOCKED_CODE_PATTERNS:
+        if pattern in code:
+            return f"Blocked: code contains '{pattern}'"
+
+    # 3. AST walk for dangerous constructs
+    tree = ast.parse(code)
+    for node in ast.walk(tree):
+        # Block rm -rf style via subprocess
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            val = node.value
+            if any(d in val for d in ["rm -rf /", "rm -rf ~", "mkfs.", "dd if="]):
+                return f"Blocked: destructive shell command in string literal"
+
+    return None  # safe
+
+
 async def _exec_execute_python(code: str, timeout: int = 30) -> str:
-    """Execute Python code on the server."""
+    """Execute Python code on the server with safety checks."""
     import subprocess
-    import sys
     import tempfile
 
     timeout = max(5, min(timeout, 300))
     project_root = os.path.dirname(os.path.abspath(__file__))
+
+    # Safety check before execution
+    safety_err = _check_code_safety(code)
+    if safety_err:
+        return f"❌ Code execution blocked: {safety_err}"
 
     def _run():
         with tempfile.NamedTemporaryFile(
