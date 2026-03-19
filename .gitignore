@@ -33,3 +33,17 @@ local_agent/data/
 
 # CLAUDE가 사용하는 비밀 설정 파일
 .claude/
+
+# 백업 파일
+*.bak_*
+*.bak
+
+# 임시 파일
+tmp*.py
+tmp_*
+
+# 로그 디렉토리
+logs/
+
+# 백업 디렉토리
+backups/

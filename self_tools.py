@@ -157,11 +157,11 @@ SELF_TOOLS = [
     },
     {
         "name": "create_task",
-        "description": "Create async background task (Sonnet, 15 rounds). For deep research.",
+        "description": "Create async background task (Sonnet, 15 rounds). Use for: deep research, multi-step coding/patching, file edits requiring multiple tool calls, or any task where tool-call limits could interrupt progress. Prefer this over direct multi-step execution.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "What to research/analyze."},
+                "content": {"type": "string", "description": "What to research, analyze, or implement. Be specific: include file paths, requirements, constraints, and expected outcome."},
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
             },
             "required": ["content"],
@@ -177,6 +177,41 @@ SELF_TOOLS = [
                 "limit": {"type": "integer", "description": "Max results (1-10).", "default": 5},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "kg_query",
+        "description": "Execute a Cypher query directly on Neo4j KG. Use for KG cleanup, deduplication, bulk updates, or complex graph queries. READ by default (write=False). Set write=True for mutations (DELETE, MERGE, SET).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Cypher query to execute."},
+                "write": {"type": "boolean", "description": "Set true for write operations (DELETE, MERGE, SET). Default false (read-only).", "default": False},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "kg_delete_episode",
+        "description": "Delete a specific episode from KG by name. Also removes orphaned entities (entities with no remaining relationships). Use for KG cleanup of garbage/duplicate episodes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "episode_name": {"type": "string", "description": "Exact name of the episode to delete."},
+            },
+            "required": ["episode_name"],
+        },
+    },
+    {
+        "name": "kg_merge_entities",
+        "description": "Merge a duplicate entity (source) into a canonical entity (target). Transfers all RELATES_TO and MENTIONS relationships, then deletes source. Use for deduplication (e.g. 'Korean Peninsula' + 'Korean peninsula' → keep one).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_name": {"type": "string", "description": "Entity name to merge FROM (will be deleted)."},
+                "target_name": {"type": "string", "description": "Entity name to merge INTO (will be kept)."},
+            },
+            "required": ["source_name", "target_name"],
         },
     },
 ]
@@ -490,6 +525,48 @@ async def _exec_recall_experience(query: str, limit: int = 5) -> str:
     return f"Found {len(rows)} experience(s):\n" + "\n\n".join(lines)
 
 
+async def _exec_kg_query(query: str, write: bool = False) -> str:
+    from shared import kg_cypher
+    result = await asyncio.to_thread(kg_cypher, query, write)
+    if "error" in result:
+        return f"KG query failed: {result['error']}"
+    rows = result.get("rows", [])
+    count = result.get("count", 0)
+    if not rows:
+        return f"Query returned 0 rows. (write={write})"
+    import json
+    formatted = json.dumps(rows[:50], ensure_ascii=False, indent=2, default=str)
+    suffix = f"\n... (+{count-50} more rows)" if count > 50 else ""
+    return f"KG query result ({count} rows):\n{formatted}{suffix}"
+
+
+async def _exec_kg_delete_episode(episode_name: str) -> str:
+    from shared import kg_delete_episode
+    result = await asyncio.to_thread(kg_delete_episode, episode_name)
+    if "error" in result:
+        return f"Delete failed: {result['error']}"
+    if result.get("not_found"):
+        return f"Episode not found: '{episode_name}'"
+    return (
+        f"✅ Episode deleted: '{episode_name}'\n"
+        f"  Deleted episodes: {result.get('deleted_episode', 0)}\n"
+        f"  Deleted orphaned entities: {result.get('deleted_entities', 0)}"
+    )
+
+
+async def _exec_kg_merge_entities(source_name: str, target_name: str) -> str:
+    from shared import kg_merge_entities
+    result = await asyncio.to_thread(kg_merge_entities, source_name, target_name)
+    if "error" in result:
+        return f"Merge failed: {result['error']}"
+    return (
+        f"✅ Entity merged: '{result['deleted_source']}' → '{result['merged_into']}'\n"
+        f"  Outgoing relations transferred: {result.get('transferred_outgoing', 0)}\n"
+        f"  Incoming relations transferred: {result.get('transferred_incoming', 0)}\n"
+        f"  MENTIONS transferred: {result.get('transferred_mentions', 0)}"
+    )
+
+
 SELF_TOOL_HANDLERS = {
     "read_diary": _exec_read_diary,
     "read_chat_logs": _exec_read_chat_logs,
@@ -502,4 +579,7 @@ SELF_TOOL_HANDLERS = {
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
     "create_task": _exec_create_task,
+    "kg_query": _exec_kg_query,
+    "kg_delete_episode": _exec_kg_delete_episode,
+    "kg_merge_entities": _exec_kg_merge_entities,
 }

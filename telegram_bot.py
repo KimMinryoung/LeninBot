@@ -24,7 +24,10 @@ from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import (
+    Message, BufferedInputFile,
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+)
 from aiogram.filters import Command
 import anthropic
 
@@ -608,6 +611,7 @@ def _is_allowed(user_id: int) -> bool:
 
 
 # ── Router & Handlers ───────────────────────────────────────────────
+_pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → entry)
 router = Router()
 
 
@@ -1174,57 +1178,78 @@ async def _process_task(bot: Bot, task: dict):
     content = task["content"]
     is_self_generated = (user_id == 0)
 
-    try:
-        report = await _chat_with_tools(
-            [{"role": "user", "content": content}],
-            max_rounds=15,
-            system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
-            model=_CLAUDE_MODEL_STRONG,
-            max_tokens=_CLAUDE_MAX_TOKENS_TASK,
-        )
+    max_retries = 10
+    retry_delay = 60  # seconds
 
-        # Save full report to DB
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET status = 'done', result = %s, "
-            "completed_at = NOW() WHERE id = %s",
-            (report, task_id),
-        )
+    for attempt in range(max_retries):
+        try:
+            report = await _chat_with_tools(
+                [{"role": "user", "content": content}],
+                max_rounds=15,
+                system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
+                model=_CLAUDE_MODEL_STRONG,
+                max_tokens=_CLAUDE_MAX_TOKENS_TASK,
+            )
 
-        # Classify priority
-        priority = _classify_priority(content, report)
-        priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
+            # Save full report to DB
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET status = 'done', result = %s, "
+                "completed_at = NOW() WHERE id = %s",
+                (report, task_id),
+            )
 
-        # Send report as Markdown file
-        filename = f"report_task_{task_id}.md"
-        doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
-        summary = _extract_summary(report)
-        origin = " (자율 생성)" if is_self_generated else ""
-        caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
+            # Classify priority
+            priority = _classify_priority(content, report)
+            priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
 
-        if is_self_generated:
-            # Self-generated task: broadcast to all users
-            for uid in ALLOWED_USER_IDS:
-                try:
-                    await bot.send_document(chat_id=uid, document=doc, caption=caption)
-                except Exception:
-                    pass
-        else:
-            await bot.send_document(chat_id=user_id, document=doc, caption=caption)
+            # Send report as Markdown file
+            filename = f"report_task_{task_id}.md"
+            doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
+            summary = _extract_summary(report)
+            origin = " (자율 생성)" if is_self_generated else ""
+            caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
 
-    except Exception as e:
-        logger.error("Task %d failed: %s", task_id, e)
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET status = 'failed', result = %s, "
-            "completed_at = NOW() WHERE id = %s",
-            (str(e), task_id),
-        )
-        error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
-        if is_self_generated:
-            await _broadcast(bot, error_msg)
-        else:
-            await bot.send_message(chat_id=user_id, text=error_msg)
+            if is_self_generated:
+                # Self-generated task: broadcast to all users
+                for uid in ALLOWED_USER_IDS:
+                    try:
+                        await bot.send_document(chat_id=uid, document=doc, caption=caption)
+                    except Exception:
+                        pass
+            else:
+                await bot.send_document(chat_id=user_id, document=doc, caption=caption)
+
+            return  # success
+
+        except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = (
+                "rate_limit" in err_str or
+                "overloaded" in err_str or
+                "529" in err_str or
+                "429" in err_str or
+                "too many requests" in err_str
+            )
+
+            if is_rate_limit and attempt < max_retries - 1:
+                logger.warning("Task %d rate limited (attempt %d/%d), retrying in %ds...", task_id, attempt + 1, max_retries, retry_delay)
+                await asyncio.sleep(retry_delay)
+                continue
+
+            # Final failure or non-rate-limit error
+            logger.error("Task %d failed: %s", task_id, e)
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET status = 'failed', result = %s, "
+                "completed_at = NOW() WHERE id = %s",
+                (str(e), task_id),
+            )
+            error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
+            if is_self_generated:
+                await _broadcast(bot, error_msg)
+            else:
+                await bot.send_message(chat_id=user_id, text=error_msg)
 
 
 async def _broadcast(bot: Bot, text: str):
@@ -1375,6 +1400,145 @@ async def _check_deploy_meta(bot: Bot):
 
 
 # ── Entry Point ──────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════
+#  자가수정 핸들러 — Telegram 전용 (chatbot.py에는 없음)
+# ═══════════════════════════════════════════════════════════════
+
+@router.message(Command("modify"))
+async def cmd_modify(message: Message):
+    """자가수정 명령어 — 허가된 Telegram 사용자만"""
+    if not _is_allowed(message.from_user.id):
+        return
+    import os as _os, time as _time, uuid as _uuid
+    content = (message.text or "").removeprefix("/modify").strip()
+    parts = content.split("|", 2)
+    if len(parts) != 3:
+        await message.answer(
+            "사용법:\n`/modify <파일경로> | <수정이유> | <새 내용 전체>`",
+            parse_mode="Markdown"
+        )
+        return
+
+    filepath, reason, new_content = [p.strip() for p in parts]
+
+    # 경로 보안: leninbot 디렉토리 밖 거부
+    base = "/home/grass/leninbot"
+    abs_path = _os.path.realpath(_os.path.join(base, filepath))
+    if not abs_path.startswith(base):
+        await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
+        return
+    if not _os.path.isfile(abs_path):
+        await message.answer(f"❌ 파일을 찾을 수 없어: `{filepath}`", parse_mode="Markdown")
+        return
+
+    # diff 생성
+    import difflib as _dl
+    try:
+        with open(abs_path, "r", encoding="utf-8") as _f:
+            old_content = _f.read()
+        diff_lines = list(_dl.unified_diff(
+            old_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{filepath}",
+            tofile=f"b/{filepath}",
+            lineterm=""
+        ))
+        diff_text = "".join(diff_lines)
+        insertions = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+        deletions  = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+    except Exception as e:
+        await message.answer(f"❌ diff 생성 실패: {e}")
+        return
+
+    if not diff_lines:
+        await message.answer("ℹ️ 변경사항 없음. 현재 파일과 동일해.")
+        return
+
+    # 승인 대기 등록 (5분 유효)
+    approval_id = str(_uuid.uuid4())[:8]
+    _pending_approvals[approval_id] = {
+        "filepath": abs_path,
+        "new_content": new_content,
+        "reason": reason,
+        "expire": _time.time() + 300,
+    }
+
+    diff_preview = diff_text[:3000] + ("\n…(생략)…" if len(diff_text) > 3000 else "")
+    summary = (
+        f"📝 *자가수정 요청*\n"
+        f"파일: `{filepath}`\n"
+        f"이유: {reason}\n"
+        f"변경: +{insertions} / -{deletions} 라인\n\n"
+        f"```\n{diff_preview}\n```"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ 승인", callback_data=f"selfmod_approve:{approval_id}"),
+        InlineKeyboardButton(text="❌ 거부", callback_data=f"selfmod_reject:{approval_id}"),
+    ]])
+    await message.answer(summary, parse_mode="Markdown", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("selfmod_approve:"))
+async def cb_modify_approve(callback: CallbackQuery):
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    import time as _time
+    approval_id = callback.data.split(":", 1)[1]
+    entry = _pending_approvals.pop(approval_id, None)
+    if entry is None:
+        await callback.message.edit_text("⚠️ 승인 정보를 찾을 수 없어. 만료됐거나 이미 처리됨.")
+        return
+    if _time.time() > entry["expire"]:
+        await callback.message.edit_text("⏰ 승인 시간 초과 (5분). 다시 `/modify`를 실행해.")
+        return
+
+    await callback.message.edit_text("⚙️ 패치 적용 중…")
+    await callback.answer()
+
+    sys.path.insert(0, "/home/grass/leninbot")
+    from self_modification_core import self_modify_with_safety
+    try:
+        result = await self_modify_with_safety(
+            filepath=entry["filepath"],
+            new_content=entry["new_content"],
+            reason=entry["reason"],
+            request_approval=False,
+            skip_tests=False,
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ 패치 적용 중 예외 발생:\n`{e}`", parse_mode="Markdown"
+        )
+        return
+
+    if result.status == "success":
+        commit_info = f"\n커밋: `{result.commit_hash}`" if result.commit_hash else ""
+        await callback.message.edit_text(
+            f"✅ *패치 완료*\n"
+            f"파일: `{result.filepath}`\n"
+            f"변경: {result.changes_count} 라인{commit_info}\n"
+            f"⚠️ 재시작 후 적용됩니다.",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ *패치 실패* ({result.status})\n`{result.error}`",
+            parse_mode="Markdown"
+        )
+
+
+@router.callback_query(F.data.startswith("selfmod_reject:"))
+async def cb_modify_reject(callback: CallbackQuery):
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    approval_id = callback.data.split(":", 1)[1]
+    _pending_approvals.pop(approval_id, None)
+    await callback.message.edit_text("❌ 수정 거부됨. 원본 파일 유지.")
+    await callback.answer()
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
