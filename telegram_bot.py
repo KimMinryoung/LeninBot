@@ -226,6 +226,47 @@ _CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 _CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
 _CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
 
+# ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
+_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+_ollama_available: bool | None = None  # None = not checked yet
+
+
+async def _ollama_generate(prompt: str, max_tokens: int = 512) -> str | None:
+    """Call local Ollama model. Returns response text or None on failure.
+
+    Falls back gracefully — if Ollama is down, callers should use Haiku.
+    """
+    global _ollama_available
+    import httpx
+
+    # Skip if previously confirmed unavailable (re-check every 100 calls via None reset)
+    if _ollama_available is False:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{_OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": _OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"num_predict": max_tokens, "temperature": 0.3},
+                },
+            )
+            resp.raise_for_status()
+            result = resp.json().get("response", "").strip()
+            if _ollama_available is None:
+                _ollama_available = True
+                logger.info("Ollama available: %s @ %s", _OLLAMA_MODEL, _OLLAMA_BASE_URL)
+            return result
+    except Exception as e:
+        if _ollama_available is not False:
+            logger.info("Ollama not available (%s), falling back to Haiku", e)
+            _ollama_available = False
+        return None
+
 
 def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
@@ -785,12 +826,15 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
     )
 
     try:
-        resp = await _claude.messages.create(
-            model=_CLAUDE_MODEL_LIGHT,
-            max_tokens=512,
-            messages=[{"role": "user", "content": summary_prompt}],
-        )
-        summary = resp.content[0].text
+        # Try local LLM first (free), fall back to Haiku (paid)
+        summary = await _ollama_generate(summary_prompt, max_tokens=512)
+        if not summary:
+            resp = await _claude.messages.create(
+                model=_CLAUDE_MODEL_LIGHT,
+                max_tokens=512,
+                messages=[{"role": "user", "content": summary_prompt}],
+            )
+            summary = resp.content[0].text
     except Exception as e:
         logger.warning("History compression failed: %s — using truncation fallback", e)
         # Fallback: just drop old messages
@@ -1454,12 +1498,15 @@ async def _reflect_on_recent(user_id: int):
         )
         prompt = _REFLECTION_PROMPT + conv_text
 
-        resp = await _claude.messages.create(
-            model=_CLAUDE_MODEL_LIGHT,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        result = resp.content[0].text.strip()
+        # Try local LLM first (free), fall back to Haiku (paid)
+        result = await _ollama_generate(prompt, max_tokens=512)
+        if not result:
+            resp = await _claude.messages.create(
+                model=_CLAUDE_MODEL_LIGHT,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            result = resp.content[0].text.strip()
 
         if result.upper() == "NONE":
             logger.info("Reflection: nothing to learn from recent conversation")
