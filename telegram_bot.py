@@ -19,6 +19,7 @@ import logging
 from datetime import datetime
 from contextlib import contextmanager
 from shared import KST, CORE_IDENTITY
+from skills_loader import build_skills_prompt
 
 import psycopg2
 from psycopg2 import pool
@@ -334,6 +335,7 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 
 **Current time: {current_datetime}**
 {system_alerts}
+{skills_section}
 """
 
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
@@ -1399,6 +1401,7 @@ async def handle_message(message: Message):
             system_override = _SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
                 system_alerts=_format_system_alerts(),
+                skills_section=build_skills_prompt(),
             ) + experience_context
         reply = await _chat_with_tools(history, system_prompt=system_override)
     except Exception as e:
@@ -1646,7 +1649,9 @@ async def _chat_with_tools(
 
     # Prompt caching: mark system prompt and tools as cacheable
     sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
-        current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts(),
+        current_datetime=_current_datetime_str(),
+        system_alerts=_format_system_alerts(),
+        skills_section=build_skills_prompt(),
     )
     cached_system = [{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}]
 
