@@ -132,115 +132,60 @@ class ModificationResult:
 
 def git_backup_before_modification(filepath: str) -> str:
     """
-    수정 전 git commit으로 상태 저장
-    
+    수정 전 파일 내용을 백업 파일로 저장.
+
+    Git 히스토리를 오염시키지 않고 .bak 파일로 원본 보존.
+    롤백 시 git_reset_to_commit()이 이 백업에서 복원.
+
     Args:
-        filepath: 수정할 파일 경로 (프로젝트 루트 상대)
-    
+        filepath: 수정할 파일 절대 경로
+
     Returns:
-        commit_hash (str): 복구용 커밋 해시
-    
+        backup_path (str): 백업 파일 경로 (롤백 키로 사용)
+
     Raises:
-        RuntimeError: Git 작업 실패
+        RuntimeError: 백업 실패
     """
-    project_root = "/home/grass/leninbot"
-    os.chdir(project_root)
-    
-    logger.info(f"[BACKUP] Starting git backup for: {filepath}")
-    
+    logger.info(f"[BACKUP] Starting file backup for: {filepath}")
+
+    if not os.path.isfile(filepath):
+        raise RuntimeError(f"File not found: {filepath}")
+
     try:
-        # 1. 파일이 git 추적 중인지 확인
-        result = subprocess.run(
-            ["git", "ls-files", filepath],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if not result.stdout.strip():
-            raise RuntimeError(f"File not in git tracking: {filepath}")
-        
-        # 2. 파일 스테이징
-        subprocess.run(
-            ["git", "add", filepath],
-            capture_output=True,
-            check=True,
-            timeout=5
-        )
-        
-        # 3. Commit 메시지
-        commit_msg = f"[AUTO] Pre-modification backup: {filepath} at {datetime.now().isoformat()}"
-        
-        # 4. Commit
-        result = subprocess.run(
-            ["git", "commit", "-m", commit_msg],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode != 0:
-            # 이미 동일한 내용이면 에러 (변경사항 없음)
-            if "nothing to commit" in result.stdout:
-                logger.info("[BACKUP] No changes to commit (file unchanged)")
-                # 현재 HEAD의 해시 반환
-                result = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                commit_hash = result.stdout.strip()
-            else:
-                raise RuntimeError(f"Git commit failed: {result.stderr}")
-        else:
-            # 새 커밋 생성
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            commit_hash = result.stdout.strip()
-        
-        logger.info(f"[BACKUP] ✓ Backup created: {commit_hash}")
-        return commit_hash
-        
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Git operation timed out")
+        backup_path = filepath + f".bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        import shutil
+        shutil.copy2(filepath, backup_path)
+        logger.info(f"[BACKUP] ✓ Backup created: {backup_path}")
+        return backup_path
     except Exception as e:
         logger.error(f"[BACKUP] ✗ Failed: {e}")
-        raise RuntimeError(f"Git backup failed: {e}")
+        raise RuntimeError(f"File backup failed: {e}")
 
 
-def git_reset_to_commit(commit_hash: str) -> bool:
+def git_reset_to_commit(backup_path: str) -> bool:
     """
-    특정 커밋으로 롤백
-    
+    백업 파일에서 원본 복원.
+
     Args:
-        commit_hash: 롤백할 커밋 해시
-    
+        backup_path: git_backup_before_modification()이 반환한 백업 파일 경로
+
     Returns:
         bool: 성공 여부
     """
-    project_root = "/home/grass/leninbot"
-    os.chdir(project_root)
-    
-    logger.warning(f"[ROLLBACK] Resetting to commit: {commit_hash}")
-    
+    logger.warning(f"[ROLLBACK] Restoring from backup: {backup_path}")
+
     try:
-        result = subprocess.run(
-            ["git", "reset", "--hard", commit_hash],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            logger.warning(f"[ROLLBACK] ✓ Successfully reset to {commit_hash}")
-            return True
-        else:
-            logger.error(f"[ROLLBACK] ✗ Failed: {result.stderr}")
+        if not os.path.isfile(backup_path):
+            logger.error(f"[ROLLBACK] ✗ Backup file not found: {backup_path}")
             return False
+
+        # Derive original path by stripping .bak.TIMESTAMP suffix
+        original = backup_path.rsplit(".bak.", 1)[0]
+        import shutil
+        shutil.copy2(backup_path, original)
+        os.unlink(backup_path)
+        logger.warning(f"[ROLLBACK] ✓ Restored {original} from backup")
+        return True
     except Exception as e:
         logger.error(f"[ROLLBACK] ✗ Exception: {e}")
         return False

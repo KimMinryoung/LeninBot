@@ -533,7 +533,10 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
                 return f"❌ Sandbox tests failed — rolled back.\n{test_results}"
 
             size = os.path.getsize(abs_path)
-            backup_info = f", git backup: {commit_hash[:7]}" if commit_hash else ""
+            backup_info = f", backup: {os.path.basename(commit_hash)}" if commit_hash else ""
+            # Clean up backup file on success
+            if commit_hash and os.path.isfile(commit_hash):
+                os.unlink(commit_hash)
             return f"✅ Written {len(content)} chars to {rel_path} (size: {size}B{backup_info}, tests: PASS)"
         except Exception as e:
             return f"Error writing .py file safely: {e}"
