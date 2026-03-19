@@ -228,7 +228,7 @@ _CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251
 
 # ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5-nothink")
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 _ollama_available: bool | None = None  # None = not checked yet
 
 
