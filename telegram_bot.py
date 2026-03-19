@@ -1568,9 +1568,16 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
             b["id"] for b in content
             if isinstance(b, dict) and b.get("type") == "tool_use"
         ]
+        # For server_tool_use, exclude IDs already resolved by web_search_tool_result
+        # within the same assistant content (API returns both in one response)
+        resolved_in_assistant = {
+            b.get("tool_use_id") for b in content
+            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+        }
         server_ids = [
             b["id"] for b in content
             if isinstance(b, dict) and b.get("type") == "server_tool_use"
+            and b["id"] not in resolved_in_assistant
         ]
         if not custom_ids and not server_ids:
             i += 1
@@ -1754,9 +1761,15 @@ async def _chat_with_tools(
 
         # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
         # EVERY round, not just at limit — missing result → 400 on next API call
+        # But skip IDs that already have a web_search_tool_result in assistant_content
+        already_resolved_server_ids = {
+            b.get("tool_use_id") for b in assistant_content
+            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+        }
         pending_server_ids = [
             b["id"] for b in assistant_content
             if isinstance(b, dict) and b.get("type") == "server_tool_use"
+            and b["id"] not in already_resolved_server_ids
         ]
         if pending_server_ids:
             dummy_results = [
