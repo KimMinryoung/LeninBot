@@ -12,6 +12,7 @@ Security: ALLOWED_USER_IDS whitelist, unauthorized users silently ignored.
 """
 
 import os
+import sys
 import json
 import asyncio
 import logging
@@ -1595,7 +1596,7 @@ async def cmd_modify(message: Message):
     # 경로 보안: leninbot 디렉토리 밖 거부
     base = "/home/grass/leninbot"
     abs_path = _os.path.realpath(_os.path.join(base, filepath))
-    if not abs_path.startswith(base):
+    if not (abs_path == base or abs_path.startswith(base + "/")):
         await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
         return
     if not _os.path.isfile(abs_path):
@@ -1670,7 +1671,8 @@ async def cb_modify_approve(callback: CallbackQuery):
     sys.path.insert(0, "/home/grass/leninbot")
     from self_modification_core import self_modify_with_safety
     try:
-        result = await self_modify_with_safety(
+        result = await asyncio.to_thread(
+            self_modify_with_safety,
             filepath=entry["filepath"],
             new_content=entry["new_content"],
             reason=entry["reason"],
@@ -1728,10 +1730,12 @@ async def bot_main():
     # Detect fresh deploy — inject context so the bot knows it was just updated
     await _check_deploy_meta(bot)
 
-    # Start background workers
-    asyncio.create_task(_task_worker(bot))
-    asyncio.create_task(_system_monitor(bot))
-    asyncio.create_task(_schedule_worker(bot))
+    # Start background workers (keep handles for graceful cancellation)
+    _bg_tasks = [
+        asyncio.create_task(_task_worker(bot), name="task_worker"),
+        asyncio.create_task(_system_monitor(bot), name="system_monitor"),
+        asyncio.create_task(_schedule_worker(bot), name="schedule_worker"),
+    ]
 
     # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
     import signal
@@ -1755,12 +1759,27 @@ async def bot_main():
     logger.info("Bot starting (allowed users: %s)", ALLOWED_USER_IDS)
     # drop_pending_updates: new instance takes over quickly, avoids processing stale updates
     await dp.start_polling(bot, drop_pending_updates=True)
-    # After polling stops (shutdown), release the getUpdates lock
+    # After polling stops — graceful shutdown sequence
+    # 1. Cancel background tasks
+    for t in _bg_tasks:
+        t.cancel()
+    await asyncio.gather(*_bg_tasks, return_exceptions=True)
+    logger.info("Background tasks cancelled")
+
+    # 2. Release Telegram session
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.session.close()
     except Exception:
         pass
+
+    # 3. Close DB connection pool
+    if _pool is not None:
+        try:
+            _pool.closeall()
+            logger.info("DB connection pool closed")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

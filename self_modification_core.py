@@ -700,7 +700,7 @@ ROLLBACK PLAN (if needed):
 # Phase 6: Main Integration Function
 # ============================================================================
 
-async def self_modify_with_safety(
+def self_modify_with_safety(
     filepath: str,
     new_content: str,
     reason: str,
