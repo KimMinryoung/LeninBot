@@ -414,6 +414,42 @@ class Campaign(BaseModel):
 
 
 # ============================================================
+# 8. 개념/이론 (Concept) — v2.1 추가
+# ============================================================
+
+class Concept(BaseModel):
+    """
+    추상적 개념, 이론, 이데올로기, 사회현상 엔티티.
+    대상: 정치사상(Marxism, Capitalism), 사회현상(inflation, depression),
+    학문분야(dialectical materialism), 추상 주제(democracy, class struggle) 등.
+    기존 7종 타입에 분류할 수 없는 비물질적/추상적 엔티티를 포괄.
+    """
+    concept_type: Optional[str] = Field(
+        None,
+        description=(
+            "Category of concept: ideology / economic_theory / social_phenomenon / "
+            "academic_discipline / political_concept / cultural_concept / other"
+        )
+    )
+    domain: Optional[str] = Field(
+        None,
+        description="Primary domain: politics / economics / philosophy / sociology / culture / science / military / other"
+    )
+    related_thinkers: Optional[str] = Field(
+        None,
+        description="Key thinkers or originators associated with this concept (comma-separated)"
+    )
+    historical_period: Optional[str] = Field(
+        None,
+        description="Historical period of origin or peak relevance"
+    )
+    contemporary_relevance: Optional[str] = Field(
+        None,
+        description="Brief note on current relevance or application"
+    )
+
+
+# ============================================================
 # 엔티티 타입 레지스트리
 # ============================================================
 
@@ -425,4 +461,5 @@ ENTITY_TYPES = {
     "Incident": Incident,
     "Policy": Policy,
     "Campaign": Campaign,
+    "Concept": Concept,
 }

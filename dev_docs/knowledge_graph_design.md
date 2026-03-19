@@ -99,7 +99,7 @@ GraphMemoryService()
 
 > 재설계 근거: `temp_dev/entity_redesign_form.md` 참조
 
-### 엔티티 7종 (53 필드)
+### 엔티티 8종 (58 필드)
 
 | 엔티티 | 필드 수 | 설명 | 주요 필드 |
 |--------|---------|------|-----------|
@@ -108,12 +108,14 @@ GraphMemoryService()
 | **Location** | 5 | 지리적 장소 | location_type, coordinates, significance, strategic_resources, geopolitical_bloc |
 | **Asset** | 7 | 자산/기술 | asset_type, classification, strategic_value, description_detail, supply_chain_role, dual_use_potential, controlling_entity |
 | **Incident** | 9 | 특이사건 | incident_type, severity, occurred_at, detected_at, status, confidence, impact_summary, geopolitical_context, information_source_type |
-| **Policy** | 6 | 정책/제도 (신설) | policy_type, issuing_entity, target_scope, status, effective_date, strategic_impact |
-| **Campaign** | 7 | 캠페인/작전 (신설) | campaign_type, objective, status, scale, started_at, ideological_framing, effectiveness |
+| **Policy** | 6 | 정책/제도 | policy_type, issuing_entity, target_scope, status, effective_date, strategic_impact |
+| **Campaign** | 7 | 캠페인/작전 | campaign_type, objective, status, scale, started_at, ideological_framing, effectiveness |
+| **Concept** | 5 | 추상 개념/이론 (v2.1 신설) | concept_type, domain, related_thinkers, historical_period, contemporary_relevance |
 
 - 모든 필드는 `Optional` — 수집 누적 시 Graphiti 엔티티 해소(entity resolution)가 점진적으로 채움
-- `ENTITY_TYPES` 레지스트리: `{"Person": Person, ..., "Policy": Policy, "Campaign": Campaign}`
+- `ENTITY_TYPES` 레지스트리: `{"Person": Person, ..., "Campaign": Campaign, "Concept": Concept}`
 - v1→v2 변경: Person -clearance_level +3, Organization -employee_count +3, Location +2, Asset +3, Incident +2, Policy 신설, Campaign 신설
+- v2→v2.1 변경: Concept 신설 (5 필드) — 기존 7종에 분류 불가능한 추상적 엔티티(이데올로기, 사회현상, 학문 등) 포괄
 
 ### 엣지 10종
 
@@ -284,18 +286,19 @@ OPTIONS {indexConfig: {
 
 > 새 AuraDB 인스턴스로 교체 후 v2 스키마로 초기화 완료.
 
-**통계**: 에피소드 10건, 엔티티 132개, 관계 121개 (2026-02-28 영어 정규화 재수집 후)
+**통계**: 에피소드 688건, 엔티티 1,949개, 관계 1,631개 (2026-03-19 기준)
 
 | 엔티티 타입 | 수 |
 |------------|-----|
-| Location | 44 |
-| Organization | 44 |
-| Asset | 17 |
-| Person | 15 |
-| Incident | 13 |
-| Policy | 9 |
-| Entity (기본) | 6 |
-| Campaign | 5 |
+| Organization | 536 |
+| Asset | 438 |
+| Person | 297 |
+| Location | 199 |
+| Policy | 187 |
+| Incident | 119 |
+| Concept | 99 |
+| Campaign | 72 |
+| Entity (미분류) | 0 |
 
 **에피소드 10건** (2026-02-27 국제 뉴스):
 
@@ -319,6 +322,8 @@ OPTIONS {indexConfig: {
 | `geopolitics_conflict` | 전쟁/분쟁 뉴스 |
 | `geopolitics_diplomacy` | 외교/협상 뉴스 |
 | `geopolitics_economy` | 경제/제재/무역 뉴스 |
+| `korea_domestic` | 한국 국내 뉴스/인물 |
+| `diary_news` | LeninBot 자동 수집 뉴스 |
 
 ### 검증 이력
 
@@ -344,6 +349,7 @@ OPTIONS {indexConfig: {
 | 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
 | 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
 | 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
+| 2026-03-19 | **v2.1 스키마: Concept 타입 신설** — 엔티티 7→8종. 추상 개념/이론/이데올로기/사회현상을 포괄하는 Concept 타입(5 필드) 추가. Gemini 배치 분류로 미분류 엔티티 131개 전량 타입 부여 (Concept 99, Asset 11, Organization 8, Incident 5, Person 5, Location 1, Campaign 1). `scripts/classify_untyped_entities.py` 재사용 가능. |
 
 ---
 

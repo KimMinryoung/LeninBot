@@ -580,6 +580,13 @@ You are executing a background intelligence task. Produce a structured Markdown 
 
 # Per-user chat history (in-memory, lost on restart)
 MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
+_HISTORY_TOKEN_LIMIT = 40_000  # compress if history exceeds this
+_RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate for multilingual text (~3 chars/token for Korean+English mix)."""
+    return len(text) // 3
 
 
 def _load_chat_history(user_id: int) -> list[dict]:
@@ -608,6 +615,63 @@ def _save_chat_message(user_id: int, role: str, content: str):
 def _clear_chat_history(user_id: int):
     """Delete all chat history for a user."""
     _execute("DELETE FROM telegram_chat_history WHERE user_id = %s", (user_id,))
+
+
+async def _compress_history(messages: list[dict]) -> list[dict]:
+    """Compress chat history if it exceeds the token limit.
+
+    Summarizes older messages into a single context message using Haiku,
+    keeping the most recent turns intact for conversational continuity.
+    """
+    total_tokens = sum(_estimate_tokens(m["content"]) for m in messages)
+    if total_tokens <= _HISTORY_TOKEN_LIMIT:
+        return messages
+
+    # Split into old (to summarize) and recent (to keep)
+    keep_count = _RECENT_TURNS_KEEP * 2  # user+assistant pairs
+    if len(messages) <= keep_count:
+        return messages  # not enough messages to split
+
+    old_msgs = messages[:-keep_count]
+    recent_msgs = messages[-keep_count:]
+
+    logger.info(
+        "Compressing history: %d msgs (%d tokens) → summarize %d old, keep %d recent",
+        len(messages), total_tokens, len(old_msgs), len(recent_msgs),
+    )
+
+    # Build summary request
+    conversation_text = "\n".join(
+        f"[{m['role']}] {m['content'][:1000]}" for m in old_msgs
+    )
+    summary_prompt = (
+        "아래 대화를 핵심 정보만 남기고 간결하게 요약해라. "
+        "사용자가 어떤 주제를 물었고, 어떤 결론/답변이 나왔는지 위주로. "
+        "고유명사, 수치, 날짜는 보존. 300자 이내.\n\n"
+        f"{conversation_text}"
+    )
+
+    try:
+        resp = await _claude.messages.create(
+            model=_CLAUDE_MODEL_LIGHT,
+            max_tokens=512,
+            messages=[{"role": "user", "content": summary_prompt}],
+        )
+        summary = resp.content[0].text
+    except Exception as e:
+        logger.warning("History compression failed: %s — using truncation fallback", e)
+        # Fallback: just drop old messages
+        return recent_msgs
+
+    # Inject summary as a system-like context message
+    compressed = [
+        {"role": "user", "content": f"[이전 대화 요약]\n{summary}"},
+        {"role": "assistant", "content": "네, 이전 대화 내용을 파악했습니다. 이어서 진행하겠습니다."},
+    ] + recent_msgs
+
+    new_tokens = sum(_estimate_tokens(m["content"]) for m in compressed)
+    logger.info("History compressed: %d tokens → %d tokens", total_tokens, new_tokens)
+    return compressed
 
 # ── CLAW pipeline (lazy-loaded) ──────────────────────────────────────
 _graph = None
@@ -803,28 +867,90 @@ async def cmd_task(message: Message):
 async def cmd_status(message: Message):
     if not _is_allowed(message.from_user.id):
         return
+    uid = message.from_user.id
+
+    # Gather all dashboard data in parallel
+    tasks_f = asyncio.to_thread(
+        _query,
+        "SELECT id, content, status, created_at FROM telegram_tasks "
+        "WHERE user_id = %s ORDER BY created_at DESC LIMIT 5",
+        (uid,),
+    )
+    errors_f = asyncio.to_thread(
+        _query,
+        "SELECT level, count(*) AS cnt FROM telegram_error_log "
+        "WHERE created_at > NOW() - INTERVAL '24 hours' "
+        "GROUP BY level ORDER BY level",
+        None,
+    )
+    task_stats_f = asyncio.to_thread(
+        _query,
+        "SELECT status, count(*) AS cnt FROM telegram_tasks "
+        "GROUP BY status",
+        None,
+    )
+
     try:
-        rows = await asyncio.to_thread(
-            _query,
-            "SELECT id, content, status, created_at FROM telegram_tasks "
-            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 5",
-            (message.from_user.id,),
-        )
+        tasks, errors, task_stats = await asyncio.gather(tasks_f, errors_f, task_stats_f)
     except Exception as e:
-        logger.error("Task status query error: %s", e)
-        await message.answer(f"태스크 조회 실패: {e}")
+        logger.error("Status dashboard query error: %s", e)
+        await message.answer(f"대시보드 조회 실패: {e}")
         return
-    if not rows:
-        await message.answer("등록된 태스크가 없습니다.")
-        return
-    status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌"}
-    lines = []
-    for r in rows:
-        icon = status_icons.get(r["status"], "❓")
-        ts = r["created_at"].strftime("%m/%d %H:%M")
-        preview = r["content"][:50]
-        lines.append(f"{icon} [{r['id']}] {preview}\n   상태: {r['status']} | {ts}")
-    await message.answer("\n\n".join(lines))
+
+    # -- Build dashboard --
+    lines = ["*시스템 대시보드*\n"]
+
+    # 1. Task summary
+    stat_map = {r["status"]: r["cnt"] for r in task_stats}
+    total_tasks = sum(stat_map.values())
+    lines.append(
+        f"*태스크* ({total_tasks}건): "
+        f"✅{stat_map.get('done', 0)} "
+        f"⏳{stat_map.get('pending', 0)} "
+        f"🔄{stat_map.get('processing', 0)} "
+        f"❌{stat_map.get('failed', 0)}"
+    )
+
+    # 2. Error counts (24h)
+    err_map = {r["level"]: r["cnt"] for r in errors}
+    err_total = sum(err_map.values())
+    if err_total:
+        lines.append(
+            f"*에러 (24h)*: 🔴error {err_map.get('error', 0)} "
+            f"🟡warning {err_map.get('warning', 0)}"
+        )
+    else:
+        lines.append("*에러 (24h)*: 없음")
+
+    # 3. KG stats (quick, non-blocking)
+    try:
+        from shared import fetch_kg_stats
+        kg = await asyncio.to_thread(fetch_kg_stats)
+        if "error" not in kg:
+            entity_total = sum(v for v in kg.get("entity_types", {}).values())
+            lines.append(
+                f"*KG*: 엔티티 {entity_total} | "
+                f"관계 {kg.get('edge_count', 0)} | "
+                f"에피소드 {kg.get('episode_count', 0)}"
+            )
+        else:
+            lines.append(f"*KG*: ⚠️ {kg['error'][:60]}")
+    except Exception as e:
+        lines.append(f"*KG*: ⚠️ 조회 실패")
+
+    # 4. Recent tasks
+    if tasks:
+        lines.append("\n*최근 태스크:*")
+        status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌"}
+        for r in tasks:
+            icon = status_icons.get(r["status"], "❓")
+            ts = r["created_at"].strftime("%m/%d %H:%M")
+            preview = r["content"][:45]
+            lines.append(f"{icon} `[{r['id']}]` {preview}\n   {r['status']} | {ts}")
+    else:
+        lines.append("\n태스크 없음")
+
+    await message.answer("\n".join(lines), parse_mode="Markdown")
 
 
 @router.message(Command("kg"))
@@ -1078,9 +1204,10 @@ async def handle_message(message: Message):
     user_id = message.from_user.id
     user_text = message.text
 
-    # Save user message to DB and load history
+    # Save user message to DB, load history, compress if needed
     await asyncio.to_thread(_save_chat_message, user_id, "user", user_text)
     history = await asyncio.to_thread(_load_chat_history, user_id)
+    history = await _compress_history(history)
 
     try:
         reply = await _chat_with_tools(history)
@@ -1554,11 +1681,20 @@ async def _check_deploy_meta(bot: Bot):
         # Consume the file so we don't re-trigger on manual restart
         os.remove(_DEPLOY_META_PATH)
 
+        status = meta.get("status", "success")
+
+        if status == "failed":
+            error = meta.get("error", "unknown")
+            exit_code = meta.get("exit_code", "?")
+            alert_msg = f"Deploy 실패 (exit {exit_code}): {error}"
+            _add_system_alert(alert_msg)
+            logger.error("Deploy FAILED: exit=%s error=%s", exit_code, error)
+            return
+
         changes = meta.get("changes", "")
         new_commit = meta.get("new_commit", "")[:7]
         prev_commit = meta.get("prev_commit", "")[:7]
         deps = " (의존성 업데이트됨)" if meta.get("deps_updated") else ""
-        ts = meta.get("timestamp", "")
 
         alert_msg = (
             f"Deploy 완료: {prev_commit}→{new_commit}{deps}. "
