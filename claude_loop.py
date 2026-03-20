@@ -142,6 +142,81 @@ def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> lis
     return msgs
 
 
+def validate_tool_pairs(msgs: list[dict]) -> list[dict]:
+    """Final safety net: guarantee every tool_use has a matching tool_result.
+
+    Unlike sanitize_messages (which handles server tools, edge cases, etc.),
+    this function does ONE thing with the simplest possible logic:
+    scan all messages, collect all tool_use IDs from assistant messages and
+    all tool_result IDs from user messages, then fix any mismatches.
+
+    Returns a new list (never mutates input).
+    """
+    msgs = [dict(m) for m in msgs]
+
+    # Pass 1: collect all tool_use IDs and their message indices
+    tool_use_map: dict[str, int] = {}  # tool_use_id → assistant msg index
+    tool_result_ids: set[str] = set()
+
+    for idx, msg in enumerate(msgs):
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and "id" in block:
+                tool_use_map[block["id"]] = idx
+            elif block.get("type") == "tool_result" and "tool_use_id" in block:
+                tool_result_ids.add(block["tool_use_id"])
+
+    # Pass 2: find unmatched tool_use IDs
+    unmatched = {tid: idx for tid, idx in tool_use_map.items() if tid not in tool_result_ids}
+    if not unmatched:
+        return msgs
+
+    # Log the exact problem for debugging
+    logger.error(
+        "validate_tool_pairs: %d unmatched tool_use(s) found! IDs: %s",
+        len(unmatched),
+        {tid: f"msg[{idx}]" for tid, idx in unmatched.items()},
+    )
+
+    # Pass 3: fix by injecting tool_result dummies
+    # Group unmatched by their assistant message index
+    by_assistant: dict[int, list[str]] = {}
+    for tid, idx in unmatched.items():
+        by_assistant.setdefault(idx, []).append(tid)
+
+    # Process from end to start (so inserts don't shift indices)
+    for asst_idx in sorted(by_assistant.keys(), reverse=True):
+        tids = by_assistant[asst_idx]
+        dummies = [{
+            "type": "tool_result",
+            "tool_use_id": tid,
+            "content": "[tool result unavailable — injected by safety validator]",
+            "is_error": True,
+        } for tid in tids]
+
+        # Find the next user message after this assistant
+        user_idx = asst_idx + 1
+        if user_idx < len(msgs) and msgs[user_idx].get("role") == "user":
+            existing = msgs[user_idx].get("content", [])
+            if isinstance(existing, list):
+                msgs[user_idx] = {**msgs[user_idx], "content": dummies + existing}
+            else:
+                msgs[user_idx] = {
+                    "role": "user",
+                    "content": dummies + [{"type": "text", "text": str(existing)}],
+                }
+        else:
+            # No user message after assistant — insert one
+            msgs.insert(user_idx, {"role": "user", "content": dummies})
+
+    logger.warning("validate_tool_pairs: injected %d dummy result(s)", len(unmatched))
+    return msgs
+
+
 # ── Token Estimation ─────────────────────────────────────────────────
 
 def estimate_tokens(text: str) -> int:
@@ -206,6 +281,7 @@ async def chat_with_tools(
     for round_num in range(1, max_rounds + 1):
         # Sanitize message structure before every API call
         working_msgs = sanitize_messages(working_msgs)
+        working_msgs = validate_tool_pairs(working_msgs)
 
         response = await client.messages.create(
             model=model,
@@ -403,6 +479,7 @@ async def chat_with_tools(
     })
     # Sanitize: ensure ALL tool_use/server_tool_use have matching results
     working_msgs = sanitize_messages(working_msgs)
+    working_msgs = validate_tool_pairs(working_msgs)
     try:
         final = await client.messages.create(
             model=model,
