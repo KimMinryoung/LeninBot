@@ -463,13 +463,22 @@ def _save_chat_message(user_id: int, role: str, content: str):
 
 
 def _clear_chat_history(user_id: int):
-    """Mark current position as clear point — history before this is ignored."""
+    """Mark current position as clear point — history before this is ignored.
+
+    Persists the marker to DB so it survives bot restarts.
+    """
     row = _query_one(
         "SELECT MAX(id) AS max_id FROM telegram_chat_history WHERE user_id = %s",
         (user_id,),
     )
     max_id = (row["max_id"] or 0) if row else 0
     _clear_after_id[user_id] = max_id
+    # Persist to DB (upsert)
+    _execute(
+        "INSERT INTO chat_clear_markers (user_id, clear_after_id) VALUES (%s, %s) "
+        "ON CONFLICT (user_id) DO UPDATE SET clear_after_id = EXCLUDED.clear_after_id",
+        (user_id, max_id),
+    )
     # Also delete stored chunk summaries
     _execute("DELETE FROM chat_history_summaries WHERE user_id = %s", (user_id,))
 
@@ -484,6 +493,17 @@ def _ensure_summary_table():
     global _summary_table_ready
     if _summary_table_ready:
         return
+    _execute(
+        "CREATE TABLE IF NOT EXISTS chat_clear_markers ("
+        "  user_id BIGINT PRIMARY KEY,"
+        "  clear_after_id BIGINT NOT NULL DEFAULT 0"
+        ")"
+    )
+    # Load persisted clear markers into memory
+    rows = _query("SELECT user_id, clear_after_id FROM chat_clear_markers")
+    for r in rows:
+        current = _clear_after_id.get(r["user_id"], 0)
+        _clear_after_id[r["user_id"]] = max(current, r["clear_after_id"])
     _execute(
         "CREATE TABLE IF NOT EXISTS chat_history_summaries ("
         "  id SERIAL PRIMARY KEY,"
