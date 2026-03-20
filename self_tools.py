@@ -57,14 +57,14 @@ SELF_TOOLS = [
     },
     {
         "name": "read_chat_logs",
-        "description": "Read chat logs from all interfaces (Telegram + Web).",
+        "description": "Read chat logs from one interface source (Telegram or Web).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "Entries (1-50).", "default": 20},
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
                 "keyword": {"type": "string", "description": "Filter keyword."},
-                "source": {"type": "string", "enum": ["telegram", "web", "all"], "description": "Chat source: telegram, web, or all. Default: all."},
+                "source": {"type": "string", "enum": ["telegram", "web"], "description": "Chat source: telegram or web. Default: web."},
             },
             "required": [],
         },
@@ -245,7 +245,7 @@ async def _exec_read_diary(limit: int = 5, keyword: str | None = None) -> str:
 
 async def _exec_read_chat_logs(
     limit: int = 20, hours_back: int | None = None, keyword: str | None = None,
-    source: str = "all",
+    source: str = "web",
 ) -> str:
     from shared import fetch_chat_logs
 

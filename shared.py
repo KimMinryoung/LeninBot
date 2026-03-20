@@ -238,13 +238,12 @@ def fetch_chat_logs(
     Args:
         include_logs: If True, also return processing_logs, route,
                       documents_count, web_search_used, strategy columns.
-        source: "web" = chat_logs (웹 챗봇), "telegram" = telegram_chat_history,
-                "all" = 두 소스 합산 (created_at 기준 정렬).
+        source: "web" = chat_logs (웹 챗봇), "telegram" = telegram_chat_history.
     """
     from db import query as db_query
 
     source = (source or "web").strip().lower()
-    if source not in {"web", "telegram", "all"}:
+    if source not in {"web", "telegram"}:
         logger.warning("[shared] fetch_chat_logs: invalid source=%r; falling back to 'web'", source)
         source = "web"
 
@@ -288,33 +287,24 @@ def fetch_chat_logs(
             logger.error("[shared] fetch_chat_logs(telegram) error: %s", e)
             return []
 
-    elif source == "all":
-        # 웹 + 텔레그램 합산
-        web = fetch_chat_logs(limit=limit, hours_back=hours_back, keyword=keyword, include_logs=include_logs, source="web")
-        tg = fetch_chat_logs(limit=limit, hours_back=hours_back, keyword=keyword, source="telegram")
-        combined = web + tg
-        combined.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
-        return combined[:limit]
-
-    else:
-        # 기본: web (chat_logs 테이블)
-        cols = "user_query, bot_answer, created_at"
-        if include_logs:
-            cols = (
-                "user_query, bot_answer, route, documents_count, "
-                "web_search_used, strategy, processing_logs, created_at"
-            )
-        if keyword:
-            conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
-            params.extend([f"%{keyword}%", f"%{keyword}%"])
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
-        params.append(limit)
-        try:
-            return db_query(sql, tuple(params))
-        except Exception as e:
-            logger.error("[shared] fetch_chat_logs error: %s", e)
-            return []
+    # 기본: web (chat_logs 테이블)
+    cols = "user_query, bot_answer, created_at"
+    if include_logs:
+        cols = (
+            "user_query, bot_answer, route, documents_count, "
+            "web_search_used, strategy, processing_logs, created_at"
+        )
+    if keyword:
+        conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
+    params.append(limit)
+    try:
+        return db_query(sql, tuple(params))
+    except Exception as e:
+        logger.error("[shared] fetch_chat_logs error: %s", e)
+        return []
 
 
 def fetch_task_reports(
