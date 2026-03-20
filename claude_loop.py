@@ -164,6 +164,7 @@ async def chat_with_tools(
     log_event=None,
     budget_usd: float = 0.30,
     budget_tracker: dict | None = None,
+    on_progress=None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -180,6 +181,9 @@ async def chat_with_tools(
             for persistent error logging.
         budget_usd: Maximum USD budget for this call (default 0.30).
         budget_tracker: Optional dict — filled with {"total_cost", "rounds_used"} after return.
+        on_progress: Optional async callable(event: str, detail: str) for live progress.
+            Events: "thinking" (model's intermediate text), "tool_call" (tool invoked),
+            "tool_result" (tool finished), "budget" (budget status update).
     """
     working_msgs = list(messages)
     tool_call_log = []
@@ -239,6 +243,13 @@ async def chat_with_tools(
         for block in response.content:
             if block.type == "text":
                 assistant_content.append({"type": "text", "text": block.text})
+                if on_progress and block.text.strip():
+                    # Send intermediate thinking/reasoning text
+                    preview = block.text.strip()[:200]
+                    try:
+                        await on_progress("thinking", f"[{round_num}] {preview}")
+                    except Exception:
+                        pass
             elif block.type == "server_tool_use":
                 assistant_content.append({
                     "type": "server_tool_use",
@@ -247,6 +258,11 @@ async def chat_with_tools(
                     "input": block.input,
                 })
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}(server-side)")
+                if on_progress:
+                    try:
+                        await on_progress("tool_call", f"[{round_num}] 🌐 {block.name}")
+                    except Exception:
+                        pass
             elif block.type == "web_search_tool_result":
                 assistant_content.append(block.model_dump())
             elif block.type == "tool_use":
@@ -256,6 +272,15 @@ async def chat_with_tools(
                     "name": block.name,
                     "input": block.input,
                 })
+                # Notify: tool call starting
+                input_summary = json.dumps(block.input, ensure_ascii=False)
+                if len(input_summary) > 120:
+                    input_summary = input_summary[:120] + "..."
+                if on_progress:
+                    try:
+                        await on_progress("tool_call", f"[{round_num}] 🔧 {block.name}({input_summary})")
+                    except Exception:
+                        pass
                 # Execute custom tool
                 handler = tool_handlers.get(block.name)
                 if handler:
@@ -283,10 +308,15 @@ async def chat_with_tools(
                 if is_error:
                     tool_result_block["is_error"] = True
                 tool_results.append(tool_result_block)
+                # Notify: tool call completed
+                if on_progress:
+                    status = "❌" if is_error else "✓"
+                    result_preview = result[:100] + "..." if len(result) > 100 else result
+                    try:
+                        await on_progress("tool_result", f"  {status} {result_preview}")
+                    except Exception:
+                        pass
                 # Log for diagnostics
-                input_summary = json.dumps(block.input, ensure_ascii=False)
-                if len(input_summary) > 120:
-                    input_summary = input_summary[:120] + "..."
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}({input_summary})")
 
         # Safety net: ensure EVERY tool_use block has a matching tool_result

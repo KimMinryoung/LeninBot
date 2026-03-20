@@ -62,6 +62,7 @@ async def process_task(
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
     budget_usd: float = 1.00,
+    on_progress=None,
 ):
     """Process a task: run tools, generate report, save to DB, send as file.
 
@@ -77,6 +78,7 @@ async def process_task(
         extra_tools: Additional tool definitions (e.g. task-context tools).
         extra_handlers: Additional tool handlers.
         budget_usd: USD budget for this task (default $1.00).
+        on_progress: Optional async callback for live progress updates.
     """
     task_id = task["id"]
     user_id = task["user_id"]
@@ -103,6 +105,7 @@ async def process_task(
                 budget_usd=budget_usd,
                 extra_tools=extra_tools,
                 extra_handlers=extra_handlers,
+                on_progress=on_progress,
             )
 
             # Save full report to DB

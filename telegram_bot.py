@@ -500,6 +500,59 @@ def _split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
+# ── Progress Callback (live tool progress via Telegram) ──────────────
+
+_bot_instance: Bot | None = None  # set in bot_main()
+
+
+def _make_progress_callback(chat_id: int):
+    """Create an on_progress callback that sends tool execution progress via Telegram.
+
+    Collects events per round, sends one message per round to avoid flood.
+    """
+    _buf: list[str] = []
+    _current_round = [0]
+
+    async def _flush():
+        if not _buf or not _bot_instance:
+            return
+        text = "\n".join(_buf)
+        _buf.clear()
+        try:
+            for chunk in _split_message(f"```\n{text}\n```"):
+                await _bot_instance.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
+        except Exception as e:
+            logger.debug("Progress message send failed: %s", e)
+
+    async def _on_progress(event: str, detail: str):
+        # Extract round number from detail prefix "[N] ..."
+        round_num = 0
+        if detail.startswith("["):
+            try:
+                round_num = int(detail[1:detail.index("]")])
+            except (ValueError, IndexError):
+                pass
+
+        # New round started → flush previous round's buffer
+        if round_num > _current_round[0] and _current_round[0] > 0:
+            await _flush()
+        if round_num > 0:
+            _current_round[0] = round_num
+
+        if event == "thinking":
+            _buf.append(f"💭 {detail}")
+        elif event == "tool_call":
+            _buf.append(detail)
+        elif event == "tool_result":
+            _buf.append(detail)
+        elif event == "budget":
+            _buf.append(f"💰 {detail}")
+
+    # Expose flush for final cleanup
+    _on_progress.flush = _flush
+    return _on_progress
+
+
 def _is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_USER_IDS
 
@@ -515,6 +568,7 @@ async def _chat_with_tools(
     budget_usd: float | None = None,
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
+    on_progress=None,
 ) -> str:
     """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
     sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
@@ -535,6 +589,7 @@ async def _chat_with_tools(
         max_tokens=max_tokens or _CLAUDE_MAX_TOKENS,
         log_event=_log_event,
         budget_usd=budget_usd or _config["chat_budget"],
+        on_progress=on_progress,
     )
 
 
@@ -1079,7 +1134,10 @@ async def handle_message(message: Message):
                 system_alerts=_format_system_alerts(),
                 skills_section=build_skills_prompt(),
             ) + experience_context
-        reply = await _chat_with_tools(history, system_prompt=system_override)
+        progress_cb = _make_progress_callback(message.chat.id)
+        reply = await _chat_with_tools(history, system_prompt=system_override, on_progress=progress_cb)
+        if hasattr(progress_cb, "flush"):
+            await progress_cb.flush()
     except Exception as e:
         logger.error("Claude API error: %s", e)
         _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
@@ -1509,7 +1567,9 @@ async def bot_main():
     # Ensure task table exists
     await asyncio.to_thread(_ensure_table)
 
+    global _bot_instance
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    _bot_instance = bot
     dp = Dispatcher()
     dp.include_router(router)
 
@@ -1542,6 +1602,9 @@ async def bot_main():
         task_tools, task_handlers = build_task_context_tools(
             task["id"], task["user_id"], task.get("depth", 0),
         )
+        # Send progress to the task's user (or all users if self-generated)
+        target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
+        progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
         await process_task(
             b, task,
             chat_with_tools_fn=_chat_with_tools,
@@ -1556,7 +1619,11 @@ async def bot_main():
             extra_tools=task_tools,
             extra_handlers=task_handlers,
             budget_usd=_config["task_budget"],
+            on_progress=progress_cb,
         )
+        # Flush remaining progress buffer
+        if progress_cb and hasattr(progress_cb, "flush"):
+            await progress_cb.flush()
 
     # Start background workers (keep handles for graceful cancellation)
     _bg_tasks = [
