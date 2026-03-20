@@ -69,6 +69,37 @@ def count_tool_results(msgs_list, tid):
     return count
 
 
+def _find_unresolved_tool_uses(msgs_list):
+    """Return unresolved tool_use ids as [(assistant_index, [ids...]), ...]."""
+    unresolved = []
+    for i, m in enumerate(msgs_list):
+        if m.get("role") != "assistant":
+            continue
+        c = m.get("content", [])
+        if not isinstance(c, list):
+            continue
+        tool_ids = {
+            b.get("id")
+            for b in c
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
+        }
+        if not tool_ids:
+            continue
+        resolved = set()
+        if i + 1 < len(msgs_list) and msgs_list[i + 1].get("role") == "user":
+            nc = msgs_list[i + 1].get("content", [])
+            if isinstance(nc, list):
+                resolved = {
+                    b.get("tool_use_id")
+                    for b in nc
+                    if isinstance(b, dict) and b.get("type") == "tool_result"
+                }
+        missing = sorted(tid for tid in tool_ids if tid not in resolved)
+        if missing:
+            unresolved.append((i, missing))
+    return unresolved
+
+
 # ── Tests ──
 
 class TestResults:
@@ -356,6 +387,61 @@ result = _sanitize_messages(msgs)
 user_content = result[2].get("content", [])
 has_t1 = any(isinstance(b, dict) and b.get("tool_use_id") == "t1" for b in user_content)
 T.check("string user content wrapped + dummy added", has_t1, f"content={user_content}")
+
+
+# ──────────────────────────────────────────────────────────
+print("\n=== Test 17: Broken history input (non-alternating, malformed mix) ===")
+msgs = [
+    {"role": "assistant", "content": [{"type": "tool_use", "id": "tb1", "name": "x", "input": {}}]},
+    {"role": "assistant", "content": [{"type": "text", "text": "second assistant without user"}]},
+    {"role": "user", "content": "late user"},
+]
+result = _sanitize_messages(msgs)
+unresolved = _find_unresolved_tool_uses(result)
+T.check("broken history repaired (no unresolved tool_use)", len(unresolved) == 0, f"{unresolved}")
+T.check("alternating around first tool_use", result[1].get("role") == "user", f"roles={[m.get('role') for m in result]}")
+
+
+# ──────────────────────────────────────────────────────────
+print("\n=== Test 18: JSON-string content input ===")
+msgs = [
+    {"role": "user", "content": "hello"},
+    {
+        "role": "assistant",
+        "content": "[{\"type\":\"tool_use\",\"id\":\"tj1\",\"name\":\"json_tool\",\"input\":{}}]",
+    },
+    {
+        "role": "user",
+        "content": "[{\"type\":\"text\",\"text\":\"continue from json string\"}]",
+    },
+]
+result = _sanitize_messages(msgs)
+json_unresolved = _find_unresolved_tool_uses(result)
+T.check("json string parsed and resolved", len(json_unresolved) == 0, f"{json_unresolved}")
+json_user_content = result[2].get("content", [])
+T.check(
+    "tool_result injected into json-string user msg",
+    any(isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") == "tj1" for b in json_user_content),
+    f"content={json_user_content}",
+)
+
+
+# ──────────────────────────────────────────────────────────
+print("\n=== Test 19: Orphan tool_result input ===")
+msgs = [
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "orphan1", "content": "x"}]},
+    {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+]
+result = _sanitize_messages(msgs)
+first_content = result[0].get("content", [])
+if isinstance(first_content, list):
+    orphan_still_structured = any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in first_content
+    )
+else:
+    orphan_still_structured = False
+T.check("orphan tool_result does not remain as protocol block", not orphan_still_structured, f"content={first_content}")
+T.check("no unresolved tool_use introduced by orphan input", len(_find_unresolved_tool_uses(result)) == 0)
 
 
 # ── Summary ──

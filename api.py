@@ -68,11 +68,16 @@ async def _experience_scheduler():
 async def lifespan(app: FastAPI):
     diary_task = asyncio.create_task(_diary_scheduler())
     experience_task = asyncio.create_task(_experience_scheduler())
-    # Start Telegram bot alongside the API server
-    from telegram_bot import bot_main
-    bot_task = asyncio.create_task(bot_main())
+    # Telegram bot should run in its dedicated systemd service by default.
+    # Optional fallback for single-process dev environments:
+    run_telegram_in_api = os.getenv("RUN_TELEGRAM_IN_API", "false").strip().lower() in {"1", "true", "yes", "on"}
+    bot_task = None
+    if run_telegram_in_api:
+        from telegram_bot import bot_main
+        bot_task = asyncio.create_task(bot_main())
     yield
-    bot_task.cancel()
+    if bot_task is not None:
+        bot_task.cancel()
     experience_task.cancel()
     diary_task.cancel()
 

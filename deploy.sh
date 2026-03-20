@@ -102,12 +102,12 @@ cat > "$DEPLOY_META" <<METAEOF
 }
 METAEOF
 
-# 4. 서비스 재시작 (API 먼저, 텔레그램은 마지막)
+# 4. 서비스 재시작 (API 먼저)
 echo "서비스 재시작..."
 sudo systemctl restart leninbot-api
-sudo systemctl restart leninbot-telegram
+sudo systemctl is-active --quiet leninbot-api
 
-# 5. 성공 알림 (봇이 죽은 후이므로 curl로 직접 전송)
+# 5. 성공 알림 (텔레그램 재시작 전에 전송)
 SUMMARY=$(git log --oneline -1)
 _notify_telegram "✅ *Deploy 완료*
 \`$SUMMARY\`
@@ -115,5 +115,10 @@ _notify_telegram "✅ *Deploy 완료*
 \`\`\`
 $CHANGES
 \`\`\`"
+
+# 6. 텔레그램 재시작은 마지막 단계
+# 주의: systemd 환경에서는 이 스크립트가 같은 cgroup에 있다면
+# telegram 서비스 재시작 시 즉시 종료될 수 있으므로, 이후 후처리는 두지 않는다.
+sudo systemctl restart leninbot-telegram
 
 echo "=== Deploy 완료: $SUMMARY ==="
