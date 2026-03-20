@@ -217,12 +217,7 @@ async def chat_with_tools(
             total_cost += round_cost
             logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)", round_num, round_cost, total_cost, budget_usd)
 
-        # Budget exceeded → break out of loop (handled by forced-response below)
-        if total_cost >= budget_usd:
-            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d", total_cost, budget_usd, round_num)
-            break
-
-        # If no custom tool use, extract and return text
+        # If no custom tool use, extract and return text (check BEFORE budget)
         if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens (%d) at round %d/%d", max_tokens, round_num, max_rounds)
@@ -232,6 +227,11 @@ async def chat_with_tools(
             if budget_tracker is not None:
                 budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num})
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
+
+        # Budget exceeded → process this response's tool calls, then break
+        budget_exceeded_this_round = total_cost >= budget_usd
+        if budget_exceeded_this_round:
+            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d — processing final tool calls before exit", total_cost, budget_usd, round_num)
 
         # Process tool calls
         assistant_content = []
@@ -325,10 +325,10 @@ async def chat_with_tools(
             logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
 
         if tool_results:
-            # Inject budget warning at 80% threshold
+            # Inject budget warning at 80% threshold (as separate text block in user message)
             if not budget_warning_sent and total_cost >= budget_usd * 0.8:
                 budget_warning_sent = True
-                tool_results.append({
+                tool_results.insert(0, {
                     "type": "text",
                     "text": (
                         f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
@@ -341,6 +341,10 @@ async def chat_with_tools(
         else:
             logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
+
+        # Budget break AFTER tool results are properly appended
+        if budget_exceeded_this_round:
+            break
 
     # Limit reached (rounds or budget) — force final response
     budget_exhausted = total_cost >= budget_usd
