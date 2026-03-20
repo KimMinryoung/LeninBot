@@ -88,6 +88,17 @@ _git_fetch_with_retry() {
     return 1
 }
 
+# Run systemctl with least-friction privilege path:
+# - root: direct call
+# - non-root: non-interactive sudo (fails fast if not permitted)
+_run_systemctl() {
+    if [ "$(id -u)" -eq 0 ]; then
+        systemctl "$@"
+    else
+        sudo -n systemctl "$@"
+    fi
+}
+
 # 1. 코드 업데이트 (변경분만)
 _git_fetch_with_retry
 LOCAL=$(git rev-parse HEAD)
@@ -131,8 +142,8 @@ METAEOF
 
 # 4. 서비스 재시작 (API 먼저)
 echo "서비스 재시작..."
-sudo systemctl restart leninbot-api
-sudo systemctl is-active --quiet leninbot-api
+_run_systemctl restart leninbot-api
+_run_systemctl is-active --quiet leninbot-api
 
 # 5. 성공 알림 (텔레그램 재시작 전에 전송)
 SUMMARY=$(git log --oneline -1)
@@ -146,6 +157,6 @@ $CHANGES
 # 6. 텔레그램 재시작은 마지막 단계
 # 주의: systemd 환경에서는 이 스크립트가 같은 cgroup에 있다면
 # telegram 서비스 재시작 시 즉시 종료될 수 있으므로, 이후 후처리는 두지 않는다.
-sudo systemctl restart leninbot-telegram
+_run_systemctl restart leninbot-telegram
 
 echo "=== Deploy 완료: $SUMMARY ==="
