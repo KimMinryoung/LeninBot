@@ -1779,14 +1779,15 @@ async def _chat_with_tools(
             and b["id"] not in already_resolved_server_ids
         ]
         if pending_server_ids:
-            # Append dummy results INTO the assistant content (same message)
+            # Append dummy results INTO the assistant content (same message).
+            # assistant_content is the same list object referenced by working_msgs[-1]["content"],
+            # so .append() modifies both in place. We also reassign the dict for explicitness.
             for tid in pending_server_ids:
                 assistant_content.append({
                     "type": "web_search_tool_result",
                     "tool_use_id": tid,
                     "content": [],
                 })
-            # Update the already-appended assistant message in working_msgs
             working_msgs[-1] = {"role": "assistant", "content": assistant_content}
             logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
 
@@ -1794,6 +1795,11 @@ async def _chat_with_tools(
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             # Server-side tool paused (>10 iterations) — send empty to continue
+            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
+        else:
+            # Safety: ensure a user message always follows the assistant message
+            # (should not normally happen — tool_use stop_reason always produces tool_results)
+            logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
 
     # Limit reached — check if we should auto-escalate to background task
