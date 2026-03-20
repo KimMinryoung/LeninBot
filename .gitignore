@@ -40,6 +40,7 @@ tmp_cmd.sh
 # 백업 파일
 *.bak_*
 *.bak
+*.bak2
 
 # 임시 파일
 tmp*.py

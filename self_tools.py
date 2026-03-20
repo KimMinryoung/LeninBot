@@ -256,9 +256,24 @@ async def _exec_read_chat_logs(
     results = []
     for i, row in enumerate(rows, 1):
         ts = _to_kst(row.get("created_at"))
-        q = str(row.get("user_query", ""))[:200]
-        a = str(row.get("bot_answer", ""))[:300]
-        results.append(f"[{i}] {ts}\n  User: {q}\n  Bot: {a}")
+        role = str(row.get("role", "") or "").lower()
+        content = str(row.get("content", "") or "")
+        if role in ("user", "assistant") and content:
+            label = "User" if role == "user" else "Bot"
+            text = content[:300]
+            results.append(f"[{i}] {ts}\n  {label}: {text}")
+            continue
+
+        q = str(row.get("user_query", "") or "")[:200]
+        a = str(row.get("bot_answer", "") or "")[:300]
+        lines = [f"[{i}] {ts}"]
+        if q:
+            lines.append(f"  User: {q}")
+        if a:
+            lines.append(f"  Bot: {a}")
+        if not q and not a and content:
+            lines.append(f"  Msg: {content[:300]}")
+        results.append("\n".join(lines))
 
     return f"Chat logs ({len(rows)} entries):\n\n" + "\n\n".join(results)
 

@@ -243,6 +243,11 @@ def fetch_chat_logs(
     """
     from db import query as db_query
 
+    source = (source or "web").strip().lower()
+    if source not in {"web", "telegram", "all"}:
+        logger.warning("[shared] fetch_chat_logs: invalid source=%r; falling back to 'web'", source)
+        source = "web"
+
     conditions, params = [], []
     if hours_back:
         cutoff = datetime.now(KST) - timedelta(hours=hours_back)
@@ -264,10 +269,20 @@ def fetch_chat_logs(
             rows = db_query(sql, tuple(params))
             result = []
             for r in rows:
-                if r.get("role") == "user":
-                    result.append({"user_query": r["content"], "bot_answer": "", "created_at": r["created_at"]})
+                role = str(r.get("role", "assistant"))
+                content = str(r.get("content", ""))
+                item = {
+                    "role": role,
+                    "content": content,
+                    "created_at": r["created_at"],
+                }
+                if role == "user":
+                    item["user_query"] = content
+                    item["bot_answer"] = ""
                 else:
-                    result.append({"user_query": "", "bot_answer": r["content"], "created_at": r["created_at"]})
+                    item["user_query"] = ""
+                    item["bot_answer"] = content
+                result.append(item)
             return result
         except Exception as e:
             logger.error("[shared] fetch_chat_logs(telegram) error: %s", e)
