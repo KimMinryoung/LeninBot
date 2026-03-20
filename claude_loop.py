@@ -272,6 +272,59 @@ def _dump_messages_for_debug(msgs: list[dict], round_num: int, error: Exception)
     logger.error(full_dump)
 
 
+def _strip_tool_blocks(msgs: list[dict]) -> list[dict]:
+    """Nuclear recovery: remove all tool_use/tool_result/server_tool blocks.
+
+    Keeps only text content from each message. Messages that become empty
+    after stripping are replaced with a placeholder. Consecutive same-role
+    messages are merged.
+    """
+    cleaned = []
+    for msg in msgs:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if isinstance(content, str):
+            cleaned.append({"role": role, "content": content})
+            continue
+
+        if not isinstance(content, list):
+            cleaned.append({"role": role, "content": str(content)})
+            continue
+
+        # Keep only text blocks
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block["text"])
+
+        text = "\n".join(text_parts).strip() if text_parts else ""
+        if not text:
+            text = "(도구 실행 결과 생략됨)" if role == "user" else "(도구 호출 과정 생략됨)"
+
+        cleaned.append({"role": role, "content": text})
+
+    # Merge consecutive same-role messages
+    merged = []
+    for msg in cleaned:
+        if merged and merged[-1]["role"] == msg["role"]:
+            merged[-1] = {**merged[-1], "content": merged[-1]["content"] + "\n" + msg["content"]}
+        else:
+            merged.append(msg)
+
+    # Ensure alternating user/assistant (API requirement)
+    final = []
+    for msg in merged:
+        if final and final[-1]["role"] == msg["role"]:
+            # Insert a filler of the opposite role
+            filler_role = "assistant" if msg["role"] == "user" else "user"
+            final.append({"role": filler_role, "content": "(계속)"})
+        final.append(msg)
+
+    logger.info("_strip_tool_blocks: %d msgs → %d msgs", len(msgs), len(final))
+    return final
+
+
 # ── Token Estimation ─────────────────────────────────────────────────
 
 def estimate_tokens(text: str) -> int:
@@ -347,8 +400,14 @@ async def chat_with_tools(
                 messages=working_msgs,
             )
         except Exception as api_err:
-            # Dump full message structure for debugging 400 errors
-            _dump_messages_for_debug(working_msgs, round_num, api_err)
+            err_str = str(api_err)
+            if "tool_use" in err_str and "tool_result" in err_str:
+                # Auto-recovery: strip tool blocks, break to forced response
+                _dump_messages_for_debug(working_msgs, round_num, api_err)
+                logger.warning("Auto-recovery: stripping tool blocks from messages after 400 error")
+                working_msgs = _strip_tool_blocks(working_msgs)
+                response = None  # ensure forced-response path runs
+                break
             raise
 
         # Track cost
@@ -541,28 +600,37 @@ async def chat_with_tools(
     working_msgs = sanitize_messages(working_msgs)
     working_msgs = validate_tool_pairs(working_msgs)
     try:
+        final = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=cached_system,
+            messages=working_msgs,  # no tools parameter — forces text-only response
+        )
+    except Exception as api_err:
+        # Last resort: strip all tool blocks and retry with plain text
+        _dump_messages_for_debug(working_msgs, -1, api_err)
+        logger.warning("Forced response failed — retrying with stripped messages")
+        stripped = _strip_tool_blocks(working_msgs)
         try:
             final = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 system=cached_system,
-                messages=working_msgs,  # no tools parameter — forces text-only response
+                messages=stripped,
             )
-        except Exception as api_err:
-            _dump_messages_for_debug(working_msgs, -1, api_err)
-            raise
-        if hasattr(final, "usage") and final.usage:
-            total_cost += _calculate_cost(final.usage)
-        if final.stop_reason == "max_tokens":
-            logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
-        text_parts = [b.text for b in final.content if b.type == "text"]
-        if budget_tracker is not None:
-            budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
-        return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
-    except Exception as e:
-        logger.error("Final forced response failed: %s", e)
-        if log_event:
-            log_event("error", "final_response", f"Final forced response failed: {e}")
-        if budget_tracker is not None:
-            budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
-        return f"⚠️ {limit_reason} 후 응답 생성 실패: {e}"
+        except Exception as e2:
+            logger.error("Final stripped response also failed: %s", e2)
+            if log_event:
+                log_event("error", "final_response", f"Final response failed even after strip: {e2}")
+            if budget_tracker is not None:
+                budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
+            return f"⚠️ {limit_reason} 후 응답 생성 실패: {api_err}"
+
+    if hasattr(final, "usage") and final.usage:
+        total_cost += _calculate_cost(final.usage)
+    if final.stop_reason == "max_tokens":
+        logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
+    text_parts = [b.text for b in final.content if b.type == "text"]
+    if budget_tracker is not None:
+        budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
+    return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
