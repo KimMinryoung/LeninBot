@@ -87,10 +87,10 @@ def load_skills() -> list[dict]:
 
 
 def build_skills_prompt() -> str:
-    """Build a compact skills section for the system prompt.
+    """Build a compact skills index for the system prompt.
 
-    Injects skill names + descriptions as a lookup index.
-    Full instructions are included so the agent knows exactly what to do.
+    Only includes skill names + trigger descriptions (not full instructions).
+    The model should read_file("skills/<name>/SKILL.md") when it needs to execute a skill.
     """
     skills = load_skills()
     if not skills:
@@ -98,17 +98,11 @@ def build_skills_prompt() -> str:
 
     lines = ["\n\n## Available Skills"]
     lines.append(
-        "When a user request matches a skill's description, follow its instructions exactly.\n"
+        "스킬이 트리거되면 read_file(\"skills/<name>/SKILL.md\")로 전체 지침을 읽은 뒤 따를 것.\n"
     )
 
     for skill in skills:
-        lines.append(f"### `{skill['name']}`")
-        lines.append(f"**Trigger**: {skill['description']}")
-        if skill["allowed_tools"]:
-            lines.append(f"**Tools**: {', '.join(skill['allowed_tools'])}")
-        lines.append("")
-        lines.append(skill["instructions"])
-        lines.append("")
+        lines.append(f"- **{skill['name']}**: {skill['description']}")
 
     return "\n".join(lines)
 
