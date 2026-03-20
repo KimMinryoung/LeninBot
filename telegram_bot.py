@@ -1046,7 +1046,7 @@ async def cmd_deploy(message: Message):
             pass
 
 
-@router.message(F.text)
+@router.message(F.text, ~Command("config"), ~Command("modify"))
 async def handle_message(message: Message):
     if not _is_allowed(message.from_user.id):
         return
