@@ -261,10 +261,6 @@ async def chat(
                     result = f"Unknown tool: {block.name}"
                     is_error = True
 
-                # Truncate very large results to avoid context overflow
-                if isinstance(result, str) and len(result) > 30000:
-                    result = result[:30000] + f"\n\n... [truncated, total {len(result)} chars]"
-
                 tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
