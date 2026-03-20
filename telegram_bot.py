@@ -470,6 +470,141 @@ def _clear_chat_history(user_id: int):
     )
     max_id = (row["max_id"] or 0) if row else 0
     _clear_after_id[user_id] = max_id
+    # Also delete stored chunk summaries
+    _execute("DELETE FROM chat_history_summaries WHERE user_id = %s", (user_id,))
+
+
+# ── Chunked History Summaries ─────────────────────────────────────────
+_SUMMARY_CHUNK_SIZE = 10  # messages per summary chunk
+_MAX_SUMMARY_CHUNKS = 10  # max chunks to include in context
+_summary_table_ready = False
+
+
+def _ensure_summary_table():
+    global _summary_table_ready
+    if _summary_table_ready:
+        return
+    _execute(
+        "CREATE TABLE IF NOT EXISTS chat_history_summaries ("
+        "  id SERIAL PRIMARY KEY,"
+        "  user_id BIGINT NOT NULL,"
+        "  chunk_start_id BIGINT NOT NULL,"
+        "  chunk_end_id BIGINT NOT NULL,"
+        "  summary TEXT NOT NULL,"
+        "  msg_count INTEGER DEFAULT 0,"
+        "  created_at TIMESTAMPTZ DEFAULT NOW()"
+        ")"
+    )
+    _summary_table_ready = True
+
+
+def _load_context_with_summaries(user_id: int) -> list[dict]:
+    """Load chat context: chunk summaries + recent raw messages."""
+    _ensure_summary_table()
+    min_id = _clear_after_id.get(user_id, 0)
+
+    # Last N chunk summaries (DESC then reverse for chronological order)
+    summaries = _query(
+        "SELECT chunk_start_id, chunk_end_id, summary FROM chat_history_summaries "
+        "WHERE user_id = %s AND chunk_start_id > %s "
+        "ORDER BY chunk_start_id DESC LIMIT %s",
+        (user_id, min_id, _MAX_SUMMARY_CHUNKS),
+    )
+    summaries.reverse()
+
+    # Raw messages start after last chunk (or after clear marker)
+    raw_after = summaries[-1]["chunk_end_id"] if summaries else min_id
+
+    with _get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, role, content FROM ("
+                "  SELECT id, role, content FROM telegram_chat_history"
+                "  WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT 20"
+                ") sub ORDER BY id ASC",
+                (user_id, raw_after),
+            )
+            raw_rows = cur.fetchall()
+
+    # Build context: summaries as pairs + raw messages as text
+    context: list[dict] = []
+    for s in summaries:
+        context.append({
+            "role": "user",
+            "content": f"[대화 요약 #{s['chunk_start_id']}~#{s['chunk_end_id']}]\n{s['summary']}",
+        })
+        context.append({"role": "assistant", "content": "이전 대화 내용을 파악했습니다."})
+
+    for r in raw_rows:
+        role = r["role"] if r["role"] in ("user", "assistant") else "user"
+        text = _normalize_history_content(r["content"])
+        context.append({"role": role, "content": text or "(empty)"})
+
+    return context
+
+
+async def _maybe_summarize_chunk(user_id: int):
+    """Create a summary chunk if enough unsummarized messages have accumulated."""
+    try:
+        await asyncio.to_thread(_ensure_summary_table)
+        min_id = _clear_after_id.get(user_id, 0)
+
+        last = await asyncio.to_thread(
+            _query_one,
+            "SELECT chunk_end_id FROM chat_history_summaries "
+            "WHERE user_id = %s AND chunk_start_id > %s "
+            "ORDER BY chunk_end_id DESC LIMIT 1",
+            (user_id, min_id),
+        )
+        raw_after = last["chunk_end_id"] if last else min_id
+
+        rows = await asyncio.to_thread(
+            _query,
+            "SELECT id, role, content FROM telegram_chat_history "
+            "WHERE user_id = %s AND id > %s ORDER BY id ASC LIMIT %s",
+            (user_id, raw_after, _SUMMARY_CHUNK_SIZE + 5),
+        )
+
+        if len(rows) < _SUMMARY_CHUNK_SIZE:
+            return
+
+        chunk = rows[:_SUMMARY_CHUNK_SIZE]
+        chunk_start_id = chunk[0]["id"]
+        chunk_end_id = chunk[-1]["id"]
+
+        conversation_text = "\n".join(
+            f"[{r['role']}] {_normalize_history_content(r['content'])[:500]}"
+            for r in chunk
+        )
+        summary_prompt = (
+            "아래 대화를 핵심 정보만 남기고 간결하게 요약해라. "
+            "사용자가 어떤 주제를 물었고, 어떤 결론/답변이 나왔는지 위주로. "
+            "고유명사, 수치, 날짜는 보존. 300자 이내.\n\n"
+            + conversation_text
+        )
+
+        summary = await _ollama_generate(summary_prompt, max_tokens=512)
+        if not summary:
+            resp = await _claude.messages.create(
+                model=_get_model_light(),
+                max_tokens=512,
+                messages=[{"role": "user", "content": summary_prompt}],
+            )
+            summary = resp.content[0].text
+
+        await asyncio.to_thread(
+            _execute,
+            "INSERT INTO chat_history_summaries "
+            "(user_id, chunk_start_id, chunk_end_id, summary, msg_count) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (user_id, chunk_start_id, chunk_end_id, summary, len(chunk)),
+        )
+        logger.info(
+            "Chunk summary created: user=%d msgs=#%d~#%d (%d msgs)",
+            user_id, chunk_start_id, chunk_end_id, len(chunk),
+        )
+    except Exception as e:
+        logger.warning("Chunk summarization failed: %s", e)
 
 
 async def _compress_history(messages: list[dict]) -> list[dict]:
@@ -1198,10 +1333,9 @@ async def handle_message(message: Message):
     user_id = message.from_user.id
     user_text = message.text
 
-    # Save user message to DB, load history, compress if needed
+    # Save user message to DB, load context (chunk summaries + raw messages)
     await asyncio.to_thread(_save_chat_message, user_id, "user", user_text)
-    history = await asyncio.to_thread(_load_chat_history, user_id)
-    history = await _compress_history(history)
+    history = await asyncio.to_thread(_load_context_with_summaries, user_id)
     history = sanitize_messages(history)
 
     # Auto-recall: fetch relevant past experiences for context injection
@@ -1279,8 +1413,9 @@ async def handle_message(message: Message):
             # Remove the marker from the reply shown to user
             reply = reply[:match.start()].rstrip()
 
-    # Save assistant reply to DB
+    # Save assistant reply to DB, then try to create chunk summary in background
     await asyncio.to_thread(_save_chat_message, user_id, "assistant", reply)
+    asyncio.create_task(_maybe_summarize_chunk(user_id))
 
     for chunk in _split_message(reply):
         await message.answer(chunk)
