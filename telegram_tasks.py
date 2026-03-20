@@ -97,7 +97,6 @@ async def process_task(
         try:
             report = await chat_with_tools_fn(
                 [{"role": "user", "content": content}],
-                max_rounds=50,
                 system_prompt=task_system_prompt,
                 model=get_model_fn(),
                 max_tokens=max_tokens_task,

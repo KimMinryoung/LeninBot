@@ -168,6 +168,32 @@ _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 
+# ── Runtime Config (mutable at runtime via /config) ──────────────────
+_config = {
+    "chat_budget": 0.30,       # USD per chat turn
+    "task_budget": 1.00,       # USD per background task
+    "chat_model": "sonnet",    # "sonnet" | "haiku" | "opus"
+    "task_model": "sonnet",    # "sonnet" | "haiku" | "opus"
+    "max_rounds_chat": 50,
+    "max_rounds_task": 50,
+}
+
+# Display metadata for config panel
+_CONFIG_META = {
+    "chat_budget":      {"label": "대화 예산",     "unit": "$",  "options": [0.10, 0.20, 0.30, 0.50, 1.00]},
+    "task_budget":      {"label": "태스크 예산",   "unit": "$",  "options": [0.50, 1.00, 2.00, 3.00, 5.00]},
+    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["haiku", "sonnet", "opus"]},
+    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["haiku", "sonnet", "opus"]},
+    "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
+    "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
+}
+
+_MODEL_ALIAS_MAP = {
+    "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+    "sonnet": ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+    "opus":   ("claude-opus-4-6", "claude-opus-4-6"),
+}
+
 
 def _resolve_model(alias: str, fallback: str) -> str:
     """Resolve a Claude model alias to its actual ID via the Models API."""
@@ -181,25 +207,33 @@ def _resolve_model(alias: str, fallback: str) -> str:
         return fallback
 
 
-# Lazy model resolution — avoid blocking API calls at import time
-_CLAUDE_MODEL: str | None = None
-_CLAUDE_MODEL_LIGHT: str | None = None
+# Lazy model resolution cache — maps alias → resolved ID
+_resolved_models: dict[str, str] = {}
+
+
+def _get_model_by_alias(alias: str) -> str:
+    """Resolve a model short name (haiku/sonnet/opus) to its full ID, with caching."""
+    if alias in _resolved_models:
+        return _resolved_models[alias]
+    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-4-6", "claude-sonnet-4-6"))
+    resolved = _resolve_model(model_alias, fallback)
+    _resolved_models[alias] = resolved
+    return resolved
 
 
 def _get_model() -> str:
-    """Lazily resolve the main Claude model on first use."""
-    global _CLAUDE_MODEL
-    if _CLAUDE_MODEL is None:
-        _CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
-    return _CLAUDE_MODEL
+    """Get the current chat model based on runtime config."""
+    return _get_model_by_alias(_config["chat_model"])
+
+
+def _get_model_task() -> str:
+    """Get the current task model based on runtime config."""
+    return _get_model_by_alias(_config["task_model"])
 
 
 def _get_model_light() -> str:
-    """Lazily resolve the light Claude model on first use."""
-    global _CLAUDE_MODEL_LIGHT
-    if _CLAUDE_MODEL_LIGHT is None:
-        _CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
-    return _CLAUDE_MODEL_LIGHT
+    """Get the light model (Haiku) — used for compression, reflection, etc."""
+    return _get_model_by_alias("haiku")
 
 # ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -464,7 +498,7 @@ def _is_allowed(user_id: int) -> bool:
 
 async def _chat_with_tools(
     messages: list[dict],
-    max_rounds: int = 50,
+    max_rounds: int | None = None,
     system_prompt: str | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
@@ -487,10 +521,10 @@ async def _chat_with_tools(
         tools=merged_tools,
         tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
-        max_rounds=max_rounds,
+        max_rounds=max_rounds or _config["max_rounds_chat"],
         max_tokens=max_tokens or _CLAUDE_MAX_TOKENS,
         log_event=_log_event,
-        budget_usd=budget_usd or 0.30,
+        budget_usd=budget_usd or _config["chat_budget"],
     )
 
 
@@ -499,25 +533,52 @@ _pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → ent
 router = Router()
 
 
+_HELP_TEXT = """\
+*레닌봇 커맨드 목록*
+
+*대화*
+/chat <메시지> — CLAW 파이프라인 질의 (RAG+KG+전략)
+  일반 메시지 — Claude 직접 대화 (도구 사용 가능)
+/clear — 대화 히스토리 초기화
+
+*태스크*
+/task <내용> — 백그라운드 태스크 등록 (Sonnet, $1 예산)
+/status — 시스템 대시보드 (태스크·에러·KG)
+/status\\_auto — 자율 생성 태스크 확인
+/report <id> — 태스크 리포트 파일 재전송
+
+*스케줄*
+/schedule <cron> | <내용> — 정기 태스크 등록
+  예: `/schedule 0 9 * * * | 오늘의 뉴스 브리핑`
+/schedules — 등록된 스케줄 목록
+/unschedule <id> — 스케줄 삭제
+
+*시스템*
+/kg — 지식그래프 현황 조회
+/errors \\[n] \\[error|warning] — 에러/경고 로그
+/config — 설정 패널 (모델, 예산, 라운드 수)
+/deploy — 서버 배포 (git pull + restart)
+/modify <파일> | <이유> | <내용> — 서버 파일 수정
+
+/help — 이 도움말 표시
+"""
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     if not _is_allowed(message.from_user.id):
         return
     await message.answer(
-        "레닌봇 텔레그램 인터페이스입니다.\n\n"
-        "메시지를 보내면 Claude 기반 대화를 할 수 있습니다.\n"
-        "/chat <메시지> — CLAW 파이프라인으로 질의 (RAG+KG+전략)\n"
-        "/task <내용> — 백그라운드 태스크 등록\n"
-        "/status — 최근 태스크 상태 확인\n"
-        "/status_auto — 자율 생성 태스크 확인\n"
-        "/report <id> — 태스크 리포트 파일 재전송 (DB 원문)\n"
-        "/kg — 지식그래프 현황 직접 조회\n"
-        "/schedule <cron> | <내용> — 정기 태스크 등록\n"
-        "/schedules — 등록된 스케줄 목록\n"
-        "/unschedule <id> — 스케줄 삭제\n"
-        "/errors — 최근 에러/경고 로그 조회\n"
-        "/clear — 대화 히스토리 초기화"
+        "레닌봇 텔레그램 인터페이스입니다.\n\n" + _HELP_TEXT,
+        parse_mode="Markdown",
     )
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    if not _is_allowed(message.from_user.id):
+        return
+    await message.answer(_HELP_TEXT, parse_mode="Markdown")
 
 
 @router.message(Command("clear"))
@@ -1280,6 +1341,150 @@ async def cb_modify_reject(callback: CallbackQuery):
     await callback.answer()
 
 
+# ── Config Panel ────────────────────────────────────────────────────
+
+def _config_summary() -> str:
+    """Build a text summary of current config values."""
+    lines = ["*현재 설정*\n"]
+    for key, meta in _CONFIG_META.items():
+        val = _config[key]
+        unit = meta["unit"]
+        display = f"{unit}{val}" if unit == "$" else f"{val}{unit}"
+        lines.append(f"  {meta['label']}: `{display}`")
+    return "\n".join(lines)
+
+
+def _config_main_keyboard() -> InlineKeyboardMarkup:
+    """Build the main config panel keyboard — one button per setting."""
+    rows = []
+    for key, meta in _CONFIG_META.items():
+        val = _config[key]
+        unit = meta["unit"]
+        display = f"{unit}{val}" if unit == "$" else f"{val}{unit}"
+        rows.append([InlineKeyboardButton(
+            text=f"{meta['label']}: {display}",
+            callback_data=f"cfg_select:{key}",
+        )])
+    rows.append([InlineKeyboardButton(text="닫기", callback_data="cfg_close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _config_options_keyboard(key: str) -> InlineKeyboardMarkup:
+    """Build option selection keyboard for a specific config key."""
+    meta = _CONFIG_META[key]
+    current = _config[key]
+    buttons = []
+    for opt in meta["options"]:
+        unit = meta["unit"]
+        display = f"{unit}{opt}" if unit == "$" else f"{opt}{unit}"
+        marker = " ✓" if opt == current else ""
+        buttons.append(InlineKeyboardButton(
+            text=f"{display}{marker}",
+            callback_data=f"cfg_set:{key}:{opt}",
+        ))
+    # Arrange in rows of 3
+    rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
+    rows.append([InlineKeyboardButton(text="← 뒤로", callback_data="cfg_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(Command("config"))
+async def cmd_config(message: Message):
+    """Open the config panel."""
+    if not _is_allowed(message.from_user.id):
+        return
+    await message.answer(
+        _config_summary(),
+        parse_mode="Markdown",
+        reply_markup=_config_main_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("cfg_select:"))
+async def cb_config_select(callback: CallbackQuery):
+    """User tapped a config key — show options."""
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    key = callback.data.split(":", 1)[1]
+    if key not in _CONFIG_META:
+        await callback.answer("알 수 없는 설정", show_alert=True)
+        return
+    meta = _CONFIG_META[key]
+    await callback.message.edit_text(
+        f"*{meta['label']}* 변경\n현재: `{_config[key]}`",
+        parse_mode="Markdown",
+        reply_markup=_config_options_keyboard(key),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cfg_set:"))
+async def cb_config_set(callback: CallbackQuery):
+    """User selected a new value for a config key."""
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3:
+        await callback.answer("잘못된 데이터", show_alert=True)
+        return
+    key, raw_val = parts[1], parts[2]
+    if key not in _CONFIG_META:
+        await callback.answer("알 수 없는 설정", show_alert=True)
+        return
+
+    # Convert value to the right type
+    current = _config[key]
+    if isinstance(current, float):
+        new_val = float(raw_val)
+    elif isinstance(current, int):
+        new_val = int(raw_val)
+    else:
+        new_val = raw_val
+
+    old_val = _config[key]
+    _config[key] = new_val
+
+    # If model changed, clear resolved cache so it re-resolves on next use
+    if key in ("chat_model", "task_model") and new_val != old_val:
+        _resolved_models.pop(new_val, None)
+
+    logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
+    await callback.answer(f"{_CONFIG_META[key]['label']}: {new_val}")
+
+    # Return to main config panel
+    await callback.message.edit_text(
+        _config_summary(),
+        parse_mode="Markdown",
+        reply_markup=_config_main_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "cfg_back")
+async def cb_config_back(callback: CallbackQuery):
+    """Return to main config panel."""
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    await callback.message.edit_text(
+        _config_summary(),
+        parse_mode="Markdown",
+        reply_markup=_config_main_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cfg_close")
+async def cb_config_close(callback: CallbackQuery):
+    """Close the config panel."""
+    if not _is_allowed(callback.from_user.id):
+        await callback.answer("권한 없음", show_alert=True)
+        return
+    await callback.message.edit_text("설정 패널을 닫았습니다.")
+    await callback.answer()
+
+
 # ── Entry Point ──────────────────────────────────────────────────────
 
 async def bot_main():
@@ -1310,7 +1515,7 @@ async def bot_main():
         await process_task(
             b, task,
             chat_with_tools_fn=_chat_with_tools,
-            get_model_fn=_get_model,
+            get_model_fn=_get_model_task,
             task_system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
                 system_alerts=_format_system_alerts(),
@@ -1320,7 +1525,7 @@ async def bot_main():
             log_event_fn=_log_event,
             extra_tools=task_tools,
             extra_handlers=task_handlers,
-            budget_usd=1.00,
+            budget_usd=_config["task_budget"],
         )
 
     # Start background workers (keep handles for graceful cancellation)
