@@ -12,13 +12,23 @@ import sys
 from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
 
-import anthropic
+try:
+    import anthropic
+    _ANTHROPIC_IMPORT_ERROR = None
+except ModuleNotFoundError as _err:
+    anthropic = None
+    _ANTHROPIC_IMPORT_ERROR = _err
 
 # Add project root to path so we can import claude_loop
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
-from claude_loop import sanitize_messages as _sanitize_messages_shared
+from claude_loop import (
+    sanitize_messages as _sanitize_messages_shared,
+    validate_tool_pairs as _validate_tool_pairs_shared,
+    _strip_tool_blocks as _strip_tool_blocks_shared,
+    _dump_messages_for_debug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +36,7 @@ KST = timezone(timedelta(hours=9))
 
 # ── Client & Model ────────────────────────────────────────────────────
 
-_client = anthropic.AsyncAnthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY"),
-)
+_client = None
 
 _MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 8192
@@ -118,6 +126,38 @@ def _sanitize_messages(msgs: list[dict]) -> list[dict]:
     return _sanitize_messages_shared(msgs, handle_server_tools=False)
 
 
+def _validate_messages(msgs: list[dict]) -> list[dict]:
+    """Strict local-agent tool pair validation (server tools disabled)."""
+    sanitized = _sanitize_messages(msgs)
+    return _validate_tool_pairs_shared(sanitized)
+
+
+def _extract_text_response(response) -> str:
+    text_parts = [b.text for b in response.content if getattr(b, "type", "") == "text"]
+    return "\n".join(text_parts) if text_parts else "(no response)"
+
+
+def _build_client():
+    if anthropic is None:
+        raise RuntimeError(
+            "Missing dependency: anthropic. Install with `pip install anthropic` "
+            f"(original import error: {_ANTHROPIC_IMPORT_ERROR})"
+        )
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set. Export it in your environment or .env file."
+        )
+    return anthropic.AsyncAnthropic(api_key=api_key)
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = _build_client()
+    return _client
+
+
 # ── Core Loop ─────────────────────────────────────────────────────────
 
 async def chat(
@@ -137,6 +177,7 @@ async def chat(
     """
     effective_rounds = max_rounds or _MAX_ROUNDS
     tools, handlers = _get_tools_and_handlers()
+    client = _get_client()
 
     # Work on a copy so tool-use intermediate messages don't pollute history
     working_msgs = list(messages)
@@ -150,23 +191,52 @@ async def chat(
         cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
     for round_num in range(1, effective_rounds + 1):
-        # Sanitize: ensure all tool_use blocks have matching tool_result
-        working_msgs = _sanitize_messages(working_msgs)
+        working_msgs = _validate_messages(working_msgs)
 
-        response = await _client.messages.create(
-            model=_MODEL,
-            max_tokens=_MAX_TOKENS,
-            system=cached_system,
-            tools=cached_tools,
-            messages=working_msgs,
-        )
+        try:
+            response = await client.messages.create(
+                model=_MODEL,
+                max_tokens=_MAX_TOKENS,
+                system=cached_system,
+                tools=cached_tools,
+                messages=working_msgs,
+            )
+        except Exception as api_err:
+            err_str = str(api_err)
+            if "tool_use" in err_str and "tool_result" in err_str:
+                _dump_messages_for_debug(working_msgs, round_num, api_err)
+                logger.warning("Local agent auto-recovery: strict canonicalization retry")
+                strict_msgs = _validate_messages(working_msgs)
+                try:
+                    response = await client.messages.create(
+                        model=_MODEL,
+                        max_tokens=_MAX_TOKENS,
+                        system=cached_system,
+                        tools=cached_tools,
+                        messages=strict_msgs,
+                    )
+                    working_msgs = strict_msgs
+                except Exception as strict_err:
+                    logger.warning(
+                        "Local agent strict retry failed; falling back to text-only final response: %s",
+                        strict_err,
+                    )
+                    fallback_msgs = _strip_tool_blocks_shared(strict_msgs)
+                    final = await client.messages.create(
+                        model=_MODEL,
+                        max_tokens=_MAX_TOKENS,
+                        system=cached_system,
+                        messages=fallback_msgs,
+                    )
+                    return _extract_text_response(final)
+            else:
+                raise
 
-        # If no tool use, extract and return text
-        if response.stop_reason != "tool_use":
+        # If no tool use-like stop, extract and return text
+        if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens at round %d/%d", round_num, effective_rounds)
-            text_parts = [b.text for b in response.content if b.type == "text"]
-            return "\n".join(text_parts) if text_parts else "(no response)"
+            return _extract_text_response(response)
 
         # Process tool calls
         assistant_content = []
@@ -203,6 +273,8 @@ async def chat(
                 else:
                     result = f"Unknown tool: {block.name}"
                     is_error = True
+                if not isinstance(result, str):
+                    result = str(result) if result is not None else "(no result)"
 
                 tool_result_block = {
                     "type": "tool_result",
@@ -212,6 +284,12 @@ async def chat(
                 if is_error:
                     tool_result_block["is_error"] = True
                 tool_results.append(tool_result_block)
+            else:
+                # Preserve unknown future block types as text to avoid losing context.
+                assistant_content.append({
+                    "type": "text",
+                    "text": f"[unsupported block:{getattr(block, 'type', 'unknown')}]",
+                })
 
         # Safety net: ensure EVERY tool_use block has a matching tool_result
         resolved_ids = {r["tool_use_id"] for r in tool_results}
@@ -236,14 +314,13 @@ async def chat(
     })
     working_msgs = _sanitize_messages(working_msgs)
     try:
-        final = await _client.messages.create(
+        final = await client.messages.create(
             model=_MODEL,
             max_tokens=_MAX_TOKENS,
             system=cached_system,
             messages=working_msgs,
         )
-        text_parts = [b.text for b in final.content if b.type == "text"]
-        return "\n".join(text_parts) if text_parts else "(no response)"
+        return _extract_text_response(final)
     except Exception as e:
         logger.error("Final forced response failed: %s", e)
         return f"Error: Tool limit ({effective_rounds}) reached and final response failed: {e}"
