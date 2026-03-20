@@ -375,6 +375,52 @@ _RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
 _clear_after_id: dict[int, int] = {}
 
 
+def _normalize_history_content(content) -> str:
+    """Convert mixed/legacy message content into plain text.
+
+    Claude history can contain structured content blocks in older rows.
+    We strip tool blocks and keep only user-visible text so the next
+    API call never includes dangling tool_use IDs.
+    """
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        s = content.strip()
+        # Legacy rows may store structured content as JSON string.
+        if s.startswith("[") or s.startswith("{"):
+            try:
+                parsed = json.loads(s)
+                return _normalize_history_content(parsed)
+            except Exception:
+                return content
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            text = _normalize_history_content(block)
+            if text:
+                parts.append(text)
+        return "\n".join(parts).strip()
+
+    if isinstance(content, dict):
+        btype = content.get("type")
+        if btype in ("tool_use", "server_tool_use"):
+            return ""
+        if btype == "text":
+            return str(content.get("text", ""))
+        if btype in ("tool_result", "web_search_tool_result"):
+            return _normalize_history_content(content.get("content", ""))
+        if "text" in content:
+            return str(content.get("text", ""))
+        if "content" in content:
+            return _normalize_history_content(content.get("content"))
+        return ""
+
+    return str(content)
+
+
 def _load_chat_history(user_id: int) -> list[dict]:
     """Load recent chat history from DB for a user (after last /clear)."""
     limit = MAX_HISTORY_TURNS * 2
@@ -388,7 +434,17 @@ def _load_chat_history(user_id: int) -> list[dict]:
                 ") sub ORDER BY id ASC",
                 (user_id, min_id, limit),
             )
-            return [{"role": r["role"], "content": r["content"]} for r in cur.fetchall()]
+            rows = cur.fetchall()
+
+    normalized: list[dict] = []
+    for r in rows:
+        role = r["role"] if r["role"] in ("user", "assistant") else "user"
+        text = _normalize_history_content(r["content"])
+        if not text:
+            # Keep role alternation stable with a minimal placeholder.
+            text = "(empty)"
+        normalized.append({"role": role, "content": text})
+    return normalized
 
 
 def _save_chat_message(user_id: int, role: str, content: str):
@@ -571,6 +627,22 @@ async def _chat_with_tools(
     on_progress=None,
 ) -> str:
     """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
+    # Resolve runtime defaults strictly by None (not truthiness).
+    resolved_max_rounds = _config["max_rounds_chat"] if max_rounds is None else max_rounds
+    resolved_max_tokens = _CLAUDE_MAX_TOKENS if max_tokens is None else max_tokens
+    resolved_budget = _config["chat_budget"] if budget_usd is None else budget_usd
+
+    # Defensive coercion to keep downstream budget checks deterministic.
+    try:
+        resolved_budget = float(resolved_budget)
+    except (TypeError, ValueError):
+        logger.warning("Invalid budget_usd=%r; falling back to chat_budget=%s", budget_usd, _config["chat_budget"])
+        resolved_budget = float(_config["chat_budget"])
+
+    if resolved_budget <= 0:
+        logger.warning("Non-positive budget_usd=%s; clamping to 0.01", resolved_budget)
+        resolved_budget = 0.01
+
     sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
         current_datetime=_current_datetime_str(),
         system_alerts=_format_system_alerts(),
@@ -585,10 +657,10 @@ async def _chat_with_tools(
         tools=merged_tools,
         tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
-        max_rounds=max_rounds or _config["max_rounds_chat"],
-        max_tokens=max_tokens or _CLAUDE_MAX_TOKENS,
+        max_rounds=resolved_max_rounds,
+        max_tokens=resolved_max_tokens,
         log_event=_log_event,
-        budget_usd=budget_usd or _config["chat_budget"],
+        budget_usd=resolved_budget,
         on_progress=on_progress,
     )
 
@@ -1122,6 +1194,7 @@ async def handle_message(message: Message):
     await asyncio.to_thread(_save_chat_message, user_id, "user", user_text)
     history = await asyncio.to_thread(_load_chat_history, user_id)
     history = await _compress_history(history)
+    history = sanitize_messages(history)
 
     # Auto-recall: fetch relevant past experiences for context injection
     experience_context = await _fetch_relevant_experiences(user_text)
