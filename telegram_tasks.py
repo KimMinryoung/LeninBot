@@ -193,20 +193,15 @@ async def system_monitor(
     """Background loop: monitor system events and broadcast notifications."""
     from shared import get_kg_service
 
-    # 1. Startup notification
-    await asyncio.sleep(5)
+    # 1. Initial KG check (startup notification is handled by bot_main)
+    await asyncio.sleep(10)
     kg = await asyncio.to_thread(get_kg_service)
-    kg_status = "connected" if kg else "unavailable"
-    add_alert_fn(f"Deploy 완료 — KG: {kg_status}")
-    if not kg:
+    kg_is_up = kg is not None
+    if not kg_is_up:
         add_alert_fn("KG (Neo4j AuraDB) 연결 불가 — 그래프 검색/쓰기 사용 불가")
-    await broadcast(bot, (
-        f"🟢 *Deploy 완료* — 새 버전이 live입니다.\n"
-        f"  KG (Neo4j): {kg_status}"
-    ), allowed_user_ids)
 
     # 2. Periodic KG health check (every 2 minutes)
-    kg_was_up = kg is not None
+    kg_was_up = kg_is_up
     while True:
         await asyncio.sleep(120)
         try:

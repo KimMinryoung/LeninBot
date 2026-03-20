@@ -1599,6 +1599,22 @@ async def bot_main():
         pass  # signal only works in main thread; skip if called from a thread
 
     logger.info("Bot starting (allowed users: %s)", ALLOWED_USER_IDS)
+
+    # Notify when polling is actually ready to receive messages
+    async def _notify_ready():
+        """Wait for polling to start, then send ready notification."""
+        await asyncio.sleep(2)  # brief wait for polling loop to initialize
+        from shared import get_kg_service
+        kg = await asyncio.to_thread(get_kg_service)
+        kg_status = "connected" if kg else "unavailable"
+        _add_system_alert(f"Deploy 완료 — KG: {kg_status}")
+        await broadcast(bot, (
+            f"🟢 *Deploy 완료* — 메시지 수신 준비 완료.\n"
+            f"  KG (Neo4j): {kg_status}"
+        ), ALLOWED_USER_IDS)
+
+    asyncio.create_task(_notify_ready(), name="startup_notify")
+
     # drop_pending_updates: new instance takes over quickly, avoids processing stale updates
     await dp.start_polling(bot, drop_pending_updates=True)
     # After polling stops — graceful shutdown sequence
