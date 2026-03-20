@@ -38,6 +38,7 @@ from telegram_tasks import (
     process_task, broadcast, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
     recover_processing_tasks_on_startup,
+    checkpoint_task_on_shutdown,
 )
 
 load_dotenv()
@@ -1656,12 +1657,13 @@ async def bot_main():
 
     # Ensure task table exists
     await asyncio.to_thread(_ensure_table)
-    recovery = await recover_processing_tasks_on_startup(stale_minutes=60)
-    resumed = int(recovery.get("resumed", 0))
-    closed = int(recovery.get("closed", 0))
-    if resumed or closed:
+    recovery = await recover_processing_tasks_on_startup(stale_minutes=60, max_resume_attempts=2)
+    handed_off = int(recovery.get("handed_off", recovery.get("resumed", 0)))
+    closed_stale = int(recovery.get("closed_stale", 0))
+    closed_repeated = int(recovery.get("closed_repeated", 0))
+    if handed_off or closed_stale or closed_repeated:
         _add_system_alert(
-            f"재시작 복구: processing 태스크 재개 {resumed}건 / 오래된 작업 자동종료 {closed}건"
+            f"재시작 복구: handoff {handed_off}건 / 오래된 작업 종료 {closed_stale}건 / 반복 중단 작업 종료 {closed_repeated}건"
         )
 
     global _bot_instance
@@ -1723,9 +1725,10 @@ async def bot_main():
             await progress_cb.flush()
 
     # Start background workers (keep handles for graceful cancellation)
+    _runtime_state: dict[str, int | None] = {"current_task_id": None}
     _bg_tasks = [
         asyncio.create_task(
-            task_worker(bot, process_task_fn=_process_task_wrapper),
+            task_worker(bot, process_task_fn=_process_task_wrapper, runtime_state=_runtime_state),
             name="task_worker",
         ),
         asyncio.create_task(
@@ -1749,10 +1752,15 @@ async def bot_main():
     def _handle_sigterm(*_):
         logger.info("SIGTERM received — stopping polling gracefully")
         # Schedule shutdown notification before stopping
-        async def _shutdown_notify():
+        async def _shutdown_notify_and_checkpoint():
+            task_id = _runtime_state.get("current_task_id")
+            if task_id:
+                ok = await checkpoint_task_on_shutdown(int(task_id))
+                if ok:
+                    logger.info("Shutdown checkpoint saved for in-flight task #%s", task_id)
             await broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.", ALLOWED_USER_IDS)
         try:
-            asyncio.get_event_loop().create_task(_shutdown_notify())
+            asyncio.get_event_loop().create_task(_shutdown_notify_and_checkpoint())
         except Exception:
             pass
         asyncio.get_event_loop().call_soon_threadsafe(dp.stop_polling)

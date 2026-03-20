@@ -15,6 +15,11 @@ from db import query as _query, execute as _execute, query_one as _query_one
 
 logger = logging.getLogger(__name__)
 _SCRATCHPAD_MAX_CHARS = 20_000
+_TASK_START_MARKER = "## Checkpoint: task start"
+_DEFAULT_MAX_RESUME_ATTEMPTS = 2
+_STARTUP_HANDOFF_MARKER = "## Checkpoint: startup handoff"
+_MAX_TASK_CHAIN_DEPTH = 5
+_SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
 
 
 # ── Task Report Helpers ──────────────────────────────────────────────
@@ -222,47 +227,163 @@ async def process_task(
                 await bot.send_message(chat_id=user_id, text=error_msg)
 
 
-async def recover_processing_tasks_on_startup(stale_minutes: int = 60) -> dict:
+async def recover_processing_tasks_on_startup(
+    stale_minutes: int = 60,
+    max_resume_attempts: int = _DEFAULT_MAX_RESUME_ATTEMPTS,
+) -> dict:
     """Recover interrupted tasks at startup.
 
-    - Recent processing tasks (within stale_minutes) are re-queued to pending.
+    - Recent processing tasks are NOT resumed in-place.
+      Instead, they are handed off to a new child task (pending).
     - Old processing tasks are auto-closed as failed to avoid surprise re-execution.
+    - Tasks repeatedly interrupted across restarts are auto-closed as failed.
     """
     try:
         stale_minutes = max(5, min(24 * 60, int(stale_minutes)))
+        max_resume_attempts = max(1, min(10, int(max_resume_attempts)))
 
-        closed_rows = await asyncio.to_thread(
+        processing_rows = await asyncio.to_thread(
             _query,
-            "UPDATE telegram_tasks SET status = 'failed', "
-            "result = COALESCE(result, '') || %s, completed_at = NOW() "
+            "SELECT id, user_id, content, depth, created_at, scratchpad FROM telegram_tasks "
             "WHERE status = 'processing' AND completed_at IS NULL "
-            "AND created_at < NOW() - (%s || ' minutes')::interval "
-            "RETURNING id",
-            ("\n[AUTO-CLOSED] stale processing task after restart; not resumed automatically.", str(stale_minutes)),
+            "ORDER BY created_at ASC",
         )
+        if not processing_rows:
+            logger.info("Startup recovery: no interrupted processing tasks")
+            return {
+                "resumed": 0,
+                "handed_off": 0,
+                "closed_stale": 0,
+                "closed_repeated": 0,
+                "window_minutes": stale_minutes,
+                "max_resume_attempts": max_resume_attempts,
+            }
 
-        resumed_rows = await asyncio.to_thread(
-            _query,
-            "UPDATE telegram_tasks SET status = 'pending' "
-            "WHERE status = 'processing' AND completed_at IS NULL "
-            "AND created_at >= NOW() - (%s || ' minutes')::interval "
-            "RETURNING id",
-            (str(stale_minutes),),
-        )
+        handed_off = 0
+        closed_stale = 0
+        closed_repeated = 0
 
-        closed = len(closed_rows) if closed_rows else 0
-        resumed = len(resumed_rows) if resumed_rows else 0
-        if closed or resumed:
+        from shared import KST
+        now_kst = datetime.now(KST)
+
+        for row in processing_rows:
+            task_id = row["id"]
+            user_id = int(row.get("user_id") or 0)
+            content = str(row.get("content") or "")
+            depth = int(row.get("depth") or 0)
+            created_at = row.get("created_at")
+            scratchpad = str(row.get("scratchpad") or "")
+            handoff_count = scratchpad.count(_STARTUP_HANDOFF_MARKER)
+
+            age_minutes = 0.0
+            if created_at is not None:
+                try:
+                    age_minutes = max(0.0, (now_kst - created_at).total_seconds() / 60.0)
+                except Exception:
+                    age_minutes = float(stale_minutes + 1)
+
+            if age_minutes >= stale_minutes:
+                await asyncio.to_thread(
+                    _execute,
+                    "UPDATE telegram_tasks SET status = 'failed', "
+                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
+                    "WHERE id = %s",
+                    ("\n[AUTO-CLOSED] stale processing task after restart; not resumed automatically.", task_id),
+                )
+                closed_stale += 1
+                continue
+
+            if handoff_count >= max_resume_attempts or depth >= _MAX_TASK_CHAIN_DEPTH:
+                await asyncio.to_thread(
+                    _execute,
+                    "UPDATE telegram_tasks SET status = 'failed', "
+                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
+                    "WHERE id = %s",
+                    (
+                        f"\n[AUTO-CLOSED] processing task repeatedly interrupted across restarts "
+                        f"(handoff_count={handoff_count}, limit={max_resume_attempts}, depth={depth}).",
+                        task_id,
+                    ),
+                )
+                closed_repeated += 1
+                continue
+
+            ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            handoff_note = (
+                f"{_STARTUP_HANDOFF_MARKER}\n"
+                f"- from_task_id: {task_id}\n"
+                f"- at: {ts}\n"
+                f"- reason: service restarted while task was processing\n"
+                f"- handoff_attempt: {handoff_count + 1}/{max_resume_attempts}"
+            )
+            child_scratchpad = f"{scratchpad}\n\n{handoff_note}".strip() if scratchpad else handoff_note
+            if len(child_scratchpad) > _SCRATCHPAD_MAX_CHARS:
+                child_scratchpad = child_scratchpad[-_SCRATCHPAD_MAX_CHARS:]
+
+            child_rows = await asyncio.to_thread(
+                _query,
+                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth) "
+                "VALUES (%s, %s, 'pending', %s, %s, %s) RETURNING id",
+                (user_id, content, task_id, child_scratchpad, depth + 1),
+            )
+            child_id = child_rows[0]["id"] if child_rows else None
+
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET status = 'failed', "
+                "result = COALESCE(result, '') || %s, completed_at = NOW() "
+                "WHERE id = %s",
+                (
+                    f"\n[AUTO-HANDOFF] interrupted by restart; moved to child task #{child_id}.",
+                    task_id,
+                ),
+            )
+            handed_off += 1
+
+        if closed_stale or closed_repeated or handed_off:
             logger.warning(
-                "Startup recovery: resumed=%d, auto-closed(stale)=%d (window=%dmin)",
-                resumed, closed, stale_minutes,
+                "Startup recovery: handed_off=%d, closed_stale=%d, closed_repeated=%d "
+                "(window=%dmin, resume_limit=%d)",
+                handed_off, closed_stale, closed_repeated, stale_minutes, max_resume_attempts,
             )
         else:
             logger.info("Startup recovery: no interrupted processing tasks")
-        return {"resumed": resumed, "closed": closed, "window_minutes": stale_minutes}
+        return {
+            "resumed": handed_off,  # backward-compatible key for existing callers
+            "handed_off": handed_off,
+            "closed_stale": closed_stale,
+            "closed_repeated": closed_repeated,
+            "window_minutes": stale_minutes,
+            "max_resume_attempts": max_resume_attempts,
+        }
     except Exception as e:
         logger.error("Failed to recover processing tasks on startup: %s", e)
-        return {"resumed": 0, "closed": 0, "window_minutes": stale_minutes, "error": str(e)}
+        return {
+            "resumed": 0,
+            "handed_off": 0,
+            "closed_stale": 0,
+            "closed_repeated": 0,
+            "window_minutes": stale_minutes,
+            "max_resume_attempts": max_resume_attempts,
+            "error": str(e),
+        }
+
+
+async def checkpoint_task_on_shutdown(task_id: int) -> bool:
+    """Persist a last-moment checkpoint for an in-flight task before shutdown."""
+    try:
+        ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        note = (
+            f"{_SHUTDOWN_CHECKPOINT_MARKER}\n"
+            f"- task_id: {task_id}\n"
+            f"- at: {ts}\n"
+            "- note: service received SIGTERM while task was processing"
+        )
+        await asyncio.to_thread(_append_task_scratchpad, task_id, note)
+        return True
+    except Exception as e:
+        logger.error("Failed to checkpoint task %s on shutdown: %s", task_id, e)
+        return False
 
 
 # ── Broadcast ────────────────────────────────────────────────────────
@@ -319,12 +440,13 @@ async def system_monitor(
 
 # ── Task Worker ──────────────────────────────────────────────────────
 
-async def task_worker(bot: Bot, *, process_task_fn):
+async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None = None):
     """Poll DB for pending tasks and process them one at a time.
 
     Args:
         bot: Telegram Bot instance.
         process_task_fn: Async callable(bot, task) to process each task.
+        runtime_state: Optional mutable dict for tracking in-flight task.
     """
     logger.info("Task worker started")
     while True:
@@ -337,10 +459,18 @@ async def task_worker(bot: Bot, *, process_task_fn):
                 "RETURNING id, user_id, content, scratchpad, parent_task_id, depth",
             )
             if task:
-                await process_task_fn(bot, task)
+                if runtime_state is not None:
+                    runtime_state["current_task_id"] = task.get("id")
+                try:
+                    await process_task_fn(bot, task)
+                finally:
+                    if runtime_state is not None:
+                        runtime_state["current_task_id"] = None
             else:
                 await asyncio.sleep(5)
         except Exception as e:
+            if runtime_state is not None:
+                runtime_state["current_task_id"] = None
             logger.error("Worker loop error: %s", e)
             await asyncio.sleep(10)
 
