@@ -11,6 +11,25 @@ VENV="$DEPLOY_DIR/venv"
 LOG="/tmp/leninbot-deploy.log"
 DEPLOY_META="/tmp/leninbot-deploy-meta.json"
 LOCK_FILE="/tmp/leninbot-deploy.lock"
+FORCE_RESTART=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --restart|-r)
+            FORCE_RESTART=1
+            ;;
+        --help|-h)
+            echo "Usage: bash deploy.sh [--restart]"
+            echo "  --restart, -r   Restart services even when no new commit is found."
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Use --help for usage."
+            exit 2
+            ;;
+    esac
+done
 
 exec > >(tee "$LOG") 2>&1
 
@@ -103,19 +122,25 @@ _run_systemctl() {
 _git_fetch_with_retry
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
+DID_PULL=0
 
 if [ "$LOCAL" = "$REMOTE" ]; then
-    echo "이미 최신. 변경 없음."
-    exit 0
+    if [ "$FORCE_RESTART" -eq 0 ]; then
+        echo "이미 최신. 변경 없음."
+        exit 0
+    fi
+    echo "이미 최신이지만 --restart 옵션으로 서비스 재시작을 진행합니다."
+    CHANGES="(코드 변경 없음: 서비스 재시작만 수행)"
+else
+    CHANGES=$(git log "$LOCAL..$REMOTE" --oneline)
+    echo "변경 감지: $LOCAL → $REMOTE"
+    echo "$CHANGES"
+    git pull origin "$BRANCH"
+    DID_PULL=1
 fi
 
-CHANGES=$(git log "$LOCAL..$REMOTE" --oneline)
-echo "변경 감지: $LOCAL → $REMOTE"
-echo "$CHANGES"
-git pull origin "$BRANCH"
-
 # 2. 의존성 — requirements.txt 변경 시에만 설치
-if git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements"; then
+if [ "$DID_PULL" -eq 1 ] && git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements"; then
     echo "의존성 변경 감지 → pip install"
     source "$VENV/bin/activate"
     pip install -r requirements.txt --quiet
