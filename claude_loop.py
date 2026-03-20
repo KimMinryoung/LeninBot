@@ -143,78 +143,133 @@ def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> lis
 
 
 def validate_tool_pairs(msgs: list[dict]) -> list[dict]:
-    """Final safety net: guarantee every tool_use has a matching tool_result.
+    """Final safety net: guarantee every tool_use has a matching tool_result
+    in the IMMEDIATELY NEXT user message.
 
-    Unlike sanitize_messages (which handles server tools, edge cases, etc.),
-    this function does ONE thing with the simplest possible logic:
-    scan all messages, collect all tool_use IDs from assistant messages and
-    all tool_result IDs from user messages, then fix any mismatches.
+    The API rule: assistant message at index N with tool_use blocks
+    MUST be followed by a user message at index N+1 containing
+    tool_result blocks for ALL of those tool_use IDs.
 
+    This function enforces that rule with a simple adjacent-pair scan.
     Returns a new list (never mutates input).
     """
     msgs = [dict(m) for m in msgs]
+    injected = 0
 
-    # Pass 1: collect all tool_use IDs and their message indices
-    tool_use_map: dict[str, int] = {}  # tool_use_id → assistant msg index
-    tool_result_ids: set[str] = set()
+    i = 0
+    while i < len(msgs):
+        msg = msgs[i]
+        if msg.get("role") != "assistant":
+            i += 1
+            continue
 
-    for idx, msg in enumerate(msgs):
         content = msg.get("content", [])
         if not isinstance(content, list):
+            i += 1
             continue
+
+        # Collect ALL tool_use IDs in this assistant message
+        tool_use_ids = set()
         for block in content:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use" and "id" in block:
-                tool_use_map[block["id"]] = idx
-            elif block.get("type") == "tool_result" and "tool_use_id" in block:
-                tool_result_ids.add(block["tool_use_id"])
+            if isinstance(block, dict) and block.get("type") == "tool_use" and "id" in block:
+                tool_use_ids.add(block["id"])
 
-    # Pass 2: find unmatched tool_use IDs
-    unmatched = {tid: idx for tid, idx in tool_use_map.items() if tid not in tool_result_ids}
-    if not unmatched:
-        return msgs
+        if not tool_use_ids:
+            i += 1
+            continue
 
-    # Log the exact problem for debugging
-    logger.error(
-        "validate_tool_pairs: %d unmatched tool_use(s) found! IDs: %s",
-        len(unmatched),
-        {tid: f"msg[{idx}]" for tid, idx in unmatched.items()},
-    )
+        # Check the IMMEDIATELY NEXT message for matching tool_results
+        resolved_ids = set()
+        next_idx = i + 1
+        if next_idx < len(msgs) and msgs[next_idx].get("role") == "user":
+            nc = msgs[next_idx].get("content", [])
+            if isinstance(nc, list):
+                for block in nc:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        resolved_ids.add(block.get("tool_use_id"))
 
-    # Pass 3: fix by injecting tool_result dummies
-    # Group unmatched by their assistant message index
-    by_assistant: dict[int, list[str]] = {}
-    for tid, idx in unmatched.items():
-        by_assistant.setdefault(idx, []).append(tid)
+        missing = tool_use_ids - resolved_ids
+        if not missing:
+            i += 2  # skip past this assistant + user pair
+            continue
 
-    # Process from end to start (so inserts don't shift indices)
-    for asst_idx in sorted(by_assistant.keys(), reverse=True):
-        tids = by_assistant[asst_idx]
+        # Missing tool_results — inject dummies
+        logger.error(
+            "validate_tool_pairs: msg[%d] has %d unresolved tool_use(s): %s",
+            i, len(missing), missing,
+        )
         dummies = [{
             "type": "tool_result",
             "tool_use_id": tid,
             "content": "[tool result unavailable — injected by safety validator]",
             "is_error": True,
-        } for tid in tids]
+        } for tid in missing]
+        injected += len(dummies)
 
-        # Find the next user message after this assistant
-        user_idx = asst_idx + 1
-        if user_idx < len(msgs) and msgs[user_idx].get("role") == "user":
-            existing = msgs[user_idx].get("content", [])
+        if next_idx < len(msgs) and msgs[next_idx].get("role") == "user":
+            existing = msgs[next_idx].get("content", [])
             if isinstance(existing, list):
-                msgs[user_idx] = {**msgs[user_idx], "content": dummies + existing}
+                msgs[next_idx] = {**msgs[next_idx], "content": dummies + existing}
             else:
-                msgs[user_idx] = {
+                msgs[next_idx] = {
                     "role": "user",
                     "content": dummies + [{"type": "text", "text": str(existing)}],
                 }
         else:
             # No user message after assistant — insert one
-            msgs.insert(user_idx, {"role": "user", "content": dummies})
+            msgs.insert(next_idx, {"role": "user", "content": dummies})
 
-    logger.warning("validate_tool_pairs: injected %d dummy result(s)", len(unmatched))
+        i += 2  # skip past this assistant + the (possibly new) user
+
+    if injected:
+        logger.warning("validate_tool_pairs: injected %d dummy result(s) total", injected)
     return msgs
+
+
+def _dump_messages_for_debug(msgs: list[dict], round_num: int, error: Exception):
+    """Log detailed message structure when API call fails.
+
+    Produces a concise per-message summary showing role, content block types,
+    and tool_use/tool_result IDs — enough to pinpoint the mismatch.
+    """
+    lines = [f"=== API ERROR at round {round_num}: {error} ==="]
+    lines.append(f"Total messages: {len(msgs)}")
+
+    for idx, msg in enumerate(msgs):
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+
+        if isinstance(content, str):
+            lines.append(f"  [{idx}] {role}: text({len(content)} chars)")
+            continue
+
+        if not isinstance(content, list):
+            lines.append(f"  [{idx}] {role}: <{type(content).__name__}>")
+            continue
+
+        block_descs = []
+        for block in content:
+            if not isinstance(block, dict):
+                block_descs.append(f"<{type(block).__name__}>")
+                continue
+            btype = block.get("type", "?")
+            if btype == "tool_use":
+                block_descs.append(f"tool_use(id={block.get('id','?')}, name={block.get('name','?')})")
+            elif btype == "tool_result":
+                block_descs.append(f"tool_result(for={block.get('tool_use_id','?')})")
+            elif btype == "server_tool_use":
+                block_descs.append(f"server_tool_use(id={block.get('id','?')}, name={block.get('name','?')})")
+            elif btype == "web_search_tool_result":
+                block_descs.append(f"web_search_result(for={block.get('tool_use_id','?')})")
+            elif btype == "text":
+                text_preview = str(block.get("text", ""))[:60]
+                block_descs.append(f"text({text_preview!r})")
+            else:
+                block_descs.append(f"{btype}({list(block.keys())})")
+        lines.append(f"  [{idx}] {role}: [{', '.join(block_descs)}]")
+
+    full_dump = "\n".join(lines)
+    logger.error(full_dump)
 
 
 # ── Token Estimation ─────────────────────────────────────────────────
@@ -283,13 +338,18 @@ async def chat_with_tools(
         working_msgs = sanitize_messages(working_msgs)
         working_msgs = validate_tool_pairs(working_msgs)
 
-        response = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=cached_system,
-            tools=cached_tools,
-            messages=working_msgs,
-        )
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=cached_system,
+                tools=cached_tools,
+                messages=working_msgs,
+            )
+        except Exception as api_err:
+            # Dump full message structure for debugging 400 errors
+            _dump_messages_for_debug(working_msgs, round_num, api_err)
+            raise
 
         # Track cost
         if hasattr(response, "usage") and response.usage:
@@ -481,12 +541,16 @@ async def chat_with_tools(
     working_msgs = sanitize_messages(working_msgs)
     working_msgs = validate_tool_pairs(working_msgs)
     try:
-        final = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=cached_system,
-            messages=working_msgs,  # no tools parameter — forces text-only response
-        )
+        try:
+            final = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=cached_system,
+                messages=working_msgs,  # no tools parameter — forces text-only response
+            )
+        except Exception as api_err:
+            _dump_messages_for_debug(working_msgs, -1, api_err)
+            raise
         if hasattr(final, "usage") and final.usage:
             total_cost += _calculate_cost(final.usage)
         if final.stop_reason == "max_tokens":
