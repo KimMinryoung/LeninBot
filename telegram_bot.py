@@ -505,12 +505,32 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
 
     # Last N chunk summaries (DESC then reverse for chronological order)
     summaries = _query(
-        "SELECT chunk_start_id, chunk_end_id, summary FROM chat_history_summaries "
+        "SELECT id, chunk_start_id, chunk_end_id, summary FROM chat_history_summaries "
         "WHERE user_id = %s AND chunk_start_id > %s "
         "ORDER BY chunk_start_id DESC LIMIT %s",
         (user_id, min_id, _MAX_SUMMARY_CHUNKS),
     )
     summaries.reverse()
+
+    # Validate: check that the newest summary still references existing chat rows.
+    # If chat_history was purged but summaries remain, drop orphaned summaries.
+    if summaries:
+        check_id = summaries[-1]["chunk_end_id"]
+        probe = _query_one(
+            "SELECT id FROM telegram_chat_history WHERE id = %s AND user_id = %s",
+            (check_id, user_id),
+        )
+        if not probe:
+            orphan_ids = [s["id"] for s in summaries]
+            logger.warning(
+                "Orphaned summaries detected (chat row #%d missing) — purging %d summaries for user %d",
+                check_id, len(orphan_ids), user_id,
+            )
+            _execute(
+                "DELETE FROM chat_history_summaries WHERE user_id = %s",
+                (user_id,),
+            )
+            summaries = []
 
     # Raw messages start after last chunk (or after clear marker)
     raw_after = summaries[-1]["chunk_end_id"] if summaries else min_id
