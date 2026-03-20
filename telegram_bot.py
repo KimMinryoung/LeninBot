@@ -371,17 +371,22 @@ _HISTORY_TOKEN_LIMIT = 40_000  # compress if history exceeds this
 _RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
 
 
+# Per-user clear marker: messages with id <= this value are ignored
+_clear_after_id: dict[int, int] = {}
+
+
 def _load_chat_history(user_id: int) -> list[dict]:
-    """Load recent chat history from DB for a user."""
+    """Load recent chat history from DB for a user (after last /clear)."""
     limit = MAX_HISTORY_TURNS * 2
+    min_id = _clear_after_id.get(user_id, 0)
     with _get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "SELECT role, content FROM ("
                 "  SELECT role, content, id FROM telegram_chat_history"
-                "  WHERE user_id = %s ORDER BY id DESC LIMIT %s"
+                "  WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT %s"
                 ") sub ORDER BY id ASC",
-                (user_id, limit),
+                (user_id, min_id, limit),
             )
             return [{"role": r["role"], "content": r["content"]} for r in cur.fetchall()]
 
@@ -395,8 +400,13 @@ def _save_chat_message(user_id: int, role: str, content: str):
 
 
 def _clear_chat_history(user_id: int):
-    """Delete all chat history for a user."""
-    _execute("DELETE FROM telegram_chat_history WHERE user_id = %s", (user_id,))
+    """Mark current position as clear point — history before this is ignored."""
+    row = _query_one(
+        "SELECT MAX(id) AS max_id FROM telegram_chat_history WHERE user_id = %s",
+        (user_id,),
+    )
+    max_id = (row["max_id"] or 0) if row else 0
+    _clear_after_id[user_id] = max_id
 
 
 async def _compress_history(messages: list[dict]) -> list[dict]:
