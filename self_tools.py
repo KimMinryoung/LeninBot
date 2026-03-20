@@ -44,94 +44,29 @@ def _to_kst(ts) -> str:
 
 SELF_TOOLS = [
     {
-        "name": "read_diary",
-        "description": "Read your diary entries (written every 6h). For continuity across sessions.",
+        "name": "read_self",
+        "description": (
+            "Read internal data. source: diary (6h entries), chat_logs (telegram/web), "
+            "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
+            "system_status (overview), server_logs (journald), recent_updates (changelog)."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Entries to retrieve (1-20).", "default": 5},
-                "keyword": {"type": "string", "description": "Filter by keyword."},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_chat_logs",
-        "description": "Read chat logs from one interface source (Telegram or Web).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "description": "Entries (1-50).", "default": 20},
-                "hours_back": {"type": "integer", "description": "Only last N hours."},
-                "keyword": {"type": "string", "description": "Filter keyword."},
-                "source": {"type": "string", "enum": ["telegram", "web"], "description": "Chat source: telegram or web. Default: web."},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_processing_logs",
-        "description": "Web chatbot pipeline logs (nodes, route, strategy, doc counts).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "description": "Entries (1-20).", "default": 5},
-                "hours_back": {"type": "integer", "description": "Only last N hours."},
-                "keyword": {"type": "string", "description": "Filter keyword."},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_task_reports",
-        "description": "Read /task queue reports (status, content, result).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "description": "Entries (1-20).", "default": 5},
-                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"]},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_kg_status",
-        "description": "Knowledge Graph stats: entity counts, edges, recent episodes.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "read_system_status",
-        "description": "Overall status: diary, chat activity, tasks, KG health.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "read_server_logs",
-        "description": "Read server logs from journald (systemd). For troubleshooting and self-monitoring.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "service": {
+                "source": {
                     "type": "string",
-                    "enum": ["telegram", "api", "nginx"],
-                    "description": "Which service: telegram (bot), api (FastAPI), nginx.",
-                    "default": "telegram",
+                    "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
+                             "kg_status", "system_status", "server_logs", "recent_updates"],
                 },
-                "minutes_back": {"type": "integer", "description": "Minutes back (1-60).", "default": 10},
-                "limit": {"type": "integer", "description": "Max log lines (1-200).", "default": 50},
-                "grep": {"type": "string", "description": "Optional: filter lines containing this text."},
+                "limit": {"type": "integer", "description": "Results count."},
+                "keyword": {"type": "string", "description": "Filter keyword."},
+                "hours_back": {"type": "integer", "description": "Only last N hours."},
+                "service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "For server_logs."},
+                "grep": {"type": "string", "description": "For server_logs: filter text."},
+                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"], "description": "For task_reports."},
+                "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
-            "required": [],
-        },
-    },
-    {
-        "name": "read_recent_updates",
-        "description": "Recent feature changelog / system updates.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "max_entries": {"type": "integer", "description": "Entries (1-10).", "default": 3},
-            },
-            "required": [],
+            "required": ["source"],
         },
     },
     {
@@ -182,38 +117,19 @@ SELF_TOOLS = [
         },
     },
     {
-        "name": "kg_query",
-        "description": "Execute a Cypher query directly on Neo4j KG. Use for KG cleanup, deduplication, bulk updates, or complex graph queries. READ by default (write=False). Set write=True for mutations (DELETE, MERGE, SET).",
+        "name": "kg_admin",
+        "description": "KG admin ops. action: query (Cypher), delete_episode, merge_entities.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Cypher query to execute."},
-                "write": {"type": "boolean", "description": "Set true for write operations (DELETE, MERGE, SET). Default false (read-only).", "default": False},
+                "action": {"type": "string", "enum": ["query", "delete_episode", "merge_entities"]},
+                "query": {"type": "string", "description": "Cypher query (action=query)."},
+                "write": {"type": "boolean", "description": "Allow writes (action=query). Default false."},
+                "episode_name": {"type": "string", "description": "Episode name (action=delete_episode)."},
+                "source_name": {"type": "string", "description": "Entity to merge FROM (action=merge_entities)."},
+                "target_name": {"type": "string", "description": "Entity to merge INTO (action=merge_entities)."},
             },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "kg_delete_episode",
-        "description": "Delete a specific episode from KG by name. Also removes orphaned entities (entities with no remaining relationships). Use for KG cleanup of garbage/duplicate episodes.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "episode_name": {"type": "string", "description": "Exact name of the episode to delete."},
-            },
-            "required": ["episode_name"],
-        },
-    },
-    {
-        "name": "kg_merge_entities",
-        "description": "Merge a duplicate entity (source) into a canonical entity (target). Transfers all RELATES_TO and MENTIONS relationships, then deletes source. Use for deduplication (e.g. 'Korean Peninsula' + 'Korean peninsula' → keep one).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "source_name": {"type": "string", "description": "Entity name to merge FROM (will be deleted)."},
-                "target_name": {"type": "string", "description": "Entity name to merge INTO (will be kept)."},
-            },
-            "required": ["source_name", "target_name"],
+            "required": ["action"],
         },
     },
 ]
@@ -692,19 +608,55 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
     return list(TASK_CONTEXT_TOOLS), handlers
 
 
+async def _exec_read_self(
+    source: str, limit: int | None = None, keyword: str | None = None,
+    hours_back: int | None = None, service: str = "telegram",
+    grep: str = "", status: str | None = None, chat_source: str = "web",
+) -> str:
+    """Dispatcher for all read_self sources."""
+    if source == "diary":
+        return await _exec_read_diary(limit=limit or 5, keyword=keyword)
+    if source == "chat_logs":
+        return await _exec_read_chat_logs(limit=limit or 20, hours_back=hours_back, keyword=keyword, source=chat_source)
+    if source == "processing_logs":
+        return await _exec_read_processing_logs(limit=limit or 5, hours_back=hours_back, keyword=keyword)
+    if source == "task_reports":
+        return await _exec_read_task_reports(limit=limit or 5, status=status)
+    if source == "kg_status":
+        return await _exec_read_kg_status()
+    if source == "system_status":
+        return await _exec_read_system_status()
+    if source == "server_logs":
+        return await _exec_read_server_logs(service=service, minutes_back=hours_back or 10, limit=limit or 50, grep=grep)
+    if source == "recent_updates":
+        return await _exec_read_recent_updates(max_entries=limit or 3)
+    return f"Unknown source: {source}"
+
+
+async def _exec_kg_admin(
+    action: str, query: str = "", write: bool = False,
+    episode_name: str = "", source_name: str = "", target_name: str = "",
+) -> str:
+    """Dispatcher for KG admin operations."""
+    if action == "query":
+        if not query:
+            return "Error: 'query' parameter required for action=query."
+        return await _exec_kg_query(query=query, write=write)
+    if action == "delete_episode":
+        if not episode_name:
+            return "Error: 'episode_name' parameter required for action=delete_episode."
+        return await _exec_kg_delete_episode(episode_name=episode_name)
+    if action == "merge_entities":
+        if not source_name or not target_name:
+            return "Error: 'source_name' and 'target_name' required for action=merge_entities."
+        return await _exec_kg_merge_entities(source_name=source_name, target_name=target_name)
+    return f"Unknown action: {action}"
+
+
 SELF_TOOL_HANDLERS = {
-    "read_diary": _exec_read_diary,
-    "read_chat_logs": _exec_read_chat_logs,
-    "read_processing_logs": _exec_read_processing_logs,
-    "read_task_reports": _exec_read_task_reports,
-    "read_kg_status": _exec_read_kg_status,
-    "read_system_status": _exec_read_system_status,
-    "read_server_logs": _exec_read_server_logs,
-    "read_recent_updates": _exec_read_recent_updates,
+    "read_self": _exec_read_self,
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
     "create_task": _exec_create_task,
-    "kg_query": _exec_kg_query,
-    "kg_delete_episode": _exec_kg_delete_episode,
-    "kg_merge_entities": _exec_kg_merge_entities,
+    "kg_admin": _exec_kg_admin,
 }
