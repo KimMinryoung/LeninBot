@@ -32,9 +32,16 @@ read_file("파일명.py", line_start=X, line_end=Y)
 ```python
 # execute_python으로 호출
 import sys; sys.path.insert(0, '/home/grass/leninbot')
-from self_modification_core import safe_patch_file
-result = safe_patch_file(file_path, old_code, new_code)
+from self_modification_core import self_modify_with_safety
+result = self_modify_with_safety(
+    filepath=file_path,
+    new_content=new_code,
+    reason="skill patch",
+    request_approval=False,
+    skip_tests=False,
+)
 ```
+- 내부적으로 라인 단위 패치(generate_line_patch/apply_line_patch_safe) 경로를 사용한다.
 - git 자동 백업 → 구문 검사 → 적용 → 실패 시 자동 롤백
 
 ## Step 4 — 구문 검증
