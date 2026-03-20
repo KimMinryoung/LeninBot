@@ -476,7 +476,7 @@ def _clear_chat_history(user_id: int):
 
 # ── Chunked History Summaries ─────────────────────────────────────────
 _SUMMARY_CHUNK_SIZE = 10  # messages per summary chunk
-_MAX_SUMMARY_CHUNKS = 10  # max chunks to include in context
+_MAX_SUMMARY_CHUNKS = 3   # max chunks to include in context
 _summary_table_ready = False
 
 
