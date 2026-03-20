@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-18
+# Project State Report — 2026-03-20
 
 ## Identity
 
@@ -230,6 +230,27 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-20 — Agent Robustness Overhaul
+
+#### db.py — Shared DB Layer
+- **`query_one()` 추가**: `INSERT ... RETURNING` 패턴 지원 (race condition 제거)
+- **stale connection recovery**: `get_conn()`에서 `SELECT 1` 헬스체크, 죽은 커넥션 자동 교체 (Supabase idle timeout 대응)
+
+#### shared.py — Neo4j Driver Leak Fix
+- **`_get_neo4j_sync_driver()` → context manager**: 예외 발생 시에도 `driver.close()` 보장
+- 4개 호출처 (`fetch_kg_stats`, `kg_cypher`, `kg_delete_episode`, `kg_merge_entities`) 모두 `with` 블록으로 전환
+
+#### telegram_bot.py — 구조 정리 + 버그 수정 (-220줄)
+- **DB 레이어 중복 제거**: 자체 pool/query/execute 55줄 삭제 → `db.py` import로 대체
+- **tool_result 처리 통합**: `_validate_tool_results` + `_ensure_tool_results` + `_force_fix_tool_results` 3중 함수(~260줄) → `_sanitize_messages` 1개(~90줄)로 통합
+- **lazy model resolution**: import 시 blocking API 3회 → 첫 사용 시 1회만 실행
+- **`_CLAUDE_MODEL_STRONG` 제거**: `_CLAUDE_MODEL`과 동일했던 중복 변수
+- **continuation task race condition**: `INSERT` + `SELECT max(id)` → `INSERT ... RETURNING id` (원자적)
+- **tool result 안전 가드**: None 방지 + 30KB 크기 제한 (API 400 에러 방지)
+
+#### local_agent/agent.py — 동일한 안전 적용
+- **`_sanitize_messages` 추가**: orphaned tool_use 블록 자동 수정 (매 API 호출 전 + final response 전)
 
 ### 2026-03-18 — Hetzner Migration + Telegram Bot Upgrade
 
