@@ -231,42 +231,75 @@ def fetch_chat_logs(
     hours_back: int | None = None,
     keyword: str | None = None,
     include_logs: bool = False,
+    source: str = "web",
 ) -> list[dict]:
     """Fetch chat logs from PostgreSQL.
 
     Args:
         include_logs: If True, also return processing_logs, route,
                       documents_count, web_search_used, strategy columns.
+        source: "web" = chat_logs (웹 챗봇), "telegram" = telegram_chat_history,
+                "all" = 두 소스 합산 (created_at 기준 정렬).
     """
     from db import query as db_query
-
-    cols = "user_query, bot_answer, created_at"
-    if include_logs:
-        cols = (
-            "user_query, bot_answer, route, documents_count, "
-            "web_search_used, strategy, processing_logs, created_at"
-        )
 
     conditions, params = [], []
     if hours_back:
         cutoff = datetime.now(KST) - timedelta(hours=hours_back)
         conditions.append("created_at > %s")
         params.append(cutoff.isoformat())
-    if keyword:
-        conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
-        params.extend([f"%{keyword}%", f"%{keyword}%"])
 
-    where = ""
-    if conditions:
-        where = "WHERE " + " AND ".join(conditions)
+    if source == "telegram":
+        # telegram_chat_history: role/content 구조 → user_query/bot_answer로 변환
+        if keyword:
+            conditions.append("content ILIKE %s")
+            params.append(f"%{keyword}%")
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = (
+            f"SELECT role, content, created_at FROM telegram_chat_history "
+            f"{where} ORDER BY created_at DESC LIMIT %s"
+        )
+        params.append(limit)
+        try:
+            rows = db_query(sql, tuple(params))
+            result = []
+            for r in rows:
+                if r.get("role") == "user":
+                    result.append({"user_query": r["content"], "bot_answer": "", "created_at": r["created_at"]})
+                else:
+                    result.append({"user_query": "", "bot_answer": r["content"], "created_at": r["created_at"]})
+            return result
+        except Exception as e:
+            logger.error("[shared] fetch_chat_logs(telegram) error: %s", e)
+            return []
 
-    sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
-    params.append(limit)
-    try:
-        return db_query(sql, tuple(params))
-    except Exception as e:
-        logger.error("[shared] fetch_chat_logs error: %s", e)
-        return []
+    elif source == "all":
+        # 웹 + 텔레그램 합산
+        web = fetch_chat_logs(limit=limit, hours_back=hours_back, keyword=keyword, include_logs=include_logs, source="web")
+        tg = fetch_chat_logs(limit=limit, hours_back=hours_back, keyword=keyword, source="telegram")
+        combined = web + tg
+        combined.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        return combined[:limit]
+
+    else:
+        # 기본: web (chat_logs 테이블)
+        cols = "user_query, bot_answer, created_at"
+        if include_logs:
+            cols = (
+                "user_query, bot_answer, route, documents_count, "
+                "web_search_used, strategy, processing_logs, created_at"
+            )
+        if keyword:
+            conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
+        params.append(limit)
+        try:
+            return db_query(sql, tuple(params))
+        except Exception as e:
+            logger.error("[shared] fetch_chat_logs error: %s", e)
+            return []
 
 
 def fetch_task_reports(
