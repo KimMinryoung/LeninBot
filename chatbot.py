@@ -456,8 +456,7 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
     if all_nodes:
         lines.append("[Knowledge Graph: Entities]")
         for n in all_nodes:
-            # Truncate summary to 150 chars for token efficiency (개선 5)
-            summary = (n.get("summary", "") or "")[:150] + ("..." if len(n.get("summary", "") or "") > 150 else "")
+            summary = (n.get("summary", "") or "")[:300] + ("..." if len(n.get("summary", "") or "") > 300 else "")
             lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
     if all_edges:
         lines.append("[Knowledge Graph: Facts/Relations]")
@@ -665,9 +664,8 @@ def grade_documents_node(state: AgentState):
     doc_entries = []
     for i, d in enumerate(documents, 1):
         formatted = _format_doc(d)
-        # Truncate each doc to avoid token overflow
-        if len(formatted) > 500:
-            formatted = formatted[:500] + "..."
+        if len(formatted) > 800:
+            formatted = formatted[:800] + "..."
         doc_entries.append(f"[Document {i}]\n{formatted}")
     docs_text = "\n\n".join(doc_entries)
 
@@ -866,9 +864,8 @@ def _fetch_self_knowledge(tool_name: str) -> str:
 # Node: Generate (merged with strategize — dialectical analysis instructions inline)
 def generate_node(state: AgentState):
     docs = state.get("documents", [])
-    docs = docs[:12]
-    # Truncate each doc to 400 chars for token efficiency
-    context = "\n\n".join([_format_doc(d)[:400] for d in docs]) if docs else ""
+    docs = docs[:10]
+    context = "\n\n".join([_format_doc(d)[:800] for d in docs]) if docs else ""
 
     # URL documents: include with higher char limit (user explicitly referenced these)
     url_docs = state.get("url_documents", [])
@@ -1125,7 +1122,7 @@ def step_executor_node(state: AgentState):
         # Summarize what we found for step_results
         doc_snippets = []
         for d in new_docs:
-            snippet = _format_doc(d)[:200]
+            snippet = _format_doc(d)[:400]
             doc_snippets.append(snippet)
         result_summary = f"[Step {step_num}: {step['description']}] Retrieved {len(new_docs)} docs. Key content: " + " | ".join(doc_snippets[:3])
 
@@ -1136,7 +1133,7 @@ def step_executor_node(state: AgentState):
         web_docs = _run_web_search(query, logs)
         current_docs.extend(web_docs)
         if web_docs:
-            snippets = " | ".join(d.page_content[:200] for d in web_docs[:3])
+            snippets = " | ".join(d.page_content[:400] for d in web_docs[:3])
             result_summary = f"[Step {step_num}: {step['description']}] Web search found {len(web_docs)} results: {snippets}"
         else:
             result_summary = f"[Step {step_num}: {step['description']}] Web search returned no results."

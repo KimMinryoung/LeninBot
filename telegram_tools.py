@@ -129,7 +129,7 @@ async def _exec_vector_search(query: str, num_results: int = 5, layer: str | Non
             header = f"[{i}] {meta.get('title', 'Untitled')} — {meta.get('author', 'Unknown')}"
             if meta.get("year"):
                 header += f" ({meta['year']})"
-            results.append(f"{header}\n{doc.page_content[:500]}")
+            results.append(f"{header}\n{doc.page_content[:800]}")
         return "\n\n".join(results)
     except Exception as e:
         logger.error("vector_search error: %s", e)
