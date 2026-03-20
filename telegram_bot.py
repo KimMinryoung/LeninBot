@@ -1148,8 +1148,6 @@ async def cmd_deploy(message: Message):
     try:
         # Run deploy.sh detached (setsid) so it survives bot restart
         log_path = "/tmp/leninbot-deploy.log"
-        # Clear old log
-        open(log_path, "w").close()
         proc = await asyncio.create_subprocess_exec(
             "setsid", "bash", deploy_script,
             stdout=asyncio.subprocess.PIPE,

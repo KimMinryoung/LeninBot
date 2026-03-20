@@ -10,6 +10,7 @@ BRANCH="main"
 VENV="$DEPLOY_DIR/venv"
 LOG="/tmp/leninbot-deploy.log"
 DEPLOY_META="/tmp/leninbot-deploy-meta.json"
+LOCK_FILE="/tmp/leninbot-deploy.lock"
 
 exec > >(tee "$LOG") 2>&1
 
@@ -26,6 +27,14 @@ _notify_telegram() {
         done
     fi
 }
+
+# ── 동시 실행 방지 락 ───────────────────────────────────────────
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "이미 다른 deploy가 실행 중입니다. 이번 요청은 스킵합니다."
+    _notify_telegram "⚠️ *Deploy 스킵*: 이미 다른 deploy가 진행 중입니다."
+    exit 0
+fi
 
 # ── 에러 트랩 — 실패 시 알림 전송 후 종료 ──────────────────────
 _on_error() {
@@ -61,8 +70,26 @@ set -eE  # -E ensures trap propagates to functions
 cd "$DEPLOY_DIR"
 echo "=== $(date) Deploy 시작 ==="
 
+# git fetch helper: handles transient ref races/retries.
+_git_fetch_with_retry() {
+    local max_attempts=4
+    local attempt=1
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if git fetch --prune origin; then
+            return 0
+        fi
+        echo "git fetch 실패 (시도 $attempt/$max_attempts) — 정리 후 재시도"
+        # Clean potentially stale ref state and retry.
+        git remote prune origin || true
+        git gc --prune=now --quiet || true
+        sleep $((attempt * 2))
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 # 1. 코드 업데이트 (변경분만)
-git fetch origin
+_git_fetch_with_retry
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
 
