@@ -9,6 +9,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from datetime import timezone, timedelta
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,46 @@ _kg_loop = None
 
 
 _kg_run_lock = threading.Lock()
+_KG_TRANSIENT_KEYWORDS = (
+    "defunct connection",
+    "incompletecommit",
+    "read timed out",
+    "timeout",
+    "temporarily unavailable",
+    "service unavailable",
+    "connection reset",
+    "connection refused",
+    "failed to read",
+    "dns",
+    "neo4j",
+)
+
+
+def _is_transient_kg_error(err) -> bool:
+    s = str(err).lower()
+    return any(k in s for k in _KG_TRANSIENT_KEYWORDS)
+
+
+def _mark_kg_unhealthy(reason: str = ""):
+    """Mark KG singleton unhealthy so next call re-initializes after cooldown."""
+    global _kg_service, _kg_init_cooldown
+    with _kg_lock:
+        _kg_service = None
+        _kg_init_cooldown = time.monotonic() + _KG_RETRY_INTERVAL
+    if reason:
+        logger.warning("[KG] marked unhealthy (retry in %ds): %s", _KG_RETRY_INTERVAL, reason)
+
+
+def _kg_loop_exception_handler(loop, context):
+    """Handle background async errors from Graphiti/Neo4j tasks."""
+    exc = context.get("exception")
+    msg = context.get("message", "")
+    combined = f"{msg} | {exc}" if exc else msg
+    if _is_transient_kg_error(combined):
+        logger.warning("[KG loop] transient async exception: %s", combined)
+        _mark_kg_unhealthy(combined)
+        return
+    logger.error("[KG loop] unhandled async exception: %s", combined, exc_info=exc)
 
 
 def run_kg_async(coro):
@@ -84,7 +125,13 @@ def run_kg_async(coro):
     with _kg_run_lock:
         if _kg_loop is None or _kg_loop.is_closed():
             _kg_loop = asyncio.new_event_loop()
-        return _kg_loop.run_until_complete(coro)
+            _kg_loop.set_exception_handler(_kg_loop_exception_handler)
+        try:
+            return _kg_loop.run_until_complete(coro)
+        except Exception as e:
+            if _is_transient_kg_error(e):
+                _mark_kg_unhealthy(str(e))
+            raise
 
 
 def get_kg_service():
@@ -123,11 +170,19 @@ def reset_kg_service():
 
     Call this when KG operations fail due to connection issues (e.g. AuraDB paused).
     """
-    global _kg_service, _kg_init_cooldown
+    global _kg_service, _kg_init_cooldown, _kg_loop
     with _kg_lock:
         _kg_service = None
         _kg_init_cooldown = 0.0
-        logger.info("[KG] service reset — will retry on next access")
+    with _kg_run_lock:
+        if _kg_loop is not None and not _kg_loop.is_closed() and not _kg_loop.is_running():
+            try:
+                _kg_loop.close()
+            except Exception as e:
+                logger.debug("[KG] loop close skipped: %s", e)
+            finally:
+                _kg_loop = None
+    logger.info("[KG] service reset — will retry on next access")
 
 
 # ── Shared Memory Access ────────────────────────────────────────────
