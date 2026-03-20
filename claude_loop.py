@@ -87,7 +87,7 @@ def _parse_json_string_maybe(text: str):
         return text
 
 
-def _normalize_content_for_role(role: str, content, handle_server_tools: bool, strict: bool):
+def _normalize_content_for_role(role: str, content, handle_server_tools: bool):
     """Normalize message content into Anthropic-compatible shape for this role."""
     parsed = _parse_json_string_maybe(content) if isinstance(content, str) else content
     items = parsed if isinstance(parsed, list) else [parsed]
@@ -170,7 +170,7 @@ def _normalize_content_for_role(role: str, content, handle_server_tools: bool, s
     return _coerce_text(parsed) or "(empty)"
 
 
-def _canonicalize_messages(msgs: list[dict], handle_server_tools: bool = True, strict: bool = False):
+def _canonicalize_messages(msgs: list[dict], handle_server_tools: bool = True):
     """Canonicalize transcript and guarantee tool pair invariants."""
     normalized: list[dict] = []
     for raw in msgs:
@@ -179,7 +179,7 @@ def _canonicalize_messages(msgs: list[dict], handle_server_tools: bool = True, s
         role = raw.get("role", "user")
         if role not in ("user", "assistant"):
             role = "assistant" if role in ("model", "bot") else "user"
-        content = _normalize_content_for_role(role, raw.get("content", ""), handle_server_tools, strict)
+        content = _normalize_content_for_role(role, raw.get("content", ""), handle_server_tools)
         normalized.append({"role": role, "content": content})
 
     # Ensure alternating roles; insert lightweight fillers when broken.
@@ -334,7 +334,7 @@ def _find_unresolved_tool_uses(msgs: list[dict]) -> list[tuple[int, list[str]]]:
 
 def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> list[dict]:
     """Robustly canonicalize message history and inject missing tool results."""
-    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=handle_server_tools, strict=False)
+    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=handle_server_tools)
     if any(stats.values()):
         logger.warning(
             "sanitize_messages: injected=%d fillers=%d orphan_rewrites=%d",
@@ -345,7 +345,7 @@ def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> lis
 
 def validate_tool_pairs(msgs: list[dict]) -> list[dict]:
     """Strict pass: enforce immediate tool_use -> tool_result adjacency invariants."""
-    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=True, strict=True)
+    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=True)
     unresolved = _find_unresolved_tool_uses(cleaned)
     if unresolved:
         logger.error("validate_tool_pairs: unresolved tool_use pairs after strict pass: %s", unresolved)
@@ -503,6 +503,65 @@ def _append_user_text_message(msgs: list[dict], text: str):
         msgs.append({"role": "user", "content": text})
 
 
+def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
+    """Build API-safe messages by removing server tool protocol blocks.
+
+    We keep custom tool_use/tool_result blocks (needed for local tool loop).
+    For server-side tool blocks, we convert them into plain text context
+    so information is preserved without keeping fragile protocol blocks.
+    """
+    prepared = []
+    for m in msgs:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if not isinstance(content, list):
+            prepared.append({"role": role, "content": content})
+            continue
+
+        kept = []
+        for b in content:
+            if not isinstance(b, dict):
+                kept.append({"type": "text", "text": _coerce_text(b)})
+                continue
+            btype = b.get("type")
+            if btype == "server_tool_use":
+                sname = str(b.get("name", "server_tool"))
+                sinput = b.get("input", {})
+                kept.append({
+                    "type": "text",
+                    "text": f"[server tool executed: {sname}] input={_coerce_text(sinput)[:500]}",
+                })
+                continue
+            if btype == "web_search_tool_result":
+                summary = _coerce_text(b.get("content", "")).strip()
+                if summary:
+                    kept.append({
+                        "type": "text",
+                        "text": f"[web search result]\n{summary[:4000]}",
+                    })
+                continue
+            kept.append(b)
+
+        if not kept:
+            prepared.append({"role": role, "content": "(계속)"})
+        else:
+            prepared.append({"role": role, "content": kept})
+
+    # Final strict pair validation on API-bound payload.
+    prepared = validate_tool_pairs(prepared)
+    return prepared
+
+
+def _build_api_payload(working_msgs: list[dict], round_num: int) -> list[dict]:
+    """Single path to produce API-safe payload from internal transcript."""
+    api_msgs = _prepare_messages_for_api(working_msgs)
+    unresolved_api = _find_unresolved_tool_uses(api_msgs)
+    if unresolved_api:
+        logger.error("Round %d API payload unresolved pairs: %s", round_num, unresolved_api)
+        api_msgs = _strip_tool_blocks(api_msgs)
+    return api_msgs
+
+
 # ── Token Estimation ─────────────────────────────────────────────────
 
 def estimate_tokens(text: str) -> int:
@@ -587,12 +646,14 @@ async def chat_with_tools(
                 working_msgs = _strip_tool_blocks(working_msgs)
 
         try:
+            api_msgs = _build_api_payload(working_msgs, round_num)
+
             response = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 system=cached_system,
                 tools=cached_tools,
-                messages=working_msgs,
+                messages=api_msgs,
             )
         except Exception as api_err:
             err_str = str(api_err)
@@ -607,12 +668,13 @@ async def chat_with_tools(
                     logger.warning("Strict retry still unresolved: %s", unresolved)
                     strict_msgs = _strip_tool_blocks(strict_msgs)
                 try:
+                    strict_api_msgs = _build_api_payload(strict_msgs, round_num)
                     response = await client.messages.create(
                         model=model,
                         max_tokens=max_tokens,
                         system=cached_system,
                         tools=cached_tools,
-                        messages=strict_msgs,
+                        messages=strict_api_msgs,
                     )
                     working_msgs = strict_msgs
                     recovered = True
@@ -845,11 +907,12 @@ async def chat_with_tools(
         logger.error("Forced-final preflight unresolved tool pairs: %s; stripping tool blocks", unresolved)
         working_msgs = _strip_tool_blocks(working_msgs)
     try:
+        final_api_msgs = _build_api_payload(working_msgs, round_num if response else 0)
         final = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=cached_system,
-            messages=working_msgs,  # no tools parameter — forces text-only response
+            messages=final_api_msgs,  # no tools parameter — forces text-only response
         )
     except Exception as api_err:
         # Last resort: strip all tool blocks and retry with plain text

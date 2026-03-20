@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger("test_tool_results")
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
 
-from claude_loop import sanitize_messages as _sanitize_messages
+from claude_loop import sanitize_messages as _sanitize_messages, _prepare_messages_for_api
 
 
 # ── Helpers ──
@@ -442,6 +442,60 @@ else:
     orphan_still_structured = False
 T.check("orphan tool_result does not remain as protocol block", not orphan_still_structured, f"content={first_content}")
 T.check("no unresolved tool_use introduced by orphan input", len(_find_unresolved_tool_uses(result)) == 0)
+
+
+# ──────────────────────────────────────────────────────────
+print("\n=== Test 20: API payload strips server tool blocks ===")
+msgs = [
+    {"role": "user", "content": "hello"},
+    {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "searching + local tool"},
+            {"type": "server_tool_use", "id": "srv1", "name": "web_search", "input": {}},
+            {"type": "web_search_tool_result", "tool_use_id": "srv1", "content": []},
+            {"type": "tool_use", "id": "tc1", "name": "knowledge_graph_search", "input": {"query": "x"}},
+        ],
+    },
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tc1", "content": "ok"}]},
+]
+prepared = _prepare_messages_for_api(msgs)
+assistant_content = prepared[1].get("content", [])
+T.check(
+    "server blocks removed for API payload",
+    not any(isinstance(b, dict) and b.get("type") in ("server_tool_use", "web_search_tool_result") for b in assistant_content),
+    f"content={assistant_content}",
+)
+T.check("custom tool_use preserved", any(isinstance(b, dict) and b.get("type") == "tool_use" for b in assistant_content))
+T.check("custom tool_result still paired", len(_find_unresolved_tool_uses(prepared)) == 0, f"{_find_unresolved_tool_uses(prepared)}")
+
+
+# ──────────────────────────────────────────────────────────
+print("\n=== Test 21: API payload preserves server result as text ===")
+msgs = [
+    {"role": "user", "content": "hello"},
+    {
+        "role": "assistant",
+        "content": [
+            {"type": "server_tool_use", "id": "srvx", "name": "web_search", "input": {"query": "gold price drop"}},
+            {"type": "web_search_tool_result", "tool_use_id": "srvx", "content": [{"type": "text", "text": "Result A"}, {"type": "text", "text": "Result B"}]},
+            {"type": "tool_use", "id": "tx1", "name": "knowledge_graph_search", "input": {"query": "금값 하락 원인"}},
+        ],
+    },
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tx1", "content": "ok"}]},
+]
+prepared = _prepare_messages_for_api(msgs)
+assistant_content = prepared[1].get("content", [])
+text_blob = "\n".join(
+    b.get("text", "")
+    for b in assistant_content
+    if isinstance(b, dict) and b.get("type") == "text"
+)
+T.check("server result text preserved", "Result A" in text_blob and "Result B" in text_blob, f"text={text_blob}")
+T.check("server protocol blocks removed", not any(
+    isinstance(b, dict) and b.get("type") in ("server_tool_use", "web_search_tool_result")
+    for b in assistant_content
+))
 
 
 # ── Summary ──
