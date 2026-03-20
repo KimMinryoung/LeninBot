@@ -36,14 +36,36 @@ def _get_pool() -> pool.SimpleConnectionPool:
 
 @contextmanager
 def get_conn():
-    """Get a connection from the pool. Auto-returns on exit."""
+    """Get a connection from the pool. Auto-returns on exit.
+
+    Detects stale connections (closed by server after idle timeout)
+    and transparently replaces them with fresh ones.
+    """
     p = _get_pool()
     conn = p.getconn()
     try:
+        # Detect stale connections (Supabase/cloud DB closes idle connections)
+        if conn.closed:
+            p.putconn(conn, close=True)
+            conn = p.getconn()
+        else:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                p.putconn(conn, close=True)
+                conn = p.getconn()
         yield conn
         conn.commit()
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
         p.putconn(conn)
@@ -62,3 +84,12 @@ def execute(sql: str, params: tuple | list = None) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
+
+
+def query_one(sql: str, params: tuple | list = None) -> dict | None:
+    """Execute SQL and return a single row dict, or None."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return dict(row) if row else None

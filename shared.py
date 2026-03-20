@@ -7,6 +7,7 @@ All external imports are deferred to first use.
 import asyncio
 import logging
 import threading
+from contextlib import contextmanager
 from datetime import timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -272,11 +273,12 @@ def create_task_in_db(content: str, user_id: int = 0, priority: str = "normal") 
         return {"status": "error", "error": str(e)}
 
 
+@contextmanager
 def _get_neo4j_sync_driver():
     """Create a lightweight sync Neo4j driver for direct Cypher queries.
 
     Does NOT trigger Graphiti async init — avoids 'no running event loop' errors.
-    Returns (driver, database_name) or raises on missing config.
+    Yields (driver, database_name). Driver is automatically closed on exit.
     """
     from neo4j import GraphDatabase
 
@@ -287,7 +289,10 @@ def _get_neo4j_sync_driver():
     password = os.getenv("NEO4J_PASSWORD", "")
     db = os.getenv("NEO4J_DATABASE", "neo4j")
     driver = GraphDatabase.driver(uri, auth=(user, password))
-    return driver, db
+    try:
+        yield driver, db
+    finally:
+        driver.close()
 
 
 def fetch_kg_stats() -> dict:
@@ -298,40 +303,37 @@ def fetch_kg_stats() -> dict:
     entity_types breakdown, and recent_episodes with their extracted knowledge.
     """
     try:
-        sync_driver, neo4j_db = _get_neo4j_sync_driver()
+        with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
+            def _run_cypher(query):
+                with sync_driver.session(database=neo4j_db) as s:
+                    return [dict(r) for r in s.run(query)]
 
-        def _run_cypher(query):
-            with sync_driver.session(database=neo4j_db) as s:
-                return [dict(r) for r in s.run(query)]
+            entity_counts = _run_cypher(
+                "MATCH (n:Entity) "
+                "RETURN labels(n) AS labels, count(n) AS cnt"
+            )
+            edge_count_rows = _run_cypher(
+                "MATCH ()-[r:RELATES_TO]->() "
+                "RETURN count(r) AS cnt"
+            )
+            episode_rows = _run_cypher(
+                "MATCH (e:Episodic) RETURN count(e) AS cnt"
+            )
 
-        entity_counts = _run_cypher(
-            "MATCH (n:Entity) "
-            "RETURN labels(n) AS labels, count(n) AS cnt"
-        )
-        edge_count_rows = _run_cypher(
-            "MATCH ()-[r:RELATES_TO]->() "
-            "RETURN count(r) AS cnt"
-        )
-        episode_rows = _run_cypher(
-            "MATCH (e:Episodic) RETURN count(e) AS cnt"
-        )
-
-        # Recent episodes WITH their mentioned entities and linked facts
-        recent_episodes_raw = _run_cypher(
-            "MATCH (e:Episodic) "
-            "OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity) "
-            "WITH e, collect(DISTINCT {name: n.name, labels: labels(n)}) AS entities "
-            "OPTIONAL MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
-            "  WHERE e.uuid IN r.episodes "
-            "WITH e, entities, "
-            "  collect(DISTINCT {fact: r.fact, from: a.name, to: b.name}) AS facts "
-            "RETURN e.name AS name, e.created_at AS created_at, "
-            "  e.group_id AS group_id, e.source AS source, "
-            "  entities, facts "
-            "ORDER BY e.created_at DESC LIMIT 10"
-        )
-
-        sync_driver.close()
+            # Recent episodes WITH their mentioned entities and linked facts
+            recent_episodes_raw = _run_cypher(
+                "MATCH (e:Episodic) "
+                "OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity) "
+                "WITH e, collect(DISTINCT {name: n.name, labels: labels(n)}) AS entities "
+                "OPTIONAL MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
+                "  WHERE e.uuid IN r.episodes "
+                "WITH e, entities, "
+                "  collect(DISTINCT {fact: r.fact, from: a.name, to: b.name}) AS facts "
+                "RETURN e.name AS name, e.created_at AS created_at, "
+                "  e.group_id AS group_id, e.source AS source, "
+                "  entities, facts "
+                "ORDER BY e.created_at DESC LIMIT 10"
+            )
 
         # Format recent episodes with knowledge detail
         recent_episodes = []
@@ -991,14 +993,13 @@ def kg_cypher(query: str, write: bool = False) -> dict:
     Returns dict with 'rows' (list of dicts) and 'count'.
     """
     try:
-        sync_driver, neo4j_db = _get_neo4j_sync_driver()
-        with sync_driver.session(database=neo4j_db) as session:
-            if write:
-                result = session.execute_write(lambda tx: [dict(r) for r in tx.run(query)])
-            else:
-                result = session.execute_read(lambda tx: [dict(r) for r in tx.run(query)])
-        sync_driver.close()
-        return {"rows": result, "count": len(result)}
+        with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
+            with sync_driver.session(database=neo4j_db) as session:
+                if write:
+                    result = session.execute_write(lambda tx: [dict(r) for r in tx.run(query)])
+                else:
+                    result = session.execute_read(lambda tx: [dict(r) for r in tx.run(query)])
+            return {"rows": result, "count": len(result)}
     except Exception as e:
         logger.error("[shared] kg_cypher error: %s", e)
         return {"error": str(e), "rows": [], "count": 0}
@@ -1014,40 +1015,38 @@ def kg_delete_episode(episode_name: str) -> dict:
     Returns dict with 'deleted_episode', 'deleted_entities', 'error'.
     """
     try:
-        sync_driver, neo4j_db = _get_neo4j_sync_driver()
+        with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
+            def _delete(tx):
+                # Find the episode
+                ep_result = list(tx.run(
+                    "MATCH (e:Episodic {name: $name}) RETURN e.uuid AS uuid",
+                    name=episode_name
+                ))
+                if not ep_result:
+                    return {"deleted_episode": 0, "deleted_entities": 0, "not_found": True}
 
-        def _delete(tx):
-            # Find the episode
-            ep_result = list(tx.run(
-                "MATCH (e:Episodic {name: $name}) RETURN e.uuid AS uuid",
-                name=episode_name
-            ))
-            if not ep_result:
-                return {"deleted_episode": 0, "deleted_entities": 0, "not_found": True}
+                # Delete MENTIONS relationships and track entities
+                tx.run(
+                    "MATCH (e:Episodic {name: $name})-[r:MENTIONS]->(n:Entity) DELETE r",
+                    name=episode_name
+                )
 
-            # Delete MENTIONS relationships and track entities
-            tx.run(
-                "MATCH (e:Episodic {name: $name})-[r:MENTIONS]->(n:Entity) DELETE r",
-                name=episode_name
-            )
+                # Delete orphaned entities (no more MENTIONS relationships)
+                orphan_result = list(tx.run(
+                    "MATCH (n:Entity) WHERE NOT (()-[:MENTIONS]->(n)) "
+                    "AND NOT (n)-[:RELATES_TO]-() AND NOT ()-[:RELATES_TO]->(n) "
+                    "WITH n, n.name AS name DELETE n RETURN count(n) AS cnt"
+                ))
+                orphan_count = orphan_result[0]["cnt"] if orphan_result else 0
 
-            # Delete orphaned entities (no more MENTIONS relationships)
-            orphan_result = list(tx.run(
-                "MATCH (n:Entity) WHERE NOT (()-[:MENTIONS]->(n)) "
-                "AND NOT (n)-[:RELATES_TO]-() AND NOT ()-[:RELATES_TO]->(n) "
-                "WITH n, n.name AS name DELETE n RETURN count(n) AS cnt"
-            ))
-            orphan_count = orphan_result[0]["cnt"] if orphan_result else 0
+                # Delete the episode itself
+                tx.run("MATCH (e:Episodic {name: $name}) DELETE e", name=episode_name)
 
-            # Delete the episode itself
-            tx.run("MATCH (e:Episodic {name: $name}) DELETE e", name=episode_name)
+                return {"deleted_episode": 1, "deleted_entities": orphan_count, "not_found": False}
 
-            return {"deleted_episode": 1, "deleted_entities": orphan_count, "not_found": False}
-
-        with sync_driver.session(database=neo4j_db) as session:
-            result = session.execute_write(_delete)
-        sync_driver.close()
-        return result
+            with sync_driver.session(database=neo4j_db) as session:
+                result = session.execute_write(_delete)
+            return result
     except Exception as e:
         logger.error("[shared] kg_delete_episode error: %s", e)
         return {"error": str(e)}
@@ -1065,57 +1064,55 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
     Returns dict with 'transferred_relations', 'transferred_mentions', 'deleted_source'.
     """
     try:
-        sync_driver, neo4j_db = _get_neo4j_sync_driver()
+        with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
+            def _merge(tx):
+                # Check both entities exist
+                check = list(tx.run(
+                    "MATCH (s:Entity {name: $src}) MATCH (t:Entity {name: $tgt}) "
+                    "RETURN s.uuid AS src_uuid, t.uuid AS tgt_uuid",
+                    src=source_name, tgt=target_name
+                ))
+                if not check:
+                    return {"error": f"One or both entities not found: '{source_name}', '{target_name}'"}
 
-        def _merge(tx):
-            # Check both entities exist
-            check = list(tx.run(
-                "MATCH (s:Entity {name: $src}) MATCH (t:Entity {name: $tgt}) "
-                "RETURN s.uuid AS src_uuid, t.uuid AS tgt_uuid",
-                src=source_name, tgt=target_name
-            ))
-            if not check:
-                return {"error": f"One or both entities not found: '{source_name}', '{target_name}'"}
+                # Transfer outgoing RELATES_TO from source to target
+                r1 = list(tx.run(
+                    "MATCH (s:Entity {name: $src})-[r:RELATES_TO]->(x:Entity) "
+                    "MERGE (t:Entity {name: $tgt})-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(x) "
+                    "DELETE r RETURN count(r) AS cnt",
+                    src=source_name, tgt=target_name
+                ))
 
-            # Transfer outgoing RELATES_TO from source to target
-            r1 = list(tx.run(
-                "MATCH (s:Entity {name: $src})-[r:RELATES_TO]->(x:Entity) "
-                "MERGE (t:Entity {name: $tgt})-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(x) "
-                "DELETE r RETURN count(r) AS cnt",
-                src=source_name, tgt=target_name
-            ))
+                # Transfer incoming RELATES_TO to source from target
+                r2 = list(tx.run(
+                    "MATCH (x:Entity)-[r:RELATES_TO]->(s:Entity {name: $src}) "
+                    "MERGE (x)-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(t:Entity {name: $tgt}) "
+                    "DELETE r RETURN count(r) AS cnt",
+                    src=source_name, tgt=target_name
+                ))
 
-            # Transfer incoming RELATES_TO to source from target
-            r2 = list(tx.run(
-                "MATCH (x:Entity)-[r:RELATES_TO]->(s:Entity {name: $src}) "
-                "MERGE (x)-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(t:Entity {name: $tgt}) "
-                "DELETE r RETURN count(r) AS cnt",
-                src=source_name, tgt=target_name
-            ))
+                # Transfer MENTIONS
+                r3 = list(tx.run(
+                    "MATCH (e:Episodic)-[r:MENTIONS]->(s:Entity {name: $src}) "
+                    "MERGE (e)-[:MENTIONS]->(t:Entity {name: $tgt}) "
+                    "DELETE r RETURN count(r) AS cnt",
+                    src=source_name, tgt=target_name
+                ))
 
-            # Transfer MENTIONS
-            r3 = list(tx.run(
-                "MATCH (e:Episodic)-[r:MENTIONS]->(s:Entity {name: $src}) "
-                "MERGE (e)-[:MENTIONS]->(t:Entity {name: $tgt}) "
-                "DELETE r RETURN count(r) AS cnt",
-                src=source_name, tgt=target_name
-            ))
+                # Delete source
+                tx.run("MATCH (s:Entity {name: $src}) DELETE s", src=source_name)
 
-            # Delete source
-            tx.run("MATCH (s:Entity {name: $src}) DELETE s", src=source_name)
+                return {
+                    "transferred_outgoing": r1[0]["cnt"] if r1 else 0,
+                    "transferred_incoming": r2[0]["cnt"] if r2 else 0,
+                    "transferred_mentions": r3[0]["cnt"] if r3 else 0,
+                    "deleted_source": source_name,
+                    "merged_into": target_name,
+                }
 
-            return {
-                "transferred_outgoing": r1[0]["cnt"] if r1 else 0,
-                "transferred_incoming": r2[0]["cnt"] if r2 else 0,
-                "transferred_mentions": r3[0]["cnt"] if r3 else 0,
-                "deleted_source": source_name,
-                "merged_into": target_name,
-            }
-
-        with sync_driver.session(database=neo4j_db) as session:
-            result = session.execute_write(_merge)
-        sync_driver.close()
-        return result
+            with sync_driver.session(database=neo4j_db) as session:
+                result = session.execute_write(_merge)
+            return result
     except Exception as e:
         logger.error("[shared] kg_merge_entities error: %s", e)
         return {"error": str(e)}

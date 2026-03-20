@@ -17,13 +17,11 @@ import json
 import asyncio
 import logging
 from datetime import datetime
-from contextlib import contextmanager
 from shared import KST, CORE_IDENTITY
 from skills_loader import build_skills_prompt
-
-import psycopg2
-from psycopg2 import pool
+from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
+
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
@@ -74,62 +72,6 @@ ALLOWED_USER_IDS: set[int] = {
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
     if uid.strip()
 }
-
-# ── DB (own pool, independent from api.py) ───────────────────────────
-_pool: pool.SimpleConnectionPool | None = None
-
-
-def _get_pool() -> pool.SimpleConnectionPool:
-    global _pool
-    if _pool is None:
-        _pool = pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=3,
-            host=os.getenv("DB_HOST"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            dbname=os.getenv("DB_NAME", "postgres"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            sslmode="require",
-        )
-    return _pool
-
-
-@contextmanager
-def _get_conn():
-    p = _get_pool()
-    conn = p.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        p.putconn(conn)
-
-
-def _query(sql: str, params: tuple | None = None) -> list[dict]:
-    with _get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return [dict(row) for row in cur.fetchall()]
-
-
-def _execute(sql: str, params: tuple | None = None) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-
-
-def _query_one(sql: str, params: tuple | None = None) -> dict | None:
-    """Execute SQL with RETURNING and fetch one row."""
-    with _get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, params)
-            row = cur.fetchone()
-            return dict(row) if row else None
-
 
 def _ensure_table():
     """Create telegram_tasks and telegram_chat_history tables if not exists."""
@@ -223,9 +165,25 @@ def _resolve_model(alias: str, fallback: str) -> str:
         return fallback
 
 
-_CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
-_CLAUDE_MODEL_STRONG = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
-_CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
+# Lazy model resolution — avoid blocking API calls at import time
+_CLAUDE_MODEL: str | None = None
+_CLAUDE_MODEL_LIGHT: str | None = None
+
+
+def _get_model() -> str:
+    """Lazily resolve the main Claude model on first use."""
+    global _CLAUDE_MODEL
+    if _CLAUDE_MODEL is None:
+        _CLAUDE_MODEL = _resolve_model("claude-sonnet-4-6", "claude-sonnet-4-6")
+    return _CLAUDE_MODEL
+
+
+def _get_model_light() -> str:
+    """Lazily resolve the light Claude model on first use."""
+    global _CLAUDE_MODEL_LIGHT
+    if _CLAUDE_MODEL_LIGHT is None:
+        _CLAUDE_MODEL_LIGHT = _resolve_model("claude-haiku-4-5", "claude-haiku-4-5-20251001")
+    return _CLAUDE_MODEL_LIGHT
 
 # ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -833,7 +791,7 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
         summary = await _ollama_generate(summary_prompt, max_tokens=512)
         if not summary:
             resp = await _claude.messages.create(
-                model=_CLAUDE_MODEL_LIGHT,
+                model=_get_model_light(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": summary_prompt}],
             )
@@ -1428,13 +1386,10 @@ async def handle_message(message: Message):
     # Create background task for unfinished work
     if continuation_task:
         task_content = f"[자동 승격] 대화 중 미완료 작업 이어서 수행:\n{continuation_task}\n\n원래 질문: {user_text[:500]}"
-        await asyncio.to_thread(
-            _execute,
-            "INSERT INTO telegram_tasks (user_id, content, status) VALUES (%s, %s, 'pending')",
-            (user_id, task_content),
-        )
         task_row = await asyncio.to_thread(
-            _query_one, "SELECT id FROM telegram_tasks WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,),
+            _query_one,
+            "INSERT INTO telegram_tasks (user_id, content, status) VALUES (%s, %s, 'pending') RETURNING id",
+            (user_id, task_content),
         )
         task_id = task_row["id"] if task_row else "?"
         await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{task_id}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
@@ -1509,7 +1464,7 @@ async def _reflect_on_recent(user_id: int):
         result = await _ollama_generate(prompt, max_tokens=512)
         if not result:
             resp = await _claude.messages.create(
-                model=_CLAUDE_MODEL_LIGHT,
+                model=_get_model_light(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -1543,209 +1498,69 @@ async def _reflect_on_recent(user_id: int):
         logger.warning("Reflection failed: %s", e)
 
 
-def _validate_tool_results(msgs: list[dict], label: str = "") -> None:
-    """Log detailed diagnostics if any tool_use block lacks a matching tool_result.
+def _sanitize_messages(msgs: list[dict]) -> list[dict]:
+    """Ensure every tool_use/server_tool_use has a matching result.
 
-    This is a read-only diagnostic function — it does NOT modify messages.
-    """
-    for i, msg in enumerate(msgs):
-        if msg.get("role") != "assistant":
-            continue
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            continue
+    Single-pass replacement for the previous _validate_tool_results +
+    _ensure_tool_results + _force_fix_tool_results triple.
 
-        # Gather tool_use IDs that need a tool_result in the NEXT user message
-        custom_ids = {
-            b["id"] for b in content
-            if isinstance(b, dict) and b.get("type") == "tool_use" and "id" in b
-        }
-        if not custom_ids:
-            continue
-
-        # Gather tool_use IDs that need a web_search_tool_result in the SAME assistant message
-        server_ids = {
-            b["id"] for b in content
-            if isinstance(b, dict) and b.get("type") == "server_tool_use" and "id" in b
-        }
-        server_resolved = {
-            b.get("tool_use_id") for b in content
-            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-        }
-        unresolved_server = server_ids - server_resolved
-
-        # Check next user message for custom tool_result
-        resolved_custom: set = set()
-        if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
-            nc = msgs[i + 1].get("content", [])
-            if isinstance(nc, list):
-                resolved_custom = {
-                    b.get("tool_use_id") for b in nc
-                    if isinstance(b, dict) and b.get("type") == "tool_result"
-                }
-        unresolved_custom = custom_ids - resolved_custom
-
-        if unresolved_custom or unresolved_server:
-            # Dump message structure around the problem
-            ctx_start = max(0, i - 1)
-            ctx_end = min(len(msgs), i + 3)
-            context_dump = []
-            for j in range(ctx_start, ctx_end):
-                m = msgs[j]
-                role = m.get("role", "?")
-                c = m.get("content", "")
-                if isinstance(c, list):
-                    block_types = [
-                        f"{b.get('type','?')}(id={b.get('id', b.get('tool_use_id', '?'))})"
-                        if isinstance(b, dict) else type(b).__name__
-                        for b in c
-                    ]
-                    c_summary = f"[{', '.join(block_types)}]"
-                else:
-                    c_summary = repr(c[:80]) if isinstance(c, str) else repr(c)
-                context_dump.append(f"  msgs[{j}] {role}: {c_summary}")
-
-            logger.error(
-                "VALIDATE(%s) tool_result MISMATCH at msgs[%d]:\n"
-                "  unresolved_custom=%s unresolved_server=%s\n"
-                "  total_msgs=%d next_role=%s\n%s",
-                label, i,
-                unresolved_custom, unresolved_server,
-                len(msgs),
-                msgs[i + 1].get("role") if i + 1 < len(msgs) else "N/A",
-                "\n".join(context_dump),
-            )
-
-
-def _force_fix_tool_results(msgs: list[dict]) -> list[dict]:
-    """Brute-force second pass: scan ALL messages and inject any missing tool_result.
-
-    Unlike _ensure_tool_results (which handles complex index logic),
-    this function takes the simplest possible approach:
-    1. Collect ALL tool_use IDs from ALL assistant messages
-    2. Collect ALL tool_result tool_use_ids from ALL user messages
-    3. For each unresolved tool_use ID, inject a dummy tool_result right after the assistant message
-    """
-    msgs = [dict(m) for m in msgs]
-    fixed = 0
-
-    i = 0
-    while i < len(msgs):
-        msg = msgs[i]
-        if msg.get("role") != "assistant":
-            i += 1
-            continue
-
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            i += 1
-            continue
-
-        # Find tool_use IDs in this assistant message
-        tool_use_ids = []
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_use" and "id" in b:
-                tool_use_ids.append(b["id"])
-
-        if not tool_use_ids:
-            i += 1
-            continue
-
-        # Check the NEXT message for tool_results
-        resolved = set()
-        next_idx = i + 1
-        if next_idx < len(msgs) and msgs[next_idx].get("role") == "user":
-            nc = msgs[next_idx].get("content", [])
-            if isinstance(nc, list):
-                for b in nc:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        resolved.add(b.get("tool_use_id"))
-
-        missing = [tid for tid in tool_use_ids if tid not in resolved]
-        if missing:
-            dummies = [{
-                "type": "tool_result",
-                "tool_use_id": tid,
-                "content": "[tool result unavailable — injected by force_fix]",
-                "is_error": True,
-            } for tid in missing]
-            fixed += len(dummies)
-            logger.error(
-                "_force_fix_tool_results: FOUND %d missing tool_result(s) at msgs[%d] "
-                "(ids=%s, next_role=%s, next_content_types=%s)",
-                len(missing), i, missing,
-                msgs[next_idx].get("role") if next_idx < len(msgs) else "N/A",
-                [b.get("type") if isinstance(b, dict) else type(b).__name__
-                 for b in (msgs[next_idx].get("content", []) if next_idx < len(msgs) and isinstance(msgs[next_idx].get("content", []), list) else [])]
-            )
-            if next_idx < len(msgs) and msgs[next_idx].get("role") == "user":
-                nc = msgs[next_idx].get("content", [])
-                if isinstance(nc, list):
-                    msgs[next_idx] = {**msgs[next_idx], "content": dummies + nc}
-                else:
-                    msgs[next_idx] = {
-                        "role": "user",
-                        "content": dummies + [{"type": "text", "text": str(nc)}],
-                    }
-            else:
-                msgs.insert(next_idx, {"role": "user", "content": dummies})
-
-        if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
-            i += 2  # skip assistant + user
-        else:
-            i += 1  # skip assistant only
-
-    if fixed:
-        logger.error("_force_fix_tool_results: injected %d dummy tool_result(s) total", fixed)
-    return msgs
-
-
-def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
-    """Ensure every tool_use/server_tool_use in assistant messages has a matching result.
-
-    - Custom tool_use → tool_result in the NEXT user message
+    Rules:
+    - tool_use → tool_result in the NEXT user message
     - server_tool_use → web_search_tool_result in the SAME assistant message
 
-    Missing results are injected as dummies to prevent 400 errors from the API.
-    Operates on a copy to avoid mutating the original list.
+    Missing results are injected as dummies to prevent 400 errors.
     """
-    msgs = [dict(m) for m in msgs]  # shallow copy each message
-    i = 0
+    msgs = [dict(m) for m in msgs]
     injected = 0
+    i = 0
+
     while i < len(msgs):
         msg = msgs[i]
         if msg.get("role") != "assistant":
             i += 1
             continue
+
         content = msg.get("content", [])
         if not isinstance(content, list):
             i += 1
             continue
 
-        # Collect all tool IDs that need results
+        # Collect custom tool_use IDs
         custom_ids = [
             b["id"] for b in content
-            if isinstance(b, dict) and b.get("type") == "tool_use"
+            if isinstance(b, dict) and b.get("type") == "tool_use" and "id" in b
         ]
-        # For server_tool_use, exclude IDs already resolved by web_search_tool_result
-        # within the same assistant content (API returns both in one response)
-        resolved_in_assistant = {
+
+        # Collect server_tool_use IDs, excluding those already resolved in-message
+        resolved_server = {
             b.get("tool_use_id") for b in content
             if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
         }
-        server_ids = [
+        unresolved_server = [
             b["id"] for b in content
             if isinstance(b, dict) and b.get("type") == "server_tool_use"
-            and b["id"] not in resolved_in_assistant
+            and "id" in b and b["id"] not in resolved_server
         ]
-        if not custom_ids and not server_ids:
+
+        if not custom_ids and not unresolved_server:
             i += 1
             continue
 
-        # Check the next user message for existing custom tool results
+        # Inject server tool dummies into the SAME assistant message
+        if unresolved_server:
+            server_dummies = [
+                {"type": "web_search_tool_result", "tool_use_id": tid, "content": []}
+                for tid in unresolved_server
+            ]
+            msgs[i] = {**msgs[i], "content": list(content) + server_dummies}
+            injected += len(server_dummies)
+
+        # Check next user message for existing custom tool_results
         resolved_custom: set = set()
+        next_is_user = (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user")
         next_content: list = []
-        if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
+
+        if next_is_user:
             nc = msgs[i + 1].get("content", [])
             if isinstance(nc, list):
                 next_content = nc
@@ -1754,54 +1569,33 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
                     if isinstance(b, dict) and b.get("type") == "tool_result"
                 }
 
-        # --- Server tool dummies go INTO the assistant message (same block) ---
-        # server_ids already excludes those resolved within the assistant content
-        server_dummies = []
-        for tid in server_ids:
-            server_dummies.append({
-                "type": "web_search_tool_result",
+        # Inject custom tool dummies into the NEXT user message
+        missing_custom = [tid for tid in custom_ids if tid not in resolved_custom]
+        if missing_custom:
+            dummies = [{
+                "type": "tool_result",
                 "tool_use_id": tid,
-                "content": [],
-            })
-        if server_dummies:
-            # Deep-copy content so we don't mutate the original list
-            new_content = list(content) + server_dummies
-            msgs[i] = {**msgs[i], "content": new_content}
-            injected += len(server_dummies)
-
-        # --- Custom tool dummies go in the NEXT user message ---
-        dummies = []
-        for tid in custom_ids:
-            if tid not in resolved_custom:
-                dummies.append({
-                    "type": "tool_result",
-                    "tool_use_id": tid,
-                    "content": "[tool result unavailable]",
-                })
-
-        if dummies:
+                "content": "[tool result unavailable]",
+                "is_error": True,
+            } for tid in missing_custom]
             injected += len(dummies)
+
             if next_content:
-                # Prepend dummies to existing user message content
                 msgs[i + 1] = {**msgs[i + 1], "content": dummies + next_content}
-            elif i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
-                # User message has string content — wrap into list
+            elif next_is_user:
                 old = msgs[i + 1].get("content", "")
                 msgs[i + 1] = {
                     "role": "user",
                     "content": dummies + [{"type": "text", "text": str(old)}],
                 }
             else:
-                # No user message after assistant — insert one
                 msgs.insert(i + 1, {"role": "user", "content": dummies})
 
-        i += 1  # move past assistant message
-        # If custom dummies were injected (possibly inserting a user message), skip it too
-        if dummies or (i < len(msgs) and msgs[i].get("role") == "user"):
-            i += 1  # move past user message (existing or inserted)
+        # Skip past assistant + user pair
+        i += 2 if (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user") else 1
 
     if injected:
-        logger.warning("_ensure_tool_results: injected %d dummy result(s)", injected)
+        logger.warning("_sanitize_messages: injected %d dummy result(s)", injected)
     return msgs
 
 
@@ -1836,14 +1630,10 @@ async def _chat_with_tools(
 
     for round_num in range(1, max_rounds + 1):
         # Sanitize message structure before every API call
-        working_msgs = _ensure_tool_results(working_msgs)
-        working_msgs = _force_fix_tool_results(working_msgs)
-
-        # DEBUG: validate message structure before API call
-        _validate_tool_results(working_msgs, f"round {round_num}")
+        working_msgs = _sanitize_messages(working_msgs)
 
         response = await _claude.messages.create(
-            model=model or _CLAUDE_MODEL,
+            model=model or _get_model(),
             max_tokens=effective_max_tokens,
             system=cached_system,
             tools=cached_tools,
@@ -1987,12 +1777,10 @@ async def _chat_with_tools(
         ),
     })
     # Sanitize: ensure ALL tool_use/server_tool_use have matching results
-    working_msgs = _ensure_tool_results(working_msgs)
-    working_msgs = _force_fix_tool_results(working_msgs)
-    _validate_tool_results(working_msgs, "final")
+    working_msgs = _sanitize_messages(working_msgs)
     try:
         final = await _claude.messages.create(
-            model=model or _CLAUDE_MODEL,
+            model=model or _get_model(),
             max_tokens=effective_max_tokens,
             system=cached_system,
             messages=working_msgs,  # no tools parameter — forces text-only response
@@ -2058,7 +1846,7 @@ async def _process_task(bot: Bot, task: dict):
                 [{"role": "user", "content": content}],
                 max_rounds=15,
                 system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
-                model=_CLAUDE_MODEL_STRONG,
+                model=_get_model(),
                 max_tokens=_CLAUDE_MAX_TOKENS_TASK,
             )
 
@@ -2487,13 +2275,6 @@ async def bot_main():
     except Exception:
         pass
 
-    # 3. Close DB connection pool
-    if _pool is not None:
-        try:
-            _pool.closeall()
-            logger.info("DB connection pool closed")
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":
