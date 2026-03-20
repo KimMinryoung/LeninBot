@@ -1139,9 +1139,27 @@ async def handle_message(message: Message):
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()
     except Exception as e:
-        logger.error("Claude API error: %s", e)
-        _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
-        reply = f"오류가 발생했습니다: {e}"
+        err_str = str(e)
+        is_tool_pair_error = "tool_use" in err_str and "tool_result" in err_str
+
+        if is_tool_pair_error:
+            # Auto-recovery: clear context and retry with current message only
+            logger.warning("Tool pair 400 error — clearing context and retrying: %s", e)
+            _log_event("warning", "chat", f"Tool pair error auto-recovery: {e}")
+            _clear_chat_history(user_id)
+            try:
+                fresh_msgs = [{"role": "user", "content": user_text}]
+                progress_cb = _make_progress_callback(message.chat.id)
+                reply = await _chat_with_tools(fresh_msgs, on_progress=progress_cb)
+                if hasattr(progress_cb, "flush"):
+                    await progress_cb.flush()
+            except Exception as e2:
+                logger.error("Retry after clear also failed: %s", e2)
+                reply = f"오류가 발생했습니다 (자동 복구 실패): {e2}"
+        else:
+            logger.error("Claude API error: %s", e)
+            _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
+            reply = f"오류가 발생했습니다: {e}"
 
     # Auto-escalation: extract [CONTINUE_TASK: ...] marker and create background task
     continuation_task = None
