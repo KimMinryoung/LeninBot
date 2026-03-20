@@ -558,6 +558,16 @@ async def _maybe_summarize_chunk(user_id: int):
         )
         raw_after = last["chunk_end_id"] if last else min_id
 
+        # Bootstrap: no summaries yet → only consider recent messages, not from the dawn of time
+        if not last:
+            latest = await asyncio.to_thread(
+                _query_one,
+                "SELECT MAX(id) AS max_id FROM telegram_chat_history WHERE user_id = %s AND id > %s",
+                (user_id, min_id),
+            )
+            if latest and latest["max_id"]:
+                raw_after = max(min_id, latest["max_id"] - _SUMMARY_CHUNK_SIZE * (_MAX_SUMMARY_CHUNKS + 1))
+
         rows = await asyncio.to_thread(
             _query,
             "SELECT id, role, content FROM telegram_chat_history "
