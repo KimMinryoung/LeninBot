@@ -376,6 +376,11 @@ _RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
 # Per-user clear marker: messages with id <= this value are ignored
 _clear_after_id: dict[int, int] = {}
 
+# Chat scratchpad: preserve tool work details across turns when interrupted
+import time as _time_mod
+_chat_scratchpad: dict[int, tuple[str, float]] = {}  # user_id → (summary, monotonic_ts)
+_SCRATCHPAD_TTL = 1800  # 30분 후 자동 만료
+
 
 def _normalize_history_content(content) -> str:
     """Convert mixed/legacy message content into plain text.
@@ -627,6 +632,7 @@ async def _chat_with_tools(
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
     on_progress=None,
+    budget_tracker: dict | None = None,
 ) -> str:
     """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
     # Resolve runtime defaults strictly by None (not truthiness).
@@ -664,6 +670,7 @@ async def _chat_with_tools(
         log_event=_log_event,
         budget_usd=resolved_budget,
         on_progress=on_progress,
+        budget_tracker=budget_tracker,
     )
 
 
@@ -725,6 +732,7 @@ async def cmd_clear(message: Message):
     if not _is_allowed(message.from_user.id):
         return
     await asyncio.to_thread(_clear_chat_history, message.from_user.id)
+    _chat_scratchpad.pop(message.from_user.id, None)
     await message.answer("대화 히스토리가 초기화되었습니다.")
 
 
@@ -1199,19 +1207,32 @@ async def handle_message(message: Message):
     # Auto-recall: fetch relevant past experiences for context injection
     experience_context = await _fetch_relevant_experiences(user_text)
 
+    # Scratchpad: recover previous turn's interrupted tool work
+    scratchpad_context = ""
+    sp_entry = _chat_scratchpad.get(user_id)
+    if sp_entry:
+        sp_text, sp_ts = sp_entry
+        if (_time_mod.monotonic() - sp_ts) < _SCRATCHPAD_TTL:
+            scratchpad_context = sp_text
+            logger.info("Injecting scratchpad context for user %d (%d chars)", user_id, len(sp_text))
+        _chat_scratchpad.pop(user_id, None)  # consume after TTL check
+
     try:
         system_override = None
-        if experience_context:
+        extra_context = (experience_context or "") + scratchpad_context
+        if extra_context:
             system_override = _SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
                 system_alerts=_format_system_alerts(),
                 skills_section=build_skills_prompt(),
-            ) + experience_context
+            ) + extra_context
         progress_cb = _make_progress_callback(message.chat.id)
-        reply = await _chat_with_tools(history, system_prompt=system_override, on_progress=progress_cb)
+        bt = {}
+        reply = await _chat_with_tools(history, system_prompt=system_override, on_progress=progress_cb, budget_tracker=bt)
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()
     except Exception as e:
+        bt = {}  # no budget info on exception
         err_str = str(e)
         is_tool_pair_error = "tool_use" in err_str and "tool_result" in err_str
 
@@ -1233,6 +1254,20 @@ async def handle_message(message: Message):
             logger.error("Claude API error: %s", e)
             _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
             reply = f"오류가 발생했습니다: {e}"
+
+    # Scratchpad: save if interrupted, clear if completed normally
+    if bt.get("was_interrupted") and bt.get("tool_work_details"):
+        details = bt["tool_work_details"]
+        sp_summary = (
+            f"\n\n## 이전 턴 작업 컨텍스트 (중단됨)\n"
+            f"- 라운드: {bt.get('rounds_used', '?')}, 비용: ${bt.get('total_cost', 0):.2f}\n"
+            f"- 수행한 도구 호출:\n" + "\n".join(details[:20]) + "\n"
+            "위 도구 호출은 이전 턴에서 이미 실행된 것이다. 같은 호출을 반복하지 말고, 결과를 활용하거나 보완 조사를 하라."
+        )
+        _chat_scratchpad[user_id] = (sp_summary, _time_mod.monotonic())
+        logger.info("Saved scratchpad for user %d: %d tool details", user_id, len(details))
+    else:
+        _chat_scratchpad.pop(user_id, None)
 
     # Auto-escalation: extract [CONTINUE_TASK: ...] marker and create background task
     continuation_task = None

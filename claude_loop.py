@@ -619,6 +619,7 @@ async def chat_with_tools(
     # Tool protocol blocks are generated only within this call.
     working_msgs = _normalize_initial_messages(messages)
     tool_call_log = []
+    tool_work_details = []  # result snippets for scratchpad
     total_cost = 0.0
     budget_warning_sent = False
 
@@ -705,7 +706,10 @@ async def chat_with_tools(
                     log_event("warning", "chat", f"Response truncated by max_tokens ({max_tokens}) at round {round_num}/{max_rounds}")
             text_parts = [b.text for b in response.content if b.type == "text"]
             if budget_tracker is not None:
-                budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num})
+                budget_tracker.update({
+                    "total_cost": total_cost, "rounds_used": round_num,
+                    "was_interrupted": False, "tool_work_details": list(tool_work_details),
+                })
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
         # Budget exceeded → process this response's tool calls, then break
@@ -815,6 +819,7 @@ async def chat_with_tools(
                         pass
                 # Log for diagnostics
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
+                tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result[:150]}")
             else:
                 # Preserve unknown future block types as text context.
                 assistant_content.append({"type": "text", "text": _coerce_text(b)})
@@ -931,7 +936,10 @@ async def chat_with_tools(
             if log_event:
                 log_event("error", "final_response", f"Final response failed even after strip: {e2}")
             if budget_tracker is not None:
-                budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
+                budget_tracker.update({
+                    "total_cost": total_cost, "rounds_used": round_num if response else 0,
+                    "was_interrupted": was_still_working, "tool_work_details": list(tool_work_details),
+                })
             return f"⚠️ {limit_reason} 후 응답 생성 실패: {api_err}"
 
     if hasattr(final, "usage") and final.usage:
@@ -940,5 +948,8 @@ async def chat_with_tools(
         logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
     text_parts = [b.text for b in final.content if b.type == "text"]
     if budget_tracker is not None:
-        budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
+        budget_tracker.update({
+            "total_cost": total_cost, "rounds_used": round_num if response else 0,
+            "was_interrupted": was_still_working, "tool_work_details": list(tool_work_details),
+        })
     return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
