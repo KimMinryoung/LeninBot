@@ -10,6 +10,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ── Pricing Constants (USD per million tokens) ──────────────────────
+# Claude Sonnet 4.6 pricing — update when model pricing changes
+PRICING = {
+    "input": 3.00 / 1_000_000,
+    "output": 15.00 / 1_000_000,
+    "cache_creation": 3.75 / 1_000_000,
+    "cache_read": 0.30 / 1_000_000,
+}
+
+
+def _calculate_cost(usage) -> float:
+    """Calculate USD cost from a response.usage object."""
+    cost = 0.0
+    cost += getattr(usage, "input_tokens", 0) * PRICING["input"]
+    cost += getattr(usage, "output_tokens", 0) * PRICING["output"]
+    # Cache tokens (may not always be present)
+    cost += getattr(usage, "cache_creation_input_tokens", 0) * PRICING["cache_creation"]
+    cost += getattr(usage, "cache_read_input_tokens", 0) * PRICING["cache_read"]
+    return cost
+
+
 # ── Message Sanitization ─────────────────────────────────────────────
 
 def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> list[dict]:
@@ -138,9 +159,11 @@ async def chat_with_tools(
     tools: list[dict],
     tool_handlers: dict,
     system_prompt: str,
-    max_rounds: int = 15,
+    max_rounds: int = 50,
     max_tokens: int = 4096,
     log_event=None,
+    budget_usd: float = 0.30,
+    budget_tracker: dict | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -155,9 +178,13 @@ async def chat_with_tools(
         max_tokens: Max tokens for response.
         log_event: Optional callable(level, source, message, detail=None, task_id=None)
             for persistent error logging.
+        budget_usd: Maximum USD budget for this call (default 0.30).
+        budget_tracker: Optional dict — filled with {"total_cost", "rounds_used"} after return.
     """
     working_msgs = list(messages)
     tool_call_log = []
+    total_cost = 0.0
+    budget_warning_sent = False
 
     # Prompt caching: mark system prompt and tools as cacheable
     cached_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
@@ -171,6 +198,7 @@ async def chat_with_tools(
         break
 
     response = None
+    round_num = 0
     for round_num in range(1, max_rounds + 1):
         # Sanitize message structure before every API call
         working_msgs = sanitize_messages(working_msgs)
@@ -183,6 +211,17 @@ async def chat_with_tools(
             messages=working_msgs,
         )
 
+        # Track cost
+        if hasattr(response, "usage") and response.usage:
+            round_cost = _calculate_cost(response.usage)
+            total_cost += round_cost
+            logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)", round_num, round_cost, total_cost, budget_usd)
+
+        # Budget exceeded → break out of loop (handled by forced-response below)
+        if total_cost >= budget_usd:
+            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d", total_cost, budget_usd, round_num)
+            break
+
         # If no custom tool use, extract and return text
         if response.stop_reason not in ("tool_use", "pause_turn"):
             if response.stop_reason == "max_tokens":
@@ -190,6 +229,8 @@ async def chat_with_tools(
                 if log_event:
                     log_event("warning", "chat", f"Response truncated by max_tokens ({max_tokens}) at round {round_num}/{max_rounds}")
             text_parts = [b.text for b in response.content if b.type == "text"]
+            if budget_tracker is not None:
+                budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num})
             return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
 
         # Process tool calls
@@ -284,6 +325,16 @@ async def chat_with_tools(
             logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
 
         if tool_results:
+            # Inject budget warning at 80% threshold
+            if not budget_warning_sent and total_cost >= budget_usd * 0.8:
+                budget_warning_sent = True
+                tool_results.append({
+                    "type": "text",
+                    "text": (
+                        f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
+                        "마무리하거나 request_continuation 도구를 사용하세요."
+                    ),
+                })
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
@@ -291,25 +342,28 @@ async def chat_with_tools(
             logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
 
-    # Limit reached — force final response
+    # Limit reached (rounds or budget) — force final response
+    budget_exhausted = total_cost >= budget_usd
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
     was_still_working = response.stop_reason in ("tool_use", "pause_turn") if response else False
-    logger.warning("Tool round limit (%d) reached (still_working=%s). Forcing final response. Calls:\n%s",
-                    max_rounds, was_still_working, log_detail)
+    logger.warning(
+        "Limit reached (rounds=%d/%d, budget=$%.4f/$%.2f, still_working=%s). Forcing final response. Calls:\n%s",
+        round_num if response else 0, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
+    )
 
     # Inject a nudge so the model knows it must answer now
     escalation_hint = ""
     if was_still_working:
         escalation_hint = (
-            " 미완료 작업이 있다면, 응답 맨 끝에 "
-            "\"[CONTINUE_TASK: 남은 작업 설명]\" 형식으로 한 줄 추가하세요. "
-            "시스템이 자동으로 백그라운드 태스크를 생성합니다."
+            " 미완료 작업이 있다면 request_continuation 도구가 있으면 사용하고, "
+            "없으면 응답 맨 끝에 \"[CONTINUE_TASK: 남은 작업 설명]\" 형식으로 한 줄 추가하세요."
         )
+    limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
     working_msgs.append({
         "role": "user",
         "content": (
-            "[SYSTEM] 도구 호출 한도에 도달했습니다. 추가 도구를 사용하지 말고, "
-            "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
+            f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, 라운드: {round_num if response else 0}/{max_rounds}). "
+            "추가 도구를 사용하지 말고, 지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
             + escalation_hint
         ),
     })
@@ -322,12 +376,18 @@ async def chat_with_tools(
             system=cached_system,
             messages=working_msgs,  # no tools parameter — forces text-only response
         )
+        if hasattr(final, "usage") and final.usage:
+            total_cost += _calculate_cost(final.usage)
         if final.stop_reason == "max_tokens":
             logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
         text_parts = [b.text for b in final.content if b.type == "text"]
+        if budget_tracker is not None:
+            budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
         return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
     except Exception as e:
         logger.error("Final forced response failed: %s", e)
         if log_event:
             log_event("error", "final_response", f"Final forced response failed: {e}")
-        return f"⚠️ 도구 호출 한도({max_rounds}회) 도달 후 응답 생성 실패: {e}"
+        if budget_tracker is not None:
+            budget_tracker.update({"total_cost": total_cost, "rounds_used": round_num if response else 0})
+        return f"⚠️ {limit_reason} 후 응답 생성 실패: {e}"

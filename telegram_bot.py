@@ -134,6 +134,14 @@ def _ensure_table():
         CREATE INDEX IF NOT EXISTS idx_error_log_created
         ON telegram_error_log (created_at DESC)
     """)
+    # Task chaining columns (additive — safe for existing rows)
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES telegram_tasks(id)")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT DEFAULT ''")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent
+        ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
+    """)
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
@@ -314,6 +322,11 @@ You are executing a background intelligence task. Produce a structured Markdown 
 - Format: # Title → ## Executive Summary → ## Analysis (subsections) → ## Key Entities → ## Sources → ## Outlook
 - Cite all sources. Distinguish confirmed facts from inference.
 
+## Scratchpad & Continuation
+- save_scratchpad: 중요한 중간 발견을 저장하라. 자식 태스크에 자동 상속됨.
+- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
+- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
+
 **Current time: {current_datetime}**
 {system_alerts}
 """
@@ -451,10 +464,13 @@ def _is_allowed(user_id: int) -> bool:
 
 async def _chat_with_tools(
     messages: list[dict],
-    max_rounds: int = 15,
+    max_rounds: int = 50,
     system_prompt: str | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
+    budget_usd: float | None = None,
+    extra_tools: list | None = None,
+    extra_handlers: dict | None = None,
 ) -> str:
     """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
     sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
@@ -462,16 +478,19 @@ async def _chat_with_tools(
         system_alerts=_format_system_alerts(),
         skills_section=build_skills_prompt(),
     )
+    merged_tools = TOOLS + (extra_tools or [])
+    merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
     return await chat_with_tools(
         messages,
         client=_claude,
         model=model or _get_model(),
-        tools=TOOLS,
-        tool_handlers=TOOL_HANDLERS,
+        tools=merged_tools,
+        tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
         max_rounds=max_rounds,
         max_tokens=max_tokens or _CLAUDE_MAX_TOKENS,
         log_event=_log_event,
+        budget_usd=budget_usd or 0.30,
     )
 
 
@@ -1284,6 +1303,10 @@ async def bot_main():
 
     # Build process_task closure with module-level dependencies
     async def _process_task_wrapper(b: Bot, task: dict):
+        from self_tools import build_task_context_tools
+        task_tools, task_handlers = build_task_context_tools(
+            task["id"], task["user_id"], task.get("depth", 0),
+        )
         await process_task(
             b, task,
             chat_with_tools_fn=_chat_with_tools,
@@ -1295,6 +1318,9 @@ async def bot_main():
             max_tokens_task=_CLAUDE_MAX_TOKENS_TASK,
             allowed_user_ids=ALLOWED_USER_IDS,
             log_event_fn=_log_event,
+            extra_tools=task_tools,
+            extra_handlers=task_handlers,
+            budget_usd=1.00,
         )
 
     # Start background workers (keep handles for graceful cancellation)

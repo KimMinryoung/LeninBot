@@ -157,12 +157,13 @@ SELF_TOOLS = [
     },
     {
         "name": "create_task",
-        "description": "Create async background task (Sonnet, 15 rounds). Use for: deep research, multi-step coding/patching, file edits requiring multiple tool calls, or any task where tool-call limits could interrupt progress. Prefer this over direct multi-step execution.",
+        "description": "Create async background task (Sonnet, 50 rounds, $1 budget). Use for: deep research, multi-step coding/patching, file edits requiring multiple tool calls, or any task where tool-call limits could interrupt progress. Prefer this over direct multi-step execution.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "What to research, analyze, or implement. Be specific: include file paths, requirements, constraints, and expected outcome."},
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
+                "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional). Child inherits parent's scratchpad."},
             },
             "required": ["content"],
         },
@@ -491,12 +492,16 @@ async def _exec_write_kg(
 async def _exec_create_task(
     content: str,
     priority: str = "normal",
+    parent_task_id: int | None = None,
 ) -> str:
     from shared import create_task_in_db
 
-    result = await asyncio.to_thread(create_task_in_db, content, 0, priority)
+    result = await asyncio.to_thread(
+        create_task_in_db, content, 0, priority, parent_task_id=parent_task_id,
+    )
     if result["status"] == "ok":
-        return f"Task #{result['task_id']} created (priority: {priority}). It will be processed in the background."
+        depth_info = f", depth={result.get('depth', 0)}" if parent_task_id else ""
+        return f"Task #{result['task_id']} created (priority: {priority}{depth_info}). It will be processed in the background."
     else:
         return f"Failed to create task: {result['error']}"
 
@@ -565,6 +570,109 @@ async def _exec_kg_merge_entities(source_name: str, target_name: str) -> str:
         f"  Incoming relations transferred: {result.get('transferred_incoming', 0)}\n"
         f"  MENTIONS transferred: {result.get('transferred_mentions', 0)}"
     )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 4. TASK-CONTEXT TOOL DEFINITIONS (injected only during task execution)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK_CONTEXT_TOOLS = [
+    {
+        "name": "save_scratchpad",
+        "description": "Save intermediate findings to this task's scratchpad. Automatically inherited by child tasks. Use to preserve important progress.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Text to save (findings, partial results, notes)."},
+                "mode": {
+                    "type": "string",
+                    "enum": ["overwrite", "append"],
+                    "default": "append",
+                    "description": "append (default) adds to existing scratchpad; overwrite replaces it.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "request_continuation",
+        "description": "Create a child task to continue unfinished work. Saves progress summary to scratchpad and spawns a new task that inherits it. Use when budget/round limit is approaching.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "progress_summary": {"type": "string", "description": "What has been accomplished so far."},
+                "next_steps": {"type": "string", "description": "What the child task should do next. Be specific."},
+            },
+            "required": ["progress_summary", "next_steps"],
+        },
+    },
+]
+
+_SCRATCHPAD_MAX_CHARS = 20_000
+
+
+def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
+    """Build task-context tool handlers with task_id bound via closure.
+
+    Returns (tools_list, handlers_dict) ready to merge into the tool loop.
+    """
+    from db import execute as db_execute, query as db_query
+
+    async def _exec_save_scratchpad(content: str, mode: str = "append") -> str:
+        try:
+            if mode == "overwrite":
+                new_pad = content[:_SCRATCHPAD_MAX_CHARS]
+            else:
+                # Append: fetch current, concatenate, trim front if over limit
+                rows = await asyncio.to_thread(
+                    db_query, "SELECT scratchpad FROM telegram_tasks WHERE id = %s", (task_id,)
+                )
+                current = (rows[0].get("scratchpad") or "") if rows else ""
+                new_pad = current + "\n" + content if current else content
+                if len(new_pad) > _SCRATCHPAD_MAX_CHARS:
+                    new_pad = new_pad[-_SCRATCHPAD_MAX_CHARS:]
+
+            await asyncio.to_thread(
+                db_execute,
+                "UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s",
+                (new_pad, task_id),
+            )
+            return f"Scratchpad saved ({len(new_pad)} chars, mode={mode}) for task #{task_id}."
+        except Exception as e:
+            logger.error("save_scratchpad error (task %d): %s", task_id, e)
+            return f"Failed to save scratchpad: {e}"
+
+    async def _exec_request_continuation(progress_summary: str, next_steps: str) -> str:
+        from shared import create_task_in_db
+
+        # 1. Update current task's scratchpad with progress
+        scratchpad_content = f"## Progress (task #{task_id})\n{progress_summary}\n\n## Next Steps\n{next_steps}"
+        await _exec_save_scratchpad(scratchpad_content, mode="append")
+
+        # 2. Create child task
+        result = await asyncio.to_thread(
+            create_task_in_db,
+            next_steps,
+            user_id=user_id,
+            parent_task_id=task_id,
+            scratchpad=scratchpad_content,
+        )
+
+        if result["status"] == "ok":
+            child_id = result["task_id"]
+            child_depth = result.get("depth", depth + 1)
+            return (
+                f"Child task #{child_id} created (depth={child_depth}, parent=#{task_id}). "
+                f"Progress saved. You can now finish your current response."
+            )
+        else:
+            return f"Failed to create continuation task: {result['error']}"
+
+    handlers = {
+        "save_scratchpad": _exec_save_scratchpad,
+        "request_continuation": _exec_request_continuation,
+    }
+    return list(TASK_CONTEXT_TOOLS), handlers
 
 
 SELF_TOOL_HANDLERS = {

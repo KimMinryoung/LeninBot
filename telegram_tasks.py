@@ -59,23 +59,36 @@ async def process_task(
     max_tokens_task: int,
     allowed_user_ids: set[int],
     log_event_fn,
+    extra_tools: list | None = None,
+    extra_handlers: dict | None = None,
+    budget_usd: float = 1.00,
 ):
     """Process a task: run tools, generate report, save to DB, send as file.
 
     Args:
         bot: Telegram Bot instance.
-        task: Dict with id, user_id, content.
+        task: Dict with id, user_id, content, scratchpad, parent_task_id, depth.
         chat_with_tools_fn: Async callable matching _chat_with_tools signature.
         get_model_fn: Callable returning current model ID.
         task_system_prompt: System prompt for task execution.
         max_tokens_task: Max tokens for task output.
         allowed_user_ids: Set of allowed Telegram user IDs.
         log_event_fn: Callable for persistent error logging.
+        extra_tools: Additional tool definitions (e.g. task-context tools).
+        extra_handlers: Additional tool handlers.
+        budget_usd: USD budget for this task (default $1.00).
     """
     task_id = task["id"]
     user_id = task["user_id"]
     content = task["content"]
+    scratchpad = task.get("scratchpad") or ""
+    depth = task.get("depth") or 0
+    parent_task_id = task.get("parent_task_id")
     is_self_generated = (user_id == 0)
+
+    # Inject inherited context from parent scratchpad
+    if scratchpad:
+        content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
 
     max_retries = 10
     retry_delay = 60
@@ -84,10 +97,13 @@ async def process_task(
         try:
             report = await chat_with_tools_fn(
                 [{"role": "user", "content": content}],
-                max_rounds=15,
+                max_rounds=50,
                 system_prompt=task_system_prompt,
                 model=get_model_fn(),
                 max_tokens=max_tokens_task,
+                budget_usd=budget_usd,
+                extra_tools=extra_tools,
+                extra_handlers=extra_handlers,
             )
 
             # Save full report to DB
@@ -229,7 +245,7 @@ async def task_worker(bot: Bot, *, process_task_fn):
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content",
+                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth",
             )
             if task:
                 await process_task_fn(bot, task)
