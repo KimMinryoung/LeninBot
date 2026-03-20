@@ -15,12 +15,13 @@ Server deployed at **Hetzner VPS** (Ubuntu 24.04, 16GB RAM), HTTPS via `leninbot
      ┌────────────────────────────┼────────────────────────────┐
      │                            │                            │
 User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer.py)
-        ─► LangGraph StateGraph (chatbot.py)   ─► Claude Sonnet 4.6 (chat + task)
-           ─► PostgreSQL/pgvector              ─► Claude Haiku 4.5 (light, reserved)
-           ─► Gemini 3.1 Flash Lite (gen)      ─► vector_search (via chatbot.py)
-           ─► Gemini 2.5 Flash-Lite (routing)  ─► knowledge_graph_search (via shared.py)
-           ─► BGE-M3 embeddings (CPU)          ─► web_search (Claude built-in, server-side)
-           ─► LangGraph MemorySaver            ─► File system tools (read/write/list/execute_python)
+        ─► LangGraph StateGraph   ─► telegram_tools.py (tool defs + handlers)
+           (chatbot.py)           ─► claude_loop.py (Claude tool-use loop, shared)
+           ─► PostgreSQL/pgvector ─► telegram_tasks.py (bg workers, scheduler, monitor)
+           ─► Gemini 3.1 FL (gen) ─► Claude Sonnet 4.6 (chat + task)
+           ─► Gemini 2.5 FL-L     ─► Claude Haiku 4.5 (light, reserved)
+           ─► BGE-M3 (CPU)       ─► web_search (Claude built-in, server-side)
+           ─► LangGraph MemorySaver
 
      ─► GraphMemoryService (graph_memory/) ─► Neo4j (Graphiti knowledge graph)
                                              ─► Gemini 2.5 Flash (entity/edge extraction)
@@ -144,10 +145,13 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 ```
 AIChatBot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
-├── chatbot.py                # Core LangGraph agent pipeline (~1,339 lines)
+├── chatbot.py                # Core LangGraph agent pipeline (~1,290 lines) + public API (similarity_search, search_knowledge_graph)
 ├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, URL fetching
 ├── self_tools.py             # Self-awareness tools: 11 tools (+write_kg, +create_task, +read_server_logs, -render tools)
-├── telegram_bot.py           # Telegram bot (aiogram 3.x + Claude Sonnet 4.6 chat/task + file system tools)
+├── telegram_bot.py           # Telegram bot: config, handlers, routing (~1,360 lines, refactored)
+├── telegram_tools.py         # Tool definitions + execution handlers (~415 lines, extracted from telegram_bot.py)
+├── claude_loop.py            # Claude tool-use loop + sanitize_messages (~333 lines, shared with local_agent)
+├── telegram_tasks.py         # Background task worker, scheduler, system monitor (~327 lines, extracted)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)

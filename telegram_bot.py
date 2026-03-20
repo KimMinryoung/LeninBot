@@ -31,6 +31,14 @@ from aiogram.types import (
 from aiogram.filters import Command
 import anthropic
 
+# Extracted modules
+from telegram_tools import TOOLS, TOOL_HANDLERS
+from claude_loop import sanitize_messages, estimate_tokens, chat_with_tools
+from telegram_tasks import (
+    process_task, broadcast, system_monitor,
+    task_worker, schedule_worker, check_deploy_meta,
+)
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -296,409 +304,6 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 {skills_section}
 """
 
-# ── Tool Definitions (Anthropic API format) ──────────────────────────
-_TOOLS = [
-    {
-        "name": "vector_search",
-        "description": "Search Marxist-Leninist document DB (pgvector). Returns excerpts with author/year/title.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query (Korean or English)."},
-                "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
-                "layer": {
-                    "type": "string",
-                    "enum": ["core_theory", "modern_analysis"],
-                    "description": "Filter: core_theory (classical) or modern_analysis. Omit for all.",
-                },
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "knowledge_graph_search",
-        "description": "Search Neo4j KG for geopolitical entities and relationships.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "What entities/relations to find."},
-                "num_results": {"type": "integer", "description": "Results count (1-20).", "default": 10},
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "type": "web_search_20250305",
-        "name": "web_search",
-        "max_uses": 5,
-    },
-    {
-        "name": "fetch_url",
-        "description": "Fetch and extract body text from a URL. Use when the user shares a link and asks about its content. Returns up to 10,000 chars of cleaned body text.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "The URL to fetch content from."},
-            },
-            "required": ["url"],
-        },
-    },
-    # ── File system tools (Hetzner VPS) ──
-    {
-        "name": "read_file",
-        "description": "Read a file on the server. Returns content with line numbers.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path (absolute or relative to project root)."},
-                "line_start": {"type": "integer", "description": "Start line (1-based). Omit for beginning."},
-                "line_end": {"type": "integer", "description": "End line (inclusive). Omit for end."},
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "write_file",
-        "description": "Write content to a file on the server. Creates parent directories if needed.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path to write."},
-                "content": {"type": "string", "description": "Content to write."},
-                "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "Write mode. Default: overwrite."},
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "list_directory",
-        "description": "List files and directories on the server. Supports glob patterns.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Directory path. Default: project root."},
-                "pattern": {"type": "string", "description": "Glob pattern filter. Default: * (all)."},
-                "recursive": {"type": "boolean", "description": "Search recursively. Default: false."},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "execute_python",
-        "description": "Execute Python code on the server. Returns stdout/stderr. Use for data processing, calculations, or system tasks.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "Python code to execute."},
-                "timeout": {"type": "integer", "description": "Max execution time in seconds (5-300). Default: 30."},
-            },
-            "required": ["code"],
-        },
-    },
-]
-
-
-# ── Tool Execution (lazy-loaded from chatbot.py) ────────────────────
-async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
-    """Execute vector similarity search via chatbot module."""
-    try:
-        from chatbot import _direct_similarity_search
-        docs = await asyncio.to_thread(_direct_similarity_search, query, num_results, layer)
-        if not docs:
-            return "No documents found."
-        results = []
-        for i, doc in enumerate(docs, 1):
-            meta = doc.metadata
-            header = f"[{i}] {meta.get('title', 'Untitled')} — {meta.get('author', 'Unknown')}"
-            if meta.get("year"):
-                header += f" ({meta['year']})"
-            results.append(f"{header}\n{doc.page_content[:500]}")
-        return "\n\n".join(results)
-    except Exception as e:
-        logger.error("vector_search error: %s", e)
-        return f"Vector search failed: {e}"
-
-
-async def _exec_kg_search(query: str, num_results: int = 10) -> str:
-    """Execute knowledge graph search via chatbot module."""
-    try:
-        from chatbot import _search_kg
-        result = await asyncio.to_thread(_search_kg, query, num_results)
-        return result or "No knowledge graph results found."
-    except Exception as e:
-        logger.error("kg_search error: %s", e)
-        return f"Knowledge graph search failed: {e}"
-
-
-
-async def _exec_fetch_url(url: str) -> str:
-    """Fetch and extract main body text from a URL."""
-    try:
-        from shared import fetch_url_content
-        content = await asyncio.to_thread(fetch_url_content, url)
-        return content or "Failed to extract content from this URL."
-    except Exception as e:
-        logger.error("fetch_url error: %s", e)
-        return f"URL fetch failed: {e}"
-
-
-async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None) -> str:
-    """Read a file on the server."""
-    import glob as _glob
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.isabs(path):
-        path = os.path.join(project_root, path)
-    if not os.path.exists(path):
-        return f"Error: File not found: {path}"
-    if os.path.isdir(path):
-        return f"Error: Path is a directory: {path}"
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        total = len(lines)
-        start = max(1, line_start or 1)
-        end = min(total, line_end or total)
-        selected = lines[start - 1 : end]
-        numbered = [f"{start + i:>6}\t{line.rstrip()}" for i, line in enumerate(selected)]
-        return f"[{path}] lines {start}-{end} of {total}\n" + "\n".join(numbered)
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-_WRITE_ALLOWED_DIRS = ["research", "docs", "logs", "temp_dev", "data"]
-_WRITE_ALLOWED_EXTENSIONS = [".md", ".txt", ".json", ".csv", ".log", ".yaml", ".yml"]
-
-
-async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> str:
-    """Write content to a file on the server.
-
-    Safety rules:
-    - .py files → routed through self_modification_core (Git backup + syntax check)
-    - Other files in allowed dirs → written directly
-    - Files outside project root → blocked
-    """
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.isabs(path):
-        path = os.path.join(project_root, path)
-    abs_path = os.path.realpath(path)
-
-    # Block writes outside project root
-    if not (abs_path == project_root or abs_path.startswith(project_root + "/")):
-        return f"❌ Write denied: path is outside project root"
-
-    rel_path = os.path.relpath(abs_path, project_root)
-    ext = os.path.splitext(abs_path)[1].lower()
-
-    # .py files → safe modification path (Git backup + syntax check)
-    if ext == ".py":
-        try:
-            sys.path.insert(0, project_root)
-            from self_modification_core import (
-                git_backup_before_modification,
-                generate_line_patch,
-                apply_line_patch_safe,
-                run_sandbox_tests,
-                git_reset_to_commit,
-            )
-            # Read original (if exists)
-            old_content = ""
-            if os.path.isfile(abs_path):
-                with open(abs_path, "r", encoding="utf-8") as f:
-                    old_content = f.read()
-
-            # Syntax check new content first
-            import ast
-            try:
-                ast.parse(content)
-            except SyntaxError as e:
-                return f"❌ Syntax error in new content: {e}"
-
-            # Git backup
-            if os.path.isfile(abs_path):
-                commit_hash = git_backup_before_modification(abs_path)
-            else:
-                commit_hash = None
-
-            # Write the file
-            os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
-            with open(abs_path, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            # Run sandbox tests
-            test_results = run_sandbox_tests(abs_path)
-            if test_results.status == "fail":
-                # Rollback
-                if commit_hash:
-                    git_reset_to_commit(commit_hash)
-                elif os.path.isfile(abs_path):
-                    os.unlink(abs_path)
-                return f"❌ Sandbox tests failed — rolled back.\n{test_results}"
-
-            size = os.path.getsize(abs_path)
-            backup_info = f", backup: {os.path.basename(commit_hash)}" if commit_hash else ""
-            # Clean up backup file on success
-            if commit_hash and os.path.isfile(commit_hash):
-                os.unlink(commit_hash)
-            return f"✅ Written {len(content)} chars to {rel_path} (size: {size}B{backup_info}, tests: PASS)"
-        except Exception as e:
-            return f"Error writing .py file safely: {e}"
-
-    # Non-code files: allow in specific dirs or with safe extensions
-    rel_parts = rel_path.replace("\\", "/").split("/")
-    in_allowed_dir = any(rel_parts[0] == d for d in _WRITE_ALLOWED_DIRS) if rel_parts else False
-    has_safe_ext = ext in _WRITE_ALLOWED_EXTENSIONS
-
-    if not (in_allowed_dir or has_safe_ext):
-        return (
-            f"❌ Write denied: {rel_path}\n"
-            f"Allowed dirs: {_WRITE_ALLOWED_DIRS}\n"
-            f"Allowed extensions: {_WRITE_ALLOWED_EXTENSIONS}\n"
-            f"For .py files, write is allowed with automatic safety checks."
-        )
-
-    try:
-        os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
-        write_mode = "a" if mode == "append" else "w"
-        with open(abs_path, write_mode, encoding="utf-8") as f:
-            f.write(content)
-        size = os.path.getsize(abs_path)
-        return f"Written {len(content)} chars to {rel_path} (size: {size}B, mode: {mode})"
-    except Exception as e:
-        return f"Error writing file: {e}"
-
-
-async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bool = False) -> str:
-    """List files and directories on the server."""
-    import glob as _glob
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    if not path:
-        path = project_root
-    elif not os.path.isabs(path):
-        path = os.path.join(project_root, path)
-    if not os.path.isdir(path):
-        return f"Error: Not a directory: {path}"
-    try:
-        if recursive:
-            search = os.path.join(path, "**", pattern)
-            entries = _glob.glob(search, recursive=True)
-        else:
-            search = os.path.join(path, pattern)
-            entries = _glob.glob(search)
-        entries.sort()
-        lines = []
-        for entry in entries[:200]:
-            try:
-                stat = os.stat(entry)
-                kind = "DIR " if os.path.isdir(entry) else "FILE"
-                size = f"{stat.st_size:>10,}" if not os.path.isdir(entry) else "         -"
-                mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-                rel = os.path.relpath(entry, path)
-                lines.append(f"  {kind} {size}  {mtime}  {rel}")
-            except OSError:
-                lines.append(f"  ???? {os.path.relpath(entry, path)}")
-        header = f"[{path}] {len(entries)} entries"
-        if len(entries) > 200:
-            header += f" (showing first 200)"
-        return header + "\n" + "\n".join(lines)
-    except Exception as e:
-        return f"Error listing directory: {e}"
-
-
-_BLOCKED_CODE_PATTERNS = [
-    # Destructive file operations
-    "shutil.rmtree", "os.rmdir", "os.removedirs",
-    # System-level danger
-    "os.system(", "os.exec",
-    # Credential/env exfiltration
-    "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
-    "GEMINI_API_KEY", "OPENAI_API_KEY",
-]
-
-
-def _check_code_safety(code: str) -> str | None:
-    """Return error message if code contains blocked patterns, None if safe."""
-    import ast
-
-    # 1. Syntax check
-    try:
-        ast.parse(code)
-    except SyntaxError as e:
-        return f"Syntax error: {e}"
-
-    # 2. Blocked string patterns (credentials, destructive ops)
-    for pattern in _BLOCKED_CODE_PATTERNS:
-        if pattern in code:
-            return f"Blocked: code contains '{pattern}'"
-
-    # 3. AST walk for dangerous constructs
-    tree = ast.parse(code)
-    for node in ast.walk(tree):
-        # Block rm -rf style via subprocess
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            val = node.value
-            if any(d in val for d in ["rm -rf /", "rm -rf ~", "mkfs.", "dd if="]):
-                return f"Blocked: destructive shell command in string literal"
-
-    return None  # safe
-
-
-async def _exec_execute_python(code: str, timeout: int = 30) -> str:
-    """Execute Python code on the server with safety checks."""
-    import subprocess
-    import tempfile
-
-    timeout = max(5, min(timeout, 300))
-    project_root = os.path.dirname(os.path.abspath(__file__))
-
-    # Safety check before execution
-    safety_err = _check_code_safety(code)
-    if safety_err:
-        return f"❌ Code execution blocked: {safety_err}"
-
-    def _run():
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", dir=project_root,
-            delete=False, encoding="utf-8",
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
-        try:
-            result = subprocess.run(
-                [sys.executable, tmp_path],
-                capture_output=True, text=True, timeout=timeout,
-                cwd=project_root,
-                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-            )
-            parts = []
-            if result.stdout.strip():
-                parts.append(result.stdout.strip())
-            if result.stderr.strip():
-                parts.append(f"[stderr]\n{result.stderr.strip()}")
-            return "\n".join(parts) if parts else "(no output)"
-        except subprocess.TimeoutExpired:
-            return f"Execution timed out after {timeout}s."
-        finally:
-            os.unlink(tmp_path)
-
-    return await asyncio.to_thread(_run)
-
-
-_TOOL_HANDLERS = {
-    "vector_search": _exec_vector_search,
-    "knowledge_graph_search": _exec_kg_search,
-    "fetch_url": _exec_fetch_url,
-    "read_file": _exec_read_file,
-    "write_file": _exec_write_file,
-    "list_directory": _exec_list_directory,
-    "execute_python": _exec_execute_python,
-}
-
-# ── Self-awareness tools (shared memory access) ─────────────────────
-from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
-
-_TOOLS.extend(SELF_TOOLS)
-_TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
-
 _TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
@@ -713,15 +318,10 @@ You are executing a background intelligence task. Produce a structured Markdown 
 {system_alerts}
 """
 
-# Per-user chat history (in-memory, lost on restart)
+# ── Chat History ─────────────────────────────────────────────────────
 MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
 _HISTORY_TOKEN_LIMIT = 40_000  # compress if history exceeds this
 _RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
-
-
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate for multilingual text (~3 chars/token for Korean+English mix)."""
-    return len(text) // 3
 
 
 def _load_chat_history(user_id: int) -> list[dict]:
@@ -758,7 +358,7 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
     Summarizes older messages into a single context message using Haiku,
     keeping the most recent turns intact for conversational continuity.
     """
-    total_tokens = sum(_estimate_tokens(m["content"]) for m in messages)
+    total_tokens = sum(estimate_tokens(m["content"]) for m in messages)
     if total_tokens <= _HISTORY_TOKEN_LIMIT:
         return messages
 
@@ -807,7 +407,7 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
         {"role": "assistant", "content": "네, 이전 대화 내용을 파악했습니다. 이어서 진행하겠습니다."},
     ] + recent_msgs
 
-    new_tokens = sum(_estimate_tokens(m["content"]) for m in compressed)
+    new_tokens = sum(estimate_tokens(m["content"]) for m in compressed)
     logger.info("History compressed: %d tokens → %d tokens", total_tokens, new_tokens)
     return compressed
 
@@ -845,6 +445,34 @@ def _split_message(text: str, max_len: int = 4096) -> list[str]:
 
 def _is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_USER_IDS
+
+
+# ── Thin wrapper: _chat_with_tools (injects module-level dependencies) ──
+
+async def _chat_with_tools(
+    messages: list[dict],
+    max_rounds: int = 15,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
+    sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
+        current_datetime=_current_datetime_str(),
+        system_alerts=_format_system_alerts(),
+        skills_section=build_skills_prompt(),
+    )
+    return await chat_with_tools(
+        messages,
+        client=_claude,
+        model=model or _get_model(),
+        tools=TOOLS,
+        tool_handlers=TOOL_HANDLERS,
+        system_prompt=sys_prompt,
+        max_rounds=max_rounds,
+        max_tokens=max_tokens or _CLAUDE_MAX_TOKENS,
+        log_event=_log_event,
+    )
 
 
 # ── Router & Handlers ───────────────────────────────────────────────
@@ -1406,11 +1034,7 @@ _reflection_counter: dict[int, int] = {}
 
 
 async def _fetch_relevant_experiences(user_text: str) -> str:
-    """Search experiential_memory for insights relevant to the user's message.
-
-    Returns a formatted context string to inject into the system prompt,
-    or empty string if nothing relevant found.
-    """
+    """Search experiential_memory for insights relevant to the user's message."""
     try:
         from shared import search_experiential_memory
         results = await asyncio.to_thread(search_experiential_memory, user_text, 3)
@@ -1419,7 +1043,6 @@ async def _fetch_relevant_experiences(user_text: str) -> str:
         lines = ["\n## Past Experiences (auto-recalled)"]
         for r in results:
             cat = r.get("category", "?")
-            sim = r.get("similarity", 0)
             lines.append(f"- [{cat}] {r['content']}")
         lines.append("위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.")
         return "\n".join(lines)
@@ -1497,585 +1120,6 @@ async def _reflect_on_recent(user_id: int):
     except Exception as e:
         logger.warning("Reflection failed: %s", e)
 
-
-def _sanitize_messages(msgs: list[dict]) -> list[dict]:
-    """Ensure every tool_use/server_tool_use has a matching result.
-
-    Single-pass replacement for the previous _validate_tool_results +
-    _ensure_tool_results + _force_fix_tool_results triple.
-
-    Rules:
-    - tool_use → tool_result in the NEXT user message
-    - server_tool_use → web_search_tool_result in the SAME assistant message
-
-    Missing results are injected as dummies to prevent 400 errors.
-    """
-    msgs = [dict(m) for m in msgs]
-    injected = 0
-    i = 0
-
-    while i < len(msgs):
-        msg = msgs[i]
-        if msg.get("role") != "assistant":
-            i += 1
-            continue
-
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            i += 1
-            continue
-
-        # Collect custom tool_use IDs
-        custom_ids = [
-            b["id"] for b in content
-            if isinstance(b, dict) and b.get("type") == "tool_use" and "id" in b
-        ]
-
-        # Collect server_tool_use IDs, excluding those already resolved in-message
-        resolved_server = {
-            b.get("tool_use_id") for b in content
-            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-        }
-        unresolved_server = [
-            b["id"] for b in content
-            if isinstance(b, dict) and b.get("type") == "server_tool_use"
-            and "id" in b and b["id"] not in resolved_server
-        ]
-
-        if not custom_ids and not unresolved_server:
-            i += 1
-            continue
-
-        # Inject server tool dummies into the SAME assistant message
-        if unresolved_server:
-            server_dummies = [
-                {"type": "web_search_tool_result", "tool_use_id": tid, "content": []}
-                for tid in unresolved_server
-            ]
-            msgs[i] = {**msgs[i], "content": list(content) + server_dummies}
-            injected += len(server_dummies)
-
-        # Check next user message for existing custom tool_results
-        resolved_custom: set = set()
-        next_is_user = (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user")
-        next_content: list = []
-
-        if next_is_user:
-            nc = msgs[i + 1].get("content", [])
-            if isinstance(nc, list):
-                next_content = nc
-                resolved_custom = {
-                    b.get("tool_use_id") for b in nc
-                    if isinstance(b, dict) and b.get("type") == "tool_result"
-                }
-
-        # Inject custom tool dummies into the NEXT user message
-        missing_custom = [tid for tid in custom_ids if tid not in resolved_custom]
-        if missing_custom:
-            dummies = [{
-                "type": "tool_result",
-                "tool_use_id": tid,
-                "content": "[tool result unavailable]",
-                "is_error": True,
-            } for tid in missing_custom]
-            injected += len(dummies)
-
-            if next_content:
-                msgs[i + 1] = {**msgs[i + 1], "content": dummies + next_content}
-            elif next_is_user:
-                old = msgs[i + 1].get("content", "")
-                msgs[i + 1] = {
-                    "role": "user",
-                    "content": dummies + [{"type": "text", "text": str(old)}],
-                }
-            else:
-                msgs.insert(i + 1, {"role": "user", "content": dummies})
-
-        # Skip past assistant + user pair
-        i += 2 if (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user") else 1
-
-    if injected:
-        logger.warning("_sanitize_messages: injected %d dummy result(s)", injected)
-    return msgs
-
-
-async def _chat_with_tools(
-    messages: list[dict],
-    max_rounds: int = 15,
-    system_prompt: str | None = None,
-    model: str | None = None,
-    max_tokens: int | None = None,
-) -> str:
-    """Call Claude with tools, execute tool calls, loop until text response."""
-    # Work on a copy so tool-use intermediate messages don't pollute persistent history
-    working_msgs = list(messages)
-    tool_call_log = []  # Track tool calls for diagnostic output
-    effective_max_tokens = max_tokens or _CLAUDE_MAX_TOKENS
-
-    # Prompt caching: mark system prompt and tools as cacheable
-    sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
-        current_datetime=_current_datetime_str(),
-        system_alerts=_format_system_alerts(),
-        skills_section=build_skills_prompt(),
-    )
-    cached_system = [{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}]
-
-    # Mark last custom tool for caching (skip server-side tools like web_search)
-    cached_tools = [dict(t) for t in _TOOLS]
-    for i in range(len(cached_tools) - 1, -1, -1):
-        if cached_tools[i].get("type", "").startswith("web_search"):
-            continue  # server-side tool — can't add cache_control
-        cached_tools[i] = {**cached_tools[i], "cache_control": {"type": "ephemeral"}}
-        break
-
-    for round_num in range(1, max_rounds + 1):
-        # Sanitize message structure before every API call
-        working_msgs = _sanitize_messages(working_msgs)
-
-        response = await _claude.messages.create(
-            model=model or _get_model(),
-            max_tokens=effective_max_tokens,
-            system=cached_system,
-            tools=cached_tools,
-            messages=working_msgs,
-        )
-
-        # If no custom tool use, extract and return text
-        # (server-side tools like web_search are auto-handled, stop_reason is "end_turn")
-        if response.stop_reason not in ("tool_use", "pause_turn"):
-            if response.stop_reason == "max_tokens":
-                logger.warning("Response truncated by max_tokens (%d) at round %d/%d", effective_max_tokens, round_num, max_rounds)
-                _log_event("warning", "chat", f"Response truncated by max_tokens ({effective_max_tokens}) at round {round_num}/{max_rounds}")
-            text_parts = [b.text for b in response.content if b.type == "text"]
-            return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
-
-        # Process tool calls (custom tools only; server-side blocks pass through)
-        assistant_content = []
-        tool_results = []
-        for block in response.content:
-            if block.type == "text":
-                assistant_content.append({"type": "text", "text": block.text})
-            elif block.type == "server_tool_use":
-                # Server-side tool (web_search) — pass through as-is
-                assistant_content.append({
-                    "type": "server_tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-                tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}(server-side)")
-            elif block.type == "web_search_tool_result":
-                # Server-side search result — pass through
-                assistant_content.append(block.model_dump())
-            elif block.type == "tool_use":
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-                # Execute custom tool
-                handler = _TOOL_HANDLERS.get(block.name)
-                if handler:
-                    logger.info("Tool call: %s(%s)", block.name, json.dumps(block.input, ensure_ascii=False)[:200])
-                    try:
-                        result = await handler(**block.input)
-                        is_error = False
-                    except Exception as e:
-                        logger.error("Tool %s execution error: %s", block.name, e)
-                        _log_event("warning", "tool", f"Tool {block.name} failed: {e}")
-                        result = f"Tool execution failed: {e}"
-                        is_error = True
-                else:
-                    result = f"Unknown tool: {block.name}"
-                    is_error = True
-                # Guard: ensure result is a non-None string
-                if not isinstance(result, str) or result is None:
-                    result = str(result) if result is not None else "(no result)"
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                }
-                if is_error:
-                    tool_result_block["is_error"] = True
-                tool_results.append(tool_result_block)
-                # Log for diagnostics
-                input_summary = json.dumps(block.input, ensure_ascii=False)
-                if len(input_summary) > 120:
-                    input_summary = input_summary[:120] + "..."
-                tool_call_log.append(f"  [{round_num}/{max_rounds}] {block.name}({input_summary})")
-
-        # Safety net: ensure EVERY tool_use block has a matching tool_result
-        resolved_ids = {r["tool_use_id"] for r in tool_results}
-        for block in assistant_content:
-            if isinstance(block, dict) and block.get("type") == "tool_use" and block["id"] not in resolved_ids:
-                logger.warning("Safety net: missing tool_result for tool_use id=%s name=%s", block["id"], block.get("name"))
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block["id"],
-                    "content": f"Tool execution skipped (internal error): no result was produced for {block.get('name', 'unknown')}",
-                    "is_error": True,
-                })
-
-        # Append assistant message with tool_use + user message with tool_results
-        working_msgs.append({"role": "assistant", "content": assistant_content})
-
-        # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
-        # IMPORTANT: web_search_tool_result must go in the ASSISTANT message (same block),
-        # NOT in the user message — the API only recognises server tool results in assistant content.
-        already_resolved_server_ids = {
-            b.get("tool_use_id") for b in assistant_content
-            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-        }
-        pending_server_ids = [
-            b["id"] for b in assistant_content
-            if isinstance(b, dict) and b.get("type") == "server_tool_use"
-            and b["id"] not in already_resolved_server_ids
-        ]
-        if pending_server_ids:
-            # Append dummy results INTO the assistant content (same message).
-            # assistant_content is the same list object referenced by working_msgs[-1]["content"],
-            # so .append() modifies both in place. We also reassign the dict for explicitness.
-            for tid in pending_server_ids:
-                assistant_content.append({
-                    "type": "web_search_tool_result",
-                    "tool_use_id": tid,
-                    "content": [],
-                })
-            working_msgs[-1] = {"role": "assistant", "content": assistant_content}
-            logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
-
-        if tool_results:
-            working_msgs.append({"role": "user", "content": tool_results})
-        elif response.stop_reason == "pause_turn":
-            # Server-side tool paused (>10 iterations) — send empty to continue
-            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
-        else:
-            # Safety: ensure a user message always follows the assistant message
-            # (should not normally happen — tool_use stop_reason always produces tool_results)
-            logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
-            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
-
-    # Limit reached — check if we should auto-escalate to background task
-    log_detail = "\n".join(tool_call_log) if tool_call_log else ""
-    was_still_working = response.stop_reason in ("tool_use", "pause_turn")
-    logger.warning("Tool round limit (%d) reached (still_working=%s). Forcing final response. Calls:\n%s",
-                    max_rounds, was_still_working, log_detail)
-
-    # Inject a nudge so the model knows it must answer now
-    escalation_hint = ""
-    if was_still_working:
-        escalation_hint = (
-            " 미완료 작업이 있다면, 응답 맨 끝에 "
-            "\"[CONTINUE_TASK: 남은 작업 설명]\" 형식으로 한 줄 추가하세요. "
-            "시스템이 자동으로 백그라운드 태스크를 생성합니다."
-        )
-    working_msgs.append({
-        "role": "user",
-        "content": (
-            "[SYSTEM] 도구 호출 한도에 도달했습니다. 추가 도구를 사용하지 말고, "
-            "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
-            + escalation_hint
-        ),
-    })
-    # Sanitize: ensure ALL tool_use/server_tool_use have matching results
-    working_msgs = _sanitize_messages(working_msgs)
-    try:
-        final = await _claude.messages.create(
-            model=model or _get_model(),
-            max_tokens=effective_max_tokens,
-            system=cached_system,
-            messages=working_msgs,  # no tools parameter — forces text-only response
-        )
-        if final.stop_reason == "max_tokens":
-            logger.warning("Forced final response truncated by max_tokens (%d)", effective_max_tokens)
-        text_parts = [b.text for b in final.content if b.type == "text"]
-        return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
-    except Exception as e:
-        logger.error("Final forced response failed: %s", e)
-        _log_event("error", "final_response", f"Final forced response failed: {e}")
-        return f"⚠️ 도구 호출 한도({max_rounds}회) 도달 후 응답 생성 실패: {e}"
-
-
-# ── Background Task Worker ───────────────────────────────────────────
-def _extract_summary(report: str, max_len: int = 300) -> str:
-    """Extract Executive Summary section or first paragraph as brief summary."""
-    # Try to find Executive Summary section
-    for marker in ("## Executive Summary", "## 요약", "## 핵심 요약"):
-        idx = report.find(marker)
-        if idx != -1:
-            after = report[idx + len(marker):].strip()
-            # Take until next ## heading
-            next_heading = after.find("\n## ")
-            section = after[:next_heading].strip() if next_heading != -1 else after
-            if section:
-                return section[:max_len] + ("..." if len(section) > max_len else "")
-    # Fallback: first non-heading paragraph
-    for line in report.split("\n"):
-        line = line.strip()
-        if line and not line.startswith("#") and not line.startswith("**"):
-            return line[:max_len] + ("..." if len(line) > max_len else "")
-    return report[:max_len]
-
-
-def _classify_priority(content: str, report: str) -> str:
-    """Classify task result priority from content tags or report urgency keywords."""
-    # Check explicit priority tag in content
-    if "[🔴 HIGH]" in content:
-        return "high"
-    if "[🟢 LOW]" in content:
-        return "low"
-    # Check report for urgency signals
-    report_lower = report[:2000].lower()
-    if any(k in report_lower for k in ("urgent", "critical", "긴급", "위기", "경고", "즉시")):
-        return "high"
-    return "normal"
-
-
-async def _process_task(bot: Bot, task: dict):
-    """Process a task: run tools, generate report, save to DB, send as file."""
-    task_id = task["id"]
-    user_id = task["user_id"]
-    content = task["content"]
-    is_self_generated = (user_id == 0)
-
-    max_retries = 10
-    retry_delay = 60  # seconds
-
-    for attempt in range(max_retries):
-        try:
-            report = await _chat_with_tools(
-                [{"role": "user", "content": content}],
-                max_rounds=15,
-                system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str(), system_alerts=_format_system_alerts()),
-                model=_get_model(),
-                max_tokens=_CLAUDE_MAX_TOKENS_TASK,
-            )
-
-            # Save full report to DB
-            await asyncio.to_thread(
-                _execute,
-                "UPDATE telegram_tasks SET status = 'done', result = %s, "
-                "completed_at = NOW() WHERE id = %s",
-                (report, task_id),
-            )
-
-            # Classify priority
-            priority = _classify_priority(content, report)
-            priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
-
-            # Send report as Markdown file
-            filename = f"report_task_{task_id}.md"
-            doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
-            summary = _extract_summary(report)
-            origin = " (자율 생성)" if is_self_generated else ""
-            caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
-
-            if is_self_generated:
-                # Self-generated task: broadcast to all users
-                for uid in ALLOWED_USER_IDS:
-                    try:
-                        await bot.send_document(chat_id=uid, document=doc, caption=caption)
-                    except Exception:
-                        pass
-            else:
-                await bot.send_document(chat_id=user_id, document=doc, caption=caption)
-
-            return  # success
-
-        except Exception as e:
-            err_str = str(e).lower()
-            is_rate_limit = (
-                "rate_limit" in err_str or
-                "overloaded" in err_str or
-                "529" in err_str or
-                "429" in err_str or
-                "too many requests" in err_str
-            )
-
-            if is_rate_limit and attempt < max_retries - 1:
-                logger.warning("Task %d rate limited (attempt %d/%d), retrying in %ds...", task_id, attempt + 1, max_retries, retry_delay)
-                await asyncio.sleep(retry_delay)
-                continue
-
-            # Final failure or non-rate-limit error
-            logger.error("Task %d failed: %s", task_id, e)
-            await asyncio.to_thread(
-                _log_event, "error", "task",
-                f"Task {task_id} failed: {e}",
-                detail=content[:500], task_id=task_id,
-            )
-            await asyncio.to_thread(
-                _execute,
-                "UPDATE telegram_tasks SET status = 'failed', result = %s, "
-                "completed_at = NOW() WHERE id = %s",
-                (str(e), task_id),
-            )
-            error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
-            if is_self_generated:
-                await _broadcast(bot, error_msg)
-            else:
-                await bot.send_message(chat_id=user_id, text=error_msg)
-
-
-async def _broadcast(bot: Bot, text: str):
-    """Send a message to all allowed users. For system event notifications."""
-    for uid in ALLOWED_USER_IDS:
-        try:
-            await bot.send_message(chat_id=uid, text=text)
-        except Exception as e:
-            logger.warning("Broadcast to %s failed: %s", uid, e)
-
-
-async def _system_monitor(bot: Bot):
-    """Background loop: monitor system events and broadcast notifications."""
-    from shared import get_kg_service
-
-    # 1. Startup notification
-    await asyncio.sleep(5)  # let services initialize
-    kg = await asyncio.to_thread(get_kg_service)
-    kg_status = "connected" if kg else "unavailable"
-    _add_system_alert(f"Deploy 완료 — KG: {kg_status}")
-    if not kg:
-        _add_system_alert("KG (Neo4j AuraDB) 연결 불가 — 그래프 검색/쓰기 사용 불가")
-    await _broadcast(bot, (
-        f"🟢 *Deploy 완료* — 새 버전이 live입니다.\n"
-        f"  KG (Neo4j): {kg_status}"
-    ))
-
-    # 2. Periodic KG health check (every 2 minutes)
-    kg_was_up = kg is not None
-    while True:
-        await asyncio.sleep(120)
-        try:
-            kg = await asyncio.to_thread(get_kg_service)
-            kg_is_up = kg is not None
-
-            if kg_was_up and not kg_is_up:
-                _clear_system_alert("KG 재연결")
-                _add_system_alert("KG (Neo4j AuraDB) 연결 끊김 — 그래프 검색/쓰기 사용 불가")
-                await _broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j AuraDB에 연결할 수 없습니다.")
-            elif not kg_was_up and kg_is_up:
-                _clear_system_alert("KG")  # clear all KG-related alerts
-                _add_system_alert("KG 재연결 성공 — Neo4j AuraDB 정상")
-                await _broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j AuraDB 연결이 복구되었습니다.")
-
-            kg_was_up = kg_is_up
-        except Exception as e:
-            logger.error("System monitor error: %s", e)
-
-
-async def _task_worker(bot: Bot):
-    """Poll DB for pending tasks and process them one at a time."""
-    logger.info("Task worker started")
-    while True:
-        try:
-            task = await asyncio.to_thread(
-                _query_one,
-                "UPDATE telegram_tasks SET status = 'processing' "
-                "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
-                "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content",
-            )
-            if task:
-                await _process_task(bot, task)
-            else:
-                await asyncio.sleep(5)
-        except Exception as e:
-            logger.error("Worker loop error: %s", e)
-            await asyncio.sleep(10)
-
-
-async def _schedule_worker(bot: Bot):
-    """Check cron schedules every 60s, create tasks when due."""
-    from croniter import croniter
-    from shared import KST
-
-    logger.info("Schedule worker started")
-    await asyncio.sleep(10)  # let other services init first
-    while True:
-        try:
-            schedules = await asyncio.to_thread(
-                _query,
-                "SELECT id, user_id, content, cron_expr, last_run_at "
-                "FROM telegram_schedules WHERE enabled = TRUE",
-            )
-            now_kst = datetime.now(KST)
-            for sched in schedules:
-                try:
-                    cron = croniter(sched["cron_expr"], now_kst)
-                    prev_fire = cron.get_prev(datetime)
-                    # Should fire if prev_fire is after last_run_at (or never run)
-                    last_run = sched["last_run_at"]
-                    if last_run is None or prev_fire > last_run:
-                        # Create a task
-                        await asyncio.to_thread(
-                            _execute,
-                            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
-                            (sched["user_id"], sched["content"]),
-                        )
-                        await asyncio.to_thread(
-                            _execute,
-                            "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
-                            (now_kst, sched["id"]),
-                        )
-                        logger.info("Schedule #%d fired → task created: %.50s", sched["id"], sched["content"])
-                        # Notify the user
-                        try:
-                            await bot.send_message(
-                                chat_id=sched["user_id"],
-                                text=f"⏰ 스케줄 [{sched['id']}] 실행 → 태스크 생성됨\n{sched['content'][:100]}",
-                            )
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.error("Schedule #%d check error: %s", sched["id"], e)
-        except Exception as e:
-            logger.error("Schedule worker error: %s", e)
-        await asyncio.sleep(60)
-
-
-# ── Deploy detection ─────────────────────────────────────────────────
-_DEPLOY_META_PATH = "/tmp/leninbot-deploy-meta.json"
-
-
-async def _check_deploy_meta(bot: Bot):
-    """On startup, check if we were just deployed. Inject into system alerts."""
-    try:
-        if not os.path.isfile(_DEPLOY_META_PATH):
-            return
-        with open(_DEPLOY_META_PATH, "r") as f:
-            meta = json.load(f)
-        # Consume the file so we don't re-trigger on manual restart
-        os.remove(_DEPLOY_META_PATH)
-
-        status = meta.get("status", "success")
-
-        if status == "failed":
-            error = meta.get("error", "unknown")
-            exit_code = meta.get("exit_code", "?")
-            alert_msg = f"Deploy 실패 (exit {exit_code}): {error}"
-            _add_system_alert(alert_msg)
-            logger.error("Deploy FAILED: exit=%s error=%s", exit_code, error)
-            return
-
-        changes = meta.get("changes", "")
-        new_commit = meta.get("new_commit", "")[:7]
-        prev_commit = meta.get("prev_commit", "")[:7]
-        deps = " (의존성 업데이트됨)" if meta.get("deps_updated") else ""
-
-        alert_msg = (
-            f"Deploy 완료: {prev_commit}→{new_commit}{deps}. "
-            f"변경: {changes}"
-        )
-        _add_system_alert(alert_msg)
-        logger.info("Deploy detected: %s → %s", prev_commit, new_commit)
-    except Exception as e:
-        logger.warning("Deploy meta check failed: %s", e)
-
-
-# ── Entry Point ──────────────────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════════
 #  자가수정 핸들러 — Telegram 전용 (chatbot.py에는 없음)
@@ -2216,6 +1260,9 @@ async def cb_modify_reject(callback: CallbackQuery):
     await callback.message.edit_text("❌ 수정 거부됨. 원본 파일 유지.")
     await callback.answer()
 
+
+# ── Entry Point ──────────────────────────────────────────────────────
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
@@ -2233,13 +1280,42 @@ async def bot_main():
     dp.include_router(router)
 
     # Detect fresh deploy — inject context so the bot knows it was just updated
-    await _check_deploy_meta(bot)
+    await check_deploy_meta(bot, add_alert_fn=_add_system_alert)
+
+    # Build process_task closure with module-level dependencies
+    async def _process_task_wrapper(b: Bot, task: dict):
+        await process_task(
+            b, task,
+            chat_with_tools_fn=_chat_with_tools,
+            get_model_fn=_get_model,
+            task_system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(
+                current_datetime=_current_datetime_str(),
+                system_alerts=_format_system_alerts(),
+            ),
+            max_tokens_task=_CLAUDE_MAX_TOKENS_TASK,
+            allowed_user_ids=ALLOWED_USER_IDS,
+            log_event_fn=_log_event,
+        )
 
     # Start background workers (keep handles for graceful cancellation)
     _bg_tasks = [
-        asyncio.create_task(_task_worker(bot), name="task_worker"),
-        asyncio.create_task(_system_monitor(bot), name="system_monitor"),
-        asyncio.create_task(_schedule_worker(bot), name="schedule_worker"),
+        asyncio.create_task(
+            task_worker(bot, process_task_fn=_process_task_wrapper),
+            name="task_worker",
+        ),
+        asyncio.create_task(
+            system_monitor(
+                bot,
+                allowed_user_ids=ALLOWED_USER_IDS,
+                add_alert_fn=_add_system_alert,
+                clear_alert_fn=_clear_system_alert,
+            ),
+            name="system_monitor",
+        ),
+        asyncio.create_task(
+            schedule_worker(bot, allowed_user_ids=ALLOWED_USER_IDS),
+            name="schedule_worker",
+        ),
     ]
 
     # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
@@ -2249,7 +1325,7 @@ async def bot_main():
         logger.info("SIGTERM received — stopping polling gracefully")
         # Schedule shutdown notification before stopping
         async def _shutdown_notify():
-            await _broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.")
+            await broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.", ALLOWED_USER_IDS)
         try:
             asyncio.get_event_loop().create_task(_shutdown_notify())
         except Exception:

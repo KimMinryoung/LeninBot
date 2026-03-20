@@ -1,34 +1,13 @@
-"""Unit tests for _sanitize_messages (consolidated tool_result handler).
+"""Unit tests for sanitize_messages (consolidated tool_result handler).
 
-The function is extracted from telegram_bot.py and tested in isolation
-(no DB/API dependencies needed).
+Tests claude_loop.sanitize_messages directly (no DB/API dependencies needed).
 """
 import logging
-import re
-
-# ── Extract function from telegram_bot.py without importing the module ──
-
-_source_path = "telegram_bot.py"
-with open(_source_path, "r") as f:
-    _source = f.read()
-
-
-def _extract_function(source: str, func_name: str) -> str:
-    pattern = rf"^(def {func_name}\(.*?)(?=\ndef |\nclass |\nasync def |\Z)"
-    match = re.search(pattern, source, re.MULTILINE | re.DOTALL)
-    if not match:
-        raise ValueError(f"Could not find function {func_name} in source")
-    return match.group(1)
-
 
 logger = logging.getLogger("test_tool_results")
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
 
-_ns = {"logger": logger}
-code = _extract_function(_source, "_sanitize_messages")
-exec(compile(code, "<extracted:_sanitize_messages>", "exec"), _ns)
-
-_sanitize_messages = _ns["_sanitize_messages"]
+from claude_loop import sanitize_messages as _sanitize_messages
 
 
 # ── Helpers ──

@@ -1244,6 +1244,18 @@ workflow.add_conditional_edges("step_executor", plan_progress, {
 })
 graph = workflow.compile(checkpointer=MemorySaver())
 
+
+# ── Public API (used by telegram_tools, etc.) ────────────────────────
+def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
+    """Public wrapper for vector similarity search."""
+    return _direct_similarity_search(query, k, layer)
+
+
+def search_knowledge_graph(query: str, num_results: int = 10) -> str | None:
+    """Public wrapper for knowledge graph search."""
+    return _search_kg(query, num_results)
+
+
 # 실행 루프 (채팅 인터페이스)
 if __name__ == "__main__":
     print("🚩 [System] 사이버-레닌 AI 가동됨.")
