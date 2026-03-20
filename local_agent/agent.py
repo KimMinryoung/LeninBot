@@ -103,6 +103,78 @@ def _get_tools_and_handlers():
     return _tools_cache, _handlers_cache
 
 
+# ── Message Sanitization ──────────────────────────────────────────────
+
+def _sanitize_messages(msgs: list[dict]) -> list[dict]:
+    """Ensure every tool_use in assistant messages has a matching tool_result.
+
+    Injects dummy tool_result for any unmatched tool_use to prevent 400 errors.
+    """
+    msgs = [dict(m) for m in msgs]
+    injected = 0
+    i = 0
+
+    while i < len(msgs):
+        msg = msgs[i]
+        if msg.get("role") != "assistant":
+            i += 1
+            continue
+
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            i += 1
+            continue
+
+        tool_use_ids = [
+            b["id"] for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_use" and "id" in b
+        ]
+        if not tool_use_ids:
+            i += 1
+            continue
+
+        # Check next user message for existing tool_results
+        resolved: set = set()
+        next_is_user = (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user")
+        next_content: list = []
+
+        if next_is_user:
+            nc = msgs[i + 1].get("content", [])
+            if isinstance(nc, list):
+                next_content = nc
+                resolved = {
+                    b.get("tool_use_id") for b in nc
+                    if isinstance(b, dict) and b.get("type") == "tool_result"
+                }
+
+        missing = [tid for tid in tool_use_ids if tid not in resolved]
+        if missing:
+            dummies = [{
+                "type": "tool_result",
+                "tool_use_id": tid,
+                "content": "[tool result unavailable]",
+                "is_error": True,
+            } for tid in missing]
+            injected += len(dummies)
+
+            if next_content:
+                msgs[i + 1] = {**msgs[i + 1], "content": dummies + next_content}
+            elif next_is_user:
+                old = msgs[i + 1].get("content", "")
+                msgs[i + 1] = {
+                    "role": "user",
+                    "content": dummies + [{"type": "text", "text": str(old)}],
+                }
+            else:
+                msgs.insert(i + 1, {"role": "user", "content": dummies})
+
+        i += 2 if (i + 1 < len(msgs) and msgs[i + 1].get("role") == "user") else 1
+
+    if injected:
+        logger.warning("_sanitize_messages: injected %d dummy result(s)", injected)
+    return msgs
+
+
 # ── Core Loop ─────────────────────────────────────────────────────────
 
 async def chat(
@@ -135,6 +207,9 @@ async def chat(
         cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
     for round_num in range(1, effective_rounds + 1):
+        # Sanitize: ensure all tool_use blocks have matching tool_result
+        working_msgs = _sanitize_messages(working_msgs)
+
         response = await _client.messages.create(
             model=_MODEL,
             max_tokens=_MAX_TOKENS,
@@ -220,6 +295,7 @@ async def chat(
         "role": "user",
         "content": "[SYSTEM] Tool call limit reached. Answer with what you have gathered so far.",
     })
+    working_msgs = _sanitize_messages(working_msgs)
     try:
         final = await _client.messages.create(
             model=_MODEL,

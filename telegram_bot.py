@@ -1689,6 +1689,11 @@ async def _chat_with_tools(
                 else:
                     result = f"Unknown tool: {block.name}"
                     is_error = True
+                # Guard: ensure result is a non-None string, truncate if oversized
+                if not isinstance(result, str) or result is None:
+                    result = str(result) if result is not None else "(no result)"
+                if len(result) > 30000:
+                    result = result[:30000] + f"\n\n... [truncated, total {len(result)} chars]"
                 tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
