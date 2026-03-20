@@ -1503,6 +1503,26 @@ async def bot_main():
     dp = Dispatcher()
     dp.include_router(router)
 
+    # Register commands for Telegram "/" autocomplete menu
+    from aiogram.types import BotCommand
+    await bot.set_my_commands([
+        BotCommand(command="help", description="커맨드 목록"),
+        BotCommand(command="chat", description="CLAW 파이프라인 질의"),
+        BotCommand(command="task", description="백그라운드 태스크 등록"),
+        BotCommand(command="status", description="시스템 대시보드"),
+        BotCommand(command="status_auto", description="자율 생성 태스크 확인"),
+        BotCommand(command="report", description="태스크 리포트 재전송"),
+        BotCommand(command="schedule", description="정기 태스크 등록"),
+        BotCommand(command="schedules", description="등록된 스케줄 목록"),
+        BotCommand(command="unschedule", description="스케줄 삭제"),
+        BotCommand(command="kg", description="지식그래프 현황"),
+        BotCommand(command="config", description="설정 패널"),
+        BotCommand(command="errors", description="에러/경고 로그"),
+        BotCommand(command="deploy", description="서버 배포"),
+        BotCommand(command="modify", description="서버 파일 수정"),
+        BotCommand(command="clear", description="대화 히스토리 초기화"),
+    ])
+
     # Detect fresh deploy — inject context so the bot knows it was just updated
     await check_deploy_meta(bot, add_alert_fn=_add_system_alert)
 
