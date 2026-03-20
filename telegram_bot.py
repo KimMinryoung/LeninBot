@@ -1544,8 +1544,10 @@ async def _reflect_on_recent(user_id: int):
 
 
 def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
-    """Ensure every tool_use/server_tool_use in assistant messages has a matching
-    tool_result/web_search_tool_result in the immediately following user message.
+    """Ensure every tool_use/server_tool_use in assistant messages has a matching result.
+
+    - Custom tool_use → tool_result in the NEXT user message
+    - server_tool_use → web_search_tool_result in the SAME assistant message
 
     Missing results are injected as dummies to prevent 400 errors from the API.
     Operates on a copy to avoid mutating the original list.
@@ -1583,9 +1585,8 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
             i += 1
             continue
 
-        # Check the next message for existing results
+        # Check the next user message for existing custom tool results
         resolved_custom: set = set()
-        resolved_server: set = set()
         next_content: list = []
         if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
             nc = msgs[i + 1].get("content", [])
@@ -1595,12 +1596,23 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
                     b.get("tool_use_id") for b in nc
                     if isinstance(b, dict) and b.get("type") == "tool_result"
                 }
-                resolved_server = {
-                    b.get("tool_use_id") for b in nc
-                    if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-                }
 
-        # Build dummy results for unresolved IDs
+        # --- Server tool dummies go INTO the assistant message (same block) ---
+        # server_ids already excludes those resolved within the assistant content
+        server_dummies = []
+        for tid in server_ids:
+            server_dummies.append({
+                "type": "web_search_tool_result",
+                "tool_use_id": tid,
+                "content": [],
+            })
+        if server_dummies:
+            # Deep-copy content so we don't mutate the original list
+            new_content = list(content) + server_dummies
+            msgs[i] = {**msgs[i], "content": new_content}
+            injected += len(server_dummies)
+
+        # --- Custom tool dummies go in the NEXT user message ---
         dummies = []
         for tid in custom_ids:
             if tid not in resolved_custom:
@@ -1608,13 +1620,6 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
                     "type": "tool_result",
                     "tool_use_id": tid,
                     "content": "[tool result unavailable]",
-                })
-        for tid in server_ids:
-            if tid not in resolved_server:
-                dummies.append({
-                    "type": "web_search_tool_result",
-                    "tool_use_id": tid,
-                    "content": [],
                 })
 
         if dummies:
@@ -1634,7 +1639,9 @@ def _ensure_tool_results(msgs: list[dict]) -> list[dict]:
                 msgs.insert(i + 1, {"role": "user", "content": dummies})
 
         i += 1  # move past assistant message
-        i += 1  # move past user message (existing or inserted)
+        # If custom dummies were injected (possibly inserting a user message), skip it too
+        if dummies or (i < len(msgs) and msgs[i].get("role") == "user"):
+            i += 1  # move past user message (existing or inserted)
 
     if injected:
         logger.warning("_ensure_tool_results: injected %d dummy result(s)", injected)
@@ -1760,8 +1767,8 @@ async def _chat_with_tools(
         working_msgs.append({"role": "assistant", "content": assistant_content})
 
         # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
-        # EVERY round, not just at limit — missing result → 400 on next API call
-        # But skip IDs that already have a web_search_tool_result in assistant_content
+        # IMPORTANT: web_search_tool_result must go in the ASSISTANT message (same block),
+        # NOT in the user message — the API only recognises server tool results in assistant content.
         already_resolved_server_ids = {
             b.get("tool_use_id") for b in assistant_content
             if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
@@ -1772,19 +1779,18 @@ async def _chat_with_tools(
             and b["id"] not in already_resolved_server_ids
         ]
         if pending_server_ids:
-            dummy_results = [
-                {
+            # Append dummy results INTO the assistant content (same message)
+            for tid in pending_server_ids:
+                assistant_content.append({
                     "type": "web_search_tool_result",
                     "tool_use_id": tid,
                     "content": [],
-                }
-                for tid in pending_server_ids
-            ]
-            # Merge with any custom tool_results
-            user_content = dummy_results + tool_results
-            working_msgs.append({"role": "user", "content": user_content})
-            logger.debug("Injected %d dummy web_search_tool_result(s) mid-loop", len(pending_server_ids))
-        elif tool_results:
+                })
+            # Update the already-appended assistant message in working_msgs
+            working_msgs[-1] = {"role": "assistant", "content": assistant_content}
+            logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
+
+        if tool_results:
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             # Server-side tool paused (>10 iterations) — send empty to continue
