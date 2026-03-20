@@ -37,6 +37,7 @@ from claude_loop import sanitize_messages, estimate_tokens, chat_with_tools
 from telegram_tasks import (
     process_task, broadcast, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
+    recover_processing_tasks_on_startup,
 )
 
 load_dotenv()
@@ -1655,6 +1656,13 @@ async def bot_main():
 
     # Ensure task table exists
     await asyncio.to_thread(_ensure_table)
+    recovery = await recover_processing_tasks_on_startup(stale_minutes=60)
+    resumed = int(recovery.get("resumed", 0))
+    closed = int(recovery.get("closed", 0))
+    if resumed or closed:
+        _add_system_alert(
+            f"재시작 복구: processing 태스크 재개 {resumed}건 / 오래된 작업 자동종료 {closed}건"
+        )
 
     global _bot_instance
     bot = Bot(token=TELEGRAM_BOT_TOKEN)

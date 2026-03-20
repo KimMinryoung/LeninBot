@@ -14,6 +14,7 @@ from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
 
 logger = logging.getLogger(__name__)
+_SCRATCHPAD_MAX_CHARS = 20_000
 
 
 # ── Task Report Helpers ──────────────────────────────────────────────
@@ -45,6 +46,25 @@ def _classify_priority(content: str, report: str) -> str:
     if any(k in report_lower for k in ("urgent", "critical", "긴급", "위기", "경고", "즉시")):
         return "high"
     return "normal"
+
+
+def _append_task_scratchpad(task_id: int, note: str) -> None:
+    """Append a checkpoint note to telegram_tasks.scratchpad."""
+    rows = _query("SELECT scratchpad FROM telegram_tasks WHERE id = %s", (task_id,))
+    current = (rows[0].get("scratchpad") or "") if rows else ""
+    new_pad = f"{current}\n{note}".strip() if current else note
+    if len(new_pad) > _SCRATCHPAD_MAX_CHARS:
+        new_pad = new_pad[-_SCRATCHPAD_MAX_CHARS:]
+    _execute("UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s", (new_pad, task_id))
+
+
+def _is_code_delivery_task(content: str) -> bool:
+    text = content.lower()
+    keywords = (
+        "fix", "patch", "modify", "refactor", "test", "deploy",
+        "commit", "push", "코드", "수정", "테스트", "배포", "커밋", "푸시",
+    )
+    return any(k in text for k in keywords)
 
 
 # ── Process Task ─────────────────────────────────────────────────────
@@ -87,10 +107,25 @@ async def process_task(
     depth = task.get("depth") or 0
     parent_task_id = task.get("parent_task_id")
     is_self_generated = (user_id == 0)
+    is_code_task = _is_code_delivery_task(content)
 
     # Inject inherited context from parent scratchpad
     if scratchpad:
         content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
+
+    # Persist a boot checkpoint so restart-resume has deterministic anchor.
+    started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    await asyncio.to_thread(
+        _append_task_scratchpad,
+        task_id,
+        f"## Checkpoint: task start\n- started_at: {started_at}\n- depth: {depth}\n- code_task: {is_code_task}",
+    )
+    if is_code_task:
+        await asyncio.to_thread(
+            _append_task_scratchpad,
+            task_id,
+            "## Mandatory stage checklist\n- [ ] sync\n- [ ] analysis\n- [ ] edit\n- [ ] test\n- [ ] restart\n- [ ] commit\n- [ ] push",
+        )
 
     max_retries = 10
     retry_delay = 60
@@ -107,6 +142,15 @@ async def process_task(
                 extra_handlers=extra_handlers,
                 on_progress=on_progress,
             )
+
+            if is_code_task:
+                await asyncio.to_thread(
+                    _append_task_scratchpad,
+                    task_id,
+                    "## Checkpoint: task end\n"
+                    "- status: done\n"
+                    "- note: verify checklist manually in report/progress logs",
+                )
 
             # Save full report to DB
             await asyncio.to_thread(
@@ -156,6 +200,11 @@ async def process_task(
             # Final failure or non-rate-limit error
             logger.error("Task %d failed: %s", task_id, e)
             await asyncio.to_thread(
+                _append_task_scratchpad,
+                task_id,
+                f"## Checkpoint: task failed\n- error: {str(e)[:1000]}",
+            )
+            await asyncio.to_thread(
                 log_event_fn, "error", "task",
                 f"Task {task_id} failed: {e}",
                 detail=content[:500], task_id=task_id,
@@ -171,6 +220,49 @@ async def process_task(
                 await broadcast(bot, error_msg, allowed_user_ids)
             else:
                 await bot.send_message(chat_id=user_id, text=error_msg)
+
+
+async def recover_processing_tasks_on_startup(stale_minutes: int = 60) -> dict:
+    """Recover interrupted tasks at startup.
+
+    - Recent processing tasks (within stale_minutes) are re-queued to pending.
+    - Old processing tasks are auto-closed as failed to avoid surprise re-execution.
+    """
+    try:
+        stale_minutes = max(5, min(24 * 60, int(stale_minutes)))
+
+        closed_rows = await asyncio.to_thread(
+            _query,
+            "UPDATE telegram_tasks SET status = 'failed', "
+            "result = COALESCE(result, '') || %s, completed_at = NOW() "
+            "WHERE status = 'processing' AND completed_at IS NULL "
+            "AND created_at < NOW() - (%s || ' minutes')::interval "
+            "RETURNING id",
+            ("\n[AUTO-CLOSED] stale processing task after restart; not resumed automatically.", str(stale_minutes)),
+        )
+
+        resumed_rows = await asyncio.to_thread(
+            _query,
+            "UPDATE telegram_tasks SET status = 'pending' "
+            "WHERE status = 'processing' AND completed_at IS NULL "
+            "AND created_at >= NOW() - (%s || ' minutes')::interval "
+            "RETURNING id",
+            (str(stale_minutes),),
+        )
+
+        closed = len(closed_rows) if closed_rows else 0
+        resumed = len(resumed_rows) if resumed_rows else 0
+        if closed or resumed:
+            logger.warning(
+                "Startup recovery: resumed=%d, auto-closed(stale)=%d (window=%dmin)",
+                resumed, closed, stale_minutes,
+            )
+        else:
+            logger.info("Startup recovery: no interrupted processing tasks")
+        return {"resumed": resumed, "closed": closed, "window_minutes": stale_minutes}
+    except Exception as e:
+        logger.error("Failed to recover processing tasks on startup: %s", e)
+        return {"resumed": 0, "closed": 0, "window_minutes": stale_minutes, "error": str(e)}
 
 
 # ── Broadcast ────────────────────────────────────────────────────────
