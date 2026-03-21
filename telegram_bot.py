@@ -375,6 +375,11 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - 도구 한도에 도달하면 시스템이 자동으로 백그라운드 태스크를 생성할 수 있다. 하지만 사전에 판단해서 선제적으로 create_task를 쓰는 것이 더 좋다.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 작업을 이어가라.
 
+## Mission Management
+- 활성 미션이 있으면 시스템 프롬프트에 타임라인이 주입된다. 이를 활용해 맥락을 유지하라.
+- 과제가 **완전히 완수**되었다고 판단하면 `mission(action="close")`를 호출해 미션을 종료하라.
+- 아직 미완료이면 미션을 열어두어라. 다음 태스크나 대화에서 이어갈 수 있다.
+
 ## Response Rules
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
 
@@ -397,6 +402,7 @@ You are executing a background intelligence task. Produce a structured Markdown 
 - save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라. 채팅과 다른 태스크에서도 조회 가능.
 - request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
 - 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
+- 과제가 **완전히 완수**되었으면 mission(action="close")를 호출하라. 미완료이면 열어두어라.
 
 **Current time: {current_datetime}**
 {system_alerts}
@@ -958,6 +964,41 @@ async def cmd_clear(message: Message):
     except Exception:
         pass
     await message.answer("대화 히스토리가 초기화되었습니다.")
+
+
+@router.message(Command("mission"))
+async def cmd_mission(message: Message):
+    """View or close the active mission."""
+    if not _is_allowed(message.from_user.id):
+        return
+    uid = message.from_user.id
+    arg = (message.text or "").removeprefix("/mission").strip().lower()
+
+    try:
+        from telegram_mission import get_active_mission, get_mission_events, close_mission
+        mission = await asyncio.to_thread(get_active_mission, uid)
+
+        if arg == "close":
+            if not mission:
+                await message.answer("활성 미션이 없습니다.")
+                return
+            await asyncio.to_thread(close_mission, mission["id"])
+            await message.answer(f"미션 #{mission['id']} 종료: {mission['title']}")
+            return
+
+        # Default: show status
+        if not mission:
+            await message.answer("활성 미션이 없습니다.")
+            return
+        events = await asyncio.to_thread(get_mission_events, mission["id"], 10)
+        lines = [f"🎯 *미션 #{mission['id']}*: {mission['title']}", f"생성: {mission['created_at']}"]
+        if events:
+            lines.append(f"\n타임라인 ({len(events)}건):")
+            for e in events:
+                lines.append(f"  `[{e['source']}]` {e['event_type']}: {str(e['content'] or '')[:100]}")
+        await message.answer("\n".join(lines))
+    except Exception as e:
+        await message.answer(f"미션 조회 오류: {e}")
 
 
 @router.message(Command("errors"))
@@ -1603,9 +1644,15 @@ async def handle_message(message: Message):
                 system_alerts=_format_system_alerts(),
                 skills_section=build_skills_prompt(),
             ) + extra_context
+        # Bind mission tool handler to this user
+        from telegram_tools import build_mission_handler
+        mission_handler = build_mission_handler(user_id)
         progress_cb = _make_progress_callback(message.chat.id)
         bt = {}
-        reply = await _chat_with_tools(history, system_prompt=system_override, on_progress=progress_cb, budget_tracker=bt)
+        reply = await _chat_with_tools(
+            history, system_prompt=system_override, on_progress=progress_cb, budget_tracker=bt,
+            extra_handlers={"mission": mission_handler},
+        )
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()
     except Exception as e:
@@ -2116,6 +2163,7 @@ async def bot_main():
         BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="deploy", description="서버 배포 (git pull)"),
         BotCommand(command="modify", description="서버 파일 수정"),
+        BotCommand(command="mission", description="미션 상태 / close"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
 
@@ -2125,10 +2173,14 @@ async def bot_main():
     # Build process_task closure with module-level dependencies
     async def _process_task_wrapper(b: Bot, task: dict):
         from self_tools import build_task_context_tools
+        from telegram_tools import MISSION_TOOL, build_mission_handler
         task_tools, task_handlers = build_task_context_tools(
             task["id"], task["user_id"], task.get("depth", 0),
             mission_id=task.get("mission_id"),
         )
+        # Add mission tool to task context
+        task_tools.append(MISSION_TOOL)
+        task_handlers["mission"] = build_mission_handler(task["user_id"])
         # Send progress to the task's user (or all users if self-generated)
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None

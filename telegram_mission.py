@@ -9,14 +9,46 @@ from db import query as _query, execute as _execute
 logger = logging.getLogger(__name__)
 
 
+_MISSION_STALE_HOURS = 24
+
+
 def get_active_mission(user_id: int) -> dict | None:
-    """Return the most recent active mission for a user, or None."""
+    """Return the most recent active mission for a user, or None.
+
+    Auto-closes missions with no events in the last 24 hours.
+    """
     rows = _query(
         "SELECT * FROM telegram_missions WHERE user_id = %s AND status = 'active' "
         "ORDER BY created_at DESC LIMIT 1",
         (user_id,),
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    mission = rows[0]
+    # Check staleness: last event time or mission creation
+    last_event = _query(
+        "SELECT created_at FROM telegram_mission_events WHERE mission_id = %s "
+        "ORDER BY created_at DESC LIMIT 1",
+        (mission["id"],),
+    )
+    last_activity = last_event[0]["created_at"] if last_event else mission["created_at"]
+    try:
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        # Ensure last_activity is timezone-aware
+        if hasattr(last_activity, 'tzinfo') and last_activity.tzinfo is None:
+            last_activity = last_activity.replace(tzinfo=timezone.utc)
+        elif isinstance(last_activity, str):
+            # Parse ISO format string
+            last_activity = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
+        hours_since = (now - last_activity).total_seconds() / 3600
+        if hours_since >= _MISSION_STALE_HOURS:
+            close_mission(mission["id"])
+            logger.info("Mission #%d auto-closed (stale %.1fh)", mission["id"], hours_since)
+            return None
+    except Exception as e:
+        logger.debug("Mission staleness check failed: %s", e)
+    return mission
 
 
 def get_mission_events(mission_id: int, limit: int = 20) -> list[dict]:

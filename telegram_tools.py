@@ -439,6 +439,53 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
     return await asyncio.to_thread(_run)
 
 
+# ── Mission Tool ──────────────────────────────────────────────────────
+
+MISSION_TOOL = {
+    "name": "mission",
+    "description": "Manage the active mission (shared context between chat and tasks). Use 'status' to check current mission, 'close' to end a completed mission.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["status", "close"],
+                "description": "status: view active mission + recent events. close: end the mission (use when the goal is fully achieved).",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+def build_mission_handler(user_id: int):
+    """Create a mission tool handler bound to a specific user_id."""
+    async def _handle(action: str, **_kwargs) -> str:
+        try:
+            from telegram_mission import get_active_mission, get_mission_events, close_mission
+            if action == "status":
+                mission = get_active_mission(user_id)
+                if not mission:
+                    return "No active mission."
+                events = get_mission_events(mission["id"], limit=10)
+                lines = [f"Mission #{mission['id']}: {mission['title']} [{mission['status']}]"]
+                lines.append(f"Created: {mission['created_at']}")
+                if events:
+                    lines.append(f"\nTimeline ({len(events)} events):")
+                    for e in events:
+                        lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:200]}")
+                return "\n".join(lines)
+            elif action == "close":
+                mission = get_active_mission(user_id)
+                if not mission:
+                    return "No active mission to close."
+                return close_mission(mission["id"])
+            return f"Unknown mission action: {action}"
+        except Exception as e:
+            return f"Mission error: {e}"
+    return _handle
+
+
 # ── Handler Registry ─────────────────────────────────────────────────
 TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
@@ -454,4 +501,5 @@ TOOL_HANDLERS = {
 from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 
 TOOLS.extend(SELF_TOOLS)
+TOOLS.append(MISSION_TOOL)
 TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
