@@ -340,6 +340,18 @@ async def recover_processing_tasks_on_startup(
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
+            # Record handoff to mission timeline
+            try:
+                from telegram_mission import get_active_mission, add_mission_event
+                mission = get_active_mission(user_id)
+                if mission:
+                    add_mission_event(
+                        mission["id"], "system", "decision",
+                        f"Service restart: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts})"
+                    )
+            except Exception:
+                pass
+
             await asyncio.to_thread(
                 _execute,
                 "UPDATE telegram_tasks SET status = 'failed', "
@@ -391,7 +403,24 @@ async def checkpoint_task_on_shutdown(task_id: int) -> bool:
             f"- at: {ts}\n"
             "- note: service received SIGTERM while task was processing"
         )
+        # Write to scratchpad (for startup recovery marker counting)
         await asyncio.to_thread(_append_task_scratchpad, task_id, note)
+        # Also record to mission timeline
+        try:
+            from telegram_mission import add_mission_event
+            # Look up user_id for this task
+            task_rows = _query("SELECT user_id FROM telegram_tasks WHERE id = %s", (task_id,))
+            if task_rows:
+                from telegram_mission import get_active_mission
+                user_id = int(task_rows[0].get("user_id") or 0)
+                mission = get_active_mission(user_id)
+                if mission:
+                    add_mission_event(
+                        mission["id"], f"task#{task_id}", "decision",
+                        f"Service shutdown — task #{task_id} interrupted at {ts}"
+                    )
+        except Exception:
+            pass  # best-effort
         return True
     except Exception as e:
         logger.error("Failed to checkpoint task %s on shutdown: %s", task_id, e)

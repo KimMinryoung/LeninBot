@@ -189,18 +189,26 @@ async def chat(
 
     budget_tracker: dict = {}
 
+    # Cache mission ID for this chat turn (avoid repeated DB lookups in on_progress)
+    _cached_mission_id: int | None = None
+    try:
+        from local_agent.mission import get_active_mission, add_mission_event
+        m = get_active_mission()
+        if m:
+            _cached_mission_id = m["id"]
+    except Exception:
+        pass
+
     # Bridge on_tool_call callback to on_progress + auto-log tool_result to mission
     async def _on_progress(event: str, detail: str):
         if on_tool_call and event == "tool_call":
             on_tool_call(event, detail)
         # Auto-log tool_result events to active mission
-        if event == "tool_result" and len(detail) >= 20:
+        if _cached_mission_id and event == "tool_result" and len(detail) >= 20:
             try:
-                from local_agent.mission import get_active_mission, add_mission_event
-                mission = get_active_mission()
-                if mission:
-                    truncated = detail[:2000]
-                    add_mission_event(mission["id"], "chat", "tool_result", truncated)
+                from local_agent.mission import add_mission_event
+                truncated = detail[:2000]
+                add_mission_event(_cached_mission_id, "chat", "tool_result", truncated)
             except Exception:
                 pass
 
