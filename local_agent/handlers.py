@@ -5,12 +5,29 @@ import json
 import logging
 import os
 from datetime import datetime
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+# ── Tool Result Size Limit ────────────────────────────────────────────
+_MAX_RESULT_CHARS = 30_000  # ~10K tokens — prevents API overload
+
+
+def _truncate_result(fn):
+    """Decorator: truncate tool results exceeding _MAX_RESULT_CHARS."""
+    @wraps(fn)
+    async def wrapper(*args, **kwargs):
+        result = await fn(*args, **kwargs)
+        if isinstance(result, str) and len(result) > _MAX_RESULT_CHARS:
+            truncated = result[:_MAX_RESULT_CHARS]
+            result = truncated + f"\n\n... [truncated: {len(result):,} → {_MAX_RESULT_CHARS:,} chars]"
+        return result
+    return wrapper
 
 
 # ── File System Tools ─────────────────────────────────────────────────
 
+@_truncate_result
 async def handle_read_file(path: str, line_start: int | None = None, line_end: int | None = None) -> str:
     path = os.path.expanduser(path)
     if not os.path.isabs(path):
@@ -104,6 +121,7 @@ async def handle_web_search(query: str, max_results: int = 5) -> str:
 
 # ── Playwright Crawling ──────────────────────────────────────────────
 
+@_truncate_result
 async def handle_crawl_page(url: str, wait_for: str | None = None, extract_links: bool = False) -> str:
     try:
         from local_agent.crawler import crawl
@@ -139,16 +157,30 @@ async def handle_manage_task(
     action: str,
     content: str | None = None,
     task_id: int | None = None,
+    parent_task_id: int | None = None,
     status: str | None = None,
     result: str | None = None,
+    scratchpad: str | None = None,
 ) -> str:
     from local_agent.local_db import query, execute
     try:
         if action == "add":
             if not content:
                 return "Error: 'content' required for add action."
-            row_id = execute("INSERT INTO tasks (content) VALUES (?)", (content,))
-            return f"Task #{row_id} created: {content}"
+            depth = 0
+            if parent_task_id:
+                parent = query("SELECT depth FROM tasks WHERE id = ?", (parent_task_id,))
+                if not parent:
+                    return f"Error: parent task #{parent_task_id} not found."
+                depth = (parent[0].get("depth") or 0) + 1
+                if depth > 5:
+                    return "Error: maximum task depth (5) exceeded."
+            row_id = execute(
+                "INSERT INTO tasks (content, parent_task_id, depth) VALUES (?, ?, ?)",
+                (content, parent_task_id, depth),
+            )
+            chain_info = f" (subtask of #{parent_task_id}, depth={depth})" if parent_task_id else ""
+            return f"Task #{row_id} created{chain_info}: {content}"
 
         elif action == "list":
             if status:
@@ -159,9 +191,13 @@ async def handle_manage_task(
                 return "No tasks found."
             lines = []
             for r in rows:
-                lines.append(f"  #{r['id']} [{r['status']}] {r['content'][:80]}")
+                indent = "  " * (r.get("depth") or 0)
+                parent_info = f" ←#{r['parent_task_id']}" if r.get("parent_task_id") else ""
+                lines.append(f"  {indent}#{r['id']} [{r['status']}]{parent_info} {r['content'][:80]}")
                 if r.get("result"):
-                    lines.append(f"       Result: {r['result'][:120]}")
+                    lines.append(f"  {indent}     Result: {r['result'][:120]}")
+                if r.get("scratchpad"):
+                    lines.append(f"  {indent}     Scratchpad: {len(r['scratchpad'])} chars")
             return f"{len(rows)} task(s):\n" + "\n".join(lines)
 
         elif action == "update":
@@ -176,8 +212,14 @@ async def handle_manage_task(
             if result:
                 parts.append("result = ?")
                 params.append(result)
+            if scratchpad is not None:
+                # Enforce 20KB limit
+                if len(scratchpad) > 20_000:
+                    scratchpad = scratchpad[:20_000] + "\n[truncated at 20KB]"
+                parts.append("scratchpad = ?")
+                params.append(scratchpad)
             if not parts:
-                return "Error: provide 'status' or 'result' to update."
+                return "Error: provide 'status', 'result', or 'scratchpad' to update."
             params.append(task_id)
             execute(f"UPDATE tasks SET {', '.join(parts)} WHERE id = ?", params)
             return f"Task #{task_id} updated."
@@ -207,6 +249,7 @@ async def handle_sync_pull(data_type: str, params: dict | None = None) -> str:
 
 # ── Python Code Execution ────────────────────────────────────────────
 
+@_truncate_result
 async def handle_execute_python(code: str, timeout: int = 30) -> str:
     """Write code to a temp file, execute it, return output."""
     import asyncio
@@ -342,6 +385,7 @@ async def handle_vectordb_ingest(
 
 # ── Crawl Site (batch new articles) ──────────────────────────────────
 
+@_truncate_result
 async def handle_crawl_site(
     list_url: str,
     link_pattern: str,

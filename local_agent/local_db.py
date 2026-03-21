@@ -23,12 +23,15 @@ def init_db():
     conn = _get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            content     TEXT NOT NULL,
-            status      TEXT DEFAULT 'pending',
-            result      TEXT,
-            created_at  TEXT DEFAULT (datetime('now', 'localtime')),
-            completed_at TEXT
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            content         TEXT NOT NULL,
+            status          TEXT DEFAULT 'pending',
+            result          TEXT,
+            parent_task_id  INTEGER,
+            scratchpad      TEXT,
+            depth           INTEGER DEFAULT 0,
+            created_at      TEXT DEFAULT (datetime('now', 'localtime')),
+            completed_at    TEXT
         );
         CREATE TABLE IF NOT EXISTS crawl_cache (
             url         TEXT PRIMARY KEY,
@@ -43,8 +46,19 @@ def init_db():
             content     TEXT NOT NULL,
             created_at  TEXT DEFAULT (datetime('now', 'localtime'))
         );
+        CREATE TABLE IF NOT EXISTS chat_summaries (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_start_id  INTEGER NOT NULL,
+            chunk_end_id    INTEGER NOT NULL,
+            summary         TEXT NOT NULL,
+            msg_count       INTEGER NOT NULL,
+            created_at      TEXT DEFAULT (datetime('now', 'localtime'))
+        );
     """)
     conn.commit()
+
+    # Migrate: add new columns to tasks table if missing
+    _migrate_tasks_table(conn)
 
     # One-time backfill: populate crawl_cache with URLs from existing docs/*.txt
     count = conn.execute("SELECT COUNT(*) FROM crawl_cache WHERE content = '[backfilled from docs/]'").fetchone()[0]
@@ -52,6 +66,21 @@ def init_db():
         n = backfill_crawl_cache_from_docs()
         if n:
             print(f"  Backfilled {n} URLs from docs/ into crawl_cache.")
+
+
+def _migrate_tasks_table(conn):
+    """Add new columns to tasks table if they don't exist (idempotent)."""
+    cursor = conn.execute("PRAGMA table_info(tasks)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    migrations = [
+        ("parent_task_id", "INTEGER"),
+        ("scratchpad", "TEXT"),
+        ("depth", "INTEGER DEFAULT 0"),
+    ]
+    for col_name, col_type in migrations:
+        if col_name not in existing_cols:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type}")
+    conn.commit()
 
 
 def query(sql: str, params: tuple | list = ()) -> list[dict]:

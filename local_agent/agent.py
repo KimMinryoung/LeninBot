@@ -1,11 +1,11 @@
-"""Core agent — Claude Sonnet 4.6 tool-use loop.
+"""Core agent — delegates to claude_loop.chat_with_tools() for robustness.
 
-Adapted from telegram_bot.py's _chat_with_tools() pattern.
+Budget tracking, multi-layer error recovery, and safety nets are all
+inherited from the shared loop used by telegram_bot.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -19,16 +19,11 @@ except ModuleNotFoundError as _err:
     anthropic = None
     _ANTHROPIC_IMPORT_ERROR = _err
 
-# Add project root to path so we can import claude_loop
+# Add project root to path so we can import claude_loop / shared
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
-from claude_loop import (
-    sanitize_messages as _sanitize_messages_shared,
-    validate_tool_pairs as _validate_tool_pairs_shared,
-    _strip_tool_blocks as _strip_tool_blocks_shared,
-    _dump_messages_for_debug,
-)
+from claude_loop import chat_with_tools
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +35,11 @@ _client = None
 
 _MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 8192
-_MAX_ROUNDS = 10
+_MAX_ROUNDS = 15
+_BUDGET_USD = 0.50  # local agent default (higher than telegram chat)
 
 # ── System Prompt ─────────────────────────────────────────────────────
 
-# Try to import CORE_IDENTITY from shared.py; fall back to minimal version
 try:
     from shared import CORE_IDENTITY
 except ImportError:
@@ -118,24 +113,7 @@ def _get_tools_and_handlers():
     return _tools_cache, _handlers_cache
 
 
-# ── Message Sanitization (shared from claude_loop.py) ──────────────────
-
-
-def _sanitize_messages(msgs: list[dict]) -> list[dict]:
-    """Wrapper: sanitize messages without server_tool_use handling (local agent)."""
-    return _sanitize_messages_shared(msgs, handle_server_tools=False)
-
-
-def _validate_messages(msgs: list[dict]) -> list[dict]:
-    """Strict local-agent tool pair validation (server tools disabled)."""
-    sanitized = _sanitize_messages(msgs)
-    return _validate_tool_pairs_shared(sanitized)
-
-
-def _extract_text_response(response) -> str:
-    text_parts = [b.text for b in response.content if getattr(b, "type", "") == "text"]
-    return "\n".join(text_parts) if text_parts else "(no response)"
-
+# ── Client ────────────────────────────────────────────────────────────
 
 def _build_client():
     if anthropic is None:
@@ -158,169 +136,50 @@ def _get_client():
     return _client
 
 
-# ── Core Loop ─────────────────────────────────────────────────────────
+# ── Core Loop (delegates to claude_loop) ──────────────────────────────
 
 async def chat(
     messages: list[dict],
     on_tool_call: Callable | None = None,
     max_rounds: int | None = None,
-) -> str:
-    """Run the Claude tool-use loop.
+    budget_usd: float | None = None,
+) -> tuple[str, dict]:
+    """Run the Claude tool-use loop via claude_loop.chat_with_tools().
 
     Args:
         messages: Conversation history (Anthropic format).
         on_tool_call: Optional callback(name, input_summary) for UI updates.
         max_rounds: Override default max rounds.
+        budget_usd: Override default budget.
 
     Returns:
-        Final text response from Claude.
+        Tuple of (response_text, budget_info_dict).
+        budget_info_dict contains: total_cost, rounds_used, was_interrupted.
     """
-    effective_rounds = max_rounds or _MAX_ROUNDS
     tools, handlers = _get_tools_and_handlers()
     client = _get_client()
-
-    # Work on a copy so tool-use intermediate messages don't pollute history
-    working_msgs = list(messages)
-
-    # Prompt caching
     sys_prompt = _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str())
-    cached_system = [{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}]
 
-    cached_tools = [dict(t) for t in tools]
-    if cached_tools:
-        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+    budget_tracker: dict = {}
 
-    for round_num in range(1, effective_rounds + 1):
-        working_msgs = _validate_messages(working_msgs)
+    # Bridge on_tool_call callback to on_progress
+    async def _on_progress(event: str, detail: str):
+        if on_tool_call and event == "tool_call":
+            # Extract tool name and input from detail like "[1] 🔧 web_search({...})"
+            on_tool_call(event, detail)
 
-        try:
-            response = await client.messages.create(
-                model=_MODEL,
-                max_tokens=_MAX_TOKENS,
-                system=cached_system,
-                tools=cached_tools,
-                messages=working_msgs,
-            )
-        except Exception as api_err:
-            err_str = str(api_err)
-            if "tool_use" in err_str and "tool_result" in err_str:
-                _dump_messages_for_debug(working_msgs, round_num, api_err)
-                logger.warning("Local agent auto-recovery: strict canonicalization retry")
-                strict_msgs = _validate_messages(working_msgs)
-                try:
-                    response = await client.messages.create(
-                        model=_MODEL,
-                        max_tokens=_MAX_TOKENS,
-                        system=cached_system,
-                        tools=cached_tools,
-                        messages=strict_msgs,
-                    )
-                    working_msgs = strict_msgs
-                except Exception as strict_err:
-                    logger.warning(
-                        "Local agent strict retry failed; falling back to text-only final response: %s",
-                        strict_err,
-                    )
-                    fallback_msgs = _strip_tool_blocks_shared(strict_msgs)
-                    final = await client.messages.create(
-                        model=_MODEL,
-                        max_tokens=_MAX_TOKENS,
-                        system=cached_system,
-                        messages=fallback_msgs,
-                    )
-                    return _extract_text_response(final)
-            else:
-                raise
+    reply = await chat_with_tools(
+        messages,
+        client=client,
+        model=_MODEL,
+        tools=tools,
+        tool_handlers=handlers,
+        system_prompt=sys_prompt,
+        max_rounds=max_rounds or _MAX_ROUNDS,
+        max_tokens=_MAX_TOKENS,
+        budget_usd=budget_usd or _BUDGET_USD,
+        budget_tracker=budget_tracker,
+        on_progress=_on_progress,
+    )
 
-        # If no tool use-like stop, extract and return text
-        if response.stop_reason not in ("tool_use", "pause_turn"):
-            if response.stop_reason == "max_tokens":
-                logger.warning("Response truncated by max_tokens at round %d/%d", round_num, effective_rounds)
-            return _extract_text_response(response)
-
-        # Process tool calls
-        assistant_content = []
-        tool_results = []
-
-        for block in response.content:
-            if block.type == "text":
-                assistant_content.append({"type": "text", "text": block.text})
-            elif block.type == "tool_use":
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-
-                # Notify UI
-                input_summary = json.dumps(block.input, ensure_ascii=False)
-                if len(input_summary) > 120:
-                    input_summary = input_summary[:120] + "..."
-                if on_tool_call:
-                    on_tool_call(block.name, input_summary)
-
-                # Execute tool
-                handler = handlers.get(block.name)
-                if handler:
-                    try:
-                        result = await handler(**block.input)
-                        is_error = False
-                    except Exception as e:
-                        logger.error("Tool %s error: %s", block.name, e, exc_info=True)
-                        result = f"Tool execution failed: {e}"
-                        is_error = True
-                else:
-                    result = f"Unknown tool: {block.name}"
-                    is_error = True
-                if not isinstance(result, str):
-                    result = str(result) if result is not None else "(no result)"
-
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                }
-                if is_error:
-                    tool_result_block["is_error"] = True
-                tool_results.append(tool_result_block)
-            else:
-                # Preserve unknown future block types as text to avoid losing context.
-                assistant_content.append({
-                    "type": "text",
-                    "text": f"[unsupported block:{getattr(block, 'type', 'unknown')}]",
-                })
-
-        # Safety net: ensure EVERY tool_use block has a matching tool_result
-        resolved_ids = {r["tool_use_id"] for r in tool_results}
-        for block in assistant_content:
-            if isinstance(block, dict) and block.get("type") == "tool_use" and block["id"] not in resolved_ids:
-                logger.warning("Safety net: missing tool_result for tool_use id=%s name=%s", block["id"], block.get("name"))
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block["id"],
-                    "content": f"Tool execution skipped (internal error): no result for {block.get('name', 'unknown')}",
-                    "is_error": True,
-                })
-
-        working_msgs.append({"role": "assistant", "content": assistant_content})
-        working_msgs.append({"role": "user", "content": tool_results})
-
-    # Round limit reached — force final response without tools
-    logger.warning("Tool round limit (%d) reached. Forcing final response.", effective_rounds)
-    working_msgs.append({
-        "role": "user",
-        "content": "[SYSTEM] Tool call limit reached. Answer with what you have gathered so far.",
-    })
-    working_msgs = _sanitize_messages(working_msgs)
-    try:
-        final = await client.messages.create(
-            model=_MODEL,
-            max_tokens=_MAX_TOKENS,
-            system=cached_system,
-            messages=working_msgs,
-        )
-        return _extract_text_response(final)
-    except Exception as e:
-        logger.error("Final forced response failed: %s", e)
-        return f"Error: Tool limit ({effective_rounds}) reached and final response failed: {e}"
+    return reply, budget_tracker

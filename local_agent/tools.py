@@ -78,15 +78,17 @@ LOCAL_TOOLS = [
     },
     {
         "name": "manage_task",
-        "description": "Manage local task queue. Actions: add (create task), list (show tasks), update (change status/result).",
+        "description": "Manage local task queue. Actions: add (create task), list (show tasks), update (change status/result/scratchpad).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["add", "list", "update"], "description": "Action to perform."},
                 "content": {"type": "string", "description": "Task description (for 'add')."},
                 "task_id": {"type": "integer", "description": "Task ID (for 'update')."},
+                "parent_task_id": {"type": "integer", "description": "Parent task ID to chain from (for 'add'). Creates a subtask."},
                 "status": {"type": "string", "enum": ["pending", "running", "done", "failed"], "description": "New status (for 'update' or filter for 'list')."},
                 "result": {"type": "string", "description": "Task result text (for 'update')."},
+                "scratchpad": {"type": "string", "description": "Working notes to persist across continuations (for 'update'). Max 20KB. Use to save intermediate progress."},
             },
             "required": ["action"],
         },
