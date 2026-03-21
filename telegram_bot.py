@@ -889,7 +889,7 @@ _HELP_TEXT = """\
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
 /config — 설정 패널 (모델, 예산, 라운드 수)
-/deploy — 서버 배포 (git pull + restart)
+/deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: telegram)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
 
 /help — 이 도움말 표시
@@ -1340,12 +1340,19 @@ async def cmd_deploy(message: Message):
         await message.answer("deploy.sh를 찾을 수 없습니다.")
         return
 
-    status_msg = await message.answer("🚀 Deploy 시작...")
+    # Parse service target: /deploy [telegram|api|all] (default: telegram)
+    args = (message.text or "").split(maxsplit=1)
+    target = args[1].strip().lower() if len(args) > 1 else "telegram"
+    if target not in ("telegram", "api", "all"):
+        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/deploy [telegram|api|all]`", parse_mode="Markdown")
+        return
+
+    status_msg = await message.answer(f"🚀 Deploy 시작... (대상: {target})")
     try:
         # Run deploy.sh detached (setsid) so it survives bot restart
         log_path = "/tmp/leninbot-deploy.log"
         proc = await asyncio.create_subprocess_exec(
-            "setsid", "bash", deploy_script,
+            "setsid", "bash", deploy_script, f"--{target}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,

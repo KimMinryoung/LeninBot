@@ -12,15 +12,28 @@ LOG="/tmp/leninbot-deploy.log"
 DEPLOY_META="/tmp/leninbot-deploy-meta.json"
 LOCK_FILE="/tmp/leninbot-deploy.lock"
 FORCE_RESTART=0
+SERVICE="all"  # all | api | telegram
 
 for arg in "$@"; do
     case "$arg" in
         --restart|-r)
             FORCE_RESTART=1
             ;;
+        --telegram)
+            SERVICE="telegram"
+            ;;
+        --api)
+            SERVICE="api"
+            ;;
+        --all)
+            SERVICE="all"
+            ;;
         --help|-h)
-            echo "Usage: bash deploy.sh [--restart]"
+            echo "Usage: bash deploy.sh [--restart] [--telegram|--api|--all]"
             echo "  --restart, -r   Restart services even when no new commit is found."
+            echo "  --telegram      Restart leninbot-telegram only."
+            echo "  --api           Restart leninbot-api only."
+            echo "  --all           Restart both services (default)."
             exit 0
             ;;
         *)
@@ -165,14 +178,19 @@ cat > "$DEPLOY_META" <<METAEOF
 }
 METAEOF
 
-# 4. 서비스 재시작 (API 먼저)
-echo "서비스 재시작..."
-_run_systemctl restart leninbot-api
-_run_systemctl is-active --quiet leninbot-api
+# 4. 서비스 재시작 (SERVICE 플래그에 따라 선택적)
+SUMMARY=$(git log --oneline -1)
+RESTARTED=""
+
+if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api" ]; then
+    echo "leninbot-api 재시작..."
+    _run_systemctl restart leninbot-api
+    _run_systemctl is-active --quiet leninbot-api
+    RESTARTED="api"
+fi
 
 # 5. 성공 알림 (텔레그램 재시작 전에 전송)
-SUMMARY=$(git log --oneline -1)
-_notify_telegram "✅ *Deploy 완료*
+_notify_telegram "✅ *Deploy 완료* [$SERVICE]
 \`$SUMMARY\`
 변경 커밋:
 \`\`\`
@@ -182,6 +200,10 @@ $CHANGES
 # 6. 텔레그램 재시작은 마지막 단계
 # 주의: systemd 환경에서는 이 스크립트가 같은 cgroup에 있다면
 # telegram 서비스 재시작 시 즉시 종료될 수 있으므로, 이후 후처리는 두지 않는다.
-_run_systemctl restart leninbot-telegram
+if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "telegram" ]; then
+    echo "leninbot-telegram 재시작..."
+    _run_systemctl restart leninbot-telegram
+    RESTARTED="${RESTARTED:+$RESTARTED+}telegram"
+fi
 
-echo "=== Deploy 완료: $SUMMARY ==="
+echo "=== Deploy 완료 [$RESTARTED]: $SUMMARY ==="
