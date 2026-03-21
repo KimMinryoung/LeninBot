@@ -524,19 +524,10 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                     prev_fire = cron.get_prev(datetime)
                     last_run = sched["last_run_at"]
                     if last_run is None or prev_fire > last_run:
-                        # Inherit active mission for this user
-                        sched_mission_id = None
-                        try:
-                            from telegram_mission import get_active_mission
-                            m = get_active_mission(sched["user_id"])
-                            if m:
-                                sched_mission_id = m["id"]
-                        except Exception:
-                            pass
                         await asyncio.to_thread(
                             _execute,
-                            "INSERT INTO telegram_tasks (user_id, content, mission_id) VALUES (%s, %s, %s)",
-                            (sched["user_id"], sched["content"], sched_mission_id),
+                            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
+                            (sched["user_id"], sched["content"]),
                         )
                         await asyncio.to_thread(
                             _execute,
