@@ -729,7 +729,7 @@ async def chat_with_tools(
                 assistant_content.append({"type": "text", "text": text})
                 if on_progress and text.strip():
                     # Send intermediate thinking/reasoning text
-                    preview = text.strip()[:200]
+                    preview = text.strip()
                     try:
                         await on_progress("thinking", f"[{round_num}] {preview}")
                     except Exception:
@@ -775,8 +775,6 @@ async def chat_with_tools(
                 })
                 # Notify: tool call starting
                 input_summary = json.dumps(tinput, ensure_ascii=False)
-                if len(input_summary) > 120:
-                    input_summary = input_summary[:120] + "..."
                 if on_progress:
                     try:
                         await on_progress("tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
@@ -812,14 +810,14 @@ async def chat_with_tools(
                 # Notify: tool call completed
                 if on_progress:
                     status = "❌" if is_error else "✓"
-                    result_preview = result[:100] + "..." if len(result) > 100 else result
+                    result_preview = result
                     try:
                         await on_progress("tool_result", f"  {status} {result_preview}")
                     except Exception:
                         pass
                 # Log for diagnostics
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
-                tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result[:150]}")
+                tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result}")
             else:
                 # Preserve unknown future block types as text context.
                 assistant_content.append({"type": "text", "text": _coerce_text(b)})
