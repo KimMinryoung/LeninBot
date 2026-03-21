@@ -1436,8 +1436,13 @@ async def handle_photo(message: Message):
         return
     await message.chat.do("typing")
 
+    user_id = message.from_user.id
+    import time as _time
+
     # 가장 큰 해상도 이미지 선택
     photo = message.photo[-1]
+    logger.info("photo received: user_id=%s file_id=%s size=%dx%d",
+                user_id, photo.file_id, photo.width, photo.height)
     file = await message.bot.get_file(photo.file_id)
 
     # 이미지 다운로드 (bytes)
@@ -1447,7 +1452,12 @@ async def handle_photo(message: Message):
     # caption이 있으면 프롬프트로 사용
     caption = message.caption or "이 이미지를 분석해줘."
 
-    # Claude Vision API 호출 (_claude AsyncAnthropic, 현재 설정 모델 사용)
+    # 채팅 히스토리 저장 — user 메시지
+    user_history_text = f"[이미지] {caption}" if message.caption else "[이미지]"
+    await asyncio.to_thread(_save_chat_message, user_id, "user", user_history_text)
+
+    # Claude Vision API 호출
+    t_start = _time.monotonic()
     try:
         response = await _claude.messages.create(
             model=_get_model(),
@@ -1472,7 +1482,18 @@ async def handle_photo(message: Message):
                 }
             ],
         )
-        await message.reply(response.content[0].text)
+        elapsed = _time.monotonic() - t_start
+        reply_text = response.content[0].text
+        usage = getattr(response, "usage", None)
+        in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
+        out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
+        logger.info("photo vision done: user_id=%s elapsed=%.2fs in_tokens=%s out_tokens=%s",
+                    user_id, elapsed, in_tok, out_tok)
+
+        # 채팅 히스토리 저장 — assistant 응답
+        await asyncio.to_thread(_save_chat_message, user_id, "assistant", reply_text)
+
+        await message.reply(reply_text)
     except Exception as e:
         logger.error("handle_photo error: %s", e)
         await message.reply(f"❌ 이미지 분석 중 오류: {e}")
