@@ -30,6 +30,7 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 import anthropic
+import base64
 
 # Extracted modules
 from telegram_tools import TOOLS, TOOL_HANDLERS
@@ -1374,6 +1375,55 @@ async def cmd_deploy(message: Message):
             await status_msg.edit_text(f"❌ Deploy 오류: {e}")
         except Exception:
             pass
+
+
+@router.message(F.photo)
+async def handle_photo(message: Message, state: FSMContext):
+    """사용자가 이미지를 보내면 Claude Vision으로 분석"""
+    if not _is_allowed(message.from_user.id):
+        return
+    await message.chat.do("typing")
+
+    # 가장 큰 해상도 이미지 선택
+    photo = message.photo[-1]
+    file = await message.bot.get_file(photo.file_id)
+
+    # 이미지 다운로드 (bytes)
+    file_bytes = await message.bot.download_file(file.file_path)
+    image_data = base64.b64encode(file_bytes.read()).decode("utf-8")
+
+    # caption이 있으면 프롬프트로 사용
+    caption = message.caption or "이 이미지를 분석해줘."
+
+    # Claude Vision API 호출 (_claude AsyncAnthropic, 현재 설정 모델 사용)
+    try:
+        response = await _claude.messages.create(
+            model=_get_model(),
+            max_tokens=1024,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_data,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": caption,
+                        },
+                    ],
+                }
+            ],
+        )
+        await message.reply(response.content[0].text)
+    except Exception as e:
+        logger.error("handle_photo error: %s", e)
+        await message.reply(f"❌ 이미지 분석 중 오류: {e}")
 
 
 @router.message(F.text, ~Command("config"), ~Command("modify"))
