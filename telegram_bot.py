@@ -889,7 +889,8 @@ _HELP_TEXT = """\
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
 /config — 설정 패널 (모델, 예산, 라운드 수)
-/deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: telegram)
+/restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
+/deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: all)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
 
 /help — 이 도움말 표시
@@ -1330,6 +1331,50 @@ async def cmd_unschedule(message: Message):
         await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
 
 
+@router.message(Command("restart"))
+async def cmd_restart(message: Message):
+    """Restart service(s) without git pull. Pure systemctl restart."""
+    if not _is_allowed(message.from_user.id):
+        return
+
+    args = (message.text or "").split(maxsplit=1)
+    target = args[1].strip().lower() if len(args) > 1 else "telegram"
+    if target not in ("telegram", "api", "all"):
+        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/restart [telegram|api|all]`", parse_mode="Markdown")
+        return
+
+    services = {
+        "telegram": ["leninbot-telegram"],
+        "api": ["leninbot-api"],
+        "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
+    }[target]
+
+    status_msg = await message.answer(f"🔄 서비스 재시작 중... ({target})")
+    results = []
+    for svc in services:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-n", "systemctl", "restart", svc,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode == 0:
+                results.append(f"✅ {svc}")
+            else:
+                results.append(f"❌ {svc}: {stdout.decode(errors='replace').strip()}")
+        except asyncio.TimeoutError:
+            results.append(f"⏱ {svc}: timeout")
+        except (asyncio.CancelledError, ConnectionError, OSError):
+            return  # telegram being restarted — expected
+
+    try:
+        await status_msg.edit_text(f"서비스 재시작 완료:\n" + "\n".join(results))
+    except Exception:
+        pass  # bot was restarted
+
+
 @router.message(Command("deploy"))
 async def cmd_deploy(message: Message):
     """Run deploy.sh — git pull + restart services. Output sent back via Telegram."""
@@ -1340,9 +1385,9 @@ async def cmd_deploy(message: Message):
         await message.answer("deploy.sh를 찾을 수 없습니다.")
         return
 
-    # Parse service target: /deploy [telegram|api|all] (default: telegram)
+    # Parse service target: /deploy [telegram|api|all] (default: all)
     args = (message.text or "").split(maxsplit=1)
-    target = args[1].strip().lower() if len(args) > 1 else "telegram"
+    target = args[1].strip().lower() if len(args) > 1 else "all"
     if target not in ("telegram", "api", "all"):
         await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/deploy [telegram|api|all]`", parse_mode="Markdown")
         return
@@ -1964,7 +2009,8 @@ async def bot_main():
         BotCommand(command="kg", description="지식그래프 현황"),
         BotCommand(command="config", description="설정 패널"),
         BotCommand(command="errors", description="에러/경고 로그"),
-        BotCommand(command="deploy", description="서버 배포"),
+        BotCommand(command="restart", description="서비스 재시작"),
+        BotCommand(command="deploy", description="서버 배포 (git pull)"),
         BotCommand(command="modify", description="서버 파일 수정"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
