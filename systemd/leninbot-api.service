@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot API (FastAPI + Uvicorn)
-After=network.target
+After=network.target leninbot-neo4j.service
+Requires=leninbot-neo4j.service
 
 [Service]
 User=grass
