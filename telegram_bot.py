@@ -1456,31 +1456,40 @@ async def handle_photo(message: Message):
     user_history_text = f"[이미지] {caption}" if message.caption else "[이미지]"
     await asyncio.to_thread(_save_chat_message, user_id, "user", user_history_text)
 
+    # 직전 1턴(user+assistant)을 맥락으로 포함
+    recent = await asyncio.to_thread(_load_chat_history, user_id)
+    # recent 마지막은 방금 저장한 [이미지] → 그 앞 2개가 직전 턴
+    context_msgs = recent[-3:-1] if len(recent) >= 3 else []
+    # Claude API는 user로 시작해야 함 — assistant로 시작하면 컨텍스트 제거
+    if context_msgs and context_msgs[0]["role"] != "user":
+        context_msgs = []
+
     # Claude Vision API 호출
     t_start = _time.monotonic()
     try:
+        messages = context_msgs + [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_data,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": caption,
+                    },
+                ],
+            }
+        ]
         response = await _claude.messages.create(
             model=_get_model(),
             max_tokens=1024,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": image_data,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": caption,
-                        },
-                    ],
-                }
-            ],
+            messages=messages,
         )
         elapsed = _time.monotonic() - t_start
         reply_text = response.content[0].text
