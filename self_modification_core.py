@@ -32,11 +32,13 @@ import logging
 # Setup Logging
 # ============================================================================
 
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(_log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s: %(message)s',
     handlers=[
-        logging.FileHandler('/home/grass/leninbot/logs/self_modifications.log'),
+        logging.FileHandler(os.path.join(_log_dir, 'self_modifications.log')),
         logging.StreamHandler()
     ]
 )

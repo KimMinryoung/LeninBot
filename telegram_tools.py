@@ -325,8 +325,17 @@ _BLOCKED_CODE_PATTERNS = [
     "os.system(", "os.exec",
     # Credential/env exfiltration
     "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
-    "GEMINI_API_KEY", "OPENAI_API_KEY",
+    "GEMINI_API_KEY", "OPENAI_API_KEY", "ADMIN_API_KEY",
 ]
+
+# Modules/builtins that should never be imported or called in sandboxed code
+_BLOCKED_IMPORTS = {
+    "ctypes", "multiprocessing", "signal", "resource", "pty",
+}
+_BLOCKED_FUNCTIONS = {
+    "exec", "eval", "compile", "__import__", "getattr", "setattr", "delattr",
+    "globals", "locals", "vars", "breakpoint", "exit", "quit", "input",
+}
 
 
 def _check_code_safety(code: str) -> str | None:
@@ -335,7 +344,7 @@ def _check_code_safety(code: str) -> str | None:
 
     # 1. Syntax check
     try:
-        ast.parse(code)
+        tree = ast.parse(code)
     except SyntaxError as e:
         return f"Syntax error: {e}"
 
@@ -345,13 +354,34 @@ def _check_code_safety(code: str) -> str | None:
             return f"Blocked: code contains '{pattern}'"
 
     # 3. AST walk for dangerous constructs
-    tree = ast.parse(code)
     for node in ast.walk(tree):
-        # Block rm -rf style via subprocess
+        # Block dangerous string literals (shell commands)
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             val = node.value
             if any(d in val for d in ["rm -rf /", "rm -rf ~", "mkfs.", "dd if="]):
                 return f"Blocked: destructive shell command in string literal"
+
+        # Block dangerous imports
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in _BLOCKED_IMPORTS:
+                    return f"Blocked: import of '{alias.name}'"
+        if isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in _BLOCKED_IMPORTS:
+                return f"Blocked: import from '{node.module}'"
+
+        # Block dangerous function calls: exec(), eval(), __import__(), getattr(), etc.
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name in _BLOCKED_FUNCTIONS:
+                return f"Blocked: call to '{name}()'"
 
     return None  # safe
 
@@ -377,11 +407,23 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
             f.write(code)
             tmp_path = f.name
         try:
+            # Filter out sensitive env vars from subprocess
+            _sensitive_keys = {
+                "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
+                "GEMINI_API_KEY", "OPENAI_API_KEY", "ADMIN_API_KEY",
+                "DB_PASSWORD", "SUPABASE_KEY", "TAVILY_API_KEY",
+                "AURA_NEO4J_PASSWORD",
+            }
+            safe_env = {
+                k: v for k, v in os.environ.items()
+                if k not in _sensitive_keys
+            }
+            safe_env["PYTHONIOENCODING"] = "utf-8"
             result = subprocess.run(
                 [sys.executable, tmp_path],
                 capture_output=True, text=True, timeout=timeout,
                 cwd=project_root,
-                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                env=safe_env,
             )
             parts = []
             if result.stdout.strip():

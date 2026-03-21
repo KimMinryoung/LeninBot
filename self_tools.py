@@ -627,7 +627,7 @@ async def _exec_read_self(
     if source == "system_status":
         return await _exec_read_system_status()
     if source == "server_logs":
-        return await _exec_read_server_logs(service=service, minutes_back=hours_back or 10, limit=limit or 50, grep=grep)
+        return await _exec_read_server_logs(service=service, minutes_back=(hours_back or 1) * 60, limit=limit or 50, grep=grep)
     if source == "recent_updates":
         return await _exec_read_recent_updates(max_entries=limit or 3)
     return f"Unknown source: {source}"

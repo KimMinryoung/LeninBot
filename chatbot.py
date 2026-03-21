@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 import hashlib
@@ -657,8 +658,10 @@ def grade_documents_node(state: AgentState):
         logs.append("   ⚠️ 연관있는 문헌이 없다.")
         return {"documents": [], "logs": logs}
 
-    # Rate-limit guard: brief pause between analyze_intent and batch_grader
-    time.sleep(0.5)
+    # Rate-limit guard: minimal pause between analyze_intent and batch_grader
+    # NOTE: kept short (50ms) to avoid blocking the event loop — LangGraph runs
+    # sync nodes in the event loop thread via astream.
+    time.sleep(0.05)
 
     # Build numbered document list for batch grading
     doc_entries = []
@@ -1003,7 +1006,7 @@ def log_conversation_node(state: AgentState, config: RunnableConfig):
             "documents_count": len(docs),
             "web_search_used": web_search_used,
             "strategy": None,
-            "processing_logs": processing_logs,
+            "processing_logs": json.dumps(processing_logs, ensure_ascii=False),
         }
 
         db_execute(

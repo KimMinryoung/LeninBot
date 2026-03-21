@@ -198,13 +198,14 @@ _MODEL_ALIAS_MAP = {
 }
 
 
-def _resolve_model(alias: str, fallback: str) -> str:
-    """Resolve a Claude model alias to its actual ID via the Models API."""
+async def _resolve_model(alias: str, fallback: str) -> str:
+    """Resolve a Claude model alias to its actual ID via the Models API (non-blocking)."""
     try:
-        _sync = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        model = _sync.models.retrieve(model_id=alias)
-        logger.info("Resolved model %s => %s", alias, model.id)
-        return model.id
+        resolved = await asyncio.to_thread(
+            lambda: anthropic.Anthropic(api_key=ANTHROPIC_API_KEY).models.retrieve(model_id=alias).id
+        )
+        logger.info("Resolved model %s => %s", alias, resolved)
+        return resolved
     except Exception as e:
         logger.warning("Model resolve failed for %s, using fallback %s: %s", alias, fallback, e)
         return fallback
@@ -214,29 +215,36 @@ def _resolve_model(alias: str, fallback: str) -> str:
 _resolved_models: dict[str, str] = {}
 
 
-def _get_model_by_alias(alias: str) -> str:
+async def _get_model_by_alias(alias: str) -> str:
     """Resolve a model short name (haiku/sonnet/opus) to its full ID, with caching."""
     if alias in _resolved_models:
         return _resolved_models[alias]
     model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-4-6", "claude-sonnet-4-6"))
-    resolved = _resolve_model(model_alias, fallback)
+    resolved = await _resolve_model(model_alias, fallback)
     _resolved_models[alias] = resolved
     return resolved
 
 
-def _get_model() -> str:
+async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
-    return _get_model_by_alias(_config["chat_model"])
+    return await _get_model_by_alias(_config["chat_model"])
 
 
-def _get_model_task() -> str:
+async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
-    return _get_model_by_alias(_config["task_model"])
+    return await _get_model_by_alias(_config["task_model"])
 
 
-def _get_model_light() -> str:
+async def _get_model_light() -> str:
     """Get the light model (Haiku) — used for compression, reflection, etc."""
-    return _get_model_by_alias("haiku")
+    return await _get_model_by_alias("haiku")
+
+def _extract_text(response) -> str:
+    """Safely extract text from Claude API response, handling empty content."""
+    if response.content:
+        return response.content[0].text
+    return ""
+
 
 # ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -637,11 +645,11 @@ async def _maybe_summarize_chunk(user_id: int):
         summary = await _ollama_generate(summary_prompt, max_tokens=512)
         if not summary:
             resp = await _claude.messages.create(
-                model=_get_model_light(),
+                model=await _get_model_light(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": summary_prompt}],
             )
-            summary = resp.content[0].text
+            summary = _extract_text(resp)
 
         await asyncio.to_thread(
             _execute,
@@ -697,11 +705,11 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
         summary = await _ollama_generate(summary_prompt, max_tokens=512)
         if not summary:
             resp = await _claude.messages.create(
-                model=_get_model_light(),
+                model=await _get_model_light(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": summary_prompt}],
             )
-            summary = resp.content[0].text
+            summary = _extract_text(resp)
     except Exception as e:
         logger.warning("History compression failed: %s — using truncation fallback", e)
         # Fallback: just drop old messages
@@ -847,7 +855,7 @@ async def _chat_with_tools(
     return await chat_with_tools(
         messages,
         client=_claude,
-        model=model or _get_model(),
+        model=model or await _get_model(),
         tools=merged_tools,
         tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
@@ -1449,6 +1457,11 @@ async def handle_photo(message: Message):
     file_bytes = await message.bot.download_file(file.file_path)
     image_data = base64.b64encode(file_bytes.read()).decode("utf-8")
 
+    # Detect media type from file extension (Telegram supports JPEG, PNG, WebP)
+    _ext = (file.file_path or "").rsplit(".", 1)[-1].lower() if file.file_path else ""
+    _media_type_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+    media_type = _media_type_map.get(_ext, "image/jpeg")
+
     # caption이 있으면 프롬프트로 사용
     caption = message.caption or "이 이미지를 분석해줘."
 
@@ -1475,7 +1488,7 @@ async def handle_photo(message: Message):
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": "image/jpeg",
+                            "media_type": media_type,
                             "data": image_data,
                         },
                     },
@@ -1487,12 +1500,12 @@ async def handle_photo(message: Message):
             }
         ]
         response = await _claude.messages.create(
-            model=_get_model(),
+            model=await _get_model(),
             max_tokens=1024,
             messages=messages,
         )
         elapsed = _time.monotonic() - t_start
-        reply_text = response.content[0].text
+        reply_text = _extract_text(response)
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
         out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
@@ -1678,11 +1691,11 @@ async def _reflect_on_recent(user_id: int):
         result = await _ollama_generate(prompt, max_tokens=512)
         if not result:
             resp = await _claude.messages.create(
-                model=_get_model_light(),
+                model=await _get_model_light(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
-            result = resp.content[0].text.strip()
+            result = _extract_text(resp).strip()
 
         if result.upper() == "NONE":
             logger.info("Reflection: nothing to learn from recent conversation")

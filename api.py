@@ -6,15 +6,28 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 #from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import HumanMessage
 from db import query as db_query
 
 load_dotenv()
+
+# ── Admin API key authentication ──────────────────────────────────
+_ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+_admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
+
+
+async def require_admin(api_key: str = Security(_admin_key_header)):
+    """Dependency that enforces admin API key for sensitive endpoints."""
+    if not _ADMIN_API_KEY:
+        raise HTTPException(status_code=503, detail="Admin API key not configured on server")
+    if not api_key or api_key != _ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
 
 
 # ── Diary scheduler (background task) ─────────────────────────
@@ -85,8 +98,27 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 
 
-# Per-session locks to prevent concurrent requests from corrupting checkpointed state
-_session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# Per-session locks to prevent concurrent requests from corrupting checkpointed state.
+# Uses LRU-style eviction to prevent unbounded memory growth.
+_session_locks: dict[str, asyncio.Lock] = {}
+_SESSION_LOCKS_MAX = 200
+
+
+def _get_session_lock(session_id: str) -> asyncio.Lock:
+    """Get or create a lock for a session, evicting oldest if over limit."""
+    if session_id not in _session_locks:
+        if len(_session_locks) >= _SESSION_LOCKS_MAX:
+            # Evict oldest (first inserted) entries that are not locked
+            to_remove = []
+            for k, v in _session_locks.items():
+                if not v.locked():
+                    to_remove.append(k)
+                if len(_session_locks) - len(to_remove) < _SESSION_LOCKS_MAX // 2:
+                    break
+            for k in to_remove:
+                del _session_locks[k]
+        _session_locks[session_id] = asyncio.Lock()
+    return _session_locks[session_id]
 
 # Lazy-load chatbot so uvicorn can bind the port first
 _graph = None
@@ -139,9 +171,9 @@ async def chat(request: ChatRequest, http_req: Request):
     user_agent = http_req.headers.get("user-agent", "")
     # X-Forwarded-For is set by Render's proxy; fall back to direct client IP
     forwarded = http_req.headers.get("x-forwarded-for", "")
-    ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host or "")
+    ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host if http_req.client else "")
 
-    lock = _session_locks[request.session_id]
+    lock = _get_session_lock(request.session_id)
 
     async def event_generator():
         if lock.locked():
@@ -200,13 +232,14 @@ async def chat(request: ChatRequest, http_req: Request):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@app.get("/logs")
+@app.get("/logs", dependencies=[Depends(require_admin)])
 async def get_logs(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """
     Fetch chat logs (admin view — all fields, ordered by most recent first).
+    Requires X-Admin-Key header.
     """
     rows = db_query(
         "SELECT * FROM chat_logs ORDER BY created_at DESC LIMIT %s OFFSET %s",
@@ -272,7 +305,7 @@ async def get_report(report_id: int):
     return {"report": rows[0]}
 
 
-@app.delete("/session/{session_id}")
+@app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])
 async def clear_session(session_id: str):
     """특정 세션의 대화 기록(체크포인트)을 삭제합니다."""
     g = get_graph()
@@ -282,7 +315,7 @@ async def clear_session(session_id: str):
     return {"session_id": session_id, "cleared": exists}
 
 
-@app.delete("/sessions")
+@app.delete("/sessions", dependencies=[Depends(require_admin)])
 async def clear_all_sessions():
     """모든 세션의 대화 기록(체크포인트)을 삭제합니다."""
     g = get_graph()

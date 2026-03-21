@@ -938,24 +938,34 @@ _pw_lock = threading.Lock()
 def _get_pw_browser():
     """Lazy singleton: one persistent Chromium instance, reused across calls."""
     global _pw_instance, _pw_browser
-    if _pw_browser is not None:
-        try:
-            # Check if browser is still alive
-            _pw_browser.contexts  # noqa — will raise if dead
-            return _pw_browser
-        except Exception:
-            _pw_browser = None
-            _pw_instance = None
 
     with _pw_lock:
+        # Check if browser is still alive (inside lock to prevent race)
         if _pw_browser is not None:
-            return _pw_browser
+            try:
+                _pw_browser.contexts  # noqa — will raise if dead
+                return _pw_browser
+            except Exception:
+                _pw_browser = None
+                if _pw_instance is not None:
+                    try:
+                        _pw_instance.stop()
+                    except Exception:
+                        pass
+                    _pw_instance = None
+
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
             return None
-        _pw_instance = sync_playwright().start()
-        _pw_browser = _pw_instance.chromium.launch(headless=True)
+
+        pw = sync_playwright().start()
+        try:
+            _pw_browser = pw.chromium.launch(headless=True)
+            _pw_instance = pw
+        except Exception:
+            pw.stop()
+            raise
         logger.info("[Playwright] Browser pool started")
         return _pw_browser
 
@@ -1102,15 +1112,29 @@ Deploy: git pull + systemctl restart, triggered by Telegram /deploy command."""
 
 
 
+_KG_WRITE_BLOCKED_PATTERNS = [
+    "DETACH DELETE", "DELETE", "DROP", "REMOVE", "CREATE INDEX", "DROP INDEX",
+    "CREATE CONSTRAINT", "DROP CONSTRAINT",
+]
+
+
 def kg_cypher(query: str, write: bool = False) -> dict:
-    """Execute arbitrary Cypher on Neo4j KG.
+    """Execute Cypher on Neo4j KG.
 
     Args:
         query: Cypher query string.
-        write: If True, execute as write transaction.
+        write: If True, execute as write transaction. Destructive operations
+               (DETACH DELETE, DROP, etc.) are blocked for safety.
 
     Returns dict with 'rows' (list of dicts) and 'count'.
     """
+    # Block destructive write operations
+    if write:
+        upper = query.upper().strip()
+        for pattern in _KG_WRITE_BLOCKED_PATTERNS:
+            if pattern in upper:
+                return {"error": f"Blocked: destructive operation '{pattern}' not allowed via kg_cypher. Use dedicated functions.", "rows": [], "count": 0}
+
     try:
         with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
             with sync_driver.session(database=neo4j_db) as session:

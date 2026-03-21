@@ -8,6 +8,7 @@ Neo4j + Gemini를 사용하여 에피소드 수집, 검색, 브리핑 생성을 
 chatbot.py와 독립적으로 사용 가능. 통합은 별도 작업.
 """
 
+import asyncio
 import os
 import json
 from datetime import datetime, timezone
@@ -61,6 +62,7 @@ class GraphMemoryService:
     def __init__(self):
         self._graphiti: Graphiti | None = None
         self._llm_client: GeminiClient | None = None
+        self._init_lock = asyncio.Lock()
 
     @property
     def graphiti(self) -> Graphiti:
@@ -71,6 +73,11 @@ class GraphMemoryService:
         """Neo4j 연결 + Gemini LLM 초기화 + 인덱스/제약조건 설정."""
         if self._graphiti is not None:
             return
+
+        async with self._init_lock:
+            # Double-check after acquiring lock
+            if self._graphiti is not None:
+                return
 
         load_dotenv()
 

@@ -7,7 +7,7 @@ import os
 import json
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
@@ -119,7 +119,7 @@ async def process_task(
         content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
 
     # Persist a boot checkpoint so restart-resume has deterministic anchor.
-    started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     await asyncio.to_thread(
         _append_task_scratchpad,
         task_id,
@@ -140,7 +140,7 @@ async def process_task(
             report = await chat_with_tools_fn(
                 [{"role": "user", "content": content}],
                 system_prompt=task_system_prompt,
-                model=get_model_fn(),
+                model=await get_model_fn(),
                 max_tokens=max_tokens_task,
                 budget_usd=budget_usd,
                 extra_tools=extra_tools,
@@ -278,7 +278,9 @@ async def recover_processing_tasks_on_startup(
             age_minutes = 0.0
             if created_at is not None:
                 try:
-                    age_minutes = max(0.0, (now_kst - created_at).total_seconds() / 60.0)
+                    # Ensure both datetimes are timezone-aware for comparison
+                    ca = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+                    age_minutes = max(0.0, (now_kst - ca).total_seconds() / 60.0)
                 except Exception:
                     age_minutes = float(stale_minutes + 1)
 
@@ -308,7 +310,7 @@ async def recover_processing_tasks_on_startup(
                 closed_repeated += 1
                 continue
 
-            ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
             handoff_note = (
                 f"{_STARTUP_HANDOFF_MARKER}\n"
                 f"- from_task_id: {task_id}\n"
@@ -372,7 +374,7 @@ async def recover_processing_tasks_on_startup(
 async def checkpoint_task_on_shutdown(task_id: int) -> bool:
     """Persist a last-moment checkpoint for an in-flight task before shutdown."""
     try:
-        ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         note = (
             f"{_SHUTDOWN_CHECKPOINT_MARKER}\n"
             f"- task_id: {task_id}\n"

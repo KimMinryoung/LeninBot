@@ -14,8 +14,11 @@ service.py의 initialize()에서 1회 호출.
 """
 
 import json
+import logging
 from datetime import datetime, date
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _PATCHES_APPLIED = False
 
@@ -108,11 +111,15 @@ def _patch_extract_edges() -> None:
 
     def _patched_edge(context: dict[str, Any]):
         messages = _original_edge_fn(context)
+        patched = False
         for msg in messages:
             if hasattr(msg, "content") and _ORIGINAL_RELATION_RULES in msg.content:
                 msg.content = msg.content.replace(
                     _ORIGINAL_RELATION_RULES, _PATCHED_RELATION_RULES
                 )
+                patched = True
+        if not patched:
+            logger.warning("[graphiti_patches] edge prompt patch target not found — upstream may have changed")
         return messages
 
     # 모듈 레벨 교체
@@ -128,5 +135,5 @@ def _patch_extract_edges() -> None:
         )
         if wrapper and hasattr(wrapper, "func"):
             wrapper.func = _patched_edge
-    except Exception:
-        pass  # prompt_library 구조 변경 시 무시 — custom_extraction_instructions로 여전히 커버됨
+    except Exception as e:
+        logger.warning("[graphiti_patches] prompt_library patch skipped: %s", e)
