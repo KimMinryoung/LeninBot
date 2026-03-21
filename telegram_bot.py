@@ -1149,7 +1149,7 @@ async def cmd_kg(message: Message):
         await message.answer(f"⚠️ KG 오류: {stats['error']}")
         return
 
-    lines = ["📊 *지식그래프 현황* (Neo4j AuraDB)\n"]
+    lines = ["📊 *지식그래프 현황* (Neo4j Local)\n"]
     lines.append(f"엔티티: {sum(v for v in stats.get('entity_types', {}).values())}개")
     for label, cnt in stats.get("entity_types", {}).items():
         lines.append(f"  {label}: {cnt}")

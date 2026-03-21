@@ -414,7 +414,7 @@ async def system_monitor(
     kg = await asyncio.to_thread(get_kg_service)
     kg_is_up = kg is not None
     if not kg_is_up:
-        add_alert_fn("KG (Neo4j AuraDB) 연결 불가 — 그래프 검색/쓰기 사용 불가")
+        add_alert_fn("KG (Neo4j) 연결 불가 — 그래프 검색/쓰기 사용 불가")
 
     # 2. Periodic KG health check (every 2 minutes)
     kg_was_up = kg_is_up
@@ -426,12 +426,12 @@ async def system_monitor(
 
             if kg_was_up and not kg_is_up:
                 clear_alert_fn("KG 재연결")
-                add_alert_fn("KG (Neo4j AuraDB) 연결 끊김 — 그래프 검색/쓰기 사용 불가")
-                await broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j AuraDB에 연결할 수 없습니다.", allowed_user_ids)
+                add_alert_fn("KG (Neo4j) 연결 끊김 — 그래프 검색/쓰기 사용 불가")
+                await broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j에 연결할 수 없습니다.", allowed_user_ids)
             elif not kg_was_up and kg_is_up:
                 clear_alert_fn("KG")
-                add_alert_fn("KG 재연결 성공 — Neo4j AuraDB 정상")
-                await broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j AuraDB 연결이 복구되었습니다.", allowed_user_ids)
+                add_alert_fn("KG 재연결 성공 — Neo4j 정상")
+                await broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j 연결이 복구되었습니다.", allowed_user_ids)
 
             kg_was_up = kg_is_up
         except Exception as e:

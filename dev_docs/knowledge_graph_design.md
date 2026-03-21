@@ -16,7 +16,7 @@ Cyber-Lenin의 **정보 에이전트** 기능을 위한 지식 그래프 모듈.
 | 구성요소 | 기술 |
 |----------|------|
 | 그래프 프레임워크 | [Graphiti](https://github.com/getzep/graphiti) (바이-템포럴 지식 그래프) |
-| 그래프 DB | Neo4j AuraDB (클라우드 관리형) |
+| 그래프 DB | Neo4j Community (Hetzner Docker, `docker-compose.neo4j.yml`) |
 | LLM | Gemini 2.5 Flash (추출), Gemini 2.5 Flash-Lite (리랭킹) |
 | 임베딩 | gemini-embedding-001 (1024차원) |
 | Python 패키지 | `graphiti-core[google-genai]` |
@@ -191,10 +191,10 @@ GraphMemoryService()
 
 | 변수 | 설명 | 예시 |
 |------|------|------|
-| `NEO4J_URI` | AuraDB 연결 URI | `neo4j+s://0b6bbc24.databases.neo4j.io` |
-| `NEO4J_USER` | DB 사용자 | `0b6bbc24` (인스턴스 ID) |
+| `NEO4J_URI` | Neo4j 연결 URI | `bolt://localhost:7687` |
+| `NEO4J_USER` | DB 사용자 | `neo4j` |
 | `NEO4J_PASSWORD` | DB 비밀번호 | `.env` 참조 |
-| `NEO4J_DATABASE` | DB 이름 | `0b6bbc24` (인스턴스 ID) |
+| `NEO4J_DATABASE` | DB 이름 | `neo4j` |
 | `GEMINI_API_KEY` | Gemini API 키 | `.env` 참조 |
 | `SEMAPHORE_LIMIT` | Graphiti 동시성 제한 | 기본 20, rate limit 시 1로 낮추기 |
 
@@ -206,12 +206,13 @@ GraphMemoryService()
 | 리랭킹/속성 추출 | gemini-2.5-flash-lite | GeminiClient (small_model) + GeminiRerankerClient |
 | 임베딩 | gemini-embedding-001 | GeminiEmbedder (1024차원 벡터) |
 
-### Neo4j AuraDB 특이사항
+### Neo4j Local (Docker) 설정
 
-1. **DB 이름 = 인스턴스 ID** — `neo4j`가 아닌 인스턴스 ID (예: `0b6bbc24`)를 `NEO4J_DATABASE`로 사용해야 함
-2. **`database` 파라미터 필수** — `Neo4jDriver` 생성 시 반드시 `database=` 전달
-3. **벡터 인덱스 수동 생성 필요** — `build_indices_and_constraints()`가 벡터 인덱스를 자동 생성하지 않음
-4. **AuraDB Free Tier** — 노드/관계 수 제한 있음, 대규모 수집 시 유의
+1. **Docker Compose**: `docker-compose.neo4j.yml` — Neo4j 5 Community + APOC
+2. **systemd**: `leninbot-neo4j.service` — Docker 컨테이너 자동 시작, `leninbot-api`가 의존
+3. **DB 이름**: `neo4j` (기본값)
+4. **벡터 인덱스 수동 생성 필요** — `build_indices_and_constraints()`가 벡터 인덱스를 자동 생성하지 않음
+5. **AuraDB에서 이전 완료** (2026-03-21) — `scripts/migrate_neo4j.py` 사용
 
 ### 벡터 인덱스 수동 생성
 
@@ -350,6 +351,7 @@ OPTIONS {indexConfig: {
 | 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
 | 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
 | 2026-03-19 | **v2.1 스키마: Concept 타입 신설** — 엔티티 7→8종. 추상 개념/이론/이데올로기/사회현상을 포괄하는 Concept 타입(5 필드) 추가. Gemini 배치 분류로 미분류 엔티티 131개 전량 타입 부여 (Concept 99, Asset 11, Organization 8, Incident 5, Person 5, Location 1, Campaign 1). `scripts/classify_untyped_entities.py` 재사용 가능. |
+| 2026-03-21 | **Neo4j AuraDB → Local Docker 이전**: `docker-compose.neo4j.yml` (Neo4j 5 Community + APOC), `systemd/leninbot-neo4j.service`, `scripts/migrate_neo4j.py`. 엔티티 2,116개, 관계 1,826개, 에피소드 761건 전량 이전 완료. AuraDB 연결 끊김 문제 해소. |
 
 ---
 
