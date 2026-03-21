@@ -156,6 +156,30 @@ LOCAL_TOOLS = [
         },
     },
     {
+        "name": "mission",
+        "description": "Manage mission context — a shared timeline between chat and tasks. Actions: status (view active mission + recent events), add_event (record finding/decision/tool_result), list_events (full timeline), close (end mission), create (manually start a new mission).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "add_event", "list_events", "close", "create"],
+                    "description": "Action to perform.",
+                },
+                "title": {"type": "string", "description": "Mission title (for 'create')."},
+                "content": {"type": "string", "description": "Event content (for 'add_event')."},
+                "event_type": {
+                    "type": "string",
+                    "enum": ["finding", "decision", "tool_result"],
+                    "description": "Event type (for 'add_event'). Default: finding.",
+                },
+                "source": {"type": "string", "description": "Event source (for 'add_event'). Default: chat."},
+                "limit": {"type": "integer", "description": "Max events to return (for 'list_events'). Default: 50."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "sync_pull",
         "description": "Pull data from the central server. Types: diaries, chat_logs, task_reports, kg_stats, experience.",
         "input_schema": {

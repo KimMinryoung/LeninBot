@@ -180,7 +180,19 @@ async def handle_manage_task(
                 (content, parent_task_id, depth),
             )
             chain_info = f" (subtask of #{parent_task_id}, depth={depth})" if parent_task_id else ""
-            return f"Task #{row_id} created{chain_info}: {content}"
+            msg = f"Task #{row_id} created{chain_info}: {content}"
+
+            # Auto-create mission if none active (top-level tasks only)
+            if not parent_task_id:
+                try:
+                    from local_agent.mission import get_active_mission, create_mission_from_chat
+                    if not get_active_mission():
+                        mission = create_mission_from_chat(content[:80], task_id=row_id)
+                        msg += f"\n  → Mission #{mission['id']} auto-created"
+                except Exception as e:
+                    logger.warning("Mission auto-create failed: %s", e)
+
+            return msg
 
         elif action == "list":
             if status:
@@ -222,6 +234,22 @@ async def handle_manage_task(
                 return "Error: provide 'status', 'result', or 'scratchpad' to update."
             params.append(task_id)
             execute(f"UPDATE tasks SET {', '.join(parts)} WHERE id = ?", params)
+
+            # Record task_completed event to active mission
+            if status in ("done", "failed"):
+                try:
+                    from local_agent.mission import get_active_mission, add_mission_event
+                    mission = get_active_mission()
+                    if mission:
+                        event_content = f"Task #{task_id} → {status}"
+                        if result:
+                            event_content += f": {result[:200]}"
+                        add_mission_event(
+                            mission["id"], f"task#{task_id}", "task_completed", event_content
+                        )
+                except Exception as e:
+                    logger.warning("Mission event for task completion failed: %s", e)
+
             return f"Task #{task_id} updated."
 
         return f"Unknown action: {action}"
@@ -485,3 +513,10 @@ LOCAL_TOOL_HANDLERS = {
     "vectordb_ingest": handle_vectordb_ingest,
     "crawl_site": handle_crawl_site,
 }
+
+# Register mission handler (lazy import to avoid circular deps)
+async def _handle_mission_dispatch(**kwargs):
+    from local_agent.mission import handle_mission
+    return await handle_mission(**kwargs)
+
+LOCAL_TOOL_HANDLERS["mission"] = _handle_mission_dispatch

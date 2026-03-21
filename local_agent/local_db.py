@@ -30,6 +30,7 @@ def init_db():
             parent_task_id  INTEGER,
             scratchpad      TEXT,
             depth           INTEGER DEFAULT 0,
+            mission_id      INTEGER,
             created_at      TEXT DEFAULT (datetime('now', 'localtime')),
             completed_at    TEXT
         );
@@ -54,6 +55,23 @@ def init_db():
             msg_count       INTEGER NOT NULL,
             created_at      TEXT DEFAULT (datetime('now', 'localtime'))
         );
+        CREATE TABLE IF NOT EXISTS missions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            status      TEXT DEFAULT 'active',
+            created_at  TEXT DEFAULT (datetime('now', 'localtime')),
+            closed_at   TEXT
+        );
+        CREATE TABLE IF NOT EXISTS mission_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id  INTEGER NOT NULL REFERENCES missions(id),
+            source      TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_events_timeline
+            ON mission_events(mission_id, created_at);
     """)
     conn.commit()
 
@@ -76,6 +94,7 @@ def _migrate_tasks_table(conn):
         ("parent_task_id", "INTEGER"),
         ("scratchpad", "TEXT"),
         ("depth", "INTEGER DEFAULT 0"),
+        ("mission_id", "INTEGER"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing_cols:

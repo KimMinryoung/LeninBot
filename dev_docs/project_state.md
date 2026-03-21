@@ -167,9 +167,10 @@ AIChatBot/
 │   ├── __init__.py           # Package init
 │   ├── __main__.py           # Entry point: python -m local_agent
 │   ├── agent.py              # Core tool-use loop (Anthropic API, max 10 rounds)
-│   ├── tools.py              # 9 local tool definitions (Anthropic API format)
+│   ├── tools.py              # 14 local tool definitions (Anthropic API format)
 │   ├── handlers.py           # Tool handler implementations
-│   ├── local_db.py           # SQLite (tasks, crawl_cache, conversations)
+│   ├── mission.py            # Mission context system (shared chat/task timeline)
+│   ├── local_db.py           # SQLite (tasks, crawl_cache, conversations, missions, mission_events)
 │   ├── crawler.py            # Playwright crawling (persistent cookies, JS rendering)
 │   ├── sync.py               # Server push/pull via shared.py + db.py
 │   ├── cli.py                # Interactive REPL

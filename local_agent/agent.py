@@ -80,6 +80,28 @@ def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
+def _build_mission_context() -> str:
+    """Build mission context string to append to system prompt."""
+    try:
+        from local_agent.mission import get_active_mission, get_mission_events
+        mission = get_active_mission()
+        if not mission:
+            return ""
+        events = get_mission_events(mission["id"], limit=10)
+        lines = [
+            f"\n\n## Active Mission: #{mission['id']} — {mission['title']}",
+            f"Started: {mission['created_at']}",
+        ]
+        if events:
+            lines.append("Timeline:")
+            for e in events:
+                lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {e['content'][:200]}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("Mission context build failed: %s", e)
+        return ""
+
+
 # ── Tool Assembly ─────────────────────────────────────────────────────
 
 def _build_tools_and_handlers() -> tuple[list[dict], dict]:
@@ -160,13 +182,27 @@ async def chat(
     client = _get_client()
     sys_prompt = _SYSTEM_PROMPT_TEMPLATE.format(current_datetime=_current_datetime_str())
 
+    # Inject active mission context into system prompt
+    mission_ctx = _build_mission_context()
+    if mission_ctx:
+        sys_prompt += mission_ctx
+
     budget_tracker: dict = {}
 
-    # Bridge on_tool_call callback to on_progress
+    # Bridge on_tool_call callback to on_progress + auto-log tool_result to mission
     async def _on_progress(event: str, detail: str):
         if on_tool_call and event == "tool_call":
-            # Extract tool name and input from detail like "[1] 🔧 web_search({...})"
             on_tool_call(event, detail)
+        # Auto-log tool_result events to active mission
+        if event == "tool_result" and len(detail) >= 20:
+            try:
+                from local_agent.mission import get_active_mission, add_mission_event
+                mission = get_active_mission()
+                if mission:
+                    truncated = detail[:2000]
+                    add_mission_event(mission["id"], "chat", "tool_result", truncated)
+            except Exception:
+                pass
 
     reply = await chat_with_tools(
         messages,
