@@ -141,9 +141,35 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES telegram_tasks(id)")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT DEFAULT ''")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
         ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
+    """)
+    # Mission context tables
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_missions (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            title       TEXT NOT NULL,
+            status      VARCHAR(20) DEFAULT 'active',
+            created_at  TIMESTAMPTZ DEFAULT NOW(),
+            closed_at   TIMESTAMPTZ
+        )
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_mission_events (
+            id          SERIAL PRIMARY KEY,
+            mission_id  INTEGER NOT NULL REFERENCES telegram_missions(id),
+            source      TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_mission_events_timeline
+        ON telegram_mission_events(mission_id, created_at)
     """)
 
 
@@ -367,8 +393,8 @@ You are executing a background intelligence task. Produce a structured Markdown 
 - Format: # Title → ## Executive Summary → ## Analysis (subsections) → ## Key Entities → ## Sources → ## Outlook
 - Cite all sources. Distinguish confirmed facts from inference.
 
-## Scratchpad & Continuation
-- save_scratchpad: 중요한 중간 발견을 저장하라. 자식 태스크에 자동 상속됨.
+## Mission Timeline & Continuation
+- save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라. 채팅과 다른 태스크에서도 조회 가능.
 - request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
 - 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
 
@@ -385,10 +411,6 @@ _RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
 # Per-user clear marker: messages with id <= this value are ignored
 _clear_after_id: dict[int, int] = {}
 
-# Chat scratchpad: preserve tool work details across turns when interrupted
-import time as _time_mod
-_chat_scratchpad: dict[int, tuple[str, float]] = {}  # user_id → (summary, monotonic_ts)
-_SCRATCHPAD_TTL = 1800  # 30분 후 자동 만료
 
 
 def _normalize_history_content(content) -> str:
@@ -927,7 +949,14 @@ async def cmd_clear(message: Message):
     if not _is_allowed(message.from_user.id):
         return
     await asyncio.to_thread(_clear_chat_history, message.from_user.id)
-    _chat_scratchpad.pop(message.from_user.id, None)
+    # Close active mission on history clear
+    try:
+        from telegram_mission import get_active_mission, close_mission
+        mission = await asyncio.to_thread(get_active_mission, message.from_user.id)
+        if mission:
+            await asyncio.to_thread(close_mission, mission["id"])
+    except Exception:
+        pass
     await message.answer("대화 히스토리가 초기화되었습니다.")
 
 
@@ -1040,12 +1069,27 @@ async def cmd_task(message: Message):
         await message.answer("사용법: /task <내용>")
         return
     try:
-        await asyncio.to_thread(
-            _execute,
-            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
+        rows = await asyncio.to_thread(
+            _query,
+            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s) RETURNING id",
             (message.from_user.id, content),
         )
-        await message.answer(f"태스크가 큐에 추가되었습니다:\n{content}")
+        task_id = rows[0]["id"] if rows else None
+        msg = f"태스크가 큐에 추가되었습니다:\n{content}"
+
+        # Auto-create mission if none active
+        if task_id:
+            try:
+                from telegram_mission import get_active_mission, create_mission
+                if not await asyncio.to_thread(get_active_mission, message.from_user.id):
+                    mission = await asyncio.to_thread(
+                        create_mission, message.from_user.id, content[:80], task_id
+                    )
+                    msg += f"\n\n🎯 미션 #{mission['id']} 자동 생성"
+            except Exception as e:
+                logger.warning("Mission auto-create failed: %s", e)
+
+        await message.answer(msg)
     except Exception as e:
         logger.error("Task insert error: %s", e)
         await message.answer(f"태스크 등록 실패: {e}")
@@ -1536,19 +1580,13 @@ async def handle_message(message: Message):
     # Auto-recall: fetch relevant past experiences for context injection
     experience_context = await _fetch_relevant_experiences(user_text)
 
-    # Scratchpad: recover previous turn's interrupted tool work
-    scratchpad_context = ""
-    sp_entry = _chat_scratchpad.get(user_id)
-    if sp_entry:
-        sp_text, sp_ts = sp_entry
-        if (_time_mod.monotonic() - sp_ts) < _SCRATCHPAD_TTL:
-            scratchpad_context = sp_text
-            logger.info("Injecting scratchpad context for user %d (%d chars)", user_id, len(sp_text))
-        _chat_scratchpad.pop(user_id, None)  # consume after TTL check
+    # Mission context: inject active mission timeline
+    from telegram_mission import build_mission_context
+    mission_context = await asyncio.to_thread(build_mission_context, user_id)
 
     try:
         system_override = None
-        extra_context = (experience_context or "") + scratchpad_context
+        extra_context = (experience_context or "") + mission_context
         if extra_context:
             system_override = _SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
@@ -1584,19 +1622,23 @@ async def handle_message(message: Message):
             _log_event("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
             reply = f"오류가 발생했습니다: {e}"
 
-    # Scratchpad: save if interrupted, clear if completed normally
+    # Mission: log interrupted tool work to active mission
     if bt.get("was_interrupted") and bt.get("tool_work_details"):
-        details = bt["tool_work_details"]
-        sp_summary = (
-            f"\n\n## 이전 턴 작업 컨텍스트 (중단됨)\n"
-            f"- 라운드: {bt.get('rounds_used', '?')}, 비용: ${bt.get('total_cost', 0):.2f}\n"
-            f"- 수행한 도구 호출:\n" + "\n".join(details[:20]) + "\n"
-            "위 도구 호출은 이전 턴에서 이미 실행된 것이다. 같은 호출을 반복하지 말고, 결과를 활용하거나 보완 조사를 하라."
-        )
-        _chat_scratchpad[user_id] = (sp_summary, _time_mod.monotonic())
-        logger.info("Saved scratchpad for user %d: %d tool details", user_id, len(details))
-    else:
-        _chat_scratchpad.pop(user_id, None)
+        try:
+            from telegram_mission import get_active_mission, add_mission_event
+            mission = await asyncio.to_thread(get_active_mission, user_id)
+            if mission:
+                details = bt["tool_work_details"]
+                event_content = (
+                    f"Chat interrupted (rounds={bt.get('rounds_used', '?')}, "
+                    f"cost=${bt.get('total_cost', 0):.2f})\n"
+                    + "\n".join(details[:20])
+                )[:2000]
+                await asyncio.to_thread(
+                    add_mission_event, mission["id"], "chat", "tool_result", event_content
+                )
+        except Exception as e:
+            logger.debug("Mission event for interrupted chat failed: %s", e)
 
     # Auto-escalation: extract [CONTINUE_TASK: ...] marker and create background task
     continuation_task = None

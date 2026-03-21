@@ -114,23 +114,29 @@ async def process_task(
     is_self_generated = (user_id == 0)
     is_code_task = _is_code_delivery_task(content)
 
-    # Inject inherited context from parent scratchpad
-    if scratchpad:
+    # Inject mission context instead of scratchpad
+    mission_ctx = ""
+    try:
+        from telegram_mission import get_active_mission, get_mission_events, add_mission_event
+        mission = get_active_mission(user_id)
+        if mission:
+            events = get_mission_events(mission["id"], limit=15)
+            if events:
+                lines = [f"## Mission Context: #{mission['id']} — {mission['title']}"]
+                for e in events:
+                    lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:200]}")
+                mission_ctx = "\n".join(lines)
+            add_mission_event(mission["id"], f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
+    except Exception as e:
+        logger.debug("Mission context injection failed: %s", e)
+
+    if mission_ctx:
+        content = f"{mission_ctx}\n\n---\n\n## Task\n{content}"
+    elif scratchpad:
+        # Fallback: legacy scratchpad inheritance for old tasks
         content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
 
-    # Persist a boot checkpoint so restart-resume has deterministic anchor.
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    await asyncio.to_thread(
-        _append_task_scratchpad,
-        task_id,
-        f"## Checkpoint: task start\n- started_at: {started_at}\n- depth: {depth}\n- code_task: {is_code_task}",
-    )
-    if is_code_task:
-        await asyncio.to_thread(
-            _append_task_scratchpad,
-            task_id,
-            "## Mandatory stage checklist\n- [ ] sync\n- [ ] analysis\n- [ ] edit\n- [ ] test\n- [ ] restart\n- [ ] commit\n- [ ] push",
-        )
 
     max_retries = 10
     retry_delay = 60
@@ -148,14 +154,15 @@ async def process_task(
                 on_progress=on_progress,
             )
 
-            if is_code_task:
-                await asyncio.to_thread(
-                    _append_task_scratchpad,
-                    task_id,
-                    "## Checkpoint: task end\n"
-                    "- status: done\n"
-                    "- note: verify checklist manually in report/progress logs",
-                )
+            # Record task completion to mission
+            try:
+                from telegram_mission import get_active_mission, add_mission_event
+                m = get_active_mission(user_id)
+                if m:
+                    summary = _extract_summary(report, 500)
+                    add_mission_event(m["id"], f"task#{task_id}", "task_completed", f"Done: {summary}")
+            except Exception:
+                pass
 
             # Save full report to DB
             await asyncio.to_thread(
@@ -204,11 +211,14 @@ async def process_task(
 
             # Final failure or non-rate-limit error
             logger.error("Task %d failed: %s", task_id, e)
-            await asyncio.to_thread(
-                _append_task_scratchpad,
-                task_id,
-                f"## Checkpoint: task failed\n- error: {str(e)[:1000]}",
-            )
+            # Record failure to mission
+            try:
+                from telegram_mission import get_active_mission, add_mission_event
+                m = get_active_mission(user_id)
+                if m:
+                    add_mission_event(m["id"], f"task#{task_id}", "task_completed", f"Failed: {str(e)[:500]}")
+            except Exception:
+                pass
             await asyncio.to_thread(
                 log_event_fn, "error", "task",
                 f"Task {task_id} failed: {e}",

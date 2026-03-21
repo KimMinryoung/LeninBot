@@ -99,7 +99,7 @@ SELF_TOOLS = [
             "properties": {
                 "content": {"type": "string", "description": "What to research, analyze, or implement. Be specific: include file paths, requirements, constraints, and expected outcome."},
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
-                "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional). Child inherits parent's scratchpad."},
+                "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional). Child reads mission timeline for context."},
             },
             "required": ["content"],
         },
@@ -511,17 +511,17 @@ async def _exec_kg_merge_entities(source_name: str, target_name: str) -> str:
 
 TASK_CONTEXT_TOOLS = [
     {
-        "name": "save_scratchpad",
-        "description": "Save intermediate findings to this task's scratchpad. Automatically inherited by child tasks. Use to preserve important progress.",
+        "name": "save_finding",
+        "description": "Save intermediate findings to the active mission timeline. Visible to both chat and future tasks. Use to preserve important progress, decisions, and discoveries.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "Text to save (findings, partial results, notes)."},
-                "mode": {
+                "event_type": {
                     "type": "string",
-                    "enum": ["overwrite", "append"],
-                    "default": "append",
-                    "description": "append (default) adds to existing scratchpad; overwrite replaces it.",
+                    "enum": ["finding", "decision"],
+                    "default": "finding",
+                    "description": "Type of event: finding (discovery/result) or decision (strategic choice).",
                 },
             },
             "required": ["content"],
@@ -529,7 +529,7 @@ TASK_CONTEXT_TOOLS = [
     },
     {
         "name": "request_continuation",
-        "description": "Create a child task to continue unfinished work. Saves progress summary to scratchpad and spawns a new task that inherits it. Use when budget/round limit is approaching.",
+        "description": "Create a child task to continue unfinished work. Records progress to the mission timeline and spawns a new task. Use when budget/round limit is approaching.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -541,54 +541,49 @@ TASK_CONTEXT_TOOLS = [
     },
 ]
 
-_SCRATCHPAD_MAX_CHARS = 20_000
-
 
 def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
     """Build task-context tool handlers with task_id bound via closure.
 
     Returns (tools_list, handlers_dict) ready to merge into the tool loop.
     """
-    from db import execute as db_execute, query as db_query
 
-    async def _exec_save_scratchpad(content: str, mode: str = "append") -> str:
+    async def _exec_save_finding(content: str, event_type: str = "finding") -> str:
         try:
-            if mode == "overwrite":
-                new_pad = content[:_SCRATCHPAD_MAX_CHARS]
-            else:
-                # Append: fetch current, concatenate, trim front if over limit
-                rows = await asyncio.to_thread(
-                    db_query, "SELECT scratchpad FROM telegram_tasks WHERE id = %s", (task_id,)
-                )
-                current = (rows[0].get("scratchpad") or "") if rows else ""
-                new_pad = current + "\n" + content if current else content
-                if len(new_pad) > _SCRATCHPAD_MAX_CHARS:
-                    new_pad = new_pad[-_SCRATCHPAD_MAX_CHARS:]
-
+            from telegram_mission import get_active_mission, add_mission_event
+            mission = await asyncio.to_thread(get_active_mission, user_id)
+            if not mission:
+                return "No active mission — finding not saved."
+            truncated = content[:2000]
             await asyncio.to_thread(
-                db_execute,
-                "UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s",
-                (new_pad, task_id),
+                add_mission_event, mission["id"], f"task#{task_id}", event_type, truncated
             )
-            return f"Scratchpad saved ({len(new_pad)} chars, mode={mode}) for task #{task_id}."
+            return f"Saved {event_type} to mission #{mission['id']} ({len(truncated)} chars)."
         except Exception as e:
-            logger.error("save_scratchpad error (task %d): %s", task_id, e)
-            return f"Failed to save scratchpad: {e}"
+            logger.error("save_finding error (task %d): %s", task_id, e)
+            return f"Failed to save finding: {e}"
 
     async def _exec_request_continuation(progress_summary: str, next_steps: str) -> str:
         from shared import create_task_in_db
 
-        # 1. Update current task's scratchpad with progress
-        scratchpad_content = f"## Progress (task #{task_id})\n{progress_summary}\n\n## Next Steps\n{next_steps}"
-        await _exec_save_scratchpad(scratchpad_content, mode="append")
+        # 1. Record progress to mission timeline
+        try:
+            from telegram_mission import get_active_mission, add_mission_event
+            mission = await asyncio.to_thread(get_active_mission, user_id)
+            if mission:
+                event_content = f"Progress: {progress_summary[:500]}\nNext: {next_steps[:500]}"
+                await asyncio.to_thread(
+                    add_mission_event, mission["id"], f"task#{task_id}", "decision", event_content
+                )
+        except Exception:
+            pass
 
-        # 2. Create child task
+        # 2. Create child task (no scratchpad — child reads mission timeline)
         result = await asyncio.to_thread(
             create_task_in_db,
             next_steps,
             user_id=user_id,
             parent_task_id=task_id,
-            scratchpad=scratchpad_content,
         )
 
         if result["status"] == "ok":
@@ -596,13 +591,13 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
             child_depth = result.get("depth", depth + 1)
             return (
                 f"Child task #{child_id} created (depth={child_depth}, parent=#{task_id}). "
-                f"Progress saved. You can now finish your current response."
+                f"Progress saved to mission. You can now finish your current response."
             )
         else:
             return f"Failed to create continuation task: {result['error']}"
 
     handlers = {
-        "save_scratchpad": _exec_save_scratchpad,
+        "save_finding": _exec_save_finding,
         "request_continuation": _exec_request_continuation,
     }
     return list(TASK_CONTEXT_TOOLS), handlers

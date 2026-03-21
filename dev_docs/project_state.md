@@ -152,6 +152,7 @@ AIChatBot/
 ├── telegram_tools.py         # Tool definitions + execution handlers (~415 lines, extracted from telegram_bot.py)
 ├── claude_loop.py            # Claude tool-use loop + sanitize_messages (~333 lines, shared with local_agent)
 ├── telegram_tasks.py         # Background task worker, scheduler, system monitor (~327 lines, extracted)
+├── telegram_mission.py       # Mission context system for Telegram (shared chat/task timeline, PostgreSQL)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
@@ -287,11 +288,11 @@ AIChatBot/
 #### local_agent/ (신규 패키지) — Windows 10 로컬 에이전트
 - **역할 분리**: 로컬 = 개인 워크스테이션 (파일 접근, 크롤링, 보고서), 서버 = 중앙 저장소 + 공개 서비스. 공유하는 건 기억(메모리)뿐.
 - **agent.py**: `claude_loop.chat_with_tools()` 위임. 예산 추적($0.50 기본), 다층 에러 복구, safety net 모두 공유 루프에서 상속. `max_rounds=15`.
-- **tools.py**: 12개 로컬 도구 정의 (Anthropic API format). `manage_task`에 parent_task_id/scratchpad 지원.
+- **tools.py**: 14개 로컬 도구 정의 (Anthropic API format). `manage_task`에 parent_task_id/scratchpad 지원. `mission` 도구 추가.
 - **handlers.py**: 도구 핸들러 구현. `@_truncate_result` 데코레이터로 30KB 결과 크기 제한. `web_search`는 `tavily-python` 직접 사용.
 - **crawler.py**: Playwright async 크롤링. Persistent Chromium context (쿠키 유지 → 로그인 세션). 결과를 SQLite `crawl_cache`에 자동 캐싱. JS 렌더링 페이지 지원.
 - **sync.py**: 서버 push/pull. `shared.py` fetch 함수들과 `db.py` 직접 사용. KG 에피소드 쓰기, 태스크 보고서 저장.
-- **local_db.py**: SQLite (`local_agent/data/local.db`). 테이블: `tasks` (태스크 큐 + parent_task_id/scratchpad/depth), `crawl_cache`, `conversations`, `chat_summaries`. 자동 마이그레이션.
+- **local_db.py**: SQLite (`local_agent/data/local.db`). 테이블: `tasks`, `crawl_cache`, `conversations`, `chat_summaries`, `missions`, `mission_events`. 자동 마이그레이션.
 - **cli.py**: 대화형 REPL. 특수 명령: `/quit`, `/clear`, `/tasks`, `/history`. 턴당/세션 비용 표시. 대화 압축 (20K 토큰 초과 시 Haiku 요약). 백그라운드 청크 요약.
 - **self_tools 통합**: `from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS` → 서버 메모리 접근 도구 자동 추가.
 - **기존 서버 코드 변경 없음**: shared.py, db.py, self_tools.py, claude_loop.py는 그대로 import만 함.
