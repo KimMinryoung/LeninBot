@@ -101,23 +101,27 @@ async def process_task(
     scratchpad = task.get("scratchpad") or ""
     depth = task.get("depth") or 0
     parent_task_id = task.get("parent_task_id")
+    mission_id = task.get("mission_id")
     is_self_generated = (user_id == 0)
 
-    # Inject mission context instead of scratchpad
+    # Inject mission context using task's own mission_id
     mission_ctx = ""
-    try:
-        from telegram_mission import get_active_mission, get_mission_events, add_mission_event
-        mission = get_active_mission(user_id)
-        if mission:
-            events = get_mission_events(mission["id"], limit=15)
+    if mission_id:
+        try:
+            from telegram_mission import get_mission_events, add_mission_event
+            # Look up mission title
+            from db import query as _db_query
+            mission_rows = _db_query("SELECT title FROM telegram_missions WHERE id = %s", (mission_id,))
+            mission_title = mission_rows[0]["title"] if mission_rows else "?"
+            events = get_mission_events(mission_id, limit=15)
             if events:
-                lines = [f"## Mission Context: #{mission['id']} — {mission['title']}"]
+                lines = [f"## Mission Context: #{mission_id} — {mission_title}"]
                 for e in events:
                     lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:200]}")
                 mission_ctx = "\n".join(lines)
-            add_mission_event(mission["id"], f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
-    except Exception as e:
-        logger.debug("Mission context injection failed: %s", e)
+            add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
+        except Exception as e:
+            logger.debug("Mission context injection failed: %s", e)
 
     if mission_ctx:
         content = f"{mission_ctx}\n\n---\n\n## Task\n{content}"
@@ -142,14 +146,13 @@ async def process_task(
             )
 
             # Record task completion to mission
-            try:
-                from telegram_mission import get_active_mission, add_mission_event
-                m = get_active_mission(user_id)
-                if m:
+            if mission_id:
+                try:
+                    from telegram_mission import add_mission_event
                     summary = _extract_summary(report, 500)
-                    add_mission_event(m["id"], f"task#{task_id}", "task_completed", f"Done: {summary}")
-            except Exception:
-                pass
+                    add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Done: {summary}")
+                except Exception:
+                    pass
 
             # Save full report to DB
             await asyncio.to_thread(
@@ -199,13 +202,12 @@ async def process_task(
             # Final failure or non-rate-limit error
             logger.error("Task %d failed: %s", task_id, e)
             # Record failure to mission
-            try:
-                from telegram_mission import get_active_mission, add_mission_event
-                m = get_active_mission(user_id)
-                if m:
-                    add_mission_event(m["id"], f"task#{task_id}", "task_completed", f"Failed: {str(e)[:500]}")
-            except Exception:
-                pass
+            if mission_id:
+                try:
+                    from telegram_mission import add_mission_event
+                    add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Failed: {str(e)[:500]}")
+                except Exception:
+                    pass
             await asyncio.to_thread(
                 log_event_fn, "error", "task",
                 f"Task {task_id} failed: {e}",
@@ -241,7 +243,7 @@ async def recover_processing_tasks_on_startup(
 
         processing_rows = await asyncio.to_thread(
             _query,
-            "SELECT id, user_id, content, depth, created_at, scratchpad FROM telegram_tasks "
+            "SELECT id, user_id, content, depth, created_at, scratchpad, mission_id FROM telegram_tasks "
             "WHERE status = 'processing' AND completed_at IS NULL "
             "ORDER BY created_at ASC",
         )
@@ -319,25 +321,25 @@ async def recover_processing_tasks_on_startup(
             if len(child_scratchpad) > _SCRATCHPAD_MAX_CHARS:
                 child_scratchpad = child_scratchpad[-_SCRATCHPAD_MAX_CHARS:]
 
+            task_mission_id = row.get("mission_id")
             child_rows = await asyncio.to_thread(
                 _query,
-                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth) "
-                "VALUES (%s, %s, 'pending', %s, %s, %s) RETURNING id",
-                (user_id, content, task_id, child_scratchpad, depth + 1),
+                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id) "
+                "VALUES (%s, %s, 'pending', %s, %s, %s, %s) RETURNING id",
+                (user_id, content, task_id, child_scratchpad, depth + 1, task_mission_id),
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
             # Record handoff to mission timeline
-            try:
-                from telegram_mission import get_active_mission, add_mission_event
-                mission = get_active_mission(user_id)
-                if mission:
+            if task_mission_id:
+                try:
+                    from telegram_mission import add_mission_event
                     add_mission_event(
-                        mission["id"], "system", "decision",
+                        task_mission_id, "system", "decision",
                         f"Service restart: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts})"
                     )
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             await asyncio.to_thread(
                 _execute,
@@ -392,20 +394,16 @@ async def checkpoint_task_on_shutdown(task_id: int) -> bool:
         )
         # Write to scratchpad (for startup recovery marker counting)
         await asyncio.to_thread(_append_task_scratchpad, task_id, note)
-        # Also record to mission timeline
+        # Also record to mission timeline (use task's own mission_id)
         try:
-            from telegram_mission import add_mission_event
-            # Look up user_id for this task
-            task_rows = _query("SELECT user_id FROM telegram_tasks WHERE id = %s", (task_id,))
-            if task_rows:
-                from telegram_mission import get_active_mission
-                user_id = int(task_rows[0].get("user_id") or 0)
-                mission = get_active_mission(user_id)
-                if mission:
-                    add_mission_event(
-                        mission["id"], f"task#{task_id}", "decision",
-                        f"Service shutdown — task #{task_id} interrupted at {ts}"
-                    )
+            task_rows = _query("SELECT mission_id FROM telegram_tasks WHERE id = %s", (task_id,))
+            task_mid = task_rows[0].get("mission_id") if task_rows else None
+            if task_mid:
+                from telegram_mission import add_mission_event
+                add_mission_event(
+                    task_mid, f"task#{task_id}", "decision",
+                    f"Service shutdown — task #{task_id} interrupted at {ts}"
+                )
         except Exception:
             pass  # best-effort
         return True
@@ -484,7 +482,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth",
+                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id",
             )
             if task:
                 if runtime_state is not None:
@@ -526,10 +524,19 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                     prev_fire = cron.get_prev(datetime)
                     last_run = sched["last_run_at"]
                     if last_run is None or prev_fire > last_run:
+                        # Inherit active mission for this user
+                        sched_mission_id = None
+                        try:
+                            from telegram_mission import get_active_mission
+                            m = get_active_mission(sched["user_id"])
+                            if m:
+                                sched_mission_id = m["id"]
+                        except Exception:
+                            pass
                         await asyncio.to_thread(
                             _execute,
-                            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
-                            (sched["user_id"], sched["content"]),
+                            "INSERT INTO telegram_tasks (user_id, content, mission_id) VALUES (%s, %s, %s)",
+                            (sched["user_id"], sched["content"], sched_mission_id),
                         )
                         await asyncio.to_thread(
                             _execute,

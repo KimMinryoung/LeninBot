@@ -429,8 +429,25 @@ async def _exec_create_task(
 ) -> str:
     from shared import create_task_in_db
 
+    # Inherit mission from parent task if chaining, otherwise use bot's active mission
+    task_mission_id = None
+    if not parent_task_id:
+        try:
+            from telegram_mission import get_active_mission
+            # user_id=0 tasks: check if any user has an active mission
+            # (bot-generated tasks are typically in response to a user's mission)
+            from db import query as _db_q
+            active = _db_q(
+                "SELECT id FROM telegram_missions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+            )
+            if active:
+                task_mission_id = active[0]["id"]
+        except Exception:
+            pass
+
     result = await asyncio.to_thread(
-        create_task_in_db, content, 0, priority, parent_task_id=parent_task_id,
+        create_task_in_db, content, 0, priority,
+        parent_task_id=parent_task_id, mission_id=task_mission_id,
     )
     if result["status"] == "ok":
         depth_info = f", depth={result.get('depth', 0)}" if parent_task_id else ""
@@ -542,23 +559,22 @@ TASK_CONTEXT_TOOLS = [
 ]
 
 
-def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
-    """Build task-context tool handlers with task_id bound via closure.
+def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission_id: int | None = None):
+    """Build task-context tool handlers with task_id/mission_id bound via closure.
 
     Returns (tools_list, handlers_dict) ready to merge into the tool loop.
     """
 
     async def _exec_save_finding(content: str, event_type: str = "finding") -> str:
+        if not mission_id:
+            return "No mission linked to this task — finding not saved."
         try:
-            from telegram_mission import get_active_mission, add_mission_event
-            mission = await asyncio.to_thread(get_active_mission, user_id)
-            if not mission:
-                return "No active mission — finding not saved."
+            from telegram_mission import add_mission_event
             truncated = content[:2000]
             await asyncio.to_thread(
-                add_mission_event, mission["id"], f"task#{task_id}", event_type, truncated
+                add_mission_event, mission_id, f"task#{task_id}", event_type, truncated
             )
-            return f"Saved {event_type} to mission #{mission['id']} ({len(truncated)} chars)."
+            return f"Saved {event_type} to mission #{mission_id} ({len(truncated)} chars)."
         except Exception as e:
             logger.error("save_finding error (task %d): %s", task_id, e)
             return f"Failed to save finding: {e}"
@@ -567,18 +583,17 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0):
         from shared import create_task_in_db
 
         # 1. Record progress to mission timeline
-        try:
-            from telegram_mission import get_active_mission, add_mission_event
-            mission = await asyncio.to_thread(get_active_mission, user_id)
-            if mission:
+        if mission_id:
+            try:
+                from telegram_mission import add_mission_event
                 event_content = f"Progress: {progress_summary[:500]}\nNext: {next_steps[:500]}"
                 await asyncio.to_thread(
-                    add_mission_event, mission["id"], f"task#{task_id}", "decision", event_content
+                    add_mission_event, mission_id, f"task#{task_id}", "decision", event_content
                 )
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-        # 2. Create child task (no scratchpad — child reads mission timeline)
+        # 2. Create child task (inherits mission_id via parent lookup)
         result = await asyncio.to_thread(
             create_task_in_db,
             next_steps,

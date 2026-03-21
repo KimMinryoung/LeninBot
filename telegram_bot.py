@@ -1069,23 +1069,33 @@ async def cmd_task(message: Message):
         await message.answer("사용법: /task <내용>")
         return
     try:
+        uid = message.from_user.id
+
+        # Resolve mission: use active or auto-create
+        mission_id = None
+        try:
+            from telegram_mission import get_active_mission, create_mission
+            mission = await asyncio.to_thread(get_active_mission, uid)
+            if mission:
+                mission_id = mission["id"]
+        except Exception as e:
+            logger.warning("Mission lookup failed: %s", e)
+
         rows = await asyncio.to_thread(
             _query,
-            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s) RETURNING id",
-            (message.from_user.id, content),
+            "INSERT INTO telegram_tasks (user_id, content, mission_id) VALUES (%s, %s, %s) RETURNING id",
+            (uid, content, mission_id),
         )
         task_id = rows[0]["id"] if rows else None
         msg = f"태스크가 큐에 추가되었습니다:\n{content}"
 
-        # Auto-create mission if none active
-        if task_id:
+        # Auto-create mission if none existed
+        if task_id and mission_id is None:
             try:
-                from telegram_mission import get_active_mission, create_mission
-                if not await asyncio.to_thread(get_active_mission, message.from_user.id):
-                    mission = await asyncio.to_thread(
-                        create_mission, message.from_user.id, content[:80], task_id
-                    )
-                    msg += f"\n\n🎯 미션 #{mission['id']} 자동 생성"
+                from telegram_mission import create_mission
+                mission = await asyncio.to_thread(create_mission, uid, content[:80], task_id)
+                mission_id = mission["id"]
+                msg += f"\n\n🎯 미션 #{mission_id} 자동 생성"
             except Exception as e:
                 logger.warning("Mission auto-create failed: %s", e)
 
@@ -1660,10 +1670,19 @@ async def handle_message(message: Message):
     # Create background task for unfinished work
     if continuation_task:
         task_content = f"[자동 승격] 대화 중 미완료 작업 이어서 수행:\n{continuation_task}\n\n원래 질문: {user_text[:500]}"
+        # Inherit active mission
+        cont_mission_id = None
+        try:
+            from telegram_mission import get_active_mission
+            m = await asyncio.to_thread(get_active_mission, user_id)
+            if m:
+                cont_mission_id = m["id"]
+        except Exception:
+            pass
         task_row = await asyncio.to_thread(
             _query_one,
-            "INSERT INTO telegram_tasks (user_id, content, status) VALUES (%s, %s, 'pending') RETURNING id",
-            (user_id, task_content),
+            "INSERT INTO telegram_tasks (user_id, content, status, mission_id) VALUES (%s, %s, 'pending', %s) RETURNING id",
+            (user_id, task_content, cont_mission_id),
         )
         task_id = task_row["id"] if task_row else "?"
         await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{task_id}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
@@ -2108,6 +2127,7 @@ async def bot_main():
         from self_tools import build_task_context_tools
         task_tools, task_handlers = build_task_context_tools(
             task["id"], task["user_id"], task.get("depth", 0),
+            mission_id=task.get("mission_id"),
         )
         # Send progress to the task's user (or all users if self-generated)
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
