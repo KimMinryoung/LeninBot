@@ -286,7 +286,7 @@ AIChatBot/
 #### local_agent/ (신규 패키지) — Windows 10 로컬 에이전트
 - **역할 분리**: 로컬 = 개인 워크스테이션 (파일 접근, 크롤링, 보고서), 서버 = 중앙 저장소 + 공개 서비스. 공유하는 건 기억(메모리)뿐.
 - **agent.py**: Claude Sonnet 4.6 tool-use 루프 (`telegram_bot.py` 패턴 복제). `max_rounds=10`, 프롬프트 캐싱, `CORE_IDENTITY` 공유.
-- **tools.py**: 9개 로컬 도구 정의 (Anthropic API format): `read_file`, `write_file`, `list_directory`, `web_search`, `crawl_page`, `query_local_db`, `manage_task`, `sync_push`, `sync_pull`
+- **tools.py**: 13개 로컬 도구 정의 (Anthropic API format): `read_file`, `write_file`, `list_directory`, `web_search`, `crawl_page`, `query_local_db`, `manage_task`, `sync_push`, `sync_pull`, `vectordb_ingest`, `crawl_site`, `execute_python`
 - **handlers.py**: 도구 핸들러 구현. `web_search`는 `tavily-python` 직접 사용. 파일 도구는 절대경로 자동 해석.
 - **crawler.py**: Playwright async 크롤링. Persistent Chromium context (쿠키 유지 → 로그인 세션). 결과를 SQLite `crawl_cache`에 자동 캐싱. JS 렌더링 페이지 지원.
 - **sync.py**: 서버 push/pull. `shared.py` fetch 함수들과 `db.py` 직접 사용. KG 에피소드 쓰기, 태스크 보고서 저장.
