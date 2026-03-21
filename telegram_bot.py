@@ -1378,7 +1378,7 @@ async def cmd_deploy(message: Message):
 
 
 @router.message(F.photo)
-async def handle_photo(message: Message, state: FSMContext):
+async def handle_photo(message: Message):
     """사용자가 이미지를 보내면 Claude Vision으로 분석"""
     if not _is_allowed(message.from_user.id):
         return
