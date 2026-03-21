@@ -15,7 +15,6 @@ from db import query as _query, execute as _execute, query_one as _query_one
 
 logger = logging.getLogger(__name__)
 _SCRATCHPAD_MAX_CHARS = 20_000
-_TASK_START_MARKER = "## Checkpoint: task start"
 _DEFAULT_MAX_RESUME_ATTEMPTS = 2
 _STARTUP_HANDOFF_MARKER = "## Checkpoint: startup handoff"
 _MAX_TASK_CHAIN_DEPTH = 5
@@ -63,15 +62,6 @@ def _append_task_scratchpad(task_id: int, note: str) -> None:
     _execute("UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s", (new_pad, task_id))
 
 
-def _is_code_delivery_task(content: str) -> bool:
-    text = content.lower()
-    keywords = (
-        "fix", "patch", "modify", "refactor", "test", "deploy",
-        "commit", "push", "코드", "수정", "테스트", "배포", "커밋", "푸시",
-    )
-    return any(k in text for k in keywords)
-
-
 # ── Process Task ─────────────────────────────────────────────────────
 
 async def process_task(
@@ -93,7 +83,7 @@ async def process_task(
 
     Args:
         bot: Telegram Bot instance.
-        task: Dict with id, user_id, content, scratchpad, parent_task_id, depth.
+        task: Dict with id, user_id, content, parent_task_id, depth.
         chat_with_tools_fn: Async callable matching _chat_with_tools signature.
         get_model_fn: Callable returning current model ID.
         task_system_prompt: System prompt for task execution.
@@ -112,7 +102,6 @@ async def process_task(
     depth = task.get("depth") or 0
     parent_task_id = task.get("parent_task_id")
     is_self_generated = (user_id == 0)
-    is_code_task = _is_code_delivery_task(content)
 
     # Inject mission context instead of scratchpad
     mission_ctx = ""
@@ -135,8 +124,6 @@ async def process_task(
     elif scratchpad:
         # Fallback: legacy scratchpad inheritance for old tasks
         content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
-
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     max_retries = 10
     retry_delay = 60

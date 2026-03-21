@@ -160,7 +160,7 @@ async def handle_manage_task(
     parent_task_id: int | None = None,
     status: str | None = None,
     result: str | None = None,
-    scratchpad: str | None = None,
+    **_kwargs,
 ) -> str:
     from local_agent.local_db import query, execute
     try:
@@ -208,8 +208,6 @@ async def handle_manage_task(
                 lines.append(f"  {indent}#{r['id']} [{r['status']}]{parent_info} {r['content'][:80]}")
                 if r.get("result"):
                     lines.append(f"  {indent}     Result: {r['result'][:120]}")
-                if r.get("scratchpad"):
-                    lines.append(f"  {indent}     Scratchpad: {len(r['scratchpad'])} chars")
             return f"{len(rows)} task(s):\n" + "\n".join(lines)
 
         elif action == "update":
@@ -224,14 +222,8 @@ async def handle_manage_task(
             if result:
                 parts.append("result = ?")
                 params.append(result)
-            if scratchpad is not None:
-                # Enforce 20KB limit
-                if len(scratchpad) > 20_000:
-                    scratchpad = scratchpad[:20_000] + "\n[truncated at 20KB]"
-                parts.append("scratchpad = ?")
-                params.append(scratchpad)
             if not parts:
-                return "Error: provide 'status', 'result', or 'scratchpad' to update."
+                return "Error: provide 'status' or 'result' to update."
             params.append(task_id)
             execute(f"UPDATE tasks SET {', '.join(parts)} WHERE id = ?", params)
 
