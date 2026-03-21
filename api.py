@@ -236,6 +236,43 @@ async def get_history(
     return {"history": rows}
 
 
+@app.get("/reports")
+async def list_reports(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Completed task reports list (public, for BichonWebsite)."""
+    rows = db_query(
+        """SELECT id, content, completed_at,
+                  LEFT(result, 300) AS excerpt
+           FROM telegram_tasks
+           WHERE status = 'done' AND result IS NOT NULL AND result != ''
+           ORDER BY completed_at DESC
+           LIMIT %s OFFSET %s""",
+        (limit, offset),
+    )
+    count_rows = db_query(
+        "SELECT COUNT(*) AS cnt FROM telegram_tasks WHERE status = 'done' AND result IS NOT NULL AND result != ''",
+    )
+    total = count_rows[0]["cnt"] if count_rows else 0
+    return {"reports": rows, "total": total}
+
+
+@app.get("/reports/{report_id}")
+async def get_report(report_id: int):
+    """Single task report (full markdown)."""
+    rows = db_query(
+        """SELECT id, content, result, created_at, completed_at
+           FROM telegram_tasks
+           WHERE id = %s AND status = 'done' AND result IS NOT NULL""",
+        (report_id,),
+    )
+    if not rows:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "Report not found"})
+    return {"report": rows[0]}
+
+
 @app.delete("/session/{session_id}")
 async def clear_session(session_id: str):
     """특정 세션의 대화 기록(체크포인트)을 삭제합니다."""
