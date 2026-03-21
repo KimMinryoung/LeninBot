@@ -203,14 +203,16 @@ data: {"type": "error", "content": "에러 메시지"}
 
 ---
 
-## 백그라운드 스케줄러
+## systemd 타이머 (스케줄 작업)
 
-서버 시작 시 자동 실행되는 백그라운드 태스크:
+API 서버와 분리된 독립 systemd timer로 실행:
 
-| 스케줄러 | 주기 | 설명 |
-|----------|------|------|
-| 일기 작성 (`diary_writer`) | 6시간 (0, 6, 12, 18시 KST) | AI 일기 자동 작성 |
-| 경험 메모리 (`experience_writer`) | 매일 00:30 KST | 대화 경험 압축 및 저장 |
+| 타이머 | 주기 | 설명 |
+|--------|------|------|
+| `leninbot-diary.timer` | 6시간 (0, 6, 12, 18시 KST) | AI 일기 자동 작성 (`diary_writer.py`) |
+| `leninbot-experience.timer` | 매일 00:30 KST | 대화 경험 압축 및 저장 (`experience_writer.py`) |
+
+로그 확인: `journalctl -u leninbot-diary`, `journalctl -u leninbot-experience`
 
 ---
 

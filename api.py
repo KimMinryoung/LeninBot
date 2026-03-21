@@ -30,57 +30,8 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
         raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
 
 
-# ── Diary scheduler (background task) ─────────────────────────
-async def _diary_scheduler():
-    """6 의 배수 시각 정각 (0, 6, 12, 18 시) 에 일기 자동 작성 (KST 기준)."""
-    from datetime import datetime, timedelta, timezone
-
-    KST = timezone(timedelta(hours=9))
-
-    while True:
-        now = datetime.now(KST)
-        PERIODHOUR = 6
-        # 다음 6 의 배수 정각 계산
-        current_hour = now.hour
-        next_hour = current_hour + (PERIODHOUR - current_hour % PERIODHOUR) if current_hour % PERIODHOUR != 0 else current_hour + PERIODHOUR
-        next_run = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=(next_hour - current_hour))
-        wait_seconds = (next_run - now).total_seconds()
-        print(f"📝 [일기 스케줄러] 다음 실행: {next_run.strftime('%H:%M')} (KST, {int(wait_seconds)}초 후)")
-
-        await asyncio.sleep(wait_seconds)
-        try:
-            from diary_writer import write_diary
-            await asyncio.to_thread(write_diary)
-        except Exception as e:
-            print(f"⚠️ [일기 스케줄러] 오류: {e}")
-
-
-async def _experience_scheduler():
-    """매일 00:30 KST — 경험 메모리 압축 및 저장."""
-    from datetime import datetime, timedelta, timezone
-
-    KST = timezone(timedelta(hours=9))
-
-    while True:
-        now = datetime.now(KST)
-        target = now.replace(hour=0, minute=30, second=0, microsecond=0)
-        if now >= target:
-            target += timedelta(days=1)
-        wait_seconds = (target - now).total_seconds()
-        print(f"🧠 [경험 스케줄러] 다음 실행: {target.strftime('%Y-%m-%d %H:%M')} KST ({int(wait_seconds)}초 후)")
-
-        await asyncio.sleep(wait_seconds)
-        try:
-            from experience_writer import write_experiences
-            await asyncio.to_thread(write_experiences)
-        except Exception as e:
-            print(f"⚠️ [경험 스케줄러] 오류: {e}")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    diary_task = asyncio.create_task(_diary_scheduler())
-    experience_task = asyncio.create_task(_experience_scheduler())
     # Telegram bot should run in its dedicated systemd service by default.
     # Optional fallback for single-process dev environments:
     run_telegram_in_api = os.getenv("RUN_TELEGRAM_IN_API", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -91,8 +42,6 @@ async def lifespan(app: FastAPI):
     yield
     if bot_task is not None:
         bot_task.cancel()
-    experience_task.cancel()
-    diary_task.cancel()
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)

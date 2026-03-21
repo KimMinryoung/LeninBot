@@ -1,0 +1,9 @@
+[Unit]
+Description=LeninBot Diary Writer Timer (every 6h KST: 0, 6, 12, 18)
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target
