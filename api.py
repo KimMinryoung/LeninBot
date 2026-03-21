@@ -243,8 +243,7 @@ async def list_reports(
 ):
     """Completed task reports list (public, for BichonWebsite)."""
     rows = db_query(
-        """SELECT id, content, completed_at,
-                  LEFT(result, 300) AS excerpt
+        """SELECT id, content, result, created_at, completed_at
            FROM telegram_tasks
            WHERE status = 'done' AND result IS NOT NULL AND result != ''
            ORDER BY completed_at DESC
