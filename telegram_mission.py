@@ -112,7 +112,11 @@ def create_mission(user_id: int, title: str, task_id: int | None = None) -> dict
 def add_mission_event(
     mission_id: int, source: str, event_type: str, content: str,
 ) -> None:
-    """Add an event to a mission timeline."""
+    """Add an event to a mission timeline. Only active missions accept events."""
+    # Guard: don't write to closed missions
+    rows = _query("SELECT status FROM telegram_missions WHERE id = %s", (mission_id,))
+    if not rows or rows[0]["status"] != "active":
+        return
     _execute(
         "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
         "VALUES (%s, %s, %s, %s)",

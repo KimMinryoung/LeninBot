@@ -65,8 +65,11 @@ def create_mission_from_chat(title: str, task_id: int | None = None) -> dict:
 
 def add_mission_event(
     mission_id: int, source: str, event_type: str, content: str
-) -> int:
-    """Add an event to a mission timeline."""
+) -> int | None:
+    """Add an event to a mission timeline. Only active missions accept events."""
+    rows = query("SELECT status FROM missions WHERE id = ?", (mission_id,))
+    if not rows or rows[0]["status"] != "active":
+        return None
     return execute(
         "INSERT INTO mission_events (mission_id, source, event_type, content) VALUES (?, ?, ?, ?)",
         (mission_id, source, event_type, content),
