@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-20
+# Project State Report — 2026-03-22
 
 ## Identity
 
@@ -19,8 +19,8 @@ User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer
            (chatbot.py)           ─► claude_loop.py (Claude tool-use loop, shared)
            ─► PostgreSQL/pgvector ─► telegram_tasks.py (bg workers, scheduler, monitor)
            ─► Gemini 3.1 FL (gen) ─► Claude Sonnet 4.6 (chat + task)
-           ─► Gemini 2.5 FL-L     ─► Claude Haiku 4.5 (light, reserved)
-           ─► BGE-M3 (CPU)       ─► web_search (Claude built-in, server-side)
+           ─► Gemini 2.5 FL-L     ─► web_search (Tavily API, client-side)
+           ─► BGE-M3 (CPU)       ─► get_finance_data (yfinance, 10min cache)
            ─► LangGraph MemorySaver
 
      ─► GraphMemoryService (graph_memory/) ─► Neo4j (Graphiti knowledge graph)
@@ -153,6 +153,7 @@ AIChatBot/
 ├── claude_loop.py            # Claude tool-use loop + sanitize_messages (~333 lines, shared with local_agent)
 ├── telegram_tasks.py         # Background task worker, scheduler, system monitor (~327 lines, extracted)
 ├── telegram_mission.py       # Mission context system for Telegram (shared chat/task timeline, PostgreSQL)
+├── finance_data.py           # Real-time finance data tool (yfinance, 10min in-memory cache, 8 tickers)
 ├── diary_writer.py           # Autonomous diary writer (~502 lines)
 ├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
 ├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
@@ -213,7 +214,7 @@ AIChatBot/
 13. Session management API: `DELETE /session/{id}` and `DELETE /sessions`
 14. Concurrent request protection: per-session `asyncio.Lock` (second request gets immediate SSE error)
 15. Knowledge graph integration: kg_retrieve node in vectorstore path + per-step KG in plan path (with cross-step dedup); structured entity/relation facts injected into strategize and generate prompts; graceful degradation on KG failure
-16. **Telegram bot** (aiogram 3.x): Claude Sonnet 4.6 (chat + task) with Anthropic tool-use (7 tools + 11 self-tools); Claude built-in web search (server-side); file system tools (read/write/list/execute_python); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), `/deploy` remote deployment trigger. Model IDs resolved dynamically via Anthropic Models API at startup.
+16. **Telegram bot** (aiogram 3.x): Claude Sonnet 4.6 (chat + task) with Anthropic tool-use (8 tools + 11 self-tools); web search via Tavily API (client-side, replaced Claude server-side tool); `get_finance_data` real-time market prices (yfinance, 10min cache: gold, silver, DXY, WTI, Brent, S&P 500, US 10Y, KOSPI); file system tools (read/write/list/execute_python); `/chat` conversational agent, `/task` structured intelligence report agent (delivers .md files), `/deploy` remote deployment trigger. Model IDs resolved dynamically via Anthropic Models API at startup. System prompts use XML tags for block-level structure.
 17. **Unified identity**: CORE_IDENTITY in shared.py — single personality definition used by all three interfaces (web, Telegram, diary)
 18. **Autonomous diary writer**: Cron-triggered, fetches recent conversations + news, generates dialectical diary entries, auto-ingests news to knowledge graph
 19. **Datetime-aware system prompts**: All interfaces inject current KST datetime to prevent knowledge-cutoff confusion
@@ -236,6 +237,39 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-22 — Web Search Fix, Finance Data, XML Prompts
+
+#### telegram_tools.py + claude_loop.py — Web Search: Claude Server → Tavily Client
+- **근본 원인**: Claude 서버 사이드 `web_search` (`web_search_20250305`)가 커스텀 `tool_use`와 동일 응답에 포함될 때 400 에러 발생. 텍스트 변환, 원본 보존, 완전 제거 모두 실패 — API가 서버 도구 프로토콜 블록 누락을 거부.
+- **해결**: Tavily API 클라이언트 도구로 교체. 같은 `web_search` 이름 유지. `AsyncTavilyClient`로 비동기 검색, title+URL+content 반환.
+- **서버 도구 잔재 제거**: `claude_loop.py`에서 `server_tool_use`/`web_search_tool_result` 처리 코드를 방어적 fallback으로 축소. pending server tool injection 로직 삭제.
+
+#### finance_data.py (신규) — 실시간 금융 데이터 도구
+- **`get_finance_data` 도구**: yfinance로 8개 자산 조회 (gold, silver, DXY, WTI, Brent, S&P 500, US 10Y, KOSPI)
+- **인메모리 캐시**: 10분 TTL, `yf.Tickers()` 배치 호출 (1회 HTTP로 전체 fetch)
+- **`finance_summary()`**: 프롬프트 주입용 한 줄 요약 함수
+- **4곳 주입**: Telegram 채팅/태스크 시스템 프롬프트, 웹 챗봇 generate_node, 일기 프롬프트
+- **의존성**: `yfinance` 추가 (requirements.txt)
+
+#### telegram_bot.py — 도구 이름 중복 해결 + XML 프롬프트
+- **dedup**: `merged_tools = TOOLS + extra_tools` → 이름 기반 중복 제거 (extra_tools 우선). MISSION_TOOL 중복 등록으로 인한 "Tool names must be unique" 400 에러 해결.
+- **XML 프롬프트**: Markdown `##` 헤더 → XML 태그로 교체. `<tool-strategy>`, `<workload-management>`, `<mission-management>`, `<response-rules>`, `<rules>`, `<mission-guidelines>`, `<context>` 등 블록 경계를 명시적으로 구분.
+- **런타임 주입도 XML**: `<system-alerts>`, `<market-data>`, `<past-experiences>`, `<active-mission>`, `<mission-context>`, `<task>`
+
+#### claude_loop.py — 도구 결과 보존 + 진단 개선
+- **`_strip_tool_blocks` 개선**: 기존에는 tool_use/tool_result 블록을 전부 삭제하고 `"(도구 실행 결과 생략됨)"` 플레이스홀더로 교체 → 도구 결과를 텍스트로 변환하여 보존 (`[도구 호출: name(input)]`, `[도구 결과: content]`)
+- **에러 덤프 대상 변경**: `working_msgs` → `api_msgs` (실제 전송된 페이로드 덤프)
+
+#### telegram_tools.py — execute_python 자동 import
+- 봇이 생성한 코드에서 `import subprocess` 누락으로 `NameError` 반복 → 실행 코드 앞에 `import os, sys, json, subprocess, re` + `sys.path.insert(0, project_root)` 자동 주입
+
+#### Hetzner 서버 — logviewer 계정 추가
+- **목적**: Claude Code가 SSH로 서버 로그를 직접 조회
+- **계정**: `logviewer@37.27.33.127`, rbash (restricted bash)
+- **허용 명령**: journalctl, grep, cat, head, tail, less, ls, wc
+- **SSH 키**: `~/.ssh/logviewer_key` (passphrase 없음)
+- **앱 로그**: `/home/grass/leninbot/logs/` (setfacl 읽기 권한)
 
 ### 2026-03-20 — Agent Robustness Overhaul
 
@@ -269,12 +303,11 @@ AIChatBot/
 - **`/deploy` 명령**: 텔레그램에서 원격 배포 트리거 (setsid로 분리 실행)
 - **파일**: `deploy.sh`, `setup-server.sh`, `systemd/leninbot-api.service`, `systemd/leninbot-telegram.service`, `doc/hetzner_deploy_guide.md`
 
-#### Telegram Bot: Sonnet 4.6 + File System + Claude Web Search
+#### Telegram Bot: Sonnet 4.6 + File System
 - **Main LLM**: Claude Haiku 4.5 → **Claude Sonnet 4.6** (chat + task 통합)
-- **Light LLM**: `_CLAUDE_MODEL_LIGHT` (Haiku 4.5) 등록 — 향후 경량 작업용
-- **Web Search**: Tavily 커스텀 도구 → **Claude built-in** (`web_search_20250305`, 서버 사이드)
+- **Web Search**: Claude built-in (`web_search_20250305`) 도입 → 이후 2026-03-22에 Tavily 클라이언트로 재교체 (서버 도구 400 에러 문제)
 - **파일 시스템 도구 추가**: `read_file`, `write_file`, `list_directory`, `execute_python` — 서버 직접 접근
-- **`_chat_with_tools()` 업데이트**: `server_tool_use`, `web_search_tool_result` 블록 처리, `pause_turn` 지원
+- **`_chat_with_tools()` 업데이트**: `pause_turn` 지원
 
 #### self_tools.py — Render → Hetzner 전환
 - **제거**: `read_render_status`, `read_render_logs` (주석처리)
