@@ -525,12 +525,11 @@ def _append_user_text_message(msgs: list[dict], text: str):
 
 
 def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
-    """Build API-safe messages by stripping server tool protocol blocks.
+    """Build API-safe messages from working transcript.
 
-    Server-side tool blocks (server_tool_use, web_search_tool_result) are
-    completely removed.  The API handles server tools internally and their
-    presence alongside custom tool_use blocks causes 400 errors.
-    Custom tool_use/tool_result blocks are preserved for the local tool loop.
+    Server tool blocks are converted to text at response-processing time,
+    so working_msgs should not contain them.  The strip here is a defensive
+    fallback.  Custom tool_use/tool_result blocks are preserved.
     """
     prepared = []
     for m in msgs:
@@ -744,16 +743,14 @@ async def chat_with_tools(
                     except Exception:
                         pass
             elif btype == "server_tool_use":
-                tid = str(b.get("id", "")).strip()
                 tname = str(b.get("name", "")).strip()
-                tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
-                if tid and tname:
-                    assistant_content.append({
-                        "type": "server_tool_use",
-                        "id": tid,
-                        "name": tname,
-                        "input": tinput,
-                    })
+                # Convert to text immediately — keeping server_tool protocol
+                # blocks in working_msgs causes 400 errors in subsequent rounds
+                # when custom tool_use blocks co-exist.
+                assistant_content.append({
+                    "type": "text",
+                    "text": f"[서버 도구 호출: {tname}]",
+                })
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname or '?'}(server-side)")
                 if on_progress:
                     try:
@@ -761,13 +758,13 @@ async def chat_with_tools(
                     except Exception:
                         pass
             elif btype == "web_search_tool_result":
-                tid = str(b.get("tool_use_id", "")).strip()
-                wcontent = b.get("content", [])
-                assistant_content.append({
-                    "type": "web_search_tool_result",
-                    "tool_use_id": tid,
-                    "content": wcontent if isinstance(wcontent, list) else [],
-                })
+                # Convert search results to text — preserves content for context
+                wcontent = _coerce_text(b.get("content", "")).strip()
+                if wcontent:
+                    assistant_content.append({
+                        "type": "text",
+                        "text": f"[검색 결과]\n{wcontent[:4000]}",
+                    })
             elif btype == "tool_use":
                 tid = str(b.get("id", "")).strip()
                 tname = str(b.get("name", "")).strip()
@@ -844,27 +841,9 @@ async def chat_with_tools(
                 })
 
         # Append assistant message with tool_use + user message with tool_results
+        # Note: server_tool blocks are already converted to text above,
+        # so working_msgs never contain server_tool_use/web_search_tool_result.
         working_msgs.append({"role": "assistant", "content": assistant_content})
-
-        # Fix: inject dummy web_search_tool_result for any unresolved server_tool_use
-        already_resolved_server_ids = {
-            b.get("tool_use_id") for b in assistant_content
-            if isinstance(b, dict) and b.get("type") == "web_search_tool_result"
-        }
-        pending_server_ids = [
-            b["id"] for b in assistant_content
-            if isinstance(b, dict) and b.get("type") == "server_tool_use"
-            and b["id"] not in already_resolved_server_ids
-        ]
-        if pending_server_ids:
-            for tid in pending_server_ids:
-                assistant_content.append({
-                    "type": "web_search_tool_result",
-                    "tool_use_id": tid,
-                    "content": [],
-                })
-            working_msgs[-1] = {"role": "assistant", "content": assistant_content}
-            logger.debug("Injected %d dummy web_search_tool_result(s) into assistant content", len(pending_server_ids))
 
         if tool_results:
             # Inject budget warning at 80% threshold (as separate text block in user message)
