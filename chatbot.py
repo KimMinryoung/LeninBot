@@ -920,6 +920,16 @@ def generate_node(state: AgentState):
 
     current_dt = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
+    # Finance data context
+    _finance_context = ""
+    try:
+        from finance_data import finance_summary
+        _fs = finance_summary()
+        if _fs:
+            _finance_context = f"[MARKET DATA] {_fs}"
+    except Exception:
+        pass
+
     # Static content first (maximizes Gemini implicit caching), variable content last
     # CORE_IDENTITY + STYLE + MISSION + ANALYSIS METHOD are stable across calls → cacheable prefix
     # CURRENT TIME + SOURCE MATERIAL + QUESTION change per call → placed at the end
@@ -930,6 +940,7 @@ def generate_node(state: AgentState):
 [MISSION] {mission}
 
 [CURRENT TIME] {current_dt}
+{_finance_context}
 [QUESTION] {last_user_query}
 
 Respond in the same language as the user's question."""
@@ -940,6 +951,7 @@ Respond in the same language as the user's question."""
 [MISSION] {mission}
 {analysis_method}
 [CURRENT TIME] {current_dt}
+{_finance_context}
 [SOURCE MATERIAL] {context if context else "(No sources found.)"}{kg_section}{step_section}{exp_section}{self_section}
 
 [QUESTION] {last_user_query}

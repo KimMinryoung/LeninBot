@@ -378,6 +378,9 @@ DO NOT write about these. If news overlaps, find a DIFFERENT angle or SKIP it.
 ## Recent task results
 {task_summary}
 
+## Current market data
+{finance_data}
+
 ## MANDATORY RULES
 1. Write in first-person (me, comrades, etc.).
 2. Reflect the mood of the time.
@@ -538,6 +541,13 @@ def _generate_diary(
     else:
         task_summary = "(No recent tasks)"
 
+    # Finance data
+    try:
+        from finance_data import finance_summary
+        _fdata = finance_summary()
+    except Exception:
+        _fdata = "(unavailable)"
+
     prompt = _DIARY_PROMPT.format(
         time_context=time_context,
         n_logs=n_logs,
@@ -546,6 +556,7 @@ def _generate_diary(
         banned_topics=banned_topics,
         self_updates=self_updates,
         task_summary=task_summary,
+        finance_data=_fdata,
     )
 
     try:
