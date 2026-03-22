@@ -968,27 +968,56 @@ async def cmd_clear(message: Message):
 
 @router.message(Command("mission"))
 async def cmd_mission(message: Message):
-    """View or close the active mission."""
+    """View, create, or close the active mission.
+    Usage:
+      /mission               — 현재 미션 상태 조회
+      /mission create <제목>  — 새 미션 생성
+      /mission close         — 활성 미션 종료
+    """
     if not _is_allowed(message.from_user.id):
         return
     uid = message.from_user.id
-    arg = (message.text or "").removeprefix("/mission").strip().lower()
+    raw_arg = (message.text or "").removeprefix("/mission").strip()
+    arg_lower = raw_arg.lower()
 
     try:
-        from telegram_mission import get_active_mission, get_mission_events, close_mission
+        from telegram_mission import get_active_mission, get_mission_events, close_mission, create_mission
         mission = await asyncio.to_thread(get_active_mission, uid)
 
-        if arg == "close":
+        # --- CREATE ---
+        if arg_lower.startswith("create"):
+            title = raw_arg[len("create"):].strip()
+            if not title:
+                await message.answer("❌ 미션 제목을 입력하세요.\n예: `/mission create 3월 금값 분석`")
+                return
+            if mission:
+                await message.answer(
+                    f"⚠️ 이미 활성 미션이 있습니다: *#{mission['id']}* {mission['title']}\n"
+                    f"먼저 `/mission close`로 종료하세요."
+                )
+                return
+            new_mission = await asyncio.to_thread(create_mission, uid, title)
+            await message.answer(
+                f"✅ 미션 생성됨\n"
+                f"🎯 *#{new_mission['id']}*: {new_mission['title']}"
+            )
+            return
+
+        # --- CLOSE ---
+        if arg_lower == "close":
             if not mission:
                 await message.answer("활성 미션이 없습니다.")
                 return
             await asyncio.to_thread(close_mission, mission["id"])
-            await message.answer(f"미션 #{mission['id']} 종료: {mission['title']}")
+            await message.answer(f"✅ 미션 #{mission['id']} 종료: {mission['title']}")
             return
 
-        # Default: show status
+        # --- STATUS (default) ---
         if not mission:
-            await message.answer("활성 미션이 없습니다.")
+            await message.answer(
+                "활성 미션이 없습니다.\n"
+                "새 미션을 만들려면: `/mission create <제목>`"
+            )
             return
         events = await asyncio.to_thread(get_mission_events, mission["id"], 10)
         lines = [f"🎯 *미션 #{mission['id']}*: {mission['title']}", f"생성: {mission['created_at']}"]
@@ -998,7 +1027,7 @@ async def cmd_mission(message: Message):
                 lines.append(f"  `[{e['source']}]` {e['event_type']}: {str(e['content'] or '')[:100]}")
         await message.answer("\n".join(lines))
     except Exception as e:
-        await message.answer(f"미션 조회 오류: {e}")
+        await message.answer(f"미션 오류: {e}")
 
 
 @router.message(Command("errors"))
