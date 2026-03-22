@@ -44,9 +44,16 @@ TOOLS = [
         },
     },
     {
-        "type": "web_search_20250305",
         "name": "web_search",
-        "max_uses": 5,
+        "description": "Search the web via Tavily API. Returns relevant snippets with URLs. Use for current events, real-time data, fact-checking.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query."},
+                "max_results": {"type": "integer", "description": "Number of results (1-10).", "default": 5},
+            },
+            "required": ["query"],
+        },
     },
     {
         "name": "fetch_url",
@@ -489,10 +496,38 @@ def build_mission_handler(user_id: int):
     return _handle
 
 
+# ── Web Search (Tavily) ──────────────────────────────────────────────
+
+async def _exec_web_search(query: str, max_results: int = 5) -> str:
+    """Search the web via Tavily API."""
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+    if not api_key:
+        return "Error: TAVILY_API_KEY not set."
+    max_results = max(1, min(max_results, 10))
+    try:
+        from tavily import AsyncTavilyClient
+        client = AsyncTavilyClient(api_key=api_key)
+        resp = await client.search(query, max_results=max_results)
+        results = resp.get("results", [])
+        if not results:
+            return f"No results for: {query}"
+        lines = []
+        for r in results:
+            title = r.get("title", "")
+            url = r.get("url", "")
+            content = r.get("content", "")[:500]
+            lines.append(f"### {title}\n{url}\n{content}")
+        return "\n\n".join(lines)
+    except Exception as e:
+        logger.error("Tavily search error: %s", e)
+        return f"Web search failed: {e}"
+
+
 # ── Handler Registry ─────────────────────────────────────────────────
 TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
+    "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,

@@ -634,13 +634,10 @@ async def chat_with_tools(
     # Prompt caching: mark system prompt and tools as cacheable
     cached_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
 
-    # Mark last custom tool for caching (skip server-side tools like web_search)
+    # Mark last tool for prompt caching
     cached_tools = [dict(t) for t in tools]
-    for i in range(len(cached_tools) - 1, -1, -1):
-        if cached_tools[i].get("type", "").startswith("web_search"):
-            continue  # server-side tool — can't add cache_control
-        cached_tools[i] = {**cached_tools[i], "cache_control": {"type": "ephemeral"}}
-        break
+    if cached_tools:
+        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
     response = None
     round_num = 0
@@ -742,29 +739,13 @@ async def chat_with_tools(
                         await on_progress("thinking", f"[{round_num}] {preview}")
                     except Exception:
                         pass
-            elif btype == "server_tool_use":
-                tname = str(b.get("name", "")).strip()
-                # Convert to text immediately — keeping server_tool protocol
-                # blocks in working_msgs causes 400 errors in subsequent rounds
-                # when custom tool_use blocks co-exist.
-                assistant_content.append({
-                    "type": "text",
-                    "text": f"[서버 도구 호출: {tname}]",
-                })
-                tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname or '?'}(server-side)")
-                if on_progress:
-                    try:
-                        await on_progress("tool_call", f"[{round_num}] 🌐 {tname or 'server_tool'}")
-                    except Exception:
-                        pass
-            elif btype == "web_search_tool_result":
-                # Convert search results to text — preserves content for context
-                wcontent = _coerce_text(b.get("content", "")).strip()
-                if wcontent:
-                    assistant_content.append({
-                        "type": "text",
-                        "text": f"[검색 결과]\n{wcontent[:4000]}",
-                    })
+            elif btype in ("server_tool_use", "web_search_tool_result"):
+                # Defensive fallback: server-side tools are no longer used
+                # (replaced by Tavily client tool), but convert to text if
+                # the API ever returns them unexpectedly.
+                t = _coerce_text(b.get("content", "") or b.get("input", "") or b.get("name", ""))
+                if t:
+                    assistant_content.append({"type": "text", "text": f"[server: {t[:2000]}]"})
             elif btype == "tool_use":
                 tid = str(b.get("id", "")).strip()
                 tname = str(b.get("name", "")).strip()
