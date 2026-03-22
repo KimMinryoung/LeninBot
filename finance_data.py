@@ -23,6 +23,7 @@ TICKERS = {
     "brent": "BZ=F",
     "sp500": "^GSPC",
     "us10y": "^TNX",
+    "kospi": "^KS11",
 }
 
 LABELS = {
@@ -33,6 +34,7 @@ LABELS = {
     "brent": "브렌트유(USD/bbl)",
     "sp500": "S&P 500",
     "us10y": "미국채10Y(%)",
+    "kospi": "KOSPI",
 }
 
 CACHE_TTL = 600  # 10 minutes
