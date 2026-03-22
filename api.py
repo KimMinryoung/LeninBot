@@ -32,6 +32,26 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── KG Eager Init ────────────────────────────────────────────────
+    # Initialize Neo4j connection immediately at startup (background thread)
+    # so the first real request doesn't pay the cold-start penalty.
+    def _eager_init_kg():
+        from shared import get_kg_service
+        svc = get_kg_service()
+        if svc:
+            import logging
+            logging.getLogger(__name__).info("[startup] KG eager init succeeded")
+        else:
+            import logging
+            logging.getLogger(__name__).warning("[startup] KG eager init failed — will retry on first request")
+
+    import threading
+    threading.Thread(target=_eager_init_kg, daemon=True, name="kg-eager-init").start()
+
+    # ── KG Health Check (10 min interval) ────────────────────────────
+    from shared import start_kg_healthcheck
+    start_kg_healthcheck(interval=600)
+
     # Telegram bot should run in its dedicated systemd service by default.
     # Optional fallback for single-process dev environments:
     run_telegram_in_api = os.getenv("RUN_TELEGRAM_IN_API", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -42,6 +62,7 @@ async def lifespan(app: FastAPI):
     yield
     if bot_task is not None:
         bot_task.cancel()
+
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)

@@ -184,6 +184,42 @@ def reset_kg_service():
                 _kg_loop = None
     logger.info("[KG] service reset — will retry on next access")
 
+# ── KG Health Check ──────────────────────────────────────────────────
+_kg_healthcheck_started = False
+
+
+def start_kg_healthcheck(interval: int = 600) -> None:
+    """Start a background daemon thread that pings Neo4j every `interval` seconds.
+
+    If the ping fails the KG singleton is marked unhealthy so the next
+    get_kg_service() call triggers a fresh re-initialization.
+    Called once from api.py / telegram_bot.py lifespan.
+    """
+    global _kg_healthcheck_started
+    if _kg_healthcheck_started:
+        return
+    _kg_healthcheck_started = True
+
+    def _checker():
+        while True:
+            time.sleep(interval)
+            svc = _kg_service  # read without lock — snapshot
+            if svc is None:
+                # Already unhealthy; get_kg_service() will retry on next real request
+                logger.debug("[KG healthcheck] service is None, skipping ping")
+                continue
+            try:
+                run_kg_async(svc._graphiti.driver.execute_query("RETURN 1"))
+                logger.debug("[KG healthcheck] ping OK")
+            except Exception as e:
+                logger.warning("[KG healthcheck] ping failed — marking unhealthy: %s", e)
+                _mark_kg_unhealthy(str(e))
+
+    t = threading.Thread(target=_checker, daemon=True, name="kg-healthcheck")
+    t.start()
+    logger.info("[KG healthcheck] started (interval=%ds)", interval)
+
+
 
 # ── Shared Memory Access ────────────────────────────────────────────
 # Reusable query functions for cross-module memory retrieval.
