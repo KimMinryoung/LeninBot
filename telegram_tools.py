@@ -330,9 +330,8 @@ _BLOCKED_CODE_PATTERNS = [
     "shutil.rmtree", "os.rmdir", "os.removedirs",
     # System-level danger
     "os.system(", "os.exec",
-    # Credential/env exfiltration
-    "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
-    "GEMINI_API_KEY", "OPENAI_API_KEY", "ADMIN_API_KEY",
+    # Credential/env exfiltration — safe_env filtering already protects values
+    # (env var name blocking removed: prevented legitimate os.getenv usage)
 ]
 
 # Modules/builtins that should never be imported or called in sandboxed code
