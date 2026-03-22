@@ -400,11 +400,14 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
         return f"❌ Code execution blocked: {safety_err}"
 
     def _run():
+        # Prepend common imports so the model doesn't need to remember them
+        prelude = "import os, sys, json, subprocess, re\nsys.path.insert(0, %r)\n" % project_root
+        full_code = prelude + code
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", dir=project_root,
             delete=False, encoding="utf-8",
         ) as f:
-            f.write(code)
+            f.write(full_code)
             tmp_path = f.name
         try:
             # Filter out sensitive env vars from subprocess
