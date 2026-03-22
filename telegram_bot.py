@@ -878,7 +878,19 @@ async def _chat_with_tools(
         system_alerts=_format_system_alerts(),
         skills_section=build_skills_prompt(),
     )
-    merged_tools = TOOLS + (extra_tools or [])
+    # Deduplicate tools by name — extra_tools override TOOLS with the same name
+    seen_names: set[str] = set()
+    merged_tools: list[dict] = []
+    for t in (extra_tools or []):
+        name = t.get("name", "")
+        if name and name not in seen_names:
+            seen_names.add(name)
+            merged_tools.append(t)
+    for t in TOOLS:
+        name = t.get("name", "")
+        if name not in seen_names:
+            seen_names.add(name)
+            merged_tools.append(t)
     merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
     return await chat_with_tools(
         messages,
