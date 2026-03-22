@@ -141,7 +141,7 @@ def build_mission_context(user_id: int) -> str:
             return ""
         events = get_mission_events(mission["id"], limit=10)
         lines = [
-            f"\n\n## Active Mission: #{mission['id']} — {mission['title']}",
+            f"\n<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
             f"Started: {mission['created_at']}",
         ]
         if events:
@@ -151,6 +151,7 @@ def build_mission_context(user_id: int) -> str:
                 lines.append(
                     f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {content_preview}"
                 )
+        lines.append("</active-mission>")
         return "\n".join(lines)
     except Exception as e:
         logger.debug("Mission context build failed: %s", e)

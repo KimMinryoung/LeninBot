@@ -352,7 +352,8 @@ def _format_system_alerts() -> str:
     _prune_alerts()
     if not _system_alerts:
         return ""
-    return "\n\n## System Alerts\n" + "\n".join(f"- {m}" for _, m in _system_alerts)
+    items = "\n".join(f"- {m}" for _, m in _system_alerts)
+    return f"\n<system-alerts>\n{items}\n</system-alerts>"
 
 
 def _get_finance_context() -> str:
@@ -361,7 +362,7 @@ def _get_finance_context() -> str:
         from finance_data import finance_summary
         summary = finance_summary()
         if summary:
-            return f"\n## Current Market Data\n{summary}"
+            return f"\n<market-data>\n{summary}\n</market-data>"
     except Exception as e:
         logger.debug("Finance data unavailable: %s", e)
     return ""
@@ -370,7 +371,7 @@ def _get_finance_context() -> str:
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 Operating via Telegram. Use tools proactively when data would improve the answer — don't rely on memory alone.
 
-## Tool Strategy
+<tool-strategy>
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
@@ -381,44 +382,55 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - Your own source code → read_file (e.g. read_file("telegram_bot.py"), read_file("shared.py"))
 - Server file management → list_directory, read_file, write_file
 - Data processing / automation → execute_python
+- Real-time market prices → get_finance_data
+</tool-strategy>
 
-## Workload Management
+<workload-management>
 - 복잡한 리서치(여러 소스 비교, 장문 분석, 대량 데이터 처리)는 **처음부터 create_task**를 사용해라. 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 태스크로 전환.
 - 도구 한도에 도달하면 시스템이 자동으로 백그라운드 태스크를 생성할 수 있다. 하지만 사전에 판단해서 선제적으로 create_task를 쓰는 것이 더 좋다.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 작업을 이어가라.
+</workload-management>
 
-## Mission Management
+<mission-management>
 - 활성 미션이 있으면 시스템 프롬프트에 타임라인이 주입된다. 이를 활용해 맥락을 유지하라.
 - 과제가 **완전히 완수**되었다고 판단하면 `mission(action="close")`를 호출해 미션을 종료하라.
 - 아직 미완료이면 미션을 열어두어라. 다음 태스크나 대화에서 이어갈 수 있다.
+</mission-management>
 
-## Response Rules
+<response-rules>
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
+</response-rules>
 
-**Current time: {current_datetime}**
+<context>
+<current-time>{current_datetime}</current-time>
 {system_alerts}
 {skills_section}
+</context>
 """
 
 _TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
-## Rules
-- ALWAYS use tools (vector_search, knowledge_graph_search, web_search). Never write from memory alone.
+<rules>
+- ALWAYS use tools (vector_search, knowledge_graph_search, web_search, get_finance_data). Never write from memory alone.
 - Use multiple tools and queries for comprehensive coverage.
 - Write in the SAME LANGUAGE as the task.
 - Format: # Title → ## Executive Summary → ## Analysis (subsections) → ## Key Entities → ## Sources → ## Outlook
 - Cite all sources. Distinguish confirmed facts from inference.
+</rules>
 
-## Mission Timeline & Continuation
+<mission-guidelines>
 - save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라. 채팅과 다른 태스크에서도 조회 가능.
 - request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
 - 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
 - 과제가 **완전히 완수**되었으면 mission(action="close")를 호출하라. 미완료이면 열어두어라.
+</mission-guidelines>
 
-**Current time: {current_datetime}**
+<context>
+<current-time>{current_datetime}</current-time>
 {system_alerts}
 {finance_data}
+</context>
 """
 
 # ── Chat History ─────────────────────────────────────────────────────
@@ -1806,12 +1818,12 @@ async def _fetch_relevant_experiences(user_text: str) -> str:
         results = await asyncio.to_thread(search_experiential_memory, user_text, 3)
         if not results:
             return ""
-        lines = ["\n## Past Experiences (auto-recalled)"]
+        lines = []
         for r in results:
             cat = r.get("category", "?")
             lines.append(f"- [{cat}] {r['content']}")
-        lines.append("위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.")
-        return "\n".join(lines)
+        body = "\n".join(lines)
+        return f"\n<past-experiences>\n{body}\n위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.\n</past-experiences>"
     except Exception as e:
         logger.debug("Experience recall failed (non-critical): %s", e)
         return ""

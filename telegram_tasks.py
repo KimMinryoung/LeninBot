@@ -115,19 +115,19 @@ async def process_task(
             mission_title = mission_rows[0]["title"] if mission_rows else "?"
             events = get_mission_events(mission_id, limit=15)
             if events:
-                lines = [f"## Mission Context: #{mission_id} — {mission_title}"]
+                lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
                 for e in events:
                     lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:200]}")
+                lines.append("</mission-context>")
                 mission_ctx = "\n".join(lines)
             add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
         except Exception as e:
             logger.debug("Mission context injection failed: %s", e)
 
     if mission_ctx:
-        content = f"{mission_ctx}\n\n---\n\n## Task\n{content}"
+        content = f"{mission_ctx}\n\n<task>\n{content}\n</task>"
     elif scratchpad:
-        # Fallback: legacy scratchpad inheritance for old tasks
-        content = f"## Inherited Context (from parent task #{parent_task_id}, depth={depth})\n{scratchpad}\n\n---\n\n## Task\n{content}"
+        content = f"<inherited-context parent=\"{parent_task_id}\" depth=\"{depth}\">\n{scratchpad}\n</inherited-context>\n\n<task>\n{content}\n</task>"
 
     max_retries = 10
     retry_delay = 60
