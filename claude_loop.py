@@ -404,11 +404,11 @@ def _dump_messages_for_debug(msgs: list[dict], round_num: int, error: Exception)
 
 
 def _strip_tool_blocks(msgs: list[dict]) -> list[dict]:
-    """Nuclear recovery: remove all tool_use/tool_result/server_tool blocks.
+    """Nuclear recovery: convert all tool protocol blocks to plain text.
 
-    Keeps only text content from each message. Messages that become empty
-    after stripping are replaced with a placeholder. Consecutive same-role
-    messages are merged.
+    Preserves tool call/result CONTENT as readable text so the model retains
+    context from previous tool executions.  Only the protocol structure
+    (tool_use/tool_result types) is removed.
     """
     cleaned = []
     for msg in msgs:
@@ -423,15 +423,36 @@ def _strip_tool_blocks(msgs: list[dict]) -> list[dict]:
             cleaned.append({"role": role, "content": str(content)})
             continue
 
-        # Keep only text blocks
         text_parts = []
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text_parts.append(block["text"])
+            if not isinstance(block, dict):
+                t = _coerce_text(block)
+                if t:
+                    text_parts.append(t)
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                text_parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                name = block.get("name", "?")
+                inp = _coerce_text(block.get("input", {}))[:500]
+                text_parts.append(f"[도구 호출: {name}({inp})]")
+            elif btype == "tool_result":
+                result_text = _coerce_text(block.get("content", ""))[:2000]
+                text_parts.append(f"[도구 결과: {result_text}]")
+            elif btype in ("server_tool_use", "web_search_tool_result"):
+                # Server tool blocks: extract any useful text
+                t = _coerce_text(block.get("content", "") or block.get("input", ""))
+                if t:
+                    text_parts.append(f"[검색 결과: {t[:2000]}]")
+            else:
+                t = _coerce_text(block)
+                if t:
+                    text_parts.append(t)
 
-        text = "\n".join(text_parts).strip() if text_parts else ""
+        text = "\n".join(t for t in text_parts if t).strip()
         if not text:
-            text = "(도구 실행 결과 생략됨)" if role == "user" else "(도구 호출 과정 생략됨)"
+            text = "(빈 메시지)"
 
         cleaned.append({"role": role, "content": text})
 
