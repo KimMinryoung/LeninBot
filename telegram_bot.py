@@ -355,6 +355,18 @@ def _format_system_alerts() -> str:
     return "\n\n## System Alerts\n" + "\n".join(f"- {m}" for _, m in _system_alerts)
 
 
+def _get_finance_context() -> str:
+    """Get finance data summary for prompt injection. Never fails."""
+    try:
+        from finance_data import finance_summary
+        summary = finance_summary()
+        if summary:
+            return f"\n## Current Market Data\n{summary}"
+    except Exception as e:
+        logger.debug("Finance data unavailable: %s", e)
+    return ""
+
+
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 Operating via Telegram. Use tools proactively when data would improve the answer — don't rely on memory alone.
 
@@ -406,6 +418,7 @@ You are executing a background intelligence task. Produce a structured Markdown 
 
 **Current time: {current_datetime}**
 {system_alerts}
+{finance_data}
 """
 
 # ── Chat History ─────────────────────────────────────────────────────
@@ -2232,6 +2245,7 @@ async def bot_main():
             task_system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
                 system_alerts=_format_system_alerts(),
+                finance_data=_get_finance_context(),
             ),
             max_tokens_task=_CLAUDE_MAX_TOKENS_TASK,
             allowed_user_ids=ALLOWED_USER_IDS,

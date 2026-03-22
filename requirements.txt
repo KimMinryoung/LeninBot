@@ -22,6 +22,9 @@ graphiti-core[google-genai]
 # Browser automation (URL fetching for JS-rendered pages)
 playwright
 
+# Finance data
+yfinance
+
 # Telegram bot
 aiogram>=3.0,<4.0
 anthropic

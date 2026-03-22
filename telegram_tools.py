@@ -506,3 +506,9 @@ from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 TOOLS.extend(SELF_TOOLS)
 TOOLS.append(MISSION_TOOL)
 TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
+
+# ── Finance data tool (real-time market prices) ──────────────────────
+from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
+
+TOOLS.append(FINANCE_TOOL)
+TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
