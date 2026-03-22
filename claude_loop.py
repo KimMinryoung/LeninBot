@@ -504,11 +504,12 @@ def _append_user_text_message(msgs: list[dict], text: str):
 
 
 def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
-    """Build API-safe messages by removing server tool protocol blocks.
+    """Build API-safe messages preserving server tool protocol blocks.
 
-    We keep custom tool_use/tool_result blocks (needed for local tool loop).
-    For server-side tool blocks, we convert them into plain text context
-    so information is preserved without keeping fragile protocol blocks.
+    Server-side tool blocks (server_tool_use, web_search_tool_result) are kept
+    as-is — the API expects them in conversation history when server tools are
+    enabled.  Custom tool_use/tool_result blocks are also preserved for the
+    local tool loop.
     """
     prepared = []
     for m in msgs:
@@ -522,23 +523,6 @@ def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
         for b in content:
             if not isinstance(b, dict):
                 kept.append({"type": "text", "text": _coerce_text(b)})
-                continue
-            btype = b.get("type")
-            if btype == "server_tool_use":
-                sname = str(b.get("name", "server_tool"))
-                sinput = b.get("input", {})
-                kept.append({
-                    "type": "text",
-                    "text": f"[server tool executed: {sname}] input={_coerce_text(sinput)[:500]}",
-                })
-                continue
-            if btype == "web_search_tool_result":
-                summary = _coerce_text(b.get("content", "")).strip()
-                if summary:
-                    kept.append({
-                        "type": "text",
-                        "text": f"[web search result]\n{summary[:4000]}",
-                    })
                 continue
             kept.append(b)
 
@@ -661,7 +645,7 @@ async def chat_with_tools(
             recovered = False
             if "tool_use" in err_str and "tool_result" in err_str:
                 # Auto-recovery: strict re-canonicalization first, then strip.
-                _dump_messages_for_debug(working_msgs, round_num, api_err)
+                _dump_messages_for_debug(api_msgs, round_num, api_err)
                 logger.warning("Auto-recovery: retrying once with strict canonicalization")
                 strict_msgs = validate_tool_pairs(working_msgs)
                 unresolved = _find_unresolved_tool_uses(strict_msgs)
