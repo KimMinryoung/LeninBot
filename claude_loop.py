@@ -504,12 +504,12 @@ def _append_user_text_message(msgs: list[dict], text: str):
 
 
 def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
-    """Build API-safe messages preserving server tool protocol blocks.
+    """Build API-safe messages by stripping server tool protocol blocks.
 
-    Server-side tool blocks (server_tool_use, web_search_tool_result) are kept
-    as-is — the API expects them in conversation history when server tools are
-    enabled.  Custom tool_use/tool_result blocks are also preserved for the
-    local tool loop.
+    Server-side tool blocks (server_tool_use, web_search_tool_result) are
+    completely removed.  The API handles server tools internally and their
+    presence alongside custom tool_use blocks causes 400 errors.
+    Custom tool_use/tool_result blocks are preserved for the local tool loop.
     """
     prepared = []
     for m in msgs:
@@ -523,6 +523,10 @@ def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
         for b in content:
             if not isinstance(b, dict):
                 kept.append({"type": "text", "text": _coerce_text(b)})
+                continue
+            btype = b.get("type")
+            # Strip server tool protocol blocks entirely
+            if btype in ("server_tool_use", "web_search_tool_result"):
                 continue
             kept.append(b)
 
