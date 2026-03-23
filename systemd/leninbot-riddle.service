@@ -1,0 +1,12 @@
+[Unit]
+Description=Cyber-Lenin Riddle Engine
+After=network.target
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+ExecStart=/home/grass/leninbot/venv/bin/python riddle_engine.py
+EnvironmentFile=/home/grass/leninbot/.env
+StandardOutput=journal
+StandardError=journal
