@@ -272,46 +272,53 @@ def _extract_text(response) -> str:
     return ""
 
 
-# ── Local LLM (Ollama) — cheap alternative for lightweight tasks ─────
-_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
-_ollama_available: bool | None = None  # None = not checked yet
+# ── Local LLM (OpenAI-compatible: llama-server, Ollama, etc.) ─────
+_LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:8080")
+_LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen3.5-9b")
+_local_llm_available: bool | None = None  # None = not checked yet
 
 
-async def _ollama_generate(prompt: str, max_tokens: int = 512) -> str | None:
-    """Call local Ollama model. Returns response text or None on failure.
+async def _local_llm_generate(prompt: str, max_tokens: int = 2048) -> str | None:
+    """Call local LLM via OpenAI-compatible /v1/chat/completions.
 
-    Falls back gracefully — if Ollama is down, callers should use Haiku.
+    Works with llama-server, TabbyAPI, Ollama (/v1 endpoint), vLLM, etc.
+    Handles thinking models (Qwen3.5) — extracts content, ignores reasoning_content.
+    Falls back gracefully — if server is down, callers should use Haiku.
     """
-    global _ollama_available
+    global _local_llm_available
     import httpx
 
-    # Skip if previously confirmed unavailable (re-check every 100 calls via None reset)
-    if _ollama_available is False:
+    if _local_llm_available is False:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
-                f"{_OLLAMA_BASE_URL}/api/generate",
+                f"{_LOCAL_LLM_BASE_URL}/v1/chat/completions",
                 json={
-                    "model": _OLLAMA_MODEL,
-                    "prompt": prompt,
+                    "model": _LOCAL_LLM_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3,
                     "stream": False,
-                    "think": False,  # disable thinking for speed on CPU
-                    "options": {"num_predict": max_tokens, "temperature": 0.3},
                 },
             )
             resp.raise_for_status()
-            result = resp.json().get("response", "").strip()
-            if _ollama_available is None:
-                _ollama_available = True
-                logger.info("Ollama available: %s @ %s", _OLLAMA_MODEL, _OLLAMA_BASE_URL)
-            return result
+            data = resp.json()
+            msg = data["choices"][0]["message"]
+            # Thinking models put answer in content, reasoning in reasoning_content
+            result = (msg.get("content") or "").strip()
+            if not result:
+                # Fallback: some backends merge everything into content
+                result = (msg.get("reasoning_content") or "").strip()
+            if _local_llm_available is None:
+                _local_llm_available = True
+                logger.info("Local LLM available: %s @ %s", _LOCAL_LLM_MODEL, _LOCAL_LLM_BASE_URL)
+            return result or None
     except Exception as e:
-        if _ollama_available is not False:
-            logger.info("Ollama not available (%s), falling back to Haiku", e)
-            _ollama_available = False
+        if _local_llm_available is not False:
+            logger.info("Local LLM not available (%s), falling back to Haiku", e)
+            _local_llm_available = False
         return None
 
 
@@ -695,7 +702,7 @@ async def _maybe_summarize_chunk(user_id: int):
             + conversation_text
         )
 
-        summary = await _ollama_generate(summary_prompt, max_tokens=512)
+        summary = await _local_llm_generate(summary_prompt, max_tokens=512)
         if not summary:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
@@ -755,7 +762,7 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
 
     try:
         # Try local LLM first (free), fall back to Haiku (paid)
-        summary = await _ollama_generate(summary_prompt, max_tokens=512)
+        summary = await _local_llm_generate(summary_prompt, max_tokens=512)
         if not summary:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
@@ -1862,7 +1869,7 @@ async def _reflect_on_recent(user_id: int):
         prompt = _REFLECTION_PROMPT + conv_text
 
         # Try local LLM first (free), fall back to Haiku (paid)
-        result = await _ollama_generate(prompt, max_tokens=512)
+        result = await _local_llm_generate(prompt, max_tokens=512)
         if not result:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
