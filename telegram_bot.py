@@ -306,11 +306,10 @@ async def _local_llm_generate(prompt: str, max_tokens: int = 2048) -> str | None
             resp.raise_for_status()
             data = resp.json()
             msg = data["choices"][0]["message"]
-            # Thinking models put answer in content, reasoning in reasoning_content
             result = (msg.get("content") or "").strip()
             if not result:
-                # Fallback: some backends merge everything into content
-                result = (msg.get("reasoning_content") or "").strip()
+                # Fallback: reasoning field (Ollama) or reasoning_content (llama-server)
+                result = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
             if _local_llm_available is None:
                 _local_llm_available = True
                 logger.info("Local LLM available: %s @ %s", _LOCAL_LLM_MODEL, _LOCAL_LLM_BASE_URL)
@@ -702,7 +701,7 @@ async def _maybe_summarize_chunk(user_id: int):
             + conversation_text
         )
 
-        summary = await _local_llm_generate(summary_prompt, max_tokens=512)
+        summary = await _local_llm_generate(summary_prompt)
         if not summary:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
@@ -762,7 +761,7 @@ async def _compress_history(messages: list[dict]) -> list[dict]:
 
     try:
         # Try local LLM first (free), fall back to Haiku (paid)
-        summary = await _local_llm_generate(summary_prompt, max_tokens=512)
+        summary = await _local_llm_generate(summary_prompt)
         if not summary:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
@@ -1869,7 +1868,7 @@ async def _reflect_on_recent(user_id: int):
         prompt = _REFLECTION_PROMPT + conv_text
 
         # Try local LLM first (free), fall back to Haiku (paid)
-        result = await _local_llm_generate(prompt, max_tokens=512)
+        result = await _local_llm_generate(prompt)
         if not result:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
