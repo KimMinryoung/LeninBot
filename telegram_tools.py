@@ -174,6 +174,10 @@ async def _exec_read_file(path: str, line_start: int | None = None, line_end: in
         return f"Error: File not found: {path}"
     if os.path.isdir(path):
         return f"Error: Path is a directory: {path}"
+    # Block direct access to .env files (credentials protection)
+    _basename = os.path.basename(path)
+    if _basename == ".env" or _basename.startswith(".env."):
+        return "Error: Access to .env files is blocked for security reasons."
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
@@ -332,6 +336,10 @@ _BLOCKED_CODE_PATTERNS = [
     "os.system(", "os.exec",
     # Credential/env exfiltration — safe_env filtering already protects values
     # (env var name blocking removed: prevented legitimate os.getenv usage)
+    # .env direct open() patterns
+    'open(".env")', "open('.env')",
+    'open(".env.', "open('.env.",
+    'open(f".env', "open(f'.env",
 ]
 
 # Modules/builtins that should never be imported or called in sandboxed code
