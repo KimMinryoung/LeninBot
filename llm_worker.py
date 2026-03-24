@@ -1,10 +1,10 @@
 """
-ollama_worker.py — LLM 문학 분석 위임 스크립트 (MOON PC 우선, 로컬 폴백)
+llm_worker.py — LLM 문학 분석 위임 스크립트 (MOON PC 우선, 로컬 폴백)
 
 사용법:
-    python ollama_worker.py              # 전체 태스크 실행
-    python ollama_worker.py --task <id>  # 특정 태스크만 (결과: temp_dev/)
-    python ollama_worker.py --list       # 태스크 목록 출력
+    python llm_worker.py              # 전체 태스크 실행
+    python llm_worker.py --task <id>  # 특정 태스크만 (결과: temp_dev/)
+    python llm_worker.py --list       # 태스크 목록 출력
 
 결과:
     전체 실행: literature/analysis/<id>_analysis.json
@@ -16,7 +16,7 @@ import os
 import argparse
 from datetime import datetime
 from pathlib import Path
-from ollama_client import ask, check_ollama
+from llm_client import ask, check_llm
 
 # ── 설정 ─────────────────────────────────────────────
 OUTPUT_DIR   = Path("literature/analysis")
@@ -156,7 +156,7 @@ def run_task(task: dict, output_dir: Path = OUTPUT_DIR) -> dict:
         "author":    task["author"],
         "title":     task["title"],
         "source":    task["file"],
-        "model":     check_ollama().get("model", "unknown"),
+        "model":     check_llm().get("model", "unknown"),
         "timestamp": datetime.now().isoformat(),
         "analysis":  result_text,
     }
@@ -172,8 +172,8 @@ def run_task(task: dict, output_dir: Path = OUTPUT_DIR) -> dict:
 
 # ── 전체 실행 ─────────────────────────────────────────
 def run_all():
-    status = check_ollama()
-    print(f"=== ollama_worker 시작 ({status.get('backend', '?')}: {status.get('model', '?')}) ===")
+    status = check_llm()
+    print(f"=== llm_worker 시작 ({status.get('backend', '?')}: {status.get('model', '?')}) ===")
     print(f"총 {len(TASKS)}개 태스크\n")
 
     results = []

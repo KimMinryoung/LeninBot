@@ -382,7 +382,7 @@ class Razvedchik:
             f"Write in English. Max 200 characters."
         )
         try:
-            from ollama_client import ask_with_system
+            from llm_client import ask_with_system
             comment = ask_with_system(
                 user_prompt=prompt,
                 system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
@@ -472,7 +472,7 @@ class Razvedchik:
             f"Write in English."
         )
         try:
-            from ollama_client import ask_with_system
+            from llm_client import ask_with_system
             result = ask_with_system(
                 user_prompt=prompt,
                 system_prompt=RAZVEDCHIK_POST_SYSTEM,

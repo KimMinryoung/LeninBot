@@ -41,7 +41,7 @@ _RIDDLE_USER = """\
 
 def _generate_riddle() -> str:
     """qwen3.5:4b로 수수께끼 생성."""
-    from ollama_client import ask_with_system
+    from llm_client import ask_with_system
     return ask_with_system(
         user_prompt=_RIDDLE_USER,
         system_prompt=_RIDDLE_SYSTEM,

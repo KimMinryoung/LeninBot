@@ -55,7 +55,7 @@ def _fetch_recent_diary() -> str:
 
 def _generate_dream(diary_content: str) -> str:
     """qwen3.5:4b로 몽상일기 생성."""
-    from ollama_client import ask_with_system
+    from llm_client import ask_with_system
     return ask_with_system(
         user_prompt=_DREAM_USER.format(diary_content=diary_content),
         system_prompt=_DREAM_SYSTEM,

@@ -58,7 +58,7 @@ def _run_debate(topic: str) -> list[dict]:
     3라운드 논쟁 실행.
     Returns: [{"speaker": str, "text": str}, ...]
     """
-    from ollama_client import ask_with_system, ask_chat
+    from llm_client import ask_with_system, ask_chat
 
     rounds = []
 
