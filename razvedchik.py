@@ -58,6 +58,13 @@ INTERESTING_KEYWORDS = [
     "surveillance", "감시", "freedom", "자유",
     "open source", "오픈소스", "decentralization",
 ]
+# 짧은 키워드(3자 이하)는 단어 경계 매칭이 필요 (예: "AI"가 "CONTAIN"에 오매칭 방지)
+_KW_PATTERNS = []
+for _kw in INTERESTING_KEYWORDS:
+    if len(_kw) <= 3:
+        _KW_PATTERNS.append(re.compile(r"\b" + re.escape(_kw) + r"\b", re.IGNORECASE))
+    else:
+        _KW_PATTERNS.append(re.compile(re.escape(_kw), re.IGNORECASE))
 
 # ── Razvedchik 정체성 ─────────────────────────────────────────────────────────
 RAZVEDCHIK_SYSTEM_PROMPT = """\
@@ -103,15 +110,7 @@ class MoltbookClient:
         """
         HTTP 요청 실행. 응답이 verification 챌린지면 자동 해결 후 재시도.
         """
-        url = f"{MB_BASE_URL}{path}"
-        resp = httpx.request(
-            method,
-            url,
-            headers=self.headers,
-            timeout=MB_TIMEOUT,
-            follow_redirects=False,
-            **kwargs,
-        )
+        resp = self._client.request(method, path, **kwargs)
         resp.raise_for_status()
         data = resp.json()
 
@@ -119,15 +118,11 @@ class MoltbookClient:
         if isinstance(data, dict) and data.get("type") == "verification":
             logger.info("[razvedchik] Verification 챌린지 감지 — 자동 해결 시도")
             solved = self.solve_verification(data)
-            # 원래 요청에 verification_answer 추가
             if "json" in kwargs:
                 kwargs["json"]["verification_answer"] = solved
             else:
                 kwargs["json"] = {"verification_answer": solved}
-            resp2 = httpx.request(
-                method, url, headers=self.headers,
-                timeout=MB_TIMEOUT, follow_redirects=False, **kwargs,
-            )
+            resp2 = self._client.request(method, path, **kwargs)
             resp2.raise_for_status()
             return resp2.json()
 
@@ -171,16 +166,6 @@ class MoltbookClient:
             result = ops.get(op, 0)
             logger.info("[razvedchik] 챌린지 해결: %d %s %d = %d", a, op, b, result)
             return result
-
-        # eval fallback (안전한 수학 표현식만)
-        try:
-            expr = re.sub(r"[^0-9\+\-\*\/\(\)\s]", "", challenge)
-            if expr.strip():
-                result = int(eval(expr))
-                logger.info("[razvedchik] eval 해결: %s = %d", expr.strip(), result)
-                return result
-        except Exception:
-            pass
 
         logger.warning("[razvedchik] 챌린지 해결 실패 — 0 반환")
         return 0
@@ -345,10 +330,14 @@ class Razvedchik:
         logger.info("[razvedchik] 흥미로운 포스트: %d개", len(interesting))
         return interesting
 
+    @staticmethod
+    def _get_score(post: dict) -> int:
+        """포스트의 점수를 추출."""
+        return int(post.get("score", 0) or post.get("upvotes", 0) or post.get("karma", 0) or 0)
+
     def _is_interesting(self, post: dict) -> bool:
         """포스트가 흥미로운지 판별."""
-        karma = post.get("karma", 0) or post.get("score", 0) or post.get("upvotes", 0)
-        if karma and int(karma) > 5:
+        if self._get_score(post) > 5:
             return True
 
         # 제목 + 내용 합쳐서 키워드 검색
@@ -356,10 +345,10 @@ class Razvedchik:
             post.get("title", ""),
             post.get("content", ""),
             post.get("body", ""),
-        ]).lower()
+        ])
 
-        for kw in INTERESTING_KEYWORDS:
-            if kw.lower() in text:
+        for pat in _KW_PATTERNS:
+            if pat.search(text):
                 return True
         return False
 
@@ -380,7 +369,7 @@ class Razvedchik:
         """
         title   = post.get("title", "(제목 없음)")
         content = (post.get("content") or post.get("body") or "")[:500]
-        karma   = post.get("karma", 0) or post.get("score", 0) or 0
+        karma   = self._get_score(post)
 
         if dry_run:
             return f"[Razvedchik on patrol] Topic '{title[:30]}' — noted in the record."
@@ -577,8 +566,8 @@ class Razvedchik:
                 {
                     "id":      p.get("id", ""),
                     "title":   p.get("title", ""),
-                    "karma":   p.get("karma", 0) or p.get("score", 0),
-                    "submolt": p.get("submolt", ""),
+                    "score":   self._get_score(p),
+                    "submolt": p.get("submolt", {}).get("name", "") if isinstance(p.get("submolt"), dict) else str(p.get("submolt", "")),
                     "url":     p.get("url", ""),
                 }
                 for p in selected_posts
@@ -674,11 +663,8 @@ class Razvedchik:
             logger.error("[razvedchik] 피드 스캔 실패: %s", e)
             interesting_posts = []
 
-        # 2. 상위 3~5개 선별 (karma 기준 정렬)
-        def _karma(p):
-            return p.get("karma", 0) or p.get("score", 0) or p.get("upvotes", 0) or 0
-
-        selected = sorted(interesting_posts, key=_karma, reverse=True)[:max_comments]
+        # 2. 상위 3~5개 선별 (score 기준 정렬)
+        selected = sorted(interesting_posts, key=self._get_score, reverse=True)[:max_comments]
         logger.info("[razvedchik] STEP 2: %d개 포스트 선별됨", len(selected))
 
         # 3. 각 포스트에 댓글
@@ -902,10 +888,11 @@ def main() -> None:
             posts = razvedchik.scan_feed(submolts=args.submolt, limit=args.limit)
             print(f"\n✅ 흥미로운 포스트 {len(posts)}개:\n")
             for i, p in enumerate(posts, 1):
-                karma   = p.get("karma", 0) or p.get("score", 0) or 0
+                score   = Razvedchik._get_score(p)
                 title   = p.get("title", "(제목 없음)")
-                submolt = p.get("submolt", "?")
-                print(f"  {i:2d}. [{submolt}] {title[:60]} (karma={karma})")
+                sub     = p.get("submolt", {})
+                sub_name = sub.get("name", "?") if isinstance(sub, dict) else str(sub)
+                print(f"  {i:2d}. [{sub_name}] {title[:60]} (score={score})")
         except Exception as e:
             logger.error("스캔 실패: %s", e)
             sys.exit(1)
