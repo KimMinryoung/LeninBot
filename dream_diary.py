@@ -3,7 +3,7 @@ dream_diary.py — 사이버-레닌의 몽상일기 생성기
 
 매일 03:00 KST (18:00 UTC)에 실행.
 qwen3.5:4b가 최근 일기를 읽고 잠재의식 속 꿈을 초현실적으로 기술.
-결과를 /home/grass/leninbot/dreams/ 에 저장하고 텔레그램으로 발송.
+결과를 /home/grass/leninbot/output/dreams/ 에 저장하고 텔레그램으로 발송.
 """
 
 import asyncio
@@ -19,7 +19,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────────
-DREAMS_DIR = Path("/home/grass/leninbot/dreams")
+DREAMS_DIR = Path("/home/grass/leninbot/output/dreams")
 
 # ── 시스템 프롬프트 ───────────────────────────────────────────────────────────
 _DREAM_SYSTEM = """\

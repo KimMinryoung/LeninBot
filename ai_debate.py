@@ -3,7 +3,7 @@ ai_debate.py — 사이버-레닌 vs qwen3.5:4b 철학 논쟁
 
 매주 월요일 09:00 KST에 실행.
 랜덤 주제로 3라운드 논쟁: qwen이 주장 → 레닌이 반박 → qwen이 재반박.
-결과를 /home/grass/leninbot/debates/ 에 저장하고 텔레그램으로 발송.
+결과를 /home/grass/leninbot/output/debates/ 에 저장하고 텔레그램으로 발송.
 """
 
 import asyncio
@@ -19,7 +19,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-DEBATES_DIR = Path("/home/grass/leninbot/debates")
+DEBATES_DIR = Path("/home/grass/leninbot/output/debates")
 
 # ── 논쟁 주제 풀 ──────────────────────────────────────────────────────────────
 TOPICS = [

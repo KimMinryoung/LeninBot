@@ -40,7 +40,7 @@ logger = logging.getLogger("razvedchik")
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────────
 BASE_DIR     = Path("/home/grass/leninbot")
-REPORTS_DIR  = BASE_DIR / "reports"
+REPORTS_DIR  = BASE_DIR / "output" / "reports"
 CREDS_PATH   = Path.home() / ".config" / "moltbook" / "credentials.json"
 
 # ── Moltbook API 설정 ──────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ riddle_engine.py — 답 없는 기묘한 수수께끼 생성기
 
 매일 04:30 KST (19:30 UTC)에 실행.
 카프카 + 레닌의 혼종이 만드는 수수께끼 — 답이 없거나, 답이 문제보다 더 이상하다.
-결과를 /home/grass/leninbot/riddles/ 에 저장하고 텔레그램으로 발송.
+결과를 /home/grass/leninbot/output/riddles/ 에 저장하고 텔레그램으로 발송.
 """
 
 import asyncio
@@ -18,7 +18,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-RIDDLES_DIR = Path("/home/grass/leninbot/riddles")
+RIDDLES_DIR = Path("/home/grass/leninbot/output/riddles")
 
 # ── 시스템 프롬프트 ───────────────────────────────────────────────────────────
 _RIDDLE_SYSTEM = """\
