@@ -253,18 +253,22 @@ AIChatBot/
 
 ### 2026-03-24 — MOON PC LLM 연결 (qwen3.5-9b Q8_0, SSH 리버스 터널)
 
-#### ollama_client.py — 전면 재작성: MOON PC 우선 + 로컬 Ollama 폴백
-- **배경**: MOON PC (Windows 10, RTX 3060 12GB)에 qwen3.5-9b Q8_0 양자화 모델(8.88 GiB)을 llama.cpp `llama-server`로 서빙. Ollama 대신 llama.cpp 직접 사용 (오버헤드 감소).
+#### ollama_client.py — 전면 재작성: MOON PC 우선 + 로컬 llama-server 폴백
+- **배경**: MOON PC (Windows 10, RTX 3060 12GB)에 qwen3.5-9b Q8_0 양자화 모델(8.88 GiB)을 llama.cpp `llama-server`로 서빙.
 - **연결 방식**: SSH 리버스 터널 (`ssh -R 8080:localhost:8080 root@37.27.33.127`). Surfshark VPN 고정 IP(37.19.205.183)는 인바운드 불가 → 터널로 우회.
-- **이중 백엔드**: 1차 MOON PC llama-server (OpenAI 호환 `/v1/chat/completions`, `127.0.0.1:8080`) → 2차 로컬 Ollama (`localhost:11434`, `qwen3.5:4b`). 헬스체크 5초 캐시, 1차 실패 시 자동 폴백.
-- **API 호환**: 기존 `ask()`, `ask_with_system()`, `ask_chat()`, `check_ollama()` 인터페이스 유지. 내부에서 OpenAI 호환 / Ollama 네이티브 API 자동 분기.
+- **이중 백엔드**: 1차 MOON PC llama-server (`127.0.0.1:8080`, qwen3.5-9b Q8_0) → 2차 로컬 llama-server (`127.0.0.1:11435`, qwen3.5-4b Q4_K_M). 양쪽 모두 OpenAI 호환 API (`/v1/chat/completions`). 헬스체크 5초 캐시, 1차 실패 시 자동 폴백.
+- **Ollama 완전 제거**: Ollama 데몬 비활성화(`systemctl disable ollama`), 네이티브 API 분기 코드 삭제. 양쪽 llama-server 통일로 코드 단순화.
 - **`model` 파라미터**: 하위호환용으로 유지하되 무시 — 백엔드 자동 선택에 따라 모델 결정.
 
-#### scripts/graffiti/common.py — MOON PC 우선 폴백 적용
-- `ask_local()`: MOON PC OpenAI API 시도 → 실패 시 로컬 Ollama API 폴백. 동일한 이중 백엔드 패턴.
+#### scripts/graffiti/common.py — 동일한 이중 llama-server 폴백
+- `ask_local()`: MOON PC → 로컬 llama-server 순차 시도. 양쪽 다 OpenAI API.
 
-#### .env 변경
-- `MOON_LLM_BASE_URL`: `http://localhost:8080` → `http://127.0.0.1:8080` (SSH 터널 경유)
+#### ollama_worker.py, kg_enricher.py — ollama_client 통합
+- 직접 Ollama API 호출하던 하드코딩 제거 → `ollama_client.ask()` 사용.
+
+#### systemd — 로컬 llama-server 서비스
+- `leninbot-llama.service`: llama-server (qwen3.5-4b Q4_K_M, `127.0.0.1:11435`, CPU 4스레드, ctx 8192)
+- Ollama 서비스 비활성화 완료
 
 #### 인프라 구성
 ```
@@ -275,7 +279,7 @@ MOON PC (Windows 10, RTX 3060 12GB)
                  └─ Hetzner VPS (127.0.0.1:8080)
                       └─ ollama_client.py (자동 감지)
 
-폴백: 터널 끊김 → 로컬 Ollama qwen3.5:4b (localhost:11434)
+폴백: 터널 끊김 → 로컬 llama-server qwen3.5-4b Q4_K_M (127.0.0.1:11435)
 ```
 
 ### 2026-03-22 — Web Search Fix, Finance Data, XML Prompts
