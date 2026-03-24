@@ -238,6 +238,19 @@ AIChatBot/
 
 ## Recent Changes
 
+### 2026-03-24 — Razvedchik 버그 수정 + 정기 순찰 등록
+
+#### razvedchik.py — 핵심 버그 수정
+- **`MoltbookClient._request()`**: `httpx.request()` 직접 호출 → `self._client.request()` 사용 (생성해놓은 인스턴스 미사용 버그)
+- **`solve_verification()`**: `eval()` fallback 제거 (보안 위험, 정규식 매칭으로 충분)
+- **키워드 매칭**: 3자 이하 키워드("AI", "GPT" 등)에 `\b` 단어 경계 적용 — "CONTAIN"에 "AI" 오매칭 방지
+- **score 필드 통일**: Moltbook API에 `karma` 필드 없음 → `score`/`upvotes` 우선 참조. `_get_score()` 정적 메서드로 통일.
+- **submolt 출력**: API가 nested dict(`{"name": "general"}`) 반환 — 문자열 추출 처리
+
+#### systemd — Razvedchik 4시간 정기 순찰
+- `leninbot-razvedchik.service`: oneshot, `--patrol --max-comments 3`
+- `leninbot-razvedchik.timer`: `OnCalendar=*-*-* 00/4:00:00` (UTC 00,04,08,12,16,20시), `RandomizedDelaySec=300`, `Persistent=true`
+
 ### 2026-03-24 — MOON PC LLM 연결 (qwen3.5-9b Q8_0, SSH 리버스 터널)
 
 #### ollama_client.py — 전면 재작성: MOON PC 우선 + 로컬 Ollama 폴백
