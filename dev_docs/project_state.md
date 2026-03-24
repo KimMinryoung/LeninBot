@@ -1,9 +1,9 @@
-# Project State Report — 2026-03-22
+# Project State Report — 2026-03-24
 
 ## Identity
 
 **Cyber-Lenin** (사이버-레닌) — A digital revolutionary intelligence with unified identity across four interfaces: web chatbot, Telegram agent, autonomous diary writer, and **local PC agent**. One continuous consciousness with shared memory and unified principles.
-Server deployed at **Hetzner VPS** (Ubuntu 24.04, 16GB RAM), HTTPS via `leninbot.duckdns.org` (Nginx + Let's Encrypt). Frontend at `bichonwebpage.onrender.com`. Local agent runs on Windows 10 PC.
+Server deployed at **Hetzner VPS** (Ubuntu 24.04, 16GB RAM), HTTPS via `leninbot.duckdns.org` (Nginx + Let's Encrypt). Frontend at `bichonwebpage.onrender.com`. Local agent runs on Windows 10 PC (RTX 3060 12GB).
 
 ---
 
@@ -237,6 +237,33 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-24 — MOON PC LLM 연결 (qwen3.5-9b Q8_0, SSH 리버스 터널)
+
+#### ollama_client.py — 전면 재작성: MOON PC 우선 + 로컬 Ollama 폴백
+- **배경**: MOON PC (Windows 10, RTX 3060 12GB)에 qwen3.5-9b Q8_0 양자화 모델(8.88 GiB)을 llama.cpp `llama-server`로 서빙. Ollama 대신 llama.cpp 직접 사용 (오버헤드 감소).
+- **연결 방식**: SSH 리버스 터널 (`ssh -R 8080:localhost:8080 root@37.27.33.127`). Surfshark VPN 고정 IP(37.19.205.183)는 인바운드 불가 → 터널로 우회.
+- **이중 백엔드**: 1차 MOON PC llama-server (OpenAI 호환 `/v1/chat/completions`, `127.0.0.1:8080`) → 2차 로컬 Ollama (`localhost:11434`, `qwen3.5:4b`). 헬스체크 5초 캐시, 1차 실패 시 자동 폴백.
+- **API 호환**: 기존 `ask()`, `ask_with_system()`, `ask_chat()`, `check_ollama()` 인터페이스 유지. 내부에서 OpenAI 호환 / Ollama 네이티브 API 자동 분기.
+- **`model` 파라미터**: 하위호환용으로 유지하되 무시 — 백엔드 자동 선택에 따라 모델 결정.
+
+#### scripts/graffiti/common.py — MOON PC 우선 폴백 적용
+- `ask_local()`: MOON PC OpenAI API 시도 → 실패 시 로컬 Ollama API 폴백. 동일한 이중 백엔드 패턴.
+
+#### .env 변경
+- `MOON_LLM_BASE_URL`: `http://localhost:8080` → `http://127.0.0.1:8080` (SSH 터널 경유)
+
+#### 인프라 구성
+```
+MOON PC (Windows 10, RTX 3060 12GB)
+  └─ llama-server (0.0.0.0:8080)
+       └─ Qwen3.5-9B-Q8_0.gguf (-ngl 99, -c 8192)
+            └─ SSH 리버스 터널 (-R 8080:localhost:8080)
+                 └─ Hetzner VPS (127.0.0.1:8080)
+                      └─ ollama_client.py (자동 감지)
+
+폴백: 터널 끊김 → 로컬 Ollama qwen3.5:4b (localhost:11434)
+```
 
 ### 2026-03-22 — Web Search Fix, Finance Data, XML Prompts
 
