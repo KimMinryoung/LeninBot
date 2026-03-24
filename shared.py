@@ -1017,6 +1017,7 @@ _PLAYWRIGHT_DIRECT_SITES = (
     "instagram.com",
     "youtube.com", "youtu.be",
     "threads.net",
+    "moltbook.com",
 )
 
 # Sites with content in iframes
