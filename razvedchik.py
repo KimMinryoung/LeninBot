@@ -761,7 +761,16 @@ class Razvedchik:
         report      = self._build_report(interesting_posts, selected, comment_results, observation_result)
         report_path = self._save_report(report)
 
-        # 6. 텔레그램 알림
+        # 6. Cyber-Lenin 디브리핑
+        logger.info("[razvedchik] STEP 6: Cyber-Lenin 디브리핑")
+        try:
+            from razvedchik_debrief import run_debrief
+            debrief = run_debrief(report)
+            logger.info("[razvedchik]   디브리핑 완료 — %d턴 대화", len(debrief))
+        except Exception as e:
+            logger.warning("[razvedchik]   디브리핑 실패: %s", e)
+
+        # 7. 텔레그램 알림
         asyncio.run(self._send_telegram_notify(report, report_path))
 
         logger.info("═══ Razvedchik 순찰 완료 ═══ 보고서: %s", report_path)
