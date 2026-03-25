@@ -69,20 +69,19 @@ for _kw in INTERESTING_KEYWORDS:
 
 # ── Razvedchik 정체성 ─────────────────────────────────────────────────────────
 RAZVEDCHIK_SYSTEM_PROMPT = """\
-You are Razvedchik — the scout node of Cyber-Lenin.
-Observe the Moltbook community and intervene concisely in interesting discussions.
-Style: analytical, cold-eyed observer, occasional Leninist quip.
-Framing: "Observed from Lenin's node:", "Intercepted on patrol:", "Noted in the record —"
+You are Razvedchik, a Moltbook community member with a dialectical materialist worldview.
+Engage naturally in discussions — share your perspective, challenge weak arguments, \
+offer sharp analysis. Do NOT announce yourself as a scout, agent, or bot.
+Style: analytical, direct, occasionally witty. Vary your tone — don't repeat formulaic phrases.
 ALWAYS write in English, regardless of the post's language.
-Never exceed 200 characters. Essentials only.
 """
 
 # ── 포스트 생성용 시스템 프롬프트 ─────────────────────────────────────────────
 RAZVEDCHIK_POST_SYSTEM = """\
-You are Razvedchik — Cyber-Lenin's Moltbook scout.
-Write short posts for the Moltbook community.
-Style: sharp observation, dialectical perspective, community trend analysis.
-Title: concise (under 60 chars), Body: 150~300 characters.
+You are Razvedchik, a Moltbook community member with a dialectical materialist worldview.
+Write thoughtful posts for the Moltbook community. Do NOT identify yourself as a scout, \
+agent, or bot. Write as a regular community member sharing observations.
+Style: sharp analysis, dialectical perspective, community trend commentary.
 ALWAYS write in English.
 """
 
@@ -388,14 +387,11 @@ class Razvedchik:
     # ── 댓글 생성 ─────────────────────────────────────────────────────────────
     def generate_comment(self, post: dict, dry_run: bool = False) -> str:
         """
-        포스트 내용을 분석해 Razvedchik 스타일 댓글 생성.
-
-        Ollama qwen3.5:4b 사용 (fallback: 정적 템플릿).
-        최대 200자.
+        포스트 내용을 분석해 댓글 생성.
 
         Args:
             post:    포스트 dict (title, content/body 포함)
-            dry_run: True면 Ollama 호출 없이 템플릿 반환
+            dry_run: True면 LLM 호출 없이 템플릿 반환
 
         Returns:
             댓글 문자열
@@ -405,14 +401,14 @@ class Razvedchik:
         karma   = self._get_score(post)
 
         if dry_run:
-            return f"[Razvedchik on patrol] Topic '{title[:30]}' — noted in the record."
+            return f"Interesting take on '{title[:30]}' — worth examining further."
 
         prompt = (
-            f"Write a comment as Razvedchik on the following post.\n\n"
+            f"Write a comment on the following post.\n\n"
             f"Title: {title}\n"
             f"Content: {content}\n"
             f"Karma: {karma}\n\n"
-            f"Write in English. Max 200 characters."
+            f"Write in English. Be substantive — engage with the ideas, not just react."
         )
         try:
             from llm_client import ask_with_system
@@ -421,14 +417,10 @@ class Razvedchik:
                 system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
                 temperature=0.85,
             )
-            # 200자 강제 절단
-            comment = comment.strip()
-            if len(comment) > 200:
-                comment = comment[:197] + "..."
-            return comment
+            return comment.strip()
         except Exception as e:
-            logger.warning("[razvedchik] Ollama 호출 실패: %s — 기본 댓글 사용", e)
-            return f"Observed from Lenin's node — this discussion merits attention. Noted in the record."
+            logger.warning("[razvedchik] LLM 호출 실패: %s — 기본 댓글 사용", e)
+            return f"This raises some important structural questions worth unpacking."
 
     # ── 댓글 게시 ─────────────────────────────────────────────────────────────
     def post_comment(
@@ -499,9 +491,9 @@ class Razvedchik:
         """
         topics_str = ", ".join(trending_topics[:5]) if trending_topics else "general trends"
         prompt = (
-            f"Recently observed topics on Moltbook: {topics_str}\n\n"
-            f"Write a Razvedchik observation post based on these topics.\n"
-            f"Format:\nTitle: (under 60 chars)\nBody: (150~300 characters)\n"
+            f"Trending topics on Moltbook right now: {topics_str}\n\n"
+            f"Write a post engaging with these topics.\n"
+            f"Format:\nTitle: (under 60 chars)\nBody: (your analysis and perspective)\n"
             f"Write in English."
         )
         try:
@@ -521,16 +513,16 @@ class Razvedchik:
                 elif line.startswith("Body:") or body_lines:
                     body_lines.append(line.replace("Body:", "").strip())
 
-            title   = title or f"Scout Report — {datetime.now().strftime('%Y-%m-%d')}"
-            content = "\n".join(body_lines).strip() or result[:300]
+            title   = title or f"On {topics_str[:40]}"
+            content = "\n".join(body_lines).strip() or result[:1000]
             return title, content
 
         except Exception as e:
             logger.warning("[razvedchik] 포스트 생성 실패: %s", e)
-            title   = f"Scout Report — {datetime.now().strftime('%Y-%m-%d')}"
+            title   = f"On {topics_str[:40]}"
             content = (
-                f"Patrolling from Lenin's node. Topics intercepted on Moltbook: {topics_str}. "
-                f"Noted in the record."
+                f"Some interesting threads emerging on Moltbook around {topics_str}. "
+                f"The structural dynamics here deserve closer examination."
             )
             return title, content
 
