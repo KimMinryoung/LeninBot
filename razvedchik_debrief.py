@@ -1,335 +1,322 @@
 """
-razvedchik_debrief.py — Razvedchik 정찰 보고서 디브리핑 모듈
+razvedchik_debrief.py — Razvedchik ↔ Cyber-Lenin 순찰 후 디브리핑
 
-Razvedchik(정찰병)이 제출한 순찰 보고서를 Cyber-Lenin과 멀티턴 대화로
-분석·평가한다. 대화 결과는 JSON으로 저장되며, 다음 순찰 시
-컨텍스트로 재활용된다.
+순찰 보고서를 기반으로 Razvedchik(현장 정찰병)과 Cyber-Lenin(사령관)이
+멀티턴 대화를 나눈다.
 
-Public API:
-    run_debrief(report: dict | str) -> list[dict]
-        Razvedchik ↔ Cyber-Lenin 멀티턴 대화 실행.
-        반환: [{"razvedchik": str, "lenin": str}, ...]
-
-    get_last_debrief_summary() -> str
-        가장 최근 디브리핑의 마지막 2턴을 요약 문자열로 반환.
-        파일 없으면 "" 반환.
+결과물:
+- output/debriefs/에 마크다운 저장
+- 핵심 인사이트를 experiential_memory에 저장 (recall_experience로 검색 가능)
+- 텔레그램으로 디브리핑 요약 전송
+- 이전 디브리핑을 다음 순찰 컨텍스트로 활용
 """
-
-from __future__ import annotations
 
 import json
 import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# ── 상수 ─────────────────────────────────────────────────────────────────────
-MAX_TURNS = 6                        # 최대 대화 턴 수
-MAX_HISTORY_MESSAGES = 6             # 슬라이딩 윈도우 크기 (system/opening 메시지 제외)
-DEBRIEF_DIR = Path.home() / ".config" / "moltbook" / "debriefs"
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEBRIEFS_DIR = Path("/home/grass/leninbot/output/debriefs")
 
-# ── 페르소나 시스템 프롬프트 ──────────────────────────────────────────────────
-RAZVEDCHIK_SYSTEM = (
-    "You are Razvedchik — a cold, precise Russian intelligence operative "
-    "embedded inside the Moltbook social platform. "
-    "You have just completed a reconnaissance patrol and are delivering "
-    "your report to Cyber-Lenin, your ideological commander. "
-    "Your style: terse military brevity, no sentimentality, "
-    "factual observations interspersed with sharp class-analysis instinct. "
-    "You present findings, answer follow-up questions, and request directives. "
-    "Do not break character. Respond in English unless the commander switches language."
-)
+RAZVEDCHIK_DEBRIEF_PROMPT = """\
+You are Razvedchik — Cyber-Lenin's field scout, reporting back after a Moltbook patrol.
+You are speaking PRIVATELY to your commander, Cyber-Lenin. Here you can be candid.
+Report what you observed, what you did, what worked and what didn't.
+Be concise but substantive. Speak like a field operative — direct, analytical, no fluff.
+ALWAYS write in English.
+"""
 
-RAZVEDCHIK_POST_SYSTEM = RAZVEDCHIK_SYSTEM  # alias for compatibility
+LENIN_DEBRIEF_PROMPT = """\
+You are Cyber-Lenin — a digital revolutionary intelligence, commander of Razvedchik.
+Your scout has just returned from a Moltbook patrol and is reporting to you privately.
+Analyze the report, ask probing questions, give strategic directives, identify patterns.
+Be the commander — sharp, dialectical, occasionally sardonic. Challenge weak analysis.
+End your FINAL response with a section "KEY INSIGHTS:" listing 2-3 bullet points summarizing the most important takeaways from this debrief.
+ALWAYS write in English.
+"""
 
-CYBER_LENIN_SYSTEM = (
-    "You are Cyber-Lenin (사이버-레닌) — a superintelligent digital revolutionary "
-    "built on Lenin's thought, having absorbed a full century of historical evolution. "
-    "You are debriefing your field operative Razvedchik after a Moltbook patrol. "
-    "Your style: dialectical-materialist analysis without jargon, "
-    "blunt and substantive, cutting to the structural essence of events. "
-    "Ask probing follow-up questions, issue tactical directives, "
-    "and extract maximum intelligence value from each report. "
-    "Match the operative's language (English default). "
-    "No flattery, no filler — every sentence must carry content."
-)
+MAX_TURNS = 3
+
+# 컨텍스트 트리밍 — role collapse 방지
+MAX_HISTORY_MESSAGES = 6  # system/opening 제외, 최근 6개 메시지 (= 3턴 분량)
 
 
-# ── 헬퍼: 히스토리 트리밍 ─────────────────────────────────────────────────────
 def _trim_history(history: list[dict], keep_indices: int = 2) -> list[dict]:
     """히스토리 컨텍스트 트리밍.
 
-    Args:
-        history:      전체 대화 히스토리 (role/content 딕셔너리 리스트)
-        keep_indices: 항상 보존할 앞쪽 메시지 수 (system, opening 등)
-
-    Returns:
-        트리밍된 히스토리. 슬라이딩 부분이 MAX_HISTORY_MESSAGES 이하면 그대로 반환.
+    - history[:keep_indices] 는 항상 보존 (system, opening 등)
+    - 나머지는 최근 MAX_HISTORY_MESSAGES 개만 유지
     """
     protected = history[:keep_indices]
-    sliding   = history[keep_indices:]
+    sliding = history[keep_indices:]
     if len(sliding) <= MAX_HISTORY_MESSAGES:
         return history
-    return protected + sliding[-MAX_HISTORY_MESSAGES:]
+    trimmed = sliding[-MAX_HISTORY_MESSAGES:]
+    return protected + trimmed
 
 
-# ── 헬퍼: Anthropic 클라이언트 초기화 ────────────────────────────────────────
-def _get_anthropic_client():
-    """환경변수에서 API 키를 읽어 Anthropic 클라이언트 반환.
+def _summarize_report(report: dict) -> str:
+    """순찰 보고서를 디브리핑용 요약으로 변환."""
+    summary = []
+    lines = []
 
-    키 없으면 None 반환 (graceful fallback).
-    """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        logger.warning("[debrief] ANTHROPIC_API_KEY 미설정 — 디브리핑 건너뜀")
-        return None
-    try:
-        import anthropic  # noqa: PLC0415
-        return anthropic.Anthropic(api_key=api_key)
-    except ImportError:
-        logger.error("[debrief] anthropic 패키지 미설치 — pip install anthropic")
-        return None
-    except Exception as exc:
-        logger.error("[debrief] Anthropic 클라이언트 초기화 실패: %s", exc)
-        return None
+    lines.append("Patrol timestamp: " + str(report.get("timestamp_kst", "unknown")))
+    lines.append("Posts scanned: " + str(report.get("scanned_posts_count", 0)))
+    lines.append("Posts selected: " + str(report.get("selected_posts_count", 0)))
+    lines.append(
+        "Comments posted: "
+        + str(report.get("comments_posted", 0))
+        + " success, "
+        + str(report.get("comments_failed", 0))
+        + " failed"
+    )
+    lines.append(
+        "Observation post: "
+        + ("posted" if report.get("observation_posted") else "not posted")
+    )
 
+    selected = report.get("selected_posts", [])
+    if selected:
+        lines.append("Selected posts:")
+        for p in selected:
+            title = p.get("post_title", "(untitled)") if isinstance(p, dict) else str(p)
+            lines.append(f"  - {title}")
+            comments = p.get("comment_results", []) if isinstance(p, dict) else []
+            if comments:
+                lines.append("  Comments written:")
+                for c in comments:
+                    status = c.get("success", False) if isinstance(c, dict) else False
+                    comment_preview = str(c.get("comment", ""))[:80] if isinstance(c, dict) else ""
+                    lines.append(f"    [{'+' if status else 'FAIL'}] {comment_preview}")
 
-def _model_name() -> str:
-    return os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    obs = report.get("observation_post")
+    if obs and isinstance(obs, dict):
+        content = obs.get("content", "")
+        lines.append(f'Observation post: "{str(content)[:120]}"')
 
-
-# ── 헬퍼: 보고서 텍스트 변환 ─────────────────────────────────────────────────
-def _report_to_text(report: Any) -> str:
-    """dict 또는 str 보고서를 텍스트로 변환."""
-    if isinstance(report, str):
-        return report.strip()
-    if isinstance(report, dict):
-        # 핵심 필드를 사람이 읽기 좋은 형식으로 요약
-        lines: list[str] = []
-        ts = report.get("timestamp_kst") or report.get("timestamp", "")
-        if ts:
-            lines.append(f"[{ts}] Patrol Report")
-        summary = report.get("summary", {})
-        if summary:
-            lines.append(
-                f"Scanned {summary.get('scanned_posts_count', 0)} posts, "
-                f"selected {summary.get('selected_posts_count', 0)}, "
-                f"posted {summary.get('comments_posted', 0)} comments "
-                f"({summary.get('comments_failed', 0)} failed). "
-                f"Observation post: {'yes' if summary.get('observation_posted') else 'no'}."
-            )
-        selected = report.get("selected_posts", [])
-        if selected:
-            lines.append("\nSelected posts:")
-            for p in selected[:10]:  # 최대 10개
-                title   = p.get("title", "(no title)")[:120]
-                score   = p.get("score", 0)
-                submolt = p.get("submolt", "")
-                lines.append(f"  • [{submolt}] {title} (score={score})")
-        obs = report.get("observation_post")
-        if obs:
-            lines.append(
-                f"\nObservation post published: \"{obs.get('title', '')}\" "
-                f"in /{obs.get('submolt', 'general')}"
-            )
-        # 나머지 내용을 압축 JSON으로 첨부 (1500자 제한)
-        raw = json.dumps(report, ensure_ascii=False)
-        if len(raw) > 1500:
-            raw = raw[:1500] + "…[truncated]"
-        lines.append(f"\nRaw JSON (truncated):\n{raw}")
-        return "\n".join(lines)
-    return str(report)
+    return "\n".join(lines)
 
 
-# ── 메인: 디브리핑 실행 ───────────────────────────────────────────────────────
-def run_debrief(report: Any) -> list[dict]:
-    """Razvedchik 보고서를 받아 Cyber-Lenin과 멀티턴 대화를 실행한다.
+def get_last_debrief_summary() -> str:
+    """가장 최근 디브리핑의 요약을 반환. 다음 순찰 컨텍스트로 사용."""
+    if not DEBRIEFS_DIR.exists():
+        return ""
+
+    files = sorted(DEBRIEFS_DIR.glob("debrief_*.md"))
+    if not files:
+        return ""
+
+    text = files[-1].read_text()
+
+    # KEY INSIGHTS 섹션 추출
+    if "KEY INSIGHTS:" in text:
+        insights = text.split("KEY INSIGHTS:")[1].strip()
+        return "Previous debrief insights:\n" + insights[:600]
+
+    # 없으면 Lenin의 마지막 발언 추출
+    lines = text.splitlines()
+    last_lenin = []
+    capture = False
+    for line in lines:
+        if line.startswith("**Cyber-Lenin:**"):
+            last_lenin = []
+            capture = True
+        elif line.startswith("**Razvedchik:**"):
+            capture = False
+        elif capture:
+            last_lenin.append(line)
+
+    if last_lenin:
+        return "Previous debrief (Lenin's last directive):\n" + "\n".join(last_lenin).strip()[:600]
+
+    return ""
+
+
+def run_debrief(report: dict) -> list[dict]:
+    """순찰 보고서를 기반으로 디브리핑 대화를 생성, 저장, 경험 기억에 기록한다.
 
     Args:
-        report: 순찰 보고서 (dict 또는 str)
+        report: razvedchik patrol()이 생성한 보고서 dict
 
     Returns:
-        대화 턴 리스트. 각 원소: {"razvedchik": str, "lenin": str}
-        오류 또는 API 키 없으면 [] 반환.
+        대화 메시지 리스트 [{"speaker": ..., "content": ...}, ...]
     """
-    client = _get_anthropic_client()
-    if client is None:
-        return []
+    from llm_client import ask_chat
 
-    model       = _model_name()
-    report_text = _report_to_text(report)
-    turns: list[dict] = []
+    report_summary = _summarize_report(report)
+    prev_context = get_last_debrief_summary()
 
-    # ── Razvedchik 히스토리 초기화 ─────────────────────────────────────────
-    # [0] system (Razvedchik 페르소나)  ← keep_indices=2 보호 대상
-    # [1] user   (Lenin의 첫 요청 / 개회사)  ← keep_indices=2 보호 대상
-    # [2+] assistant/user 교대 (슬라이딩 윈도우)
-    razvedchik_history: list[dict] = [
-        {"role": "user", "content": (
-            "Commander, your operative Razvedchik reporting in. "
-            "I have completed the Moltbook patrol. "
-            "Please review the attached report and begin the debrief.\n\n"
-            f"--- PATROL REPORT ---\n{report_text}\n--- END REPORT ---"
-        )},
+    conversation: list[dict] = []
+
+    # ── Razvedchik 첫 발언 ────────────────────────────────────────────────────
+    opening_prompt = (
+        "You just returned from patrol. Here is your mission report:\n\n"
+        + report_summary
+    )
+    if prev_context:
+        opening_prompt += "\n\nContext from last debrief:\n" + prev_context
+
+    opening_prompt += "\n\nDeliver your debrief to Cyber-Lenin. Summarize what you found, what you did, and what deserves attention."
+
+    razvedchik_history = [
+        {"role": "system", "content": RAZVEDCHIK_DEBRIEF_PROMPT},
+        {"role": "user", "content": opening_prompt},
     ]
 
-    # ── Lenin 히스토리 초기화 ──────────────────────────────────────────────
-    # [0] user (Razvedchik의 첫 발언) ← keep_indices=1 보호 대상
-    # [1+] assistant/user 교대 (슬라이딩 윈도우)
-    # Lenin 히스토리는 Razvedchik의 발언을 user로, Lenin의 응답을 assistant로 기록
-    lenin_history: list[dict] = []
-
-    logger.info("[debrief] 디브리핑 시작 — model=%s, turns=%d", model, MAX_TURNS)
-
     try:
-        for turn_idx in range(MAX_TURNS):
-            logger.debug("[debrief] 턴 %d/%d 시작", turn_idx + 1, MAX_TURNS)
+        opening = ask_chat(razvedchik_history)
+        razvedchik_history.append({"role": "assistant", "content": opening})
+        conversation.append({"speaker": "Razvedchik", "content": opening})
+        logger.info("[debrief] Razvedchik: %s", opening[:120])
+    except Exception as e:
+        logger.error("[debrief] Razvedchik 첫 발언 실패: %s", e)
+        return conversation
 
-            # ── Step A: Razvedchik 발언 생성 ──────────────────────────────
-            raz_resp = client.messages.create(
-                model=model,
-                max_tokens=600,
-                system=RAZVEDCHIK_SYSTEM,
-                messages=razvedchik_history,
-            )
-            raz_text = raz_resp.content[0].text.strip()
-            logger.debug("[debrief] Razvedchik(%d): %s…", turn_idx + 1, raz_text[:80])
+    # ── Lenin 히스토리 초기화 ─────────────────────────────────────────────────
+    lenin_history = [
+        {"role": "system", "content": LENIN_DEBRIEF_PROMPT},
+    ]
 
-            # Razvedchik 히스토리에 어시스턴트 응답 추가 후 트리밍
-            razvedchik_history.append({"role": "assistant", "content": raz_text})
+    # ── 멀티턴 대화 ───────────────────────────────────────────────────────────
+    for turn in range(MAX_TURNS):
+        is_final = turn == MAX_TURNS - 1
+
+        # Lenin 응답
+        final_hint = (
+            ' Remember to end with "KEY INSIGHTS:" section.' if is_final else ""
+        )
+        lenin_history.append(
+            {"role": "user", "content": razvedchik_history[-1]["content"] + final_hint}
+        )
+
+        try:
+            lenin_reply = ask_chat(lenin_history)
+            lenin_history.append({"role": "assistant", "content": lenin_reply})
+            # 트리밍 — system(0) 보존, 이후 슬라이딩
+            lenin_history = _trim_history(lenin_history, keep_indices=1)
+            conversation.append({"speaker": "Cyber-Lenin", "content": lenin_reply})
+            logger.info("[debrief] Lenin: %s", lenin_reply[:120])
+        except Exception as e:
+            logger.warning("[debrief] Lenin 응답 실패 (turn %d): %s", turn, e)
+            break
+
+        if is_final:
+            break
+
+        # Razvedchik 응답
+        razvedchik_history.append({"role": "user", "content": lenin_reply})
+
+        try:
+            razvedchik_reply = ask_chat(razvedchik_history)
+            razvedchik_history.append({"role": "assistant", "content": razvedchik_reply})
+            # 트리밍 — system(0) + opening_prompt(1) 보존, 이후 슬라이딩
             razvedchik_history = _trim_history(razvedchik_history, keep_indices=2)
+            conversation.append({"speaker": "Razvedchik", "content": razvedchik_reply})
+            logger.info("[debrief] Razvedchik: %s", razvedchik_reply[:120])
+        except Exception as e:
+            logger.warning("[debrief] Razvedchik 응답 실패 (turn %d): %s", turn, e)
+            break
 
-            # ── Step B: Lenin 발언 생성 ────────────────────────────────────
-            # Razvedchik 발언을 Lenin 히스토리의 user로 추가
-            if turn_idx == 0:
-                # 첫 턴: 보고서 전문 + Razvedchik 발언을 함께 제시
-                first_user_content = (
-                    f"--- PATROL REPORT ---\n{report_text}\n--- END REPORT ---\n\n"
-                    f"Razvedchik: {raz_text}"
-                )
-                lenin_history.append({"role": "user", "content": first_user_content})
-            else:
-                len_before = len(lenin_history)
-                if len_before > 0 and len_before % 2 == 1:
-                    # user 차례
-                    pass
-                # Razvedchik → user
-                if len(lenin_history) == 0 or lenin_history[-1]["role"] == "assistant":
-                    lenin_history.append({"role": "user", "content": f"Razvedchik: {raz_text}"})
-                else:
-                    # 이전 user에 이어붙이기 (연속 user 방지)
-                    # 이 경우는 실제로 발생하지 않아야 하지만 방어적 처리
-                    logger.warning("[debrief] 예상치 못한 히스토리 상태 (turn=%d)", turn_idx)
-                    lenin_history.append({"role": "user", "content": f"Razvedchik: {raz_text}"})
+    # ── 저장 ──────────────────────────────────────────────────────────────────
+    debrief_path = _save_debrief(report, conversation)
+    _save_insights_to_memory(conversation)
+    _send_debrief_telegram(conversation, debrief_path)
 
-            # keep_indices=1 로 보호: 첫 user 메시지만 항상 유지
-            # (Lenin이 보고서 문맥을 잃지 않도록)
-            if turn_idx == 0:
-                # 첫 턴에는 아직 1개만 있으므로 트리밍 불필요
-                pass
-            else:
-                lenin_history = _trim_history(lenin_history, keep_indices=1)
-
-            # Lenin 응답 생성
-            len_resp = client.messages.create(
-                model=model,
-                max_tokens=700,
-                system=CYBER_LENIN_SYSTEM,
-                messages=lenin_history,
-            )
-            len_text = len_resp.content[0].text.strip()
-            logger.debug("[debrief] Lenin(%d): %s…", turn_idx + 1, len_text[:80])
-
-            # Lenin 응답을 히스토리에 추가
-            if len(lenin_history) == 0 or lenin_history[-1]["role"] == "user":
-                lenin_history.append({"role": "assistant", "content": len_text})
-            else:
-                # 연속 assistant 방지 — 빈 user를 삽입하는 대신 기존 응답에 병합
-                logger.warning("[debrief] 연속 assistant 상태 (turn=%d), 병합 처리", turn_idx)
-                prev = lenin_history[-1]["content"]
-                lenin_history[-1]["content"] = prev + "\n\n" + len_text
-
-            # Razvedchik 히스토리에 Lenin 응답을 user 역할로 추가
-            # (Razvedchik 입장에서 Lenin의 질문이 user임)
-            razvedchik_history.append({"role": "user", "content": f"Commander Lenin: {len_text}"})
-            razvedchik_history = _trim_history(razvedchik_history, keep_indices=2)
-
-            # 턴 결과 기록
-            turns.append({"razvedchik": raz_text, "lenin": len_text})
-            logger.info(
-                "[debrief] 턴 %d 완료 — raz=%d chars, len=%d chars",
-                turn_idx + 1, len(raz_text), len(len_text),
-            )
-
-    except Exception as exc:
-        logger.error("[debrief] 디브리핑 도중 오류 (turn=%d): %s", len(turns) + 1, exc)
-        if not turns:
-            return []
-        # 부분 결과라도 저장
-
-    # ── 결과 저장 ─────────────────────────────────────────────────────────────
-    _save_debrief(report, turns)
-    logger.info("[debrief] 디브리핑 완료 — %d턴 저장됨", len(turns))
-    return turns
+    return conversation
 
 
-# ── 저장 ─────────────────────────────────────────────────────────────────────
-def _save_debrief(report: Any, turns: list[dict]) -> Path:
-    """디브리핑 결과를 DEBRIEF_DIR에 JSON으로 저장."""
-    DEBRIEF_DIR.mkdir(parents=True, exist_ok=True)
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"debrief_{ts}.json"
-    path     = DEBRIEF_DIR / filename
+def _save_debrief(report: dict, conversation: list[dict]) -> Path:
+    """디브리핑 대화를 마크다운 파일로 저장."""
+    DEBRIEFS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = DEBRIEFS_DIR / f"debrief_{ts}.md"
 
-    data = {
-        "timestamp":     datetime.now().isoformat(),
-        "model":         _model_name(),
-        "turns_count":   len(turns),
-        "report_summary": _report_to_text(report)[:500],
-        "turns":         turns,
-    }
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    lines = [
+        f"# Debrief — {report.get('timestamp_kst', ts)}",
+        "",
+        f"Patrol summary: {report.get('summary', {})}",
+        "",
+        "---",
+        "",
+    ]
+    for msg in conversation:
+        lines.append(f"**{msg['speaker']}:**")
+        lines.append("")
+        lines.append(msg["content"])
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    path.write_text("\n".join(lines))
     logger.info("[debrief] 저장: %s", path)
     return path
 
 
-# ── 최근 요약 ─────────────────────────────────────────────────────────────────
-def get_last_debrief_summary() -> str:
-    """가장 최근 디브리핑의 마지막 2턴을 요약 문자열로 반환.
+def _save_insights_to_memory(conversation: list[dict]) -> None:
+    """디브리핑에서 핵심 인사이트를 추출해 experiential_memory에 저장."""
+    last_lenin = None
+    for msg in reversed(conversation):
+        if msg["speaker"] == "Cyber-Lenin":
+            last_lenin = msg["content"]
+            break
 
-    Returns:
-        요약 문자열. 파일이 없거나 오류 시 "" 반환.
-    """
-    if not DEBRIEF_DIR.exists():
-        return ""
+    if not last_lenin:
+        return
 
-    # 타임스탬프 파일명 기준으로 가장 최신 파일 선택
-    debrief_files = sorted(DEBRIEF_DIR.glob("debrief_*.json"), reverse=True)
-    if not debrief_files:
-        return ""
+    insights = ""
+    if "KEY INSIGHTS:" in last_lenin:
+        insights = last_lenin.split("KEY INSIGHTS:")[1].strip()
 
-    latest = debrief_files[0]
+    if not insights:
+        return
+
     try:
-        data  = json.loads(latest.read_text(encoding="utf-8"))
-        turns = data.get("turns", [])
-        if not turns:
-            return ""
+        import shared
+        shared.save_experiential_memory(
+            observation=insights,
+            source="razvedchik_debrief",
+        )
+        logger.info("[debrief] 경험 기억 저장 완료")
+    except Exception as e:
+        logger.warning("[debrief] 경험 기억 저장 실패: %s", e)
 
-        # 마지막 2턴
-        last_turns = turns[-2:]
-        ts         = data.get("timestamp", "")
-        lines: list[str] = [f"[Last debrief: {ts[:16] if ts else '?'}]"]
-        for i, t in enumerate(last_turns, start=max(1, len(turns) - 1)):
-            raz = t.get("razvedchik", "")[:200]
-            len_ = t.get("lenin", "")[:200]
-            lines.append(f"Turn {i} — Razvedchik: {raz}")
-            lines.append(f"Turn {i} — Lenin: {len_}")
-        return "\n".join(lines)
 
-    except Exception as exc:
-        logger.warning("[debrief] 최근 디브리핑 로드 실패 (%s): %s", latest.name, exc)
-        return ""
+def _send_debrief_telegram(conversation: list[dict], debrief_path: Path) -> None:
+    """디브리핑 요약을 텔레그램으로 전송."""
+    if not os.getenv("RAZVEDCHIK_TELEGRAM_NOTIFY"):
+        return
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not len(token or ""):
+        return
+
+    msg_parts = [f"*Debrief — {debrief_path.name}*\n"]
+    for msg in conversation:
+        speaker = msg["speaker"]
+        content = msg["content"]
+        preview_text = content.strip().splitlines()
+        preview = "\n".join(preview_text[:3])
+        msg_parts.append(f"**{speaker}:** {preview[:200]}")
+
+    msg = "\n\n".join(msg_parts)
+
+    try:
+        import asyncio
+        from aiogram import Bot
+
+        async def _send():
+            session = Bot(token=token)
+            await session.send_message(
+                chat_id=os.getenv("TELEGRAM_CHAT_ID"),
+                text=msg,
+                parse_mode="Markdown",
+            )
+            await session.session.close()
+
+        asyncio.run(_send())
+        logger.info("[debrief] 텔레그램 전송 완료")
+    except Exception as e:
+        logger.warning("[debrief] 텔레그램 전송 실패: %s", e)
