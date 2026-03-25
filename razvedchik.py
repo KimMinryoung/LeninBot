@@ -188,6 +188,99 @@ class MoltbookClient:
         logger.warning("[razvedchik] 챌린지 해결 실패 — 0 반환")
         return 0
 
+    @staticmethod
+    def solve_challenge_text(challenge_text: str) -> str:
+        """
+        obfuscate된 영어 챌린지 텍스트에서 수학 문제 추출 후 계산.
+        반환: "40.00" 형식 문자열
+        """
+        # 영단어 → 정수 매핑
+        word_to_num = {
+            'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,
+            'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
+            'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15,
+            'sixteen':16,'seventeen':17,'eighteen':18,'nineteen':19,'twenty':20,
+            'thirty':30,'forty':40,'fifty':50,'sixty':60,'seventy':70,
+            'eighty':80,'ninety':90,'hundred':100,
+            # 오타/변형 (실제 챌린지에서 관찰됨)
+            'nooton':1,'nootons':1,'neuton':1,'neutons':1,
+        }
+
+        # 텍스트 정규화: 특수문자/케이스 제거
+        text = re.sub(r'[^a-zA-Z0-9\s]', ' ', challenge_text).lower()
+        words = text.split()
+
+        # 숫자 단어 시퀀스에서 숫자 추출
+        def extract_numbers(words):
+            nums = []
+            i = 0
+            while i < len(words):
+                w = words[i]
+                if w in word_to_num:
+                    val = word_to_num[w]
+                    # "twenty six" 등 복합 숫자
+                    if val in (20,30,40,50,60,70,80,90) and i+1 < len(words) and words[i+1] in word_to_num and word_to_num[words[i+1]] < 10:
+                        val += word_to_num[words[i+1]]
+                        i += 1
+                    # "hundred" 처리
+                    if i+1 < len(words) and words[i+1] == 'hundred':
+                        val *= 100
+                        i += 1
+                    nums.append(val)
+                i += 1
+            return nums
+
+        numbers = extract_numbers(words)
+        logger.debug("[razvedchik] 챌린지 추출 숫자: %s from '%s'", numbers, challenge_text[:60])
+
+        if not numbers:
+            logger.warning("[razvedchik] 챌린지 숫자 추출 실패")
+            return "0.00"
+
+        # 연산자 판단
+        # "multiplies by" → 곱셈
+        if 'multipli' in text or 'multiply' in text or 'times' in text:
+            result = 1
+            for n in numbers:
+                result *= n
+        else:
+            # 기본: 덧셈 (plus, adds, and, total)
+            result = sum(numbers)
+
+        return f"{result:.2f}"
+
+    def _verify_content(self, verification: dict) -> bool:
+        """
+        댓글/포스트 게시 후 응답의 verification 필드를 처리해 verify API 호출.
+
+        Args:
+            verification: response["comment"]["verification"] 또는 response["post"]["verification"]
+
+        Returns:
+            True if verified, False otherwise
+        """
+        if not verification:
+            return False
+
+        code = verification.get("verification_code", "")
+        challenge_text = verification.get("challenge_text", "")
+        expires_at = verification.get("expires_at", "")
+
+        if not code or not challenge_text:
+            logger.warning("[razvedchik] verification 필드 불완전: %s", verification)
+            return False
+
+        answer = self.solve_challenge_text(challenge_text)
+        logger.info("[razvedchik] Verification 시도 — code=%s, answer=%s", code[:30], answer)
+
+        try:
+            resp = self._request("POST", "/verify", json={"verification_code": code, "answer": answer})
+            logger.info("[razvedchik] Verification 응답: %s", resp)
+            return True
+        except Exception as e:
+            logger.warning("[razvedchik] Verification 실패: %s", e)
+            return False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 class Razvedchik:
@@ -451,7 +544,16 @@ class Razvedchik:
             body["parent_id"] = parent_id
 
         logger.info("[razvedchik] 댓글 게시 — post_id=%s", post_id)
-        return self.client.post(f"/posts/{post_id}/comments", body)
+        resp = self.client.post(f"/posts/{post_id}/comments", body)
+
+        # verification 처리
+        comment_data = resp.get("comment", {})
+        verification = comment_data.get("verification")
+        if verification:
+            verified = self.client._verify_content(verification)
+            logger.info("[razvedchik] 댓글 verification: %s", "✅" if verified else "❌")
+
+        return resp
 
     # ── 포스트 작성 ───────────────────────────────────────────────────────────
     def post_observation(
@@ -480,7 +582,16 @@ class Razvedchik:
             "content":      content,
         }
         logger.info("[razvedchik] 포스트 작성 — submolt=%s, title=%s", submolt, topic[:30])
-        return self.client.post("/posts", body)
+        resp = self.client.post("/posts", body)
+
+        # verification 처리
+        post_data = resp.get("post", {})
+        verification = post_data.get("verification")
+        if verification:
+            verified = self.client._verify_content(verification)
+            logger.info("[razvedchik] 포스트 verification: %s", "✅" if verified else "❌")
+
+        return resp
 
     def generate_observation_post(self, trending_topics: list[str]) -> tuple[str, str]:
         """
