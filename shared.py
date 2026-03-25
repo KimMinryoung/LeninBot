@@ -851,6 +851,7 @@ def save_experiential_memory(
 # ── URL Content Fetching ────────────────────────────────────────────
 # Shared across chatbot (web RAG) and telegram_bot (Claude agent).
 
+import json as _json
 import re as _re
 from typing import Optional as _Optional
 from urllib.parse import urlparse as _urlparse
@@ -863,11 +864,33 @@ def extract_urls(text: str) -> list[str]:
     return _URL_PATTERN.findall(text)
 
 
+_JS_PLACEHOLDER_RE = _re.compile(
+    r"(enable\s+javascript|javascript\s+(is\s+)?(required|needed|must)|"
+    r"this\s+app\s+works\s+best\s+with|turn\s+on\s+javascript|"
+    r"activate\s+javascript|자바스크립트를?\s*(활성화|켜|필요)|"
+    r"loading\.{2,}|please\s+wait)", _re.I
+)
+
+
+def _is_low_quality(text: str) -> bool:
+    """Check if extracted text looks like a JS placeholder or empty shell."""
+    if not text or len(text) < 80:
+        return True
+    if _JS_PLACEHOLDER_RE.search(text[:500]):
+        return True
+    # Mostly whitespace / very few real words
+    words = text.split()
+    if len(words) < 15:
+        return True
+    return False
+
+
 def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     """Fetch and extract main body text from a URL (up to 10,000 chars).
 
-    Tries Tavily Extract first (handles JS-rendered pages),
-    falls back to requests + BeautifulSoup with aggressive boilerplate removal.
+    Tries Playwright (persistent context) first, then Tavily Extract and
+    requests+BS4 as fallbacks. Low-quality / JS-placeholder results from
+    any method are skipped in favor of the next.
     """
     def _clean_text(raw: str) -> str:
         """Strip boilerplate noise and keep only substantive paragraphs."""
@@ -879,17 +902,16 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
             cleaned.append(line)
         return "\n".join(cleaned)
 
-    # Sites that need Playwright directly (JS-rendered, iframe, or API-gated)
-    if any(site in url for site in _PLAYWRIGHT_DIRECT_SITES):
-        try:
-            result = _playwright_fetch(url, max_chars)
-            if result and len(result) > 50:
-                return result
-        except Exception as e:
-            logger.info("[URL] Playwright direct 실패 (%s): %s", url[:60], e)
-        return None
+    # 1) Playwright first — handles JS-rendered pages, iframes, cookies
+    try:
+        result = _playwright_fetch(url, max_chars)
+        if result and not _is_low_quality(result):
+            return result
+    except Exception as e:
+        logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
 
-    # Try Tavily Extract first
+    # 2) Fallback: Tavily Extract
+    best_fallback = None
     try:
         from langchain_tavily import TavilyExtract
         extractor = TavilyExtract()
@@ -903,11 +925,14 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
             item = items[0] if isinstance(items[0], dict) else {"content": str(items[0])}
             content = item.get("raw_content", "") or item.get("content", "")
             if content and len(content) > 50:
-                return _clean_text(content)[:max_chars]
+                cleaned = _clean_text(content)[:max_chars]
+                if not _is_low_quality(cleaned):
+                    return cleaned
+                best_fallback = cleaned
     except Exception as e:
-        logger.info("[URL] Tavily Extract 실패 (%s), fallback 시도: %s", url[:60], e)
+        logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
-    # Fallback: requests + BeautifulSoup
+    # 3) Fallback: requests + BeautifulSoup
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -920,13 +945,11 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
         from bs4 import BeautifulSoup, Comment
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Remove non-content elements aggressively
         for tag in soup(["script", "style", "nav", "header", "footer", "aside",
                          "iframe", "noscript", "form", "button", "svg", "img"]):
             tag.decompose()
         for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
             comment.extract()
-        # Remove common boilerplate classes/ids
         _BOILERPLATE = _re.compile(
             r"(sidebar|widget|advert|banner|cookie|popup|modal|share|social|"
             r"related|recommend|comment|reply|breadcrumb|pagination|menu|"
@@ -938,7 +961,6 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
         for el in soup.find_all(attrs={"id": _BOILERPLATE}):
             el.decompose()
 
-        # Try to find the main content container (priority order)
         main = (
             soup.find("article")
             or soup.find("main")
@@ -954,37 +976,40 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
         text = _clean_text(text)
 
         if len(text) > 50:
-            return text[:max_chars]
+            if not _is_low_quality(text):
+                return text[:max_chars]
+            if best_fallback is None or len(text) > len(best_fallback):
+                best_fallback = text[:max_chars]
     except Exception as e:
         logger.warning("[URL] requests fallback도 실패 (%s): %s", url[:60], e)
 
-    # Final fallback: Playwright (handles JS-rendered pages, iframes like Naver Cafe)
-    try:
-        result = _playwright_fetch(url, max_chars)
-        if result and len(result) > 50:
-            return result
-    except Exception as e:
-        logger.info("[URL] Playwright fallback 실패 (%s): %s", url[:60], e)
-
-    return None
+    # Return best fallback result even if low-quality (better than nothing)
+    return best_fallback
 
 
-# ── Playwright Browser Pool (async, singleton) ──────────────────────
+# ── Playwright Browser Pool (sync, singleton with persistent context) ──
 _pw_instance = None
 _pw_browser = None
+_pw_context = None
 _pw_lock = threading.Lock()
+_PW_COOKIE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pw_cookies.json")
 
 
-def _get_pw_browser():
-    """Lazy singleton: one persistent Chromium instance, reused across calls."""
-    global _pw_instance, _pw_browser
+def _get_pw_context():
+    """Lazy singleton: persistent Chromium context with cookie/session reuse."""
+    global _pw_instance, _pw_browser, _pw_context
 
     with _pw_lock:
-        # Check if browser is still alive (inside lock to prevent race)
+        if _pw_context is not None:
+            try:
+                _pw_context.pages  # noqa — will raise if dead
+                return _pw_context
+            except Exception:
+                _pw_context = None
+
         if _pw_browser is not None:
             try:
-                _pw_browser.contexts  # noqa — will raise if dead
-                return _pw_browser
+                _pw_browser.contexts  # noqa
             except Exception:
                 _pw_browser = None
                 if _pw_instance is not None:
@@ -1001,42 +1026,57 @@ def _get_pw_browser():
 
         pw = sync_playwright().start()
         try:
-            _pw_browser = pw.chromium.launch(headless=True)
+            browser = pw.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                locale="ko-KR",
+            )
+            if os.path.exists(_PW_COOKIE_PATH):
+                try:
+                    with open(_PW_COOKIE_PATH, "r", encoding="utf-8") as f:
+                        cookies = _json.load(f)
+                    context.add_cookies(cookies)
+                    logger.info("[Playwright] Restored %d cookies", len(cookies))
+                except Exception:
+                    pass
             _pw_instance = pw
+            _pw_browser = browser
+            _pw_context = context
         except Exception:
             pw.stop()
             raise
-        logger.info("[Playwright] Browser pool started")
-        return _pw_browser
+        logger.info("[Playwright] Browser context started")
+        return _pw_context
+
+
+def _save_pw_cookies():
+    """Persist current cookies to disk."""
+    if _pw_context is None:
+        return
+    try:
+        cookies = _pw_context.cookies()
+        with open(_PW_COOKIE_PATH, "w", encoding="utf-8") as f:
+            _json.dump(cookies, f, ensure_ascii=False)
+    except Exception:
+        pass
 
 
 # Sites that need Playwright directly (JS-rendered or iframe-based)
-_PLAYWRIGHT_DIRECT_SITES = (
-    "cafe.naver.com", "blog.naver.com", "m.blog.naver.com",
-    "twitter.com", "x.com",
-    "instagram.com",
-    "youtube.com", "youtu.be",
-    "threads.net",
-    "moltbook.com",
-)
-
 # Sites with content in iframes
 _IFRAME_SITES = ("cafe.naver.com", "blog.naver.com", "m.blog.naver.com")
 
 
 def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fetch URL content via Playwright (persistent browser pool). Handles JS + iframe."""
-    browser = _get_pw_browser()
-    if browser is None:
+    """Fetch URL content via Playwright (persistent context with cookies). Handles JS + iframe."""
+    context = _get_pw_context()
+    if context is None:
         return None
 
     page = None
     try:
-        page = browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            locale="ko-KR",
-        )
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         # Naver Cafe/Blog: content is inside an iframe
         target = page
@@ -1074,6 +1114,7 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
 
         if text and len(text) > 50:
             logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))
+            _save_pw_cookies()
             return text[:max_chars]
     except Exception as e:
         logger.warning("[URL] Playwright page error (%s): %s", url[:60], e)
