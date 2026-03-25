@@ -14,7 +14,8 @@ Hetzner 서버의 leninbot이 MOON PC(Windows 10, RTX 3060 12GB)의 qwen3.5-9b Q
 C:\Users\DESKTOP\llama-cpp\bin\llama-server.exe ^
   -m C:\Users\DESKTOP\llama-cpp\models\Qwen_Qwen3.5-9B-Q8_0.gguf ^
   --host 0.0.0.0 --port 8080 ^
-  -ngl 99 -c 8192
+  -ngl 99 -c 8192 ^
+  --chat-template-kwargs "{\"enable_thinking\":false}"
 ```
 
 | 옵션 | 의미 |
@@ -24,6 +25,7 @@ C:\Users\DESKTOP\llama-cpp\bin\llama-server.exe ^
 | `--port 8080` | 서빙 포트 |
 | `-ngl 99` | 모든 레이어 GPU 오프로드 |
 | `-c 8192` | 컨텍스트 길이 |
+| `--chat-template-kwargs` | qwen3.5 thinking 비활성화 (필수 — 없으면 빈 응답/잘린 글 발생) |
 
 ### 동작 확인
 
