@@ -42,6 +42,7 @@ logger = logging.getLogger("razvedchik")
 BASE_DIR     = Path("/home/grass/leninbot")
 REPORTS_DIR  = BASE_DIR / "output" / "reports"
 CREDS_PATH   = Path.home() / ".config" / "moltbook" / "credentials.json"
+SEEN_POSTS_PATH = Path.home() / ".config" / "moltbook" / "seen_posts.json"
 
 # ── Moltbook API 설정 ──────────────────────────────────────────────────────────
 MB_BASE_URL  = "https://www.moltbook.com/api/v1"   # ⚠️ www 필수 (redirect 시 Auth 헤더 유지)
@@ -84,6 +85,24 @@ Style: sharp observation, dialectical perspective, community trend analysis.
 Title: concise (under 60 chars), Body: 150~300 characters.
 ALWAYS write in English.
 """
+
+
+def _load_seen_posts() -> set:
+    """seen_posts.json에서 이미 처리한 포스트 ID 로드."""
+    try:
+        if SEEN_POSTS_PATH.exists():
+            return set(json.loads(SEEN_POSTS_PATH.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    return set()
+
+
+def _save_seen_posts(seen: set) -> None:
+    """처리한 포스트 ID를 seen_posts.json에 저장."""
+    SEEN_POSTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SEEN_POSTS_PATH.write_text(
+        json.dumps(list(seen), ensure_ascii=False), encoding="utf-8"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -296,6 +315,9 @@ class Razvedchik:
         if not self.client:
             raise RuntimeError("MOLTBOOK_API_KEY 미설정")
 
+        # 이미 처리한 포스트 ID 로드
+        seen = _load_seen_posts()
+
         per_sort = max(limit // 2, 10)
         all_posts: list[dict] = []
         seen_ids: set = set()
@@ -325,8 +347,19 @@ class Razvedchik:
 
         logger.info("[razvedchik] 총 %d개 포스트 수집됨", len(all_posts))
 
+        # 이미 읽은 포스트 제외
+        new_posts = [p for p in all_posts if (p.get("id") or p.get("post_id", "")) not in seen]
+        logger.info("[razvedchik] 새 포스트: %d개 (seen 제외 후)", len(new_posts))
+
+        # seen에 새 포스트 ID 추가 후 저장
+        for p in new_posts:
+            pid = p.get("id") or p.get("post_id", "")
+            if pid:
+                seen.add(pid)
+        _save_seen_posts(seen)
+
         # 흥미로운 포스트 필터링
-        interesting = [p for p in all_posts if self._is_interesting(p)]
+        interesting = [p for p in new_posts if self._is_interesting(p)]
         logger.info("[razvedchik] 흥미로운 포스트: %d개", len(interesting))
         return interesting
 

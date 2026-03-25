@@ -1097,7 +1097,7 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
                 return [title, desc, chapters].filter(Boolean).join('\\n\\n');
             }""")
         else:
-            text = target.evaluate("""() => {
+            _js_extract = """() => {
                 ['nav','header','footer','aside','.sidebar','.menu',
                  '.advertisement','.ad','#comments','.comment','script','style']
                 .forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
@@ -1110,7 +1110,14 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
                     if (el && el.innerText.trim().length > 100) return el.innerText.trim();
                 }
                 return document.body ? document.body.innerText.trim() : '';
-            }""")
+            }"""
+            text = target.evaluate(_js_extract)
+            # Loading 감지 시 최대 10초간 재시도 (2초 간격)
+            import time as _time
+            _deadline = _time.time() + 10
+            while _is_low_quality(text) and _time.time() < _deadline:
+                page.wait_for_timeout(2000)
+                text = target.evaluate(_js_extract)
 
         if text and len(text) > 50:
             logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))

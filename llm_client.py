@@ -74,6 +74,45 @@ def _resolve_backend(force_refresh: bool = False) -> dict:
 
 
 # ── OpenAI 호환 호출 (공통) ───────────────────────────────────────────────────
+import re as _re
+_THINK_RE = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL)
+
+
+def _extract_answer(msg: dict) -> str:
+    """Extract the actual answer from an LLM response message.
+
+    Qwen3.5 models produce reasoning in <think> tags. llama-server may put
+    the thinking in a separate 'reasoning_content' field, leaving 'content'
+    empty. When that happens, fall back to reasoning_content and strip the
+    thinking wrapper.
+    """
+    content = (msg.get("content") or "").strip()
+    if content:
+        # In case <think> tags leak into content
+        return _THINK_RE.sub("", content).strip() or content
+
+    # content is empty — extract usable text from reasoning_content
+    reasoning = (msg.get("reasoning_content") or "").strip()
+    if not reasoning:
+        return ""
+
+    # Strip <think> wrapper if present
+    cleaned = _THINK_RE.sub("", reasoning).strip()
+    if cleaned:
+        return cleaned
+
+    # No explicit </think> close — reasoning IS the raw thinking.
+    # Try to find the last substantive line (the model's intended answer
+    # often appears at the very end of the thinking block).
+    lines = [l.strip() for l in reasoning.splitlines() if l.strip()]
+    # Walk backwards to find a line that looks like an actual response
+    # (not a numbered step, not a markdown header, not a bullet)
+    for line in reversed(lines):
+        if not _re.match(r"^(\d+[\.\):]|\*\*|[-*•]|#{1,3}\s)", line) and len(line) > 10:
+            return line
+    return ""
+
+
 def _call(base: str, model: str, messages: list[dict],
           temperature: float, timeout: int) -> str:
     resp = httpx.post(
@@ -88,7 +127,7 @@ def _call(base: str, model: str, messages: list[dict],
         timeout=timeout,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    return _extract_answer(resp.json()["choices"][0]["message"])
 
 
 def _call_llm(messages: list[dict], temperature: float = 0.7,
