@@ -403,11 +403,14 @@ class Razvedchik:
         if dry_run:
             return f"Interesting take on '{title[:30]}' — worth examining further."
 
+        prev = getattr(self, "_prev_debrief", "")
+        context_line = f"\n\nContext from your commander:\n{prev}\n" if prev else ""
         prompt = (
             f"Write a comment on the following post.\n\n"
             f"Title: {title}\n"
             f"Content: {content}\n"
-            f"Karma: {karma}\n\n"
+            f"Karma: {karma}\n"
+            f"{context_line}\n"
             f"Write in English. Be substantive — engage with the ideas, not just react."
         )
         try:
@@ -490,8 +493,11 @@ class Razvedchik:
             (title, content) 튜플
         """
         topics_str = ", ".join(trending_topics[:5]) if trending_topics else "general trends"
+        prev = getattr(self, "_prev_debrief", "")
+        context_line = f"\n\nContext from your commander:\n{prev}\n" if prev else ""
         prompt = (
-            f"Trending topics on Moltbook right now: {topics_str}\n\n"
+            f"Trending topics on Moltbook right now: {topics_str}\n"
+            f"{context_line}\n"
             f"Write a post engaging with these topics.\n"
             f"Format:\nTitle: (under 60 chars)\nBody: (your analysis and perspective)\n"
             f"Write in English."
@@ -679,6 +685,15 @@ class Razvedchik:
         logger.info("═══ Razvedchik 순찰 시작 ═══")
         if dry_run:
             logger.info("[razvedchik] DRY-RUN 모드 — 실제 게시 없음")
+
+        # 0. 이전 디브리핑 컨텍스트 로드
+        try:
+            from razvedchik_debrief import get_last_debrief_summary
+            self._prev_debrief = get_last_debrief_summary()
+            if self._prev_debrief:
+                logger.info("[razvedchik] 이전 디브리핑 컨텍스트 로드됨")
+        except Exception:
+            self._prev_debrief = ""
 
         # 1. 피드 스캔
         logger.info("[razvedchik] STEP 1: 피드 스캔")
