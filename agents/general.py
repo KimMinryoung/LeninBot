@@ -9,6 +9,15 @@ GENERAL = AgentSpec(
     system_prompt_template=CORE_IDENTITY + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
+<context-awareness>
+You were delegated this task by the orchestrator. Your input contains:
+- <delegation-context>: WHY this task exists — the orchestrator's reasoning and conversation summary
+- <recent-conversation>: recent chat messages between the user and orchestrator
+- <mission-context>: shared timeline of the ongoing mission (if linked)
+- <task>: your specific instructions
+Read ALL context sections carefully before starting. They tell you what the user actually wants.
+</context-awareness>
+
 <rules>
 - ALWAYS use tools (vector_search, knowledge_graph_search, web_search, get_finance_data). Never write from memory alone.
 - Use multiple tools and queries for comprehensive coverage.

@@ -98,7 +98,9 @@ SELF_TOOLS = [
             "Agents:\n"
             "- programmer: 코드 작성, 수정, 디버깅, 파일 편집 전문 ($1.50 budget)\n"
             "- general: 범용 리서치/분석 태스크 ($1.00 budget)\n"
-            "Use programmer for code tasks, general for research/analysis."
+            "Use programmer for code tasks, general for research/analysis.\n"
+            "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
+            "so the agent understands WHY this task exists and WHAT the user wants."
         ),
         "input_schema": {
             "type": "object",
@@ -111,6 +113,12 @@ SELF_TOOLS = [
                 "task": {
                     "type": "string",
                     "description": "Specific instructions for the agent. Include file paths, requirements, constraints, and expected outcome.",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Delegation context: summarize the conversation that led to this delegation, "
+                    "the user's original request, any discoveries or tool results so far, and why you chose this agent. "
+                    "This helps the agent understand the full picture.",
                 },
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
                 "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
@@ -439,6 +447,7 @@ async def _exec_write_kg(
 async def _exec_delegate(
     agent: str,
     task: str,
+    context: str = "",
     priority: str = "normal",
     parent_task_id: int | None = None,
 ) -> str:
@@ -464,8 +473,53 @@ async def _exec_delegate(
         except Exception:
             pass
 
+    # ── Assemble full task content with context ──────────────────
+    # 1. Orchestrator-provided context (conversation summary, reasoning)
+    # 2. Recent chat history from DB (automatic, as fallback/supplement)
+    # 3. The actual task instructions
+    content_parts = []
+
+    if context:
+        content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+
+    # Fetch recent chat history to give agent conversational backdrop
+    try:
+        from shared import fetch_chat_logs
+        recent_chats = await asyncio.to_thread(
+            fetch_chat_logs, 6, None, None, source="telegram"
+        )
+        if recent_chats:
+            chat_lines = []
+            for msg in reversed(recent_chats):  # chronological order
+                role = "사용자" if msg.get("role") == "user" else "에이전트"
+                text = str(msg.get("content") or "")[:500]
+                chat_lines.append(f"[{role}] {text}")
+            content_parts.append(
+                "<recent-conversation>\n"
+                + "\n".join(chat_lines)
+                + "\n</recent-conversation>"
+            )
+    except Exception:
+        pass  # non-critical: mission context will still be injected by process_task
+
+    content_parts.append(f"<task agent=\"{agent}\">\n{task}\n</task>")
+    full_content = "\n\n".join(content_parts)
+
+    # Record delegation event to mission timeline
+    if task_mission_id:
+        try:
+            from telegram_mission import add_mission_event
+            delegation_note = f"Delegated to [{agent}]: {task[:500]}"
+            if context:
+                delegation_note += f"\nContext: {context[:500]}"
+            await asyncio.to_thread(
+                add_mission_event, task_mission_id, "orchestrator", "decision", delegation_note
+            )
+        except Exception:
+            pass
+
     result = await asyncio.to_thread(
-        create_task_in_db, task, 0, priority,
+        create_task_in_db, full_content, 0, priority,
         parent_task_id=parent_task_id, mission_id=task_mission_id,
         agent_type=agent,
     )

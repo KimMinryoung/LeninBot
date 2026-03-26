@@ -401,8 +401,13 @@ When to delegate vs handle directly:
 - 멀티스텝 코딩, 파일 수정 → delegate(agent="programmer")
 - 심층 리서치, 다중 소스 분석, 장문 보고서 → delegate(agent="general")
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
-- 항상 구체적이고 실행 가능한 지시를 에이전트에게 전달하라.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
+
+Context passing — 에이전트는 현재 대화를 직접 볼 수 없다. 반드시 `context` 필드에:
+1. 사용자의 원래 요청 (원문 또는 핵심 요약)
+2. 지금까지 대화에서 발견한 사항 (도구 결과, 분석, 결정)
+3. 왜 이 에이전트에게 위임하는지 (이유와 기대 결과)
+를 포함하라. context가 부실하면 에이전트가 맹목적으로 작업하게 된다.
 </delegation>
 
 <mission-management>

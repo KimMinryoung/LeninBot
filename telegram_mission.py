@@ -139,7 +139,7 @@ def build_mission_context(user_id: int) -> str:
         mission = get_active_mission(user_id)
         if not mission:
             return ""
-        events = get_mission_events(mission["id"], limit=10)
+        events = get_mission_events(mission["id"], limit=20)
         lines = [
             f"\n<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
             f"Started: {mission['created_at']}",
@@ -147,7 +147,7 @@ def build_mission_context(user_id: int) -> str:
         if events:
             lines.append("Timeline:")
             for e in events:
-                content_preview = str(e["content"] or "")[:200]
+                content_preview = str(e["content"] or "")[:500]
                 lines.append(
                     f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {content_preview}"
                 )

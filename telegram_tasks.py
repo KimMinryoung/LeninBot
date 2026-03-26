@@ -113,11 +113,11 @@ async def process_task(
             from db import query as _db_query
             mission_rows = _db_query("SELECT title FROM telegram_missions WHERE id = %s", (mission_id,))
             mission_title = mission_rows[0]["title"] if mission_rows else "?"
-            events = get_mission_events(mission_id, limit=15)
+            events = get_mission_events(mission_id, limit=20)
             if events:
                 lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
                 for e in events:
-                    lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:200]}")
+                    lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
                 lines.append("</mission-context>")
                 mission_ctx = "\n".join(lines)
             add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
@@ -145,12 +145,16 @@ async def process_task(
                 on_progress=on_progress,
             )
 
-            # Record task completion to mission
+            # Record task completion to mission (generous summary for context chain)
             if mission_id:
                 try:
                     from telegram_mission import add_mission_event
-                    summary = _extract_summary(report, 500)
-                    add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Done: {summary}")
+                    agent_label = f" [{task.get('agent_type', 'general')}]" if task.get("agent_type") else ""
+                    summary = _extract_summary(report, 1500)
+                    add_mission_event(
+                        mission_id, f"task#{task_id}", "task_completed",
+                        f"Done{agent_label}: {summary}",
+                    )
                 except Exception:
                     pass
 
