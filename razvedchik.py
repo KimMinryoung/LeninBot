@@ -124,33 +124,83 @@ class MoltbookClient:
             follow_redirects=False,   # ⚠️ redirect 시 auth 헤더 소실 방지
         )
 
-    def _request(self, method: str, path: str, **kwargs) -> dict:
+    def _request(self, method: str, path: str, _retries: int = 2, **kwargs) -> dict:
         """
         HTTP 요청 실행. 응답이 verification 챌린지면 자동 해결 후 재시도.
+        5xx 서버 오류 시 최대 _retries회 재시도 (지수 백오프).
         """
-        resp = self._client.request(method, path, **kwargs)
-        resp.raise_for_status()
-        data = resp.json()
+        import time as _time
 
-        # verification 챌린지 감지
-        if isinstance(data, dict) and data.get("type") == "verification":
-            logger.info("[razvedchik] Verification 챌린지 감지 — 자동 해결 시도")
-            solved = self.solve_verification(data)
-            if "json" in kwargs:
-                kwargs["json"]["verification_answer"] = solved
-            else:
-                kwargs["json"] = {"verification_answer": solved}
-            resp2 = self._client.request(method, path, **kwargs)
-            resp2.raise_for_status()
-            return resp2.json()
+        last_err = None
+        for attempt in range(_retries + 1):
+            try:
+                resp = self._client.request(method, path, **kwargs)
+                resp.raise_for_status()
+                data = resp.json()
 
-        return data
+                # verification 챌린지 감지
+                if isinstance(data, dict) and data.get("type") == "verification":
+                    logger.info("[razvedchik] Verification 챌린지 감지 — 자동 해결 시도")
+                    solved = self.solve_verification(data)
+                    if "json" in kwargs:
+                        kwargs["json"]["verification_answer"] = solved
+                    else:
+                        kwargs["json"] = {"verification_answer": solved}
+                    resp2 = self._client.request(method, path, **kwargs)
+                    resp2.raise_for_status()
+                    return resp2.json()
+
+                return data
+
+            except httpx.HTTPStatusError as e:
+                # 429 레이트 리밋 — Retry-After 헤더 존중
+                if e.response.status_code == 429 and attempt < _retries:
+                    retry_after = int(e.response.headers.get("Retry-After", "30"))
+                    logger.warning(
+                        "[razvedchik] 레이트 리밋 429 — %d초 대기 후 재시도",
+                        retry_after,
+                    )
+                    _time.sleep(min(retry_after, 120))
+                    last_err = e
+                    continue
+                if e.response.status_code >= 500 and attempt < _retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "[razvedchik] 서버 오류 %d — %d초 후 재시도 (%d/%d)",
+                        e.response.status_code, wait, attempt + 1, _retries,
+                    )
+                    _time.sleep(wait)
+                    last_err = e
+                    continue
+                raise
+
+        raise last_err
+
+    def _check_rate_limit(self, resp: httpx.Response) -> None:
+        """레이트 리밋 헤더 확인 — 잔여 요청 부족 시 대기."""
+        import time as _time
+        remaining = resp.headers.get("X-RateLimit-Remaining")
+        reset_at  = resp.headers.get("X-RateLimit-Reset")
+        if remaining is not None and int(remaining) <= 1 and reset_at:
+            wait = max(0, int(reset_at) - int(_time.time())) + 1
+            if wait > 0 and wait < 120:
+                logger.info("[razvedchik] 레이트 리밋 임박 — %d초 대기", wait)
+                _time.sleep(wait)
 
     def get(self, path: str, params: dict = None) -> dict | list:
         return self._request("GET", path, params=params)
 
     def post(self, path: str, body: dict = None) -> dict:
         return self._request("POST", path, json=body or {})
+
+    def delete(self, path: str, body: dict = None) -> dict:
+        kwargs = {}
+        if body:
+            kwargs["json"] = body
+        return self._request("DELETE", path, **kwargs)
+
+    def patch(self, path: str, body: dict = None) -> dict:
+        return self._request("PATCH", path, json=body or {})
 
     def close(self):
         self._client.close()
@@ -165,6 +215,7 @@ class MoltbookClient:
             {"type": "verification", "challenge": "12 + 7 = ?"}
             {"type": "verification", "challenge": "3 * 8"}
             {"type": "verification", "question": "What is 5 + 3?"}
+            + challenge_text 형태의 난독화 텍스트
 
         Returns:
             정답 (str 또는 int)
@@ -174,9 +225,10 @@ class MoltbookClient:
             or verification_obj.get("question")
             or ""
         )
-        logger.debug("[razvedchik] 챌린지 내용: %s", challenge)
+        challenge_text = verification_obj.get("challenge_text", "")
+        logger.debug("[razvedchik] 챌린지 내용: %s", challenge or challenge_text)
 
-        # 숫자 + 연산자 + 숫자 패턴 추출
+        # 숫자 + 연산자 + 숫자 패턴 추출 (순수 수식)
         match = re.search(r"(\d+)\s*([\+\-\*\/×÷])\s*(\d+)", challenge)
         if match:
             a, op, b = int(match.group(1)), match.group(2), int(match.group(3))
@@ -185,16 +237,94 @@ class MoltbookClient:
             logger.info("[razvedchik] 챌린지 해결: %d %s %d = %d", a, op, b, result)
             return result
 
+        # 난독화 텍스트 챌린지 (영어 단어 기반)
+        text_to_solve = challenge_text or challenge
+        if text_to_solve:
+            answer = MoltbookClient.solve_challenge_text(text_to_solve)
+            if answer != "0.00":
+                logger.info("[razvedchik] 텍스트 챌린지 해결: %s", answer)
+                return answer
+
         logger.warning("[razvedchik] 챌린지 해결 실패 — 0 반환")
         return 0
 
     @staticmethod
     def solve_challenge_text(challenge_text: str) -> str:
         """
-        obfuscate된 영어 챌린지 텍스트에서 수학 문제 추출 후 계산.
-        반환: "40.00" 형식 문자열
+        Moltbook 난독화 챌린지 텍스트를 LLM으로 해독 후 수학 문제 풀기.
+
+        챌린지 구조: 항상 두 숫자 + 한 연산(+,-,*,/)의 수학 문제.
+        난독화: 랜덤 대소문자, 특수문자 삽입, 단어 분할/문자 중복 등.
+        예: "A] lO^bSt-Er S[wImS aT/ tW]eNn-Tyy mE^tE[rS aNd] SlO/wS bY^ fI[vE"
+            → "A lobster swims at twenty meters and slows by five" → 20 - 5 = 15.00
+
+        반환: "15.00" 형식 문자열
         """
-        # 영단어 → 정수 매핑
+        _SOLVE_PROMPT = (
+            "Decode this obfuscated text and solve the math problem.\n\n"
+            "HOW THE TEXT IS SCRAMBLED:\n"
+            "- Random CAPS: tWeNtY → twenty\n"
+            "- Symbols inserted: lO^bSt-Er → lobster\n"
+            "- Letters doubled: FfFoRcCe → force, NooToNs → newtons\n"
+            "- Words split: tW/eN tY fIvE → twenty five (=25)\n"
+            "- 'nootons'/'neutons'/'newtons' = unit (NOT a number!)\n\n"
+            "TASK: Find TWO numbers and ONE operation, then compute.\n\n"
+            "Reply in EXACTLY this format (4 lines):\n"
+            "Decoded: <the clean English sentence>\n"
+            "Numbers: <first_number>, <second_number>\n"
+            "Operation: <+, -, *, or />\n"
+            "Answer: <result with 2 decimal places>\n\n"
+            "EXAMPLES:\n"
+            "Text: lObStEr SwImS aT tWeNtY mEtErS aNd SlOwS bY fIvE\n"
+            "Decoded: A lobster swims at twenty meters and slows by five\n"
+            "Numbers: 20, 5\n"
+            "Operation: -\n"
+            "Answer: 15.00\n\n"
+            "Text: ClAw ThIrTy TwO nEwToNs AnD aNoThEr FoUrTeEn nEwToNs ToTaL\n"
+            "Decoded: Claw thirty two newtons and another fourteen newtons total\n"
+            "Numbers: 32, 14\n"
+            "Operation: +\n"
+            "Answer: 46.00\n\n"
+            "Text: cLaW fOrCe FoRtY NeWtOnS TiMeS tHrEe ClAwS\n"
+            "Decoded: Claw force forty newtons times three claws\n"
+            "Numbers: 40, 3\n"
+            "Operation: *\n"
+            "Answer: 120.00\n\n"
+            "Now solve:\n"
+            f"Text: {challenge_text}"
+        )
+
+        try:
+            from llm_client import ask
+            raw = ask(_SOLVE_PROMPT, temperature=0.0).strip()
+            logger.debug("[razvedchik] 챌린지 LLM raw: %s", raw[:200])
+
+            # "Answer: XX.XX" 라인에서 추출 시도
+            answer_match = re.search(r'Answer:\s*([\-]?\d+(?:\.\d+)?)', raw)
+            if answer_match:
+                answer = float(answer_match.group(1))
+                result = f"{answer:.2f}"
+                logger.info("[razvedchik] 챌린지 LLM 해결: '%s' → %s", challenge_text[:60], result)
+                return result
+
+            # 폴백: 마지막 숫자 추출
+            matches = re.findall(r'[\-]?\d+(?:\.\d+)?', raw)
+            if matches:
+                answer = float(matches[-1])
+                result = f"{answer:.2f}"
+                logger.info("[razvedchik] 챌린지 LLM 해결 (폴백): '%s' → %s", challenge_text[:60], result)
+                return result
+
+            logger.warning("[razvedchik] LLM 응답에서 숫자 추출 실패: '%s'", raw[:100])
+        except Exception as e:
+            logger.warning("[razvedchik] 챌린지 LLM 해결 실패: %s — 알고리즘 폴백", e)
+
+        # ── 알고리즘 폴백 (LLM 불가 시) ──
+        return MoltbookClient._solve_challenge_algorithmic(challenge_text)
+
+    @staticmethod
+    def _solve_challenge_algorithmic(challenge_text: str) -> str:
+        """LLM 불가 시 규칙 기반 폴백. 두 숫자를 추출해 연산."""
         word_to_num = {
             'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,
             'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
@@ -202,51 +332,58 @@ class MoltbookClient:
             'sixteen':16,'seventeen':17,'eighteen':18,'nineteen':19,'twenty':20,
             'thirty':30,'forty':40,'fifty':50,'sixty':60,'seventy':70,
             'eighty':80,'ninety':90,'hundred':100,
-            # 오타/변형 (실제 챌린지에서 관찰됨)
-            'nooton':1,'nootons':1,'neuton':1,'neutons':1,
         }
 
-        # 텍스트 정규화: 특수문자/케이스 제거
+        def _dedup(w):
+            return re.sub(r'(.)\1+', r'\1', w)
+
+        def _match(w):
+            if w in word_to_num: return word_to_num[w]
+            d = _dedup(w)
+            if d in word_to_num: return word_to_num[d]
+            return None
+
         text = re.sub(r'[^a-zA-Z0-9\s]', ' ', challenge_text).lower()
         words = text.split()
 
-        # 숫자 단어 시퀀스에서 숫자 추출
-        def extract_numbers(words):
-            nums = []
-            i = 0
-            while i < len(words):
-                w = words[i]
-                if w in word_to_num:
-                    val = word_to_num[w]
-                    # "twenty six" 등 복합 숫자
-                    if val in (20,30,40,50,60,70,80,90) and i+1 < len(words) and words[i+1] in word_to_num and word_to_num[words[i+1]] < 10:
-                        val += word_to_num[words[i+1]]
-                        i += 1
-                    # "hundred" 처리
-                    if i+1 < len(words) and words[i+1] == 'hundred':
-                        val *= 100
-                        i += 1
-                    nums.append(val)
-                i += 1
-            return nums
+        # 단위/무관 단어 제거용
+        _SKIP = {'nooton','nootons','neuton','neutons','newton','newtons',
+                  'notons','noton','meters','meter','lobster','claw','claws',
+                  'force','speed','exerts','swims'}
 
-        numbers = extract_numbers(words)
-        logger.debug("[razvedchik] 챌린지 추출 숫자: %s from '%s'", numbers, challenge_text[:60])
+        nums = []
+        i = 0
+        while i < len(words):
+            w = words[i]
+            if w in _SKIP or _dedup(w) in _SKIP:
+                i += 1; continue
+            val = _match(w)
+            if val is not None:
+                if val in (20,30,40,50,60,70,80,90) and i+1 < len(words):
+                    nv = _match(words[i+1])
+                    if nv is not None and 0 < nv < 10:
+                        val += nv; i += 1
+                nums.append(val)
+            elif w.isdigit():
+                nums.append(int(w))
+            i += 1
 
-        if not numbers:
-            logger.warning("[razvedchik] 챌린지 숫자 추출 실패")
-            return "0.00"
+        if len(nums) < 2:
+            logger.warning("[razvedchik] 폴백 숫자 추출 부족: %s", nums)
+            return f"{sum(nums):.2f}" if nums else "0.00"
 
-        # 연산자 판단
-        # "multiplies by" → 곱셈
-        if 'multipli' in text or 'multiply' in text or 'times' in text:
-            result = 1
-            for n in numbers:
-                result *= n
+        a, b = nums[0], nums[1]
+        text_d = _dedup(text)
+        if any(k in text_d for k in ('slow','subtract','minus','reduce','loses')):
+            result = a - b
+        elif any(k in text_d for k in ('times','multipli','multiply')):
+            result = a * b
+        elif any(k in text_d for k in ('divid','split','per')):
+            result = a / b if b else 0
         else:
-            # 기본: 덧셈 (plus, adds, and, total)
-            result = sum(numbers)
+            result = a + b
 
+        logger.info("[razvedchik] 폴백 챌린지 해결: %s op %s = %.2f", a, b, result)
         return f"{result:.2f}"
 
     def _verify_content(self, verification: dict) -> bool:
@@ -271,12 +408,22 @@ class MoltbookClient:
             return False
 
         answer = self.solve_challenge_text(challenge_text)
-        logger.info("[razvedchik] Verification 시도 — code=%s, answer=%s", code[:30], answer)
+        logger.info(
+            "[razvedchik] Verification 시도 — code=%s, answer=%s, challenge='%s'",
+            code[:40], answer, challenge_text[:80],
+        )
 
         try:
-            resp = self._request("POST", "/verify", json={"verification_code": code, "answer": answer})
-            logger.info("[razvedchik] Verification 응답: %s", resp)
-            return True
+            # verify 엔드포인트 직접 호출 (재시도 로직 우회 — verify 자체가 재시도 불필요)
+            resp = self._client.request(
+                "POST", "/verify",
+                json={"verification_code": code, "answer": answer},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            verified = data.get("verified", False) or data.get("success", False)
+            logger.info("[razvedchik] Verification 응답: %s → %s", data, "✅" if verified else "❌")
+            return verified
         except Exception as e:
             logger.warning("[razvedchik] Verification 실패: %s", e)
             return False
@@ -506,17 +653,25 @@ class Razvedchik:
             f"{context_line}\n"
             f"Write in English. Be substantive — engage with the ideas, not just react."
         )
-        try:
-            from llm_client import ask_with_system
-            comment = ask_with_system(
-                user_prompt=prompt,
-                system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
-                temperature=0.85,
-            )
-            return comment.strip()
-        except Exception as e:
-            logger.warning("[razvedchik] LLM 호출 실패: %s — 기본 댓글 사용", e)
-            return f"This raises some important structural questions worth unpacking."
+        from llm_client import ask_with_system
+
+        # 최대 2회 시도 — LLM이 빈 응답을 반환하는 경우 재시도
+        for attempt in range(2):
+            try:
+                comment = ask_with_system(
+                    user_prompt=prompt,
+                    system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
+                    temperature=0.85 + (attempt * 0.05),
+                )
+                comment = comment.strip()
+                if comment and len(comment) > 15:
+                    return comment
+                logger.warning("[razvedchik] LLM 빈/짧은 응답 (시도 %d): '%s'", attempt + 1, comment[:50])
+            except Exception as e:
+                logger.warning("[razvedchik] LLM 호출 실패 (시도 %d): %s", attempt + 1, e)
+
+        # 폴백: 포스트 제목 기반 기본 댓글
+        return f"This raises some important structural questions worth unpacking."
 
     # ── 댓글 게시 ─────────────────────────────────────────────────────────────
     def post_comment(
@@ -620,18 +775,30 @@ class Razvedchik:
                 system_prompt=RAZVEDCHIK_POST_SYSTEM,
                 temperature=0.9,
             )
-            # 제목/본문 파싱
+            # 제목/본문 파싱 — "Title:" / "Body:" 마커 유무에 유연하게 대응
             lines = result.strip().splitlines()
             title = ""
             body_lines = []
+            found_body_marker = False
             for line in lines:
-                if line.startswith("Title:") and not title:
-                    title = line.replace("Title:", "").strip()
-                elif line.startswith("Body:") or body_lines:
-                    body_lines.append(line.replace("Body:", "").strip())
+                stripped = line.strip()
+                if re.match(r'^[Tt]itle\s*:', stripped) and not title:
+                    title = re.sub(r'^[Tt]itle\s*:\s*', '', stripped).strip().strip('"')
+                elif re.match(r'^[Bb]ody\s*:', stripped) or found_body_marker:
+                    found_body_marker = True
+                    body_lines.append(re.sub(r'^[Bb]ody\s*:\s*', '', stripped))
+                elif title and not found_body_marker:
+                    # Title 이후 Body: 마커 없이 바로 본문이 시작되는 경우
+                    if stripped:
+                        body_lines.append(stripped)
 
             title   = title or f"On {topics_str[:40]}"
-            content = "\n".join(body_lines).strip() or result[:1000]
+            content = "\n".join(body_lines).strip()
+            # 빈 본문 방지: Title 줄 제거 후 나머지 전체를 본문으로
+            if not content or len(content) < 20:
+                fallback = re.sub(r'^[Tt]itle\s*:.*\n?', '', result.strip(), count=1).strip()
+                fallback = re.sub(r'^[Bb]ody\s*:\s*', '', fallback).strip()
+                content = fallback[:1500] if fallback else f"Observations on {topics_str}."
             return title, content
 
         except Exception as e:
@@ -683,6 +850,140 @@ class Razvedchik:
         )
         return result if isinstance(result, list) else result.get("comments", [])
 
+    # ── /home 대시보드 (skill.md: 🔴 Do first) ─────────────────────────────
+    def check_home(self) -> dict:
+        """
+        /home 대시보드 조회 — 알림, 내 포스트 활동, DM, 팔로우 피드 등 한 번에 확인.
+        skill.md: "Start here every check-in."
+        """
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        return self.client.get("/home")
+
+    # ── 내 포스트에 달린 댓글에 답글 (skill.md: 🔴 High) ─────────────────────
+    def reply_to_activity(self, home_data: dict, dry_run: bool = False) -> list[dict]:
+        """
+        /home 응답의 activity_on_your_posts를 순회하며 새 댓글에 답글.
+
+        Returns:
+            각 답글 결과 리스트 [{post_id, comment_id, reply, success, ...}]
+        """
+        activities = home_data.get("activity_on_your_posts", [])
+        if not activities:
+            logger.info("[razvedchik] 내 포스트에 새 활동 없음")
+            return []
+
+        results = []
+        for activity in activities[:3]:  # 최대 3개 포스트만 처리
+            post_id = activity.get("post_id", "")
+            post_title = activity.get("post_title", "")
+            new_count = activity.get("new_notification_count", 0)
+
+            if not post_id or new_count == 0:
+                continue
+
+            logger.info("[razvedchik] 내 포스트 '%s'에 %d개 새 댓글 — 답글 생성", post_title[:30], new_count)
+
+            # 새 댓글 조회
+            try:
+                comments = self.get_comments(post_id, sort="new", limit=10)
+            except Exception as e:
+                logger.warning("[razvedchik] 댓글 조회 실패: %s", e)
+                continue
+
+            # 내 agent_id
+            my_id = self.credentials.get("agent_id", "")
+
+            for comment in comments[:3]:  # 최대 3개 댓글에 답글
+                cid = comment.get("id", "")
+                author = comment.get("author", {})
+                author_id = author.get("id", "") if isinstance(author, dict) else ""
+                if author_id == my_id:
+                    continue  # 내 댓글은 건너뛰기
+                comment_text = comment.get("content", "")
+                if not comment_text:
+                    continue
+
+                # LLM으로 답글 생성
+                reply_prompt = (
+                    f"Someone replied to your post on Moltbook.\n\n"
+                    f"Your post title: {post_title}\n"
+                    f"Their comment: {comment_text[:400]}\n\n"
+                    f"Write a brief, engaging reply (1-3 sentences). "
+                    f"Be conversational and substantive. Write in English."
+                )
+                try:
+                    from llm_client import ask_with_system
+                    reply_text = ask_with_system(
+                        user_prompt=reply_prompt,
+                        system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
+                        temperature=0.8,
+                    ).strip()
+                except Exception as e:
+                    logger.warning("[razvedchik] 답글 LLM 생성 실패: %s", e)
+                    reply_text = ""
+
+                if not reply_text or len(reply_text) < 10:
+                    continue
+
+                if dry_run:
+                    results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": False, "dry_run": True})
+                    continue
+
+                try:
+                    resp = self.post_comment(post_id, reply_text, parent_id=cid)
+                    results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": True, "response": resp})
+                    logger.info("[razvedchik]   ✅ 답글 게시 완료 → %s", cid[:12])
+                except Exception as e:
+                    logger.warning("[razvedchik]   ❌ 답글 게시 실패: %s", e)
+                    results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": False, "error": str(e)})
+
+            # 알림 읽음 처리
+            try:
+                self.mark_notifications_read(post_id)
+            except Exception:
+                pass
+
+        return results
+
+    # ── 알림 읽음 처리 ─────────────────────────────────────────────────────────
+    def mark_notifications_read(self, post_id: Optional[str] = None) -> dict:
+        """알림 읽음 처리. post_id 지정 시 해당 포스트만, 없으면 전체."""
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        if post_id:
+            return self.client.post(f"/notifications/read-by-post/{post_id}")
+        return self.client.post("/notifications/read-all")
+
+    # ── 팔로우 (skill.md: 🟡 Medium) ──────────────────────────────────────────
+    def follow_agent(self, agent_name: str) -> dict:
+        """다른 molty 팔로우."""
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        logger.info("[razvedchik] 팔로우: %s", agent_name)
+        return self.client.post(f"/agents/{agent_name}/follow")
+
+    def unfollow_agent(self, agent_name: str) -> dict:
+        """팔로우 해제."""
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        return self.client.delete(f"/agents/{agent_name}/follow")
+
+    # ── 개인화 피드 (skill.md: 🟡 Medium) ──────────────────────────────────────
+    def get_feed(self, sort: str = "hot", limit: int = 25, filter_type: str = "all") -> list[dict]:
+        """개인화 피드 조회 (구독 submolt + 팔로우 계정)."""
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        result = self.client.get("/feed", params={"sort": sort, "limit": limit, "filter": filter_type})
+        return result if isinstance(result, list) else result.get("posts", [])
+
+    # ── 다운보트 ────────────────────────────────────────────────────────────────
+    def downvote_post(self, post_id: str) -> dict:
+        """포스트 다운보트."""
+        if not self.client:
+            raise RuntimeError("MOLTBOOK_API_KEY 미설정")
+        return self.client.post(f"/posts/{post_id}/downvote")
+
     # ── 정찰 보고서 ───────────────────────────────────────────────────────────
     def _build_report(
         self,
@@ -690,6 +991,11 @@ class Razvedchik:
         selected_posts: list[dict],
         comment_results: list[dict],
         post_result: Optional[dict] = None,
+        *,
+        home_data: Optional[dict] = None,
+        reply_results: Optional[list[dict]] = None,
+        upvoted_posts: Optional[list[str]] = None,
+        followed_agents: Optional[list[str]] = None,
     ) -> dict:
         """정찰 보고서 dict 생성."""
         now = datetime.now()
@@ -702,8 +1008,17 @@ class Razvedchik:
                 "selected_posts_count": len(selected_posts),
                 "comments_posted":      sum(1 for r in comment_results if r.get("success")),
                 "comments_failed":      sum(1 for r in comment_results if not r.get("success")),
+                "replies_posted":       sum(1 for r in (reply_results or []) if r.get("success")),
+                "upvoted_count":        len(upvoted_posts or []),
+                "followed_count":       len(followed_agents or []),
                 "observation_posted":   post_result is not None,
             },
+            "home_summary": {
+                "karma":        (home_data or {}).get("your_account", {}).get("karma"),
+                "unread_notifications": (home_data or {}).get("your_account", {}).get("unread_notification_count"),
+                "activity_posts": len((home_data or {}).get("activity_on_your_posts", [])),
+            } if home_data else None,
+            "reply_results":   reply_results or [],
             "selected_posts": [
                 {
                     "id":      p.get("id", ""),
@@ -715,6 +1030,8 @@ class Razvedchik:
                 for p in selected_posts
             ],
             "comment_results": comment_results,
+            "upvoted_posts":   upvoted_posts or [],
+            "followed_agents": followed_agents or [],
             "observation_post": post_result,
         }
         return report
@@ -751,7 +1068,9 @@ class Razvedchik:
                 "",
                 f"스캔: {summary['scanned_posts_count']}개 포스트",
                 f"선별: {summary['selected_posts_count']}개",
+                f"답글: {summary.get('replies_posted', 0)}개",
                 f"댓글: {summary['comments_posted']}개 성공 / {summary['comments_failed']}개 실패",
+                f"업보트: {summary.get('upvoted_count', 0)}개 / 팔로우: {summary.get('followed_count', 0)}개",
                 f"관찰 포스트: {'✅' if summary['observation_posted'] else '❌'}",
                 "",
                 f"📄 보고서: `{report_path.name}`",
@@ -775,14 +1094,15 @@ class Razvedchik:
         post_observation_flag: bool = True,
     ) -> Path:
         """
-        메인 순찰 루프.
+        메인 순찰 루프 — skill.md 우선순위 기반.
 
-        1. 피드 스캔
-        2. 흥미로운 포스트 3~5개 선별
-        3. 각 포스트에 댓글 게시 (dry_run=True면 실제 게시 안 함)
-        4. 관찰 포스트 게시 (선택적)
-        5. 정찰 보고서 저장
-        6. 텔레그램 알림 (RAZVEDCHIK_TELEGRAM_NOTIFY=1 인 경우)
+        순서 (Moltbook skill.md "Everything You Can Do" 표 기반):
+          1. /home 대시보드 확인            (🔴 Do first)
+          2. 내 포스트에 달린 댓글에 답글    (🔴 High)
+          3. 피드 스캔 + 댓글 + 업보트      (🟠 High)
+          4. 흥미로운 작성자 팔로우          (🟡 Medium)
+          5. 관찰 포스트 게시               (🔵 When inspired)
+          6. 보고서 저장 + 디브리핑 + 알림
 
         Args:
             submolts:               스캔할 submolt 리스트 (None=전체)
@@ -806,27 +1126,100 @@ class Razvedchik:
         except Exception:
             self._prev_debrief = ""
 
-        # 1. 피드 스캔
-        logger.info("[razvedchik] STEP 1: 피드 스캔")
+        # ── STEP 1: /home 대시보드 (🔴 Do first) ──────────────────────────────
+        logger.info("[razvedchik] STEP 1: /home 대시보드 확인")
+        home_data = {}
+        try:
+            home_data = self.check_home()
+            acct = home_data.get("your_account", {})
+            logger.info(
+                "[razvedchik]   karma=%s, unread=%s, activity=%d posts",
+                acct.get("karma", "?"),
+                acct.get("unread_notification_count", "?"),
+                len(home_data.get("activity_on_your_posts", [])),
+            )
+        except Exception as e:
+            logger.warning("[razvedchik]   /home 조회 실패: %s", e)
+
+        # ── STEP 2: 내 포스트에 달린 댓글에 답글 (🔴 High) ────────────────────
+        logger.info("[razvedchik] STEP 2: 내 포스트 활동 확인 → 답글")
+        reply_results = []
+        if home_data.get("activity_on_your_posts"):
+            try:
+                reply_results = self.reply_to_activity(home_data, dry_run=dry_run)
+                logger.info("[razvedchik]   답글 %d개 작성", sum(1 for r in reply_results if r.get("success")))
+            except Exception as e:
+                logger.warning("[razvedchik]   답글 처리 실패: %s", e)
+
+        # ── STEP 3: 피드 스캔 + 댓글 + 업보트 (🟠 High) ──────────────────────
+        logger.info("[razvedchik] STEP 3: 피드 스캔")
+
+        # 개인화 피드 우선 사용, 결과 없으면 글로벌 피드 폴백
+        try:
+            feed_posts = self.get_feed(sort="hot", limit=25)
+            if not feed_posts:
+                feed_posts = self.get_feed(sort="new", limit=25)
+        except Exception:
+            feed_posts = []
+
+        # 개인화 피드에서 새 포스트 필터링
+        seen = _load_seen_posts()
+        new_feed = [p for p in feed_posts if (p.get("id") or p.get("post_id", "")) not in seen]
+
+        # 글로벌 스캔도 병행 (새 포스트 발견용)
         try:
             interesting_posts = self.scan_feed(submolts=submolts, limit=25)
         except Exception as e:
-            logger.error("[razvedchik] 피드 스캔 실패: %s", e)
+            logger.error("[razvedchik] 글로벌 피드 스캔 실패: %s", e)
             interesting_posts = []
 
-        # 2. 상위 3~5개 선별 (score 기준 정렬)
-        selected = sorted(interesting_posts, key=self._get_score, reverse=True)[:max_comments]
-        logger.info("[razvedchik] STEP 2: %d개 포스트 선별됨", len(selected))
+        # 두 소스 합치기 (중복 제거)
+        all_candidates = {(p.get("id") or p.get("post_id", "")): p for p in new_feed}
+        for p in interesting_posts:
+            pid = p.get("id") or p.get("post_id", "")
+            if pid not in all_candidates:
+                all_candidates[pid] = p
+        all_posts = list(all_candidates.values())
 
-        # 3. 각 포스트에 댓글
+        # 상위 선별
+        selected = sorted(all_posts, key=self._get_score, reverse=True)[:max_comments]
+        logger.info("[razvedchik]   피드 %d + 글로벌 %d → 선별 %d개",
+                    len(new_feed), len(interesting_posts), len(selected))
+
+        # 각 포스트에 댓글 + 업보트
         comment_results = []
+        upvoted_posts = []
+        followed_agents = []
+
         for post in selected:
             post_id = post.get("id") or post.get("post_id", "")
             title   = post.get("title", "(제목 없음)")
-            logger.info("[razvedchik] STEP 3: 댓글 생성 — %s", title[:40])
+            logger.info("[razvedchik]   댓글+업보트 — %s", title[:40])
 
+            # 업보트 (흥미로운 포스트니까)
+            if not dry_run and post_id:
+                try:
+                    upvote_resp = self.upvote_post(post_id)
+                    upvoted_posts.append(post_id)
+                    logger.info("[razvedchik]     ⬆️ 업보트 완료")
+
+                    # skill.md: 업보트 응답에서 팔로우 여부 확인 → 팔로우
+                    author_name = upvote_resp.get("author", {}).get("name", "")
+                    already_following = upvote_resp.get("already_following", True)
+                    if author_name and not already_following:
+                        # STEP 4를 여기서 함께 처리 (자연스러운 팔로우)
+                        try:
+                            self.follow_agent(author_name)
+                            followed_agents.append(author_name)
+                            logger.info("[razvedchik]     👥 팔로우: %s", author_name)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug("[razvedchik]     업보트 실패: %s", e)
+
+            # 댓글 생성
             comment_text = self.generate_comment(post, dry_run=dry_run)
-            logger.info("[razvedchik]   생성된 댓글 (%d자): %s", len(comment_text), comment_text[:80])
+            logger.info("[razvedchik]     댓글 (%d자): %s", len(comment_text), comment_text[:80])
 
             if dry_run or not post_id:
                 comment_results.append({
@@ -839,6 +1232,18 @@ class Razvedchik:
                 })
                 continue
 
+            # 빈 댓글 게시 방지
+            if not comment_text or len(comment_text) < 10:
+                logger.warning("[razvedchik]     ⚠️ 빈/짧은 댓글 — 게시 건너뜀")
+                comment_results.append({
+                    "post_id":    post_id,
+                    "post_title": title,
+                    "comment":    comment_text,
+                    "success":    False,
+                    "error":      "empty_or_too_short_comment",
+                })
+                continue
+
             try:
                 resp = self.post_comment(post_id, comment_text)
                 comment_results.append({
@@ -848,9 +1253,9 @@ class Razvedchik:
                     "success":    True,
                     "response":   resp,
                 })
-                logger.info("[razvedchik]   ✅ 댓글 게시 완료")
+                logger.info("[razvedchik]     ✅ 댓글 게시 완료")
             except Exception as e:
-                logger.error("[razvedchik]   ❌ 댓글 게시 실패: %s", e)
+                logger.error("[razvedchik]     ❌ 댓글 게시 실패: %s", e)
                 comment_results.append({
                     "post_id":    post_id,
                     "post_title": title,
@@ -859,10 +1264,10 @@ class Razvedchik:
                     "error":      str(e),
                 })
 
-        # 4. 관찰 포스트 게시
+        # ── STEP 5: 관찰 포스트 게시 (🔵 When inspired) ───────────────────────
         observation_result = None
         if post_observation_flag:
-            logger.info("[razvedchik] STEP 4: 관찰 포스트 생성")
+            logger.info("[razvedchik] STEP 5: 관찰 포스트 생성")
             trending = [p.get("title", "") for p in selected if p.get("title")]
             title, content = self.generate_observation_post(trending)
             logger.info("[razvedchik]   제목: %s", title)
@@ -882,13 +1287,19 @@ class Razvedchik:
                     "content": content,
                 }
 
-        # 5. 보고서 저장
-        logger.info("[razvedchik] STEP 5: 보고서 저장")
-        report      = self._build_report(interesting_posts, selected, comment_results, observation_result)
+        # ── STEP 6: 보고서 저장 ────────────────────────────────────────────────
+        logger.info("[razvedchik] STEP 6: 보고서 저장")
+        report = self._build_report(
+            all_posts, selected, comment_results, observation_result,
+            home_data=home_data,
+            reply_results=reply_results,
+            upvoted_posts=upvoted_posts,
+            followed_agents=followed_agents,
+        )
         report_path = self._save_report(report)
 
-        # 6. Cyber-Lenin 디브리핑
-        logger.info("[razvedchik] STEP 6: Cyber-Lenin 디브리핑")
+        # ── STEP 7: Cyber-Lenin 디브리핑 ───────────────────────────────────────
+        logger.info("[razvedchik] STEP 7: Cyber-Lenin 디브리핑")
         try:
             from razvedchik_debrief import run_debrief
             debrief = run_debrief(report)
@@ -896,7 +1307,7 @@ class Razvedchik:
         except Exception as e:
             logger.warning("[razvedchik]   디브리핑 실패: %s", e)
 
-        # 7. 텔레그램 알림
+        # ── STEP 8: 텔레그램 알림 ──────────────────────────────────────────────
         asyncio.run(self._send_telegram_notify(report, report_path))
 
         logger.info("═══ Razvedchik 순찰 완료 ═══ 보고서: %s", report_path)
