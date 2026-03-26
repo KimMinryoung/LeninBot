@@ -92,16 +92,30 @@ SELF_TOOLS = [
         },
     },
     {
-        "name": "create_task",
-        "description": "Create async background task (Sonnet, 50 rounds, $1 budget). Use for: deep research, multi-step coding/patching, file edits requiring multiple tool calls, or any task where tool-call limits could interrupt progress. Prefer this over direct multi-step execution.",
+        "name": "delegate",
+        "description": (
+            "Delegate a task to a specialized agent. Runs asynchronously in background.\n"
+            "Agents:\n"
+            "- programmer: 코드 작성, 수정, 디버깅, 파일 편집 전문 ($1.50 budget)\n"
+            "- general: 범용 리서치/분석 태스크 ($1.00 budget)\n"
+            "Use programmer for code tasks, general for research/analysis."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "What to research, analyze, or implement. Be specific: include file paths, requirements, constraints, and expected outcome."},
+                "agent": {
+                    "type": "string",
+                    "enum": ["programmer", "general"],
+                    "description": "Which specialist agent to delegate to.",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Specific instructions for the agent. Include file paths, requirements, constraints, and expected outcome.",
+                },
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
-                "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional). Child reads mission timeline for context."},
+                "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
             },
-            "required": ["content"],
+            "required": ["agent", "task"],
         },
     },
     {
@@ -422,20 +436,25 @@ async def _exec_write_kg(
         return f"Failed to store knowledge: {result['message']}"
 
 
-async def _exec_create_task(
-    content: str,
+async def _exec_delegate(
+    agent: str,
+    task: str,
     priority: str = "normal",
     parent_task_id: int | None = None,
 ) -> str:
     from shared import create_task_in_db
 
+    # Validate agent name
+    try:
+        from agents import get_agent
+        spec = get_agent(agent)
+    except ValueError as e:
+        return str(e)
+
     # Inherit mission from parent task if chaining, otherwise use bot's active mission
     task_mission_id = None
     if not parent_task_id:
         try:
-            from telegram_mission import get_active_mission
-            # user_id=0 tasks: check if any user has an active mission
-            # (bot-generated tasks are typically in response to a user's mission)
             from db import query as _db_q
             active = _db_q(
                 "SELECT id FROM telegram_missions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
@@ -446,14 +465,19 @@ async def _exec_create_task(
             pass
 
     result = await asyncio.to_thread(
-        create_task_in_db, content, 0, priority,
+        create_task_in_db, task, 0, priority,
         parent_task_id=parent_task_id, mission_id=task_mission_id,
+        agent_type=agent,
     )
     if result["status"] == "ok":
         depth_info = f", depth={result.get('depth', 0)}" if parent_task_id else ""
-        return f"Task #{result['task_id']} created (priority: {priority}{depth_info}). It will be processed in the background."
+        return (
+            f"Task #{result['task_id']} delegated to [{agent}] agent "
+            f"(priority: {priority}{depth_info}, budget: ${spec.budget_usd:.2f}). "
+            f"Processing in background."
+        )
     else:
-        return f"Failed to create task: {result['error']}"
+        return f"Failed to delegate task: {result['error']}"
 
 
     # read_source_code removed — replaced by read_file tool in telegram_bot.py
@@ -667,6 +691,6 @@ SELF_TOOL_HANDLERS = {
     "read_self": _exec_read_self,
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
-    "create_task": _exec_create_task,
+    "delegate": _exec_delegate,
     "kg_admin": _exec_kg_admin,
 }

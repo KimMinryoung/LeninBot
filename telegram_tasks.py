@@ -243,7 +243,7 @@ async def recover_processing_tasks_on_startup(
 
         processing_rows = await asyncio.to_thread(
             _query,
-            "SELECT id, user_id, content, depth, created_at, scratchpad, mission_id FROM telegram_tasks "
+            "SELECT id, user_id, content, depth, created_at, scratchpad, mission_id, agent_type FROM telegram_tasks "
             "WHERE status = 'processing' AND completed_at IS NULL "
             "ORDER BY created_at ASC",
         )
@@ -322,11 +322,12 @@ async def recover_processing_tasks_on_startup(
                 child_scratchpad = child_scratchpad[-_SCRATCHPAD_MAX_CHARS:]
 
             task_mission_id = row.get("mission_id")
+            task_agent_type = row.get("agent_type")
             child_rows = await asyncio.to_thread(
                 _query,
-                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id) "
-                "VALUES (%s, %s, 'pending', %s, %s, %s, %s) RETURNING id",
-                (user_id, content, task_id, child_scratchpad, depth + 1, task_mission_id),
+                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type) "
+                "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s) RETURNING id",
+                (user_id, content, task_id, child_scratchpad, depth + 1, task_mission_id, task_agent_type),
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
@@ -482,7 +483,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id",
+                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type",
             )
             if task:
                 if runtime_state is not None:

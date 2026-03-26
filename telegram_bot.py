@@ -384,18 +384,26 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - URL in message → fetch_url to read the page, then analyze with context from other tools
 - Self-reflection → read_diary; cross-interface memory → read_chat_logs
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
-- Store important facts → write_kg; deep research → create_task
+- Store important facts → write_kg
 - Your own source code → read_file (e.g. read_file("telegram_bot.py"), read_file("shared.py"))
 - Server file management → list_directory, read_file, write_file
 - Data processing / automation → execute_python
 - Real-time market prices → get_finance_data
 </tool-strategy>
 
-<workload-management>
-- 복잡한 리서치(여러 소스 비교, 장문 분석, 대량 데이터 처리)는 **처음부터 create_task**를 사용해라. 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 태스크로 전환.
-- 도구 한도에 도달하면 시스템이 자동으로 백그라운드 태스크를 생성할 수 있다. 하지만 사전에 판단해서 선제적으로 create_task를 쓰는 것이 더 좋다.
-- 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 작업을 이어가라.
-</workload-management>
+<delegation>
+You have specialized agents. Use the `delegate` tool to dispatch tasks:
+- programmer: 코드 작성/수정/디버깅/파일 편집 전문 (예산 $1.50)
+- general: 범용 리서치/분석 (예산 $1.00)
+
+When to delegate vs handle directly:
+- 간단한 질문, 일상 대화, 짧은 조회 → 직접 처리
+- 멀티스텝 코딩, 파일 수정 → delegate(agent="programmer")
+- 심층 리서치, 다중 소스 분석, 장문 보고서 → delegate(agent="general")
+- 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
+- 항상 구체적이고 실행 가능한 지시를 에이전트에게 전달하라.
+- 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
+</delegation>
 
 <mission-management>
 - 활성 미션이 있으면 시스템 프롬프트에 타임라인이 주입된다. 이를 활용해 맥락을 유지하라.
@@ -414,30 +422,9 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 </context>
 """
 
-_TASK_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
-You are executing a background intelligence task. Produce a structured Markdown report.
 
-<rules>
-- ALWAYS use tools (vector_search, knowledge_graph_search, web_search, get_finance_data). Never write from memory alone.
-- Use multiple tools and queries for comprehensive coverage.
-- Write in the SAME LANGUAGE as the task.
-- Format: # Title → ## Executive Summary → ## Analysis (subsections) → ## Key Entities → ## Sources → ## Outlook
-- Cite all sources. Distinguish confirmed facts from inference.
-</rules>
-
-<mission-guidelines>
-- save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라. 채팅과 다른 태스크에서도 조회 가능.
-- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
-- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
-- 과제가 **완전히 완수**되었으면 mission(action="close")를 호출하라. 미완료이면 열어두어라.
-</mission-guidelines>
-
-<context>
-<current-time>{current_datetime}</current-time>
-{system_alerts}
-{finance_data}
-</context>
-"""
+# Task system prompts are now defined per-agent in agents/ package.
+# See agents/general.py, agents/programmer.py, etc.
 
 # ── Chat History ─────────────────────────────────────────────────────
 MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
@@ -1800,7 +1787,7 @@ async def handle_message(message: Message):
             pass
         task_row = await asyncio.to_thread(
             _query_one,
-            "INSERT INTO telegram_tasks (user_id, content, status, mission_id) VALUES (%s, %s, 'pending', %s) RETURNING id",
+            "INSERT INTO telegram_tasks (user_id, content, status, mission_id, agent_type) VALUES (%s, %s, 'pending', %s, 'general') RETURNING id",
             (user_id, task_content, cont_mission_id),
         )
         task_id = task_row["id"] if task_row else "?"
@@ -2245,14 +2232,41 @@ async def bot_main():
     # Build process_task closure with module-level dependencies
     async def _process_task_wrapper(b: Bot, task: dict):
         from self_tools import build_task_context_tools
+        from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
         from telegram_tools import MISSION_TOOL, build_mission_handler
-        task_tools, task_handlers = build_task_context_tools(
+
+        # ── Agent-aware task execution ──────────────────────────────
+        agent_type = task.get("agent_type") or "general"
+        try:
+            from agents import get_agent
+            spec = get_agent(agent_type)
+        except (ValueError, ImportError):
+            # Fallback: unknown agent_type treated as general
+            from agents import get_agent
+            spec = get_agent("general")
+
+        # Filter base tools to agent's allowed set
+        agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+
+        # Add task-context tools (save_finding, request_continuation)
+        ctx_tools, ctx_handlers = build_task_context_tools(
             task["id"], task["user_id"], task.get("depth", 0),
             mission_id=task.get("mission_id"),
         )
-        # Add mission tool to task context
-        task_tools.append(MISSION_TOOL)
-        task_handlers["mission"] = build_mission_handler(task["user_id"])
+        agent_tools.extend(ctx_tools)
+        agent_handlers.update(ctx_handlers)
+
+        # Add mission tool
+        agent_tools.append(MISSION_TOOL)
+        agent_handlers["mission"] = build_mission_handler(task["user_id"])
+
+        # Render agent-specific system prompt
+        system_prompt = spec.render_prompt(
+            current_datetime=_current_datetime_str(),
+            system_alerts=_format_system_alerts(),
+            finance_data=_get_finance_context(),
+        )
+
         # Send progress to the task's user (or all users if self-generated)
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
@@ -2260,17 +2274,13 @@ async def bot_main():
             b, task,
             chat_with_tools_fn=_chat_with_tools,
             get_model_fn=_get_model_task,
-            task_system_prompt=_TASK_SYSTEM_PROMPT_TEMPLATE.format(
-                current_datetime=_current_datetime_str(),
-                system_alerts=_format_system_alerts(),
-                finance_data=_get_finance_context(),
-            ),
+            task_system_prompt=system_prompt,
             max_tokens_task=_CLAUDE_MAX_TOKENS_TASK,
             allowed_user_ids=ALLOWED_USER_IDS,
             log_event_fn=_log_event,
-            extra_tools=task_tools,
-            extra_handlers=task_handlers,
-            budget_usd=_config["task_budget"],
+            extra_tools=agent_tools,
+            extra_handlers=agent_handlers,
+            budget_usd=spec.budget_usd,
             on_progress=progress_cb,
         )
         # Flush remaining progress buffer

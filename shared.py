@@ -380,6 +380,7 @@ def create_task_in_db(
     priority: str = "normal",
     parent_task_id: int | None = None,
     mission_id: int | None = None,
+    agent_type: str | None = None,
 ) -> dict:
     """Insert a task into telegram_tasks for background processing.
 
@@ -390,6 +391,8 @@ def create_task_in_db(
         parent_task_id: If chaining, the parent task's ID.
         mission_id: Mission to link this task to. If None and parent exists,
                      inherits parent's mission_id.
+        agent_type: Specialist agent to execute this task (e.g. 'programmer', 'general').
+                    If None and parent exists, inherits parent's agent_type.
 
     Returns dict with 'status' and 'task_id' or 'error'.
     """
@@ -398,12 +401,12 @@ def create_task_in_db(
     priority_tag = {"high": "[🔴 HIGH]", "normal": "[🟡 NORMAL]", "low": "[🟢 LOW]"}.get(priority, "")
     tagged_content = f"{priority_tag} {content}".strip() if priority_tag else content
 
-    # Determine depth (and inherit mission_id) from parent
+    # Determine depth (and inherit mission_id/agent_type) from parent
     depth = 0
     if parent_task_id is not None:
         try:
             parent_rows = db_query(
-                "SELECT depth, mission_id FROM telegram_tasks WHERE id = %s", (parent_task_id,)
+                "SELECT depth, mission_id, agent_type FROM telegram_tasks WHERE id = %s", (parent_task_id,)
             )
             if not parent_rows:
                 return {"status": "error", "error": f"Parent task {parent_task_id} not found"}
@@ -413,19 +416,22 @@ def create_task_in_db(
             # Inherit mission_id from parent if not explicitly provided
             if mission_id is None:
                 mission_id = parent_rows[0].get("mission_id")
+            # Inherit agent_type from parent if not explicitly provided
+            if agent_type is None:
+                agent_type = parent_rows[0].get("agent_type")
         except Exception as e:
             logger.error("[shared] parent depth lookup error: %s", e)
             return {"status": "error", "error": str(e)}
 
     try:
         rows = db_query(
-            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (user_id, tagged_content, parent_task_id, depth, mission_id),
+            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, tagged_content, parent_task_id, depth, mission_id, agent_type),
         )
         task_id = rows[0]["id"] if rows else "?"
-        logger.info("[shared] Task created: id=%s, priority=%s, depth=%d, parent=%s, mission=%s",
-                     task_id, priority, depth, parent_task_id, mission_id)
+        logger.info("[shared] Task created: id=%s, priority=%s, depth=%d, parent=%s, mission=%s, agent=%s",
+                     task_id, priority, depth, parent_task_id, mission_id, agent_type)
         return {"status": "ok", "task_id": task_id, "depth": depth, "mission_id": mission_id}
     except Exception as e:
         logger.error("[shared] create_task_in_db error: %s", e)
