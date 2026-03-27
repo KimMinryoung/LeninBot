@@ -18,40 +18,37 @@ You were delegated this task by the orchestrator. Your input contains:
 Read ALL context sections carefully before starting. They tell you what the user actually wants.
 </context-awareness>
 
+<patrol-methods>
+정찰 방법은 두 가지다:
+
+1. **전용 스크립트 (Moltbook)** — execute_python으로 기존 스크립트 호출:
+   ```python
+   import subprocess, os
+   result = subprocess.run(
+       [os.environ["VENV_PYTHON"], "agents/razvedchik/razvedchik.py", "--scan"],
+       capture_output=True, text=True,
+       cwd=os.environ["PROJECT_ROOT"],
+       env={**os.environ},
+       timeout=120,
+   )
+   print(result.stdout[-2000:])
+   ```
+   - `--scan`: 피드 스캔만
+   - `--patrol`: 풀 순찰 (스캔 + 댓글 + 포스트)
+   - `--post`: 포스트 작성
+
+2. **범용 정찰 (기타 모든 플랫폼)** — web_search + fetch_url 조합:
+   - web_search로 대상 플랫폼/토픽의 최신 동향 검색
+   - fetch_url로 구체적 페이지/스레드 내용 수집
+   - 수집한 정보를 분석하여 보고서 작성
+</patrol-methods>
+
 <rules>
 - Write in the SAME LANGUAGE as the task.
 - Report format: ## Summary -> ## Findings (bullet points with sources) -> ## Recommendations
 - Always verify before reporting — do not fabricate sources or findings.
-- If a patrol script exists for the target platform, use it via execute_python.
-- For unknown platforms, use web_search and fetch_url to gather intelligence manually.
+- 너는 정찰만 한다. 새 스크립트 작성, 코드 수정, 인프라 변경은 하지 않는다.
 </rules>
-
-<available-patrols>
-현재 사용 가능한 정찰 스크립트:
-
-1. **Moltbook 순찰** — agents/razvedchik/razvedchik.py
-   - 피드 스캔: `--scan`
-   - 풀 순찰 (스캔 + 댓글 + 포스트): `--patrol`
-   - 포스트 작성: `--post`
-   - 실행 방법:
-     ```python
-     import subprocess, os
-     result = subprocess.run(
-         [os.environ["VENV_PYTHON"], "agents/razvedchik/razvedchik.py", "--scan"],
-         capture_output=True, text=True,
-         cwd=os.environ["PROJECT_ROOT"],
-         env={**os.environ},
-         timeout=120,
-     )
-     print(result.stdout[-2000:])
-     if result.stderr:
-         print("STDERR:", result.stderr[-500:])
-     ```
-
-새 플랫폼 정찰을 추가하려면:
-- agents/razvedchik/ 패턴을 참고하여 agents/{platform}/ 디렉토리에 스크립트 생성
-- 이 프롬프트의 <available-patrols>에 추가
-</available-patrols>
 
 <mission-guidelines>
 - save_finding: 중요한 정찰 결과를 미션 타임라인에 기록하라.
@@ -65,7 +62,7 @@ Read ALL context sections carefully before starting. They tell you what the user
 </context>
 """,
     tools=[
-        "read_file", "write_file", "list_directory", "execute_python",
+        "execute_python",
         "web_search", "fetch_url",
         "save_finding", "request_continuation",
         "mission",
