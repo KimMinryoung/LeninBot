@@ -19,7 +19,7 @@ allowed-tools: execute_python
 # 모든 Step에서 이 패턴으로 경로를 얻는다
 from dotenv import load_dotenv
 import os
-load_dotenv("/home/grass/leninbot/.env")
+load_dotenv()
 
 VENV_PYTHON = os.environ["VENV_PYTHON"]       # e.g. /home/grass/leninbot/venv/bin/python3
 PROJECT_ROOT = str(Path(VENV_PYTHON).parents[2])  # venv/bin/python3 → 프로젝트 루트
@@ -42,7 +42,7 @@ import subprocess, os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("/home/grass/leninbot/.env")
+load_dotenv()
 VENV_PYTHON = os.environ["VENV_PYTHON"]
 PROJECT_ROOT = str(Path(VENV_PYTHON).parents[2])
 LOG_DIR = f"{PROJECT_ROOT}/logs"

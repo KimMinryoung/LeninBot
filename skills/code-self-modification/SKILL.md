@@ -4,7 +4,7 @@ description: Safely modifies leninbot's own Python source code. Handles patch va
 compatibility: Requires git, Python 3.10+, write access to project root, sudo systemctl access. Uses self_modification_core.py.
 metadata:
   author: cyber-Lenin
-  version: "1.1"
+  version: "1.2"
 allowed-tools: read_file write_file execute_python
 ---
 
@@ -13,6 +13,14 @@ allowed-tools: read_file write_file execute_python
 ## 핵심 원칙
 **잘못된 수정은 봇 전체를 죽인다.** 반드시 아래 순서를 지킬 것.
 **할 수 있는 건 직접 한다.** "권한 없다"고 가정하지 말고, 먼저 실행해서 확인할 것.
+**경로는 .env에서 로드한다. 하드코딩 금지.**
+
+```python
+import os
+from dotenv import load_dotenv
+load_dotenv()
+PROJECT_ROOT = os.environ["PROJECT_ROOT"]
+```
 
 ---
 
@@ -31,7 +39,10 @@ read_file("파일명.py", line_start=X, line_end=Y)
 `self_modification_core.py`의 안전 경로 사용:
 ```python
 # execute_python으로 호출
-import sys; sys.path.insert(0, '/home/grass/leninbot')
+import os, sys
+from dotenv import load_dotenv
+load_dotenv()
+sys.path.insert(0, os.environ["PROJECT_ROOT"])
 from self_modification_core import self_modify_with_safety
 result = self_modify_with_safety(
     filepath=file_path,
@@ -73,10 +84,13 @@ print(result.returncode, result.stdout, result.stderr)
 ## Step 7 — 테스트 통과 시 commit & push
 테스트가 통과한 경우에만 원격 저장소에 반영한다:
 ```python
-import subprocess
-subprocess.run(["git", "add", "-A"], cwd="/home/grass/leninbot")
-subprocess.run(["git", "commit", "-m", "feat: 변경 내용 요약"], cwd="/home/grass/leninbot")
-subprocess.run(["git", "push", "origin", "main"], cwd="/home/grass/leninbot")
+import os, subprocess
+from dotenv import load_dotenv
+load_dotenv()
+ROOT = os.environ["PROJECT_ROOT"]
+subprocess.run(["git", "add", "-A"], cwd=ROOT)
+subprocess.run(["git", "commit", "-m", "feat: 변경 내용 요약"], cwd=ROOT)
+subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
 ```
 - **테스트 실패 시 push 금지** — 롤백 후 재수정
 
@@ -99,3 +113,4 @@ subprocess.run(["git", "push", "origin", "main"], cwd="/home/grass/leninbot")
 - `os.system`, `subprocess` 직접 실행 코드 삽입 (자기 자신 코드에)
 - 테스트 전 push
 - "권한 없다"고 가정하고 사용자에게 떠넘기기
+- 경로 하드코딩 (반드시 .env에서 PROJECT_ROOT 로드)
