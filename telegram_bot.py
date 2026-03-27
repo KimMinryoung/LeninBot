@@ -1210,6 +1210,101 @@ async def cmd_task(message: Message):
         await message.answer(f"태스크 등록 실패: {e}")
 
 
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """시스템 리소스 현황 — CPU/메모리/디스크/네트워크 (psutil 실시간 + JSON 추이)."""
+    if not _is_allowed(message.from_user.id):
+        return
+
+    import psutil
+    from datetime import timezone, timedelta
+    from scripts.metrics_snapshot import parse_cpu_json, parse_memory_json, _sparkline
+
+    KST_tz = timezone(timedelta(hours=9))
+    now_kst = datetime.now(timezone.utc).astimezone(KST_tz)
+    ts_str = now_kst.strftime("%Y-%m-%d %H:%M KST")
+
+    await message.answer("⏳ 메트릭 수집 중...")
+
+    def _collect():
+        cpu = psutil.cpu_percent(interval=1)
+        vm = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        import time
+        net_before = psutil.net_io_counters()
+        time.sleep(0.5)
+        net_after = psutil.net_io_counters()
+        rx_kbs = round((net_after.bytes_recv - net_before.bytes_recv) / 1024 / 0.5, 1)
+        tx_kbs = round((net_after.bytes_sent - net_before.bytes_sent) / 1024 / 0.5, 1)
+        return {
+            "cpu": cpu,
+            "mem_pct": vm.percent,
+            "mem_used": round(vm.used / 1024**3, 2),
+            "mem_total": round(vm.total / 1024**3, 2),
+            "mem_avail": round(vm.available / 1024**3, 2),
+            "disk_pct": disk.percent,
+            "disk_used": round(disk.used / 1024**3, 1),
+            "disk_total": round(disk.total / 1024**3, 1),
+            "disk_free": round(disk.free / 1024**3, 1),
+            "rx_kbs": rx_kbs,
+            "tx_kbs": tx_kbs,
+        }
+
+    def _make_bar(pct: float, width: int = 20) -> str:
+        filled = int(round(pct / 100 * width))
+        filled = max(0, min(filled, width))
+        return "█" * filled + "░" * (width - filled)
+
+    def _alert(pct: float) -> str:
+        if pct >= 90:
+            return " 🔴"
+        if pct >= 75:
+            return " 🟡"
+        return " 🟢"
+
+    try:
+        m = await asyncio.to_thread(_collect)
+
+        def _get_sparks():
+            try:
+                cpu_rows = parse_cpu_json(12)
+                mem_rows = parse_memory_json(12)
+                cpu_spark = _sparkline([v for _, v in cpu_rows]) if cpu_rows else "—"
+                mem_spark = _sparkline([v for _, v in mem_rows]) if mem_rows else "—"
+                return cpu_spark, mem_spark
+            except Exception:
+                return "—", "—"
+
+        cpu_spark, mem_spark = await asyncio.to_thread(_get_sparks)
+
+        out = [
+            f"📊 *시스템 메트릭* — {ts_str}",
+            "",
+            f"🖥 *CPU*{_alert(m['cpu'])}",
+            f"  사용률: `{m['cpu']:.1f}%`",
+            f"  `[{_make_bar(m['cpu'])}]`",
+            f"  추이(12h): `{cpu_spark}`",
+            "",
+            f"🧠 *메모리*{_alert(m['mem_pct'])}",
+            f"  사용: `{m['mem_used']} / {m['mem_total']} GiB ({m['mem_pct']:.1f}%)`",
+            f"  여유: `{m['mem_avail']} GiB`",
+            f"  `[{_make_bar(m['mem_pct'])}]`",
+            f"  추이(12h): `{mem_spark}`",
+            "",
+            f"💾 *디스크 (/)*{_alert(m['disk_pct'])}",
+            f"  사용: `{m['disk_used']} / {m['disk_total']} GiB ({m['disk_pct']:.1f}%)`",
+            f"  여유: `{m['disk_free']} GiB`",
+            f"  `[{_make_bar(m['disk_pct'])}]`",
+            "",
+            f"🌐 *네트워크*",
+            f"  ↓ `{m['rx_kbs']} kB/s`  ↑ `{m['tx_kbs']} kB/s`",
+        ]
+        await message.answer("\n".join(out), parse_mode="Markdown")
+    except Exception as e:
+        logger.error("cmd_stats error: %s", e)
+        await message.answer(f"⚠️ 메트릭 수집 실패: {e}")
+
 @router.message(Command("status"))
 async def cmd_status(message: Message):
     if not _is_allowed(message.from_user.id):
@@ -2216,6 +2311,7 @@ async def bot_main():
         BotCommand(command="chat", description="CLAW 파이프라인 질의"),
         BotCommand(command="task", description="백그라운드 태스크 등록"),
         BotCommand(command="status", description="시스템 대시보드"),
+        BotCommand(command="stats", description="시스템 리소스 현황"),
         BotCommand(command="status_auto", description="자율 생성 태스크 확인"),
         BotCommand(command="report", description="태스크 리포트 재전송"),
         BotCommand(command="schedule", description="정기 태스크 등록"),
