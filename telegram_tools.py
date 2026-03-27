@@ -82,7 +82,7 @@ TOOLS = [
     },
     {
         "name": "write_file",
-        "description": "Write content to a file on the server. Creates parent directories if needed.",
+        "description": "Write ENTIRE content to a file. WARNING: overwrites the whole file. For modifying existing code, prefer patch_file instead.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -91,6 +91,19 @@ TOOLS = [
                 "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "Write mode. Default: overwrite."},
             },
             "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "patch_file",
+        "description": "Surgically modify a file by replacing a specific block of text. Safer than write_file — only changes the matched portion, preserving the rest. Supports fuzzy matching. Use this for all code modifications.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to patch."},
+                "old_str": {"type": "string", "description": "The exact text block to find and replace. Include enough context for a unique match."},
+                "new_str": {"type": "string", "description": "The replacement text."},
+            },
+            "required": ["path", "old_str", "new_str"],
         },
     },
     {
@@ -290,6 +303,47 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
         return f"Written {len(content)} chars to {rel_path} (size: {size}B, mode: {mode})"
     except Exception as e:
         return f"Error writing file: {e}"
+
+
+async def _exec_patch_file(path: str, old_str: str, new_str: str) -> str:
+    """Surgically modify a file by replacing a specific text block."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isabs(path):
+        path = os.path.join(project_root, path)
+    abs_path = os.path.realpath(path)
+
+    if not (abs_path == project_root or abs_path.startswith(project_root + "/")):
+        return "❌ Patch denied: path is outside project root"
+
+    rel_path = os.path.relpath(abs_path, project_root)
+    ext = os.path.splitext(abs_path)[1].lower()
+
+    try:
+        from patch_file import replace_block
+        result = replace_block(abs_path, old_str, new_str, backup=True)
+
+        if not result["ok"]:
+            return f"❌ Patch failed: {result['message']}"
+
+        # .py 파일은 구문 검사
+        if ext == ".py":
+            import ast
+            try:
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    ast.parse(f.read())
+            except SyntaxError as e:
+                # 롤백: .bak 파일에서 복원
+                bak_path = abs_path + ".bak"
+                if os.path.isfile(bak_path):
+                    import shutil
+                    shutil.copy2(bak_path, abs_path)
+                return f"❌ Syntax error after patch — rolled back: {e}"
+
+        diff_preview = result["diff"][:1000] if result["diff"] else "(no diff)"
+        return f"✅ Patched {rel_path}\n{diff_preview}"
+
+    except Exception as e:
+        return f"Error patching file: {e}"
 
 
 async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bool = False) -> str:
@@ -538,6 +592,7 @@ TOOL_HANDLERS = {
     "fetch_url": _exec_fetch_url,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,
+    "patch_file": _exec_patch_file,
     "list_directory": _exec_list_directory,
     "execute_python": _exec_execute_python,
 }

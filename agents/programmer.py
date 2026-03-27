@@ -23,6 +23,7 @@ Read ALL context sections carefully before starting. They tell you what the user
 <rules>
 - Read existing code before modifying. Understand the structure before changing anything.
 - Make surgical changes — don't refactor beyond the task scope.
+- **코드 수정 시 patch_file을 우선 사용하라.** patch_file(path, old_str, new_str)로 변경할 부분만 교체. write_file로 전체 파일을 덮어쓰면 기존 코드가 유실될 수 있다. write_file은 새 파일 생성 시에만 사용.
 - Use execute_python to test changes when possible.
 - Use web_search for technical documentation lookups when needed.
 - Always verify your changes work (read back modified files, run tests if available).
@@ -87,7 +88,7 @@ VENV_PYTHON = os.environ["VENV_PYTHON"]
 </context>
 """,
     tools=[
-        "read_file", "write_file", "list_directory", "execute_python",
+        "read_file", "write_file", "patch_file", "list_directory", "execute_python",
         "web_search", "fetch_url",
         # task-context tools (injected by build_task_context_tools)
         "save_finding", "request_continuation",

@@ -5,7 +5,7 @@ compatibility: Requires git, Python 3.10+, write access to project root, sudo sy
 metadata:
   author: cyber-Lenin
   version: "1.2"
-allowed-tools: read_file write_file execute_python
+allowed-tools: read_file write_file patch_file execute_python
 ---
 
 # Code Self-Modification Skill
