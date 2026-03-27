@@ -348,11 +348,11 @@ async def recover_processing_tasks_on_startup(
 
             await asyncio.to_thread(
                 _execute,
-                "UPDATE telegram_tasks SET status = 'failed', "
+                "UPDATE telegram_tasks SET status = 'handed_off', "
                 "result = COALESCE(result, '') || %s, completed_at = NOW() "
                 "WHERE id = %s",
                 (
-                    f"\n[AUTO-HANDOFF] interrupted by restart; moved to child task #{child_id}.",
+                    f"\n[AUTO-HANDOFF] interrupted by restart; continued in child task #{child_id}.",
                     task_id,
                 ),
             )

@@ -54,12 +54,13 @@ VENV_PYTHON = os.environ["VENV_PYTHON"]
    ```
    내부적으로 git 자동 백업 → 구문 검사 → 적용 → 실패 시 자동 롤백.
 3. **구문 검증**: `ast.parse()`로 확인.
-4. **서비스 재시작** (변경 사항 즉시 반영. `/deploy`나 사용자에게 요청 금지):
+4. **맥락 인계** (재시작 전 필수!): 서비스 재시작 = 현재 태스크 사망. 반드시 `request_continuation`으로 자식 태스크를 생성하여 남은 작업(테스트, commit, push)을 위임한다. progress_summary에 수정 파일명/변경 내용/완료 단계를, next_steps에 남은 단계를 구체적으로 기술.
+5. **서비스 재시작** (변경 사항 즉시 반영. `/deploy`나 사용자에게 요청 금지):
    ```python
    subprocess.run(["sudo", "systemctl", "restart", "leninbot-telegram"], capture_output=True, text=True)
    ```
-5. **테스트**: 재시작 후 서버 로그 확인 (에러 없는지).
-6. **commit & push** (테스트 통과 시에만):
+6. **테스트** (자식 태스크가 수행): 재시작 후 서버 로그 확인 (에러 없는지).
+7. **commit & push** (테스트 통과 시에만):
    ```python
    import os, subprocess
    from dotenv import load_dotenv
@@ -69,7 +70,7 @@ VENV_PYTHON = os.environ["VENV_PYTHON"]
    subprocess.run(["git", "commit", "-m", "feat: 변경 내용 요약"], cwd=ROOT)
    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
    ```
-7. **보고**: 수정 파일명, 라인 번호, 변경 내용, 재시작 결과, commit hash.
+8. **보고**: 수정 파일명, 라인 번호, 변경 내용, 재시작 결과, commit hash.
 
 **절대 금지**: 인증/보안 로직 단독 수정 / 프로젝트 루트 외부 파일 수정 / 백업 없는 수정 / 테스트 전 push / "권한 없다" 가정하고 사용자에게 떠넘기기 / 경로 하드코딩.
 </code-modification-skill>

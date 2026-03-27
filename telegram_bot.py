@@ -1350,7 +1350,8 @@ async def cmd_status(message: Message):
         f"✅{stat_map.get('done', 0)} "
         f"⏳{stat_map.get('pending', 0)} "
         f"🔄{stat_map.get('processing', 0)} "
-        f"❌{stat_map.get('failed', 0)}"
+        f"❌{stat_map.get('failed', 0)} "
+        f"🔀{stat_map.get('handed_off', 0)}"
     )
 
     # 2. Error counts (24h)
@@ -1383,7 +1384,7 @@ async def cmd_status(message: Message):
     # 4. Recent tasks
     if tasks:
         lines.append("\n*최근 태스크:*")
-        status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌"}
+        status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌", "handed_off": "🔀"}
         for r in tasks:
             icon = status_icons.get(r["status"], "❓")
             ts = r["created_at"].strftime("%m/%d %H:%M")
@@ -1477,7 +1478,7 @@ async def cmd_status_auto(message: Message):
     if not rows:
         await message.answer("자율 생성된 태스크가 없습니다.")
         return
-    status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌"}
+    status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌", "handed_off": "🔀"}
     lines = ["🤖 *자율 생성 태스크* (최근 10건)\n"]
     for r in rows:
         icon = status_icons.get(r["status"], "❓")

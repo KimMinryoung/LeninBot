@@ -672,9 +672,15 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
                 pass
 
         # 2. Create child task (inherits mission_id via parent lookup)
+        # progress_summary를 next_steps에 합쳐서 자식 태스크가 맥락을 갖도록 함
+        child_content = (
+            f"[continuation from task #{task_id}]\n"
+            f"## 이전 진행 상황\n{progress_summary}\n\n"
+            f"## 다음 할 일\n{next_steps}"
+        )
         result = await asyncio.to_thread(
             create_task_in_db,
-            next_steps,
+            child_content,
             user_id=user_id,
             parent_task_id=task_id,
         )
@@ -682,9 +688,21 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if result["status"] == "ok":
             child_id = result["task_id"]
             child_depth = result.get("depth", depth + 1)
+            # 현재 태스크를 handed_off로 마킹
+            try:
+                from db import execute as db_execute
+                await asyncio.to_thread(
+                    db_execute,
+                    "UPDATE telegram_tasks SET status = 'handed_off', "
+                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
+                    "WHERE id = %s",
+                    (f"\n[HANDED-OFF] continued in child task #{child_id}.", task_id),
+                )
+            except Exception as e:
+                logger.warning("Failed to mark task #%d as handed_off: %s", task_id, e)
             return (
                 f"Child task #{child_id} created (depth={child_depth}, parent=#{task_id}). "
-                f"Progress saved to mission. You can now finish your current response."
+                f"Current task marked as handed_off. You can now finish your current response."
             )
         else:
             return f"Failed to create continuation task: {result['error']}"

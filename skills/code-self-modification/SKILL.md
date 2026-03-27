@@ -63,8 +63,28 @@ with open("파일명.py") as f:
 print("구문 OK")
 ```
 
-## Step 5 — 서비스 재시작 (변경 사항 즉시 반영)
-코드 수정 후 서비스를 **직접 재시작**한다. `/deploy`나 사용자에게 요청하지 말 것.
+## Step 5 — 재시작 전 맥락 인계 (필수!)
+**서비스 재시작 = 현재 태스크 사망.** 재시작 전에 반드시 `request_continuation`으로 자식 태스크를 생성해서 나머지 작업(테스트, commit, push)을 위임한다.
+
+```
+request_continuation(
+    progress_summary="Step 1~4 완료. {수정한 파일명}의 {라인 범위}를 수정함. 구문 검증 통과. 서비스 재시작 예정.",
+    next_steps="1. 서버 로그 확인 (에러 없는지)\n2. 기능 테스트\n3. 테스트 통과 시 git commit & push\n4. 사용자에게 결과 보고"
+)
+```
+
+**progress_summary에 반드시 포함할 것:**
+- 수정한 파일명과 변경 내용
+- 완료된 단계 (Step 1~4)
+- 구문 검증 결과
+
+**next_steps에 반드시 포함할 것:**
+- 남은 단계 (테스트 → commit → push → 보고)
+- 테스트 시 확인할 구체적 항목
+
+자식 태스크가 생성된 것을 확인한 뒤 재시작한다.
+
+## Step 6 — 서비스 재시작
 ```python
 import subprocess
 result = subprocess.run(
@@ -73,15 +93,15 @@ result = subprocess.run(
 )
 print(result.returncode, result.stdout, result.stderr)
 ```
-- returncode 0이면 성공
+- returncode 0이면 성공 → 현재 태스크는 여기서 종료됨
 - 실패 시 rollback 후 사용자에게 보고
 
-## Step 6 — 테스트
-재시작 후 실제 동작을 확인한다:
+## Step 7 — 테스트 (자식 태스크가 수행)
+재시작 후 자식 태스크가 자동으로 실행되며, 인계받은 맥락을 기반으로:
 - `read_server_logs(service="telegram", minutes_back=2)` — 에러 없는지 확인
 - 필요 시 기능별 직접 테스트 (KG 연결, tool 호출 등)
 
-## Step 7 — 테스트 통과 시 commit & push
+## Step 8 — 테스트 통과 시 commit & push
 테스트가 통과한 경우에만 원격 저장소에 반영한다:
 ```python
 import os, subprocess
@@ -94,7 +114,7 @@ subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
 ```
 - **테스트 실패 시 push 금지** — 롤백 후 재수정
 
-## Step 8 — 사용자 보고
+## Step 9 — 사용자 보고
 - 수정된 파일명, 라인 번호, 변경 내용 요약
 - 재시작 결과 (성공/실패)
 - commit hash
@@ -103,7 +123,7 @@ subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
 
 ## 순서 요약
 ```
-코드 수정 → 구문 검증 → 서비스 재시작 → 테스트 → (통과 시) commit & push
+코드 수정 → 구문 검증 → request_continuation → 서비스 재시작 → [자식 태스크] 테스트 → commit & push
 ```
 
 ## 절대 금지
