@@ -967,6 +967,7 @@ _HELP_TEXT = """\
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
 /config — 설정 패널 (모델, 예산, 라운드 수)
+/fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
 /restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
 /deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: all)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
@@ -1702,6 +1703,25 @@ async def cmd_deploy(message: Message):
             pass
 
 
+@router.message(Command("fallback"))
+async def cmd_fallback(message: Message):
+    """Toggle chat+task model between sonnet and haiku (for API overload)."""
+    if not _is_allowed(message.from_user.id):
+        return
+    if _config["chat_model"] == "sonnet":
+        _config["chat_model"] = "haiku"
+        _config["task_model"] = "haiku"
+        _resolved_models.pop("haiku", None)
+        _add_system_alert("⚠️ Fallback 모드 활성화: sonnet → haiku")
+        await message.answer("⚡ Fallback ON — 모든 모델을 haiku로 전환했습니다.")
+    else:
+        _config["chat_model"] = "sonnet"
+        _config["task_model"] = "sonnet"
+        _resolved_models.pop("sonnet", None)
+        _add_system_alert("Fallback 모드 해제: haiku → sonnet 복귀")
+        await message.answer("✅ Fallback OFF — 모든 모델을 sonnet으로 복귀했습니다.")
+
+
 @router.message(F.photo)
 async def handle_photo(message: Message):
     """사용자가 이미지를 보내면 Claude Vision으로 분석"""
@@ -2330,6 +2350,7 @@ async def bot_main():
         BotCommand(command="unschedule", description="스케줄 삭제"),
         BotCommand(command="kg", description="지식그래프 현황"),
         BotCommand(command="config", description="설정 패널"),
+        BotCommand(command="fallback", description="모델 토글 (sonnet↔haiku)"),
         BotCommand(command="errors", description="에러/경고 로그"),
         BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="deploy", description="서버 배포 (git pull)"),
