@@ -2372,12 +2372,53 @@ async def bot_main():
         # Send progress to the task's user (or all users if self-generated)
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
+
+        # ── Provider dispatch: Claude vs MOON PC (OpenAI-compatible) ──
+        if spec.provider == "moon":
+            from openai_tool_loop import chat_with_tools as moon_chat_with_tools
+            from llm_client import MOON_BASE, MOON_MODEL, _health_ok
+
+            if not _health_ok(MOON_BASE):
+                logger.warning("MOON PC unavailable for agent %s; falling back to Claude", spec.name)
+                chosen_chat_fn = _chat_with_tools
+                chosen_model_fn = _get_model_task
+                chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+            else:
+                async def _moon_chat_with_tools(
+                    messages, max_rounds=None, system_prompt=None, model=None,
+                    max_tokens=None, budget_usd=None, extra_tools=None,
+                    extra_handlers=None, on_progress=None, budget_tracker=None,
+                ):
+                    merged_tools = list(extra_tools or []) + agent_tools
+                    merged_handlers = {**agent_handlers, **(extra_handlers or {})}
+                    return await moon_chat_with_tools(
+                        messages,
+                        base_url=MOON_BASE,
+                        model=model or MOON_MODEL,
+                        tools=merged_tools,
+                        tool_handlers=merged_handlers,
+                        system_prompt=system_prompt or system_prompt,
+                        max_rounds=max_rounds or spec.max_rounds,
+                        max_tokens=max_tokens or 4096,
+                        log_event=_log_event,
+                        budget_usd=budget_usd or 0.0,
+                        budget_tracker=budget_tracker,
+                        on_progress=on_progress,
+                    )
+                chosen_chat_fn = _moon_chat_with_tools
+                chosen_model_fn = lambda: MOON_MODEL
+                chosen_max_tokens = 4096
+        else:
+            chosen_chat_fn = _chat_with_tools
+            chosen_model_fn = _get_model_task
+            chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+
         await process_task(
             b, task,
-            chat_with_tools_fn=_chat_with_tools,
-            get_model_fn=_get_model_task,
+            chat_with_tools_fn=chosen_chat_fn,
+            get_model_fn=chosen_model_fn,
             task_system_prompt=system_prompt,
-            max_tokens_task=_CLAUDE_MAX_TOKENS_TASK,
+            max_tokens_task=chosen_max_tokens,
             allowed_user_ids=ALLOWED_USER_IDS,
             log_event_fn=_log_event,
             extra_tools=agent_tools,

@@ -15,6 +15,7 @@ class AgentSpec:
     system_prompt_template: str               # supports {current_datetime}, {system_alerts}, etc.
     tools: list[str] = field(default_factory=list)  # empty = all tools allowed
     model: str | None = None                  # None = use default model
+    provider: str = "claude"                  # "claude" | "moon" (OpenAI-compatible local LLM)
     budget_usd: float = 1.00
     max_rounds: int = 50
 

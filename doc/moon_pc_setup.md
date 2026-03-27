@@ -42,7 +42,7 @@ curl http://localhost:8080/health
 llama-server가 뜬 후 실행:
 
 ```cmd
-ssh -R 8080:localhost:8080 root@37.27.33.127 -N -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes
+ssh -R 127.0.0.1:8080:127.0.0.1:8080 root@37.27.33.127 -N -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes
 ```
 
 | 옵션 | 의미 |

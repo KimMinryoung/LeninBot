@@ -31,11 +31,14 @@ prompt = (
 
 print("Generating dream...\n")
 result = ask_local(prompt)
+if not result:
+    print("ERROR: LLM returned empty response")
+    exit(1)
 print(result)
 
 # Extract title (first line) and content (rest)
 lines = result.strip().split("\n", 1)
-title = lines[0].strip().lstrip("#").strip()
+title = lines[0].strip().lstrip("#").strip() or "Untitled Dream"
 content = lines[1].strip() if len(lines) > 1 else result
 
 resp = post_graffiti("dream", {
