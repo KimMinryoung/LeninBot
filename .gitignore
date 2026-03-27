@@ -21,6 +21,9 @@ temp_dev/
 # 일기 업데이트 소비 추적 (런타임 상태)
 diary_updates_consumed.json
 
+# 런타임 설정 (서버별 상태)
+config.json
+
 데이터 수집용 크롤러 코드
 crawler/
 

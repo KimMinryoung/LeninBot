@@ -198,7 +198,7 @@ _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 
 # ── Runtime Config (mutable at runtime via /config) ──────────────────
-_config = {
+_CONFIG_DEFAULTS = {
     "chat_budget": 0.30,       # USD per chat turn
     "task_budget": 1.00,       # USD per background task
     "chat_model": "sonnet",    # "sonnet" | "haiku" | "opus"
@@ -206,6 +206,44 @@ _config = {
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
 }
+
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def _load_config() -> dict:
+    """Load config from disk, falling back to defaults for missing keys."""
+    config = dict(_CONFIG_DEFAULTS)
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            saved = json.loads(f.read())
+        for key, val in saved.items():
+            if key in _CONFIG_DEFAULTS:
+                # Ensure type matches default
+                default_val = _CONFIG_DEFAULTS[key]
+                if isinstance(default_val, float):
+                    config[key] = float(val)
+                elif isinstance(default_val, int):
+                    config[key] = int(val)
+                else:
+                    config[key] = str(val)
+        logger.info("Config loaded from %s: %s", _CONFIG_PATH, config)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning("Config load failed, using defaults: %s", e)
+    return config
+
+
+def _save_config():
+    """Persist current config to disk."""
+    try:
+        with open(_CONFIG_PATH, "w") as f:
+            f.write(json.dumps(_config, indent=2))
+    except Exception as e:
+        logger.warning("Config save failed: %s", e)
+
+
+_config = _load_config()
 
 # Display metadata for config panel
 _CONFIG_META = {
@@ -1720,6 +1758,7 @@ async def cmd_fallback(message: Message):
         _resolved_models.pop("sonnet", None)
         _add_system_alert("Fallback 모드 해제: haiku → sonnet 복귀")
         await message.answer("✅ Fallback OFF — 모든 모델을 sonnet으로 복귀했습니다.")
+    _save_config()
 
 
 @router.message(F.photo)
@@ -2273,6 +2312,7 @@ async def cb_config_set(callback: CallbackQuery):
         _resolved_models.pop(new_val, None)
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
+    _save_config()
     await callback.answer(f"{_CONFIG_META[key]['label']}: {new_val}")
 
     # Return to main config panel
