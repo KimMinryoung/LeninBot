@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-24
+# Project State Report — 2026-03-27
 
 ## Identity
 
@@ -143,56 +143,71 @@ Note: All per-turn transient fields are reset in `analyze_intent_node` to preven
 ## File Structure
 
 ```
-AIChatBot/
-├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*, /sessions)
-├── chatbot.py                # Core LangGraph agent pipeline (~1,290 lines) + public API (similarity_search, search_knowledge_graph)
-├── shared.py                 # Shared resources: CORE_IDENTITY, KST, MODEL constants, singletons, memory access, URL fetching
-├── self_tools.py             # Self-awareness tools: 11 tools (+write_kg, +create_task, +read_server_logs, -render tools)
-├── telegram_bot.py           # Telegram bot: config, handlers, routing (~1,360 lines, refactored)
-├── telegram_tools.py         # Tool definitions + execution handlers (~415 lines, extracted from telegram_bot.py)
-├── claude_loop.py            # Claude tool-use loop + sanitize_messages (~333 lines, shared with local_agent)
-├── telegram_tasks.py         # Background task worker, scheduler, system monitor (~327 lines, extracted)
-├── telegram_mission.py       # Mission context system for Telegram (shared chat/task timeline, PostgreSQL)
-├── finance_data.py           # Real-time finance data tool (yfinance, 10min in-memory cache, 8 tickers)
-├── diary_writer.py           # Autonomous diary writer (~502 lines)
-├── experience_writer.py      # Experiential memory consolidation (daily 00:30 KST cron)
-├── db.py                     # PostgreSQL connection pool (psycopg2, replaces Supabase REST API)
-├── update_knowledge.py       # Vector DB ingestion script (still uses Supabase client)
-├── crawler.py                # Lenin corpus (marxists.org)
-├── crawler_marx.py           # Marx/Engels corpus
-├── crawler_theorists.py      # Trotsky, Luxemburg, Gramsci, Bukharin, Mao (Trotsky url_filter fixed)
-├── crawler_modern.py         # arXiv, BIS, marxists.org modern (ARXIV_QUERIES updated)
-├── crawler_korean_orgs.py    # uprising.kr, bolky.jinbo.net
-├── fetch_core_theorists.py   # Targeted Bukharin/Trotsky fetcher (chapter-by-chapter)
-├── cleanup_arxiv.py          # Deletes arxiv_* from DB, log, and local files
-├── local_agent/              # Local PC agent (Windows, Claude Sonnet 4.6 tool-use)
-│   ├── __init__.py           # Package init
-│   ├── __main__.py           # Entry point: python -m local_agent
-│   ├── agent.py              # Core tool-use loop (Anthropic API, max 10 rounds)
-│   ├── tools.py              # 14 local tool definitions (Anthropic API format)
-│   ├── handlers.py           # Tool handler implementations
-│   ├── mission.py            # Mission context system (shared chat/task timeline)
-│   ├── local_db.py           # SQLite (tasks, crawl_cache, conversations, missions, mission_events)
-│   ├── crawler.py            # Playwright crawling (persistent cookies, JS rendering)
-│   ├── sync.py               # Server push/pull via shared.py + db.py
-│   ├── cli.py                # Interactive REPL
-│   └── data/                 # Runtime data (gitignored): local.db, browser_cookies.json
+leninbot/
+├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*)
+├── chatbot.py                # Core LangGraph agent pipeline + public API
+├── shared.py                 # CORE_IDENTITY, KST, MODEL constants, KG singleton, memory access
+├── self_tools.py             # Self-awareness tools: delegate, save_finding, request_continuation 등
+├── telegram_bot.py           # Telegram bot: config, handlers, routing
+├── telegram_tools.py         # Tool definitions + handlers (patch_file, read/write/execute 등)
+├── claude_loop.py            # Claude tool-use loop + sanitize_messages
+├── telegram_tasks.py         # Background task worker, scheduler, system monitor (handed_off 상태 지원)
+├── telegram_mission.py       # Mission context system (shared chat/task timeline, PostgreSQL)
+├── finance_data.py           # Real-time finance data tool (yfinance, 10min cache)
+├── diary_writer.py           # Autonomous diary writer (systemd service)
+├── experience_writer.py      # Experiential memory consolidation (daily cron)
+├── db.py                     # PostgreSQL connection pool (psycopg2)
+├── llm_client.py             # LLM client abstraction
+├── llm_worker.py             # LLM worker utilities
+├── graffiti_api.py           # FastAPI router for creative outputs (dreams/debates/riddles)
+├── patch_file.py             # 토큰 효율적 파일 패치 유틸 (replace_block, insert_after 등)
+├── self_modification_core.py # Git backup + syntax check + rollback 안전 수정
+├── task_checkpoint.py        # Checkpoint save/load utilities
+├── skills_loader.py          # skills/ 디렉토리 스캔 → 시스템 프롬프트 주입
+│
+├── agents/                   # 에이전트 정의 및 실행 스크립트
+│   ├── __init__.py           # Agent registry (general, programmer, scout)
+│   ├── base.py               # AgentSpec dataclass
+│   ├── general.py            # 범용 리서치/분석 에이전트
+│   ├── programmer.py         # 코드 수정 전문 에이전트 (Kitov) — patch_file 우선 사용
+│   ├── scout.py              # 외부 플랫폼 정찰 에이전트 — raw 데이터 아카이빙
+│   └── razvedchik/           # Moltbook 정찰 실행 스크립트
+│       ├── persona.py        # Scout 기본 페르소나 + 작업별 프롬프트 조합 (SSOT)
+│       ├── razvedchik.py     # Moltbook 순찰 CLI (--scan, --patrol, --post)
+│       └── razvedchik_debrief.py  # 순찰 후 디브리핑 (정찰병 ↔ 사령관)
+│
+├── skills/                   # 에이전트 스킬 (agentskills.io 호환 SKILL.md 포맷)
+│   ├── code-self-modification/  # 코드 안전 수정 (재시작 전 request_continuation 필수)
+│   ├── coauthor-doc/         # 구조화된 문서 공동 작성 3단계 워크플로
+│   ├── create-skill/         # 새 스킬 스캐폴딩
+│   ├── cron-manage/          # cron 등록/삭제 (.env VENV_PYTHON 강제)
+│   ├── geopolitical-analysis/  # 지정학 분석 (변증법적 유물론 프레임워크)
+│   ├── kg-maintenance/       # Knowledge Graph 정비 (중복 병합, 타입 할당)
+│   ├── moltbook/             # Moltbook 플랫폼 상호작용
+│   ├── research-report/      # 멀티소스 딥 리서치 보고서
+│   └── venv-package-check/   # venv 패키지 확인/설치 (.env VENV_PIP)
+│
+├── scripts/                  # 독립 실행 스크립트
+│   ├── import_skill.py       # 외부 agentskills.io 스킬 가져오기 CLI
+│   ├── metrics_collector.py  # psutil 시스템 메트릭 수집 (10분 cron)
+│   ├── metrics_snapshot.py   # 메트릭 JSON → sparkline 변환
+│   ├── ai_debate.py          # 주간 AI 토론 생성 (systemd timer)
+│   ├── dream_diary.py        # 일일 초현실 꿈일기 생성 (systemd timer)
+│   ├── riddle_engine.py      # 일일 수수께끼 생성 (systemd timer)
+│   ├── autonomous_work.py    # 자율 유지보수 작업
+│   ├── kg_enricher.py        # KG 엔티티 설명 자동 생성
+│   └── update_knowledge.py   # Vector DB 인제스천
+│
 ├── graph_memory/             # Graphiti knowledge graph module
-│   ├── __init__.py           # Package exports: GraphMemoryService, ENTITY_TYPES, EDGE_TYPES, etc.
-│   ├── __main__.py           # python -m graph_memory "query" 엔트리포인트
-│   ├── cli.py                # KG 질의 CLI (run_query, main)
-│   ├── config.py             # Edge type mapping, excluded types, episode source map, extraction instructions
-│   ├── entities.py           # 7 entity types: Person, Organization, Location, Asset, Incident, Policy, Campaign (v2)
-│   ├── edges.py              # 10 edge types: +PolicyEffect, +Participation (v2)
-│   ├── graphiti_patches.py   # Graphiti 런타임 몽키패치 (DateTime 직렬화, 엣지 프롬프트)
-│   ├── kr_news_fetcher.py    # 한국 국내 뉴스 수집 + 인물 프로파일 보강 파이프라인
-│   ├── service.py            # GraphMemoryService class (init, ingest, search, briefing)
-│   └── news_fetcher.py       # Tavily 뉴스 검색 → 지식그래프 수집 유틸리티
-├── docs/                     # Local corpus (~2,316 files, gitignored)
-├── temp_dev/                 # Dev notes and plans (gitignored)
-├── .env                      # API keys
-├── requirements.txt
-└── render.yaml               # Render deployment config
+│   ├── service.py            # GraphMemoryService (Neo4j keepalive/liveness 설정)
+│   └── ...                   # entities, edges, config, patches, news fetchers
+│
+├── local_agent/              # Local PC agent (Windows, Claude Sonnet 4.6)
+├── dev_docs/                 # 설계 문서 (project_state, skill_import_design 등)
+├── systemd/                  # systemd 서비스/타이머 정의
+├── data/                     # 런타임 데이터 (gitignored): metrics, scout_raw
+├── .env                      # 환경변수: API keys, VENV_PYTHON, VENV_PIP, PROJECT_ROOT
+└── requirements.txt
 ```
 
 ---
@@ -237,6 +252,38 @@ AIChatBot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-27 — 에이전트 인프라 개선, 프로젝트 구조 정리
+
+#### 에이전트 시스템
+- **scout 에이전트** 신규 (`agents/scout.py`): 외부 플랫폼 정찰 전문. Moltbook은 전용 스크립트, 기타는 web_search+fetch_url 범용 정찰. raw 데이터를 `data/scout_raw/`에 자동 아카이빙.
+- **razvedchik 프롬프트 통합** (`agents/razvedchik/persona.py`): scout/razvedchik/debrief 간 중복 시스템 프롬프트를 SCOUT_PERSONA + 작업별 지침 조합 방식으로 통합.
+- **patch_file tool** 신규: `write_file` 전체 덮어쓰기 대신 `patch_file.py`의 `replace_block`을 활용한 diff 단위 수정. programmer 에이전트에 우선 사용 규칙 명시.
+- **태스크 인계 체계**: `handed_off` (🔀) 상태 추가. `request_continuation` 시 progress_summary를 자식 태스크 content에 합산. code-self-modification 스킬에 재시작 전 맥락 인계 필수 명시.
+
+#### 환경/경로 표준화
+- `.env`에 `VENV_PYTHON`, `VENV_PIP`, `PROJECT_ROOT` 추가
+- 모든 스킬/에이전트 프롬프트에서 하드코딩 경로 제거 → `.env` 로드 패턴으로 전환
+- `cron-manage` 스킬: venv python 경로를 .env에서 강제 로드하여 cron 등록 실수 방지
+
+#### Neo4j 연결 안정화
+- `graph_memory/service.py`: Neo4j 드라이버에 `keep_alive=True`, `max_connection_lifetime=300s`, `liveness_check_timeout=30s` 설정. 유휴 연결 끊김으로 인한 "KG 연결 끊김 → 재연결" 반복 문제 해결.
+- KG health check 기본 간격 600s → 300s로 단축.
+
+#### 프로젝트 구조 정리
+- 루트 .py 28개 → 20개: 독립 스크립트를 `scripts/`로, razvedchik을 `agents/razvedchik/`로 이동
+- systemd 서비스 4개 ExecStart 경로 수정
+- `.gitignore` 정리: `data/`, `graffiti/`, `literature/`, `local_graffiti/` 등 추가
+- 일회성 테스트/패치 파일 삭제, `moltbook_skill.md` → `skills/moltbook/SKILL.md`로 이동
+
+#### 스킬 시스템
+- `coauthor-doc` 스킬: anthropics/skills/doc-coauthoring 기반 문서 공동 작성 3단계 워크플로
+- `scripts/import_skill.py`: agentskills.io 표준 스킬 외부 import CLI (GitHub/로컬, allowed-tools 자동 매핑)
+- `dev_docs/skill_import_design.md`: import 메커니즘 설계 문서
+
+#### metrics_collector.py — sar → psutil 전환
+- sar 파싱 제거, psutil 직접 사용. disk_tps → disk usage(used/total/pct) 변경.
+- `/stats` 텔레그램 커맨드 추가 (실시간 메트릭 + sparkline 추이 대시보드).
 
 ### 2026-03-24 — Razvedchik 버그 수정 + 정기 순찰 등록
 
