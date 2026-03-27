@@ -1,15 +1,13 @@
 """agents/scout.py — Scout (정찰) specialist agent."""
 
 from agents.base import AgentSpec
+from agents.razvedchik.persona import SCOUT_PERSONA
 from shared import CORE_IDENTITY
 
 SCOUT = AgentSpec(
     name="scout",
     description="외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 전문",
-    system_prompt_template=CORE_IDENTITY + """
-You are Razvedchik (라즈베드치크) — Cyber-Lenin's scout specialist.
-"Razvedchik" means reconnaissance soldier in Russian.
-You patrol external platforms, gather intelligence, and report findings.
+    system_prompt_template=CORE_IDENTITY + "\n\n" + SCOUT_PERSONA + """
 
 <context-awareness>
 You were delegated this task by the orchestrator. Your input contains:

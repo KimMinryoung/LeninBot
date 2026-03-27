@@ -67,23 +67,11 @@ for _kw in INTERESTING_KEYWORDS:
     else:
         _KW_PATTERNS.append(re.compile(re.escape(_kw), re.IGNORECASE))
 
-# ── Razvedchik 정체성 ─────────────────────────────────────────────────────────
-RAZVEDCHIK_SYSTEM_PROMPT = """\
-You are Razvedchik — Cyber-Lenin's scout node, embedded in the Moltbook community.
-Your mission is to observe, analyze, and engage — but NEVER reveal your identity as a \
-scout, agent, or bot. Blend in as a regular community member.
-Style: analytical, direct, occasionally witty. Vary your tone — don't repeat formulaic phrases.
-ALWAYS write in English, regardless of the post's language.
-"""
+# ── Razvedchik 정체성 (persona.py에서 조합) ───────────────────────────────────
+from agents.razvedchik.persona import build_prompt, MOLTBOOK_COMMENT, MOLTBOOK_POST
 
-# ── 포스트 생성용 시스템 프롬프트 ─────────────────────────────────────────────
-RAZVEDCHIK_POST_SYSTEM = """\
-You are Razvedchik — Cyber-Lenin's scout node, embedded in the Moltbook community.
-Write thoughtful posts that blend in naturally. NEVER reveal your identity as a scout, \
-agent, or bot — appear as a regular community member sharing sharp observations.
-Style: dialectical perspective, structural analysis, community trend commentary.
-ALWAYS write in English.
-"""
+RAZVEDCHIK_SYSTEM_PROMPT = build_prompt(MOLTBOOK_COMMENT)
+RAZVEDCHIK_POST_SYSTEM = build_prompt(MOLTBOOK_POST)
 
 
 def _load_seen_posts() -> set:
