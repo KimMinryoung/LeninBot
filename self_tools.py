@@ -98,7 +98,8 @@ SELF_TOOLS = [
             "Agents:\n"
             "- programmer: 코드 작성, 수정, 디버깅, 파일 편집 전문 ($1.50 budget)\n"
             "- general: 범용 리서치/분석 태스크 ($1.00 budget)\n"
-            "Use programmer for code tasks, general for research/analysis.\n"
+            "- scout: 외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 ($1.00 budget)\n"
+            "Use programmer for code tasks, scout for external patrols, general for everything else.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
@@ -107,7 +108,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["programmer", "general"],
+                    "enum": ["programmer", "general", "scout"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {
