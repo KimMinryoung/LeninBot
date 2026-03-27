@@ -828,7 +828,7 @@ async def chat_with_tools(
 
         if tool_results:
             # Inject budget warning at 80% threshold (as separate text block in user message)
-            if not budget_warning_sent and total_cost >= budget_usd * 0.8:
+            if not budget_warning_sent and total_cost > budget_usd * 0.8:
                 budget_warning_sent = True
                 tool_results.insert(0, {
                     "type": "text",

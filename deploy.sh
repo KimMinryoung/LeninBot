@@ -122,12 +122,12 @@ _git_fetch_with_retry() {
 
 # Run systemctl with least-friction privilege path:
 # - root: direct call
-# - non-root: non-interactive sudo (fails fast if not permitted)
+# - non-root: sudo with absolute path (matches sudoers NOPASSWD entry)
 _run_systemctl() {
     if [ "$(id -u)" -eq 0 ]; then
-        systemctl "$@"
+        /usr/bin/systemctl "$@"
     else
-        sudo -n systemctl "$@"
+        sudo /usr/bin/systemctl "$@"
     fi
 }
 
