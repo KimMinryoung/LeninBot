@@ -188,7 +188,7 @@ def reset_kg_service():
 _kg_healthcheck_started = False
 
 
-def start_kg_healthcheck(interval: int = 600) -> None:
+def start_kg_healthcheck(interval: int = 300) -> None:
     """Start a background daemon thread that pings Neo4j every `interval` seconds.
 
     If the ping fails the KG singleton is marked unhealthy so the next

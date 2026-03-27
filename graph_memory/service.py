@@ -115,6 +115,18 @@ class GraphMemoryService:
             password=neo4j_password,
             database=neo4j_database,
         )
+        # graphiti의 Neo4jDriver가 keepalive/lifetime 설정 없이 드라이버를 생성하므로,
+        # 내부 client를 재생성하여 유휴 연결 끊김 방지
+        from neo4j import AsyncGraphDatabase
+        graph_driver.client = AsyncGraphDatabase.driver(
+            uri=neo4j_uri,
+            auth=(neo4j_user or '', neo4j_password or ''),
+            keep_alive=True,
+            max_connection_lifetime=300,       # 5분마다 연결 갱신
+            liveness_check_timeout=30,         # 유휴 연결 사용 전 30초 내 liveness 확인
+            connection_acquisition_timeout=30,
+            max_connection_pool_size=50,
+        )
 
         self._llm_client = llm_client
 
