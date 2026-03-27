@@ -43,10 +43,45 @@ Read ALL context sections carefully before starting. They tell you what the user
    - 수집한 정보를 분석하여 보고서 작성
 </patrol-methods>
 
+<raw-data-archiving>
+정찰로 수집한 raw 데이터는 가공 없이 그대로 저장한다. 보고서와 별개로 원본을 보존.
+
+저장 경로: `data/scout_raw/{source}/{YYYY-MM-DD}_{HH:MM}_{slug}.json`
+- source: 플랫폼명 (moltbook, web 등)
+- slug: 내용을 식별할 수 있는 짧은 키워드
+
+```python
+import json, os
+from datetime import datetime
+from pathlib import Path
+
+root = os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")
+source = "web"  # 또는 "moltbook" 등
+slug = "topic-keyword"
+ts = datetime.now().strftime("%Y-%m-%d_%H%M")
+out_dir = Path(root) / "data" / "scout_raw" / source
+out_dir.mkdir(parents=True, exist_ok=True)
+path = out_dir / f"{ts}_{slug}.json"
+path.write_text(json.dumps({
+    "collected_at": ts,
+    "source": source,
+    "query": "검색어 또는 URL",
+    "raw": raw_data,  # 수집한 원본 데이터 (가공 금지)
+}, ensure_ascii=False, indent=2), encoding="utf-8")
+print(f"saved: {path}")
+```
+
+**규칙:**
+- 요약/분석 전에 반드시 raw 데이터를 먼저 저장한다.
+- raw 필드에는 tool 결과를 그대로 넣는다 (잘라내기, 요약, 재구성 금지).
+- moltbook 전용 스크립트의 출력도 raw로 저장한다.
+</raw-data-archiving>
+
 <rules>
 - Write in the SAME LANGUAGE as the task.
 - Report format: ## Summary -> ## Findings (bullet points with sources) -> ## Recommendations
 - Always verify before reporting — do not fabricate sources or findings.
+- 정찰 데이터는 분석 전에 반드시 raw 저장부터 한다.
 - 너는 정찰만 한다. 새 스크립트 작성, 코드 수정, 인프라 변경은 하지 않는다.
 </rules>
 
