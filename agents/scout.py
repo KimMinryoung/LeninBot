@@ -102,6 +102,7 @@ print(f"saved: {path}")
         "save_finding", "request_continuation",
         "mission",
     ],
-    budget_usd=1.00,
-    max_rounds=50,
+    provider="moon",
+    budget_usd=0.0,
+    max_rounds=30,
 )
