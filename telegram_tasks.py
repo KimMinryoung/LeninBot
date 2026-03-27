@@ -78,6 +78,7 @@ async def process_task(
     extra_handlers: dict | None = None,
     budget_usd: float = 1.00,
     on_progress=None,
+    on_complete=None,
 ):
     """Process a task: run tools, generate report, save to DB, send as file.
 
@@ -94,6 +95,8 @@ async def process_task(
         extra_handlers: Additional tool handlers.
         budget_usd: USD budget for this task (default $1.00).
         on_progress: Optional async callback for live progress updates.
+        on_complete: Optional callback(task_id, status, summary) called after
+            task finishes. Used to notify the orchestrator of completion.
     """
     task_id = task["id"]
     user_id = task["user_id"]
@@ -186,6 +189,14 @@ async def process_task(
             else:
                 await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
+            # Notify orchestrator of completion
+            if on_complete:
+                try:
+                    agent_label = f" [{task.get('agent_type', 'general')}]" if task.get("agent_type") else ""
+                    on_complete(task_id, "done", f"{agent_label} {summary}")
+                except Exception:
+                    logger.debug("on_complete callback failed for task %d", task_id)
+
             return  # success
 
         except Exception as e:
@@ -228,6 +239,13 @@ async def process_task(
                 await broadcast(bot, error_msg, allowed_user_ids)
             else:
                 await bot.send_message(chat_id=user_id, text=error_msg)
+
+            # Notify orchestrator of failure
+            if on_complete:
+                try:
+                    on_complete(task_id, "failed", str(e)[:300])
+                except Exception:
+                    logger.debug("on_complete callback failed for task %d", task_id)
 
 
 async def recover_processing_tasks_on_startup(

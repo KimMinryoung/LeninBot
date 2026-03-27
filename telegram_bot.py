@@ -265,6 +265,13 @@ async def _get_model_light() -> str:
     """Get the light model (Haiku) — used for compression, reflection, etc."""
     return await _get_model_by_alias("haiku")
 
+
+async def _get_model_moon() -> str:
+    """Get the Moon (local LLM) model name — async wrapper for await compatibility."""
+    from llm_client import MOON_MODEL
+    return MOON_MODEL
+
+
 def _extract_text(response) -> str:
     """Safely extract text from Claude API response, handling empty content."""
     if response.content:
@@ -1676,8 +1683,10 @@ async def cmd_deploy(message: Message):
 
         result = "\n".join(output_lines[-30:])  # last 30 lines
         if proc.returncode == 0:
+            _add_system_alert(f"Deploy 완료 (대상: {target})")
             await status_msg.edit_text(f"✅ Deploy 완료\n```\n{result}\n```", parse_mode="Markdown")
         else:
+            _add_system_alert(f"Deploy 실패 (대상: {target}, exit {proc.returncode})")
             await status_msg.edit_text(f"❌ Deploy 실패 (exit {proc.returncode})\n```\n{result}\n```", parse_mode="Markdown")
     except Exception as e:
         # ServerDisconnectedError / CancelledError = bot killed by deploy restart — expected
@@ -1686,6 +1695,7 @@ async def cmd_deploy(message: Message):
         if ("Disconnect" in err_name or "Disconnect" in err_str
                 or isinstance(e, (asyncio.CancelledError, ConnectionError, OSError))):
             return  # deploy.sh curl handles notification
+        _add_system_alert(f"Deploy 오류 (대상: {target}): {type(e).__name__}")
         try:
             await status_msg.edit_text(f"❌ Deploy 오류: {e}")
         except Exception:
@@ -2406,12 +2416,16 @@ async def bot_main():
                         on_progress=on_progress,
                     )
                 chosen_chat_fn = _moon_chat_with_tools
-                chosen_model_fn = lambda: MOON_MODEL
+                chosen_model_fn = _get_model_moon
                 chosen_max_tokens = 4096
         else:
             chosen_chat_fn = _chat_with_tools
             chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+
+        def _on_task_complete(task_id: int, status: str, summary: str):
+            icon = "✅" if status == "done" else "❌"
+            _add_system_alert(f"{icon} 태스크 #{task_id} {status}: {summary[:200]}")
 
         await process_task(
             b, task,
@@ -2425,6 +2439,7 @@ async def bot_main():
             extra_handlers=agent_handlers,
             budget_usd=spec.budget_usd,
             on_progress=progress_cb,
+            on_complete=_on_task_complete,
         )
         # Flush remaining progress buffer
         if progress_cb and hasattr(progress_cb, "flush"):
