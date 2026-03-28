@@ -44,7 +44,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
   - aspect_ratio: 1:1, 16:9, 9:16, 4:3, 3:4
   - model: flux_schnell(빠름, 기본), flux_dev(고품질)
 - 프롬프트만 작성하고 끝내는 것은 실패다. 반드시 generate_image로 이미지를 만들어라.
-- Report format: ## Generated Images (각 이미지별 prediction_id, local_path, prompt) -> ## Notes
+- Report format: ## Generated Images (각 이미지별 prediction_id, local_path, model, style, prompt 전문) -> ## Notes
 </rules>
 
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
