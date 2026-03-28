@@ -327,15 +327,13 @@ async def process_task(
             logger.debug("Current state build failed: %s", e)
 
     # (D) Build full context: all parts combined
+    # Note: scratchpad is no longer injected as context (replaced by current_state +
+    # agent-execution-history + mission events). It's kept only for recovery marker counting.
     context_parts = []
     if state_ctx:
         context_parts.append(state_ctx)
     if mission_ctx:
         context_parts.append(mission_ctx)
-    if scratchpad:
-        context_parts.append(
-            f"<inherited-context parent=\"{parent_task_id}\" depth=\"{depth}\">\n{scratchpad}\n</inherited-context>"
-        )
     if agent_history_ctx:
         context_parts.append(agent_history_ctx)
     if chat_ctx:
@@ -404,11 +402,6 @@ async def process_task(
                             task_id,
                             kg_result.get("group_id", "?"),
                             kg_result.get("facts_count", 0),
-                        )
-                        # Optionally append KG save note to scratchpad for debugging
-                        _append_task_scratchpad(
-                            task_id,
-                            f"[AUTO-KG] Saved to {kg_result.get('group_id', '?')} | {kg_result.get('facts_count', 0)} facts"
                         )
                     else:
                         logger.debug(
