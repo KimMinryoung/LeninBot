@@ -462,7 +462,7 @@ async def _exec_delegate(
     except ValueError as e:
         return str(e)
 
-    # Inherit mission from parent task if chaining, otherwise use bot's active mission
+    # Inherit mission from parent task if chaining, otherwise use/create mission
     task_mission_id = None
     if not parent_task_id:
         try:
@@ -472,8 +472,27 @@ async def _exec_delegate(
             )
             if active:
                 task_mission_id = active[0]["id"]
-        except Exception:
-            pass
+            else:
+                # Auto-create mission from delegation context
+                from telegram_mission import create_mission
+                mission_title = task[:80].replace("\n", " ").strip()
+                # user_id 0 = orchestrator-initiated, find the real user from recent tasks
+                user_id_for_mission = 0
+                try:
+                    recent_user = _db_q(
+                        "SELECT DISTINCT user_id FROM telegram_chat_history "
+                        "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
+                    )
+                    if recent_user:
+                        user_id_for_mission = recent_user[0]["user_id"]
+                except Exception:
+                    pass
+                if user_id_for_mission:
+                    new_mission = create_mission(user_id_for_mission, mission_title)
+                    task_mission_id = new_mission["id"]
+                    logger.info("Auto-created mission #%d from delegate: %s", task_mission_id, mission_title)
+        except Exception as e:
+            logger.debug("Mission auto-create in delegate failed: %s", e)
 
     # ── Assemble full task content with context ──────────────────
     # 1. Orchestrator-provided context (conversation summary, reasoning)

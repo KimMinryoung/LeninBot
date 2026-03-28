@@ -39,13 +39,24 @@ def get_active_mission(user_id: int) -> dict | None:
         if hasattr(last_activity, 'tzinfo') and last_activity.tzinfo is None:
             last_activity = last_activity.replace(tzinfo=timezone.utc)
         elif isinstance(last_activity, str):
-            # Parse ISO format string
             last_activity = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
         hours_since = (now - last_activity).total_seconds() / 3600
         if hours_since >= _MISSION_STALE_HOURS:
-            close_mission(mission["id"])
-            logger.info("Mission #%d auto-closed (stale %.1fh)", mission["id"], hours_since)
-            return None
+            # Don't auto-close if there are pending/processing tasks linked to this mission
+            active_tasks = _query(
+                "SELECT COUNT(*) AS cnt FROM telegram_tasks "
+                "WHERE mission_id = %s AND status IN ('pending', 'processing')",
+                (mission["id"],),
+            )
+            if active_tasks and active_tasks[0]["cnt"] > 0:
+                logger.debug(
+                    "Mission #%d stale (%.1fh) but has %d active tasks — keeping alive",
+                    mission["id"], hours_since, active_tasks[0]["cnt"],
+                )
+            else:
+                close_mission(mission["id"])
+                logger.info("Mission #%d auto-closed (stale %.1fh, no active tasks)", mission["id"], hours_since)
+                return None
     except Exception as e:
         logger.debug("Mission staleness check failed: %s", e)
     return mission
