@@ -647,15 +647,28 @@ GENERATE_IMAGE_TOOL = {
 }
 
 
+_last_image_gen_time: float = 0.0
+_IMAGE_GEN_INTERVAL: float = 8.0  # seconds between API calls
+
+
 async def _exec_generate_image(
     prompt: str,
     style: str = "poster",
     aspect_ratio: str = "1:1",
     model: str | None = None,
 ) -> str:
+    import time as _time
+    global _last_image_gen_time
     from replicate_image_service import generate_image, is_replicate_configured
     if not is_replicate_configured():
         return "ERROR: REPLICATE_API_TOKEN is not configured"
+
+    # Rate limit: wait if called too soon after previous generation
+    elapsed = _time.monotonic() - _last_image_gen_time
+    if elapsed < _IMAGE_GEN_INTERVAL and _last_image_gen_time > 0:
+        wait = _IMAGE_GEN_INTERVAL - elapsed
+        await asyncio.sleep(wait)
+
     try:
         result = await generate_image(
             prompt,
@@ -664,6 +677,7 @@ async def _exec_generate_image(
             aspect_ratio=aspect_ratio,
             download=True,
         )
+        _last_image_gen_time = _time.monotonic()
         local_path = result.get("local_path") or "N/A"
         urls = result.get("image_urls", [])
         url = urls[0] if urls else "N/A"
@@ -676,6 +690,7 @@ async def _exec_generate_image(
             f"  local_path: {local_path}"
         )
     except Exception as e:
+        _last_image_gen_time = _time.monotonic()  # count failed calls too
         return f"Image generation failed: {e}"
 
 
