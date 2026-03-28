@@ -1,0 +1,190 @@
+"""bot_config.py — LLM client setup, runtime config, and model resolution."""
+
+import os
+import json
+import asyncio
+import logging
+
+from dotenv import load_dotenv
+import anthropic
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# ── API Keys ──────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# ── LLM Clients ──────────────────────────────────────────────────────
+_claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+# OpenAI client (lazy — only created if key exists)
+_openai_client = None
+if OPENAI_API_KEY:
+    from openai import AsyncOpenAI
+    _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+_CLAUDE_MAX_TOKENS = 4096
+_CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
+
+# ── Runtime Config (mutable at runtime via /config) ──────────────────
+_CONFIG_DEFAULTS = {
+    "chat_budget": 0.30,       # USD per chat turn
+    "task_budget": 1.00,       # USD per background task
+    "chat_model": "high",      # "high" | "medium" | "low"
+    "task_model": "high",      # "high" | "medium" | "low"
+    "max_rounds_chat": 50,
+    "max_rounds_task": 50,
+    "provider": "claude",      # "claude" | "openai"
+}
+
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def _load_config() -> dict:
+    """Load config from disk, falling back to defaults for missing keys."""
+    config = dict(_CONFIG_DEFAULTS)
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            saved = json.loads(f.read())
+        for key, val in saved.items():
+            if key in _CONFIG_DEFAULTS:
+                # Ensure type matches default
+                default_val = _CONFIG_DEFAULTS[key]
+                if isinstance(default_val, float):
+                    config[key] = float(val)
+                elif isinstance(default_val, int):
+                    config[key] = int(val)
+                else:
+                    config[key] = str(val)
+        logger.info("Config loaded from %s: %s", _CONFIG_PATH, config)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning("Config load failed, using defaults: %s", e)
+    return config
+
+
+def _save_config():
+    """Persist current config to disk."""
+    try:
+        with open(_CONFIG_PATH, "w") as f:
+            f.write(json.dumps(_config, indent=2))
+    except Exception as e:
+        logger.warning("Config save failed: %s", e)
+
+
+_config = _load_config()
+
+# Display metadata for config panel
+_CONFIG_META = {
+    "chat_budget":      {"label": "대화 예산",     "unit": "$",  "options": [0.10, 0.20, 0.30, 0.50, 1.00]},
+    "task_budget":      {"label": "태스크 예산",   "unit": "$",  "options": [0.50, 1.00, 2.00, 3.00, 5.00]},
+    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["high", "medium", "low"]},
+    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["high", "medium", "low"]},
+    "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
+    "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
+    "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai"]},
+}
+
+_MODEL_ALIAS_MAP = {
+    "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+    "sonnet": ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+    "opus":   ("claude-opus-4-6", "claude-opus-4-6"),
+}
+
+_OPENAI_MODEL_MAP = {
+    "gpt54":     "gpt-5.4",
+    "gpt54mini": "gpt-5.4-mini",
+    "gpt54nano": "gpt-5.4-nano",
+}
+
+# Tier → provider-specific model mapping
+_TIER_MAP = {
+    "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
+    "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
+}
+
+def _tier_to_display(tier: str) -> str:
+    """Return a display label showing tier + actual model for current provider."""
+    provider = _config.get("provider", "claude")
+    tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
+    alias = tier_map.get(tier, tier)
+    if provider == "openai":
+        model_name = _OPENAI_MODEL_MAP.get(alias, alias)
+    else:
+        model_name = alias
+    return f"{tier} ({model_name})"
+
+
+async def _resolve_model(alias: str, fallback: str) -> str:
+    """Resolve a Claude model alias to its actual ID via the Models API (non-blocking)."""
+    try:
+        resolved = await asyncio.to_thread(
+            lambda: anthropic.Anthropic(api_key=ANTHROPIC_API_KEY).models.retrieve(model_id=alias).id
+        )
+        logger.info("Resolved model %s => %s", alias, resolved)
+        return resolved
+    except Exception as e:
+        logger.warning("Model resolve failed for %s, using fallback %s: %s", alias, fallback, e)
+        return fallback
+
+
+# Lazy model resolution cache — maps alias → resolved ID
+_resolved_models: dict[str, str] = {}
+
+
+async def _get_model_by_alias(alias: str) -> str:
+    """Resolve a model short name (haiku/sonnet/opus) to its full ID, with caching."""
+    if alias in _resolved_models:
+        return _resolved_models[alias]
+    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-4-6", "claude-sonnet-4-6"))
+    resolved = await _resolve_model(model_alias, fallback)
+    _resolved_models[alias] = resolved
+    return resolved
+
+
+def _resolve_openai_model(alias: str) -> str:
+    """Resolve OpenAI model alias (gpt54/gpt54mini/gpt54nano) to actual model ID."""
+    return _OPENAI_MODEL_MAP.get(alias, alias)
+
+
+def _resolve_tier(tier: str) -> str:
+    """Resolve a tier name (high/medium/low) to provider-specific model alias."""
+    provider = _config.get("provider", "claude")
+    tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
+    return tier_map.get(tier, tier)  # passthrough if not a tier name
+
+
+async def _get_model() -> str:
+    """Get the current chat model based on runtime config."""
+    alias = _resolve_tier(_config["chat_model"])
+    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
+        return _resolve_openai_model(alias)
+    return await _get_model_by_alias(alias)
+
+
+async def _get_model_task() -> str:
+    """Get the current task model based on runtime config."""
+    alias = _resolve_tier(_config["task_model"])
+    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
+        return _resolve_openai_model(alias)
+    return await _get_model_by_alias(alias)
+
+
+async def _get_model_light() -> str:
+    """Get the light model (Haiku) — used for compression, reflection, etc."""
+    return await _get_model_by_alias("haiku")
+
+
+async def _get_model_moon() -> str:
+    """Get the Moon (local LLM) model name — async wrapper for await compatibility."""
+    from llm_client import MOON_MODEL
+    return MOON_MODEL
+
+
+def _extract_text(response) -> str:
+    """Safely extract text from Claude API response, handling empty content."""
+    if response.content:
+        return response.content[0].text
+    return ""

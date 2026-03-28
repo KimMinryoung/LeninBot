@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,112 @@ MODEL_PRESETS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+
+@dataclass
+class ReplicateErrorInfo:
+    category: str
+    user_message: str
+    retryable: bool
+    detail: str
+    status_code: int | None = None
+
+
+class ReplicateImageError(RuntimeError):
+    def __init__(self, info: ReplicateErrorInfo):
+        super().__init__(info.detail)
+        self.info = info
+
+
+def _extract_error_message(payload: Any) -> str:
+    if isinstance(payload, dict):
+        for key in ("detail", "error", "message", "title"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+        if payload:
+            return str(payload)
+    if payload:
+        return str(payload)
+    return "Unknown Replicate API error"
+
+
+def _classify_replicate_error(exc: Exception) -> ReplicateErrorInfo:
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        status_code = response.status_code if response is not None else None
+        payload = None
+        if response is not None:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = response.text
+        detail = _extract_error_message(payload)
+        lowered = detail.lower()
+
+        if status_code == 429 or "rate limit" in lowered or "too many requests" in lowered:
+            return ReplicateErrorInfo(
+                category="rate_limit",
+                user_message="⏳ 이미지 생성 한도에 걸렸다. 잠시 후 다시 시도해라.",
+                retryable=True,
+                detail=detail,
+                status_code=status_code,
+            )
+        if status_code == 422:
+            return ReplicateErrorInfo(
+                category="invalid_request",
+                user_message="⚠️ 이미지 요청이 거부됐다. 프롬프트나 옵션을 조금 단순하게 바꿔 다시 시도해라.",
+                retryable=False,
+                detail=detail,
+                status_code=status_code,
+            )
+        if status_code in {408, 409, 425, 500, 502, 503, 504}:
+            return ReplicateErrorInfo(
+                category="temporary_api_error",
+                user_message="🔄 이미지 서버가 일시적으로 불안정하다. 잠시 후 다시 시도해라.",
+                retryable=True,
+                detail=detail,
+                status_code=status_code,
+            )
+        return ReplicateErrorInfo(
+            category="api_error",
+            user_message="❌ 이미지 생성 API가 요청을 처리하지 못했다.",
+            retryable=False,
+            detail=detail,
+            status_code=status_code,
+        )
+
+    if isinstance(exc, requests.RequestException):
+        return ReplicateErrorInfo(
+            category="network_error",
+            user_message="🌐 이미지 서버와 통신이 흔들렸다. 잠시 후 다시 시도해라.",
+            retryable=True,
+            detail=str(exc),
+        )
+
+    if isinstance(exc, TimeoutError):
+        return ReplicateErrorInfo(
+            category="timeout",
+            user_message="⏱️ 이미지 생성 대기 시간이 초과됐다. 다시 시도해라.",
+            retryable=True,
+            detail=str(exc),
+        )
+
+    lowered = str(exc).lower()
+    if "rate limit" in lowered or "too many requests" in lowered:
+        return ReplicateErrorInfo(
+            category="rate_limit",
+            user_message="⏳ 이미지 생성 한도에 걸렸다. 잠시 후 다시 시도해라.",
+            retryable=True,
+            detail=str(exc),
+        )
+
+    return ReplicateErrorInfo(
+        category="unknown",
+        user_message="❌ 이미지 생성 중 예기치 않은 오류가 발생했다.",
+        retryable=False,
+        detail=str(exc),
+    )
 
 
 @lru_cache(maxsize=16)
@@ -173,14 +280,19 @@ def create_prediction(
         payload["webhook_events_filter"] = ["completed"]
 
     logger.info("[replicate] POST %s model=%s has_version=%s", prediction_url, cfg["model"], "version" in payload)
-    response = requests.post(
-        prediction_url,
-        headers=_headers(),
-        json=payload,
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.post(
+            prediction_url,
+            headers=_headers(),
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        info = _classify_replicate_error(exc)
+        logger.warning("[replicate] create_prediction failed category=%s retryable=%s detail=%s", info.category, info.retryable, info.detail)
+        raise ReplicateImageError(info) from exc
 
 
 def get_prediction(prediction_id: str) -> dict[str, Any]:
@@ -201,15 +313,21 @@ async def wait_for_prediction(
 ) -> dict[str, Any]:
     started = time.monotonic()
     while True:
-        prediction = await asyncio.to_thread(get_prediction, prediction_id)
+        try:
+            prediction = await asyncio.to_thread(get_prediction, prediction_id)
+        except Exception as exc:
+            info = _classify_replicate_error(exc)
+            logger.warning("[replicate] get_prediction failed category=%s retryable=%s detail=%s", info.category, info.retryable, info.detail)
+            raise ReplicateImageError(info) from exc
         status = prediction.get("status")
         if status == "succeeded":
             return prediction
         if status in {"failed", "canceled"}:
-            error = prediction.get("error") or f"Replicate prediction ended with status={status}"
-            raise RuntimeError(error)
+            error = str(prediction.get("error") or f"Replicate prediction ended with status={status}")
+            info = _classify_replicate_error(RuntimeError(error))
+            raise ReplicateImageError(info)
         if time.monotonic() - started > timeout_sec:
-            raise TimeoutError(f"Replicate prediction timed out after {timeout_sec}s")
+            raise ReplicateImageError(_classify_replicate_error(TimeoutError(f"Replicate prediction timed out after {timeout_sec}s")))
         await asyncio.sleep(poll_interval)
 
 
@@ -261,16 +379,35 @@ async def generate_image(
     )
     prediction_id = prediction.get("id")
     if not prediction_id:
-        raise RuntimeError("Replicate response missing prediction id")
+        raise ReplicateImageError(
+            ReplicateErrorInfo(
+                category="invalid_response",
+                user_message="❌ 이미지 생성 응답이 비정상적이다. 다시 시도해라.",
+                retryable=True,
+                detail="Replicate response missing prediction id",
+            )
+        )
 
     completed = await wait_for_prediction(prediction_id)
     urls = extract_output_urls(completed)
     if not urls:
-        raise RuntimeError("Replicate returned no image output")
+        raise ReplicateImageError(
+            ReplicateErrorInfo(
+                category="invalid_response",
+                user_message="❌ 이미지 결과가 비어 있다. 다시 시도해라.",
+                retryable=True,
+                detail="Replicate returned no image output",
+            )
+        )
 
     local_path = None
     if download:
-        local_path = await asyncio.to_thread(download_image, urls[0], prompt)
+        try:
+            local_path = await asyncio.to_thread(download_image, urls[0], prompt)
+        except Exception as exc:
+            info = _classify_replicate_error(exc)
+            logger.warning("[replicate] download_image failed category=%s retryable=%s detail=%s", info.category, info.retryable, info.detail)
+            raise ReplicateImageError(info) from exc
 
     return {
         "prediction_id": prediction_id,
