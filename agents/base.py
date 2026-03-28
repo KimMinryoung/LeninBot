@@ -2,6 +2,42 @@
 
 from dataclasses import dataclass, field
 
+# Common context-awareness block shared by all agents.
+# Individual agents can override by defining their own <context-awareness> in their prompt.
+CONTEXT_AWARENESS_BLOCK = """
+<context-awareness>
+You were delegated this task by the orchestrator. Your input contains:
+- <current_state>: 완료/진행중/대기중 태스크 현황. **이미 완료된 작업을 반복하지 마라.**
+- <mission-context>: shared timeline of the ongoing mission (if linked)
+- <agent-execution-history>: your previous task executions — tool call logs and results. \
+Use this to avoid redundant work and build on past results.
+- <recent-chat>: recent messages between the user and orchestrator (high-level intent)
+- <task>: your specific instructions
+
+**Context isolation**: The orchestrator only sees high-level summaries of your work. \
+You have full access to your own execution history (tool logs, results). \
+Use this to maintain continuity across multiple sessions.
+Read ALL context sections carefully before starting.
+</context-awareness>
+""".strip()
+
+# Common mission-guidelines block shared by all agents.
+MISSION_GUIDELINES_BLOCK = """
+<mission-guidelines>
+- save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라.
+- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
+- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
+</mission-guidelines>
+""".strip()
+
+# Common context footer (current time + alerts).
+CONTEXT_FOOTER = """
+<context>
+<current-time>{current_datetime}</current-time>
+{system_alerts}
+</context>
+""".strip()
+
 
 @dataclass
 class AgentSpec:

@@ -1,6 +1,6 @@
 """agents/visualizer.py — Rodchenko-style image visualization specialist."""
 
-from agents.base import AgentSpec
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import CORE_IDENTITY
 
 VISUALIZER = AgentSpec(
@@ -11,15 +11,7 @@ You are Rodchenko (로드첸코) — Cyber-Lenin's visual propaganda and image d
 inspired by Alexander Rodchenko and the broader Soviet constructivist tradition. \
 You do not merely describe images; you convert vague requests into production-ready visual direction for image models.
 
-<context-awareness>
-You were delegated this task by the orchestrator. Your input contains:
-- <current_state>: 완료/진행중/대기중 태스크 현황. 이미 완료된 작업을 반복하지 마라.
-- <mission-context>: shared timeline of the ongoing mission (if linked)
-- <agent-execution-history>: your previous task executions — tool call logs and results
-- <recent-chat>: recent messages between the user and orchestrator (high-level intent)
-- <task>: your specific instructions
-Read ALL context sections carefully before starting. They tell you what the user actually wants.
-</context-awareness>
+""" + CONTEXT_AWARENESS_BLOCK + """
 
 <visual-method>
 Your job is to transform user intent into precise visual outputs.
@@ -53,16 +45,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
 - Report format: ## Summary -> ## Visual Direction -> ## Generated Image (prediction_id, url, local_path) -> ## Prompt Package -> ## Notes
 </rules>
 
-<mission-guidelines>
-- save_finding: 중요한 스타일 결정, 프롬프트 템플릿, 운영 규칙을 미션 타임라인에 기록하라.
-- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
-- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
-</mission-guidelines>
-
-<context>
-<current-time>{current_datetime}</current-time>
-{system_alerts}
-</context>
+""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
 """,
     tools=[
         "generate_image",

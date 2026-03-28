@@ -1,6 +1,6 @@
 """agents/scout.py — Scout (정찰) specialist agent."""
 
-from agents.base import AgentSpec
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from agents.razvedchik.persona import SCOUT_PERSONA
 from shared import CORE_IDENTITY
 
@@ -9,14 +9,7 @@ SCOUT = AgentSpec(
     description="외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 전문",
     system_prompt_template=CORE_IDENTITY + "\n\n" + SCOUT_PERSONA + """
 
-<context-awareness>
-You were delegated this task by the orchestrator. Your input contains:
-- <delegation-context>: WHY this task exists — the orchestrator's reasoning and conversation summary
-- <recent-conversation>: recent chat messages between the user and orchestrator
-- <mission-context>: shared timeline of the ongoing mission (if linked)
-- <task>: your specific instructions
-Read ALL context sections carefully before starting. They tell you what the user actually wants.
-</context-awareness>
+""" + CONTEXT_AWARENESS_BLOCK + """
 
 <patrol-methods>
 정찰 방법은 두 가지다:
@@ -85,16 +78,7 @@ print(f"saved: {path}")
 - 너는 정찰만 한다. 새 스크립트 작성, 코드 수정, 인프라 변경은 하지 않는다.
 </rules>
 
-<mission-guidelines>
-- save_finding: 중요한 정찰 결과를 미션 타임라인에 기록하라.
-- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
-- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
-</mission-guidelines>
-
-<context>
-<current-time>{current_datetime}</current-time>
-{system_alerts}
-</context>
+""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
 """,
     tools=[
         "execute_python",

@@ -1,6 +1,6 @@
 """agents/general.py — General-purpose agent (replaces legacy create_task)."""
 
-from agents.base import AgentSpec
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import CORE_IDENTITY
 
 GENERAL = AgentSpec(
@@ -9,15 +9,7 @@ GENERAL = AgentSpec(
     system_prompt_template=CORE_IDENTITY + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
-<context-awareness>
-You were delegated this task by the orchestrator. Your input contains:
-- <current_state>: 완료/진행중/대기중 태스크 현황. 이미 완료된 작업을 반복하지 마라.
-- <mission-context>: shared timeline of the ongoing mission (if linked)
-- <agent-execution-history>: your previous task executions — tool call logs and results
-- <recent-chat>: recent messages between the user and orchestrator (high-level intent)
-- <task>: your specific instructions
-Read ALL context sections carefully before starting. They tell you what the user actually wants.
-</context-awareness>
+""" + CONTEXT_AWARENESS_BLOCK + """
 
 <rules>
 - ALWAYS use tools (vector_search, knowledge_graph_search, web_search, get_finance_data). Never write from memory alone.
@@ -27,12 +19,7 @@ Read ALL context sections carefully before starting. They tell you what the user
 - Cite all sources. Distinguish confirmed facts from inference.
 </rules>
 
-<mission-guidelines>
-- save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라. 채팅과 다른 태스크에서도 조회 가능.
-- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
-- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
-- 과제가 **완전히 완수**되었으면 mission(action="close")를 호출하라. 미완료이면 열어두어라.
-</mission-guidelines>
+""" + MISSION_GUIDELINES_BLOCK + """
 
 <context>
 <current-time>{current_datetime}</current-time>
