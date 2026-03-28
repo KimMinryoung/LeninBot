@@ -3,6 +3,7 @@ import json
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
@@ -277,6 +278,40 @@ async def get_report(report_id: int):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "Report not found"})
     return {"report": rows[0]}
+
+
+RESEARCH_DIR = Path(__file__).parent / "research"
+
+
+@app.get("/research")
+async def list_research():
+    """List .md files in the research/ directory."""
+    if not RESEARCH_DIR.is_dir():
+        return {"files": []}
+    files = []
+    for p in sorted(RESEARCH_DIR.glob("*.md")):
+        stat = p.stat()
+        files.append({
+            "filename": p.name,
+            "size": stat.st_size,
+            "modified_at": stat.st_mtime,
+        })
+    return {"files": files}
+
+
+@app.get("/research/{filename}")
+async def get_research(filename: str):
+    """Read a single .md file from research/ directory."""
+    # Prevent path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
+    filepath = RESEARCH_DIR / filename
+    if not filepath.is_file():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "File not found"})
+    content = filepath.read_text(encoding="utf-8")
+    return {"filename": filename, "content": content, "size": len(content)}
 
 
 @app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])
