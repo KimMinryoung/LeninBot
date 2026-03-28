@@ -161,6 +161,37 @@ async def process_task(
                 except Exception:
                     pass
 
+            # Auto-save scout reports to Knowledge Graph
+            if task.get("agent_type") == "scout":
+                try:
+                    from shared import process_scout_report_to_kg
+                    kg_result = await asyncio.to_thread(
+                        process_scout_report_to_kg,
+                        report=report,
+                        task_content=content,
+                        agent_type="scout",
+                    )
+                    if kg_result.get("status") == "ok":
+                        logger.info(
+                            "[SCOUT→KG] Task #%d saved to KG | group=%s | facts=%d",
+                            task_id,
+                            kg_result.get("group_id", "?"),
+                            kg_result.get("facts_count", 0),
+                        )
+                        # Optionally append KG save note to scratchpad for debugging
+                        _append_task_scratchpad(
+                            task_id,
+                            f"[AUTO-KG] Saved to {kg_result.get('group_id', '?')} | {kg_result.get('facts_count', 0)} facts"
+                        )
+                    else:
+                        logger.debug(
+                            "[SCOUT→KG] Task #%d KG save skipped: %s",
+                            task_id, kg_result.get("message", "unknown reason")
+                        )
+                except Exception as e:
+                    # Non-fatal: log but don't fail the task
+                    logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
+
             # Save full report to DB
             await asyncio.to_thread(
                 _execute,

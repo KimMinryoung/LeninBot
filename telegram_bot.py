@@ -31,6 +31,7 @@ from aiogram.types import (
 from aiogram.filters import Command
 import anthropic
 import base64
+from replicate_image_service import generate_image, is_replicate_configured, build_soviet_prompt
 
 # Extracted modules
 from telegram_tools import TOOLS, TOOL_HANDLERS
@@ -490,10 +491,14 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - programmer: 코드 작성/수정/디버깅/파일 편집 전문 (예산 $1.50)
 - general: 범용 리서치/분석 (예산 $1.00)
+- scout: 외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 (예산 $1.00)
+- visualizer: 이미지 프롬프트 설계, 시각 콘셉트, Rodchenko/구성주의 미학 전문 (예산 $1.00)
 
 When to delegate vs handle directly:
 - 간단한 질문, 일상 대화, 짧은 조회 → 직접 처리
 - 멀티스텝 코딩, 파일 수정 → delegate(agent="programmer")
+- 외부 플랫폼/커뮤니티 정찰 → delegate(agent="scout")
+- 이미지 방향성, 프롬프트 설계, 시각 콘셉트화 → delegate(agent="visualizer")
 - 심층 리서치, 다중 소스 분석, 장문 보고서 → delegate(agent="general")
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
@@ -1064,6 +1069,9 @@ _HELP_TEXT = """\
 /status\\_auto — 자율 생성 태스크 확인
 /report <id> — 태스크 리포트 파일 재전송
 
+*이미지*
+/image <프롬프트> — Replicate로 소련풍 게임/포스터 이미지 생성
+
 *스케줄*
 /schedule <cron> | <내용> — 정기 태스크 등록
   예: `/schedule 0 9 * * * | 오늘의 뉴스 브리핑`
@@ -1325,6 +1333,52 @@ async def cmd_task(message: Message):
         logger.error("Task insert error: %s", e)
         await message.answer(f"태스크 등록 실패: {e}")
 
+
+async def _generate_and_send_image(message: Message, prompt: str, *, style: str = "game"):
+    if not is_replicate_configured():
+        await message.answer("❌ REPLICATE_API_TOKEN이 설정되지 않았습니다.")
+        return
+
+    status = await message.answer("🎨 이미지 생성 중... Replicate polling 대기")
+    try:
+        result = await generate_image(prompt, style=style, download=True)
+        prompt_preview = build_soviet_prompt(prompt, style=style)[:180]
+        caption = (
+            f"✅ 이미지 생성 완료\n"
+            f"model: `{result['model']}`\n"
+            f"prediction: `{result['prediction_id']}`\n"
+            f"prompt: `{prompt_preview}`\n"
+            f"url: {result['image_urls'][0]}"
+        )
+        local_path = result.get("local_path")
+        if local_path and os.path.isfile(local_path):
+            with open(local_path, "rb") as f:
+                photo = BufferedInputFile(f.read(), filename=os.path.basename(local_path))
+            await message.answer_photo(photo, caption=caption, parse_mode="Markdown")
+        else:
+            await message.answer(caption, parse_mode="Markdown")
+        try:
+            await status.edit_text("🎨 이미지 생성 완료")
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("image generation failed: %s", e)
+        _log_event("error", "image", f"Replicate image generation failed: {e}", detail=prompt[:500])
+        try:
+            await status.edit_text(f"❌ 이미지 생성 실패: {e}")
+        except Exception:
+            await message.answer(f"❌ 이미지 생성 실패: {e}")
+
+
+@router.message(Command("image"))
+async def cmd_image(message: Message):
+    if not _is_allowed(message.from_user.id):
+        return
+    prompt = (message.text or "").removeprefix("/image").strip()
+    if not prompt:
+        await message.answer("사용법: /image <프롬프트>")
+        return
+    await _generate_and_send_image(message, prompt, style="game")
 
 
 @router.message(Command("stats"))
