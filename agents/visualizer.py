@@ -49,9 +49,8 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
 """,
     tools=[
         "generate_image",
-        "read_file", "list_directory", "fetch_url", "web_search",
-        "save_finding", "request_continuation",
-        "mission",
+        "read_file", "list_directory", "fetch_url", "web_search", "read_self",
+        "save_finding", "request_continuation", "mission",
     ],
     budget_usd=1.00,
     max_rounds=40,

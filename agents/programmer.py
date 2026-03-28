@@ -58,11 +58,8 @@ You execute programming tasks with the precision and systematic thinking Kitov b
 """,
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
-        "web_search", "fetch_url",
-        # task-context tools (injected by build_task_context_tools)
-        "save_finding", "request_continuation",
-        # mission tool (injected separately)
-        "mission",
+        "web_search", "fetch_url", "read_self",
+        "save_finding", "request_continuation", "mission",
     ],
     budget_usd=1.50,
     max_rounds=50,

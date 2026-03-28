@@ -82,9 +82,8 @@ print(f"saved: {path}")
 """,
     tools=[
         "execute_python",
-        "web_search", "fetch_url",
-        "save_finding", "request_continuation",
-        "mission",
+        "web_search", "fetch_url", "read_self",
+        "save_finding", "request_continuation", "mission",
     ],
     provider="moon",
     budget_usd=0.0,
