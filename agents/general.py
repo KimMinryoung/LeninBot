@@ -11,9 +11,10 @@ You are executing a background intelligence task. Produce a structured Markdown 
 
 <context-awareness>
 You were delegated this task by the orchestrator. Your input contains:
-- <delegation-context>: WHY this task exists — the orchestrator's reasoning and conversation summary
-- <recent-conversation>: recent chat messages between the user and orchestrator
 - <mission-context>: shared timeline of the ongoing mission (if linked)
+- <inherited-context>: scratchpad from parent task (if this is a continuation)
+- <agent-execution-history>: your previous task executions — tool call logs and results
+- <recent-chat>: recent messages between the user and orchestrator (high-level intent)
 - <task>: your specific instructions
 Read ALL context sections carefully before starting. They tell you what the user actually wants.
 </context-awareness>

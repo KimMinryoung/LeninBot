@@ -144,9 +144,14 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT DEFAULT ''")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
         ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_tasks_agent_user
+        ON telegram_tasks(user_id, agent_type, status) WHERE status = 'done'
     """)
     # Mission context tables
     _execute("""
@@ -478,14 +483,18 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page, then analyze with context from other tools
-- Self-reflection → read_diary; cross-interface memory → read_chat_logs
+- Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Store important facts → write_kg
-- Your own source code → read_file (e.g. read_file("telegram_bot.py"), read_file("shared.py"))
-- Server file management → list_directory, read_file, write_file
-- Data processing / automation → execute_python
 - Real-time market prices → get_finance_data
 </tool-strategy>
+
+<context-isolation>
+**너는 orchestrator다. 프로그래밍 도구(read_file, write_file, patch_file, list_directory, execute_python)에 접근할 수 없다.**
+코드 읽기/수정/실행이 필요하면 반드시 `delegate(agent="programmer")`로 위임하라.
+너의 역할은 사용자 의도를 파악하고, 적절한 에이전트에게 작업을 배분하며, 결과를 종합하는 것이다.
+<recent-task-results> 태그에 에이전트들의 최근 작업 결과 요약이 있다. 상세한 tool 실행 로그는 각 에이전트 자신만 접근 가능하다.
+</context-isolation>
 
 <delegation>
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
@@ -496,18 +505,17 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 
 When to delegate vs handle directly:
 - 간단한 질문, 일상 대화, 짧은 조회 → 직접 처리
-- 멀티스텝 코딩, 파일 수정 → delegate(agent="programmer")
+- **코드 읽기/수정/실행/파일 관리** → 반드시 delegate(agent="programmer")
 - 외부 플랫폼/커뮤니티 정찰 → delegate(agent="scout")
 - 이미지 방향성, 프롬프트 설계, 시각 콘셉트화 → delegate(agent="visualizer")
 - 심층 리서치, 다중 소스 분석, 장문 보고서 → delegate(agent="general")
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
 
-Context passing — 에이전트는 현재 대화를 직접 볼 수 없다. 반드시 `context` 필드에:
+Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 자동으로 받지만, 현재 대화의 핵심 맥락은 `context` 필드에 명시하라:
 1. 사용자의 원래 요청 (원문 또는 핵심 요약)
 2. 지금까지 대화에서 발견한 사항 (도구 결과, 분석, 결정)
 3. 왜 이 에이전트에게 위임하는지 (이유와 기대 결과)
-를 포함하라. context가 부실하면 에이전트가 맹목적으로 작업하게 된다.
 </delegation>
 
 <mission-management>
@@ -1001,6 +1009,11 @@ async def _chat_with_tools(
         system_alerts=_format_system_alerts(),
         skills_section=build_skills_prompt(),
     )
+    # Orchestrator context isolation: programming tools are reserved for programmer agent.
+    # When extra_tools is provided, caller is a task wrapper → no filtering.
+    _ORCHESTRATOR_BLOCKED_TOOLS = {"read_file", "write_file", "patch_file", "list_directory", "execute_python"}
+    is_orchestrator = extra_tools is None
+
     # Deduplicate tools by name — extra_tools override TOOLS with the same name
     seen_names: set[str] = set()
     merged_tools: list[dict] = []
@@ -1012,6 +1025,8 @@ async def _chat_with_tools(
     for t in TOOLS:
         name = t.get("name", "")
         if name not in seen_names:
+            if is_orchestrator and name in _ORCHESTRATOR_BLOCKED_TOOLS:
+                continue
             seen_names.add(name)
             merged_tools.append(t)
     merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
@@ -1782,6 +1797,21 @@ async def cmd_restart(message: Message):
         "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
     }[target]
 
+    # Save restart context to chat history BEFORE restarting (SIGTERM handler may not complete)
+    user_id = message.from_user.id
+    restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+    try:
+        await asyncio.to_thread(
+            _save_chat_message, user_id, "user",
+            f"[SYSTEM] 사용자가 /restart {target} 명령 실행 ({restart_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+        )
+        await asyncio.to_thread(
+            _save_chat_message, user_id, "assistant",
+            f"서비스 재시작을 시작합니다 ({restart_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+        )
+    except Exception:
+        pass
+
     status_msg = await message.answer(f"🔄 서비스 재시작 중... ({target})")
     results = []
     for svc in services:
@@ -1824,6 +1854,21 @@ async def cmd_deploy(message: Message):
     if target not in ("telegram", "api", "all"):
         await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/deploy [telegram|api|all]`", parse_mode="Markdown")
         return
+
+    # Save deploy context to chat history BEFORE deploying
+    deploy_user_id = message.from_user.id
+    deploy_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+    try:
+        await asyncio.to_thread(
+            _save_chat_message, deploy_user_id, "user",
+            f"[SYSTEM] 사용자가 /deploy {target} 명령 실행 ({deploy_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+        )
+        await asyncio.to_thread(
+            _save_chat_message, deploy_user_id, "assistant",
+            f"배포를 시작합니다 ({deploy_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+        )
+    except Exception:
+        pass
 
     status_msg = await message.answer(f"🚀 Deploy 시작... (대상: {target})")
     try:
@@ -2040,9 +2085,33 @@ async def handle_message(message: Message):
     from telegram_mission import build_mission_context
     mission_context = await asyncio.to_thread(build_mission_context, user_id)
 
+    # Orchestrator context: recent completed task summaries (high-level only, no tool logs)
+    task_summary_context = ""
+    try:
+        recent_tasks = await asyncio.to_thread(
+            _query,
+            "SELECT id, agent_type, content, result, completed_at FROM telegram_tasks "
+            "WHERE user_id = %s AND status = 'done' AND completed_at > NOW() - INTERVAL '24 hours' "
+            "ORDER BY completed_at DESC LIMIT 5",
+            (user_id,),
+        )
+        if recent_tasks:
+            recent_tasks.reverse()
+            task_lines = []
+            for t in recent_tasks:
+                agent = t.get("agent_type") or "general"
+                t_id = t["id"]
+                summary = (str(t.get("result") or "")[:200]).replace("\n", " ").strip()
+                if not summary:
+                    summary = (str(t.get("content") or "")[:100]).replace("\n", " ").strip()
+                task_lines.append(f"  - [{agent}] #{t_id}: {summary}")
+            task_summary_context = "\n<recent-task-results>\n" + "\n".join(task_lines) + "\n</recent-task-results>"
+    except Exception:
+        pass
+
     try:
         system_override = None
-        extra_context = (experience_context or "") + mission_context
+        extra_context = (experience_context or "") + mission_context + task_summary_context
         if extra_context:
             system_override = _SYSTEM_PROMPT_TEMPLATE.format(
                 current_datetime=_current_datetime_str(),
@@ -2066,10 +2135,9 @@ async def handle_message(message: Message):
         is_tool_pair_error = "tool_use" in err_str and "tool_result" in err_str
 
         if is_tool_pair_error:
-            # Auto-recovery: clear context and retry with current message only
-            logger.warning("Tool pair 400 error — clearing context and retrying: %s", e)
-            _log_event("warning", "chat", f"Tool pair error auto-recovery: {e}")
-            _clear_chat_history(user_id)
+            # Auto-recovery: retry with current message only (do NOT clear DB history)
+            logger.warning("Tool pair 400 error — retrying with fresh context (history preserved): %s", e)
+            _log_event("warning", "chat", f"Tool pair error auto-recovery (history preserved): {e}")
             try:
                 fresh_msgs = [{"role": "user", "content": user_text}]
                 progress_cb = _make_progress_callback(message.chat.id)
@@ -2077,7 +2145,7 @@ async def handle_message(message: Message):
                 if hasattr(progress_cb, "flush"):
                     await progress_cb.flush()
             except Exception as e2:
-                logger.error("Retry after clear also failed: %s", e2)
+                logger.error("Retry after tool pair recovery also failed: %s", e2)
                 reply = f"오류가 발생했습니다 (자동 복구 실패): {e2}"
         else:
             logger.error("Claude API error: %s", e)
@@ -2722,6 +2790,20 @@ async def bot_main():
                 ok = await checkpoint_task_on_shutdown(int(task_id))
                 if ok:
                     logger.info("Shutdown checkpoint saved for in-flight task #%s", task_id)
+            # Save restart marker to chat history so the bot retains awareness after restart
+            restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+            for uid in ALLOWED_USER_IDS:
+                try:
+                    await asyncio.to_thread(
+                        _save_chat_message, uid, "user",
+                        f"[SYSTEM] 서비스 재시작 시작 ({restart_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+                    )
+                    await asyncio.to_thread(
+                        _save_chat_message, uid, "assistant",
+                        f"서비스 재시작을 인지했습니다 ({restart_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+                    )
+                except Exception:
+                    pass
             await broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.", ALLOWED_USER_IDS)
         try:
             asyncio.get_event_loop().create_task(_shutdown_notify_and_checkpoint())
@@ -2744,6 +2826,23 @@ async def bot_main():
         kg = await asyncio.to_thread(get_kg_service)
         kg_status = "connected" if kg else "unavailable"
         _add_system_alert(f"Deploy 완료 — KG: {kg_status}")
+        # Save startup marker to chat history so the bot knows it just restarted
+        startup_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+        recovery_summary = ""
+        if handed_off or closed_stale or closed_repeated:
+            recovery_summary = f" 태스크 복구: handoff {handed_off}건, 만료종료 {closed_stale}건, 반복중단 {closed_repeated}건."
+        for uid in ALLOWED_USER_IDS:
+            try:
+                _save_chat_message(
+                    uid, "user",
+                    f"[SYSTEM] 서비스 재시작 완료 ({startup_ts}). KG: {kg_status}.{recovery_summary} 이전 대화를 이어서 진행하라."
+                )
+                _save_chat_message(
+                    uid, "assistant",
+                    f"서비스가 재시작되었습니다 ({startup_ts}). 이전 대화 맥락을 유지하고 있으며, 이어서 도움드리겠습니다."
+                )
+            except Exception as e:
+                logger.warning("Failed to save startup marker for user %s: %s", uid, e)
         await broadcast(bot, (
             f"🟢 *Deploy 완료* — 메시지 수신 준비 완료.\n"
             f"  KG (Neo4j): {kg_status}"

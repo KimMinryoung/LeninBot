@@ -127,16 +127,88 @@ async def process_task(
         except Exception as e:
             logger.debug("Mission context injection failed: %s", e)
 
+    # ── Context Isolation: build agent-appropriate context ──────────
+    agent_type = task.get("agent_type") or "general"
+
+    # (A) Agent execution history: load this agent's recent completed tasks
+    agent_history_ctx = ""
+    if user_id and user_id != 0:
+        try:
+            prev_tasks = _query(
+                "SELECT id, content, result, tool_log, completed_at FROM telegram_tasks "
+                "WHERE user_id = %s AND agent_type = %s AND status = 'done' "
+                "AND id != %s ORDER BY completed_at DESC LIMIT 3",
+                (user_id, agent_type, task_id),
+            )
+            if prev_tasks:
+                prev_tasks.reverse()  # chronological order
+                parts = []
+                for pt in prev_tasks:
+                    pt_id = pt["id"]
+                    pt_completed = str(pt.get("completed_at") or "?")[:19]
+                    # Task summary from result (brief)
+                    pt_summary = _extract_summary(str(pt.get("result") or ""), 500)
+                    # Tool log (full for this agent's own history)
+                    pt_tool_log = str(pt.get("tool_log") or "")
+                    if pt_tool_log:
+                        pt_tool_log = pt_tool_log[:8000]  # cap per-task
+                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
+                    block += f"    <summary>{pt_summary}</summary>\n"
+                    if pt_tool_log:
+                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
+                    block += f"  </prev-task>"
+                    parts.append(block)
+                agent_history_ctx = (
+                    f"<agent-execution-history agent=\"{agent_type}\">\n"
+                    + "\n".join(parts)
+                    + "\n</agent-execution-history>"
+                )
+        except Exception as e:
+            logger.debug("Agent execution history load failed: %s", e)
+
+    # (B) Recent chat: brief high-level context (what user discussed with orchestrator)
+    chat_ctx = ""
+    if user_id and user_id != 0:
+        try:
+            recent_rows = _query(
+                "SELECT role, content FROM ("
+                "  SELECT role, content, id FROM telegram_chat_history"
+                "  WHERE user_id = %s ORDER BY id DESC LIMIT 10"
+                ") sub ORDER BY id ASC",
+                (user_id,),
+            )
+            if recent_rows:
+                chat_lines = []
+                for r in recent_rows:
+                    role_label = "사용자" if r["role"] == "user" else "레닌"
+                    text = str(r["content"] or "")[:300]
+                    chat_lines.append(f"  [{role_label}] {text}")
+                chat_ctx = "<recent-chat>\n" + "\n".join(chat_lines) + "\n</recent-chat>"
+        except Exception as e:
+            logger.debug("Chat context injection for task failed: %s", e)
+
+    # (C) Build full context: all parts combined
+    context_parts = []
     if mission_ctx:
-        content = f"{mission_ctx}\n\n<task>\n{content}\n</task>"
-    elif scratchpad:
-        content = f"<inherited-context parent=\"{parent_task_id}\" depth=\"{depth}\">\n{scratchpad}\n</inherited-context>\n\n<task>\n{content}\n</task>"
+        context_parts.append(mission_ctx)
+    if scratchpad:
+        context_parts.append(
+            f"<inherited-context parent=\"{parent_task_id}\" depth=\"{depth}\">\n{scratchpad}\n</inherited-context>"
+        )
+    if agent_history_ctx:
+        context_parts.append(agent_history_ctx)
+    if chat_ctx:
+        context_parts.append(chat_ctx)
+
+    if context_parts:
+        content = "\n\n".join(context_parts) + f"\n\n<task>\n{content}\n</task>"
 
     max_retries = 10
     retry_delay = 60
 
     for attempt in range(max_retries):
         try:
+            bt = {}
             report = await chat_with_tools_fn(
                 [{"role": "user", "content": content}],
                 system_prompt=task_system_prompt,
@@ -146,7 +218,21 @@ async def process_task(
                 extra_tools=extra_tools,
                 extra_handlers=extra_handlers,
                 on_progress=on_progress,
+                budget_tracker=bt,
             )
+
+            # Save tool execution log for agent context isolation
+            tool_details = bt.get("tool_work_details", [])
+            if tool_details:
+                tool_log_text = "\n".join(str(d)[:500] for d in tool_details)[:20000]
+                try:
+                    await asyncio.to_thread(
+                        _execute,
+                        "UPDATE telegram_tasks SET tool_log = %s WHERE id = %s",
+                        (tool_log_text, task_id),
+                    )
+                except Exception as e:
+                    logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
 
             # Record task completion to mission (generous summary for context chain)
             if mission_id:
