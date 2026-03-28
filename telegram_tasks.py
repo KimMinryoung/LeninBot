@@ -180,10 +180,14 @@ async def process_task(
             if recent_rows:
                 chat_lines = []
                 for r in recent_rows:
+                    text = str(r["content"] or "")
+                    # Skip system markers (restart/deploy notifications) — not user intent
+                    if text.startswith("[SYSTEM]"):
+                        continue
                     role_label = "사용자" if r["role"] == "user" else "레닌"
-                    text = str(r["content"] or "")[:300]
-                    chat_lines.append(f"  [{role_label}] {text}")
-                chat_ctx = "<recent-chat>\n" + "\n".join(chat_lines) + "\n</recent-chat>"
+                    chat_lines.append(f"  [{role_label}] {text[:300]}")
+                if chat_lines:
+                    chat_ctx = "<recent-chat>\n" + "\n".join(chat_lines) + "\n</recent-chat>"
         except Exception as e:
             logger.debug("Chat context injection for task failed: %s", e)
 

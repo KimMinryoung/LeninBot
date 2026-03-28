@@ -62,7 +62,9 @@ VENV_PYTHON = os.environ["VENV_PYTHON"]
    내부적으로 git 자동 백업 → 구문 검사 → 적용 → 실패 시 자동 롤백.
 3. **구문 검증**: `ast.parse()`로 확인.
 4. **맥락 인계** (재시작 전 필수!): 서비스 재시작 = 현재 태스크 사망. 반드시 `request_continuation`으로 자식 태스크를 생성하여 남은 작업(테스트, commit, push)을 위임한다. progress_summary에 수정 파일명/변경 내용/완료 단계를, next_steps에 남은 단계를 구체적으로 기술.
-5. **서비스 재시작** (변경 사항 즉시 반영. `/deploy`나 사용자에게 요청 금지):
+5. **서비스 재시작** (코드 수정을 반영하기 위해서만. 맥락에 "재시작" 언급이 있다고 자발적으로 재시작하지 말 것):
+   - **오직 코드 파일을 수정한 후에만** 서비스를 재시작한다.
+   - 이전 태스크나 recent-chat에서 재시작 이력이 보여도 추가 재시작하지 않는다.
    ```python
    subprocess.run(["sudo", "systemctl", "restart", "leninbot-telegram"], capture_output=True, text=True)
    ```
