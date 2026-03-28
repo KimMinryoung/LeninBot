@@ -486,6 +486,7 @@ def fetch_kg_stats() -> dict:
             )
 
             # Recent episodes WITH their mentioned entities and linked facts
+            # Note: created_at may be STRING (old) or DATE_TIME (new) — use toString() for consistent sorting
             recent_episodes_raw = _run_cypher(
                 "MATCH (e:Episodic) "
                 "OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity) "
@@ -494,10 +495,10 @@ def fetch_kg_stats() -> dict:
                 "  WHERE e.uuid IN r.episodes "
                 "WITH e, entities, "
                 "  collect(DISTINCT {fact: r.fact, from: a.name, to: b.name}) AS facts "
-                "RETURN e.name AS name, e.created_at AS created_at, "
+                "RETURN e.name AS name, toString(e.created_at) AS created_at, "
                 "  e.group_id AS group_id, e.source AS source, "
                 "  entities, facts "
-                "ORDER BY e.created_at DESC LIMIT 10"
+                "ORDER BY toString(e.created_at) DESC LIMIT 10"
             )
 
         # Format recent episodes with knowledge detail
