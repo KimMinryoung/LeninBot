@@ -106,11 +106,12 @@ SELF_TOOLS = [
         "description": (
             "Delegate a task to a specialized agent. Runs asynchronously in background.\n"
             "Agents:\n"
-            "- programmer: 코드 작성, 수정, 디버깅, 파일 편집 전문 ($1.50 budget)\n"
-            "- general: 범용 리서치/분석 태스크 ($1.00 budget)\n"
-            "- scout: 외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 ($1.00 budget)\n"
-            "- visualizer: 이미지 프롬프트 설계, 시각 콘셉트, Rodchenko/구성주의 미학 전문 ($1.00 budget)\n"
-            "Use programmer for code tasks, scout for external patrols, visualizer for image direction/prompt design, general for everything else.\n"
+            "- programmer: 코드 작성/수정/디버깅 ($1.50)\n"
+            "- analyst: 정보 분석, KG 교차 검증, 추세/패턴 도출, 지식 공백 식별 ($1.00)\n"
+            "- scout: 외부 데이터 수집, 플랫폼 정찰 ($1.00)\n"
+            "- visualizer: 이미지 생성, 시각 콘셉트 ($1.00)\n"
+            "- general: 위 어디에도 안 맞는 범용 리서치 ($1.00)\n"
+            "Use analyst for analysis/KG work, scout for data collection, programmer for code, visualizer for images, general for the rest.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
