@@ -815,10 +815,18 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                     prev_fire = cron.get_prev(datetime)
                     last_run = sched["last_run_at"]
                     if last_run is None or prev_fire > last_run:
+                        # Detect agent_type from [agent] prefix in content
+                        sched_content = sched["content"]
+                        sched_agent = None
+                        if sched_content.startswith("[") and "]" in sched_content[:20]:
+                            tag = sched_content[1:sched_content.index("]")].strip().lower()
+                            from agents import agent_names
+                            if tag in agent_names():
+                                sched_agent = tag
                         await asyncio.to_thread(
                             _execute,
-                            "INSERT INTO telegram_tasks (user_id, content) VALUES (%s, %s)",
-                            (sched["user_id"], sched["content"]),
+                            "INSERT INTO telegram_tasks (user_id, content, agent_type) VALUES (%s, %s, %s)",
+                            (sched["user_id"], sched_content, sched_agent),
                         )
                         await asyncio.to_thread(
                             _execute,
