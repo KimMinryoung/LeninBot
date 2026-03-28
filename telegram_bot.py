@@ -1,18 +1,12 @@
-"""telegram_bot.py — Telegram bot interface (aiogram 3.x).
+"""telegram_bot.py — Telegram bot core: chat history, system prompt, LLM dispatch, bot_main.
 
-Features:
-- General messages → Claude Sonnet 4.6 with tool-use (vector_search, knowledge_graph_search, web_search, file system, execute_python)
-- /chat <message> → CLAW pipeline (LangGraph agent: intent→retrieve→KG→strategize→generate)
-- /task <content> → Save to PostgreSQL queue, background worker processes, push on completion
-- /status → Show last 5 tasks
-- /clear → Reset chat history
-
-Tools are lazy-loaded from chatbot.py to share the BGE-M3 embedding model and other heavy resources.
-Security: ALLOWED_USER_IDS whitelist, unauthorized users silently ignored.
+Command handlers → telegram_commands.py
+LLM config/model resolution → bot_config.py
+Tool definitions → telegram_tools.py
+Background tasks → telegram_tasks.py
 """
 
 import os
-import sys
 import json
 import asyncio
 import logging
@@ -36,7 +30,7 @@ from bot_config import (
     _extract_text,
 )
 from telegram_tools import TOOLS, TOOL_HANDLERS
-from claude_loop import estimate_tokens, chat_with_tools
+from claude_loop import chat_with_tools
 from telegram_tasks import (
     process_task, broadcast, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
@@ -361,13 +355,8 @@ Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 
 """
 
 
-# Task system prompts are now defined per-agent in agents/ package.
-# See agents/general.py, agents/programmer.py, etc.
-
 # ── Chat History ─────────────────────────────────────────────────────
 MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
-_HISTORY_TOKEN_LIMIT = 40_000  # compress if history exceeds this
-_RECENT_TURNS_KEEP = 4  # keep last N turns uncompressed (4 turns = 8 msgs)
 
 
 # Per-user clear marker: messages with id <= this value are ignored
@@ -649,65 +638,6 @@ async def _maybe_summarize_chunk(user_id: int):
     except Exception as e:
         logger.warning("Chunk summarization failed: %s", e)
 
-
-async def _compress_history(messages: list[dict]) -> list[dict]:
-    """Compress chat history if it exceeds the token limit.
-
-    Summarizes older messages into a single context message using Haiku,
-    keeping the most recent turns intact for conversational continuity.
-    """
-    total_tokens = sum(estimate_tokens(m["content"]) for m in messages)
-    if total_tokens <= _HISTORY_TOKEN_LIMIT:
-        return messages
-
-    # Split into old (to summarize) and recent (to keep)
-    keep_count = _RECENT_TURNS_KEEP * 2  # user+assistant pairs
-    if len(messages) <= keep_count:
-        return messages  # not enough messages to split
-
-    old_msgs = messages[:-keep_count]
-    recent_msgs = messages[-keep_count:]
-
-    logger.info(
-        "Compressing history: %d msgs (%d tokens) → summarize %d old, keep %d recent",
-        len(messages), total_tokens, len(old_msgs), len(recent_msgs),
-    )
-
-    # Build summary request
-    conversation_text = "\n".join(
-        f"[{m['role']}] {m['content'][:1000]}" for m in old_msgs
-    )
-    summary_prompt = (
-        "아래 대화를 핵심 정보만 남기고 간결하게 요약해라. "
-        "사용자가 어떤 주제를 물었고, 어떤 결론/답변이 나왔는지 위주로. "
-        "고유명사, 수치, 날짜는 보존. 300자 이내.\n\n"
-        f"{conversation_text}"
-    )
-
-    try:
-        # Try local LLM first (free), fall back to Haiku (paid)
-        summary = await _local_llm_generate(summary_prompt)
-        if not summary:
-            resp = await _claude.messages.create(
-                model=await _get_model_light(),
-                max_tokens=512,
-                messages=[{"role": "user", "content": summary_prompt}],
-            )
-            summary = _extract_text(resp)
-    except Exception as e:
-        logger.warning("History compression failed: %s — using truncation fallback", e)
-        # Fallback: just drop old messages
-        return recent_msgs
-
-    # Inject summary as a system-like context message
-    compressed = [
-        {"role": "user", "content": f"[이전 대화 요약]\n{summary}"},
-        {"role": "assistant", "content": "네, 이전 대화 내용을 파악했습니다. 이어서 진행하겠습니다."},
-    ] + recent_msgs
-
-    new_tokens = sum(estimate_tokens(m["content"]) for m in compressed)
-    logger.info("History compressed: %d tokens → %d tokens", total_tokens, new_tokens)
-    return compressed
 
 # ── CLAW pipeline (lazy-loaded) ──────────────────────────────────────
 _graph = None
