@@ -641,6 +641,10 @@ GENERATE_IMAGE_TOOL = {
                 "enum": ["flux_schnell", "flux_dev"],
                 "description": "Model preset. flux_schnell (fast) or flux_dev (higher quality). Default: flux_schnell.",
             },
+            "count": {
+                "type": "integer",
+                "description": "Number of images to generate in one batch (1-4). Single API call, no rate limit concern. Default: 1.",
+            },
         },
         "required": ["prompt"],
     },
@@ -656,12 +660,15 @@ async def _exec_generate_image(
     style: str = "poster",
     aspect_ratio: str = "1:1",
     model: str | None = None,
+    count: int = 1,
 ) -> str:
     import time as _time
     global _last_image_gen_time
     from replicate_image_service import generate_image, is_replicate_configured
     if not is_replicate_configured():
         return "ERROR: REPLICATE_API_TOKEN is not configured"
+
+    count = max(1, min(4, count))
 
     # Rate limit: wait if called too soon after previous generation
     elapsed = _time.monotonic() - _last_image_gen_time
@@ -675,22 +682,26 @@ async def _exec_generate_image(
             model=model,
             style=style,
             aspect_ratio=aspect_ratio,
+            num_outputs=count,
             download=True,
         )
         _last_image_gen_time = _time.monotonic()
-        local_path = result.get("local_path") or "N/A"
         urls = result.get("image_urls", [])
-        url = urls[0] if urls else "N/A"
-        return (
-            f"Image generated successfully.\n"
-            f"  prediction_id: {result.get('prediction_id')}\n"
-            f"  model: {result.get('model')}\n"
-            f"  final_prompt: {result.get('prompt', '')[:300]}\n"
-            f"  image_url: {url}\n"
-            f"  local_path: {local_path}"
-        )
+        local_paths = result.get("local_paths", [])
+        lines = [
+            f"Batch generated {len(urls)} image(s) in 1 API call.",
+            f"  prediction_id: {result.get('prediction_id')}",
+            f"  model: {result.get('model')}",
+            f"  style: {style}",
+            f"  final_prompt: {result.get('prompt', '')[:300]}",
+        ]
+        for i, url in enumerate(urls):
+            lp = local_paths[i] if i < len(local_paths) else "N/A"
+            lines.append(f"  [{i+1}] url: {url}")
+            lines.append(f"      local_path: {lp}")
+        return "\n".join(lines)
     except Exception as e:
-        _last_image_gen_time = _time.monotonic()  # count failed calls too
+        _last_image_gen_time = _time.monotonic()
         return f"Image generation failed: {e}"
 
 

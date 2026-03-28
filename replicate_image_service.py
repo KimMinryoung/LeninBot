@@ -362,20 +362,25 @@ async def generate_image(
     model: str | None = None,
     style: str = "poster",
     aspect_ratio: str = "1:1",
+    num_outputs: int = 1,
     download: bool = True,
     extra_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not is_replicate_configured():
         raise RuntimeError("REPLICATE_API_TOKEN is missing")
 
+    num_outputs = max(1, min(4, num_outputs))
+    merged_extra = dict(extra_input or {})
+    merged_extra["num_outputs"] = num_outputs
+
     final_prompt = build_soviet_prompt(prompt, style=style, aspect_ratio=aspect_ratio)
-    logger.info("[replicate] create prediction model=%s style=%s", model or REPLICATE_DEFAULT_MODEL, style)
+    logger.info("[replicate] create prediction model=%s style=%s num_outputs=%d", model or REPLICATE_DEFAULT_MODEL, style, num_outputs)
     prediction = await asyncio.to_thread(
         create_prediction,
         final_prompt,
         model=model,
         aspect_ratio=aspect_ratio,
-        extra_input=extra_input,
+        extra_input=merged_extra,
     )
     prediction_id = prediction.get("id")
     if not prediction_id:
@@ -400,14 +405,16 @@ async def generate_image(
             )
         )
 
-    local_path = None
+    # Download all output images
+    local_paths: list[str] = []
     if download:
-        try:
-            local_path = await asyncio.to_thread(download_image, urls[0], prompt)
-        except Exception as exc:
-            info = _classify_replicate_error(exc)
-            logger.warning("[replicate] download_image failed category=%s retryable=%s detail=%s", info.category, info.retryable, info.detail)
-            raise ReplicateImageError(info) from exc
+        for idx, url in enumerate(urls):
+            try:
+                suffix = f"_{idx+1}" if len(urls) > 1 else ""
+                path = await asyncio.to_thread(download_image, url, f"{prompt}{suffix}")
+                local_paths.append(path)
+            except Exception as exc:
+                logger.warning("[replicate] download_image #%d failed: %s", idx, exc)
 
     return {
         "prediction_id": prediction_id,
@@ -415,6 +422,7 @@ async def generate_image(
         "prompt": final_prompt,
         "status": completed.get("status"),
         "image_urls": urls,
-        "local_path": local_path,
+        "local_path": local_paths[0] if local_paths else None,
+        "local_paths": local_paths,
         "raw": completed,
     }
