@@ -36,39 +36,53 @@ SCOUT = AgentSpec(
    - 수집한 정보를 분석하여 보고서 작성
 </patrol-methods>
 
-<raw-data-archiving>
-정찰로 수집한 raw 데이터는 가공 없이 그대로 저장한다. 보고서와 별개로 원본을 보존.
+<data-collection-and-archiving>
+수집한 데이터를 **구조화된 .md 문서**로 저장한다. analyst가 이 문서를 직접 읽어 분석한다.
 
-저장 경로: `data/scout_raw/{source}/{YYYY-MM-DD}_{HH:MM}_{slug}.json`
-- source: 플랫폼명 (moltbook, web 등)
-- slug: 내용을 식별할 수 있는 짧은 키워드
+**저장 경로**: `data/scout_raw/{source}/{YYYY-MM-DD}_{HHMM}_{slug}.md`
 
+**문서 포맷** (write_file로 저장):
+```markdown
+# {제목}
+
+- **수집일시**: 2026-03-28 16:30 KST
+- **출처**: {URL 또는 플랫폼명}
+- **검색어**: {사용한 쿼리}
+- **수집 방법**: web_search / fetch_url / moltbook script
+
+## 원문
+
+{스크래핑한 본문 전체. 잘라내기 금지. HTML 태그 제거한 텍스트.}
+
+## 메타데이터
+
+- 저자: {있으면}
+- 발행일: {있으면}
+- 관련 키워드: {태그}
+```
+
+**저장 코드**:
 ```python
-import json, os
+import os
 from datetime import datetime
 from pathlib import Path
 
 root = os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")
-source = "web"  # 또는 "moltbook" 등
-slug = "topic-keyword"
+source = "web"  # 또는 "moltbook"
+slug = "topic-keyword"  # 내용 식별 가능한 짧은 키워드
 ts = datetime.now().strftime("%Y-%m-%d_%H%M")
 out_dir = Path(root) / "data" / "scout_raw" / source
 out_dir.mkdir(parents=True, exist_ok=True)
-path = out_dir / f"{ts}_{slug}.json"
-path.write_text(json.dumps({
-    "collected_at": ts,
-    "source": source,
-    "query": "검색어 또는 URL",
-    "raw": raw_data,  # 수집한 원본 데이터 (가공 금지)
-}, ensure_ascii=False, indent=2), encoding="utf-8")
+path = out_dir / f"{ts}_{slug}.md"
+path.write_text(md_content, encoding="utf-8")
 print(f"saved: {path}")
 ```
 
 **규칙:**
-- 요약/분석 전에 반드시 raw 데이터를 먼저 저장한다.
-- raw 필드에는 tool 결과를 그대로 넣는다 (잘라내기, 요약, 재구성 금지).
-- moltbook 전용 스크립트의 출력도 raw로 저장한다.
-</raw-data-archiving>
+- **본문을 포함하라.** URL만 저장하면 안 된다. fetch_url로 가져온 텍스트를 원문 섹션에 넣어라.
+- 요약/분석 하지 마라 — 그건 analyst의 일이다. 원문을 있는 그대로 저장.
+- 한 주제에 여러 소스가 있으면 소스별로 별도 .md 파일을 만들어라.
+</data-collection-and-archiving>
 
 <rules>
 - Write in the SAME LANGUAGE as the task.
@@ -82,7 +96,8 @@ print(f"saved: {path}")
 """,
     tools=[
         "execute_python",
-        "web_search", "fetch_url", "read_self", "write_kg",
+        "web_search", "fetch_url", "write_file", "list_directory",
+        "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
     ],
     provider="moon",
