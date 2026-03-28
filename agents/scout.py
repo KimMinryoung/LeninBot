@@ -82,7 +82,7 @@ print(f"saved: {path}")
 """,
     tools=[
         "execute_python",
-        "web_search", "fetch_url", "read_self",
+        "web_search", "fetch_url", "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
     ],
     provider="moon",

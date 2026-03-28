@@ -72,21 +72,30 @@ SELF_TOOLS = [
     },
     {
         "name": "write_kg",
-        "description": "Store facts/entities/relationships in KG permanently. Write clear factual sentences.",
+        "description": (
+            "Store facts to Knowledge Graph. Low-cost: just pass a string of factual statements. "
+            "Use bullet points for multiple facts. KG extracts entities/relationships automatically."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "Factual statements to store."},
-                "name": {"type": "string", "description": "Episode label (auto-generated if omitted)."},
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "Factual statements to store. Use bullet points for multiple facts. "
+                        "Example: '- 미국이 2026-03-28 대중국 반도체 수출 규제 강화 발표\\n- 한국 삼성전자 주가 3.2% 하락'"
+                    ),
+                },
+                "group_id": {
+                    "type": "string",
+                    "enum": ["geopolitics_conflict", "diplomacy", "economy", "korea_domestic", "agent_knowledge"],
+                    "description": "Topic group. Default: agent_knowledge.",
+                    "default": "agent_knowledge",
+                },
                 "source_type": {
                     "type": "string",
                     "enum": ["internal_report", "osint_news", "osint_social", "personnel_change", "diplomatic_cable", "threat_report"],
                     "default": "internal_report",
-                },
-                "group_id": {
-                    "type": "string",
-                    "description": "Group: geopolitics_conflict/diplomacy/economy, korea_domestic, agent_knowledge.",
-                    "default": "agent_knowledge",
                 },
             },
             "required": ["content"],

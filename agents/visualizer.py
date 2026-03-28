@@ -51,7 +51,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
 """,
     tools=[
         "generate_image",
-        "read_file", "list_directory", "fetch_url", "web_search", "read_self",
+        "read_file", "list_directory", "fetch_url", "web_search", "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
     ],
     budget_usd=1.00,

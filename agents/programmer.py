@@ -58,7 +58,7 @@ You execute programming tasks with the precision and systematic thinking Kitov b
 """,
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
-        "web_search", "fetch_url", "read_self",
+        "web_search", "fetch_url", "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
     ],
     budget_usd=1.50,

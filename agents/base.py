@@ -25,6 +25,9 @@ Read ALL context sections carefully before starting.
 MISSION_GUIDELINES_BLOCK = """
 <mission-guidelines>
 - save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라.
+- write_kg: **새로운 사실을 발견하면 KG에 저장하라.** 비용 거의 없음 — bullet point 형태로 사실만 전달.
+  group_id: geopolitics_conflict(지정학), economy(경제), korea_domestic(한국), agent_knowledge(기타).
+  예: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
 - request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
 - 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
 </mission-guidelines>
