@@ -469,9 +469,9 @@ async def _exec_write_kg(
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
 ) -> str:
-    from shared import add_kg_episode
+    from shared import add_kg_episode_async
 
-    result = await asyncio.to_thread(add_kg_episode, content, name, source_type, group_id)
+    result = await add_kg_episode_async(content, name, source_type, group_id)
     if result["status"] == "ok":
         # Audit log for KG writes
         ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")

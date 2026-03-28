@@ -544,13 +544,10 @@ def add_kg_episode(
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
 ) -> dict:
-    """Add an episode to the Knowledge Graph.
+    """Add an episode to the Knowledge Graph (sync version — for scripts/cron).
 
-    Args:
-        content: The text content to ingest (facts, profiles, observations).
-        name: Episode name/label. Auto-generated if empty.
-        source_type: One of EPISODE_SOURCE_MAP keys. Default 'internal_report'.
-        group_id: Logical grouping. Default 'agent_knowledge'.
+    For use inside an asyncio event loop (e.g. telegram bot), use add_kg_episode_async() instead
+    to avoid 'Cannot run the event loop while another loop is running' errors.
 
     Returns dict with 'status' ('ok' or 'error') and 'message'.
     """
@@ -563,7 +560,6 @@ def add_kg_episode(
     if not content or not content.strip():
         return {"status": "error", "message": "Content cannot be empty"}
 
-    # Auto-generate name if not provided
     if not name:
         ts = datetime.now(KST).strftime("%Y%m%d-%H%M%S")
         name = f"agent-note-{ts}"
@@ -575,12 +571,54 @@ def add_kg_episode(
             source_type=source_type,
             reference_time=datetime.now(timezone.utc),
             group_id=group_id,
-            preprocess_news=False,  # Already curated by the agent
+            preprocess_news=False,
             max_body_chars=3000,
         ))
         return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
     except Exception as e:
         logger.error("[shared] add_kg_episode error: %s", e)
+        err_str = str(e).lower()
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+            reset_kg_service()
+        return {"status": "error", "message": str(e)}
+
+
+async def add_kg_episode_async(
+    content: str,
+    name: str = "",
+    source_type: str = "internal_report",
+    group_id: str = "agent_knowledge",
+) -> dict:
+    """Add an episode to the Knowledge Graph (async version — for telegram bot/agents).
+
+    Directly awaits Graphiti's async ingest, avoiding run_until_complete() event loop conflicts.
+    """
+    from datetime import timezone
+
+    svc = get_kg_service()
+    if svc is None:
+        return {"status": "error", "message": "Knowledge Graph service unavailable"}
+
+    if not content or not content.strip():
+        return {"status": "error", "message": "Content cannot be empty"}
+
+    if not name:
+        ts = datetime.now(KST).strftime("%Y%m%d-%H%M%S")
+        name = f"agent-note-{ts}"
+
+    try:
+        await svc.ingest_episode(
+            name=name,
+            body=content.strip(),
+            source_type=source_type,
+            reference_time=datetime.now(timezone.utc),
+            group_id=group_id,
+            preprocess_news=False,
+            max_body_chars=3000,
+        )
+        return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
+    except Exception as e:
+        logger.error("[shared] add_kg_episode_async error: %s", e)
         err_str = str(e).lower()
         if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
             reset_kg_service()
