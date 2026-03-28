@@ -78,6 +78,7 @@ logging.getLogger("neo4j").addFilter(_ThrottleFilter(60.0))
 # ── Config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ALLOWED_USER_IDS: set[int] = {
     int(uid.strip())
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
@@ -192,8 +193,14 @@ def _log_event(
         logger.warning("_log_event DB write failed: %s", _le)
 
 
-# ── Claude client ────────────────────────────────────────────────────
+# ── LLM clients ─────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+# OpenAI client (lazy — only created if key exists)
+_openai_client = None
+if OPENAI_API_KEY:
+    from openai import AsyncOpenAI
+    _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 
@@ -201,10 +208,11 @@ _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 _CONFIG_DEFAULTS = {
     "chat_budget": 0.30,       # USD per chat turn
     "task_budget": 1.00,       # USD per background task
-    "chat_model": "sonnet",    # "sonnet" | "haiku" | "opus"
-    "task_model": "sonnet",    # "sonnet" | "haiku" | "opus"
+    "chat_model": "sonnet",    # "sonnet" | "haiku" | "opus" (Claude) / "gpt54" | "gpt54mini" | "gpt54nano" (OpenAI)
+    "task_model": "sonnet",    # same as above
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
+    "provider": "claude",      # "claude" | "openai"
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -249,16 +257,23 @@ _config = _load_config()
 _CONFIG_META = {
     "chat_budget":      {"label": "대화 예산",     "unit": "$",  "options": [0.10, 0.20, 0.30, 0.50, 1.00]},
     "task_budget":      {"label": "태스크 예산",   "unit": "$",  "options": [0.50, 1.00, 2.00, 3.00, 5.00]},
-    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["haiku", "sonnet", "opus"]},
-    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["haiku", "sonnet", "opus"]},
+    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["haiku", "sonnet", "opus", "gpt54", "gpt54mini", "gpt54nano"]},
+    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["haiku", "sonnet", "opus", "gpt54", "gpt54mini", "gpt54nano"]},
     "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
+    "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai"]},
 }
 
 _MODEL_ALIAS_MAP = {
     "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
     "sonnet": ("claude-sonnet-4-6", "claude-sonnet-4-6"),
     "opus":   ("claude-opus-4-6", "claude-opus-4-6"),
+}
+
+_OPENAI_MODEL_MAP = {
+    "gpt54":     "gpt-5.4",
+    "gpt54mini": "gpt-5.4-mini",
+    "gpt54nano": "gpt-5.4-nano",
 }
 
 
@@ -289,14 +304,25 @@ async def _get_model_by_alias(alias: str) -> str:
     return resolved
 
 
+def _resolve_openai_model(alias: str) -> str:
+    """Resolve OpenAI model alias (gpt54/gpt54mini/gpt54nano) to actual model ID."""
+    return _OPENAI_MODEL_MAP.get(alias, alias)
+
+
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
-    return await _get_model_by_alias(_config["chat_model"])
+    alias = _config["chat_model"]
+    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
+        return _resolve_openai_model(alias)
+    return await _get_model_by_alias(alias)
 
 
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
-    return await _get_model_by_alias(_config["task_model"])
+    alias = _config["task_model"]
+    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
+        return _resolve_openai_model(alias)
+    return await _get_model_by_alias(alias)
 
 
 async def _get_model_light() -> str:
@@ -924,7 +950,7 @@ async def _chat_with_tools(
     on_progress=None,
     budget_tracker: dict | None = None,
 ) -> str:
-    """Call Claude with tools — thin wrapper around claude_loop.chat_with_tools."""
+    """Call LLM with tools — dispatches to Claude or OpenAI based on provider config."""
     # Resolve runtime defaults strictly by None (not truthiness).
     resolved_max_rounds = _config["max_rounds_chat"] if max_rounds is None else max_rounds
     resolved_max_tokens = _CLAUDE_MAX_TOKENS if max_tokens is None else max_tokens
@@ -960,6 +986,25 @@ async def _chat_with_tools(
             seen_names.add(name)
             merged_tools.append(t)
     merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
+
+    # ── Provider dispatch: Claude vs OpenAI ──
+    if _config.get("provider") == "openai" and _openai_client:
+        from openai_tool_loop import chat_with_tools as openai_chat
+        return await openai_chat(
+            messages,
+            client=_openai_client,
+            model=model or await _get_model(),
+            tools=merged_tools,
+            tool_handlers=merged_handlers,
+            system_prompt=sys_prompt,
+            max_rounds=resolved_max_rounds,
+            max_tokens=resolved_max_tokens,
+            log_event=_log_event,
+            budget_usd=resolved_budget,
+            on_progress=on_progress,
+            budget_tracker=budget_tracker,
+        )
+
     return await chat_with_tools(
         messages,
         client=_claude,
@@ -1006,6 +1051,7 @@ _HELP_TEXT = """\
 /errors \\[n] \\[error|warning] — 에러/경고 로그
 /config — 설정 패널 (모델, 예산, 라운드 수)
 /fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
+/provider — LLM 제공자 전환 (Claude ↔ OpenAI)
 /restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
 /deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: all)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
@@ -1758,6 +1804,32 @@ async def cmd_fallback(message: Message):
         _resolved_models.pop("sonnet", None)
         _add_system_alert("Fallback 모드 해제: haiku → sonnet 복귀")
         await message.answer("✅ Fallback OFF — 모든 모델을 sonnet으로 복귀했습니다.")
+    _save_config()
+
+
+@router.message(Command("provider"))
+async def cmd_provider(message: Message):
+    """Toggle LLM provider between Claude and OpenAI."""
+    if not _is_allowed(message.from_user.id):
+        return
+    if not _openai_client:
+        await message.answer("❌ OPENAI_API_KEY가 설정되지 않아 전환할 수 없습니다.")
+        return
+    current = _config.get("provider", "claude")
+    if current == "claude":
+        _config["provider"] = "openai"
+        # Auto-switch models to OpenAI defaults
+        _config["chat_model"] = "gpt54"
+        _config["task_model"] = "gpt54"
+        _add_system_alert("🔄 Provider 전환: Claude → OpenAI (GPT-5.4)")
+        await message.answer("🔄 OpenAI로 전환 — 모델: GPT-5.4")
+    else:
+        _config["provider"] = "claude"
+        _config["chat_model"] = "sonnet"
+        _config["task_model"] = "sonnet"
+        _resolved_models.pop("sonnet", None)
+        _add_system_alert("🔄 Provider 전환: OpenAI → Claude (Sonnet)")
+        await message.answer("🔄 Claude로 전환 — 모델: Sonnet")
     _save_config()
 
 

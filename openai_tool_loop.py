@@ -1,17 +1,31 @@
-"""openai_tool_loop.py — OpenAI-compatible tool-use loop for local LLM (MOON PC).
+"""openai_tool_loop.py — OpenAI-compatible tool-use loop.
+
+Two modes:
+  1. **SDK mode** (client=AsyncOpenAI): OpenAI 공식 API. 비용 추적 + 예산 제한.
+  2. **httpx mode** (base_url=...): llama-server, vLLM 등 로컬 LLM. 비용 무시.
 
 claude_loop.py와 동일한 인터페이스를 제공하되, OpenAI 호환 API
 (/v1/chat/completions with function calling)를 사용한다.
-llama-server, vLLM 등 OpenAI 호환 백엔드에서 동작.
 
-사용 예:
+사용 예 (SDK mode — OpenAI 공식 API):
+    from openai import AsyncOpenAI
     from openai_tool_loop import chat_with_tools
 
     result = await chat_with_tools(
         messages=history,
+        client=AsyncOpenAI(),
+        model="gpt-5.4",
+        tools=tool_defs,          # Anthropic 포맷 → 내부에서 자동 변환
+        tool_handlers=handlers,
+        system_prompt="...",
+    )
+
+사용 예 (httpx mode — 로컬 LLM):
+    result = await chat_with_tools(
+        messages=history,
         base_url="http://127.0.0.1:8080",
         model="qwen3.5-9b",
-        tools=tool_defs,          # Anthropic 포맷 → 내부에서 자동 변환
+        tools=tool_defs,
         tool_handlers=handlers,
         system_prompt="...",
     )
@@ -22,6 +36,49 @@ import logging
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+# ── Pricing Constants (USD per million tokens) ────────────────────────
+OPENAI_PRICING = {
+    "gpt-5.4": {
+        "input": 2.50 / 1_000_000,
+        "output": 15.00 / 1_000_000,
+        "cached_input": 0.25 / 1_000_000,
+    },
+    "gpt-5.4-mini": {
+        "input": 0.75 / 1_000_000,
+        "output": 4.50 / 1_000_000,
+        "cached_input": 0.075 / 1_000_000,
+    },
+    "gpt-5.4-nano": {
+        "input": 0.20 / 1_000_000,
+        "output": 1.25 / 1_000_000,
+        "cached_input": 0.02 / 1_000_000,
+    },
+}
+# Fallback pricing for unknown models (use gpt-5.4 rates)
+_DEFAULT_PRICING = OPENAI_PRICING["gpt-5.4"]
+
+
+def _calculate_cost(usage, model: str) -> float:
+    """Calculate USD cost from an OpenAI usage object."""
+    pricing = OPENAI_PRICING.get(model, _DEFAULT_PRICING)
+    cost = 0.0
+
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+    # Check for cached tokens in prompt_tokens_details
+    cached_tokens = 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    if details:
+        cached_tokens = getattr(details, "cached_tokens", 0) or 0
+
+    non_cached_input = prompt_tokens - cached_tokens
+    cost += non_cached_input * pricing["input"]
+    cost += cached_tokens * pricing["cached_input"]
+    cost += completion_tokens * pricing["output"]
+    return cost
 
 
 # ── Anthropic → OpenAI tool format conversion ────────────────────────
@@ -108,7 +165,7 @@ def _normalize_messages(messages: list[dict]) -> list[dict]:
     return clean
 
 
-# ── Core API call ─────────────────────────────────────────────────────
+# ── Core API call (httpx — for local LLM) ────────────────────────────
 
 async def _call_api(
     base_url: str,
@@ -140,11 +197,34 @@ async def _call_api(
         return resp.json()
 
 
+# ── Core API call (SDK — for OpenAI official API) ────────────────────
+
+async def _call_sdk(
+    client,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    max_tokens: int = 4096,
+):
+    """Single call via openai.AsyncOpenAI SDK. Returns ChatCompletion object."""
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    return await client.chat.completions.create(**kwargs)
+
+
 # ── Tool-use loop ────────────────────────────────────────────────────
 
 async def chat_with_tools(
     messages: list[dict],
     *,
+    client=None,
     base_url: str = "http://127.0.0.1:8080",
     model: str = "qwen3.5-9b",
     tools: list[dict],
@@ -160,8 +240,23 @@ async def chat_with_tools(
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
     Interface mirrors claude_loop.chat_with_tools() for drop-in use.
-    budget_usd is accepted for compatibility but not enforced (local LLM = free).
+
+    Args:
+        client: openai.AsyncOpenAI instance for SDK mode. If None, uses httpx with base_url.
+        base_url: httpx mode endpoint (ignored if client is provided).
+        budget_usd: Max USD budget. Enforced in SDK mode; ignored in httpx mode (local LLM = free).
     """
+    sdk_mode = client is not None
+
+    # Budget validation (SDK mode only)
+    if sdk_mode and budget_usd > 0:
+        try:
+            budget_usd = float(budget_usd)
+        except (TypeError, ValueError):
+            budget_usd = 0.30
+        if budget_usd <= 0:
+            budget_usd = 0.01
+
     openai_tools = _convert_tools(tools)
     working_msgs = _normalize_messages(messages)
 
@@ -171,61 +266,110 @@ async def chat_with_tools(
 
     tool_call_log = []
     tool_work_details = []
+    total_cost = 0.0
+    budget_warning_sent = False
 
     for round_num in range(1, max_rounds + 1):
         try:
-            data = await _call_api(
-                base_url=base_url,
-                model=model,
-                messages=working_msgs,
-                tools=openai_tools if round_num <= max_rounds else None,
-                max_tokens=max_tokens,
-            )
+            if sdk_mode:
+                response = await _call_sdk(
+                    client=client,
+                    model=model,
+                    messages=working_msgs,
+                    tools=openai_tools if round_num <= max_rounds else None,
+                    max_tokens=max_tokens,
+                )
+                # Extract from SDK response object
+                choice = response.choices[0]
+                message = choice.message
+                finish_reason = choice.finish_reason or "stop"
+                content_text = message.content or ""
+                tool_calls = message.tool_calls
+
+                # Cost tracking
+                if response.usage:
+                    round_cost = _calculate_cost(response.usage, model)
+                    total_cost += round_cost
+                    logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)", round_num, round_cost, total_cost, budget_usd)
+                    if on_progress:
+                        try:
+                            await on_progress("budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
+                        except Exception:
+                            pass
+            else:
+                data = await _call_api(
+                    base_url=base_url,
+                    model=model,
+                    messages=working_msgs,
+                    tools=openai_tools if round_num <= max_rounds else None,
+                    max_tokens=max_tokens,
+                )
+                choice = data["choices"][0]
+                message = choice["message"]
+                finish_reason = choice.get("finish_reason", "stop")
+                content_text = message.get("content", "") or ""
+                tool_calls = message.get("tool_calls")
         except Exception as e:
             logger.error("OpenAI API call failed at round %d: %s", round_num, e)
             if log_event:
                 log_event("error", "openai_loop", f"API call failed: {e}")
             raise
 
-        choice = data["choices"][0]
-        message = choice["message"]
-        finish_reason = choice.get("finish_reason", "stop")
-
-        tool_calls = message.get("tool_calls")
-
         # No tool calls → return text response
         if not tool_calls or finish_reason == "stop":
-            text = message.get("content", "") or ""
             if budget_tracker is not None:
                 budget_tracker.update({
-                    "total_cost": 0.0,
+                    "total_cost": total_cost,
                     "rounds_used": round_num,
                     "was_interrupted": False,
                     "tool_work_details": list(tool_work_details),
                 })
-            return text.strip() if text.strip() else "응답을 생성하지 못했습니다."
+            return content_text.strip() if content_text.strip() else "응답을 생성하지 못했습니다."
+
+        # Budget check (SDK mode only)
+        budget_exceeded = sdk_mode and budget_usd > 0 and total_cost >= budget_usd
 
         # Has tool calls → execute them
-        # Append the assistant message (with tool_calls) to history
-        assistant_msg = {"role": "assistant", "content": message.get("content") or ""}
-        assistant_msg["tool_calls"] = [
-            {
-                "id": tc["id"],
-                "type": "function",
-                "function": {
-                    "name": tc["function"]["name"],
-                    "arguments": tc["function"]["arguments"],
-                },
-            }
-            for tc in tool_calls
-        ]
+        # Build assistant message for history
+        if sdk_mode:
+            tc_list = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in tool_calls
+            ]
+        else:
+            tc_list = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                    },
+                }
+                for tc in tool_calls
+            ]
+
+        assistant_msg = {"role": "assistant", "content": content_text, "tool_calls": tc_list}
         working_msgs.append(assistant_msg)
 
-        for tc in tool_calls:
-            tc_id = tc["id"]
-            func_name = tc["function"]["name"]
+        if on_progress and content_text.strip():
             try:
-                func_args = json.loads(tc["function"]["arguments"])
+                await on_progress("thinking", f"[{round_num}] {content_text.strip()}")
+            except Exception:
+                pass
+
+        for tc_item in tc_list:
+            tc_id = tc_item["id"]
+            func_name = tc_item["function"]["name"]
+            try:
+                func_args = json.loads(tc_item["function"]["arguments"])
             except (json.JSONDecodeError, TypeError):
                 func_args = {}
 
@@ -233,7 +377,7 @@ async def chat_with_tools(
 
             if on_progress:
                 try:
-                    await on_progress("tool_call", f"[{round_num}] {func_name}({input_summary})")
+                    await on_progress("tool_call", f"[{round_num}] 🔧 {func_name}({input_summary})")
                 except Exception:
                     pass
 
@@ -264,45 +408,75 @@ async def chat_with_tools(
             })
 
             if on_progress:
-                status = "error" if is_error else "ok"
+                status = "❌" if is_error else "✓"
                 try:
-                    await on_progress("tool_result", f"  [{status}] {result[:200]}")
+                    await on_progress("tool_result", f"  {status} {result[:200]}")
                 except Exception:
                     pass
 
             tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
             tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) -> {result}")
 
-    # Max rounds exhausted → force final text response (no tools)
+        # Budget exceeded → break after processing tool calls
+        if budget_exceeded:
+            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d", total_cost, budget_usd, round_num)
+            break
+
+        # Budget warning at 80% (SDK mode)
+        if sdk_mode and budget_usd > 0 and not budget_warning_sent and total_cost > budget_usd * 0.8:
+            budget_warning_sent = True
+            working_msgs.append({
+                "role": "user",
+                "content": (
+                    f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
+                    "마무리하거나 request_continuation 도구를 사용하세요."
+                ),
+            })
+
+    # Max rounds or budget exhausted → force final text response (no tools)
+    budget_exhausted = sdk_mode and budget_usd > 0 and total_cost >= budget_usd
+    limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
     logger.warning(
-        "Max rounds reached (%d). Forcing final response. Calls:\n%s",
-        max_rounds, "\n".join(tool_call_log),
+        "Limit reached (rounds=%d/%d, budget=$%.4f/$%.2f). Forcing final response. Calls:\n%s",
+        round_num, max_rounds, total_cost, budget_usd, "\n".join(tool_call_log),
     )
     working_msgs.append({
         "role": "user",
         "content": (
-            "[SYSTEM] 도구 호출 한도 도달. 추가 도구를 사용하지 말고, "
-            "지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
+            f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, 라운드: {round_num}/{max_rounds}). "
+            "추가 도구를 사용하지 말고, 지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
         ),
     })
 
     try:
-        data = await _call_api(
-            base_url=base_url,
-            model=model,
-            messages=working_msgs,
-            tools=None,  # no tools → force text response
-            max_tokens=max_tokens,
-        )
-        text = data["choices"][0]["message"].get("content", "")
+        if sdk_mode:
+            response = await _call_sdk(
+                client=client,
+                model=model,
+                messages=working_msgs,
+                tools=None,
+                max_tokens=max_tokens,
+            )
+            text = response.choices[0].message.content or ""
+            if response.usage:
+                total_cost += _calculate_cost(response.usage, model)
+        else:
+            data = await _call_api(
+                base_url=base_url,
+                model=model,
+                messages=working_msgs,
+                tools=None,
+                max_tokens=max_tokens,
+            )
+            text = data["choices"][0]["message"].get("content", "")
     except Exception as e:
         logger.error("Final forced response failed: %s", e)
-        text = f"도구 호출 한도 도달 후 응답 생성 실패: {e}"
+        text = f"⚠️ {limit_reason} 후 응답 생성 실패: {e}"
 
     if budget_tracker is not None:
         budget_tracker.update({
-            "total_cost": 0.0,
-            "rounds_used": max_rounds,
+            "total_cost": total_cost,
+            "rounds_used": round_num,
             "was_interrupted": True,
             "tool_work_details": list(tool_work_details),
         })
