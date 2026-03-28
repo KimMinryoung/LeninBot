@@ -87,15 +87,20 @@ def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
     """Anthropic tool definition → OpenAI function tool definition.
 
     Anthropic: {"name", "description", "input_schema": {type, properties, required}}
-    OpenAI:    {"type": "function", "function": {"name", "description", "parameters": {...}}}
+    OpenAI:    {"type": "function", "function": {"name", "description", "parameters": {...}, "strict": bool}}
     """
+    params = tool.get("input_schema", {"type": "object", "properties": {}})
+    func_def: dict = {
+        "name": tool["name"],
+        "description": tool.get("description", ""),
+        "parameters": params,
+    }
+    # Enable strict mode if schema has additionalProperties: false
+    if params.get("additionalProperties") is False:
+        func_def["strict"] = True
     return {
         "type": "function",
-        "function": {
-            "name": tool["name"],
-            "description": tool.get("description", ""),
-            "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
-        },
+        "function": func_def,
     }
 
 
@@ -316,7 +321,13 @@ async def chat_with_tools(
             raise
 
         # No tool calls → return text response
-        if not tool_calls or finish_reason == "stop":
+        # finish_reason: "stop" (normal), "length" (truncated), "tool_calls" (has tools),
+        #                "content_filter" (blocked)
+        if finish_reason != "tool_calls" or not tool_calls:
+            if finish_reason == "length":
+                logger.warning("Response truncated by max_completion_tokens (%d) at round %d", max_tokens, round_num)
+            elif finish_reason == "content_filter":
+                logger.warning("Response blocked by content filter at round %d", round_num)
             if budget_tracker is not None:
                 budget_tracker.update({
                     "total_cost": total_cost,
