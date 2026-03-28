@@ -1892,38 +1892,69 @@ async def handle_photo(message: Message):
     if context_msgs and context_msgs[0]["role"] != "user":
         context_msgs = []
 
-    # Claude Vision API 호출
+    # Vision API 호출 — provider에 따라 분기
     t_start = _time.monotonic()
     try:
-        messages = context_msgs + [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_data,
+        model_id = await _get_model()
+        if _config.get("provider") == "openai" and _openai_client:
+            # OpenAI Vision: image_url with base64 data URI
+            messages = context_msgs + [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{image_data}",
+                            },
                         },
-                    },
-                    {
-                        "type": "text",
-                        "text": caption,
-                    },
-                ],
-            }
-        ]
-        response = await _claude.messages.create(
-            model=await _get_model(),
-            max_tokens=1024,
-            messages=messages,
-        )
+                        {
+                            "type": "text",
+                            "text": caption,
+                        },
+                    ],
+                }
+            ]
+            response = await _openai_client.chat.completions.create(
+                model=model_id,
+                max_completion_tokens=1024,
+                messages=messages,
+            )
+            reply_text = response.choices[0].message.content or ""
+            usage = response.usage
+            in_tok = getattr(usage, "prompt_tokens", "?") if usage else "?"
+            out_tok = getattr(usage, "completion_tokens", "?") if usage else "?"
+        else:
+            # Claude Vision: base64 image source
+            messages = context_msgs + [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_data,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": caption,
+                        },
+                    ],
+                }
+            ]
+            response = await _claude.messages.create(
+                model=model_id,
+                max_tokens=1024,
+                messages=messages,
+            )
+            reply_text = _extract_text(response)
+            usage = getattr(response, "usage", None)
+            in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
+            out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
         elapsed = _time.monotonic() - t_start
-        reply_text = _extract_text(response)
-        usage = getattr(response, "usage", None)
-        in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
-        out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
         logger.info("photo vision done: user_id=%s elapsed=%.2fs in_tokens=%s out_tokens=%s",
                     user_id, elapsed, in_tok, out_tok)
 
