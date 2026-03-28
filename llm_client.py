@@ -2,16 +2,11 @@
 llm_client.py — 프로젝트 공용 LLM 클라이언트 (MOON PC 우선, 로컬 llama-server 폴백)
 
 우선순위:
-    1차: MOON PC llama-server (qwen3.5-9b Q8_0, SSH 터널 127.0.0.1:8080)
+    1차: MOON PC llama-server (qwen3.5-9b Q8_0, Tailscale magic DNS http://moon:8080)
     2차: 로컬 llama-server (qwen3.5-4b Q4_K_M, localhost:11435)
 
 양쪽 모두 OpenAI 호환 API (/v1/chat/completions).
-
-사용 예:
-    from llm_client import ask, ask_with_system, ask_chat
-
-    result = ask("마르크스의 잉여가치론을 설명하라")
-    result = ask_with_system("질문", system_prompt="너는 시인이다")
+.env: MOON_LLM_BASE_URL, MOON_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL
 """
 
 import os
@@ -26,7 +21,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
-MOON_BASE       = os.getenv("MOON_LLM_BASE_URL", "http://127.0.0.1:8080")
+MOON_BASE       = os.getenv("MOON_LLM_BASE_URL", "http://moon:8080")
 MOON_MODEL      = os.getenv("MOON_LLM_MODEL", "qwen3.5-9b")
 
 LOCAL_BASE      = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11435")
