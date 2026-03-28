@@ -87,7 +87,7 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
         if done_rows:
             lines.append("  <completed>")
             for t in done_rows:
-                agent = t.get("agent_type") or "general"
+                agent = t.get("agent_type") or "analyst"
                 result_summary = (str(t.get("result") or "")[:150]).replace("\n", " ").strip()
                 if not result_summary:
                     result_summary = (str(t.get("content") or "")[:80]).replace("\n", " ")
@@ -99,7 +99,7 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
         if processing_rows:
             lines.append("  <in_progress>")
             for t in processing_rows:
-                agent = t.get("agent_type") or "general"
+                agent = t.get("agent_type") or "analyst"
                 content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
                 lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
             lines.append("  </in_progress>")
@@ -108,7 +108,7 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
         if pending_rows:
             lines.append("  <not_started>")
             for t in pending_rows:
-                agent = t.get("agent_type") or "general"
+                agent = t.get("agent_type") or "analyst"
                 content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
                 lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
             lines.append("  </not_started>")
@@ -228,7 +228,7 @@ async def process_task(
             logger.debug("Mission context injection failed: %s", e)
 
     # ── Context Isolation: build agent-appropriate context ──────────
-    agent_type = task.get("agent_type") or "general"
+    agent_type = task.get("agent_type") or "analyst"
 
     # (A) Agent execution history: load this agent's recent completed tasks
     agent_history_ctx = ""
@@ -377,7 +377,7 @@ async def process_task(
             if mission_id:
                 try:
                     from telegram_mission import add_mission_event
-                    agent_label = f" [{task.get('agent_type', 'general')}]" if task.get("agent_type") else ""
+                    agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
                     summary = _extract_summary(report, 1500)
                     add_mission_event(
                         mission_id, f"task#{task_id}", "task_completed",
@@ -460,7 +460,7 @@ async def process_task(
             # Notify orchestrator of completion
             if on_complete:
                 try:
-                    agent_label = f" [{task.get('agent_type', 'general')}]" if task.get("agent_type") else ""
+                    agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
                     on_complete(task_id, "done", f"{agent_label} {summary}")
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)

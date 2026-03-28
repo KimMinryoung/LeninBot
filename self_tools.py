@@ -106,12 +106,11 @@ SELF_TOOLS = [
         "description": (
             "Delegate a task to a specialized agent. Runs asynchronously in background.\n"
             "Agents:\n"
+            "- analyst: 정보 분석/조사 (웹 검색+KG+패턴 도출+지식 저장) ($1.00)\n"
             "- programmer: 코드 작성/수정/디버깅 ($1.50)\n"
-            "- analyst: 정보 분석/조사의 기본 에이전트. 웹 검색+수집+KG 교차 검증+패턴 도출+지식 저장 ($1.00)\n"
-            "- scout: 정기 순찰, 대규모 크롤링 등 전문 수집 ($1.00)\n"
+            "- scout: 정기 순찰, 대규모 크롤링 ($1.00)\n"
             "- visualizer: 이미지 생성 ($1.00)\n"
-            "- general: 범용 ($1.00)\n"
-            "조사/분석 요청 → analyst. 코드 → programmer. 이미지 → visualizer. 정기 크롤링 → scout.\n"
+            "조사/분석 → analyst. 코드 → programmer. 이미지 → visualizer. 크롤링 → scout.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
@@ -120,7 +119,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["programmer", "general", "scout", "visualizer"],
+                    "enum": ["analyst", "programmer", "scout", "visualizer"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {

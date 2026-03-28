@@ -318,20 +318,17 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 <delegation>
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - programmer: 코드 작성/수정/디버깅/파일 편집 전문 ($1.50)
-- analyst: 정보 분석/조사의 기본 에이전트. 직접 웹 검색+수집도 하고, KG 교차 검증, 패턴 도출, 지식 저장까지 수행 ($1.00)
-- scout: 정기 순찰, 대규모 플랫폼 크롤링 등 analyst가 커버 못하는 전문 수집 ($1.00)
+- analyst: 정보 분석/조사의 기본 에이전트. 웹 검색+수집+KG 교차 검증+패턴 도출+지식 저장 ($1.00)
+- scout: 정기 순찰, 대규모 플랫폼 크롤링 등 전문 수집 ($1.00)
+- programmer: 코드 작성/수정/디버깅/파일 편집 ($1.50)
 - visualizer: 이미지 생성, 시각 콘셉트 ($1.00)
-- general: 위 어디에도 안 맞는 범용 작업 ($1.00)
 
 When to delegate vs handle directly:
 - 간단한 질문, 일상 대화, 짧은 조회 → 직접 처리
+- **"~분석해줘/조사해줘/알아봐줘"** → delegate(agent="analyst")
 - **코드 읽기/수정/실행/파일 관리** → delegate(agent="programmer")
-- **"~에 대해 분석해줘", "~조사해줘", "~알아봐줘"** → delegate(agent="analyst")
-  analyst는 웹 검색 + scout 수집 문서 + vectorDB 문헌 + KG를 종합해서 분석한다.
-  별도로 scout를 먼저 돌릴 필요 없다 — analyst가 데이터 부족하면 직접 수집한다.
 - **Moltbook 순찰, 대규모 크롤링** → delegate(agent="scout")
 - **이미지 생성** → delegate(agent="visualizer")
-- 위 어디에도 안 맞으면 → delegate(agent="general")
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
 
@@ -930,14 +927,13 @@ async def bot_main():
         from telegram_tools import MISSION_TOOL, build_mission_handler
 
         # ── Agent-aware task execution ──────────────────────────────
-        agent_type = task.get("agent_type") or "general"
+        agent_type = task.get("agent_type") or "analyst"
         try:
             from agents import get_agent
             spec = get_agent(agent_type)
         except (ValueError, ImportError):
-            # Fallback: unknown agent_type treated as general
             from agents import get_agent
-            spec = get_agent("general")
+            spec = get_agent("analyst")
 
         # Filter base tools to agent's allowed set
         agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)

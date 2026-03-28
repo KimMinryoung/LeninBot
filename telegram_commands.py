@@ -1170,7 +1170,7 @@ async def handle_message(message: Message):
             pass
         task_row = await asyncio.to_thread(
             _query_one,
-            "INSERT INTO telegram_tasks (user_id, content, status, mission_id, agent_type) VALUES (%s, %s, 'pending', %s, 'general') RETURNING id",
+            "INSERT INTO telegram_tasks (user_id, content, status, mission_id, agent_type) VALUES (%s, %s, 'pending', %s, 'analyst') RETURNING id",
             (user_id, task_content, cont_mission_id),
         )
         task_id = task_row["id"] if task_row else "?"

@@ -391,7 +391,7 @@ def create_task_in_db(
         parent_task_id: If chaining, the parent task's ID.
         mission_id: Mission to link this task to. If None and parent exists,
                      inherits parent's mission_id.
-        agent_type: Specialist agent to execute this task (e.g. 'programmer', 'general').
+        agent_type: Specialist agent to execute this task (e.g. 'programmer', 'analyst').
                     If None and parent exists, inherits parent's agent_type.
 
     Returns dict with 'status' and 'task_id' or 'error'.
