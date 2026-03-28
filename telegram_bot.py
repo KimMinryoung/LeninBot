@@ -208,8 +208,8 @@ _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 _CONFIG_DEFAULTS = {
     "chat_budget": 0.30,       # USD per chat turn
     "task_budget": 1.00,       # USD per background task
-    "chat_model": "sonnet",    # "sonnet" | "haiku" | "opus" (Claude) / "gpt54" | "gpt54mini" | "gpt54nano" (OpenAI)
-    "task_model": "sonnet",    # same as above
+    "chat_model": "high",      # "high" | "medium" | "low"
+    "task_model": "high",      # "high" | "medium" | "low"
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
     "provider": "claude",      # "claude" | "openai"
@@ -257,8 +257,8 @@ _config = _load_config()
 _CONFIG_META = {
     "chat_budget":      {"label": "대화 예산",     "unit": "$",  "options": [0.10, 0.20, 0.30, 0.50, 1.00]},
     "task_budget":      {"label": "태스크 예산",   "unit": "$",  "options": [0.50, 1.00, 2.00, 3.00, 5.00]},
-    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["haiku", "sonnet", "opus", "gpt54", "gpt54mini", "gpt54nano"]},
-    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["haiku", "sonnet", "opus", "gpt54", "gpt54mini", "gpt54nano"]},
+    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["high", "medium", "low"]},
+    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["high", "medium", "low"]},
     "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
     "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai"]},
@@ -275,6 +275,23 @@ _OPENAI_MODEL_MAP = {
     "gpt54mini": "gpt-5.4-mini",
     "gpt54nano": "gpt-5.4-nano",
 }
+
+# Tier → provider-specific model mapping
+_TIER_MAP = {
+    "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
+    "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
+}
+
+def _tier_to_display(tier: str) -> str:
+    """Return a display label showing tier + actual model for current provider."""
+    provider = _config.get("provider", "claude")
+    tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
+    alias = tier_map.get(tier, tier)
+    if provider == "openai":
+        model_name = _OPENAI_MODEL_MAP.get(alias, alias)
+    else:
+        model_name = alias
+    return f"{tier} ({model_name})"
 
 
 async def _resolve_model(alias: str, fallback: str) -> str:
@@ -309,9 +326,16 @@ def _resolve_openai_model(alias: str) -> str:
     return _OPENAI_MODEL_MAP.get(alias, alias)
 
 
+def _resolve_tier(tier: str) -> str:
+    """Resolve a tier name (high/medium/low) to provider-specific model alias."""
+    provider = _config.get("provider", "claude")
+    tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
+    return tier_map.get(tier, tier)  # passthrough if not a tier name
+
+
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
-    alias = _config["chat_model"]
+    alias = _resolve_tier(_config["chat_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
     return await _get_model_by_alias(alias)
@@ -319,7 +343,7 @@ async def _get_model() -> str:
 
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
-    alias = _config["task_model"]
+    alias = _resolve_tier(_config["task_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
     return await _get_model_by_alias(alias)
@@ -1789,21 +1813,21 @@ async def cmd_deploy(message: Message):
 
 @router.message(Command("fallback"))
 async def cmd_fallback(message: Message):
-    """Toggle chat+task model between sonnet and haiku (for API overload)."""
+    """Toggle chat+task model between high and low tier (for API overload)."""
     if not _is_allowed(message.from_user.id):
         return
-    if _config["chat_model"] == "sonnet":
-        _config["chat_model"] = "haiku"
-        _config["task_model"] = "haiku"
-        _resolved_models.pop("haiku", None)
-        _add_system_alert("⚠️ Fallback 모드 활성화: sonnet → haiku")
-        await message.answer("⚡ Fallback ON — 모든 모델을 haiku로 전환했습니다.")
+    if _config["chat_model"] in ("high", "medium"):
+        _config["chat_model"] = "low"
+        _config["task_model"] = "low"
+        _resolved_models.clear()
+        _add_system_alert(f"⚠️ Fallback 모드 활성화: → {_tier_to_display('low')}")
+        await message.answer(f"⚡ Fallback ON — 모든 모델을 {_tier_to_display('low')}로 전환")
     else:
-        _config["chat_model"] = "sonnet"
-        _config["task_model"] = "sonnet"
-        _resolved_models.pop("sonnet", None)
-        _add_system_alert("Fallback 모드 해제: haiku → sonnet 복귀")
-        await message.answer("✅ Fallback OFF — 모든 모델을 sonnet으로 복귀했습니다.")
+        _config["chat_model"] = "high"
+        _config["task_model"] = "high"
+        _resolved_models.clear()
+        _add_system_alert(f"Fallback 해제: → {_tier_to_display('high')}")
+        await message.answer(f"✅ Fallback OFF — 모든 모델을 {_tier_to_display('high')}로 복귀")
     _save_config()
 
 
@@ -1818,18 +1842,13 @@ async def cmd_provider(message: Message):
     current = _config.get("provider", "claude")
     if current == "claude":
         _config["provider"] = "openai"
-        # Auto-switch models to OpenAI defaults
-        _config["chat_model"] = "gpt54"
-        _config["task_model"] = "gpt54"
-        _add_system_alert("🔄 Provider 전환: Claude → OpenAI (GPT-5.4)")
-        await message.answer("🔄 OpenAI로 전환 — 모델: GPT-5.4")
+        _add_system_alert("🔄 Provider 전환: Claude → OpenAI")
+        await message.answer(f"🔄 OpenAI로 전환\n대화: {_tier_to_display(_config['chat_model'])}\n태스크: {_tier_to_display(_config['task_model'])}")
     else:
         _config["provider"] = "claude"
-        _config["chat_model"] = "sonnet"
-        _config["task_model"] = "sonnet"
-        _resolved_models.pop("sonnet", None)
-        _add_system_alert("🔄 Provider 전환: OpenAI → Claude (Sonnet)")
-        await message.answer("🔄 Claude로 전환 — 모델: Sonnet")
+        _resolved_models.clear()
+        _add_system_alert("🔄 Provider 전환: OpenAI → Claude")
+        await message.answer(f"🔄 Claude로 전환\n대화: {_tier_to_display(_config['chat_model'])}\n태스크: {_tier_to_display(_config['task_model'])}")
     _save_config()
 
 
@@ -2276,13 +2295,21 @@ async def cb_modify_reject(callback: CallbackQuery):
 
 # ── Config Panel ────────────────────────────────────────────────────
 
+def _config_display_value(key: str, val) -> str:
+    """Format a config value for display, with model tier → actual model mapping."""
+    meta = _CONFIG_META[key]
+    unit = meta["unit"]
+    if key in ("chat_model", "task_model"):
+        return _tier_to_display(val)
+    return f"{unit}{val}" if unit == "$" else f"{val}{unit}"
+
+
 def _config_summary() -> str:
     """Build a text summary of current config values."""
     lines = ["*현재 설정*\n"]
     for key, meta in _CONFIG_META.items():
         val = _config[key]
-        unit = meta["unit"]
-        display = f"{unit}{val}" if unit == "$" else f"{val}{unit}"
+        display = _config_display_value(key, val)
         lines.append(f"  {meta['label']}: `{display}`")
     return "\n".join(lines)
 
@@ -2292,8 +2319,7 @@ def _config_main_keyboard() -> InlineKeyboardMarkup:
     rows = []
     for key, meta in _CONFIG_META.items():
         val = _config[key]
-        unit = meta["unit"]
-        display = f"{unit}{val}" if unit == "$" else f"{val}{unit}"
+        display = _config_display_value(key, val)
         rows.append([InlineKeyboardButton(
             text=f"{meta['label']}: {display}",
             callback_data=f"cfg_select:{key}",
@@ -2308,8 +2334,7 @@ def _config_options_keyboard(key: str) -> InlineKeyboardMarkup:
     current = _config[key]
     buttons = []
     for opt in meta["options"]:
-        unit = meta["unit"]
-        display = f"{unit}{opt}" if unit == "$" else f"{opt}{unit}"
+        display = _config_display_value(key, opt)
         marker = " ✓" if opt == current else ""
         buttons.append(InlineKeyboardButton(
             text=f"{display}{marker}",
