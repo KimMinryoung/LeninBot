@@ -13,12 +13,112 @@ from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
 
+from shared import KST
+
 logger = logging.getLogger(__name__)
 _SCRATCHPAD_MAX_CHARS = 20_000
 _DEFAULT_MAX_RESUME_ATTEMPTS = 2
 _STARTUP_HANDOFF_MARKER = "## Checkpoint: startup handoff"
 _MAX_TASK_CHAIN_DEPTH = 5
 _SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
+
+
+# ── Current State Builder (shared by orchestrator + task agents) ─────
+
+def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
+    """Build a <current_state> block showing completed/in-progress/pending tasks.
+
+    Args:
+        user_id: Telegram user ID
+        detail_level: "high" = orchestrator (summaries only), "low" = brief
+    Returns:
+        XML string or empty string if no relevant state
+    """
+    try:
+        now_ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M+09:00")
+
+        # Active mission
+        mission_line = ""
+        try:
+            mission_rows = _query(
+                "SELECT id, title FROM telegram_missions WHERE user_id = %s AND status = 'active' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (user_id,),
+            )
+            if mission_rows:
+                m = mission_rows[0]
+                mission_line = f'  <active_mission id="{m["id"]}">{m["title"]}</active_mission>\n'
+        except Exception:
+            pass
+
+        # Completed tasks (last 24h)
+        done_rows = _query(
+            "SELECT id, agent_type, content, result, completed_at FROM telegram_tasks "
+            "WHERE user_id = %s AND status = 'done' AND completed_at > NOW() - INTERVAL '24 hours' "
+            "ORDER BY completed_at DESC LIMIT 5",
+            (user_id,),
+        )
+        done_rows.reverse()
+
+        # In-progress tasks
+        processing_rows = _query(
+            "SELECT id, agent_type, content, created_at FROM telegram_tasks "
+            "WHERE user_id = %s AND status = 'processing' "
+            "ORDER BY created_at ASC",
+            (user_id,),
+        )
+
+        # Pending tasks
+        pending_rows = _query(
+            "SELECT id, agent_type, content, created_at FROM telegram_tasks "
+            "WHERE user_id = %s AND status = 'pending' "
+            "ORDER BY created_at ASC LIMIT 5",
+            (user_id,),
+        )
+
+        if not done_rows and not processing_rows and not pending_rows and not mission_line:
+            return ""
+
+        lines = [f'<current_state timestamp="{now_ts}">']
+        if mission_line:
+            lines.append(mission_line.rstrip())
+
+        # Completed
+        if done_rows:
+            lines.append("  <completed>")
+            for t in done_rows:
+                agent = t.get("agent_type") or "general"
+                result_summary = (str(t.get("result") or "")[:150]).replace("\n", " ").strip()
+                if not result_summary:
+                    result_summary = (str(t.get("content") or "")[:80]).replace("\n", " ")
+                ts = str(t.get("completed_at") or "")[:16]
+                lines.append(f"    - [{agent}] #{t['id']} ({ts}): {result_summary}")
+            lines.append("  </completed>")
+
+        # In-progress
+        if processing_rows:
+            lines.append("  <in_progress>")
+            for t in processing_rows:
+                agent = t.get("agent_type") or "general"
+                content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
+                lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
+            lines.append("  </in_progress>")
+
+        # Pending
+        if pending_rows:
+            lines.append("  <not_started>")
+            for t in pending_rows:
+                agent = t.get("agent_type") or "general"
+                content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
+                lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
+            lines.append("  </not_started>")
+
+        lines.append("</current_state>")
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.debug("build_current_state failed: %s", e)
+        return ""
 
 
 # ── Task Report Helpers ──────────────────────────────────────────────
@@ -141,17 +241,34 @@ async def process_task(
                 (user_id, agent_type, task_id),
             )
             if prev_tasks:
-                prev_tasks.reverse()  # chronological order
+                prev_tasks.reverse()  # chronological → oldest first
+                num_tasks = len(prev_tasks)
                 parts = []
-                for pt in prev_tasks:
+                for idx, pt in enumerate(prev_tasks):
+                    recency = num_tasks - 1 - idx  # 0=oldest, num_tasks-1=newest
                     pt_id = pt["id"]
                     pt_completed = str(pt.get("completed_at") or "?")[:19]
-                    # Task summary from result (brief)
                     pt_summary = _extract_summary(str(pt.get("result") or ""), 500)
-                    # Tool log (full for this agent's own history)
                     pt_tool_log = str(pt.get("tool_log") or "")
-                    if pt_tool_log:
-                        pt_tool_log = pt_tool_log[:8000]  # cap per-task
+
+                    # Observation masking: newest=full, middle=actions only, oldest=summary only
+                    if recency == 0 and num_tasks > 2:
+                        # Oldest: summary only, no tool log
+                        pt_tool_log = ""
+                    elif recency < num_tasks - 1 and pt_tool_log:
+                        # Middle: mask tool outputs (keep action lines, remove "→ ..." results)
+                        masked_lines = []
+                        for line in pt_tool_log.split("\n"):
+                            arrow_pos = line.find(" → ")
+                            if arrow_pos > 0:
+                                masked_lines.append(line[:arrow_pos] + " → [masked]")
+                            else:
+                                masked_lines.append(line)
+                        pt_tool_log = "\n".join(masked_lines)[:4000]
+                    elif pt_tool_log:
+                        # Newest: full tool log
+                        pt_tool_log = pt_tool_log[:8000]
+
                     block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
                     block += f"    <summary>{pt_summary}</summary>\n"
                     if pt_tool_log:
@@ -201,8 +318,18 @@ async def process_task(
         except Exception as e:
             logger.debug("Chat context injection for task failed: %s", e)
 
-    # (C) Build full context: all parts combined
+    # (C) Current state block (what's done, in-progress, pending)
+    state_ctx = ""
+    if user_id and user_id != 0:
+        try:
+            state_ctx = build_current_state(user_id)
+        except Exception as e:
+            logger.debug("Current state build failed: %s", e)
+
+    # (D) Build full context: all parts combined
     context_parts = []
+    if state_ctx:
+        context_parts.append(state_ctx)
     if mission_ctx:
         context_parts.append(mission_ctx)
     if scratchpad:

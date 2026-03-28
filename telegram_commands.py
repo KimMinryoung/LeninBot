@@ -1072,33 +1072,15 @@ async def handle_message(message: Message):
     from telegram_mission import build_mission_context
     mission_context = await asyncio.to_thread(build_mission_context, user_id)
 
-    # Orchestrator context: recent completed task summaries (high-level only, no tool logs)
-    task_summary_context = ""
-    try:
-        recent_tasks = await asyncio.to_thread(
-            _query,
-            "SELECT id, agent_type, content, result, completed_at FROM telegram_tasks "
-            "WHERE user_id = %s AND status = 'done' AND completed_at > NOW() - INTERVAL '24 hours' "
-            "ORDER BY completed_at DESC LIMIT 5",
-            (user_id,),
-        )
-        if recent_tasks:
-            recent_tasks.reverse()
-            task_lines = []
-            for t in recent_tasks:
-                agent = t.get("agent_type") or "general"
-                t_id = t["id"]
-                summary = (str(t.get("result") or "")[:200]).replace("\n", " ").strip()
-                if not summary:
-                    summary = (str(t.get("content") or "")[:100]).replace("\n", " ").strip()
-                task_lines.append(f"  - [{agent}] #{t_id}: {summary}")
-            task_summary_context = "\n<recent-task-results>\n" + "\n".join(task_lines) + "\n</recent-task-results>"
-    except Exception:
-        pass
+    # Orchestrator context: structured state block (completed/in-progress/pending)
+    from telegram_tasks import build_current_state
+    state_context = await asyncio.to_thread(build_current_state, user_id)
+    if state_context:
+        state_context = "\n" + state_context
 
     try:
         system_override = None
-        extra_context = (experience_context or "") + mission_context + task_summary_context
+        extra_context = (experience_context or "") + mission_context + state_context
         if extra_context:
             system_override = _ctx["SYSTEM_PROMPT_TEMPLATE"].format(
                 current_datetime=_ctx["current_datetime_str"](),
