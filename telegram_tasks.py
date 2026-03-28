@@ -814,7 +814,13 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                     cron = croniter(sched["cron_expr"], now_kst)
                     prev_fire = cron.get_prev(datetime)
                     last_run = sched["last_run_at"]
-                    if last_run is None or prev_fire > last_run:
+                    # First run: only fire if prev_fire is after created_at (not immediately on registration)
+                    if last_run is None:
+                        created = sched.get("created_at")
+                        if created and prev_fire <= created:
+                            continue
+                    elif prev_fire <= last_run:
+                        continue
                         # Detect agent_type from [agent] prefix in content
                         sched_content = sched["content"]
                         sched_agent = None
