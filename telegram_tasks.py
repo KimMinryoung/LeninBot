@@ -306,6 +306,23 @@ async def process_task(
             else:
                 await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
+            # Visualizer: auto-send generated images as photos
+            if task.get("agent_type") == "visualizer":
+                try:
+                    import re as _re
+                    # Extract local_path from tool log or report
+                    tool_log_text = str(bt.get("tool_work_details", ""))
+                    paths = _re.findall(r"local_path:\s*(/\S+\.png)", tool_log_text + "\n" + report)
+                    for img_path in paths[:5]:  # max 5 images
+                        if os.path.isfile(img_path):
+                            with open(img_path, "rb") as f:
+                                photo = BufferedInputFile(f.read(), filename=os.path.basename(img_path))
+                            target = user_id if not is_self_generated else next(iter(allowed_user_ids), 0)
+                            if target:
+                                await bot.send_photo(chat_id=target, photo=photo, caption=f"🎨 [{task_id}] 생성 이미지")
+                except Exception as e:
+                    logger.debug("Visualizer auto-send image failed: %s", e)
+
             # Notify orchestrator of completion
             if on_complete:
                 try:

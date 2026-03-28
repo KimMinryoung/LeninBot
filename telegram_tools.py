@@ -609,3 +609,75 @@ from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
+
+# ── Image generation tool (Replicate) ─────────────────────────────────
+GENERATE_IMAGE_TOOL = {
+    "name": "generate_image",
+    "description": (
+        "Generate an image using Replicate FLUX models. "
+        "Returns prediction_id, model, final prompt, image URL, and local file path. "
+        "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art). "
+        "You design the prompt; this tool executes it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Image description prompt (English). Will be prefixed with style aesthetics automatically.",
+            },
+            "style": {
+                "type": "string",
+                "enum": ["poster", "game", "pixel"],
+                "description": "Visual style preset. Default: poster.",
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "enum": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+                "description": "Output aspect ratio. Default: 1:1.",
+            },
+            "model": {
+                "type": "string",
+                "enum": ["flux_schnell", "flux_dev"],
+                "description": "Model preset. flux_schnell (fast) or flux_dev (higher quality). Default: flux_schnell.",
+            },
+        },
+        "required": ["prompt"],
+    },
+}
+
+
+async def _exec_generate_image(
+    prompt: str,
+    style: str = "poster",
+    aspect_ratio: str = "1:1",
+    model: str | None = None,
+) -> str:
+    from replicate_image_service import generate_image, is_replicate_configured
+    if not is_replicate_configured():
+        return "ERROR: REPLICATE_API_TOKEN is not configured"
+    try:
+        result = await generate_image(
+            prompt,
+            model=model,
+            style=style,
+            aspect_ratio=aspect_ratio,
+            download=True,
+        )
+        local_path = result.get("local_path") or "N/A"
+        urls = result.get("image_urls", [])
+        url = urls[0] if urls else "N/A"
+        return (
+            f"Image generated successfully.\n"
+            f"  prediction_id: {result.get('prediction_id')}\n"
+            f"  model: {result.get('model')}\n"
+            f"  final_prompt: {result.get('prompt', '')[:300]}\n"
+            f"  image_url: {url}\n"
+            f"  local_path: {local_path}"
+        )
+    except Exception as e:
+        return f"Image generation failed: {e}"
+
+
+TOOLS.append(GENERATE_IMAGE_TOOL)
+TOOL_HANDLERS["generate_image"] = _exec_generate_image
