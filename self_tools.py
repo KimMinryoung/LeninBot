@@ -63,7 +63,8 @@ SELF_TOOLS = [
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
                 "service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "For server_logs."},
                 "grep": {"type": "string", "description": "For server_logs: filter text."},
-                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"], "description": "For task_reports."},
+                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
+                "task_id": {"type": "integer", "description": "For task_reports: get full report for a specific task ID."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
             "required": ["source"],
@@ -254,10 +255,38 @@ async def _exec_read_processing_logs(
 
 
 async def _exec_read_task_reports(
-    limit: int = 5, status: str | None = None,
+    limit: int = 5, status: str | None = None, task_id: int | None = None,
 ) -> str:
-    from shared import fetch_task_reports
+    # Single task full report
+    if task_id:
+        from db import query_one as _db_query_one
+        row = await asyncio.to_thread(
+            _db_query_one,
+            "SELECT id, user_id, content, status, result, tool_log, agent_type, "
+            "mission_id, parent_task_id, depth, created_at, completed_at "
+            "FROM telegram_tasks WHERE id = %s",
+            (task_id,),
+        )
+        if not row:
+            return f"Task #{task_id} not found."
+        ts = _to_kst(row.get("created_at"))
+        completed = _to_kst(row.get("completed_at")) if row.get("completed_at") else "N/A"
+        result = str(row.get("result") or "(no result)")
+        tool_log = str(row.get("tool_log") or "")
+        content = str(row.get("content") or "")
+        header = (
+            f"Task #{row['id']} | status={row['status']} | agent={row.get('agent_type', '?')}\n"
+            f"created={ts} | completed={completed}\n"
+            f"mission_id={row.get('mission_id', 'N/A')} | parent={row.get('parent_task_id', 'N/A')} | depth={row.get('depth', 0)}\n"
+            f"\n## Request\n{content[:1000]}\n"
+            f"\n## Full Report\n{result}"
+        )
+        if tool_log:
+            header += f"\n\n## Tool Log\n{tool_log[:5000]}"
+        return header
 
+    # List mode
+    from shared import fetch_task_reports
     rows = await asyncio.to_thread(fetch_task_reports, limit, status)
     if not rows:
         return "No task reports found."
@@ -738,7 +767,8 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 async def _exec_read_self(
     source: str, limit: int | None = None, keyword: str | None = None,
     hours_back: int | None = None, service: str = "telegram",
-    grep: str = "", status: str | None = None, chat_source: str = "web",
+    grep: str = "", status: str | None = None, task_id: int | None = None,
+    chat_source: str = "web",
 ) -> str:
     """Dispatcher for all read_self sources."""
     if source == "diary":
@@ -748,7 +778,7 @@ async def _exec_read_self(
     if source == "processing_logs":
         return await _exec_read_processing_logs(limit=limit or 5, hours_back=hours_back, keyword=keyword)
     if source == "task_reports":
-        return await _exec_read_task_reports(limit=limit or 5, status=status)
+        return await _exec_read_task_reports(limit=limit or 5, status=status, task_id=task_id)
     if source == "kg_status":
         return await _exec_read_kg_status()
     if source == "system_status":
