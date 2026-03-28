@@ -86,10 +86,12 @@ def _calculate_cost(usage, model: str) -> float:
 def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
     """Anthropic tool definition → OpenAI function tool definition.
 
-    Anthropic: {"name", "description", "input_schema": {type, properties, required}}
+    Anthropic: {"name", "description", "input_schema": {type, properties, required}, "cache_control": ...}
     OpenAI:    {"type": "function", "function": {"name", "description", "parameters": {...}, "strict": bool}}
     """
     params = tool.get("input_schema", {"type": "object", "properties": {}})
+    # Strip Anthropic-only keys from params copy
+    params = {k: v for k, v in params.items() if k != "cache_control"}
     func_def: dict = {
         "name": tool["name"],
         "description": tool.get("description", ""),
@@ -108,15 +110,18 @@ def _convert_tools(tools: list[dict]) -> list[dict]:
     """Convert a list of Anthropic-format tools to OpenAI format.
 
     Auto-detects: if already in OpenAI format (has "type": "function"), pass through.
+    Strips Anthropic-only keys (cache_control) from all tools.
     """
     converted = []
     for t in tools:
-        if t.get("type") == "function":
-            converted.append(t)
-        elif "input_schema" in t:
-            converted.append(_convert_tool_anthropic_to_openai(t))
+        # Strip Anthropic-only top-level keys before conversion
+        clean = {k: v for k, v in t.items() if k != "cache_control"}
+        if clean.get("type") == "function":
+            converted.append(clean)
+        elif "input_schema" in clean:
+            converted.append(_convert_tool_anthropic_to_openai(clean))
         else:
-            converted.append(t)
+            converted.append(clean)
     return converted
 
 
@@ -273,6 +278,7 @@ async def chat_with_tools(
     tool_work_details = []
     total_cost = 0.0
     budget_warning_sent = False
+    round_num = 0
 
     for round_num in range(1, max_rounds + 1):
         try:
@@ -319,6 +325,23 @@ async def chat_with_tools(
             if log_event:
                 log_event("error", "openai_loop", f"API call failed: {e}")
             raise
+
+        # Handle refusal (OpenAI safety filter)
+        refusal = None
+        if sdk_mode and hasattr(message, "refusal"):
+            refusal = message.refusal
+        elif not sdk_mode and isinstance(message, dict):
+            refusal = message.get("refusal")
+        if refusal:
+            logger.warning("Model refused request at round %d: %s", round_num, refusal)
+            if budget_tracker is not None:
+                budget_tracker.update({
+                    "total_cost": total_cost,
+                    "rounds_used": round_num,
+                    "was_interrupted": False,
+                    "tool_work_details": list(tool_work_details),
+                })
+            return f"⚠️ 모델이 요청을 거부했습니다: {refusal}"
 
         # No tool calls → return text response
         # finish_reason: "stop" (normal), "length" (truncated), "tool_calls" (has tools),
@@ -367,7 +390,12 @@ async def chat_with_tools(
                 for tc in tool_calls
             ]
 
-        assistant_msg = {"role": "assistant", "content": content_text, "tool_calls": tc_list}
+        # OpenAI expects content=null (not empty string) when assistant only has tool_calls
+        assistant_msg = {
+            "role": "assistant",
+            "content": content_text if content_text.strip() else None,
+            "tool_calls": tc_list,
+        }
         working_msgs.append(assistant_msg)
 
         if on_progress and content_text.strip():
@@ -433,13 +461,14 @@ async def chat_with_tools(
             logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d", total_cost, budget_usd, round_num)
             break
 
-        # Budget warning at 80% (SDK mode)
+        # Budget warning at 80% (SDK mode) — inject as system message to avoid
+        # breaking tool_calls → tool result adjacency required by OpenAI
         if sdk_mode and budget_usd > 0 and not budget_warning_sent and total_cost > budget_usd * 0.8:
             budget_warning_sent = True
             working_msgs.append({
-                "role": "user",
+                "role": "system",
                 "content": (
-                    f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
+                    f"[BUDGET WARNING] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
                     "마무리하거나 request_continuation 도구를 사용하세요."
                 ),
             })
