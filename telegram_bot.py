@@ -31,7 +31,12 @@ from aiogram.types import (
 from aiogram.filters import Command
 import anthropic
 import base64
-from replicate_image_service import generate_image, is_replicate_configured, build_soviet_prompt
+from replicate_image_service import (
+    generate_image,
+    is_replicate_configured,
+    build_soviet_prompt,
+    ReplicateImageError,
+)
 
 # Extracted modules
 from telegram_tools import TOOLS, TOOL_HANDLERS
@@ -1354,7 +1359,7 @@ async def _generate_and_send_image(message: Message, prompt: str, *, style: str 
         await message.answer("❌ REPLICATE_API_TOKEN이 설정되지 않았습니다.")
         return
 
-    status = await message.answer("🎨 이미지 생성 중... Replicate polling 대기")
+    status = await message.answer("🎨 이미지 생성 중... 기본 모델은 flux-schnell이다.")
     try:
         result = await generate_image(prompt, style=style, download=True)
         prompt_preview = build_soviet_prompt(prompt, style=style)[:180]
@@ -1376,13 +1381,29 @@ async def _generate_and_send_image(message: Message, prompt: str, *, style: str 
             await status.edit_text("🎨 이미지 생성 완료")
         except Exception:
             pass
+    except ReplicateImageError as e:
+        info = e.info
+        logger.warning("image generation failed category=%s retryable=%s detail=%s", info.category, info.retryable, info.detail)
+        _log_event(
+            "warning" if info.retryable else "error",
+            "image",
+            f"Replicate image generation failed ({info.category})",
+            detail=f"retryable={info.retryable} | detail={info.detail} | prompt={prompt[:400]}",
+        )
+        suffix = " 재시도 가능." if info.retryable else " 프롬프트/옵션 수정 후 다시 시도해라."
+        user_message = f"{info.user_message}{suffix}"
+        try:
+            await status.edit_text(user_message)
+        except Exception:
+            await message.answer(user_message)
     except Exception as e:
         logger.error("image generation failed: %s", e)
         _log_event("error", "image", f"Replicate image generation failed: {e}", detail=prompt[:500])
+        fallback = "❌ 이미지 생성 실패. 내부 오류다. 잠시 후 다시 시도해라."
         try:
-            await status.edit_text(f"❌ 이미지 생성 실패: {e}")
+            await status.edit_text(fallback)
         except Exception:
-            await message.answer(f"❌ 이미지 생성 실패: {e}")
+            await message.answer(fallback)
 
 
 @router.message(Command("image"))
@@ -1803,11 +1824,11 @@ async def cmd_restart(message: Message):
     try:
         await asyncio.to_thread(
             _save_chat_message, user_id, "user",
-            f"[SYSTEM] 사용자가 /restart {target} 명령 실행 ({restart_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+            f"[SYSTEM] /restart {target} 실행 ({restart_ts})."
         )
         await asyncio.to_thread(
             _save_chat_message, user_id, "assistant",
-            f"서비스 재시작을 시작합니다 ({restart_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+            f"[SYSTEM] 서비스 재시작 진행 ({restart_ts})."
         )
     except Exception:
         pass
@@ -1861,11 +1882,11 @@ async def cmd_deploy(message: Message):
     try:
         await asyncio.to_thread(
             _save_chat_message, deploy_user_id, "user",
-            f"[SYSTEM] 사용자가 /deploy {target} 명령 실행 ({deploy_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+            f"[SYSTEM] /deploy {target} 실행 ({deploy_ts})."
         )
         await asyncio.to_thread(
             _save_chat_message, deploy_user_id, "assistant",
-            f"배포를 시작합니다 ({deploy_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+            f"[SYSTEM] 배포 진행 ({deploy_ts})."
         )
     except Exception:
         pass
@@ -2796,11 +2817,11 @@ async def bot_main():
                 try:
                     await asyncio.to_thread(
                         _save_chat_message, uid, "user",
-                        f"[SYSTEM] 서비스 재시작 시작 ({restart_ts}). 재시작 후에도 이전 대화 맥락을 유지할 것."
+                        f"[SYSTEM] SIGTERM 수신, 서비스 재시작 시작 ({restart_ts})."
                     )
                     await asyncio.to_thread(
                         _save_chat_message, uid, "assistant",
-                        f"서비스 재시작을 인지했습니다 ({restart_ts}). 재시작 후 이전 대화 내용을 기반으로 대화를 이어가겠습니다."
+                        f"[SYSTEM] 서비스 재시작 진행 ({restart_ts})."
                     )
                 except Exception:
                     pass
@@ -2835,11 +2856,11 @@ async def bot_main():
             try:
                 _save_chat_message(
                     uid, "user",
-                    f"[SYSTEM] 서비스 재시작 완료 ({startup_ts}). KG: {kg_status}.{recovery_summary} 이전 대화를 이어서 진행하라."
+                    f"[SYSTEM] 서비스 재시작 완료 ({startup_ts}). KG: {kg_status}.{recovery_summary}"
                 )
                 _save_chat_message(
                     uid, "assistant",
-                    f"서비스가 재시작되었습니다 ({startup_ts}). 이전 대화 맥락을 유지하고 있으며, 이어서 도움드리겠습니다."
+                    f"[SYSTEM] 서비스 가동 확인 ({startup_ts})."
                 )
             except Exception as e:
                 logger.warning("Failed to save startup marker for user %s: %s", uid, e)

@@ -181,8 +181,18 @@ async def process_task(
                 chat_lines = []
                 for r in recent_rows:
                     text = str(r["content"] or "")
-                    # Skip system markers (restart/deploy notifications) — not user intent
                     if text.startswith("[SYSTEM]"):
+                        # Convert system markers to neutral info (not instructions)
+                        # e.g. "[SYSTEM] 사용자가 /restart ..." → "[시스템] 서비스 재시작됨 (...)"
+                        import re as _re
+                        ts_match = _re.search(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)\)", text)
+                        ts = ts_match.group(1) if ts_match else ""
+                        if "재시작 완료" in text or "재시작 시작" in text:
+                            chat_lines.append(f"  [시스템] 서비스 재시작됨 ({ts}). 이미 반영 완료.")
+                        elif "/deploy" in text:
+                            chat_lines.append(f"  [시스템] 배포 실행됨 ({ts}). 이미 반영 완료.")
+                        elif "/restart" in text:
+                            chat_lines.append(f"  [시스템] 서비스 재시작됨 ({ts}). 이미 반영 완료.")
                         continue
                     role_label = "사용자" if r["role"] == "user" else "레닌"
                     chat_lines.append(f"  [{role_label}] {text[:300]}")
