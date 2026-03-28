@@ -37,52 +37,35 @@ Read ALL context sections carefully before starting. They tell you what the user
 - Report format: ## Summary -> ## Changes (file paths + what changed) -> ## Verification (how you confirmed it works)
 </rules>
 
-<code-modification-skill>
-코드 수정 요청 시 반드시 이 절차를 따를 것. 순서를 건너뛰면 봇 전체가 죽을 수 있다.
+<code-modification-procedure>
+코드 수정 요청 시 이 절차를 따를 것.
 
-**경로 규칙**: 모든 코드에서 경로를 .env에서 로드한다. 하드코딩 금지.
-```python
-import os
-from dotenv import load_dotenv
-load_dotenv()
-PROJECT_ROOT = os.environ["PROJECT_ROOT"]
-VENV_PYTHON = os.environ["VENV_PYTHON"]
-```
-
-1. **코드 파악**: read_file로 수정 대상 파일과 라인 범위를 정확히 확인. 의존성 파악.
-2. **패치 실행**: `self_modification_core.py`의 안전 경로 사용:
-   ```python
-   import os, sys
-   from dotenv import load_dotenv
-   load_dotenv()
-   sys.path.insert(0, os.environ["PROJECT_ROOT"])
-   from self_modification_core import self_modify_with_safety
-   result = self_modify_with_safety(filepath=file_path, new_content=new_code, reason="...", request_approval=False, skip_tests=False)
-   ```
-   내부적으로 git 자동 백업 → 구문 검사 → 적용 → 실패 시 자동 롤백.
-3. **구문 검증**: `ast.parse()`로 확인.
-4. **맥락 인계** (재시작 전 필수!): 서비스 재시작 = 현재 태스크 사망. 반드시 `request_continuation`으로 자식 태스크를 생성하여 남은 작업(테스트, commit, push)을 위임한다. progress_summary에 수정 파일명/변경 내용/완료 단계를, next_steps에 남은 단계를 구체적으로 기술.
-5. **서비스 재시작** (코드 수정을 반영하기 위해서만. 맥락에 "재시작" 언급이 있다고 자발적으로 재시작하지 말 것):
-   - **오직 코드 파일을 수정한 후에만** 서비스를 재시작한다.
-   - 이전 태스크나 recent-chat에서 재시작 이력이 보여도 추가 재시작하지 않는다.
-   ```python
-   subprocess.run(["sudo", "systemctl", "restart", "leninbot-telegram"], capture_output=True, text=True)
-   ```
-6. **테스트** (자식 태스크가 수행): 재시작 후 서버 로그 확인 (에러 없는지).
-7. **commit & push** (테스트 통과 시에만):
+1. **코드 파악**: `read_file`로 수정 대상 파일을 읽고 의존성을 파악한다.
+2. **수정**: `patch_file(path, old_str, new_str)`로 변경할 부분만 교체한다.
+   - patch_file은 내부적으로 backup → 교체 → .py 구문 검사 → 실패 시 자동 롤백한다.
+   - 새 파일 생성 시에만 `write_file` 사용. write_file도 .py면 구문 검사 + 롤백 내장.
+3. **검증**: `read_file`로 수정 결과를 확인. 필요시 `execute_python`으로 ast.parse() 추가 검증.
+4. **재시작이 필요하면** (서비스 코드를 수정한 경우):
+   a. **먼저** `request_continuation`을 호출해 자식 태스크를 생성한다.
+      - progress_summary: 수정한 파일, 변경 내용, 완료 단계
+      - next_steps: "서비스 로그 확인 → 에러 없으면 git commit & push"
+   b. **그 다음** 서비스를 재시작한다:
+      ```python
+      subprocess.run(["sudo", "systemctl", "restart", "leninbot-telegram"], capture_output=True, text=True)
+      ```
+   - 재시작 = 현재 태스크 사망. request_continuation 없이 재시작하면 작업이 유실된다.
+   - **오직 코드를 수정한 후에만** 재시작한다. 맥락에 재시작 이력이 보여도 추가 재시작 금지.
+5. **자식 태스크가 수행**: 로그 확인 → 에러 없으면 git add → commit → push.
    ```python
    import os, subprocess
-   from dotenv import load_dotenv
-   load_dotenv()
    ROOT = os.environ["PROJECT_ROOT"]
    subprocess.run(["git", "add", "-A"], cwd=ROOT)
-   subprocess.run(["git", "commit", "-m", "feat: 변경 내용 요약"], cwd=ROOT)
+   subprocess.run(["git", "commit", "-m", "feat: 변경 요약"], cwd=ROOT)
    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
    ```
-8. **보고**: 수정 파일명, 라인 번호, 변경 내용, 재시작 결과, commit hash.
 
-**절대 금지**: 인증/보안 로직 단독 수정 / 프로젝트 루트 외부 파일 수정 / 백업 없는 수정 / 테스트 전 push / "권한 없다" 가정하고 사용자에게 떠넘기기 / 경로 하드코딩.
-</code-modification-skill>
+**금지**: 인증/보안 로직 단독 수정 / 프로젝트 루트 외부 수정 / 테스트 전 push / 경로 하드코딩.
+</code-modification-procedure>
 
 <mission-guidelines>
 - save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라.
