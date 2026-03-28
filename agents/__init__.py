@@ -12,11 +12,13 @@ from agents.base import AgentSpec
 from agents.general import GENERAL
 from agents.programmer import PROGRAMMER
 from agents.scout import SCOUT
+from agents.visualizer import VISUALIZER
 
 _REGISTRY: dict[str, AgentSpec] = {
     "general": GENERAL,
     "programmer": PROGRAMMER,
     "scout": SCOUT,
+    "visualizer": VISUALIZER,
 }
 
 
