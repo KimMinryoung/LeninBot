@@ -1,4 +1,4 @@
-# Project State Report — 2026-03-27
+# Project State Report — 2026-03-28
 
 ## Identity
 
@@ -15,13 +15,13 @@ Server deployed at **Hetzner VPS** (Ubuntu 24.04, 16GB RAM), HTTPS via `leninbot
      ┌────────────────────────────┼────────────────────────────┐
      │                            │                            │
 User ─► FastAPI (api.py)    Telegram (telegram_bot.py)    Cron (diary_writer.py)
-        ─► LangGraph StateGraph   ─► telegram_tools.py (tool defs + handlers)
-           (chatbot.py)           ─► claude_loop.py (Claude tool-use loop, shared)
-           ─► PostgreSQL/pgvector ─► telegram_tasks.py (bg workers, scheduler, monitor)
-           ─► Gemini 3.1 FL (gen) ─► Claude Sonnet 4.6 (chat + task)
-           ─► Gemini 2.5 FL-L     ─► web_search (Tavily API, client-side)
-           ─► BGE-M3 (CPU)       ─► get_finance_data (yfinance, 10min cache)
-           ─► LangGraph MemorySaver
+        ─► LangGraph StateGraph   ─► bot_config.py (LLM clients, model resolution)
+           (chatbot.py)           ─► telegram_commands.py (command/message handlers)
+           ─► PostgreSQL/pgvector ─► telegram_tools.py (tool defs + handlers)
+           ─► Gemini 3.1 FL (gen) ─► claude_loop.py (Claude tool-use loop, shared)
+           ─► Gemini 2.5 FL-L     ─► telegram_tasks.py (bg workers, scheduler, monitor)
+           ─► BGE-M3 (CPU)       ─► Claude Sonnet 4.6 (chat + task)
+           ─► LangGraph MemorySaver  web_search (Tavily), get_finance_data (yfinance)
 
      ─► GraphMemoryService (graph_memory/) ─► Neo4j (Graphiti knowledge graph)
                                              ─► Gemini 2.5 Flash (entity/edge extraction)
@@ -147,12 +147,15 @@ leninbot/
 ├── api.py                    # FastAPI server (SSE streaming, /chat, /logs, /session/*)
 ├── chatbot.py                # Core LangGraph agent pipeline + public API
 ├── shared.py                 # CORE_IDENTITY, KST, MODEL constants, KG singleton, memory access
-├── self_tools.py             # Self-awareness tools: delegate, save_finding, request_continuation 등
-├── telegram_bot.py           # Telegram bot: config, handlers, routing
-├── telegram_tools.py         # Tool definitions + handlers (patch_file, read/write/execute 등)
+├── bot_config.py             # LLM clients, runtime config, model resolution (from telegram_bot 분리)
+├── telegram_bot.py           # Telegram bot core: chat history, system prompt, LLM dispatch, bot_main
+├── telegram_commands.py      # Telegram command/message/callback handlers (from telegram_bot 분리)
+├── telegram_tools.py         # Tool definitions + handlers (patch_file, read/write/execute, generate_image)
+├── telegram_tasks.py         # Background tasks, scheduler, monitor, build_current_state
+├── telegram_mission.py       # Mission context system (auto-create on delegate, smart stale handling)
+├── self_tools.py             # Self-awareness tools: delegate (auto-mission), save_finding, request_continuation
 ├── claude_loop.py            # Claude tool-use loop + sanitize_messages
-├── telegram_tasks.py         # Background task worker, scheduler, system monitor (handed_off 상태 지원)
-├── telegram_mission.py       # Mission context system (shared chat/task timeline, PostgreSQL)
+├── replicate_image_service.py # Replicate FLUX image generation (poster/game/pixel styles)
 ├── finance_data.py           # Real-time finance data tool (yfinance, 10min cache)
 ├── diary_writer.py           # Autonomous diary writer (systemd service)
 ├── experience_writer.py      # Experiential memory consolidation (daily cron)
@@ -161,16 +164,16 @@ leninbot/
 ├── llm_worker.py             # LLM worker utilities
 ├── graffiti_api.py           # FastAPI router for creative outputs (dreams/debates/riddles)
 ├── patch_file.py             # 토큰 효율적 파일 패치 유틸 (replace_block, insert_after 등)
-├── self_modification_core.py # Git backup + syntax check + rollback 안전 수정
-├── task_checkpoint.py        # Checkpoint save/load utilities
+├── self_modification_core.py # Git backup + syntax check + rollback 안전 수정 (cmd_modify용)
 ├── skills_loader.py          # skills/ 디렉토리 스캔 → 시스템 프롬프트 주입
 │
 ├── agents/                   # 에이전트 정의 및 실행 스크립트
-│   ├── __init__.py           # Agent registry (general, programmer, scout)
-│   ├── base.py               # AgentSpec dataclass
+│   ├── __init__.py           # Agent registry (general, programmer, scout, visualizer)
+│   ├── base.py               # AgentSpec + 공통 context 블록 (CONTEXT_AWARENESS_BLOCK 등)
 │   ├── general.py            # 범용 리서치/분석 에이전트
-│   ├── programmer.py         # 코드 수정 전문 에이전트 (Kitov) — patch_file 우선 사용
+│   ├── programmer.py         # 코드 수정 전문 에이전트 (Kitov) — patch_file 중심
 │   ├── scout.py              # 외부 플랫폼 정찰 에이전트 — raw 데이터 아카이빙
+│   ├── visualizer.py         # 이미지 생성 에이전트 (Rodchenko) — generate_image 도구
 │   └── razvedchik/           # Moltbook 정찰 실행 스크립트
 │       ├── persona.py        # Scout 기본 페르소나 + 작업별 프롬프트 조합 (SSOT)
 │       ├── razvedchik.py     # Moltbook 순찰 CLI (--scan, --patrol, --post)
@@ -252,6 +255,56 @@ leninbot/
 10. **Telegram vector_search cold start**: First call lazy-loads chatbot.py + BGE-M3 (~30s). Subsequent calls fast.
 
 ## Recent Changes
+
+### 2026-03-28 — Context Engineering, 모듈 분리, 에이전트 격리
+
+#### Context Isolation (Orchestrator ↔ Agent 맥락 격리)
+- **Orchestrator**: 프로그래밍 도구(read_file, write_file, patch_file, list_directory, execute_python) 차단. 코드 작업은 반드시 `delegate(agent="programmer")`로 위임. 태스크 결과는 high-level 요약만 수신.
+- **Task Agents**: 자기 agent_type의 이전 태스크 tool_log 전체 접근 가능 (`<agent-execution-history>`). Orchestrator는 이 상세 로그를 볼 수 없음.
+- **tool_log 컬럼** 추가: `telegram_tasks` 테이블에 tool 실행 이력 자동 저장 (budget_tracker 연동).
+
+#### `<current_state>` 블록 도입 (Anti-hallucination)
+- `build_current_state()`: 완료/진행중/대기중 태스크를 구조화된 XML로 조립. active_mission 포함.
+- Orchestrator와 모든 Task Agent에 주입 → 에이전트가 완료된 작업을 반복하거나 없는 태스크를 생성하는 문제 방지.
+
+#### Observation Masking (JetBrains NeurIPS 2025)
+- `<agent-execution-history>`의 tool_log를 recency 기반으로 점진 제거:
+  - 최신 태스크: tool_log 전체 (8K)
+  - 중간 태스크: action만 유지, 결과(→) 마스킹 (4K)
+  - 가장 오래된 태스크: summary만
+- 사고/액션 체인 유지 + 토큰 ~50% 절감.
+
+#### 서비스 재시작 맥락 보존
+- Auto-recovery에서 `_clear_chat_history` 제거 (영구 히스토리 삭제 방지).
+- /restart, /deploy, SIGTERM, startup 시 chat history DB에 `[SYSTEM]` 마커 저장.
+- Task Agent의 `<recent-chat>`에서 `[SYSTEM]` 메시지를 `[시스템] 서비스 재시작됨 (...). 이미 반영 완료.`로 변환 → 재시작 인지 + 재실행 방지.
+
+#### Mission 자동화
+- **delegate 호출 시 미션 자동 생성**: 활성 미션 없으면 task 내용으로 자동 생성. 사용자가 `/mission create`를 안 해도 동작.
+- **stale 규칙 개선**: 진행중/대기중 태스크가 있으면 24h 경과해도 미션 유지.
+- **종료 판단 강화**: 예산 부족/에러 중단/미완료 태스크 시 close 금지. 목표 완전 달성 시에만.
+
+#### Scratchpad 역할 축소
+- `<inherited-context>` 주입 제거 → `<current_state>` + `<agent-execution-history>` + mission events가 대체.
+- Scratchpad는 recovery 마커 카운팅(재시작 루프 방지) 전용으로 축소.
+
+#### 모듈 분리 (telegram_bot.py 2893줄 → 1134줄)
+- `telegram_commands.py` (1602줄): 모든 커맨드/메시지/콜백 핸들러. `register_handlers(router, ctx)` 패턴.
+- `bot_config.py` (190줄): LLM 클라이언트, 런타임 설정, 모델 해석.
+- Dead code 제거: `_compress_history`, `estimate_tokens` import, 미사용 상수/import.
+
+#### 에이전트 공통 블록 통합 (base.py)
+- `CONTEXT_AWARENESS_BLOCK`, `MISSION_GUIDELINES_BLOCK`, `CONTEXT_FOOTER`를 `base.py`에 정의.
+- 4개 에이전트(programmer, general, visualizer, scout) 모두 공통 블록 사용. scout 구형 형식 제거.
+
+#### Programmer code-modification-skill 단순화
+- `self_modify_with_safety()` 직접 호출 지시 제거 → `patch_file`/`write_file` 도구 안전 장치(backup, syntax check, rollback) 활용.
+- 8단계 → 5단계: read → patch_file → 검증 → request_continuation + restart → 자식 태스크 commit.
+
+#### Visualizer 에이전트 이미지 생성 연결
+- `generate_image` 도구: Replicate FLUX 모델을 에이전트가 직접 호출 가능.
+- Visualizer 규칙: "프롬프트만 작성하지 말고 generate_image로 실제 생성하라."
+- 태스크 완료 시 생성된 이미지를 사용자에게 자동 전송.
 
 ### 2026-03-27 — 에이전트 인프라 개선, 프로젝트 구조 정리
 
