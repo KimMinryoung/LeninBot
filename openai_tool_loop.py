@@ -210,7 +210,7 @@ async def _call_sdk(
     kwargs = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
     }
     if tools:
         kwargs["tools"] = tools
