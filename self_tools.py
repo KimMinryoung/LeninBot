@@ -10,6 +10,7 @@ Integration in telegram_bot.py:
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 
