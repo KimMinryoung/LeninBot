@@ -518,7 +518,7 @@ async def _exec_delegate(
                 user_id_for_mission = 0
                 try:
                     recent_user = _db_q(
-                        "SELECT DISTINCT user_id FROM telegram_chat_history "
+                        "SELECT user_id FROM telegram_chat_history "
                         "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
                     )
                     if recent_user:
