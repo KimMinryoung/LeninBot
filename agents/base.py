@@ -29,6 +29,7 @@ MISSION_GUIDELINES_BLOCK = """
   group_id: geopolitics_conflict(지정학), economy(경제), korea_domestic(한국), agent_knowledge(기타).
   예: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
 - request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
+- 단, **재시작 직전 continuation**은 일반 작업 이관이 아니라 **재시작 후 복구 메모**다. 따라서 next_steps는 **이미 재시작 완료된 상태**를 전제로 써야 하며, 자식에게 재시작을 다시 지시하면 안 된다.
 - 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
 </mission-guidelines>
 """.strip()
