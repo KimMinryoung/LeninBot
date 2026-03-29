@@ -36,13 +36,15 @@ from telegram_tasks import (
     process_task, broadcast, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
     recover_processing_tasks_on_startup,
-    checkpoint_task_on_shutdown,
+    checkpoint_task_on_shutdown, persist_task_restart_state,
 )
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+_runtime_state: dict[str, int | None] = {"current_task_id": None}
 
 # Suppress TelegramConflictError spam during deploy (old/new instance overlap)
 class _ConflictFilter(logging.Filter):
@@ -141,6 +143,14 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS metadata JSONB")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) DEFAULT 'pending'")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_initiated BOOLEAN DEFAULT FALSE")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_target_service VARCHAR(20)")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_completed BOOLEAN DEFAULT FALSE")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS post_restart_phase VARCHAR(50)")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_attempt_count INTEGER DEFAULT 0")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_requested_at TIMESTAMPTZ")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS resumed_after_restart BOOLEAN DEFAULT FALSE")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_reentry_block_reason TEXT")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_details TEXT")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_attempts INTEGER DEFAULT 0")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS last_verification_at TIMESTAMPTZ")
@@ -1056,7 +1066,6 @@ async def bot_main():
             await progress_cb.flush()
 
     # Start background workers (keep handles for graceful cancellation)
-    _runtime_state: dict[str, int | None] = {"current_task_id": None}
     _bg_tasks = [
         asyncio.create_task(
             task_worker(bot, process_task_fn=_process_task_wrapper, runtime_state=_runtime_state),

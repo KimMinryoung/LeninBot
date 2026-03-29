@@ -23,6 +23,8 @@ _STARTUP_HANDOFF_MARKER = "## Checkpoint: startup handoff"
 _MAX_TASK_CHAIN_DEPTH = 5
 _SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
 _RESTART_COMPLETED_MARKER = "[restart already completed by parent task]"
+_RESTART_RESUME_MARKER = "[same-task resumed after self restart]"
+_RESTART_PHASE_KEY = "restart_state"
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -164,14 +166,19 @@ def _append_task_scratchpad(task_id: int, note: str) -> None:
     _execute("UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s", (new_pad, task_id))
 
 
-def _normalize_verification_policy(task: dict) -> dict | None:
-    metadata = task.get("metadata")
+def _load_task_metadata(task: dict | None) -> dict:
+    metadata = (task or {}).get("metadata")
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata)
         except Exception:
             metadata = None
-    if not isinstance(metadata, dict):
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _normalize_verification_policy(task: dict) -> dict | None:
+    metadata = _load_task_metadata(task)
+    if not metadata:
         return None
     policy = metadata.get("verification")
     if not isinstance(policy, dict):
@@ -284,6 +291,109 @@ async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
     return {"status": status, "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1)}
 
 
+def _get_restart_state(task: dict | None) -> dict:
+    metadata = _load_task_metadata(task)
+    state = metadata.get(_RESTART_PHASE_KEY)
+    if isinstance(state, dict):
+        return state
+    task = task or {}
+    fallback = {
+        "restart_initiated": task.get("restart_initiated"),
+        "restart_target_service": task.get("restart_target_service"),
+        "restart_completed": task.get("restart_completed"),
+        "post_restart_phase": task.get("post_restart_phase"),
+        "restart_attempt_count": task.get("restart_attempt_count"),
+        "restart_requested_at": task.get("restart_requested_at"),
+        "resumed_after_restart": task.get("resumed_after_restart"),
+        "restart_reentry_block_reason": task.get("restart_reentry_block_reason"),
+    }
+    return {k: v for k, v in fallback.items() if v not in (None, "")}
+
+
+def _restart_resume_context(task: dict | None) -> dict:
+    state = _get_restart_state(task)
+    initiated = bool(state.get("restart_initiated"))
+    target = str(state.get("restart_target_service") or "").strip() or None
+    completed = bool(state.get("restart_completed"))
+    phase = str(state.get("post_restart_phase") or "").strip() or None
+    attempts = int(state.get("restart_attempt_count") or 0) if str(state.get("restart_attempt_count") or "0").isdigit() else 0
+    return {
+        "state": state,
+        "initiated": initiated,
+        "target": target,
+        "completed": completed,
+        "phase": phase,
+        "attempts": attempts,
+        "should_skip_restart": initiated and completed and phase in {"verification", "report"},
+        "resume_reason": state.get("resume_reason") or "durable restart state present",
+    }
+
+
+def _format_restart_state_note(task: dict | None) -> str:
+    ctx = _restart_resume_context(task)
+    if not ctx["initiated"]:
+        return ""
+    bits = [
+        _RESTART_RESUME_MARKER,
+        f"- resumed_after_restart: true",
+        f"- restart_attempt_count: {ctx['attempts']}",
+    ]
+    if ctx["target"]:
+        bits.append(f"- restart_target_service: {ctx['target']}")
+    bits.append(f"- restart_completed: {'true' if ctx['completed'] else 'false'}")
+    if ctx["phase"]:
+        bits.append(f"- post_restart_phase: {ctx['phase']}")
+    bits.append(f"- restart_reentry_blocked: {'true' if ctx['should_skip_restart'] else 'false'}")
+    bits.append(f"- restart_reentry_reason: {ctx['resume_reason']}")
+    return "\n".join(bits)
+
+
+def persist_task_restart_state(
+    task_id: int,
+    *,
+    service: str,
+    phase: str,
+    mark_completed: bool = False,
+    resumed_after_restart: bool = False,
+    reentry_reason: str | None = None,
+) -> dict:
+    """Persist durable restart state before/after restart_service execution."""
+    rows = _query(
+        "SELECT metadata FROM telegram_tasks WHERE id = %s",
+        (task_id,),
+    )
+    task = rows[0] if rows else {}
+    metadata = _load_task_metadata(task)
+    existing = metadata.get(_RESTART_PHASE_KEY) if isinstance(metadata.get(_RESTART_PHASE_KEY), dict) else {}
+    previous_attempts = existing.get("restart_attempt_count")
+    try:
+        previous_attempts = int(previous_attempts or 0)
+    except Exception:
+        previous_attempts = 0
+
+    restart_state = {
+        **existing,
+        "restart_initiated": True,
+        "restart_target_service": service,
+        "restart_completed": bool(mark_completed),
+        "post_restart_phase": phase,
+        "restart_attempt_count": previous_attempts + (1 if phase == "requested" else 0),
+        "resumed_after_restart": bool(resumed_after_restart),
+    }
+    if phase == "requested":
+        restart_state["restart_requested_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    if reentry_reason:
+        restart_state["restart_reentry_block_reason"] = reentry_reason
+
+    metadata[_RESTART_PHASE_KEY] = restart_state
+    metadata_json = json.dumps(metadata)
+    _execute(
+        "UPDATE telegram_tasks SET metadata = %s WHERE id = %s",
+        (metadata_json, task_id),
+    )
+    return restart_state
+
+
 async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, verification: dict) -> dict | None:
     if verification.get("status") != "failed":
         return None
@@ -364,6 +474,7 @@ async def process_task(
     user_id = task["user_id"]
     content = task["content"]
     scratchpad = task.get("scratchpad") or ""
+    restart_ctx = _restart_resume_context(task)
     depth = task.get("depth") or 0
     parent_task_id = task.get("parent_task_id")
     mission_id = task.get("mission_id")
@@ -516,6 +627,10 @@ async def process_task(
     if context_parts:
         content = "\n\n".join(context_parts) + f"\n\n<task>\n{content}\n</task>"
 
+    restart_note = _format_restart_state_note(task)
+    if restart_note and restart_note not in content:
+        content = f"{restart_note}\n\n{content}"
+
     max_retries = 10
     retry_delay = 60
 
@@ -586,22 +701,34 @@ async def process_task(
                     # Non-fatal: log but don't fail the task
                     logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
 
+            restart_report_prefix = ""
+            if restart_ctx["initiated"]:
+                restart_report_prefix = (
+                    "## Restart Resume\n"
+                    f"- resumed_after_restart: true\n"
+                    f"- restart_attempt_count: {restart_ctx['attempts']}\n"
+                    f"- restart_target_service: {restart_ctx['target'] or '?'}\n"
+                    f"- restart_reentry_blocked: {'true' if restart_ctx['should_skip_restart'] else 'false'}\n"
+                    f"- restart_reentry_reason: {restart_ctx['resume_reason']}\n\n"
+                )
+            final_report = f"{restart_report_prefix}{report}" if restart_report_prefix else report
+
             # Save full report to DB
             await asyncio.to_thread(
                 _execute,
                 "UPDATE telegram_tasks SET status = 'done', result = %s, verification_status = 'pending', "
                 "completed_at = NOW() WHERE id = %s",
-                (report, task_id),
+                (final_report, task_id),
             )
 
             # Classify priority
-            priority = _classify_priority(content, report)
+            priority = _classify_priority(content, final_report)
             priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
 
             # Send report as Markdown file
             filename = f"report_task_{task_id}.md"
-            doc = BufferedInputFile(report.encode("utf-8"), filename=filename)
-            summary = _extract_summary(report)
+            doc = BufferedInputFile(final_report.encode("utf-8"), filename=filename)
+            summary = _extract_summary(final_report)
             origin = " (자율 생성)" if is_self_generated else ""
             caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
 
@@ -614,7 +741,7 @@ async def process_task(
             else:
                 await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
-            verification = await _run_verification(bot, task, report)
+            verification = await _run_verification(bot, task, final_report)
             verification_status = verification.get("status", "pending")
             verification_details = verification.get("details", "")
             retry_result = None
@@ -1000,7 +1127,8 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type, metadata, verification_status, verification_attempts",
+                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type, metadata, verification_status, verification_attempts, "
+                "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason",
             )
             if task:
                 if runtime_state is not None:

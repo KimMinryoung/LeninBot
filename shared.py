@@ -5,6 +5,7 @@ All external imports are deferred to first use.
 """
 
 import asyncio
+import json
 import logging
 import threading
 from concurrent.futures import Future
@@ -484,6 +485,7 @@ def create_task_in_db(
     mission_id: int | None = None,
     agent_type: str | None = None,
     metadata: dict | None = None,
+    restart_state: dict | None = None,
 ) -> dict:
     """Insert a task into telegram_tasks for background processing.
 
@@ -497,6 +499,7 @@ def create_task_in_db(
         agent_type: Specialist agent to execute this task (e.g. 'programmer', 'analyst').
                     If None and parent exists, inherits parent's agent_type.
         metadata: Optional JSON-serializable task metadata persisted on telegram_tasks.
+        restart_state: Optional durable restart state mirrored into dedicated DB columns and metadata.
 
     Returns dict with 'status' and 'task_id' or 'error'.
     """
@@ -530,11 +533,32 @@ def create_task_in_db(
             return {"status": "error", "error": str(e)}
 
     try:
-        metadata_json = json.dumps(metadata) if metadata is not None else None
+        metadata = dict(metadata or {})
+        if restart_state is not None:
+            metadata["restart_state"] = restart_state
+        restart_state = metadata.get("restart_state") if isinstance(metadata.get("restart_state"), dict) else None
+        metadata_json = json.dumps(metadata) if metadata else None
         rows = db_query(
-            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type, metadata) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, tagged_content, parent_task_id, depth, mission_id, agent_type, metadata_json),
+            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type, metadata, "
+            "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (
+                user_id,
+                tagged_content,
+                parent_task_id,
+                depth,
+                mission_id,
+                agent_type,
+                metadata_json,
+                bool((restart_state or {}).get("restart_initiated")),
+                (restart_state or {}).get("restart_target_service"),
+                bool((restart_state or {}).get("restart_completed")),
+                (restart_state or {}).get("post_restart_phase"),
+                int((restart_state or {}).get("restart_attempt_count") or 0),
+                (restart_state or {}).get("restart_requested_at"),
+                bool((restart_state or {}).get("resumed_after_restart")),
+                (restart_state or {}).get("restart_reentry_block_reason"),
+            ),
         )
         task_id = rows[0]["id"] if rows else "?"
         logger.info("[shared] Task created: id=%s, priority=%s, depth=%d, parent=%s, mission=%s, agent=%s",

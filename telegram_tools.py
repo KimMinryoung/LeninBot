@@ -673,6 +673,14 @@ async def _exec_restart_service(service: str = "telegram") -> str:
 
     project_root = os.path.dirname(os.path.abspath(__file__))
 
+    try:
+        from telegram_bot import _runtime_state
+        from telegram_tasks import persist_task_restart_state
+        current_task_id = (_runtime_state or {}).get("current_task_id")
+    except Exception:
+        current_task_id = None
+        persist_task_restart_state = None
+
     if service not in ("telegram", "api", "all"):
         return f"❌ Unknown service: {service}. Use: telegram, api, all"
 
@@ -749,6 +757,17 @@ async def _exec_restart_service(service: str = "telegram") -> str:
 
     if errors:
         return "❌ Restart blocked — import errors found:\n" + "\n".join(errors)
+
+    if current_task_id and persist_task_restart_state:
+        try:
+            persist_task_restart_state(
+                current_task_id,
+                service=service,
+                phase="requested",
+                mark_completed=False,
+            )
+        except Exception as e:
+            return f"❌ Restart blocked — failed to persist durable restart state: {e}"
 
     # 4. All checks passed — restart
     svc_map = {
