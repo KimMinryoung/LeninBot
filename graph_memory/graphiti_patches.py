@@ -15,6 +15,7 @@ service.py의 initialize()에서 1회 호출.
 
 import json
 import logging
+import re
 from datetime import datetime, date
 from typing import Any
 
@@ -71,6 +72,7 @@ def apply_graphiti_patches() -> None:
 
     _patch_to_prompt_json()
     _patch_extract_edges()
+    _build_name_normalization_regex()
 
     _PATCHES_APPLIED = True
 
@@ -137,3 +139,40 @@ def _patch_extract_edges() -> None:
             wrapper.func = _patched_edge
     except Exception as e:
         logger.warning("[graphiti_patches] prompt_library patch skipped: %s", e)
+
+
+# ── 엔티티 이름 정규화 (약어 → 정식명) ──────────────────────────
+# Graphiti의 entity resolution이 짧은 이름(US, UK 등)에서 실패하므로,
+# 에피소드 본문 텍스트를 Graphiti에 전달하기 전에 약어를 정식명으로 치환.
+
+_NAME_NORM_PATTERN: re.Pattern | None = None
+_NAME_NORM_MAP: dict[str, str] = {}
+
+
+def _build_name_normalization_regex() -> None:
+    """NAME_NORMALIZATION 딕셔너리로부터 word-boundary 정규식 컴파일."""
+    global _NAME_NORM_PATTERN, _NAME_NORM_MAP
+    from .config import NAME_NORMALIZATION
+
+    if not NAME_NORMALIZATION:
+        return
+
+    _NAME_NORM_MAP = {k.lower(): v for k, v in NAME_NORMALIZATION.items()}
+
+    # 긴 패턴 먼저 매칭 (e.g., "u.s.a." before "u.s.")
+    sorted_keys = sorted(_NAME_NORM_MAP.keys(), key=len, reverse=True)
+    escaped = [re.escape(k) for k in sorted_keys]
+    # \b 대신 (?<!\w)...(?!\w) 사용 — 마침표 포함 약어(U.S.)에서 \b 불안정
+    pattern_str = r"(?<!\w)(?:" + "|".join(escaped) + r")(?!\w)"
+    _NAME_NORM_PATTERN = re.compile(pattern_str, re.IGNORECASE)
+
+
+def normalize_entity_names_in_text(text: str) -> str:
+    """에피소드 본문 내 약어를 정식명으로 치환. service.py에서 호출."""
+    if _NAME_NORM_PATTERN is None or not text:
+        return text
+
+    def _replace(match: re.Match) -> str:
+        return _NAME_NORM_MAP.get(match.group(0).lower(), match.group(0))
+
+    return _NAME_NORM_PATTERN.sub(_replace, text)

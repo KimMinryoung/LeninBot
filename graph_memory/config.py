@@ -149,6 +149,7 @@ NEWS_PREPROCESS_PROMPT_TEMPLATE = """Extract only knowledge-graph-worthy facts f
 2) Policies, sanctions, treaties, laws, export controls — enactment, amendment, enforcement
 3) Military actions, cyberattacks, information operations, asset/weapon/technology transfers
 4) Time-stamped events (attacks, announcements, agreements, deployments, crackdowns)
+5) Use full official names for countries and organizations (e.g., "United States" not "US", "South Korea" not "ROK", "European Union" not "EU")
 
 [EXCLUDE]
 1) Anonymous civilians (e.g., "8-year-old child", "local resident", "witness")
@@ -175,13 +176,56 @@ NEWS_PREPROCESS_PROMPT_TEMPLATE = """Extract only knowledge-graph-worthy facts f
 
 CUSTOM_EXTRACTION_INSTRUCTIONS = """\
 ## LANGUAGE RULES
-- ALL entity names MUST be in English. Translate non-English names (e.g., 러시아 → Russia, 미국 → USA).
-- Use the most common English name (e.g., "Russia" not "Russian Federation").
+- ALL entity names MUST be in English. Translate non-English names (e.g., 러시아 → Russia, 미국 → United States).
+
+## ENTITY NAME NORMALIZATION (CRITICAL)
+- Countries: ALWAYS use the full official common name, NEVER abbreviations.
+  CORRECT: "United States", "South Korea", "North Korea", "United Kingdom", "European Union", "United Nations"
+  WRONG: "US", "USA", "U.S.", "ROK", "DPRK", "UK", "EU", "UN"
+- Organizations: Use the most recognized full name, not acronyms.
+  CORRECT: "International Monetary Fund", "World Health Organization", "Samsung Electronics"
+  WRONG: "IMF", "WHO", "Samsung"
+  EXCEPTION: Names where the acronym IS the official name (e.g., "NATO", "OPEC", "NVIDIA")
+- People: Use "FirstName LastName" (e.g., "Donald Trump" not "Trump", "Vladimir Putin" not "Putin")
+- Use "Russia" not "Russian Federation", "China" not "People's Republic of China"
 
 ## RELATION TYPE RULES (OVERRIDE)
 - relation_type MUST be one of: Affiliation, OrgRelation, PersonalRelation, Funding, AssetTransfer, ThreatAction, Involvement, Presence, PolicyEffect, Participation
 - Pick the closest match. Do NOT invent new types or use SCREAMING_SNAKE_CASE variants.
+- If unsure between two types, prefer the more specific one.
 """
+
+
+# ============================================================
+# 엔티티 이름 정규화 매핑 (약어 → 정식명)
+# ============================================================
+#
+# Graphiti의 entity resolution이 짧은 이름(US, UK)에서 실패하므로
+# 추출 전 텍스트 레벨에서 약어를 정식명으로 치환.
+# graphiti_patches.py의 _patch_normalize_entity_names()에서 사용.
+
+NAME_NORMALIZATION = {
+    "us": "United States",
+    "usa": "United States",
+    "u.s.": "United States",
+    "u.s.a.": "United States",
+    "united states of america": "United States",
+    "uk": "United Kingdom",
+    "u.k.": "United Kingdom",
+    "dprk": "North Korea",
+    "rok": "South Korea",
+    "prc": "China",
+    "roc": "Taiwan",
+    "eu": "European Union",
+    "un": "United Nations",
+    "imf": "International Monetary Fund",
+    "who": "World Health Organization",
+    "wto": "World Trade Organization",
+    "iaea": "International Atomic Energy Agency",
+    "uae": "United Arab Emirates",
+    "drc": "Democratic Republic of the Congo",
+    "ksa": "Saudi Arabia",
+}
 
 
 EPISODE_SOURCE_MAP = {

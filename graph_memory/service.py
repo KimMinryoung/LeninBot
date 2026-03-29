@@ -22,7 +22,7 @@ os.environ.setdefault("SEMAPHORE_LIMIT", "20")
 
 from dotenv import load_dotenv
 
-from .graphiti_patches import apply_graphiti_patches
+from .graphiti_patches import apply_graphiti_patches, normalize_entity_names_in_text
 apply_graphiti_patches()
 
 from graphiti_core import Graphiti
@@ -279,6 +279,9 @@ class GraphMemoryService:
 
         if preprocess_news and source_type == "osint_news":
             ingest_body = await self.preprocess_news_article(body)
+
+        # 약어 → 정식명 치환 (Graphiti entity resolution 보강)
+        ingest_body = normalize_entity_names_in_text(ingest_body)
 
         # 전처리 후 본문 길이 제한 (Graphiti output token 초과 방지)
         if max_body_chars and len(ingest_body) > max_body_chars:

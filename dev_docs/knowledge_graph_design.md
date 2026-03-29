@@ -271,6 +271,13 @@ OPTIONS {indexConfig: {
 | `to_prompt_json` | `prompt_helpers` + 6개 importing 모듈 | Neo4j DateTime 직렬화 지원 |
 | `Edge.relation_type` | Pydantic 모델 (클래스 수준) | SCREAMING_SNAKE_CASE → PascalCase |
 | `edge()` 함수 | `prompt_library` VersionWrapper.func | RELATION TYPE RULES 프롬프트 교체 |
+| `normalize_entity_names_in_text` | `service.py` ingest_episode() | 에피소드 본문 내 약어→정식명 치환 (US→United States 등) |
+
+### 이름 정규화 (`config.py` NAME_NORMALIZATION)
+
+에피소드 본문이 Graphiti에 전달되기 전에 국가/조직 약어를 정식명으로 치환.
+Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는 문제를 우회.
+`NAME_NORMALIZATION` 딕셔너리에 매핑 추가 시 자동 적용.
 
 ### 성능 설정
 
@@ -283,52 +290,51 @@ OPTIONS {indexConfig: {
 
 ## 6. 현재 데이터 상태
 
-### AuraDB — 새 인스턴스 (v2 스키마, 2026-02-27 초기화)
+### Local Neo4j Docker (v2.1 스키마, 2026-03-29 기준)
 
-> 새 AuraDB 인스턴스로 교체 후 v2 스키마로 초기화 완료.
-
-**통계**: 에피소드 688건, 엔티티 1,949개, 관계 1,631개 (2026-03-19 기준)
+**통계**: 에피소드 1,213건, 엔티티 3,279개, 관계 3,261개
 
 | 엔티티 타입 | 수 |
 |------------|-----|
-| Organization | 536 |
-| Asset | 438 |
-| Person | 297 |
-| Location | 199 |
-| Policy | 187 |
-| Incident | 119 |
-| Concept | 99 |
-| Campaign | 72 |
-| Entity (미분류) | 0 |
+| Organization | 901 |
+| Asset | 724 |
+| Person | 405 |
+| Location | 370 |
+| Policy | 299 |
+| Concept | 274 |
+| Incident | 186 |
+| Campaign | 97 |
+| Entity (미분류) | 23 |
 
-**에피소드 10건** (2026-02-27 국제 뉴스):
+### 에피소드 group_id 분포
 
-| # | 주제 | source_type | group_id |
-|---|------|-------------|----------|
-| 1 | 파키스탄-아프간 공개전쟁 선언 | osint_news | geopolitics_conflict |
-| 2 | 러-우 전쟁 1464일차 전황 | osint_news | geopolitics_conflict |
-| 3 | 러-우 평화협상 교착 | diplomatic_cable | geopolitics_diplomacy |
-| 4 | 미-이란 제네바 핵협상 | diplomatic_cable | geopolitics_diplomacy |
-| 5 | 수단 내전 제노사이드 경고 | osint_news | geopolitics_conflict |
-| 6 | 미 대법원 IEEPA 관세 위헌 판결 | osint_news | geopolitics_economy |
-| 7 | 영국 대러 에너지 제재 패키지 | osint_news | geopolitics_economy |
-| 8 | 베네수엘라 마두로 체포 후 제재 완화 | osint_news | geopolitics_economy |
-| 9 | 트럼프 그린란드 관세 분쟁 | osint_news | geopolitics_economy |
-| 10 | UNCTAD 글로벌 무역 보고서 | osint_news | geopolitics_economy |
+| group_id | 에피소드 수 | 설명 |
+|----------|-----------|------|
+| `diary_news` | 1,053 | LeninBot 자동 수집 뉴스 (3시간 주기) |
+| `agent_knowledge` | 59 | 에이전트가 write_kg로 저장한 지식 |
+| `geopolitics_conflict` | 53 | 전쟁/분쟁 뉴스 |
+| `korea_domestic` | 28 | 한국 국내 뉴스/인물 |
+| `economy` | 8 | 경제 뉴스 |
+| `geopolitics_economy` | 5 | 경제/제재/무역 뉴스 |
+| `diplomacy` | 4 | 외교/협상 뉴스 |
+| `geopolitics_diplomacy` | 2 | 외교/협상 뉴스 (레거시) |
 
-### group_id 목록
+### 관계명 분포
 
-| group_id | 설명 |
-|----------|------|
-| `geopolitics_conflict` | 전쟁/분쟁 뉴스 |
-| `geopolitics_diplomacy` | 외교/협상 뉴스 |
-| `geopolitics_economy` | 경제/제재/무역 뉴스 |
-| `korea_domestic` | 한국 국내 뉴스/인물 |
-| `diary_news` | LeninBot 자동 수집 뉴스 |
-
-### 검증 이력
-
-- 검색 테스트 3건 통과: Pakistan-Afghanistan, Russia-Ukraine, US tariffs (각 노드 5개+엣지 5개 반환)
+| 관계 타입 | 수 |
+|----------|-----|
+| Involvement | 557 |
+| Presence | 470 |
+| PolicyEffect | 460 |
+| AssetTransfer | 319 |
+| NULL (미분류) | 318 |
+| ThreatAction | 306 |
+| OrgRelation | 297 |
+| Participation | 190 |
+| Affiliation | 144 |
+| Funding | 46 |
+| PersonalRelation | 28 |
+| 비표준 (~80개) | ~80 |
 
 ---
 
@@ -352,19 +358,43 @@ OPTIONS {indexConfig: {
 | 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
 | 2026-03-19 | **v2.1 스키마: Concept 타입 신설** — 엔티티 7→8종. 추상 개념/이론/이데올로기/사회현상을 포괄하는 Concept 타입(5 필드) 추가. Gemini 배치 분류로 미분류 엔티티 131개 전량 타입 부여 (Concept 99, Asset 11, Organization 8, Incident 5, Person 5, Location 1, Campaign 1). `scripts/classify_untyped_entities.py` 재사용 가능. |
 | 2026-03-21 | **Neo4j AuraDB → Local Docker 이전**: `docker-compose.neo4j.yml` (Neo4j 5 Community + APOC), `systemd/leninbot-neo4j.service`, `scripts/migrate_neo4j.py`. 엔티티 2,116개, 관계 1,826개, 에피소드 761건 전량 이전 완료. AuraDB 연결 끊김 문제 해소. |
+| 2026-03-29 | **KG 데이터 품질 개선**: (1) 중복 엔티티 병합 스크립트 `merge_entities.py` — Gemini 배치 분류 + canonical 선택 + 엣지 이전 + duplicate 삭제. (2) 관계명 정규화 스크립트 `normalize_edge_names.py` — 비표준/NULL r.name을 10개 표준 타입으로 분류. (3) KG 백업 스크립트 `backup_kg.py`. (4) 추출 지시문 강화 — 국가/조직/인물 정식명 사용 규칙 추가, 약어 금지. (5) 이름 정규화 패치 — `graphiti_patches.py`에 `NAME_NORMALIZATION` 딕셔너리 + 텍스트 레벨 약어→정식명 치환 (Graphiti entity resolution 실패 방지). |
 
 ---
 
-## 8. 로드맵
+## 8. 유지보수 스크립트
 
-### 단기 (데이터 수집)
+### `skills/kg-maintenance/scripts/`
+
+| 스크립트 | 용도 | 사용법 |
+|---------|------|--------|
+| `backup_kg.py` | Entity/Edge JSON 백업 | `python backup_kg.py` (파괴적 작업 전 필수) |
+| `merge_entities.py` | 중복 엔티티 병합 (Gemini) | `python merge_entities.py` (dry-run) / `--execute` |
+| `normalize_edge_names.py` | 비표준 관계명 정규화 (Gemini) | `python normalize_edge_names.py` (dry-run) / `--execute` |
+| `dedup_entities.py` | 문자열 유사도 기반 중복 탐지 | `python dedup_entities.py` |
+| `cleanup_orphans.py` | 고아 엔티티 삭제 | `python cleanup_orphans.py` (dry-run) / `--execute` |
+| `assign_types.py` | 미분류 엔티티 타입 부여 | `python assign_types.py` |
+
+### `scripts/`
+
+| 스크립트 | 용도 |
+|---------|------|
+| `classify_untyped_entities.py` | Gemini 배치 분류 (8 타입, 더 정확) |
+| `ingest_reports_to_kg.py` | 텔레그램 태스크 리포트 → KG 수집 |
+| `kg_enricher.py` | 엔티티 요약 자동 생성 |
+
+---
+
+## 9. 로드맵
+
+### 단기 (데이터 품질 + 수집)
 
 - [x] AuraDB 새 인스턴스 초기화 + v2 스키마로 뉴스 10건 수집 완료
 - [x] 한국 국내 뉴스 수집 + 인물 프로파일 보강 파이프라인 (TDD, `temp_dev/ingest_kr_news.py`)
+- [x] 데이터 품질 도구: 중복 병합, 관계명 정규화, 백업 스크립트
+- [x] 수집 시 약어→정식명 자동 치환 (entity resolution 실패 방지)
+- [ ] 서버에서 cleanup 스크립트 실행: backup → merge → normalize → orphan → classify
 - [ ] 크롤러 → 에피소드 변환 파이프라인 구축
-  - `crawler_modern.py` 출력 → `osint_news` 소스 타입으로 자동 변환
-  - 뉴스 기사 단위로 에피소드 분할
-- [ ] 대량 수집 스크립트 작성 (rate limit 대응 딜레이 포함)
 - [ ] group_id 체계 확정 (산업별? 주제별? 시기별?)
 
 ### 중기 (chatbot 통합)
