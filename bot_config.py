@@ -156,6 +156,28 @@ def _resolve_tier(tier: str) -> str:
     return tier_map.get(tier, tier)  # passthrough if not a tier name
 
 
+def get_current_model_selection(kind: str = "chat") -> dict:
+    """Return runtime-selected provider/model metadata for chat or task path."""
+    kind = "task" if kind == "task" else "chat"
+    provider = _config.get("provider", "claude")
+    tier_key = "task_model" if kind == "task" else "chat_model"
+    tier = str(_config.get(tier_key, "high"))
+    alias = _resolve_tier(tier)
+    if provider == "openai" or alias in _OPENAI_MODEL_MAP:
+        model_id = _resolve_openai_model(alias)
+    else:
+        model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
+        model_id = _resolved_models.get(alias, fallback)
+    return {
+        "kind": kind,
+        "provider": provider,
+        "tier": tier,
+        "alias": alias,
+        "model_id": model_id,
+        "resolved": alias in _resolved_models if provider != "openai" else True,
+    }
+
+
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
     alias = _resolve_tier(_config["chat_model"])

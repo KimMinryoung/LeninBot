@@ -1,9 +1,10 @@
-# LLM Provider Architecture — 2026-03-28
+# LLM Provider Architecture — 2026-03-29
 
 ## 개요
 
-Claude API 사용량 과다로 인한 불안정성에 대응하여, OpenAI API를 대체 provider로 사용할 수 있는 어댑터 패턴을 구현함.
-런타임에 `/provider` 커맨드로 Claude↔OpenAI를 즉시 전환 가능.
+LeninBot은 특정 벤더/모델에 고정된 봇이 아니다. 런타임 설정(`config.json`)과 `/config` 패널을 통해 provider와 모델 티어를 즉시 전환할 수 있다.
+현재 구조는 Claude와 OpenAI를 지원하며, 태스크 워커 일부 경로에서는 로컬 LLM(Moon/llama-server)도 사용한다.
+따라서 문서의 모델명은 "설계 시점 예시"일 뿐이며, 실제 응답에 사용되는 모델은 매 요청 시 런타임 설정에서 해석된다.
 
 ---
 
@@ -30,10 +31,11 @@ telegram_bot.py
 
 | 파일 | 역할 |
 |------|------|
-| `claude_loop.py` | Claude 전용 tool-use 루프. Anthropic Messages API. 변경 없음. |
+| `claude_loop.py` | Anthropic Messages API용 tool-use 루프. Claude provider 선택 시 사용. |
 | `openai_tool_loop.py` | OpenAI + 로컬 LLM 겸용 tool-use 루프. SDK mode / httpx mode 이중 지원. |
-| `telegram_bot.py` | provider dispatch, 모델 티어 해석, `/provider` `/fallback` `/config` 커맨드 |
-| `config.json` | `provider`, `chat_model`, `task_model` 등 런타임 설정 영속화 (.gitignore) |
+| `telegram_bot.py` | provider dispatch, 모델 티어 해석, 시스템 프롬프트 `<current-model>` 주입, `/provider` `/fallback` `/config` 커맨드 |
+| `bot_config.py` | `/config`가 바꾸는 런타임 설정 로딩/저장 + provider별 실제 모델 ID 해석 |
+| `config.json` | `provider`, `chat_model`, `task_model` 등 런타임 설정 영속화 |
 
 ## openai_tool_loop.py — 이중 모드
 
@@ -55,7 +57,10 @@ chat_with_tools(
 
 ## 모델 티어 시스템
 
-config에 구체적 모델명 대신 `high`/`medium`/`low` 티어를 저장.
+config에는 구체적 모델명을 직접 박아두지 않고 `high`/`medium`/`low` 티어를 저장한다.
+실제 모델 ID는 매 요청 시 `bot_config.py`가 `provider` + 티어를 해석해서 결정한다.
+즉 `/config`에서 값을 바꾸면 다음 호출부터 system prompt와 API 호출 양쪽에 동일한 런타임 모델 정보가 반영된다.
+
 provider에 따라 자동 매핑:
 
 | 티어 | Claude | OpenAI |
@@ -65,6 +70,18 @@ provider에 따라 자동 매핑:
 | low | haiku (claude-haiku-4-5) | gpt-5.4-nano |
 
 `/config` 패널에서는 `high (gpt-5.4)` 형태로 티어 + 실제 모델명 동시 표시.
+
+## 런타임 모델 컨텍스트 주입
+
+텔레그램 대화 경로에서는 `telegram_bot.py`가 system prompt의 `<context>` 블록에 아래 형식으로 현재 모델 정보를 주입한다.
+
+```xml
+<current-model provider="openai" tier="high" alias="gpt54">gpt-5.4</current-model>
+```
+
+- 값의 출처는 문서 상수나 하드코딩 문자열이 아니라 `config.json` → `bot_config.py`의 런타임 해석 결과다.
+- 태스크 에이전트 경로에도 `<runtime-model-context>` 블록으로 동일 정보가 주입된다.
+- Claude alias는 최초 해석 전에는 fallback ID를 쓰고, Models API 조회 후에는 resolved ID가 캐시에 반영된다.
 
 ## Tool 포맷 변환
 

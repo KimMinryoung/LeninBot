@@ -1084,6 +1084,7 @@ async def handle_message(message: Message):
         if extra_context:
             system_override = _ctx["SYSTEM_PROMPT_TEMPLATE"].format(
                 current_datetime=_ctx["current_datetime_str"](),
+                current_model=_ctx["format_current_model_context"]("chat"),
                 system_alerts=_ctx["format_system_alerts"](),
                 skills_section=build_skills_prompt(),
             ) + extra_context

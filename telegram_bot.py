@@ -27,6 +27,7 @@ from bot_config import (
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
+    get_current_model_selection,
     _extract_text,
 )
 from telegram_tools import TOOLS, TOOL_HANDLERS
@@ -245,6 +246,15 @@ def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
+def _format_current_model_context(kind: str = "chat") -> str:
+    """Format runtime-selected model info for prompt/context injection."""
+    selection = get_current_model_selection(kind)
+    return (
+        f"<current-model provider=\"{selection['provider']}\" tier=\"{selection['tier']}\" "
+        f"alias=\"{selection['alias']}\">{selection['model_id']}</current-model>"
+    )
+
+
 # ── System Alerts (injected into system prompt) ─────────────────────
 import time as _time
 
@@ -355,6 +365,7 @@ Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 
 
 <context>
 <current-time>{current_datetime}</current-time>
+{current_model}
 {system_alerts}
 {skills_section}
 </context>
@@ -767,6 +778,7 @@ async def _chat_with_tools(
 
     sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
         current_datetime=_current_datetime_str(),
+        current_model=_format_current_model_context("chat"),
         system_alerts=_format_system_alerts(),
         skills_section=build_skills_prompt(),
     )
@@ -849,6 +861,7 @@ register_handlers(router, ctx={
     "make_progress_callback": _make_progress_callback,
     "SYSTEM_PROMPT_TEMPLATE": _SYSTEM_PROMPT_TEMPLATE,
     "current_datetime_str": _current_datetime_str,
+    "format_current_model_context": _format_current_model_context,
     "format_system_alerts": _format_system_alerts,
     "add_system_alert": _add_system_alert,
     "clear_system_alert": _clear_system_alert,
