@@ -327,19 +327,11 @@ async def handle_execute_python(code: str, timeout: int = 30) -> str:
 _embeddings = None
 
 def _get_embeddings():
-    """Lazy-load BGE-M3 embeddings (first call takes ~30s)."""
+    """Get embedding client (connects to embedding_server via HTTP)."""
     global _embeddings
     if _embeddings is None:
-        import torch
-        from langchain_huggingface import HuggingFaceEmbeddings
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("Loading BGE-M3 on %s (first time may take ~30s)...", device)
-        _embeddings = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-m3",
-            model_kwargs={"device": device},
-            encode_kwargs={"normalize_embeddings": True},
-        )
-        logger.info("BGE-M3 loaded on %s.", device)
+        from embedding_client import get_embedding_client
+        _embeddings = get_embedding_client()
     return _embeddings
 
 

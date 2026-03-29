@@ -1,26 +1,22 @@
 import os
+import sys
 import glob
 import re
 import json
 from dotenv import load_dotenv
 from tqdm import tqdm
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from db import get_conn
-import torch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 load_dotenv()
 
-# 1. 초기화
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[System] Using device: {device}")
-
-embeddings = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-m3",
-    model_kwargs={'device': device},
-    encode_kwargs={'normalize_embeddings': True}
-)
+# 1. 초기화 (embedding_server via HTTP)
+from embedding_client import get_embedding_client
+embeddings = get_embedding_client()
+print("[System] Using embedding server (HTTP client)")
 
 source_directory = "./docs/lenin"
 log_file = "processed_files.txt"

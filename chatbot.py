@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 # Database & Embeddings
 from db import query as db_query, execute as db_execute
-from langchain_huggingface import HuggingFaceEmbeddings
+from embedding_client import get_embedding_client
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
@@ -81,13 +81,9 @@ load_dotenv()
 
 GEMINI_API_KEY = _require_env("GEMINI_API_KEY")
 
-# 임베딩 모델
-embeddings = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-m3",
-    model_kwargs={'device': 'cpu'},
-    encode_kwargs={'normalize_embeddings': True}
-)
-set_shared_embeddings(embeddings)  # Share with shared.py to avoid duplicate loading
+# 임베딩 모델 (embedding_server via HTTP)
+embeddings = get_embedding_client()
+set_shared_embeddings(embeddings)  # Share with shared.py
 
 # LLM 설정 (Gemini 3.1 Flash Lite)
 llm = ChatGoogleGenerativeAI(

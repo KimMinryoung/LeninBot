@@ -907,12 +907,8 @@ def set_shared_embeddings(emb):
 def _get_exp_embeddings():
     global _exp_embeddings
     if _exp_embeddings is None:
-        from langchain_huggingface import HuggingFaceEmbeddings
-        _exp_embeddings = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-m3",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
+        from embedding_client import get_embedding_client
+        _exp_embeddings = get_embedding_client()
     return _exp_embeddings
 
 

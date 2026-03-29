@@ -1,0 +1,15 @@
+[Unit]
+Description=LeninBot Embedding Server (BGE-M3)
+After=network.target
+Before=leninbot-telegram.service leninbot-api.service
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python embedding_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
