@@ -9,7 +9,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 #from sse_starlette.sse import EventSourceResponse
@@ -281,37 +281,64 @@ async def get_report(report_id: int):
 
 
 RESEARCH_DIR = Path(__file__).parent / "research"
+LEGACY_OUTPUT_RESEARCH_DIR = Path(__file__).parent / "output" / "research"
+
+
+def _resolve_research_file(filename: str) -> Path | None:
+    """Resolve a public research markdown file, preferring research/ over legacy output/research/."""
+    primary = RESEARCH_DIR / filename
+    if primary.is_file():
+        return primary
+    legacy = LEGACY_OUTPUT_RESEARCH_DIR / filename
+    if legacy.is_file():
+        return legacy
+    return None
 
 
 @app.get("/research")
 async def list_research():
-    """List .md files in the research/ directory."""
-    if not RESEARCH_DIR.is_dir():
-        return {"files": []}
-    files = []
-    for p in sorted(RESEARCH_DIR.glob("*.md")):
-        stat = p.stat()
-        files.append({
-            "filename": p.name,
-            "size": stat.st_size,
-            "modified_at": stat.st_mtime,
-        })
+    """List public .md files, preferring research/ and backfilling from legacy output/research/."""
+    files_by_name: dict[str, dict] = {}
+    for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob("*.md"):
+            stat = p.stat()
+            files_by_name[p.name] = {
+                "filename": p.name,
+                "size": stat.st_size,
+                "modified_at": stat.st_mtime,
+                "source_dir": p.parent.name,
+            }
+    files = [files_by_name[name] for name in sorted(files_by_name)]
     return {"files": files}
 
 
 @app.get("/research/{filename}")
 async def get_research(filename: str):
-    """Read a single .md file from research/ directory."""
+    """Read a single public markdown file from research/ or legacy output/research/."""
     # Prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
-    filepath = RESEARCH_DIR / filename
-    if not filepath.is_file():
+    filepath = _resolve_research_file(filename)
+    if filepath is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     content = filepath.read_text(encoding="utf-8")
-    return {"filename": filename, "content": content, "size": len(content)}
+    return {"filename": filename, "content": content, "size": len(content), "source_dir": filepath.parent.name}
+
+
+@app.get("/reports/research")
+async def redirect_research_index():
+    """Backward-compatible redirect from legacy guessed path to the actual public research index."""
+    return RedirectResponse(url="/research", status_code=307)
+
+
+@app.get("/reports/research/{filename}")
+async def redirect_research_file(filename: str):
+    """Backward-compatible redirect from legacy guessed path to the actual public research file URL."""
+    return RedirectResponse(url=f"/research/{filename}", status_code=307)
 
 
 @app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])
