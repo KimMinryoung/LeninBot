@@ -424,7 +424,15 @@ async def generate_image(
         merged_extra["input_image"] = normalized_reference
         if model in {None, "flux_schnell", "flux_dev"}:
             resolved_model = "flux_kontext_dev"
-        aspect_ratio = "match_input_image"
+        if num_outputs > 1:
+            logger.warning(
+                "[replicate] reference_image path does not support multi-output reliably; requested=%d forcing num_outputs=1 model=%s",
+                num_outputs,
+                resolved_model,
+            )
+            num_outputs = 1
+        if aspect_ratio == "match_input_image":
+            logger.info("[replicate] reference_image using caller-requested match_input_image aspect ratio")
     else:
         merged_extra["num_outputs"] = num_outputs
 
