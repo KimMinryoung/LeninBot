@@ -972,6 +972,115 @@ def save_experiential_memory(
         return False
 
 
+# ── Vector Similarity Search ──────────────────────────────────────────
+# Shared across chatbot (RAG), telegram_tools (vector_search tool), etc.
+
+def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
+    """Search lenin_corpus via pgvector cosine similarity.
+
+    Returns list of LangChain Document objects with page_content + metadata.
+    """
+    from langchain_core.documents import Document
+    from db import query as db_query
+
+    emb = _get_exp_embeddings()
+    vec = emb.embed_query(query)
+    embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
+    try:
+        rows = db_query(
+            "SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)",
+            (embedding_str, k, layer),
+        )
+    except Exception as e:
+        error_msg = str(e)
+        if "57014" in error_msg or "timeout" in error_msg.lower():
+            logger.warning("[shared] similarity_search timeout")
+        else:
+            logger.warning("[shared] similarity_search error: %s", e)
+        return []
+
+    return [
+        Document(page_content=row.get("content", ""), metadata=row.get("metadata", {}))
+        for row in rows
+        if row.get("content")
+    ]
+
+
+# ── Knowledge Graph Search ────────────────────────────────────────────
+
+def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | None = None) -> str | None:
+    """Search the knowledge graph and return formatted results.
+
+    Handles connection resets with retry + auto-reset.
+    If query_en is provided, searches with both queries and merges results.
+    """
+    svc = get_kg_service()
+    if not svc:
+        return None
+
+    _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
+    _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
+
+    def _do_search(q):
+        _svc_ref = [svc]
+        for attempt in range(2):
+            try:
+                return run_kg_task(_svc_ref[0].search, query=q, group_ids=None, num_results=num_results)
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_conn_error = any(k in err_msg for k in _CONN_ERRORS)
+
+                if is_conn_error and attempt == 0:
+                    logger.info("[KG] connection reset, retrying... query=%s", q[:50])
+                    reset_kg_service()
+                    _svc_ref[0] = get_kg_service()
+                    if not _svc_ref[0]:
+                        return None
+                    continue
+
+                if is_conn_error:
+                    logger.warning("[KG] retry failed. query=%s", q[:50])
+                else:
+                    logger.warning("[KG] search error (query=%s): %s", q[:50], e)
+                if any(k in err_msg for k in _RESET_KEYWORDS):
+                    reset_kg_service()
+                return None
+        return None
+
+    all_nodes, all_edges = [], []
+    seen_nodes, seen_edges = set(), set()
+
+    for q in [query, query_en] if query_en and query_en != query else [query]:
+        result = _do_search(q)
+        if not result:
+            continue
+        for n in result.get("nodes", []):
+            if n.get("uuid") and n["uuid"] not in seen_nodes:
+                seen_nodes.add(n["uuid"])
+                all_nodes.append(n)
+        for e in result.get("edges", []):
+            if e.get("uuid") and e["uuid"] not in seen_edges:
+                seen_edges.add(e["uuid"])
+                all_edges.append(e)
+
+    if not all_nodes and not all_edges:
+        return None
+
+    lines = []
+    if all_nodes:
+        lines.append("[Knowledge Graph: Entities]")
+        for n in all_nodes:
+            summary = (n.get("summary", "") or "")[:300]
+            if len(n.get("summary", "") or "") > 300:
+                summary += "..."
+            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
+    if all_edges:
+        lines.append("[Knowledge Graph: Facts/Relations]")
+        for e in all_edges:
+            lines.append(f"- {e['fact']}")
+    return "\n".join(lines)
+
+
 # ── URL Content Fetching ────────────────────────────────────────────
 # Shared across chatbot (web RAG) and telegram_bot (Claude agent).
 

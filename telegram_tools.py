@@ -139,7 +139,7 @@ TOOLS = [
 async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
     """Execute vector similarity search via chatbot module."""
     try:
-        from chatbot import similarity_search
+        from shared import similarity_search
         docs = await asyncio.to_thread(similarity_search, query, num_results, layer)
         if not docs:
             return "No documents found."
@@ -159,7 +159,7 @@ async def _exec_vector_search(query: str, num_results: int = 5, layer: str | Non
 async def _exec_kg_search(query: str, num_results: int = 10) -> str:
     """Execute knowledge graph search via chatbot module."""
     try:
-        from chatbot import search_knowledge_graph
+        from shared import search_knowledge_graph
         result = await asyncio.to_thread(search_knowledge_graph, query, num_results)
         return result or "No knowledge graph results found."
     except Exception as e:

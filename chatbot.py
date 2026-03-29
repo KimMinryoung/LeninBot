@@ -26,7 +26,6 @@ from typing import Literal
 
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
-    get_kg_service, run_kg_task,
     extract_urls, fetch_urls_as_documents,
     search_experiential_memory, set_shared_embeddings,
 )
@@ -327,33 +326,8 @@ def analyze_intent_node(state: AgentState):
 def router_logic(state: AgentState):
     return state.get("datasource", "vectorstore")
 
-# Helper: Supabase RPC를 직접 호출하여 similarity search 수행
-# (langchain-community의 SupabaseVectorStore.similarity_search가
-#  postgrest v2.x의 SyncRPCFilterRequestBuilder와 호환되지 않는 문제 우회)
-def _direct_similarity_search(query: str, k: int = 5, layer: str = None) -> list:
-    query_embedding = embeddings.embed_query(query)
-    embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
-    try:
-        rows = db_query(
-            "SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)",
-            (embedding_str, k, layer),
-        )
-    except Exception as e:
-        error_msg = str(e)
-        if "57014" in error_msg or "timeout" in error_msg.lower():
-            print("⚠️ [검색] statement timeout 발생. 검색을 건너뜁니다.")
-        else:
-            print(f"⚠️ [검색] RPC 호출 실패: {e}")
-        return []
-
-    return [
-        Document(
-            page_content=row.get("content", ""),
-            metadata=row.get("metadata", {}),
-        )
-        for row in rows
-        if row.get("content")
-    ]
+# Vector search — delegates to shared.similarity_search
+from shared import similarity_search as _direct_similarity_search
 
 
 # Helper: Run similarity search for a single query with layer logic
@@ -384,82 +358,8 @@ def _deduplicate_docs(docs: list) -> list:
     return unique
 
 
-# Helper: Search Knowledge Graph
-def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optional[str]:
-    """Query the knowledge graph and return formatted results, or None on failure.
-    
-    Args:
-        query: Primary search query (Korean or English).
-        num_results: Max number of nodes+edges to retrieve.
-        query_en: Optional English query for better matching on English-centric KG.
-                  If provided, searches with both queries and merges results.
-    """
-    _svc = [get_kg_service()]
-    if not _svc[0]:
-        return None
-
-    def _do_search(q):
-        _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
-        _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
-
-        for attempt in range(2):
-            try:
-                return run_kg_task(_svc[0].search, query=q, group_ids=None, num_results=num_results)
-            except Exception as e:
-                err_msg = str(e).lower()
-                is_conn_error = any(k in err_msg for k in _CONN_ERRORS)
-
-                if is_conn_error and attempt == 0:
-                    # Stale connection — reset and retry once
-                    logger.info("[KG] 유휴 연결 리셋 감지, 재연결 시도... query=%s", q[:50])
-                    from shared import reset_kg_service
-                    reset_kg_service()
-                    _svc[0] = get_kg_service()
-                    if not _svc[0]:
-                        return None
-                    continue
-
-                if is_conn_error:
-                    logger.warning("[KG] 재시도 후에도 연결 실패. query=%s", q[:50])
-                else:
-                    logger.warning("[KG] 검색 실패 (query=%s): %s", q[:50], e)
-                if any(k in err_msg for k in _RESET_KEYWORDS):
-                    from shared import reset_kg_service
-                    reset_kg_service()
-                return None
-        return None
-    
-    # If English query is provided, search with both and merge
-    all_nodes, all_edges = [], []
-    seen_nodes, seen_edges = set(), set()
-    
-    for q in [query, query_en] if query_en and query_en != query else [query]:
-        result = _do_search(q)
-        if not result:
-            continue
-        for n in result.get("nodes", []):
-            if n.get("uuid") and n["uuid"] not in seen_nodes:
-                seen_nodes.add(n["uuid"])
-                all_nodes.append(n)
-        for e in result.get("edges", []):
-            if e.get("uuid") and e["uuid"] not in seen_edges:
-                seen_edges.add(e["uuid"])
-                all_edges.append(e)
-    
-    if not all_nodes and not all_edges:
-        return None
-    
-    lines = []
-    if all_nodes:
-        lines.append("[Knowledge Graph: Entities]")
-        for n in all_nodes:
-            summary = (n.get("summary", "") or "")[:300] + ("..." if len(n.get("summary", "") or "") > 300 else "")
-            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
-    if all_edges:
-        lines.append("[Knowledge Graph: Facts/Relations]")
-        for e in all_edges:
-            lines.append(f"- {e['fact']}")
-    return "\n".join(lines)
+# KG search — delegates to shared.search_knowledge_graph
+from shared import search_knowledge_graph as _search_kg
 
 
 def _merge_kg_contexts(existing: Optional[str], new_text: Optional[str]) -> Optional[str]:
@@ -1251,17 +1151,6 @@ workflow.add_conditional_edges("step_executor", plan_progress, {
     "done": "generate",
 })
 graph = workflow.compile(checkpointer=MemorySaver())
-
-
-# ── Public API (used by telegram_tools, etc.) ────────────────────────
-def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
-    """Public wrapper for vector similarity search."""
-    return _direct_similarity_search(query, k, layer)
-
-
-def search_knowledge_graph(query: str, num_results: int = 10) -> str | None:
-    """Public wrapper for knowledge graph search."""
-    return _search_kg(query, num_results)
 
 
 # 실행 루프 (채팅 인터페이스)
