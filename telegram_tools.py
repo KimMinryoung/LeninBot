@@ -66,6 +66,22 @@ TOOLS = [
             "required": ["url"],
         },
     },
+    {
+        "name": "download_image",
+        "description": (
+            "Download an image from a URL and save it locally. "
+            "Returns the local file path, which can be passed to generate_image's reference_image parameter. "
+            "Use this when you need a reference photo for image generation."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Image URL to download."},
+                "filename": {"type": "string", "description": "Optional filename (without extension). Auto-generated if omitted."},
+            },
+            "required": ["url"],
+        },
+    },
     # ── File system tools (Hetzner VPS) ──
     {
         "name": "read_file",
@@ -176,6 +192,47 @@ async def _exec_fetch_url(url: str) -> str:
     except Exception as e:
         logger.error("fetch_url error: %s", e)
         return f"URL fetch failed: {e}"
+
+
+async def _exec_download_image(url: str, filename: str = "") -> str:
+    """Download an image from a URL and save locally."""
+    import re
+    import time
+    import mimetypes
+    from pathlib import Path
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    out_dir = Path(project_root) / "data" / "reference_images"
+
+    def _download():
+        import requests as _req
+
+        resp = _req.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+
+        content_type = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            return f"❌ Not an image (Content-Type: {content_type})"
+
+        ext = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".jpg"
+        if filename:
+            safe_name = re.sub(r"[^a-zA-Z0-9가-힣_-]+", "-", filename).strip("-")[:60]
+        else:
+            safe_name = time.strftime("%Y%m%d_%H%M%S")
+        final_name = f"{safe_name}{ext}"
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / final_name
+        path.write_bytes(resp.content)
+
+        size_kb = len(resp.content) / 1024
+        return f"✅ Downloaded: {path} ({size_kb:.0f} KB, {content_type})"
+
+    try:
+        return await asyncio.to_thread(_download)
+    except Exception as e:
+        logger.error("download_image error: %s", e)
+        return f"❌ Download failed: {e}"
 
 
 async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None) -> str:
@@ -729,6 +786,7 @@ TOOL_HANDLERS = {
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
+    "download_image": _exec_download_image,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,
     "patch_file": _exec_patch_file,
