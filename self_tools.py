@@ -683,17 +683,54 @@ TASK_CONTEXT_TOOLS = [
     },
     {
         "name": "request_continuation",
-        "description": "Create a child task to continue unfinished work. Records progress to the mission timeline and spawns a new task. Use when budget/round limit is approaching.",
+        "description": "Create a child task to continue unfinished work. Records progress to the mission timeline and spawns a new task. Use when budget/round limit is approaching. For restart recovery handoffs, next_steps must assume the restart is already complete and must not tell the child to restart again.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "progress_summary": {"type": "string", "description": "What has been accomplished so far."},
-                "next_steps": {"type": "string", "description": "What the child task should do next. Be specific."},
+                "next_steps": {"type": "string", "description": "What the child task should do next. Be specific. For restart recovery, write only post-restart verification/follow-up steps."},
+                "restart_already_completed": {"type": "boolean", "description": "Set true for restart handoff memos so the child task is explicitly told the restart already happened.", "default": false},
             },
             "required": ["progress_summary", "next_steps"],
         },
     },
 ]
+
+
+def _sanitize_continuation_next_steps(next_steps: str, *, restart_already_completed: bool = False) -> tuple[str, list[str]]:
+    """Remove restart instructions from restart-recovery handoff text.
+
+    Returns sanitized text and a list of detected forbidden phrases.
+    """
+    text = str(next_steps or "").strip()
+    if not restart_already_completed:
+        return text, []
+
+    forbidden_phrases = [
+        "systemctl restart",
+        "sudo restart",
+        "/restart",
+        "재시작 실행",
+        "재시작 후",
+        "restart leninbot-telegram",
+        "restart the service",
+        "서비스 재시작",
+    ]
+    lower_text = text.lower()
+    detected = [phrase for phrase in forbidden_phrases if phrase in lower_text or phrase in text]
+
+    sanitized_lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        lowered = line.lower()
+        if any(phrase in lowered or phrase in line for phrase in forbidden_phrases):
+            continue
+        sanitized_lines.append(raw_line)
+
+    sanitized = "\n".join(sanitized_lines).strip()
+    if not sanitized:
+        sanitized = "새 프로세스에서 서비스 로그 확인 → 실제 상태 재검증 → 이상 없으면 커밋/푸시 또는 결과 보고로 마무리"
+    return sanitized, detected
 
 
 def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission_id: int | None = None):
@@ -716,14 +753,27 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             logger.error("save_finding error (task %d): %s", task_id, e)
             return f"Failed to save finding: {e}"
 
-    async def _exec_request_continuation(progress_summary: str, next_steps: str) -> str:
+    async def _exec_request_continuation(
+        progress_summary: str,
+        next_steps: str,
+        restart_already_completed: bool = False,
+    ) -> str:
         from shared import create_task_in_db
+
+        safe_next_steps, detected_phrases = _sanitize_continuation_next_steps(
+            next_steps,
+            restart_already_completed=restart_already_completed,
+        )
 
         # 1. Record progress to mission timeline
         if mission_id:
             try:
                 from telegram_mission import add_mission_event
-                event_content = f"Progress: {progress_summary[:500]}\nNext: {next_steps[:500]}"
+                event_content = f"Progress: {progress_summary[:500]}\nNext: {safe_next_steps[:500]}"
+                if restart_already_completed:
+                    event_content += "\nRestart already completed: true"
+                if detected_phrases:
+                    event_content += f"\nSanitized forbidden restart phrases: {', '.join(detected_phrases[:5])}"
                 await asyncio.to_thread(
                     add_mission_event, mission_id, f"task#{task_id}", "decision", event_content
                 )
@@ -732,10 +782,13 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 
         # 2. Create child task (inherits mission_id via parent lookup)
         # progress_summary를 next_steps에 합쳐서 자식 태스크가 맥락을 갖도록 함
+        child_header = [f"[continuation from task #{task_id}]"]
+        if restart_already_completed:
+            child_header.append("[restart already completed by parent task]")
         child_content = (
-            f"[continuation from task #{task_id}]\n"
-            f"## 이전 진행 상황\n{progress_summary}\n\n"
-            f"## 다음 할 일\n{next_steps}"
+            "\n".join(child_header)
+            + f"\n## 이전 진행 상황\n{progress_summary}\n\n"
+            + f"## 다음 할 일\n{safe_next_steps}"
         )
         result = await asyncio.to_thread(
             create_task_in_db,
@@ -750,19 +803,29 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             # 현재 태스크를 handed_off로 마킹
             try:
                 from db import execute as db_execute
+                handoff_note = f"\n[HANDED-OFF] continued in child task #{child_id}."
+                if restart_already_completed:
+                    handoff_note += " Restart already completed by parent; child must do post-restart verification only."
+                if detected_phrases:
+                    handoff_note += f" Sanitized phrases: {', '.join(detected_phrases[:5])}."
                 await asyncio.to_thread(
                     db_execute,
                     "UPDATE telegram_tasks SET status = 'handed_off', "
                     "result = COALESCE(result, '') || %s, completed_at = NOW() "
                     "WHERE id = %s",
-                    (f"\n[HANDED-OFF] continued in child task #{child_id}.", task_id),
+                    (handoff_note, task_id),
                 )
             except Exception as e:
                 logger.warning("Failed to mark task #%d as handed_off: %s", task_id, e)
-            return (
+            status_msg = (
                 f"Child task #{child_id} created (depth={child_depth}, parent=#{task_id}). "
                 f"Current task marked as handed_off. You can now finish your current response."
             )
+            if restart_already_completed:
+                status_msg += " Restart handoff recorded as already completed by parent."
+            if detected_phrases:
+                status_msg += f" Removed forbidden restart instructions: {', '.join(detected_phrases[:5])}."
+            return status_msg
         else:
             return f"Failed to create continuation task: {result['error']}"
 

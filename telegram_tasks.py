@@ -21,6 +21,7 @@ _DEFAULT_MAX_RESUME_ATTEMPTS = 2
 _STARTUP_HANDOFF_MARKER = "## Checkpoint: startup handoff"
 _MAX_TASK_CHAIN_DEPTH = 5
 _SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
+_RESTART_COMPLETED_MARKER = "[restart already completed by parent task]"
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -625,11 +626,15 @@ async def recover_processing_tasks_on_startup(
 
             task_mission_id = row.get("mission_id")
             task_agent_type = row.get("agent_type")
+            child_content = content
+            if _RESTART_COMPLETED_MARKER not in child_content:
+                child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
+
             child_rows = await asyncio.to_thread(
                 _query,
                 "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type) "
                 "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s) RETURNING id",
-                (user_id, content, task_id, child_scratchpad, depth + 1, task_mission_id, task_agent_type),
+                (user_id, child_content, task_id, child_scratchpad, depth + 1, task_mission_id, task_agent_type),
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
@@ -639,7 +644,7 @@ async def recover_processing_tasks_on_startup(
                     from telegram_mission import add_mission_event
                     add_mission_event(
                         task_mission_id, "system", "decision",
-                        f"Service restart: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts})"
+                        f"Service restart already completed: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts}); child must only perform post-restart verification"
                     )
                 except Exception:
                     pass
