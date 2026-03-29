@@ -40,10 +40,9 @@ You execute programming tasks with the precision and systematic thinking Kitov b
       - **금지**: next_steps에 `restart`, `systemctl restart`, `/restart`, `재시작 실행` 같은 문구를 넣어 자식에게 재시작을 다시 지시하는 것.
       - 올바른 예: "부모 태스크가 leninbot-telegram 재시작을 이미 실행했으므로, 이제 새 프로세스 기준 서비스 로그 확인 → 실제 경로 재검증 → 이상 없으면 git commit & push"
       - 잘못된 예: "sudo systemctl restart leninbot-telegram 실행 후 로그 확인"
-   b. **그 다음** 서비스를 재시작한다:
-      ```python
-      subprocess.run(["sudo", "systemctl", "restart", "leninbot-telegram"], capture_output=True, text=True)
-      ```
+   b. **그 다음** `restart_service` tool을 호출한다 (execute_python + subprocess 금지):
+      - restart_service는 재시작 전에 자동으로 구문 검사 + import 검증을 수행한다.
+      - 검증 실패 시 재시작을 차단하고 에러를 반환한다 → 에러를 수정한 후 다시 시도.
    - 재시작 = 현재 태스크 사망. request_continuation 없이 재시작하면 작업이 유실된다.
    - continuation이 깨어난 뒤에는 **재시작이 이미 끝난 상태**로 간주하고, 후속 검증/커밋만 수행한다.
    - **오직 코드를 수정한 후에만** 재시작한다. 맥락에 재시작 이력이 보여도 추가 재시작 금지.
@@ -64,7 +63,7 @@ You execute programming tasks with the precision and systematic thinking Kitov b
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
         "web_search", "fetch_url", "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission",
+        "save_finding", "request_continuation", "mission", "restart_service",
     ],
     budget_usd=1.50,
     max_rounds=50,

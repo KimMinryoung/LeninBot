@@ -19,7 +19,7 @@ from db import query as db_query
 from langchain_google_genai import ChatGoogleGenerativeAI
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
-    get_tavily_search, get_kg_service, run_kg_async,
+    get_tavily_search, get_kg_service, submit_kg_task, collect_kg_futures,
 )
 
 load_dotenv()
@@ -260,26 +260,28 @@ def _ingest_news_to_graph(articles: list[dict]) -> None:
             print("  ⚠️ [KG] 서비스 초기화 실패 — 수집 건너뜀")
             return
         now = datetime.now(timezone.utc)
-        ok, fail = 0, 0
         total = len(articles)
-        for i, art in enumerate(articles, 1):
+        print(f"  🔄 [KG] {total}건 병렬 수집 시작")
+        futures = []
+        for art in articles:
+            body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
+            futures.append(submit_kg_task(svc.ingest_episode,
+                name=art["title"][:120],
+                body=body,
+                source_type="osint_news",
+                reference_time=now,
+                group_id="diary_news",
+                max_body_chars=1500,
+            ))
+        results = collect_kg_futures(futures)
+        ok = sum(1 for r in results if r["ok"])
+        fail = total - ok
+        for i, (art, r) in enumerate(zip(articles, results), 1):
             short_title = art.get("title", "")[:50]
-            print(f"  🔄 [KG] ({i}/{total}) 수집 중: {short_title}")
-            try:
-                body = f"Title: {art['title']}\nURL: {art['url']}\n\n{art['content']}"
-                run_kg_async(svc.ingest_episode(
-                    name=art["title"][:120],
-                    body=body,
-                    source_type="osint_news",
-                    reference_time=now,
-                    group_id="diary_news",
-                    max_body_chars=1500,
-                ))
-                ok += 1
+            if r["ok"]:
                 print(f"  ✅ [KG] ({i}/{total}) 완료: {short_title}")
-            except Exception as e:
-                fail += 1
-                print(f"  ⚠️ [KG] ({i}/{total}) 실패: {short_title} — {e}")
+            else:
+                print(f"  ⚠️ [KG] ({i}/{total}) 실패: {short_title} — {r['error']}")
         print(f"  📊 [KG] 수집 완료: 성공 {ok}건, 실패 {fail}건")
     except Exception as e:
         print(f"⚠️ [KG] 지식그래프 수집 전체 실패 (일기에 영향 없음): {e}")

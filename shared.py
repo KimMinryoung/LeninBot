@@ -7,6 +7,7 @@ All external imports are deferred to first use.
 import asyncio
 import logging
 import threading
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import timezone, timedelta, datetime
 import time
@@ -73,6 +74,9 @@ _kg_loop = None
 
 
 _kg_run_lock = threading.Lock()
+_kg_loop_thread = None
+_kg_loop_ready = threading.Event()
+_KG_LOOP_START_TIMEOUT = 10
 _KG_TRANSIENT_KEYWORDS = (
     "defunct connection",
     "incompletecommit",
@@ -115,23 +119,117 @@ def _kg_loop_exception_handler(loop, context):
     logger.error("[KG loop] unhandled async exception: %s", combined, exc_info=exc)
 
 
-def run_kg_async(coro):
-    """Run a coroutine on the persistent KG event loop.
+def _kg_loop_worker(loop: asyncio.AbstractEventLoop) -> None:
+    """Background worker that owns the persistent KG event loop."""
+    asyncio.set_event_loop(loop)
+    loop.set_exception_handler(_kg_loop_exception_handler)
+    _kg_loop_ready.set()
+    loop.run_forever()
 
-    Thread-safe: serialized via _kg_run_lock because asyncio event loops
-    are NOT thread-safe and concurrent run_until_complete() calls crash.
-    """
-    global _kg_loop
+
+def _ensure_kg_loop() -> asyncio.AbstractEventLoop:
+    """Create/start the dedicated KG event loop thread once and return the loop."""
+    global _kg_loop, _kg_loop_thread
     with _kg_run_lock:
-        if _kg_loop is None or _kg_loop.is_closed():
-            _kg_loop = asyncio.new_event_loop()
-            _kg_loop.set_exception_handler(_kg_loop_exception_handler)
+        if _kg_loop is not None and not _kg_loop.is_closed() and _kg_loop_thread and _kg_loop_thread.is_alive():
+            return _kg_loop
+
+        if _kg_loop is not None and not _kg_loop.is_closed():
+            try:
+                _kg_loop.call_soon_threadsafe(_kg_loop.stop)
+            except Exception:
+                pass
+            try:
+                _kg_loop.close()
+            except Exception:
+                pass
+
+        _kg_loop_ready.clear()
+        _kg_loop = asyncio.new_event_loop()
+        _kg_loop_thread = threading.Thread(
+            target=_kg_loop_worker,
+            args=(_kg_loop,),
+            daemon=True,
+            name="kg-event-loop",
+        )
+        _kg_loop_thread.start()
+
+    if not _kg_loop_ready.wait(timeout=_KG_LOOP_START_TIMEOUT):
+        raise RuntimeError("KG event loop thread failed to start")
+    return _kg_loop
+
+
+def _submit_to_kg_loop(coro) -> Future:
+    """Submit a coroutine to the KG loop and return its Future (non-blocking).
+
+    Low-level helper — prefer submit_kg_task() or run_kg_task() instead.
+    """
+    loop = _ensure_kg_loop()
+    return asyncio.run_coroutine_threadsafe(coro, loop)
+
+
+def _wait_kg_future(future: Future):
+    """Block until a KG Future resolves; mark unhealthy on transient errors."""
+    try:
+        return future.result()
+    except Exception as e:
+        if _is_transient_kg_error(e):
+            _mark_kg_unhealthy(str(e))
+        raise
+
+
+async def _run_kg_task(async_fn, *args, **kwargs):
+    """Internal KG-loop trampoline that creates and awaits the coroutine in-loop."""
+    return await async_fn(*args, **kwargs)
+
+
+def run_kg_task(async_fn, *args, **kwargs):
+    """Create and run an async callable entirely on the dedicated KG loop (blocking).
+
+    This prevents cross-event-loop contamination when the async callable uses
+    Graphiti/Neo4j objects that were initialized on the KG loop thread.
+    Blocks the calling thread until the result is ready.
+    """
+    future = _submit_to_kg_loop(_run_kg_task(async_fn, *args, **kwargs))
+    return _wait_kg_future(future)
+
+
+def submit_kg_task(async_fn, *args, **kwargs) -> Future:
+    """Submit an async callable to the KG loop and return a Future (non-blocking).
+
+    Same safety as run_kg_task (coroutine created on the KG loop), but the
+    caller can collect multiple Futures and wait on them in parallel.
+
+    Usage:
+        futures = [submit_kg_task(svc.ingest_episode, ...) for art in articles]
+        results = collect_kg_futures(futures)
+    """
+    return _submit_to_kg_loop(_run_kg_task(async_fn, *args, **kwargs))
+
+
+def collect_kg_futures(futures: list[Future], timeout: float = 120) -> list[dict]:
+    """Wait for multiple KG Futures and return results.
+
+    Returns a list of dicts: {"ok": True, "result": ...} or {"ok": False, "error": ...}.
+    Transient errors mark the KG service unhealthy.
+    """
+    results = []
+    for f in futures:
         try:
-            return _kg_loop.run_until_complete(coro)
+            results.append({"ok": True, "result": _wait_kg_future(f)})
         except Exception as e:
-            if _is_transient_kg_error(e):
-                _mark_kg_unhealthy(str(e))
-            raise
+            results.append({"ok": False, "error": str(e)})
+    return results
+
+
+# Keep run_kg_async as a thin wrapper for backward compat (internal use only)
+def run_kg_async(coro):
+    """Run a pre-built coroutine on the KG loop (blocking).
+
+    WARNING: the coroutine must be created on the KG loop to avoid cross-loop
+    errors. Prefer run_kg_task(async_fn, *args, **kwargs) for safety.
+    """
+    return _wait_kg_future(_submit_to_kg_loop(coro))
 
 
 def get_kg_service():
@@ -153,9 +251,12 @@ def get_kg_service():
         if time.monotonic() < _kg_init_cooldown:
             return None
         try:
-            from graph_memory.service import GraphMemoryService
-            svc = GraphMemoryService()
-            run_kg_async(svc.initialize())
+            def _build_service():
+                from graph_memory.service import GraphMemoryService
+                return GraphMemoryService()
+
+            svc = _build_service()
+            run_kg_task(svc.initialize)
             _kg_service = svc
             logger.info("[KG] init succeeded")
             return svc
@@ -170,18 +271,19 @@ def reset_kg_service():
 
     Call this when KG operations fail due to connection issues (e.g. AuraDB paused).
     """
-    global _kg_service, _kg_init_cooldown, _kg_loop
+    global _kg_service, _kg_init_cooldown, _kg_loop, _kg_loop_thread
     with _kg_lock:
         _kg_service = None
         _kg_init_cooldown = 0.0
     with _kg_run_lock:
-        if _kg_loop is not None and not _kg_loop.is_closed() and not _kg_loop.is_running():
+        if _kg_loop is not None and not _kg_loop.is_closed():
             try:
-                _kg_loop.close()
+                _kg_loop.call_soon_threadsafe(_kg_loop.stop)
             except Exception as e:
-                logger.debug("[KG] loop close skipped: %s", e)
-            finally:
-                _kg_loop = None
+                logger.debug("[KG] loop stop skipped: %s", e)
+            _kg_loop = None
+        _kg_loop_thread = None
+        _kg_loop_ready.clear()
     logger.info("[KG] service reset — will retry on next access")
 
 # ── KG Health Check ──────────────────────────────────────────────────
@@ -209,7 +311,7 @@ def start_kg_healthcheck(interval: int = 300) -> None:
                 logger.debug("[KG healthcheck] service is None, skipping ping")
                 continue
             try:
-                run_kg_async(svc._graphiti.driver.execute_query("RETURN 1"))
+                run_kg_task(svc._graphiti.driver.execute_query, "RETURN 1")
                 logger.debug("[KG healthcheck] ping OK")
             except Exception as e:
                 logger.warning("[KG healthcheck] ping failed — marking unhealthy: %s", e)
@@ -565,7 +667,8 @@ def add_kg_episode(
         name = f"agent-note-{ts}"
 
     try:
-        run_kg_async(svc.ingest_episode(
+        run_kg_task(
+            svc.ingest_episode,
             name=name,
             body=content.strip(),
             source_type=source_type,
@@ -573,7 +676,7 @@ def add_kg_episode(
             group_id=group_id,
             preprocess_news=False,
             max_body_chars=3000,
-        ))
+        )
         return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
     except Exception as e:
         logger.error("[shared] add_kg_episode error: %s", e)
@@ -589,40 +692,20 @@ async def add_kg_episode_async(
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
 ) -> dict:
-    """Add an episode to the Knowledge Graph (async version — for telegram bot/agents).
+    """Add an episode to the Knowledge Graph from async callers.
 
-    Directly awaits Graphiti's async ingest, avoiding run_until_complete() event loop conflicts.
+    Important: Graphiti/Neo4j objects are bound to the dedicated KG loop thread
+    created in shared.py. Async callers must therefore hop to that loop via
+    run_kg_async() in a worker thread instead of awaiting svc.ingest_episode()
+    on the caller's own event loop.
     """
-    from datetime import timezone
-
-    svc = get_kg_service()
-    if svc is None:
-        return {"status": "error", "message": "Knowledge Graph service unavailable"}
-
-    if not content or not content.strip():
-        return {"status": "error", "message": "Content cannot be empty"}
-
-    if not name:
-        ts = datetime.now(KST).strftime("%Y%m%d-%H%M%S")
-        name = f"agent-note-{ts}"
-
-    try:
-        await svc.ingest_episode(
-            name=name,
-            body=content.strip(),
-            source_type=source_type,
-            reference_time=datetime.now(timezone.utc),
-            group_id=group_id,
-            preprocess_news=False,
-            max_body_chars=3000,
-        )
-        return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
-    except Exception as e:
-        logger.error("[shared] add_kg_episode_async error: %s", e)
-        err_str = str(e).lower()
-        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
-            reset_kg_service()
-        return {"status": "error", "message": str(e)}
+    return await asyncio.to_thread(
+        add_kg_episode,
+        content,
+        name,
+        source_type,
+        group_id,
+    )
 
 
 def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:

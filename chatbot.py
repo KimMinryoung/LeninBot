@@ -26,7 +26,7 @@ from typing import Literal
 
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
-    get_kg_service, run_kg_async,
+    get_kg_service, run_kg_task,
     extract_urls, fetch_urls_as_documents,
     search_experiential_memory, set_shared_embeddings,
 )
@@ -408,7 +408,7 @@ def _search_kg(query, num_results=10, query_en: Optional[str] = None) -> Optiona
 
         for attempt in range(2):
             try:
-                return run_kg_async(_svc[0].search(query=q, group_ids=None, num_results=num_results))
+                return run_kg_task(_svc[0].search, query=q, group_ids=None, num_results=num_results)
             except Exception as e:
                 err_msg = str(e).lower()
                 is_conn_error = any(k in err_msg for k in _CONN_ERRORS)

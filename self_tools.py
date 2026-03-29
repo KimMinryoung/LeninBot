@@ -689,7 +689,7 @@ TASK_CONTEXT_TOOLS = [
             "properties": {
                 "progress_summary": {"type": "string", "description": "What has been accomplished so far."},
                 "next_steps": {"type": "string", "description": "What the child task should do next. Be specific. For restart recovery, write only post-restart verification/follow-up steps."},
-                "restart_already_completed": {"type": "boolean", "description": "Set true for restart handoff memos so the child task is explicitly told the restart already happened.", "default": false},
+                "restart_already_completed": {"type": "boolean", "description": "Set true for restart handoff memos so the child task is explicitly told the restart already happened.", "default": False},
             },
             "required": ["progress_summary", "next_steps"],
         },

@@ -584,6 +584,145 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
         return f"Web search failed: {e}"
 
 
+# ── Restart Service Tool ─────────────────────────────────────────────
+
+RESTART_SERVICE_TOOL = {
+    "name": "restart_service",
+    "description": (
+        "Safely restart a leninbot service (telegram or api). "
+        "Pre-restart validation: 1) syntax check all .py files with uncommitted changes, "
+        "2) import-level check on key entry points (telegram_bot.py, api.py). "
+        "If validation fails, restart is blocked and errors are returned. "
+        "Use this instead of execute_python + subprocess for restarts."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "enum": ["telegram", "api", "all"],
+                "description": "Which service to restart. Default: telegram.",
+            },
+        },
+        "required": [],
+    },
+}
+
+
+async def _exec_restart_service(service: str = "telegram") -> str:
+    """Safely restart service with pre-flight validation."""
+    import ast
+    import subprocess
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    if service not in ("telegram", "api", "all"):
+        return f"❌ Unknown service: {service}. Use: telegram, api, all"
+
+    # 1. Find .py files with uncommitted changes (staged + unstaged)
+    try:
+        diff_result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD", "--diff-filter=ACMR"],
+            capture_output=True, text=True, cwd=project_root, timeout=10,
+        )
+        # Also include untracked .py files that might be new
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            capture_output=True, text=True, cwd=project_root, timeout=10,
+        )
+        changed_files = set()
+        for line in (diff_result.stdout + "\n" + untracked.stdout).strip().split("\n"):
+            line = line.strip()
+            if line.endswith(".py"):
+                changed_files.add(line)
+    except Exception as e:
+        return f"❌ Failed to detect changed files: {e}"
+
+    errors = []
+
+    # 2. Syntax check all changed .py files
+    for rel_path in sorted(changed_files):
+        abs_path = os.path.join(project_root, rel_path)
+        if not os.path.isfile(abs_path):
+            continue
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                source = f.read()
+            ast.parse(source, filename=rel_path)
+        except SyntaxError as e:
+            errors.append(f"SyntaxError in {rel_path}:{e.lineno} — {e.msg}")
+
+    if errors:
+        return "❌ Restart blocked — syntax errors found:\n" + "\n".join(errors)
+
+    # 3. Import-level validation: try importing the entry points in a subprocess
+    entry_points = {
+        "telegram": "telegram_bot",
+        "api": "api",
+    }
+    targets = ["telegram", "api"] if service == "all" else [service]
+
+    for target in targets:
+        module = entry_points[target]
+        module_path = os.path.join(project_root, f"{module}.py")
+        if not os.path.isfile(module_path):
+            continue
+        try:
+            # Run a quick import check in isolated subprocess
+            check_code = (
+                f"import sys; sys.path.insert(0, {project_root!r}); "
+                f"import importlib; importlib.import_module({module!r})"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", check_code],
+                capture_output=True, text=True, timeout=30,
+                cwd=project_root,
+                env={**os.environ, "PREFLIGHT_CHECK": "1"},
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.strip()
+                # Extract the last meaningful error line
+                err_lines = [l for l in stderr.split("\n") if l.strip()]
+                last_err = err_lines[-1] if err_lines else "unknown error"
+                errors.append(f"Import check failed for {module}.py: {last_err}")
+        except subprocess.TimeoutExpired:
+            errors.append(f"Import check timed out for {module}.py (>30s)")
+        except Exception as e:
+            errors.append(f"Import check error for {module}.py: {e}")
+
+    if errors:
+        return "❌ Restart blocked — import errors found:\n" + "\n".join(errors)
+
+    # 4. All checks passed — restart
+    svc_map = {
+        "telegram": ["leninbot-telegram"],
+        "api": ["leninbot-api"],
+        "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
+    }
+    results = []
+    for svc in svc_map[service]:
+        try:
+            proc = subprocess.run(
+                ["sudo", "-n", "systemctl", "restart", svc],
+                capture_output=True, text=True, timeout=15,
+                start_new_session=True,
+            )
+            if proc.returncode == 0:
+                results.append(f"✅ {svc}: restarted")
+            else:
+                results.append(f"❌ {svc}: {proc.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            results.append(f"⏱ {svc}: timeout")
+        except Exception as e:
+            results.append(f"❌ {svc}: {e}")
+
+    checked_files = ", ".join(sorted(changed_files)[:10]) if changed_files else "(none)"
+    return (
+        f"Pre-flight checks passed (syntax + import OK, changed: {checked_files})\n"
+        + "\n".join(results)
+    )
+
+
 # ── Handler Registry ─────────────────────────────────────────────────
 TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
@@ -595,7 +734,11 @@ TOOL_HANDLERS = {
     "patch_file": _exec_patch_file,
     "list_directory": _exec_list_directory,
     "execute_python": _exec_execute_python,
+    "restart_service": _exec_restart_service,
 }
+
+# ── Restart service tool ──────────────────────────────────────────────
+TOOLS.append(RESTART_SERVICE_TOOL)
 
 # ── Self-awareness tools (shared memory access) ─────────────────────
 from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
@@ -613,12 +756,14 @@ TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 # ── Image generation tool (Replicate) ─────────────────────────────────
 GENERATE_IMAGE_TOOL = {
     "name": "generate_image",
-    "description": (
-        "Generate an image using Replicate FLUX models. "
-        "Returns prediction_id, model, final prompt, image URL, and local file path. "
-        "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art). "
-        "You design the prompt; this tool executes it."
-    ),
+        "description": (
+            "Generate an image using Replicate FLUX models. "
+            "Returns prediction_id, model, final prompt, image URL, and local file path. "
+            "Supports optional reference_image input: pass a downloaded local image path, remote URL, or data URI. "
+            "If reference_image is provided, the backend routes to a Replicate image-editing model compatible with input_image. "
+            "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art). "
+            "You design the prompt; this tool executes it."
+        ),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -633,17 +778,21 @@ GENERATE_IMAGE_TOOL = {
             },
             "aspect_ratio": {
                 "type": "string",
-                "enum": ["1:1", "16:9", "9:16", "4:3", "3:4"],
-                "description": "Output aspect ratio. Default: 1:1.",
+                "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "match_input_image"],
+                "description": "Output aspect ratio. Default: 1:1. Use match_input_image when editing from a reference photo.",
             },
             "model": {
                 "type": "string",
-                "enum": ["flux_schnell", "flux_dev"],
-                "description": "Model preset. flux_schnell (fast) or flux_dev (higher quality). Default: flux_schnell.",
+                "enum": ["flux_schnell", "flux_dev", "flux_kontext_dev"],
+                "description": "Model preset. flux_schnell (fast), flux_dev (higher quality), or flux_kontext_dev (reference-image editing). Default: flux_schnell.",
             },
             "count": {
                 "type": "integer",
                 "description": "Number of images to generate in one batch (1-4). Single API call, no rate limit concern. Default: 1.",
+            },
+            "reference_image": {
+                "type": "string",
+                "description": "Optional reference image. Prefer a downloaded local file path under the project root. Remote URL and data URI are also accepted. When set, backend uses input_image-compatible Replicate model routing.",
             },
         },
         "required": ["prompt"],
@@ -661,6 +810,7 @@ async def _exec_generate_image(
     aspect_ratio: str = "1:1",
     model: str | None = None,
     count: int = 1,
+    reference_image: str | None = None,
 ) -> str:
     import time as _time
     global _last_image_gen_time
@@ -684,6 +834,7 @@ async def _exec_generate_image(
             aspect_ratio=aspect_ratio,
             num_outputs=count,
             download=True,
+            reference_image=reference_image,
         )
         _last_image_gen_time = _time.monotonic()
         urls = result.get("image_urls", [])
@@ -695,6 +846,9 @@ async def _exec_generate_image(
             f"  style: {style}",
             f"  final_prompt: {result.get('prompt', '')[:300]}",
         ]
+        if reference_image:
+            lines.append(f"  reference_image: {result.get('reference_image')}")
+            lines.append(f"  reference_image_source: {result.get('reference_image_source')}")
         for i, url in enumerate(urls):
             lp = local_paths[i] if i < len(local_paths) else "N/A"
             lines.append(f"  [{i+1}] url: {url}")
