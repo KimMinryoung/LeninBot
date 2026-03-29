@@ -139,6 +139,11 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS metadata JSONB")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) DEFAULT 'pending'")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_details TEXT")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_attempts INTEGER DEFAULT 0")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS last_verification_at TIMESTAMPTZ")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
         ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
@@ -1014,9 +1019,23 @@ async def bot_main():
             chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
 
-        def _on_task_complete(task_id: int, status: str, summary: str):
+        def _on_task_complete(
+            task_id: int,
+            status: str,
+            summary: str,
+            *,
+            verification_status: str = "pending",
+            verification_summary: str = "",
+            retry_result: dict | None = None,
+        ):
             icon = "✅" if status == "done" else "❌"
-            _add_system_alert(f"{icon} 태스크 #{task_id} {status}: {summary[:200]}")
+            verify_icon = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(verification_status, "⏳")
+            alert = f"{icon} 태스크 #{task_id} {status}: {summary[:200]} | {verify_icon} 검증 {verification_status}"
+            if verification_summary:
+                alert += f" — {verification_summary[:160]}"
+            if retry_result and retry_result.get("status") == "redelegated":
+                alert += f" | 재시도 #{retry_result.get('task_id')}"
+            _add_system_alert(alert)
 
         await process_task(
             b, task,

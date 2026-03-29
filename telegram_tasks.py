@@ -7,6 +7,7 @@ import os
 import json
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from aiogram import Bot
@@ -161,6 +162,166 @@ def _append_task_scratchpad(task_id: int, note: str) -> None:
     if len(new_pad) > _SCRATCHPAD_MAX_CHARS:
         new_pad = new_pad[-_SCRATCHPAD_MAX_CHARS:]
     _execute("UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s", (new_pad, task_id))
+
+
+def _normalize_verification_policy(task: dict) -> dict | None:
+    metadata = task.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = None
+    if not isinstance(metadata, dict):
+        return None
+    policy = metadata.get("verification")
+    if not isinstance(policy, dict):
+        return None
+    checks = []
+    for check in policy.get("checks") or []:
+        if check in {"task_report", "url_access", "server_logs"} and check not in checks:
+            checks.append(check)
+    urls = [str(url).strip() for url in (policy.get("urls") or []) if str(url).strip()]
+    retry_limit = policy.get("retry_limit", 1)
+    try:
+        retry_limit = max(0, min(3, int(retry_limit)))
+    except Exception:
+        retry_limit = 1
+    required = policy.get("required", True)
+    if isinstance(required, str):
+        required = required.lower() not in {"false", "0", "no"}
+    log_service = policy.get("log_service")
+    if log_service not in {"telegram", "api", "nginx", None}:
+        log_service = None
+    log_grep = str(policy.get("log_grep") or "").strip() or None
+    if urls and "url_access" not in checks:
+        checks.append("url_access")
+    if log_service and "server_logs" not in checks:
+        checks.append("server_logs")
+    if not checks:
+        checks = ["task_report"]
+    return {
+        "required": bool(required),
+        "checks": checks,
+        "urls": urls,
+        "log_service": log_service,
+        "log_grep": log_grep,
+        "retry_limit": retry_limit,
+    }
+
+
+async def _fetch_url_status(url: str) -> tuple[bool, str]:
+    def _check() -> tuple[bool, str]:
+        import requests
+        try:
+            resp = requests.get(url, timeout=20, allow_redirects=True, headers={"User-Agent": "Cyber-Lenin/verification"})
+            return resp.status_code < 400, f"{url} -> HTTP {resp.status_code}"
+        except Exception as e:
+            return False, f"{url} -> ERROR {e}"
+    return await asyncio.to_thread(_check)
+
+
+async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
+    policy = _normalize_verification_policy(task)
+    task_id = task["id"]
+    if not policy or not policy.get("required", True):
+        details = "No verification policy set; marked passed by default."
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE telegram_tasks SET verification_status = 'passed', verification_details = %s, last_verification_at = NOW() WHERE id = %s",
+            (details, task_id),
+        )
+        return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0}
+
+    detail_lines = []
+    passed = True
+
+    if "task_report" in policy["checks"]:
+        summary = _extract_summary(report, 400)
+        if report and summary:
+            detail_lines.append(f"task_report: ok — summary extracted ({summary[:200]})")
+        else:
+            passed = False
+            detail_lines.append("task_report: failed — empty report or missing summary")
+
+    if "url_access" in policy["checks"]:
+        for url in policy.get("urls", []):
+            ok, msg = await _fetch_url_status(url)
+            detail_lines.append(f"url_access: {msg}")
+            if not ok:
+                passed = False
+
+    if "server_logs" in policy["checks"]:
+        service = policy.get("log_service")
+        grep = policy.get("log_grep")
+        if not service:
+            passed = False
+            detail_lines.append("server_logs: failed — log_service missing")
+        else:
+            try:
+                from shared import fetch_server_logs
+                log_text = await asyncio.to_thread(fetch_server_logs, service, grep=grep, limit=80)
+                lowered = (log_text or "").lower()
+                err_hits = [line.strip() for line in (log_text or "").splitlines() if re.search(r"\b(error|traceback|exception|fatal)\b", line, re.I)]
+                if err_hits:
+                    passed = False
+                    detail_lines.append(f"server_logs: failed — suspicious lines found ({len(err_hits)})")
+                    detail_lines.extend(f"  {line[:240]}" for line in err_hits[:3])
+                elif lowered.strip():
+                    detail_lines.append(f"server_logs: ok — checked {service}" + (f" grep={grep}" if grep else ""))
+                else:
+                    detail_lines.append(f"server_logs: ok — no matching lines for {service}" + (f" grep={grep}" if grep else ""))
+            except Exception as e:
+                passed = False
+                detail_lines.append(f"server_logs: failed — {e}")
+
+    status = "passed" if passed else "failed"
+    details = "\n".join(detail_lines)[:4000]
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET verification_status = %s, verification_details = %s, last_verification_at = NOW(), verification_attempts = COALESCE(verification_attempts, 0) + 1 WHERE id = %s",
+        (status, details, task_id),
+    )
+    return {"status": status, "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1)}
+
+
+async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, verification: dict) -> dict | None:
+    if verification.get("status") != "failed":
+        return None
+    policy = verification.get("policy") or {}
+    retry_limit = verification.get("retry_limit", 1)
+    task_id = task["id"]
+    row = await asyncio.to_thread(
+        _query_one,
+        "SELECT verification_attempts, agent_type, content, result, mission_id FROM telegram_tasks WHERE id = %s",
+        (task_id,),
+    )
+    attempts = int((row or {}).get("verification_attempts") or 0)
+    if attempts > retry_limit:
+        return {"status": "limit_reached", "message": f"verification retry limit reached ({retry_limit})"}
+    agent_type = (row or {}).get("agent_type") or task.get("agent_type")
+    if not agent_type:
+        return {"status": "skipped", "message": "missing agent_type for redelegation"}
+
+    from shared import create_task_in_db
+    retry_instruction = (
+        f"[AUTO-RETRY after verification failure for task #{task_id}]\n"
+        f"Original task:\n{(row or {}).get('content') or task.get('content') or ''}\n\n"
+        f"Verification failed with details:\n{verification.get('details') or ''}\n\n"
+        "Fix the problem, verify the relevant endpoint/log condition in your report, and summarize what changed."
+    )
+    child = await asyncio.to_thread(
+        create_task_in_db,
+        retry_instruction,
+        0,
+        "high",
+        parent_task_id=task_id,
+        mission_id=(row or {}).get("mission_id"),
+        agent_type=agent_type,
+        metadata=task.get("metadata"),
+    )
+    if child.get("status") != "ok":
+        return {"status": "error", "message": child.get("error", "failed to create retry task")}
+    return {"status": "redelegated", "task_id": child.get("task_id"), "agent_type": agent_type}
 
 
 # ── Process Task ─────────────────────────────────────────────────────
@@ -428,7 +589,7 @@ async def process_task(
             # Save full report to DB
             await asyncio.to_thread(
                 _execute,
-                "UPDATE telegram_tasks SET status = 'done', result = %s, "
+                "UPDATE telegram_tasks SET status = 'done', result = %s, verification_status = 'pending', "
                 "completed_at = NOW() WHERE id = %s",
                 (report, task_id),
             )
@@ -453,6 +614,37 @@ async def process_task(
             else:
                 await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
+            verification = await _run_verification(bot, task, report)
+            verification_status = verification.get("status", "pending")
+            verification_details = verification.get("details", "")
+            retry_result = None
+            if verification_status == "failed":
+                retry_result = await _maybe_redelegate_after_verification_failure(bot, task, verification)
+
+            verification_icon = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(verification_status, "⏳")
+            verification_caption = (
+                f"{verification_icon} 태스크 [{task_id}] 검증 {verification_status}\n\n"
+                f"{verification_details[:700] or 'verification details unavailable'}"
+            )
+            retry_note = ""
+            if retry_result:
+                if retry_result.get("status") == "redelegated":
+                    retry_note = f"\n\n↪️ 자동 재시도 태스크 #{retry_result.get('task_id')} 생성"
+                else:
+                    retry_note = f"\n\nℹ️ 자동 재시도 상태: {retry_result.get('message') or retry_result.get('status')}"
+            verification_caption = (verification_caption + retry_note)[:1000]
+            if is_self_generated:
+                for uid in allowed_user_ids:
+                    try:
+                        await bot.send_message(chat_id=uid, text=verification_caption)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    await bot.send_message(chat_id=user_id, text=verification_caption)
+                except Exception:
+                    pass
+
             # Visualizer: auto-send generated images as photos
             if task.get("agent_type") == "visualizer":
                 try:
@@ -474,7 +666,16 @@ async def process_task(
             if on_complete:
                 try:
                     agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
-                    on_complete(task_id, "done", f"{agent_label} {summary}")
+                    cb_result = on_complete(
+                        task_id,
+                        "done",
+                        f"{agent_label} {summary}",
+                        verification_status=verification_status,
+                        verification_summary=verification_details[:300] if verification_details else verification_status,
+                        retry_result=retry_result,
+                    )
+                    if asyncio.iscoroutine(cb_result):
+                        await cb_result
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)
 
@@ -511,9 +712,9 @@ async def process_task(
             )
             await asyncio.to_thread(
                 _execute,
-                "UPDATE telegram_tasks SET status = 'failed', result = %s, "
-                "completed_at = NOW() WHERE id = %s",
-                (str(e), task_id),
+                "UPDATE telegram_tasks SET status = 'failed', result = %s, verification_status = 'failed', verification_details = %s, "
+                "completed_at = NOW(), last_verification_at = NOW() WHERE id = %s",
+                (str(e), f"task execution failed before verification: {str(e)[:1000]}", task_id),
             )
             error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
             if is_self_generated:
@@ -524,10 +725,19 @@ async def process_task(
             # Notify orchestrator of failure
             if on_complete:
                 try:
-                    on_complete(task_id, "failed", str(e)[:300])
+                    cb_result = on_complete(
+                        task_id,
+                        "failed",
+                        str(e)[:200],
+                        verification_status="failed",
+                        verification_summary=f"task execution failed before verification: {str(e)[:200]}",
+                        retry_result=None,
+                    )
+                    if asyncio.iscoroutine(cb_result):
+                        await cb_result
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)
-
+            return
 
 async def recover_processing_tasks_on_startup(
     stale_minutes: int = 60,
@@ -790,7 +1000,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type",
+                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type, metadata, verification_status, verification_attempts",
             )
             if task:
                 if runtime_state is not None:

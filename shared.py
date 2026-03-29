@@ -483,6 +483,7 @@ def create_task_in_db(
     parent_task_id: int | None = None,
     mission_id: int | None = None,
     agent_type: str | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     """Insert a task into telegram_tasks for background processing.
 
@@ -495,6 +496,7 @@ def create_task_in_db(
                      inherits parent's mission_id.
         agent_type: Specialist agent to execute this task (e.g. 'programmer', 'analyst').
                     If None and parent exists, inherits parent's agent_type.
+        metadata: Optional JSON-serializable task metadata persisted on telegram_tasks.
 
     Returns dict with 'status' and 'task_id' or 'error'.
     """
@@ -508,7 +510,7 @@ def create_task_in_db(
     if parent_task_id is not None:
         try:
             parent_rows = db_query(
-                "SELECT depth, mission_id, agent_type FROM telegram_tasks WHERE id = %s", (parent_task_id,)
+                "SELECT depth, mission_id, agent_type, metadata FROM telegram_tasks WHERE id = %s", (parent_task_id,)
             )
             if not parent_rows:
                 return {"status": "error", "error": f"Parent task {parent_task_id} not found"}
@@ -521,15 +523,18 @@ def create_task_in_db(
             # Inherit agent_type from parent if not explicitly provided
             if agent_type is None:
                 agent_type = parent_rows[0].get("agent_type")
+            if metadata is None:
+                metadata = parent_rows[0].get("metadata")
         except Exception as e:
             logger.error("[shared] parent depth lookup error: %s", e)
             return {"status": "error", "error": str(e)}
 
     try:
+        metadata_json = json.dumps(metadata) if metadata is not None else None
         rows = db_query(
-            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, tagged_content, parent_task_id, depth, mission_id, agent_type),
+            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type, metadata) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, tagged_content, parent_task_id, depth, mission_id, agent_type, metadata_json),
         )
         task_id = rows[0]["id"] if rows else "?"
         logger.info("[shared] Task created: id=%s, priority=%s, depth=%d, parent=%s, mission=%s, agent=%s",
