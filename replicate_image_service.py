@@ -9,7 +9,9 @@ MVP goals:
 """
 
 import asyncio
+import base64
 import logging
+import mimetypes
 import os
 import re
 import time
@@ -51,6 +53,13 @@ MODEL_PRESETS: dict[str, dict[str, Any]] = {
         "model": "black-forest-labs/flux-dev",
         "input": {
             "num_outputs": 1,
+            "output_format": "png",
+            "aspect_ratio": "1:1",
+        },
+    },
+    "flux_kontext_dev": {
+        "model": "black-forest-labs/flux-kontext-dev",
+        "input": {
             "output_format": "png",
             "aspect_ratio": "1:1",
         },
@@ -356,6 +365,41 @@ def download_image(url: str, prompt: str, *, output_dir: Path | None = None) -> 
     return str(path)
 
 
+def _guess_mime_type(path: Path) -> str:
+    mime_type, _ = mimetypes.guess_type(str(path))
+    return mime_type or "application/octet-stream"
+
+
+def _encode_file_to_data_uri(path: str | Path) -> str:
+    file_path = Path(path)
+    mime_type = _guess_mime_type(file_path)
+    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def prepare_reference_image(reference_image: str) -> tuple[str, str]:
+    """Normalize a local path / remote URL / data URI into a Replicate-safe input string.
+
+    Returns (normalized_value, source_kind) where source_kind is one of
+    local_path, remote_url, data_uri.
+    """
+    value = str(reference_image or "").strip()
+    if not value:
+        raise ValueError("reference_image is empty")
+    if value.startswith("data:"):
+        return value, "data_uri"
+    if re.match(r"^https?://", value, re.IGNORECASE):
+        return value, "remote_url"
+
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path(PROJECT_ROOT) / path
+    path = path.resolve()
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Reference image not found: {path}")
+    return _encode_file_to_data_uri(path), "local_path"
+
+
 async def generate_image(
     prompt: str,
     *,
@@ -365,20 +409,37 @@ async def generate_image(
     num_outputs: int = 1,
     download: bool = True,
     extra_input: dict[str, Any] | None = None,
+    reference_image: str | None = None,
 ) -> dict[str, Any]:
     if not is_replicate_configured():
         raise RuntimeError("REPLICATE_API_TOKEN is missing")
 
     num_outputs = max(1, min(4, num_outputs))
     merged_extra = dict(extra_input or {})
-    merged_extra["num_outputs"] = num_outputs
+    resolved_model = model or REPLICATE_DEFAULT_MODEL
+    reference_source: str | None = None
+
+    if reference_image:
+        normalized_reference, reference_source = prepare_reference_image(reference_image)
+        merged_extra["input_image"] = normalized_reference
+        if model in {None, "flux_schnell", "flux_dev"}:
+            resolved_model = "flux_kontext_dev"
+        aspect_ratio = "match_input_image"
+    else:
+        merged_extra["num_outputs"] = num_outputs
 
     final_prompt = build_soviet_prompt(prompt, style=style, aspect_ratio=aspect_ratio)
-    logger.info("[replicate] create prediction model=%s style=%s num_outputs=%d", model or REPLICATE_DEFAULT_MODEL, style, num_outputs)
+    logger.info(
+        "[replicate] create prediction model=%s style=%s num_outputs=%d reference=%s",
+        resolved_model,
+        style,
+        num_outputs,
+        bool(reference_image),
+    )
     prediction = await asyncio.to_thread(
         create_prediction,
         final_prompt,
-        model=model,
+        model=resolved_model,
         aspect_ratio=aspect_ratio,
         extra_input=merged_extra,
     )
@@ -418,11 +479,13 @@ async def generate_image(
 
     return {
         "prediction_id": prediction_id,
-        "model": completed.get("model") or model or REPLICATE_DEFAULT_MODEL,
+        "model": completed.get("model") or resolved_model,
         "prompt": final_prompt,
         "status": completed.get("status"),
         "image_urls": urls,
         "local_path": local_paths[0] if local_paths else None,
         "local_paths": local_paths,
+        "reference_image": reference_image,
+        "reference_image_source": reference_source,
         "raw": completed,
     }

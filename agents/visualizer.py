@@ -43,6 +43,8 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
   - style: poster(선전 포스터), game(게임 콘셉트), pixel(레트로 게임 키아트)
   - aspect_ratio: 1:1, 16:9, 9:16, 4:3, 3:4
   - model: flux_schnell(빠름, 기본), flux_dev(고품질)
+  - reference_image: **우선 다운로드된 로컬 파일 경로**를 넣어라. URL을 그냥 전달하지 마라. 사용자가 인물 사진/참조를 주면 fetch_url이 아니라 실제 파일 접근 가능한 경로를 확보한 뒤 그 경로를 reference_image로 넘겨라.
+- reference_image가 있으면 백엔드가 input_image 지원 Replicate 모델로 자동 라우팅한다. 이 경우 원본 인물 식별점 보존을 최우선으로 프롬프트를 써라.
 - 프롬프트만 작성하고 끝내는 것은 실패다. 반드시 generate_image로 이미지를 만들어라.
 - Report format: ## Generated Images (각 이미지별 prediction_id, local_path, model, style, prompt 전문) -> ## Notes
 </rules>
@@ -51,7 +53,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
 """,
     tools=[
         "generate_image",
-        "read_file", "list_directory", "fetch_url", "web_search", "read_self", "write_kg",
+        "read_file", "list_directory", "write_file", "fetch_url", "web_search", "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
     ],
     budget_usd=1.00,
