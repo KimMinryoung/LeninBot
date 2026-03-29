@@ -41,7 +41,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │  │ telegram_bot.py   │    │ uvicorn :8000    │                         │
 │  │                   │    │                  │                         │
 │  │ aiogram 3.x       │    │ chatbot.py       │                         │
-│  │ Claude Sonnet 4.6 │    │ (LangGraph RAG)  │                         │
+│  │ Claude/GPT 교체가능 │    │ (LangGraph RAG)  │                         │
 │  │ 에이전트 태스크큐    │    │ Gemini 3.1 FL    │                         │
 │  │ 도구 13+개         │    │ 9-node 워크플로우   │                         │
 │  └──────────────────┘    └──────────────────┘                         │
@@ -104,7 +104,19 @@ deploy.sh가 재시작하는 것:
 
 ## Telegram Agent System (CLAW Architecture)
 
-### Orchestrator (Claude Sonnet 4.6)
+### LLM Provider (런타임 교체 가능)
+
+`/provider` 명령으로 Claude ↔ OpenAI 실시간 전환. 시스템 프롬프트에 `<current-model>` 태그로 현재 모델 정보 자동 주입 — 에이전트가 자신의 모델을 인지.
+
+| Tier | Claude | OpenAI |
+|------|--------|--------|
+| high | Claude Opus 4.6 | GPT-5.4 |
+| medium | Claude Sonnet 4.6 | GPT-5.4-mini |
+| low | Claude Haiku 4.5 | GPT-5.4-nano |
+
+`bot_config.py`에서 관리. chat은 medium tier, task는 에이전트별 budget/tier 설정. `/fallback`으로 medium ↔ low 토글.
+
+### Orchestrator
 사용자 메시지를 받아 의도를 파악하고, 필요 시 전문 에이전트에 `delegate` tool로 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임.
 
 ### Specialist Agents
