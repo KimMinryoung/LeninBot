@@ -11,6 +11,7 @@ import asyncio
 import logging
 import base64
 from datetime import datetime
+from urllib.parse import quote_plus
 
 from aiogram import F, Router
 from aiogram.types import (
@@ -51,6 +52,14 @@ _HELP_TEXT = """\
 /status — 시스템 대시보드 (태스크·에러·KG)
 /status\\_auto — 자율 생성 태스크 확인
 /report <id> — 태스크 리포트 파일 재전송
+
+*이메일 브리지*
+/email\\_inbox — 최근 수신/초안 이메일 조회
+/email\\_poll — IMAP 받은편지함 즉시 폴링
+/email\\_routes — 분류/전달 대기 수신 메일 조회
+/email\\_deliver <inbound_id> \\[메모] — 승인된 수신 메일을 내부 입력 대상으로 표시
+/email\\_draft <inbound_id> | <답변> — 승인 대기 초안 생성
+/email\\_approve <draft_id> \\[send|draft|reject] \\[메모] — 발신 승인/초안저장/거부
 
 *이미지*
 /image <프롬프트> — Replicate로 소련풍 게임/포스터 이미지 생성
@@ -664,6 +673,213 @@ async def cmd_status_auto(message: Message):
         preview = r["content"][:60]
         lines.append(f"{icon} [{r['id']}] {preview}\n   상태: {r['status']} | {ts}")
     await message.answer("\n\n".join(lines))
+
+
+async def cmd_email_inbox(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    rows = await asyncio.to_thread(
+        _query,
+        """
+        SELECT id, direction, status, sender_email, recipient_emails, subject,
+               LEFT(COALESCE(text_body, html_body, ''), 160) AS preview,
+               metadata->'classification' AS classification,
+               metadata->>'delivery_status' AS delivery_status,
+               created_at, received_at
+        FROM email_messages
+        ORDER BY COALESCE(received_at, created_at) DESC
+        LIMIT 10
+        """,
+    )
+    if not rows:
+        await message.answer("이메일 기록이 없다. 먼저 /email_poll 또는 API /email/poll을 호출해라.")
+        return
+    lines = ["📨 *이메일 브리지 최근 기록*\n"]
+    for row in rows:
+        ts = (row.get("received_at") or row.get("created_at"))
+        ts_str = ts.strftime("%m/%d %H:%M") if ts else "-"
+        peer = row.get("sender_email") if row.get("direction") == "inbound" else ", ".join(row.get("recipient_emails") or [])
+        classification = row.get("classification") or {}
+        route = classification.get("route") if isinstance(classification, dict) else None
+        delivery = row.get("delivery_status") or "-"
+        lines.append(
+            f"`[{row['id']}]` {row['direction']} / {row['status']} / {ts_str}\n"
+            f"제목: {row.get('subject') or '(no subject)'}\n"
+            f"상대: {peer or '-'}\n"
+            f"route: {route or '-'} / delivery: {delivery}\n"
+            f"미리보기: {(row.get('preview') or '').strip()[:120]}"
+        )
+    for chunk in _ctx["split_message"]("\n\n".join(lines)):
+        await message.answer(chunk, parse_mode="Markdown")
+
+
+async def cmd_email_poll(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    await message.answer("📥 IMAP 받은편지함을 폴링한다...")
+    try:
+        from email_bridge import run_polling_cycle
+        result = await asyncio.to_thread(run_polling_cycle, 10)
+        processed = result.get("processed") or []
+    except Exception as e:
+        logger.error("email poll failed: %s", e)
+        await message.answer(f"이메일 폴링 실패: {e}")
+        return
+    if not processed:
+        await message.answer("새 메일이 없거나 브리지가 아직 설정되지 않았다.")
+        return
+    lines = [
+        f"✅ 폴링 완료 / 신규 {result.get('new_count', 0)}건 / 중복 {result.get('duplicate_count', 0)}건",
+        f"주기 설정: {result.get('poll_interval_seconds', '-') }초",
+    ]
+    for item in processed[:10]:
+        route = ((item.get("classification") or {}).get("route") if isinstance(item.get("classification"), dict) else None) or "-"
+        lines.append(
+            f"- [{item.get('stored_message_id')}] {item.get('subject') or '(no subject)'} / {item.get('sender') or '-'} / {route} / {item.get('processing_status') or '-'}"
+        )
+    await message.answer("\n".join(lines))
+
+
+async def cmd_email_routes(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    try:
+        from email_bridge import list_inbound_messages
+        rows = await asyncio.to_thread(list_inbound_messages, 10)
+    except Exception as e:
+        logger.error("email routes query failed: %s", e)
+        await message.answer(f"분류 조회 실패: {e}")
+        return
+    if not rows:
+        await message.answer("분류된 수신 메일이 없다.")
+        return
+    lines = ["🧭 *수신 메일 분류/전달 대기*\n"]
+    for row in rows:
+        classification = row.get("classification") or {}
+        route = classification.get("route") if isinstance(classification, dict) else "-"
+        auto_forward = classification.get("auto_forward_allowed") if isinstance(classification, dict) else False
+        labels = ", ".join(classification.get("labels") or []) if isinstance(classification, dict) else ""
+        delivery_status = row.get("delivery_status") or "pending_review"
+        ts = (row.get("received_at") or row.get("created_at"))
+        ts_str = ts.strftime("%m/%d %H:%M") if ts else "-"
+        lines.append(
+            f"`[{row['id']}]` {ts_str} / {route} / {delivery_status}\n"
+            f"from: {row.get('sender_email') or '-'}\n"
+            f"subject: {row.get('subject') or '(no subject)'}\n"
+            f"auto_forward_candidate: {'yes' if auto_forward else 'no'}\n"
+            f"labels: {labels or '-'}\n"
+            f"preview: {(row.get('preview') or '').strip()[:140]}"
+        )
+    for chunk in _ctx["split_message"]("\n\n".join(lines)):
+        await message.answer(chunk, parse_mode="Markdown")
+
+
+async def cmd_email_deliver(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/email_deliver").strip()
+    if not arg:
+        await message.answer("사용법: /email_deliver <inbound_id> [메모]")
+        return
+    parts = arg.split(maxsplit=1)
+    try:
+        inbound_id = int(parts[0])
+    except ValueError:
+        await message.answer("inbound_id는 숫자여야 한다.")
+        return
+    note = parts[1] if len(parts) > 1 else ""
+    try:
+        from email_bridge import mark_email_for_internal_delivery
+        result = await asyncio.to_thread(
+            mark_email_for_internal_delivery,
+            inbound_id,
+            approved_by=message.from_user.id,
+            note=note,
+        )
+    except Exception as e:
+        logger.error("email internal delivery approval failed: %s", e)
+        await message.answer(f"내부 입력 승인 실패: {e}")
+        return
+    classification = result.get("classification") or {}
+    await message.answer(
+        f"✅ 내부 입력 승인 완료\n"
+        f"message_id: `{result.get('message_id')}`\n"
+        f"status: `{result.get('status')}`\n"
+        f"route: `{classification.get('route', '-')}`",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_email_draft(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/email_draft").strip()
+    if not arg or "|" not in arg:
+        await message.answer("사용법: /email_draft <inbound_id> | <답변 초안>")
+        return
+    id_part, draft_body = [part.strip() for part in arg.split("|", 1)]
+    try:
+        inbound_id = int(id_part)
+    except ValueError:
+        await message.answer("inbound_id는 숫자여야 한다.")
+        return
+    try:
+        from email_bridge import queue_outbound_reply
+        draft = await asyncio.to_thread(
+            queue_outbound_reply,
+            inbound_id,
+            draft_body,
+            approver_user_id=message.from_user.id,
+            metadata={"created_via": "telegram_command"},
+        )
+    except Exception as e:
+        logger.error("email draft creation failed: %s", e)
+        await message.answer(f"초안 생성 실패: {e}")
+        return
+    approval_link = ""
+    base_url = _ctx.get("email_approval_base_url", "")
+    if base_url:
+        approval_link = f"\n승인 확인: {base_url}/email/messages/{draft['id']}"
+    await message.answer(
+        f"📝 승인 대기 초안 생성\n"
+        f"draft_id: `{draft['id']}`\n"
+        f"status: `{draft['status']}`{approval_link}",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_email_approve(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/email_approve").strip()
+    parts = arg.split(maxsplit=2)
+    if len(parts) < 2:
+        await message.answer("사용법: /email_approve <draft_id> [send|draft|reject] [메모]")
+        return
+    try:
+        draft_id = int(parts[0])
+    except ValueError:
+        await message.answer("draft_id는 숫자여야 한다.")
+        return
+    mode = parts[1].lower()
+    note = parts[2] if len(parts) > 2 else ""
+    try:
+        from email_bridge import reject_outbound_email, send_outbound_email
+        if mode == "send":
+            result = await asyncio.to_thread(send_outbound_email, draft_id, True, note)
+        elif mode == "draft":
+            result = await asyncio.to_thread(send_outbound_email, draft_id, False, note)
+        elif mode == "reject":
+            await asyncio.to_thread(reject_outbound_email, draft_id, note)
+            result = {"status": "rejected"}
+        else:
+            await message.answer("모드는 send, draft, reject 중 하나여야 한다.")
+            return
+    except Exception as e:
+        logger.error("email approval action failed: %s", e)
+        await message.answer(f"이메일 승인 처리 실패: {e}")
+        return
+    await message.answer(f"✅ 이메일 처리 완료: `{result.get('status', 'ok')}`", parse_mode="Markdown")
 
 
 async def cmd_schedule(message: Message):
@@ -1560,6 +1776,10 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_kg, Command("kg"))
     router.message.register(cmd_report, Command("report"))
     router.message.register(cmd_status_auto, Command("status_auto"))
+    router.message.register(cmd_email_inbox, Command("email_inbox"))
+    router.message.register(cmd_email_poll, Command("email_poll"))
+    router.message.register(cmd_email_draft, Command("email_draft"))
+    router.message.register(cmd_email_approve, Command("email_approve"))
     router.message.register(cmd_schedule, Command("schedule"))
     router.message.register(cmd_schedules, Command("schedules"))
     router.message.register(cmd_unschedule, Command("unschedule"))

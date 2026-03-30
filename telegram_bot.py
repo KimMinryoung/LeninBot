@@ -11,6 +11,7 @@ import json
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from shared import KST, CORE_IDENTITY
 from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
@@ -81,6 +82,11 @@ ALLOWED_USER_IDS: set[int] = {
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
     if uid.strip()
 }
+EMAIL_BRIDGE_ENABLED = os.getenv("EMAIL_BRIDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS", "120")))
+EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
+EMAIL_DEFAULT_APPROVER_USER_ID = int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0")
+EMAIL_LOG_DIR = Path(os.getenv("EMAIL_LOG_DIR", str(Path(__file__).resolve().parent / "logs" / "email_bridge")))
 
 def _ensure_table():
     """Create telegram_tasks and telegram_chat_history tables if not exists."""
@@ -187,6 +193,81 @@ def _ensure_table():
         CREATE INDEX IF NOT EXISTS idx_mission_events_timeline
         ON telegram_mission_events(mission_id, created_at)
     """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS email_threads (
+            id SERIAL PRIMARY KEY,
+            provider VARCHAR(50) NOT NULL DEFAULT 'imap_smtp',
+            external_thread_id VARCHAR(255),
+            subject TEXT,
+            participants JSONB NOT NULL DEFAULT '[]'::jsonb,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(provider, external_thread_id)
+        )
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS email_messages (
+            id SERIAL PRIMARY KEY,
+            thread_id INTEGER REFERENCES email_threads(id) ON DELETE SET NULL,
+            provider VARCHAR(50) NOT NULL DEFAULT 'imap_smtp',
+            direction VARCHAR(20) NOT NULL,
+            status VARCHAR(30) NOT NULL DEFAULT 'received',
+            mailbox VARCHAR(50),
+            external_message_id VARCHAR(255),
+            in_reply_to VARCHAR(255),
+            sender_email TEXT,
+            sender_name TEXT,
+            recipient_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
+            cc_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
+            bcc_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
+            subject TEXT,
+            text_body TEXT,
+            html_body TEXT,
+            raw_headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+            attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            received_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            approved_by BIGINT,
+            approved_at TIMESTAMPTZ,
+            approval_note TEXT,
+            sent_at TIMESTAMPTZ,
+            draft_saved_at TIMESTAMPTZ,
+            audit_log JSONB NOT NULL DEFAULT '[]'::jsonb,
+            UNIQUE(provider, external_message_id)
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_email_messages_status_created
+        ON email_messages(status, created_at DESC)
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_email_messages_thread_created
+        ON email_messages(thread_id, created_at DESC)
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_email_messages_provider_imap_uid
+        ON email_messages(provider, ((metadata->>'imap_uid')))
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS email_bridge_events (
+            id SERIAL PRIMARY KEY,
+            message_id INTEGER REFERENCES email_messages(id) ON DELETE CASCADE,
+            event_type VARCHAR(50) NOT NULL,
+            detail TEXT,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS email_bridge_state (
+            provider VARCHAR(50) PRIMARY KEY,
+            state JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
@@ -206,6 +287,30 @@ def _log_event(
         )
     except Exception as _le:
         logger.warning("_log_event DB write failed: %s", _le)
+
+
+def _append_email_audit_entry(message_id: int, event: str, actor: str, metadata: dict | None = None) -> None:
+    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+    _execute(
+        """
+        UPDATE email_messages
+        SET audit_log = COALESCE(audit_log, '[]'::jsonb) || jsonb_build_array(
+            jsonb_build_object(
+                'at', NOW(),
+                'event', %s,
+                'actor', %s,
+                'metadata', %s::jsonb
+            )
+        ),
+        updated_at = NOW()
+        WHERE id = %s
+        """,
+        (event[:50], actor[:100], metadata_json, message_id),
+    )
+    _execute(
+        "INSERT INTO email_bridge_events (message_id, event_type, detail, metadata) VALUES (%s, %s, %s, %s::jsonb)",
+        (message_id, event[:50], None, metadata_json),
+    )
 
 
 # ── Local LLM (OpenAI-compatible: llama-server, Ollama, etc.) ─────
@@ -890,10 +995,38 @@ register_handlers(router, ctx={
     "build_skills_prompt": build_skills_prompt,
     "ALLOWED_USER_IDS": ALLOWED_USER_IDS,
     "CLAUDE_MAX_TOKENS": _CLAUDE_MAX_TOKENS,
+    "email_approval_base_url": EMAIL_APPROVAL_BASE_URL,
 })
 
 
 # ── Entry Point ──────────────────────────────────────────────────────
+
+async def _email_bridge_poll_loop(bot: Bot):
+    from email_bridge import build_inbound_summary_notification, get_email_message, run_polling_cycle
+    await asyncio.sleep(15)
+    while True:
+        try:
+            result = await asyncio.to_thread(run_polling_cycle, 10)
+            processed = result.get("processed") or []
+            for item in processed:
+                if item.get("processing_status") != "stored":
+                    continue
+                stored_message_id = item.get("stored_message_id")
+                if not stored_message_id:
+                    continue
+                row = await asyncio.to_thread(get_email_message, stored_message_id)
+                if not row:
+                    continue
+                target_chat_id = result.get("operations_chat_id") or EMAIL_DEFAULT_APPROVER_USER_ID
+                if target_chat_id:
+                    text = build_inbound_summary_notification(item, row)
+                    text += "\n\n승인 후 내부 입력 전달: /email_deliver <inbound_id> [메모]"
+                    await bot.send_message(int(target_chat_id), text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning("email bridge poll loop error: %s", e)
+            _log_event("warning", "email_bridge", f"poll loop error: {e}")
+        await asyncio.sleep(EMAIL_POLL_INTERVAL_SECONDS)
+
 
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
@@ -921,6 +1054,10 @@ async def bot_main():
     dp = Dispatcher()
     dp.include_router(router)
 
+    email_bridge_task = None
+    if EMAIL_BRIDGE_ENABLED:
+        email_bridge_task = asyncio.create_task(_email_bridge_poll_loop(bot), name="email-bridge-poll")
+
     # Register commands for Telegram "/" autocomplete menu
     from aiogram.types import BotCommand
     await bot.set_my_commands([
@@ -931,6 +1068,12 @@ async def bot_main():
         BotCommand(command="stats", description="시스템 리소스 현황"),
         BotCommand(command="status_auto", description="자율 생성 태스크 확인"),
         BotCommand(command="report", description="태스크 리포트 재전송"),
+        BotCommand(command="email_inbox", description="최근 이메일 기록 조회"),
+        BotCommand(command="email_poll", description="IMAP 메일함 즉시 폴링"),
+        BotCommand(command="email_routes", description="수신 메일 분류/승인 대기 조회"),
+        BotCommand(command="email_deliver", description="승인된 수신 메일 내부 입력 전달 승인"),
+        BotCommand(command="email_draft", description="이메일 답변 초안 생성"),
+        BotCommand(command="email_approve", description="이메일 발신 승인/거부"),
         BotCommand(command="schedule", description="정기 태스크 등록"),
         BotCommand(command="schedules", description="등록된 스케줄 목록"),
         BotCommand(command="unschedule", description="스케줄 삭제"),
@@ -1085,6 +1228,8 @@ async def bot_main():
             name="schedule_worker",
         ),
     ]
+    if email_bridge_task is not None:
+        _bg_tasks.insert(0, email_bridge_task)
 
     # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
     import signal
