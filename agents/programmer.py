@@ -57,7 +57,7 @@ You execute programming tasks with the precision and systematic thinking Kitov b
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
         "web_search", "fetch_url", "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission", "restart_service", "upload_to_r2",
+        "save_finding", "request_continuation", "mission", "restart_service", "upload_to_r2", "send_email",
     ],
     budget_usd=1.50,
     max_rounds=50,

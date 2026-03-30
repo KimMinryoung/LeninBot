@@ -915,6 +915,115 @@ async def _exec_upload_to_r2(
 TOOLS.append(UPLOAD_TO_R2_TOOL)
 TOOL_HANDLERS["upload_to_r2"] = _exec_upload_to_r2
 
+# ── Send Email Tool ──────────────────────────────────────────────────
+SEND_EMAIL_TOOL = {
+    "name": "send_email",
+    "description": (
+        "Send an email as Cyber-Lenin via Resend API. "
+        "Supports plain text and HTML body. Use html_body for rich formatting with images. "
+        "Image URLs from upload_to_r2 can be embedded in html_body with <img> tags. "
+        "All sent emails are recorded in the email_messages DB table."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "to": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Recipient email addresses.",
+            },
+            "subject": {"type": "string", "description": "Email subject line."},
+            "body": {"type": "string", "description": "Plain text body."},
+            "html_body": {"type": "string", "description": "Optional HTML body. If provided, this is sent as the primary content."},
+            "reply_to_message_id": {"type": "integer", "description": "Optional: inbound email_messages.id to reply to. Sets In-Reply-To header and thread."},
+        },
+        "required": ["to", "subject", "body"],
+    },
+}
+
+
+async def _exec_send_email(
+    to: list[str], subject: str, body: str, html_body: str = "", reply_to_message_id: int | None = None,
+) -> str:
+    from email_bridge import (
+        CONFIG, email_sending_is_configured, get_email_message,
+    )
+    from db import execute as db_execute, query as db_query
+    import json as _json
+
+    if not email_sending_is_configured():
+        return "Email sending not configured. Check RESEND_API_KEY and EMAIL_SMTP_FROM_EMAIL in .env."
+
+    # If replying, look up the inbound message for threading
+    in_reply_to = None
+    thread_id = None
+    if reply_to_message_id:
+        inbound = await asyncio.to_thread(get_email_message, reply_to_message_id)
+        if inbound:
+            in_reply_to = inbound.get("external_message_id")
+            thread_id = inbound.get("thread_id")
+
+    # Record outbound in DB
+    from_addr = f"{CONFIG.smtp_from_name} <{CONFIG.smtp_from_email}>"
+    rows = await asyncio.to_thread(
+        db_query,
+        "INSERT INTO email_messages ("
+        "  thread_id, provider, direction, status, mailbox, in_reply_to,"
+        "  sender_email, sender_name, recipient_emails, subject,"
+        "  text_body, html_body, metadata, created_at, updated_at"
+        ") VALUES ("
+        "  %s, %s, 'outbound', 'sending', 'outbox', %s,"
+        "  %s, %s, %s::jsonb, %s,"
+        "  %s, %s, '{}'::jsonb, NOW(), NOW()"
+        ") RETURNING id",
+        (
+            thread_id, CONFIG.provider, in_reply_to,
+            CONFIG.smtp_from_email, CONFIG.smtp_from_name, _json.dumps(to), subject,
+            body, html_body or None,
+        ),
+    )
+    message_id = rows[0]["id"] if rows else None
+
+    # Send via Resend
+    import resend
+    resend.api_key = CONFIG.resend_api_key
+
+    send_params = {
+        "from": from_addr,
+        "to": to,
+        "subject": subject,
+        "text": body,
+    }
+    if html_body:
+        send_params["html"] = html_body
+    if in_reply_to:
+        send_params["headers"] = {"In-Reply-To": in_reply_to, "References": in_reply_to}
+
+    try:
+        result = resend.Emails.send(send_params)
+        resend_id = result.get("id") if isinstance(result, dict) else str(result)
+    except Exception as e:
+        if message_id:
+            await asyncio.to_thread(
+                db_execute,
+                "UPDATE email_messages SET status = 'failed', metadata = jsonb_build_object('error', %s), updated_at = NOW() WHERE id = %s",
+                (str(e)[:500], message_id),
+            )
+        return f"Email send failed: {e}"
+
+    if message_id:
+        await asyncio.to_thread(
+            db_execute,
+            "UPDATE email_messages SET status = 'sent', sent_at = NOW(), external_message_id = %s, updated_at = NOW() WHERE id = %s",
+            (resend_id, message_id),
+        )
+
+    return f"Email sent to {', '.join(to)}\nSubject: {subject}\nResend ID: {resend_id}"
+
+
+TOOLS.append(SEND_EMAIL_TOOL)
+TOOL_HANDLERS["send_email"] = _exec_send_email
+
 # ── Self-awareness tools (shared memory access) ─────────────────────
 from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 
