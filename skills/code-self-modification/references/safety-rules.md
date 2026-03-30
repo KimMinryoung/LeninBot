@@ -46,9 +46,11 @@ logging.info(API_KEY)
 ## 롤백 절차
 
 수정 실패 시:
-```bash
-cd /home/grass/leninbot
+```
+# git으로 되돌리기
 git stash  # 또는
 git checkout HEAD -- 파일명.py
-sudo systemctl restart telegram
+
+# restart_service tool로 재시작 (subprocess 직접 사용 금지)
+restart_service(service="telegram")
 ```
