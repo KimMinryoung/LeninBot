@@ -433,6 +433,24 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     if not agent_type:
         return {"status": "skipped", "message": "missing agent_type for redelegation"}
 
+    # Guard: count ancestor chain depth to prevent infinite retry loops
+    chain_depth = 0
+    max_chain_depth = retry_limit + 1  # allow at most retry_limit retries from root
+    ancestor_id = task.get("parent_task_id") or (row or {}).get("parent_task_id")
+    while ancestor_id and chain_depth < max_chain_depth + 1:
+        ancestor = await asyncio.to_thread(
+            _query_one,
+            "SELECT parent_task_id, content FROM telegram_tasks WHERE id = %s",
+            (ancestor_id,),
+        )
+        if not ancestor:
+            break
+        if "[AUTO-RETRY" in (ancestor.get("content") or ""):
+            chain_depth += 1
+        ancestor_id = ancestor.get("parent_task_id")
+    if chain_depth >= max_chain_depth:
+        return {"status": "chain_limit_reached", "message": f"auto-retry chain depth {chain_depth} >= limit {max_chain_depth}; stopping"}
+
     restart_ctx = _restart_resume_context(row or task)
     metadata = _load_task_metadata(row or task)
     restart_state = metadata.get(_RESTART_PHASE_KEY) if isinstance(metadata.get(_RESTART_PHASE_KEY), dict) else None
@@ -442,10 +460,21 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
             "message": "restart already completed; blocking auto-retry loop until manual follow-up",
         }
 
+    # Extract original task content, stripping nested AUTO-RETRY prefixes
+    raw_content = (row or {}).get('content') or task.get('content') or ''
+    import re
+    original_content = re.sub(
+        r'(?s)^\s*\[(?:restart already completed by parent task|🔴 HIGH)\]\s*\n'
+        r'(?:\[AUTO-RETRY after verification failure for task #\d+\]\s*\n'
+        r'Original task:\s*\n)*',
+        '',
+        raw_content,
+    ).strip() or raw_content
+
     from shared import create_task_in_db
     retry_instruction = (
         f"[AUTO-RETRY after verification failure for task #{task_id}]\n"
-        f"Original task:\n{(row or {}).get('content') or task.get('content') or ''}\n\n"
+        f"Original task:\n{original_content}\n\n"
         f"Verification failed with details:\n{verification.get('details') or ''}\n\n"
         "Fix the problem, verify the relevant endpoint/log condition in your report, and summarize what changed."
     )
