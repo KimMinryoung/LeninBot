@@ -750,12 +750,16 @@ def send_outbound_email(message_id: int, approve: bool = True, approval_note: st
     body = row.get("text_body") or ""
     from_addr = f"{CONFIG.smtp_from_name} <{CONFIG.smtp_from_email}>"
 
+    html_body = row.get("html_body") or ""
     send_params: dict[str, Any] = {
         "from": from_addr,
         "to": recipients,
         "subject": subject,
-        "text": body,
     }
+    if html_body:
+        send_params["html"] = html_body
+    if body:
+        send_params["text"] = body
     if row.get("in_reply_to"):
         send_params["headers"] = {
             "In-Reply-To": row["in_reply_to"],

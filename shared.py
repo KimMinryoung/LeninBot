@@ -956,6 +956,57 @@ def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | lis
     return rows
 
 
+def upload_to_r2(local_path: str, key: str | None = None, content_type: str | None = None) -> str | None:
+    """Upload a file to Cloudflare R2 and return its public URL.
+
+    Args:
+        local_path: Path to local file.
+        key: Object key in R2 bucket. Defaults to filename.
+        content_type: MIME type. Auto-detected from extension if not given.
+
+    Returns public URL string, or None on failure.
+    """
+    import mimetypes
+    import requests as _req
+
+    cf_token = os.getenv("R2_CF_API_TOKEN", "").strip()
+    account_id = os.getenv("R2_CF_ACCOUNT_ID", "").strip()
+    bucket = os.getenv("R2_BUCKET_NAME", "").strip()
+    public_url = os.getenv("R2_PUBLIC_URL", "").strip().rstrip("/")
+
+    if not all([cf_token, account_id, bucket, public_url]):
+        logger.warning("[shared] R2 upload skipped: missing env config")
+        return None
+
+    from pathlib import Path as _Path
+    path = _Path(local_path)
+    if not path.is_file():
+        logger.warning("[shared] R2 upload skipped: file not found: %s", local_path)
+        return None
+
+    if key is None:
+        key = path.name
+    if content_type is None:
+        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        resp = _req.put(
+            f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{bucket}/objects/{key}",
+            headers={"Authorization": f"Bearer {cf_token}", "Content-Type": content_type},
+            data=data,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        url = f"{public_url}/{key}"
+        logger.info("[shared] R2 uploaded: %s -> %s", local_path, url)
+        return url
+    except Exception as e:
+        logger.error("[shared] R2 upload failed for %s: %s", local_path, e)
+        return None
+
+
 def fetch_render_logs(minutes_back: int = 10, limit: int = 50) -> list[dict]:
     """Fetch live service logs from Render API.
 
