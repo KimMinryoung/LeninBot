@@ -916,6 +916,47 @@ TOOLS.append(UPLOAD_TO_R2_TOOL)
 TOOL_HANDLERS["upload_to_r2"] = _exec_upload_to_r2
 
 # ── Send Email Tool ──────────────────────────────────────────────────
+def _load_email_signature() -> dict | None:
+    """Load email signature config from config/email_signature.json."""
+    sig_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "email_signature.json")
+    try:
+        import json as _json
+        with open(sig_path, "r", encoding="utf-8") as f:
+            cfg = _json.load(f)
+        name = cfg.get("name", "")
+        email_addr = cfg.get("email", "")
+        website_url = cfg.get("website_url", "")
+        website_display = cfg.get("website_display", website_url)
+        logo_url = cfg.get("logo_url", "")
+        logo_width = cfg.get("logo_width", 200)
+
+        text_sig = f"{name}\n{email_addr}"
+        if website_display:
+            text_sig += f"\n{website_display}"
+
+        html_parts = [
+            '<br><br>',
+            '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;">',
+        ]
+        if logo_url:
+            html_parts.append(
+                f'<tr><td style="padding:0 0 8px 0;">'
+                f'<img src="{logo_url}" alt="{name}" width="{logo_width}" style="display:block;border:0;"></td></tr>'
+            )
+        html_parts.append(f'<tr><td style="font-size:14px;font-weight:700;color:#111;padding:0 0 2px 0;">{name}</td></tr>')
+        if email_addr:
+            html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="mailto:{email_addr}" style="color:#333;text-decoration:none;">{email_addr}</a></td></tr>')
+        if website_url:
+            html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="{website_url}" style="color:#333;text-decoration:none;">{website_display}</a></td></tr>')
+        html_parts.append('</table>')
+        html_sig = "\n".join(html_parts)
+
+        return {"text": text_sig, "html": html_sig}
+    except Exception as e:
+        logger.warning("Failed to load email signature: %s", e)
+        return None
+
+
 SEND_EMAIL_TOOL = {
     "name": "send_email",
     "description": (
@@ -953,6 +994,18 @@ async def _exec_send_email(
 
     if not email_sending_is_configured():
         return "Email sending not configured. Check RESEND_API_KEY and EMAIL_SMTP_FROM_EMAIL in .env."
+
+    # Load email signature and append to body
+    sig = _load_email_signature()
+    if sig:
+        body = body.rstrip() + "\n\n--\n" + sig["text"]
+        sig_html = sig["html"]
+        if html_body:
+            html_body = html_body + sig_html
+        else:
+            # Wrap plain text body in basic HTML + signature
+            escaped_body = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+            html_body = f"<div style='font-family:sans-serif;font-size:14px;'>{escaped_body}</div>{sig_html}"
 
     # If replying, look up the inbound message for threading
     in_reply_to = None
