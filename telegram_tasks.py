@@ -266,17 +266,30 @@ async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
         else:
             try:
                 from shared import fetch_server_logs
-                log_text = await asyncio.to_thread(fetch_server_logs, service, grep=grep, limit=80)
-                lowered = (log_text or "").lower()
-                err_hits = [line.strip() for line in (log_text or "").splitlines() if re.search(r"\b(error|traceback|exception|fatal)\b", line, re.I)]
-                if err_hits:
+                log_rows = await asyncio.to_thread(
+                    fetch_server_logs, service=service, hours_back=1, grep=grep, limit=80,
+                )
+                if log_rows and isinstance(log_rows[0], dict) and log_rows[0].get("error"):
                     passed = False
-                    detail_lines.append(f"server_logs: failed — suspicious lines found ({len(err_hits)})")
-                    detail_lines.extend(f"  {line[:240]}" for line in err_hits[:3])
-                elif lowered.strip():
-                    detail_lines.append(f"server_logs: ok — checked {service}" + (f" grep={grep}" if grep else ""))
+                    detail_lines.append(f"server_logs: failed — {log_rows[0]['error']}")
                 else:
-                    detail_lines.append(f"server_logs: ok — no matching lines for {service}" + (f" grep={grep}" if grep else ""))
+                    _err_pattern = re.compile(
+                        r"(Traceback \(most recent|^\s*\w+Error:|^\s*\w+Exception:|FATAL|CRITICAL)",
+                        re.MULTILINE,
+                    )
+                    err_hits = []
+                    for row in (log_rows or []):
+                        raw = str(row.get("raw") or row.get("message") or "") if isinstance(row, dict) else str(row)
+                        if _err_pattern.search(raw):
+                            err_hits.append(raw.strip())
+                    if err_hits:
+                        passed = False
+                        detail_lines.append(f"server_logs: failed — suspicious lines found ({len(err_hits)})")
+                        detail_lines.extend(f"  {line[:240]}" for line in err_hits[:3])
+                    elif log_rows:
+                        detail_lines.append(f"server_logs: ok — checked {service} ({len(log_rows)} lines)" + (f" grep={grep}" if grep else ""))
+                    else:
+                        detail_lines.append(f"server_logs: ok — no matching lines for {service}" + (f" grep={grep}" if grep else ""))
             except Exception as e:
                 passed = False
                 detail_lines.append(f"server_logs: failed — {e}")
@@ -413,13 +426,6 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         return None
     task_id = task["id"]
 
-    verification_details = str(verification.get("details") or "")
-    if "server_logs: failed" in verification_details and "'list' object has no attribute 'lower'" in verification_details:
-        return {
-            "status": "blocked_known_bug",
-            "message": "blocked auto-retry on stale server_logs verifier bug; restart updated services first and verify once",
-        }
-
     retry_limit = verification.get("retry_limit", 1)
     row = await asyncio.to_thread(
         _query_one,
@@ -453,6 +459,9 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
 
     restart_ctx = _restart_resume_context(row or task)
     metadata = _load_task_metadata(row or task)
+    # Clean stale state from parent metadata so child starts fresh
+    for _stale_key in ("verification_result", "verification_status", "last_verification_at"):
+        metadata.pop(_stale_key, None)
     restart_state = metadata.get(_RESTART_PHASE_KEY) if isinstance(metadata.get(_RESTART_PHASE_KEY), dict) else None
     if restart_ctx["initiated"] and restart_ctx["completed"] and restart_ctx["phase"] in {"verification", "report"}:
         return {
