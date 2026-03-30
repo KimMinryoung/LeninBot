@@ -235,7 +235,12 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
         return f"❌ Download failed: {e}"
 
 
-async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None) -> str:
+async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None, **kwargs) -> str:
+    # Accept common LLM misspellings
+    if line_start is None and "startline" in kwargs:
+        line_start = kwargs["startline"]
+    if line_end is None:
+        line_end = kwargs.get("endline") or kwargs.get("end_line") or kwargs.get("lineend")
     """Read a file on the server."""
     project_root = os.path.dirname(os.path.abspath(__file__))
     if not os.path.isabs(path):
