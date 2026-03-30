@@ -1154,25 +1154,6 @@ async def recover_processing_tasks_on_startup(
             restart_ctx = _restart_resume_context(row)
             restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
 
-            # If restart was triggered during verification phase, tell child to only verify
-            if restart_state and restart_state.get("post_restart_phase") == "verification":
-                parent_result = await asyncio.to_thread(
-                    _query_one,
-                    "SELECT result FROM telegram_tasks WHERE id = %s",
-                    (task_id,),
-                )
-                parent_report = (parent_result or {}).get("result") or ""
-                if parent_report:
-                    child_content = (
-                        f"{_RESTART_COMPLETED_MARKER}\n"
-                        f"[POST-RESTART VERIFICATION ONLY]\n"
-                        f"서비스가 검증 단계에서 재시작됐다. 코드 변경은 이미 완료됐고 서비스도 재시작됐다.\n"
-                        f"아래 원본 태스크의 작업 결과를 검증만 하라. 코드를 다시 수정하거나 서비스를 다시 재시작하지 마라.\n\n"
-                        f"## 원본 태스크\n{content[:2000]}\n\n"
-                        f"## 이전 실행 결과\n{parent_report[:3000]}\n\n"
-                        f"서버 로그를 확인하고, 변경사항이 정상 반영됐는지 검증한 뒤 결과를 보고하라."
-                    )
-
             metadata_json = None
             if restart_state:
                 metadata_json = json.dumps({_RESTART_PHASE_KEY: restart_state})
