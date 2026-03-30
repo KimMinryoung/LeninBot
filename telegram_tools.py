@@ -987,16 +987,24 @@ def _load_email_signature() -> dict | None:
     info_html = "".join(f"<tr>{line}</tr>" for line in info_lines)
 
     # Horizontal layout: logo left + text right, inside a bordered box
+    # Gmail/Outlook strip border-radius and padding on <table>, so use
+    # a wrapping <td> with explicit padding and inline border on each side.
+    logo_td = ""
+    if logo_url:
+        logo_td = (
+            f'<td valign="middle" width="{logo_width}" style="padding:12px 14px 12px 12px;">'
+            f'<img src="{logo_url}" alt="{name}" width="{logo_width}" height="{logo_width}" '
+            f'style="display:block;border:0;outline:none;text-decoration:none;"></td>'
+        )
     html_sig = (
         '<br><br>'
-        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;'
-        'border:1px solid #ddd;border-radius:8px;padding:12px;max-width:420px;">'
-        '<tr>'
-        + (f'<td valign="middle" style="padding:0 14px 0 0;">'
-           f'<img src="{logo_url}" alt="{name}" width="{logo_width}" height="{logo_width}" '
-           f'style="display:block;border:0;border-radius:6px;"></td>' if logo_url else '')
-        + '<td valign="middle">'
+        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;">'
+        '<tr><td style="border:1px solid #dddddd;padding:0;">'
+        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
+        f'<tr>{logo_td}'
+        '<td valign="middle" style="padding:12px 12px 12px 0;">'
         f'<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">{info_html}</table>'
+        '</td></tr></table>'
         '</td></tr></table>'
     )
 
