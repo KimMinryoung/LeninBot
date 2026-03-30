@@ -852,8 +852,8 @@ async def _exec_read_file_registry(limit: int = 20, keyword: str | None = None, 
     clauses = []
     params: list = []
     if keyword:
-        clauses.append("(filename ILIKE %s OR description ILIKE %s)")
-        params.extend([f"%{keyword}%", f"%{keyword}%"])
+        clauses.append("(filename ILIKE %s OR description ILIKE %s OR local_path ILIKE %s OR public_url ILIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
     if category:
         clauses.append("category = %s")
         params.append(category)

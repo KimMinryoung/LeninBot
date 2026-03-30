@@ -886,14 +886,14 @@ async def _exec_upload_to_r2(
     if key is None:
         key = f"{category}/{filename}" if category != "general" else filename
 
-    # Check if already registered with same key
+    # Check if already registered by local_path or R2 key
     existing = await asyncio.to_thread(
         db_query,
-        "SELECT id, public_url FROM file_registry WHERE public_url LIKE %s LIMIT 1",
-        (f"%/{key}",),
+        "SELECT id, public_url FROM file_registry WHERE local_path = %s OR public_url LIKE %s LIMIT 1",
+        (path, f"%/{key}"),
     )
     if existing:
-        return f"Already registered: {existing[0]['public_url']}\n(registry id: {existing[0]['id']})"
+        return f"Already registered: {existing[0]['public_url']}\n(file_registry id: {existing[0]['id']})"
 
     url = await asyncio.to_thread(upload_to_r2, path, key, content_type)
     if not url:
