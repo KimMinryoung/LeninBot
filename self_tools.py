@@ -57,7 +57,8 @@ SELF_TOOLS = [
                 "source": {
                     "type": "string",
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
-                             "kg_status", "system_status", "server_logs", "recent_updates"],
+                             "kg_status", "system_status", "server_logs", "recent_updates",
+                             "file_registry"],
                 },
                 "limit": {"type": "integer", "description": "Results count."},
                 "keyword": {"type": "string", "description": "Filter keyword."},
@@ -839,7 +840,46 @@ async def _exec_read_self(
         return await _exec_read_server_logs(service=service, minutes_back=(hours_back or 1) * 60, limit=limit or 50, grep=grep)
     if source == "recent_updates":
         return await _exec_read_recent_updates(max_entries=limit or 3)
+    if source == "file_registry":
+        return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
     return f"Unknown source: {source}"
+
+
+async def _exec_read_file_registry(limit: int = 20, keyword: str | None = None, category: str | None = None) -> str:
+    """Search registered files (uploaded to R2 or tracked locally)."""
+    from db import query as db_query
+
+    clauses = []
+    params: list = []
+    if keyword:
+        clauses.append("(filename ILIKE %s OR description ILIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    if category:
+        clauses.append("category = %s")
+        params.append(category)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(min(limit, 50))
+
+    rows = await asyncio.to_thread(
+        db_query,
+        f"SELECT id, filename, public_url, local_path, content_type, description, category, file_size, "
+        f"created_by_task_id, created_at FROM file_registry {where} ORDER BY created_at DESC LIMIT %s",
+        tuple(params),
+    )
+    if not rows:
+        return "=== FILE REGISTRY ===\n(no files registered)"
+    lines = ["=== FILE REGISTRY ==="]
+    for r in rows:
+        ts = _fmt_ts(r.get("created_at"))
+        size_kb = round((r.get("file_size") or 0) / 1024, 1)
+        lines.append(
+            f"[{r['id']}] {r['filename']} ({size_kb}KB, {r.get('category', '-')})\n"
+            f"  url: {r.get('public_url') or '(local only)'}\n"
+            f"  local: {r.get('local_path')}\n"
+            f"  desc: {r.get('description') or '-'}\n"
+            f"  task: #{r.get('created_by_task_id') or '-'} | {ts}"
+        )
+    return "\n".join(lines)
 
 
 async def _exec_kg_admin(

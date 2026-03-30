@@ -268,6 +268,26 @@ def _ensure_table():
             updated_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS file_registry (
+            id SERIAL PRIMARY KEY,
+            local_path TEXT NOT NULL,
+            public_url TEXT,
+            filename TEXT NOT NULL,
+            content_type VARCHAR(100),
+            description TEXT,
+            category VARCHAR(50) DEFAULT 'general',
+            file_size BIGINT,
+            created_by_task_id INTEGER,
+            created_by_agent VARCHAR(50),
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_file_registry_category
+        ON file_registry(category, created_at DESC)
+    """)
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
