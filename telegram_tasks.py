@@ -483,26 +483,51 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     task_id = task["id"]
     verification_details = str(verification.get("details") or "").lower()
 
-    # If verifier determined telegram restart is needed, do it here
-    # (verifier can't restart telegram because it would kill itself)
+    # If verifier determined telegram restart is needed, do it here.
+    # Verifier can't restart telegram itself (it would die), so we:
+    # 1. Create a pending child task for post-restart verification BEFORE restarting
+    # 2. Then restart — process dies, but child is already in the queue
+    # 3. After restart, task_worker picks up the child naturally
     needs_telegram_restart = "telegram 서비스 재시작 필요" in verification_details or "telegram restart" in verification_details
     if needs_telegram_restart:
+        row = await asyncio.to_thread(
+            _query_one,
+            "SELECT agent_type, content, result, mission_id, metadata FROM telegram_tasks WHERE id = %s",
+            (task_id,),
+        )
+        parent_report = (row or {}).get("result") or ""
+        original_content = (row or {}).get("content") or task.get("content") or ""
+        agent_type = (row or {}).get("agent_type") or task.get("agent_type")
+
+        from shared import create_task_in_db
+        child_content = (
+            f"{_RESTART_COMPLETED_MARKER}\n"
+            f"[POST-RESTART VERIFICATION ONLY]\n"
+            f"서비스가 검증 단계에서 재시작됐다. 코드 변경은 이미 완료됐고 서비스도 재시작됐다.\n"
+            f"아래 원본 태스크의 작업 결과를 검증만 하라. 코드를 다시 수정하거나 서비스를 다시 재시작하지 마라.\n\n"
+            f"## 원본 태스크\n{original_content[:2000]}\n\n"
+            f"## 이전 실행 결과\n{parent_report[:3000]}\n\n"
+            f"서버 로그를 확인하고, 변경사항이 정상 반영됐는지 검증한 뒤 결과를 보고하라."
+        )
+        child = await asyncio.to_thread(
+            create_task_in_db,
+            child_content,
+            task.get("user_id") or 0,
+            "high",
+            parent_task_id=task_id,
+            mission_id=(row or {}).get("mission_id"),
+            agent_type=agent_type,
+        )
+        child_id = child.get("task_id")
+        logger.info("Created post-restart verification child task #%s for task #%s", child_id, task_id)
+
         try:
-            persist_task_restart_state(
-                task_id,
-                service="telegram",
-                phase="verification",
-                mark_completed=False,
-                reentry_reason="verifier requested telegram restart; child must verify after restart",
-            )
             from telegram_tools import _exec_restart_service
-            restart_result = await _exec_restart_service(service="telegram")
-            # If we reach here, restart didn't kill us (unlikely for telegram)
-            logger.info("telegram restart completed within verification: %s", restart_result)
+            await _exec_restart_service(service="telegram")
         except Exception as e:
             logger.warning("telegram restart from verification failed: %s", e)
-        # Process will likely die here. recover_processing_tasks_on_startup will handle the rest.
-        return {"status": "restart_initiated", "message": "telegram restart requested by verifier; task will resume after restart"}
+        # Process will likely die here. Child task is already pending in the queue.
+        return {"status": "restart_initiated", "message": f"telegram restart; verification child #{child_id} queued"}
 
     retry_limit = verification.get("retry_limit", 1)
     row = await asyncio.to_thread(
