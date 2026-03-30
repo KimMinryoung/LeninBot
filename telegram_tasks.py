@@ -480,12 +480,18 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         raw_content,
     ).strip() or raw_content
 
+    # Include parent's result so child knows what was already tried
+    parent_result = (row or {}).get("result") or ""
+    parent_summary = _extract_summary(parent_result, 800) if parent_result else ""
+
     from shared import create_task_in_db
     retry_instruction = (
         f"[AUTO-RETRY after verification failure for task #{task_id}]\n"
         f"Original task:\n{original_content}\n\n"
+        f"Previous attempt summary (DO NOT repeat the same approach):\n{parent_summary}\n\n"
         f"Verification failed with details:\n{verification.get('details') or ''}\n\n"
-        "Fix the problem, verify the relevant endpoint/log condition in your report, and summarize what changed."
+        "The previous attempt did not pass verification. Analyze WHY it failed, take a DIFFERENT approach, "
+        "and verify the fix before reporting."
     )
     child = await asyncio.to_thread(
         create_task_in_db,
