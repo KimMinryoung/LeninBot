@@ -295,6 +295,11 @@ async def _run_verification(
             verification_prompt_parts.append(
                 f"- 다음 URL들이 정상 응답하는지 확인하라: {', '.join(policy['urls'])}"
             )
+        if log_service:
+            verification_prompt_parts.append(
+                f"- 코드가 수정됐는데 서비스 로그에 반영이 안 된 경우 (구버전 에러가 계속 보이는 경우), "
+                f"restart_service(service='{log_service}')를 호출해서 서비스를 재시작한 뒤 로그를 다시 확인하라."
+            )
         verification_prompt_parts.extend([
             "- 보고서에 적힌 변경사항이 실제로 반영됐는지 파일/코드를 확인하라.",
             "- 추측하지 말고 도구로 직접 확인하라.",
