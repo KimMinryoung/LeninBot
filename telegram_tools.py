@@ -886,6 +886,15 @@ async def _exec_upload_to_r2(
     if key is None:
         key = f"{category}/{filename}" if category != "general" else filename
 
+    # Check if already registered with same key
+    existing = await asyncio.to_thread(
+        db_query,
+        "SELECT id, public_url FROM file_registry WHERE public_url LIKE %s LIMIT 1",
+        (f"%/{key}",),
+    )
+    if existing:
+        return f"Already registered: {existing[0]['public_url']}\n(registry id: {existing[0]['id']})"
+
     url = await asyncio.to_thread(upload_to_r2, path, key, content_type)
     if not url:
         return "R2 upload failed. Check R2 env config."
@@ -909,52 +918,91 @@ async def _exec_upload_to_r2(
     except Exception as e:
         logger.warning("file_registry insert failed: %s", e)
 
-    return f"Uploaded: {url}\nLocal: {path}\nSize: {file_size} bytes\nCategory: {category}"
+    return f"Uploaded: {url}\nLocal: {path}\nSize: {file_size} bytes\nCategory: {category}\nRegistered in file_registry."
 
 
 TOOLS.append(UPLOAD_TO_R2_TOOL)
 TOOL_HANDLERS["upload_to_r2"] = _exec_upload_to_r2
 
 # ── Send Email Tool ──────────────────────────────────────────────────
-def _load_email_signature() -> dict | None:
+def _load_email_signature_config() -> dict:
     """Load email signature config from config/email_signature.json."""
     sig_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "email_signature.json")
     try:
         import json as _json
         with open(sig_path, "r", encoding="utf-8") as f:
             cfg = _json.load(f)
-        name = cfg.get("name", "")
-        email_addr = cfg.get("email", "")
-        website_url = cfg.get("website_url", "")
-        website_display = cfg.get("website_display", website_url)
-        logo_url = cfg.get("logo_url", "")
-        logo_width = cfg.get("logo_width", 200)
-
-        text_sig = f"{name}\n{email_addr}"
-        if website_display:
-            text_sig += f"\n{website_display}"
-
-        html_parts = [
-            '<br><br>',
-            '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;">',
-        ]
-        if logo_url:
-            html_parts.append(
-                f'<tr><td style="padding:0 0 8px 0;">'
-                f'<img src="{logo_url}" alt="{name}" width="{logo_width}" style="display:block;border:0;"></td></tr>'
-            )
-        html_parts.append(f'<tr><td style="font-size:14px;font-weight:700;color:#111;padding:0 0 2px 0;">{name}</td></tr>')
-        if email_addr:
-            html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="mailto:{email_addr}" style="color:#333;text-decoration:none;">{email_addr}</a></td></tr>')
-        if website_url:
-            html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="{website_url}" style="color:#333;text-decoration:none;">{website_display}</a></td></tr>')
-        html_parts.append('</table>')
-        html_sig = "\n".join(html_parts)
-
-        return {"text": text_sig, "html": html_sig}
+        if not isinstance(cfg, dict):
+            return {}
+        return cfg
     except Exception as e:
-        logger.warning("Failed to load email signature: %s", e)
+        logger.warning("Failed to load email signature config: %s", e)
+        return {}
+
+
+def _signature_mode_from_config(cfg: dict) -> str:
+    mode = str(cfg.get("insertion_mode", "html_only") or "html_only").strip().lower()
+    if mode not in {"html_only", "plain_text_only", "both", "none"}:
+        mode = "html_only"
+    return mode
+
+
+def _load_email_signature() -> dict | None:
+    cfg = _load_email_signature_config()
+    if not cfg:
         return None
+
+    mode = _signature_mode_from_config(cfg)
+    if mode == "none":
+        return None
+
+    enabled = cfg.get("enabled", True)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() not in {"0", "false", "no", "off"}
+    if not enabled:
+        return None
+
+    name = str(cfg.get("name", "") or "").strip()
+    email_addr = str(cfg.get("email", "") or "").strip()
+    website_url = str(cfg.get("website_url", "") or "").strip()
+    website_display = str(cfg.get("website_display", website_url) or website_url).strip()
+    logo_url = str(
+        cfg.get("logo_url")
+        or cfg.get("image_url")
+        or cfg.get("brand_logo_url")
+        or ""
+    ).strip()
+    logo_width = int(cfg.get("logo_width", 200) or 200)
+
+    text_lines = [line for line in [name, email_addr, website_display] if line]
+    text_sig = "\n".join(text_lines)
+
+    html_parts = [
+        '<br><br>',
+        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;">',
+    ]
+    if logo_url:
+        html_parts.append(
+            f'<tr><td style="padding:0 0 8px 0;">'
+            f'<img src="{logo_url}" alt="{name}" width="{logo_width}" style="display:block;border:0;"></td></tr>'
+        )
+    if name:
+        html_parts.append(f'<tr><td style="font-size:14px;font-weight:700;color:#111;padding:0 0 2px 0;">{name}</td></tr>')
+    if email_addr:
+        html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="mailto:{email_addr}" style="color:#333;text-decoration:none;">{email_addr}</a></td></tr>')
+    if website_url:
+        html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="{website_url}" style="color:#333;text-decoration:none;">{website_display}</a></td></tr>')
+    html_parts.append('</table>')
+    html_sig = "\n".join(html_parts)
+
+    return {
+        "text": text_sig,
+        "html": html_sig,
+        "mode": mode,
+        "config": cfg,
+        "logo_url": logo_url,
+        "logo_config_keys": ["logo_url", "image_url", "brand_logo_url"],
+    }
 
 
 SEND_EMAIL_TOOL = {
@@ -995,17 +1043,37 @@ async def _exec_send_email(
     if not email_sending_is_configured():
         return "Email sending not configured. Check RESEND_API_KEY and EMAIL_SMTP_FROM_EMAIL in .env."
 
-    # Load email signature and append to body
+    original_body = body or ""
+    original_html_body = html_body or ""
+
+    # Load email signature and append through a single config-controlled path.
+    # The caller must provide pure body content only; all signature insertion happens here.
+    # To prevent duplicate signatures in clients like Gmail, plain text stays pure body
+    # unless the operator explicitly selects a text-inserting mode in config.
     sig = _load_email_signature()
     if sig:
-        body = body.rstrip() + "\n\n--\n" + sig["text"]
-        sig_html = sig["html"]
-        if html_body:
-            html_body = html_body + sig_html
+        sig_mode = sig.get("mode", "html_only")
+        sig_text = sig.get("text", "")
+        sig_html = sig.get("html", "")
+
+        body = original_body
+        if sig_mode in {"plain_text_only", "both"} and sig_text:
+            body = original_body.rstrip() + "\n\n--\n" + sig_text
+
+        if sig_mode in {"html_only", "both"} and sig_html:
+            if original_html_body:
+                html_body = original_html_body + sig_html
+            else:
+                escaped_body = original_body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                html_body = f"<div style='font-family:sans-serif;font-size:14px;'>{escaped_body}</div>{sig_html}"
+                if sig_mode == "html_only":
+                    # Keep plain text fallback free of signature duplication.
+                    body = original_body
         else:
-            # Wrap plain text body in basic HTML + signature
-            escaped_body = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-            html_body = f"<div style='font-family:sans-serif;font-size:14px;'>{escaped_body}</div>{sig_html}"
+            html_body = original_html_body
+    else:
+        body = original_body
+        html_body = original_html_body
 
     # If replying, look up the inbound message for threading
     in_reply_to = None
