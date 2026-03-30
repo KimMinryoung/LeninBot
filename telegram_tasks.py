@@ -227,7 +227,16 @@ async def _fetch_url_status(url: str) -> tuple[bool, str]:
     return await asyncio.to_thread(_check)
 
 
-async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
+async def _run_verification(
+    bot: Bot,
+    task: dict,
+    report: str,
+    *,
+    chat_with_tools_fn=None,
+    get_model_fn=None,
+    extra_tools: list | None = None,
+    extra_handlers: dict | None = None,
+) -> dict:
     policy = _normalize_verification_policy(task)
     task_id = task["id"]
     if not policy or not policy.get("required", True):
@@ -239,15 +248,16 @@ async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
         )
         return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0}
 
+    # Phase 1: fast automated checks (task_report, url_access)
     detail_lines = []
-    passed = True
+    auto_passed = True
 
     if "task_report" in policy["checks"]:
         summary = _extract_summary(report, 400)
         if report and summary:
             detail_lines.append(f"task_report: ok — summary extracted ({summary[:200]})")
         else:
-            passed = False
+            auto_passed = False
             detail_lines.append("task_report: failed — empty report or missing summary")
 
     if "url_access" in policy["checks"]:
@@ -255,45 +265,77 @@ async def _run_verification(bot: Bot, task: dict, report: str) -> dict:
             ok, msg = await _fetch_url_status(url)
             detail_lines.append(f"url_access: {msg}")
             if not ok:
-                passed = False
+                auto_passed = False
 
-    if "server_logs" in policy["checks"]:
-        service = policy.get("log_service")
-        grep = policy.get("log_grep")
-        if not service:
-            passed = False
-            detail_lines.append("server_logs: failed — log_service missing")
-        else:
-            try:
-                from shared import fetch_server_logs
-                log_rows = await asyncio.to_thread(
-                    fetch_server_logs, service=service, hours_back=1, grep=grep, limit=80,
-                )
-                if log_rows and isinstance(log_rows[0], dict) and log_rows[0].get("error"):
-                    passed = False
-                    detail_lines.append(f"server_logs: failed — {log_rows[0]['error']}")
-                else:
-                    _err_pattern = re.compile(
-                        r"(Traceback \(most recent|^\s*\w+Error:|^\s*\w+Exception:|FATAL|CRITICAL)",
-                        re.MULTILINE,
-                    )
-                    err_hits = []
-                    for row in (log_rows or []):
-                        raw = str(row.get("raw") or row.get("message") or "") if isinstance(row, dict) else str(row)
-                        if _err_pattern.search(raw):
-                            err_hits.append(raw.strip())
-                    if err_hits:
-                        passed = False
-                        detail_lines.append(f"server_logs: failed — suspicious lines found ({len(err_hits)})")
-                        detail_lines.extend(f"  {line[:240]}" for line in err_hits[:3])
-                    elif log_rows:
-                        detail_lines.append(f"server_logs: ok — checked {service} ({len(log_rows)} lines)" + (f" grep={grep}" if grep else ""))
-                    else:
-                        detail_lines.append(f"server_logs: ok — no matching lines for {service}" + (f" grep={grep}" if grep else ""))
-            except Exception as e:
-                passed = False
-                detail_lines.append(f"server_logs: failed — {e}")
+    # Phase 2: LLM-based verification (replaces dumb server_logs pattern matching)
+    llm_verdict = None
+    if chat_with_tools_fn and get_model_fn and auto_passed:
+        original_content = task.get("content") or ""
+        checks_desc = ", ".join(policy["checks"])
+        log_service = policy.get("log_service")
+        log_grep = policy.get("log_grep")
 
+        verification_prompt_parts = [
+            f"당신은 태스크 #{task_id}의 검증자다. 태스크 실행자가 아래 작업을 완료했다고 보고했다.",
+            f"이 보고가 실제로 올바른지 도구를 사용해 독립적으로 검증하라.",
+            "",
+            f"## 원본 태스크\n{original_content[:2000]}",
+            "",
+            f"## 실행 결과 보고\n{report[:3000]}",
+            "",
+            "## 검증 지침",
+        ]
+        if log_service:
+            grep_note = f" (grep: {log_grep})" if log_grep else ""
+            verification_prompt_parts.append(
+                f"- read_self(source='server_logs', service='{log_service}'{grep_note}) 를 호출해서 "
+                f"이 태스크와 관련된 에러가 없는지 확인하라. 태스크와 무관한 기존 에러는 무시하라."
+            )
+        if policy.get("urls"):
+            verification_prompt_parts.append(
+                f"- 다음 URL들이 정상 응답하는지 확인하라: {', '.join(policy['urls'])}"
+            )
+        verification_prompt_parts.extend([
+            "- 보고서에 적힌 변경사항이 실제로 반영됐는지 파일/코드를 확인하라.",
+            "- 추측하지 말고 도구로 직접 확인하라.",
+            "",
+            "## 응답 형식 (반드시 아래 형식으로 첫 줄을 시작하라)",
+            "VERDICT: PASS 또는 VERDICT: FAIL",
+            "이유: (한두 문장으로 근거 설명)",
+        ])
+        verification_prompt = "\n".join(verification_prompt_parts)
+
+        try:
+            model = await get_model_fn()
+            llm_response = await chat_with_tools_fn(
+                [{"role": "user", "content": verification_prompt}],
+                system_prompt="당신은 태스크 검증 전문가다. 도구를 사용해 실제 상태를 확인하고 VERDICT: PASS 또는 VERDICT: FAIL로 판정하라.",
+                model=model,
+                max_tokens=2000,
+                budget_usd=0.15,
+                extra_tools=extra_tools,
+                extra_handlers=extra_handlers,
+            )
+            llm_upper = (llm_response or "").strip().upper()
+            # Extract first non-VERDICT line as reasoning
+            verdict_reasoning = ""
+            for _vline in (llm_response or "").strip().splitlines():
+                if _vline.strip() and not _vline.strip().upper().startswith("VERDICT:"):
+                    verdict_reasoning = _vline.strip()
+                    break
+            if "VERDICT: PASS" in llm_upper:
+                llm_verdict = "passed"
+                detail_lines.append(f"llm_verification: passed — {verdict_reasoning[:300]}")
+            elif "VERDICT: FAIL" in llm_upper:
+                llm_verdict = "failed"
+                detail_lines.append(f"llm_verification: failed — {verdict_reasoning[:300]}")
+            else:
+                detail_lines.append(f"llm_verification: inconclusive — {(llm_response or '').strip()[:300]}")
+        except Exception as e:
+            logger.warning("LLM verification failed for task %d: %s", task_id, e)
+            detail_lines.append(f"llm_verification: error — {e}")
+
+    passed = auto_passed and (llm_verdict != "failed")
     status = "passed" if passed else "failed"
     details = "\n".join(detail_lines)[:4000]
     await asyncio.to_thread(
@@ -816,7 +858,13 @@ async def process_task(
             else:
                 await bot.send_document(chat_id=user_id, document=doc, caption=caption)
 
-            verification = await _run_verification(bot, task, final_report)
+            verification = await _run_verification(
+                bot, task, final_report,
+                chat_with_tools_fn=chat_with_tools_fn,
+                get_model_fn=get_model_fn,
+                extra_tools=extra_tools,
+                extra_handlers=extra_handlers,
+            )
             verification_status = verification.get("status", "pending")
             verification_details = verification.get("details", "")
             retry_result = None
