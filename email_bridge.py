@@ -65,6 +65,7 @@ class EmailBridgeConfig:
     log_dir: Path
     default_approver_user_id: int
     approval_secret: str
+    resend_api_key: str
 
 
 def _apply_runtime_secrets_from_file(path_str: str | None) -> None:
@@ -115,6 +116,7 @@ def load_email_bridge_config() -> EmailBridgeConfig:
         log_dir=Path(os.getenv("EMAIL_LOG_DIR", str(root / "logs" / "email_bridge"))),
         default_approver_user_id=int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0"),
         approval_secret=os.getenv("EMAIL_APPROVAL_SECRET", "").strip(),
+        resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
     )
 
 
@@ -201,9 +203,9 @@ def email_bridge_is_configured() -> bool:
 
 def email_sending_is_configured() -> bool:
     return bool(
-        email_bridge_is_configured()
-        and CONFIG.smtp_host and CONFIG.smtp_username and CONFIG.smtp_password
+        CONFIG.enabled
         and CONFIG.smtp_from_email
+        and CONFIG.resend_api_key
     )
 
 
@@ -739,35 +741,39 @@ def send_outbound_email(message_id: int, approve: bool = True, approval_note: st
             (message_id,),
         )
         return {"status": "draft_saved", "path": path}
-    email_msg = EmailMessage()
-    email_msg["Subject"] = row.get("subject") or "(no subject)"
-    email_msg["From"] = f"{CONFIG.smtp_from_name} <{CONFIG.smtp_from_email}>"
+
+    import resend
+    resend.api_key = CONFIG.resend_api_key
+
     recipients = row.get("recipient_emails") or []
-    email_msg["To"] = ", ".join(recipients)
+    subject = row.get("subject") or "(no subject)"
+    body = row.get("text_body") or ""
+    from_addr = f"{CONFIG.smtp_from_name} <{CONFIG.smtp_from_email}>"
+
+    send_params: dict[str, Any] = {
+        "from": from_addr,
+        "to": recipients,
+        "subject": subject,
+        "text": body,
+    }
     if row.get("in_reply_to"):
-        email_msg["In-Reply-To"] = row["in_reply_to"]
-        email_msg["References"] = row["in_reply_to"]
-    email_msg["Message-ID"] = make_msgid(domain=(CONFIG.smtp_from_email.split("@", 1)[1] if "@" in CONFIG.smtp_from_email else None))
-    email_msg.set_content(row.get("text_body") or "")
-    context = ssl.create_default_context()
-    if CONFIG.smtp_port == 465:
-        with smtplib.SMTP_SSL(CONFIG.smtp_host, CONFIG.smtp_port, context=context, timeout=30) as smtp:
-            smtp.login(CONFIG.smtp_username, CONFIG.smtp_password)
-            smtp.send_message(email_msg)
-    else:
-        with smtplib.SMTP(CONFIG.smtp_host, CONFIG.smtp_port, timeout=30) as smtp:
-            smtp.starttls(context=context)
-            smtp.login(CONFIG.smtp_username, CONFIG.smtp_password)
-            smtp.send_message(email_msg)
+        send_params["headers"] = {
+            "In-Reply-To": row["in_reply_to"],
+            "References": row["in_reply_to"],
+        }
+
+    result = resend.Emails.send(send_params)
+    resend_id = result.get("id") if isinstance(result, dict) else str(result)
+
     db_execute(
         "UPDATE email_messages SET status = 'sent', sent_at = NOW(), updated_at = NOW(), external_message_id = %s WHERE id = %s",
-        (email_msg["Message-ID"], message_id),
+        (resend_id, message_id),
     )
     db_execute(
         "INSERT INTO email_bridge_events (message_id, event_type, detail, metadata) VALUES (%s, %s, %s, %s::jsonb)",
-        (message_id, "sent", row.get("subject"), json.dumps({"recipients": recipients})),
+        (message_id, "sent", subject, json.dumps({"recipients": recipients, "resend_id": resend_id})),
     )
-    return {"status": "sent", "message_id": email_msg["Message-ID"], "recipients": recipients}
+    return {"status": "sent", "message_id": resend_id, "recipients": recipients}
 
 
 def reject_outbound_email(message_id: int, note: str = "") -> None:
