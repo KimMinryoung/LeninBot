@@ -909,16 +909,20 @@ async def _exec_upload_to_r2(
         pass
 
     # Register in file_registry
+    registry_id = None
     try:
-        db_execute(
+        reg_rows = await asyncio.to_thread(
+            db_query,
             "INSERT INTO file_registry (local_path, public_url, filename, content_type, description, category, file_size, created_by_task_id, created_by_agent) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (path, url, filename, content_type, description or filename, category, file_size, task_id, agent_type),
         )
+        registry_id = reg_rows[0]["id"] if reg_rows else None
     except Exception as e:
         logger.warning("file_registry insert failed: %s", e)
 
-    return f"Uploaded: {url}\nLocal: {path}\nSize: {file_size} bytes\nCategory: {category}\nRegistered in file_registry."
+    reg_line = f"\nfile_registry id: {registry_id}" if registry_id else "\n(file_registry registration failed)"
+    return f"Uploaded: {url}\nLocal: {path}\nSize: {file_size} bytes\nCategory: {category}{reg_line}"
 
 
 TOOLS.append(UPLOAD_TO_R2_TOOL)
