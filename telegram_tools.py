@@ -970,12 +970,7 @@ def _load_email_signature() -> dict | None:
     email_addr = str(cfg.get("email", "") or "").strip()
     website_url = str(cfg.get("website_url", "") or "").strip()
     website_display = str(cfg.get("website_display", website_url) or website_url).strip()
-    logo_url = str(
-        cfg.get("logo_url")
-        or cfg.get("image_url")
-        or cfg.get("brand_logo_url")
-        or ""
-    ).strip()
+    logo_url = str(cfg.get("logo_url") or "").strip()
     logo_width = int(cfg.get("logo_width", 200) or 200)
 
     text_lines = [line for line in [name, email_addr, website_display] if line]
@@ -1005,7 +1000,6 @@ def _load_email_signature() -> dict | None:
         "mode": mode,
         "config": cfg,
         "logo_url": logo_url,
-        "logo_config_keys": ["logo_url", "image_url", "brand_logo_url"],
     }
 
 

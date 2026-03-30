@@ -1,8 +1,10 @@
 {
+  "enabled": true,
   "name": "Cyber-Lenin",
   "email": "lenin@cyber-lenin.com",
   "website_url": "https://bichonwebpage.onrender.com/chat",
-  "website_display": "cyber-lenin.com",
-  "logo_url": "https://assets.cyber-lenin.com/email-assets/cyber_lenin_signature_horizontal.png",
-  "logo_width": 200
+  "website_display": "bichonwebpage.onrender.com/chat",
+  "logo_url": "https://assets.cyber-lenin.com/email-assets/cyber-lenin-signature-logo.png",
+  "logo_width": 200,
+  "insertion_mode": "html_only"
 }
