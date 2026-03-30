@@ -976,23 +976,29 @@ def _load_email_signature() -> dict | None:
     text_lines = [line for line in [name, email_addr, website_display] if line]
     text_sig = "\n".join(text_lines)
 
-    html_parts = [
-        '<br><br>',
-        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;">',
-    ]
-    if logo_url:
-        html_parts.append(
-            f'<tr><td style="padding:0 0 8px 0;">'
-            f'<img src="{logo_url}" alt="{name}" width="{logo_width}" style="display:block;border:0;"></td></tr>'
-        )
+    # Build text info column
+    info_lines = []
     if name:
-        html_parts.append(f'<tr><td style="font-size:14px;font-weight:700;color:#111;padding:0 0 2px 0;">{name}</td></tr>')
+        info_lines.append(f'<td style="font-size:15px;font-weight:700;color:#111;padding:0 0 4px 0;">{name}</td>')
     if email_addr:
-        html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="mailto:{email_addr}" style="color:#333;text-decoration:none;">{email_addr}</a></td></tr>')
+        info_lines.append(f'<td style="font-size:13px;color:#555;padding:0 0 3px 0;"><a href="mailto:{email_addr}" style="color:#555;text-decoration:none;">{email_addr}</a></td>')
     if website_url:
-        html_parts.append(f'<tr><td style="font-size:13px;color:#333;padding:0 0 2px 0;"><a href="{website_url}" style="color:#333;text-decoration:none;">{website_display}</a></td></tr>')
-    html_parts.append('</table>')
-    html_sig = "\n".join(html_parts)
+        info_lines.append(f'<td style="font-size:13px;color:#555;padding:0 0 3px 0;"><a href="{website_url}" style="color:#555;text-decoration:none;">{website_display}</a></td>')
+    info_html = "".join(f"<tr>{line}</tr>" for line in info_lines)
+
+    # Horizontal layout: logo left + text right, inside a bordered box
+    html_sig = (
+        '<br><br>'
+        '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif;'
+        'border:1px solid #ddd;border-radius:8px;padding:12px;max-width:420px;">'
+        '<tr>'
+        + (f'<td valign="middle" style="padding:0 14px 0 0;">'
+           f'<img src="{logo_url}" alt="{name}" width="{logo_width}" height="{logo_width}" '
+           f'style="display:block;border:0;border-radius:6px;"></td>' if logo_url else '')
+        + '<td valign="middle">'
+        f'<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">{info_html}</table>'
+        '</td></tr></table>'
+    )
 
     return {
         "text": text_sig,
