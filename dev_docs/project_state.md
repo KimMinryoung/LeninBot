@@ -1,4 +1,4 @@
-# Project State — 2026-03-29
+# Project State — 2026-03-30
 
 ## Identity
 
@@ -14,15 +14,24 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
                         ┌──────────────────────────────────────────────┐
                         │              외부 인프라 (항상 ON)              │
                         │  Supabase PostgreSQL + pgvector              │
-                        │  (채팅로그, 태스크큐, 벡터DB, 경험메모리)         │
+                        │  (채팅로그, 태스크큐, 벡터DB, 경험메모리,         │
+                        │   이메일, 파일 레지스트리)                       │
                         └──────────────────┬───────────────────────────┘
                                            │ SQL
+      ┌────────────────────────────────────┼──────────────────────────┐
+      │         외부 서비스                  │                          │
+      │  Migadu IMAP (수신)                │                          │
+      │  Resend API (발신)                 │                          │
+      │  Cloudflare R2 (파일 호스팅)        │                          │
+      │    assets.cyber-lenin.com          │                          │
+      └────────────────────────────────────┼──────────────────────────┘
+                                           │
 ┌──────────────────────────────────────────┼──────────────────────────────┐
 │                    Hetzner VPS 서비스들     │                              │
 │                                          │                              │
 │  ┌───────────────┐  ┌───────────────┐    │    ┌────────────────────┐    │
 │  │ Neo4j Docker  │  │ embedding     │    │    │ MOON PC            │    │
-│  │ (:7687)       │  │ _server.py    │    │    │ (SSH 리버스 터널)    │    │
+│  │ (:7687)       │  │ _server.py    │    │    │ (Tailscale 터널)    │    │
 │  │ 지식 그래프     │  │ (:8100)       │    │    │ qwen3.5-9b Q8_0   │    │
 │  │               │  │ BGE-M3 모델    │    │    │ (:8080 via tunnel) │    │
 │  └───────┬───────┘  └───────┬───────┘    │    └─────────┬──────────┘    │
@@ -31,8 +40,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │  ┌───────┴──────────────────┴────────────┴──────────────┴─────────┐    │
 │  │                     shared.py (공유 라이브러리)                    │    │
 │  │  similarity_search()    search_knowledge_graph()               │    │
-│  │  add_kg_episode()       get_kg_service() / run_kg_task()       │    │
-│  │  submit_kg_task()       collect_kg_futures()                   │    │
+│  │  add_kg_episode()       upload_to_r2()                        │    │
+│  │  submit_kg_task()       fetch_server_logs()                   │    │
 │  │  embedding_client.py    (HTTP → embedding_server)              │    │
 │  └───────┬───────────────────────┬────────────────────────────────┘    │
 │          │                       │                                     │
@@ -43,7 +52,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │  │ aiogram 3.x       │    │ chatbot.py       │                         │
 │  │ Claude/GPT 교체가능 │    │ (LangGraph RAG)  │                         │
 │  │ 에이전트 태스크큐    │    │ Gemini 3.1 FL    │                         │
-│  │ 도구 13+개         │    │ 9-node 워크플로우   │                         │
+│  │ email_bridge.py   │    │ 9-node 워크플로우   │                         │
+│  │ 도구 17+개         │    │                  │                         │
 │  └──────────────────┘    └──────────────────┘                         │
 │  Telegram polling          :8000 (외부, 웹챗봇)                         │
 └───────────────────────────────────────────────────────────────────────┘
@@ -123,25 +133,43 @@ deploy.sh가 재시작하는 것:
 
 | 에이전트 | 페르소나 | 역할 | 주요 도구 |
 |---|---|---|---|
-| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg |
-| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service |
-| **visualizer** (Rodchenko) | 이미지 생성 | 프로파간다 포스터/게임아트 | generate_image (Replicate FLUX), reference_image 지원 |
-| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file |
+| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg, send_email |
+| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2, send_email |
+| **visualizer** (Rodchenko) | 이미지 생성 | 프로파간다 포스터/게임아트 | generate_image (Replicate FLUX), upload_to_r2 |
+| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file, upload_to_r2 |
 
 ### 핵심 도구
 
-- **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지
+- **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지. 재시작 시 자동 복구 태스크 생성 (request_continuation 불필요)
+- **send_email**: Resend API로 이메일 발신. HTML 지원, 서명 자동 삽입 (`config/email_signature.json`). DB 기록
+- **upload_to_r2**: Cloudflare R2에 파일 업로드 → 공개 URL 반환. file_registry DB 자동 등록
 - **save_finding**: 미션 타임라인에 중간 발견 기록
-- **request_continuation**: 재시작/예산 한계 시 자식 태스크 생성 (재시작 문구 자동 제거)
+- **request_continuation**: 예산 한계 시 자식 태스크 생성 (작업 이관 전용)
 - **write_kg**: 지식 그래프에 사실 저장 (KG 전용 루프에서 실행)
 - **mission**: 미션 상태 확인/종료 (delegate 시 자동 생성)
 
 ### Task Lifecycle
 ```
-delegate → pending → processing → done/failed/handed_off
-                                      ↓
-                              request_continuation → child task (pending)
+delegate → pending → processing → done → LLM verification
+                                            ├─ passed → complete
+                                            └─ failed → auto-retry child (max chain depth = retry_limit+1)
+                                                         └─ includes parent result summary + verification details
+                                   ↓
+                           handed_off (request_continuation → child task)
 ```
+
+### Verification System
+- **Phase 1**: 자동 체크 (task_report 존재, url_access HTTP 상태)
+- **Phase 2**: LLM 기반 검증 — 같은 agent가 도구로 독립 검증 (로그 확인, 코드 확인, URL 접근)
+- 검증자가 서비스 재시작 필요 판단 시: api는 직접 재시작, telegram은 VERDICT: FAIL → child task 생성 후 재시작
+- chain depth guard: ancestor 순회로 무한 retry 차단
+- retry child에 부모 result 요약 포함 → 같은 접근 반복 방지
+
+### Service Restart Recovery
+- `restart_service` 호출 → `persist_task_restart_state` → 프로세스 사망
+- `recover_processing_tasks_on_startup` → child task 자동 생성 (`_RESTART_COMPLETED_MARKER` 포함)
+- child는 재시작 이미 완료된 상태로 인식 → 재시작 반복 없음
+- `request_continuation` 사전 호출 불필요
 
 ---
 
@@ -217,7 +245,11 @@ leninbot/
 ├── experience_writer.py       # 경험 메모리 일일 정리
 ├── db.py                      # PostgreSQL 커넥션 풀 (psycopg2)
 ├── patch_file.py              # 토큰 효율적 파일 패치 (replace_block)
+├── email_bridge.py            # 이메일 브리지 (IMAP 수신, Resend 발신, 분류, DB 기록)
 ├── self_modification_core.py  # Git backup + syntax check + rollback
+│
+├── config/
+│   └── email_signature.json   # 이메일 서명 설정 (agent 수정 가능)
 │
 ├── agents/                    # 에이전트 정의
 │   ├── base.py                # AgentSpec + 공통 컨텍스트 블록
@@ -243,6 +275,41 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-03-30 — 이메일 브리지, 검증 루프 전면 수정, R2 파일 호스팅
+
+#### Email Bridge
+- `email_bridge.py`: IMAP 수신 (Migadu) + Resend API 발신
+- 수신 메일 자동 분류 (finance, urgent, human_request, bulk_like 등)
+- `send_email` agent 도구: 에이전트가 직접 이메일 발송 가능 (HTML + 이미지 지원)
+- 서명 자동 삽입 (`config/email_signature.json` — 로고, 이름, 이메일, 웹사이트)
+- `/email` 텔레그램 커맨드 하나로 통합 (폴링 + 최근 기록)
+- DB 테이블: email_threads, email_messages, email_bridge_events, email_bridge_state
+
+#### Verification Loop 전면 수정
+- **근본 원인 수정**: `fetch_server_logs()` 반환 타입 불일치 (`list[dict]`를 `str`로 처리) → 무한 retry의 원인
+- **LLM 기반 검증**: regex 패턴 매칭 → 같은 agent가 도구로 독립 검증 (budget $0.15)
+- **chain depth guard**: ancestor 순회로 무한 retry 차단 (이전에는 child의 verification_attempts만 체크)
+- **content 누적 방지**: `[AUTO-RETRY...]` 프리픽스 strip
+- **retry context**: 부모 result 요약 + "같은 접근 반복 금지" 지시 포함
+- **서비스 재시작 판단**: 수정 파일 기반 (telegram_*.py → telegram, api.py → api)
+- **telegram 재시작 시**: child task를 미리 생성(pending) 후 재시작 → task_worker가 pickup
+
+#### Continuation 단순화
+- `request_continuation`의 `restart_already_completed` 파라미터 제거
+- 재시작 전 수동 continuation 불필요 — `recover_processing_tasks_on_startup`이 자동 처리
+- programmer 시스템 프롬프트 반영
+
+#### Cloudflare R2 + File Registry
+- R2 버킷 `cyber-lenin-assets` (APAC, `assets.cyber-lenin.com` 커스텀 도메인)
+- `upload_to_r2` agent 도구: 업로드 + file_registry DB 자동 등록
+- `read_self(source='file_registry')`: 등록된 파일 검색
+- 이메일 서명 이미지, 로고 호스팅
+
+#### DNS (Cloudflare)
+- `cyber-lenin.com` A/AAAA → Hetzner VPS (37.27.33.127)
+- `assets.cyber-lenin.com` CNAME → R2 버킷
+- Migadu MX/SPF/DKIM 설정 완료
 
 ### 2026-03-29 — 서비스 안정성 + 아키텍처 정리
 
