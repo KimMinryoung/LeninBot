@@ -1778,6 +1778,8 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_status_auto, Command("status_auto"))
     router.message.register(cmd_email_inbox, Command("email_inbox"))
     router.message.register(cmd_email_poll, Command("email_poll"))
+    router.message.register(cmd_email_routes, Command("email_routes"))
+    router.message.register(cmd_email_deliver, Command("email_deliver"))
     router.message.register(cmd_email_draft, Command("email_draft"))
     router.message.register(cmd_email_approve, Command("email_approve"))
     router.message.register(cmd_schedule, Command("schedule"))

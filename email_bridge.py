@@ -375,6 +375,7 @@ def _find_existing_inbound_email(record: dict[str, Any]) -> dict[str, Any] | Non
 def store_inbound_email(record: dict[str, Any]) -> dict[str, Any] | None:
     existing = _find_existing_inbound_email(record)
     if existing:
+        existing["_is_duplicate"] = True
         return existing
     thread_id = _ensure_thread(record)
     rows = db_query(
@@ -520,7 +521,7 @@ def queue_outbound_reply(
     if inbound.get("direction") != "inbound":
         raise ValueError("draft target must be an inbound email")
     outbound_subject = subject or f"Re: {inbound.get('subject') or ''}".strip()
-    recipients = to_emails or [inbound.get("sender_email")] if inbound.get("sender_email") else []
+    recipients = to_emails or ([inbound.get("sender_email")] if inbound.get("sender_email") else [])
     approval_user = approver_user_id or CONFIG.default_approver_user_id or 0
     merged_metadata = {
         "source_message_id": inbound_message_id,
@@ -815,7 +816,7 @@ def poll_inbox_once(limit: int = 10) -> list[dict[str, Any]]:
             }
             stored = store_inbound_email(record)
             if stored:
-                status = "duplicate" if stored.get("status") != "received" and stored.get("status") != "approved_for_internal_input" else "stored"
+                status = "duplicate" if stored.get("_is_duplicate") else "stored"
                 processed.append({
                     "stored_message_id": stored.get("id"),
                     "subject": record.get("subject"),
