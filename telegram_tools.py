@@ -776,6 +776,7 @@ async def _exec_restart_service(service: str = "telegram") -> str:
         "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
     }
     results = []
+    restart_failed = False
     for svc in svc_map[service]:
         try:
             proc = subprocess.run(
@@ -786,11 +787,31 @@ async def _exec_restart_service(service: str = "telegram") -> str:
             if proc.returncode == 0:
                 results.append(f"✅ {svc}: restarted")
             else:
+                restart_failed = True
                 results.append(f"❌ {svc}: {proc.stderr.strip()}")
         except subprocess.TimeoutExpired:
+            restart_failed = True
             results.append(f"⏱ {svc}: timeout")
         except Exception as e:
+            restart_failed = True
             results.append(f"❌ {svc}: {e}")
+
+    if current_task_id and persist_task_restart_state:
+        try:
+            persist_task_restart_state(
+                current_task_id,
+                service=service,
+                phase="verification" if not restart_failed else "requested",
+                mark_completed=not restart_failed,
+                resumed_after_restart=not restart_failed,
+                reentry_reason=(
+                    "restart completed; next step is post-restart verification"
+                    if not restart_failed
+                    else "restart command failed; restart branch may retry after fix"
+                ),
+            )
+        except Exception as e:
+            results.append(f"⚠️ durable restart completion state update failed: {e}")
 
     checked_files = ", ".join(sorted(changed_files)[:10]) if changed_files else "(none)"
     return (

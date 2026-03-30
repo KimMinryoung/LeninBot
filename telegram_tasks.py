@@ -371,6 +371,10 @@ def persist_task_restart_state(
     except Exception:
         previous_attempts = 0
 
+    restart_requested_at = existing.get("restart_requested_at")
+    if phase == "requested" or not restart_requested_at:
+        restart_requested_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
     restart_state = {
         **existing,
         "restart_initiated": True,
@@ -378,18 +382,28 @@ def persist_task_restart_state(
         "restart_completed": bool(mark_completed),
         "post_restart_phase": phase,
         "restart_attempt_count": previous_attempts + (1 if phase == "requested" else 0),
+        "restart_requested_at": restart_requested_at,
         "resumed_after_restart": bool(resumed_after_restart),
     }
-    if phase == "requested":
-        restart_state["restart_requested_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     if reentry_reason:
         restart_state["restart_reentry_block_reason"] = reentry_reason
 
     metadata[_RESTART_PHASE_KEY] = restart_state
     metadata_json = json.dumps(metadata)
     _execute(
-        "UPDATE telegram_tasks SET metadata = %s WHERE id = %s",
-        (metadata_json, task_id),
+        "UPDATE telegram_tasks SET metadata = %s, restart_initiated = %s, restart_target_service = %s, restart_completed = %s, post_restart_phase = %s, restart_attempt_count = %s, restart_requested_at = %s, resumed_after_restart = %s, restart_reentry_block_reason = %s WHERE id = %s",
+        (
+            metadata_json,
+            True,
+            service,
+            bool(mark_completed),
+            phase,
+            restart_state.get("restart_attempt_count") or 0,
+            restart_requested_at,
+            bool(resumed_after_restart),
+            restart_state.get("restart_reentry_block_reason"),
+            task_id,
+        ),
     )
     return restart_state
 
@@ -397,12 +411,19 @@ def persist_task_restart_state(
 async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, verification: dict) -> dict | None:
     if verification.get("status") != "failed":
         return None
-    policy = verification.get("policy") or {}
-    retry_limit = verification.get("retry_limit", 1)
     task_id = task["id"]
+
+    verification_details = str(verification.get("details") or "")
+    if "server_logs: failed" in verification_details and "'list' object has no attribute 'lower'" in verification_details:
+        return {
+            "status": "blocked_known_bug",
+            "message": "blocked auto-retry on stale server_logs verifier bug; restart updated services first and verify once",
+        }
+
+    retry_limit = verification.get("retry_limit", 1)
     row = await asyncio.to_thread(
         _query_one,
-        "SELECT verification_attempts, agent_type, content, result, mission_id FROM telegram_tasks WHERE id = %s",
+        "SELECT verification_attempts, agent_type, content, result, mission_id, metadata FROM telegram_tasks WHERE id = %s",
         (task_id,),
     )
     attempts = int((row or {}).get("verification_attempts") or 0)
@@ -411,6 +432,15 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     agent_type = (row or {}).get("agent_type") or task.get("agent_type")
     if not agent_type:
         return {"status": "skipped", "message": "missing agent_type for redelegation"}
+
+    restart_ctx = _restart_resume_context(row or task)
+    metadata = _load_task_metadata(row or task)
+    restart_state = metadata.get(_RESTART_PHASE_KEY) if isinstance(metadata.get(_RESTART_PHASE_KEY), dict) else None
+    if restart_ctx["initiated"] and restart_ctx["completed"] and restart_ctx["phase"] in {"verification", "report"}:
+        return {
+            "status": "post_restart_verification_failed",
+            "message": "restart already completed; blocking auto-retry loop until manual follow-up",
+        }
 
     from shared import create_task_in_db
     retry_instruction = (
@@ -427,7 +457,8 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         parent_task_id=task_id,
         mission_id=(row or {}).get("mission_id"),
         agent_type=agent_type,
-        metadata=task.get("metadata"),
+        metadata=metadata,
+        restart_state=restart_state,
     )
     if child.get("status") != "ok":
         return {"status": "error", "message": child.get("error", "failed to create retry task")}
@@ -967,11 +998,35 @@ async def recover_processing_tasks_on_startup(
             if _RESTART_COMPLETED_MARKER not in child_content:
                 child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
 
+            restart_ctx = _restart_resume_context(row)
+            restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
+            metadata_json = None
+            if restart_state:
+                metadata_json = json.dumps({_RESTART_PHASE_KEY: restart_state})
+
             child_rows = await asyncio.to_thread(
                 _query,
-                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type) "
-                "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s) RETURNING id",
-                (user_id, child_content, task_id, child_scratchpad, depth + 1, task_mission_id, task_agent_type),
+                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type, metadata, "
+                "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
+                "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    user_id,
+                    child_content,
+                    task_id,
+                    child_scratchpad,
+                    depth + 1,
+                    task_mission_id,
+                    task_agent_type,
+                    metadata_json,
+                    bool((restart_state or {}).get("restart_initiated")),
+                    (restart_state or {}).get("restart_target_service"),
+                    bool((restart_state or {}).get("restart_completed")),
+                    (restart_state or {}).get("post_restart_phase"),
+                    int((restart_state or {}).get("restart_attempt_count") or 0),
+                    (restart_state or {}).get("restart_requested_at"),
+                    bool((restart_state or {}).get("resumed_after_restart")),
+                    (restart_state or {}).get("restart_reentry_block_reason"),
+                ),
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
