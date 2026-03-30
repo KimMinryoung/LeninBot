@@ -63,7 +63,13 @@ SELF_TOOLS = [
                 "keyword": {"type": "string", "description": "Filter keyword."},
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
                 "service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "For server_logs."},
-                "grep": {"type": "string", "description": "For server_logs: filter text."},
+                "grep": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}}
+                    ],
+                    "description": "For server_logs: filter text or list of texts.",
+                },
                 "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
                 "task_id": {"type": "integer", "description": "For task_reports: get full report for a specific task ID."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
@@ -445,36 +451,49 @@ async def _exec_read_system_status() -> str:
 
 
 async def _exec_read_server_logs(
-    service: str = "telegram", minutes_back: int = 10, limit: int = 50, grep: str = "",
+    service: str = "telegram", minutes_back: int = 10, limit: int = 50, grep: str | list[str] | tuple[str, ...] | None = "",
 ) -> str:
     """Read journald logs for a systemd service."""
-    import subprocess
+    from shared import fetch_server_logs, _normalize_grep_terms, grep_matches_text
 
-    service_map = {
-        "telegram": "leninbot-telegram",
-        "api": "leninbot-api",
-        "nginx": "nginx",
-    }
-    unit = service_map.get(service, "leninbot-telegram")
     minutes_back = max(1, min(60, minutes_back))
     limit = max(1, min(200, limit))
+    hours_back = max(1, (minutes_back + 59) // 60)
+    grep_terms = _normalize_grep_terms(grep)
 
-    cmd = ["journalctl", "-u", unit, f"--since={minutes_back} min ago", "--no-pager", "-n", str(limit)]
-    if grep:
-        cmd.extend(["--grep", grep])
+    rows = await asyncio.to_thread(
+        fetch_server_logs,
+        service,
+        hours_back,
+        None,
+        limit,
+    )
+    if not rows:
+        return f"=== SERVER LOGS ({service}, last {minutes_back}min) ===\n(no output)"
 
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=10,
-        )
-        output = result.stdout.strip() if result.stdout else "(no output)"
-        if result.returncode != 0 and result.stderr:
-            output += f"\n[stderr] {result.stderr.strip()}"
-        return f"=== SERVER LOGS ({unit}, last {minutes_back}min) ===\n{output}"
-    except subprocess.TimeoutExpired:
-        return f"Log fetch timed out for {unit}."
-    except Exception as e:
-        return f"Log fetch failed: {e}"
+    if rows and isinstance(rows[0], dict) and rows[0].get("error"):
+        return f"Log fetch failed: {rows[0]['error']}"
+
+    if grep_terms:
+        rows = [
+            row for row in rows
+            if grep_matches_text((row or {}).get("raw") if isinstance(row, dict) else row, grep_terms)
+        ]
+        if not rows:
+            return f"=== SERVER LOGS ({service}, last {minutes_back}min, grep={grep_terms}) ===\n(no output)"
+
+    formatted = []
+    for row in rows:
+        raw = str((row or {}).get("raw") or "").strip()
+        if raw:
+            formatted.append(raw)
+        else:
+            ts = str((row or {}).get("timestamp") or "").strip()
+            msg = str((row or {}).get("message") or "").strip()
+            formatted.append(f"{ts} {msg}".strip())
+    output = "\n".join(formatted) if formatted else "(no output)"
+    grep_desc = f", grep={grep_terms}" if grep_terms else ""
+    return f"=== SERVER LOGS ({service}, last {minutes_back}min{grep_desc}) ===\n{output}"
 
 
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
@@ -862,7 +881,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 async def _exec_read_self(
     source: str, limit: int | None = None, keyword: str | None = None,
     hours_back: int | None = None, service: str = "telegram",
-    grep: str = "", status: str | None = None, task_id: int | None = None,
+    grep: str | list[str] | tuple[str, ...] | None = "", status: str | None = None, task_id: int | None = None,
     chat_source: str = "web",
 ) -> str:
     """Dispatcher for all read_self sources."""
