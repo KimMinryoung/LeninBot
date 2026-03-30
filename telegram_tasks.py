@@ -295,12 +295,21 @@ async def _run_verification(
             verification_prompt_parts.append(
                 f"- 다음 URL들이 정상 응답하는지 확인하라: {', '.join(policy['urls'])}"
             )
-        if log_service:
-            verification_prompt_parts.append(
-                f"- 코드가 수정됐는데 서비스 로그에 반영이 안 된 경우 (구버전 에러가 계속 보이는 경우), "
-                f"restart_service(service='{log_service}')를 호출해서 서비스를 재시작한 뒤 로그를 다시 확인하라."
-            )
         verification_prompt_parts.extend([
+            "",
+            "## 서비스 재시작 판단 기준",
+            "코드가 수정됐는데 서비스 로그에 구버전 에러가 계속 보이면 재시작이 필요하다.",
+            "어떤 서비스를 재시작할지는 수정된 파일로 판단하라:",
+            "- telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, self_tools.py, shared.py 수정 → restart_service(service='telegram')",
+            "- api.py 수정 → restart_service(service='api')",
+            "- 양쪽 다 수정됐으면 restart_service(service='all')",
+            "- 단, **telegram 서비스를 재시작하면 현재 이 검증 작업도 종료된다.** "
+            "telegram 재시작이 필요하면 VERDICT: FAIL로 판정하고 이유에 'telegram 서비스 재시작 필요'라고 명시하라. "
+            "api만 재시작하면 되는 경우에는 직접 restart_service(service='api')를 호출한 뒤 로그를 재확인하라.",
+        ])
+        verification_prompt_parts.extend([
+            "",
+            "## 검증 절차",
             "- 보고서에 적힌 변경사항이 실제로 반영됐는지 파일/코드를 확인하라.",
             "- 추측하지 말고 도구로 직접 확인하라.",
             "",
@@ -472,6 +481,28 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     if verification.get("status") != "failed":
         return None
     task_id = task["id"]
+    verification_details = str(verification.get("details") or "").lower()
+
+    # If verifier determined telegram restart is needed, do it here
+    # (verifier can't restart telegram because it would kill itself)
+    needs_telegram_restart = "telegram 서비스 재시작 필요" in verification_details or "telegram restart" in verification_details
+    if needs_telegram_restart:
+        try:
+            persist_task_restart_state(
+                task_id,
+                service="telegram",
+                phase="verification",
+                mark_completed=False,
+                reentry_reason="verifier requested telegram restart; child must verify after restart",
+            )
+            from telegram_tools import _exec_restart_service
+            restart_result = await _exec_restart_service(service="telegram")
+            # If we reach here, restart didn't kill us (unlikely for telegram)
+            logger.info("telegram restart completed within verification: %s", restart_result)
+        except Exception as e:
+            logger.warning("telegram restart from verification failed: %s", e)
+        # Process will likely die here. recover_processing_tasks_on_startup will handle the rest.
+        return {"status": "restart_initiated", "message": "telegram restart requested by verifier; task will resume after restart"}
 
     retry_limit = verification.get("retry_limit", 1)
     row = await asyncio.to_thread(
@@ -1097,6 +1128,26 @@ async def recover_processing_tasks_on_startup(
 
             restart_ctx = _restart_resume_context(row)
             restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
+
+            # If restart was triggered during verification phase, tell child to only verify
+            if restart_state and restart_state.get("post_restart_phase") == "verification":
+                parent_result = await asyncio.to_thread(
+                    _query_one,
+                    "SELECT result FROM telegram_tasks WHERE id = %s",
+                    (task_id,),
+                )
+                parent_report = (parent_result or {}).get("result") or ""
+                if parent_report:
+                    child_content = (
+                        f"{_RESTART_COMPLETED_MARKER}\n"
+                        f"[POST-RESTART VERIFICATION ONLY]\n"
+                        f"서비스가 검증 단계에서 재시작됐다. 코드 변경은 이미 완료됐고 서비스도 재시작됐다.\n"
+                        f"아래 원본 태스크의 작업 결과를 검증만 하라. 코드를 다시 수정하거나 서비스를 다시 재시작하지 마라.\n\n"
+                        f"## 원본 태스크\n{content[:2000]}\n\n"
+                        f"## 이전 실행 결과\n{parent_report[:3000]}\n\n"
+                        f"서버 로그를 확인하고, 변경사항이 정상 반영됐는지 검증한 뒤 결과를 보고하라."
+                    )
+
             metadata_json = None
             if restart_state:
                 metadata_json = json.dumps({_RESTART_PHASE_KEY: restart_state})
