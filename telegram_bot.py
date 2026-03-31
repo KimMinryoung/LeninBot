@@ -488,6 +488,10 @@ def _build_env_context() -> str:
         lines.append(f"Playwright Chromium: {chromium[0]}")
     lines.append(f"Xvfb: {'available' if os.path.exists('/usr/bin/xvfb-run') else 'not found'}")
 
+    # System permissions
+    lines.append("sudo 권한: `sudo apt update/install` 가능 (NOPASSWD). `sudo systemctl restart leninbot-*` 가능.")
+    lines.append("시스템 패키지 설치: `sudo apt install -y <pkg>` 사용. pip 전역 설치 금지.")
+
     # Services
     lines.append("Services (systemd): leninbot-telegram, leninbot-api, leninbot-embedding, leninbot-neo4j")
     lines.append("서비스 코드 수정 후 restart_service tool로 재시작. subprocess로 직접 재시작 금지.")
