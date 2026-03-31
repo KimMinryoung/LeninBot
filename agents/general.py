@@ -1,12 +1,12 @@
 """agents/general.py — General-purpose agent (replaces legacy create_task)."""
 
 from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import CORE_IDENTITY
+from shared import AGENT_CONTEXT
 
 GENERAL = AgentSpec(
     name="general",
     description="범용 리서치/분석 태스크 (특정 전문 에이전트에 해당하지 않을 때)",
-    system_prompt_template=CORE_IDENTITY + """
+    system_prompt_template=AGENT_CONTEXT + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
 """ + CONTEXT_AWARENESS_BLOCK + """

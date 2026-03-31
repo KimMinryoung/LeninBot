@@ -287,12 +287,13 @@ async def list_reports(
         """SELECT id, content, result, created_at, completed_at
            FROM telegram_tasks
            WHERE status = 'done' AND result IS NOT NULL AND result != ''
+             AND COALESCE(agent_type, '') != 'programmer'
            ORDER BY completed_at DESC
            LIMIT %s OFFSET %s""",
         (limit, offset),
     )
     count_rows = db_query(
-        "SELECT COUNT(*) AS cnt FROM telegram_tasks WHERE status = 'done' AND result IS NOT NULL AND result != ''",
+        "SELECT COUNT(*) AS cnt FROM telegram_tasks WHERE status = 'done' AND result IS NOT NULL AND result != '' AND COALESCE(agent_type, '') != 'programmer'",
     )
     total = count_rows[0]["cnt"] if count_rows else 0
     return {"reports": rows, "total": total}
@@ -304,7 +305,8 @@ async def get_report(report_id: int):
     rows = db_query(
         """SELECT id, content, result, created_at, completed_at
            FROM telegram_tasks
-           WHERE id = %s AND status = 'done' AND result IS NOT NULL""",
+           WHERE id = %s AND status = 'done' AND result IS NOT NULL
+             AND COALESCE(agent_type, '') != 'programmer'""",
         (report_id,),
     )
     if not rows:

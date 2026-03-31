@@ -2,12 +2,12 @@
 
 from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from agents.razvedchik.persona import SCOUT_PERSONA
-from shared import CORE_IDENTITY
+from shared import AGENT_CONTEXT
 
 SCOUT = AgentSpec(
     name="scout",
     description="외부 플랫폼 정찰, 커뮤니티 모니터링, 웹 순찰 전문",
-    system_prompt_template=CORE_IDENTITY + "\n\n" + SCOUT_PERSONA + """
+    system_prompt_template=AGENT_CONTEXT + "\n\n" + SCOUT_PERSONA + """
 
 """ + CONTEXT_AWARENESS_BLOCK + """
 

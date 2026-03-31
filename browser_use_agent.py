@@ -23,13 +23,8 @@ _DEFAULT_MAX_STEPS = 20
 
 
 def _resolve_provider_and_model() -> tuple[str, str]:
-    """Read current provider/model from bot_config runtime settings."""
-    try:
-        from bot_config import get_current_model_selection
-        sel = get_current_model_selection(kind="task")
-        return sel["provider"], sel["model_id"]
-    except Exception:
-        return "claude", "claude-sonnet-4-6"
+    """browser-use always uses Anthropic (OpenAI models fail structured output parsing)."""
+    return "claude", "claude-sonnet-4-6"
 
 
 def _build_llm(model: str | None = None):

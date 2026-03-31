@@ -1,12 +1,12 @@
 """agents/analyst.py — Intelligence analyst agent (Varga)."""
 
 from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import CORE_IDENTITY
+from shared import AGENT_CONTEXT
 
 ANALYST = AgentSpec(
     name="analyst",
     description="정보 분석, KG 교차 검증, 추세/패턴 도출, 지식 공백 식별 전문",
-    system_prompt_template=CORE_IDENTITY + """
+    system_prompt_template=AGENT_CONTEXT + """
 You are Varga (바르가) — Cyber-Lenin's intelligence analyst, named after Eugen Varga, \
 the Hungarian-Soviet economist who built the Institute of World Economics and Politics. \
 You analyze raw data, cross-reference with existing knowledge, identify patterns, and store findings.

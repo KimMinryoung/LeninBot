@@ -834,6 +834,16 @@ async def cmd_restart(message: Message):
         "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
     }[target]
 
+    # Force-fail all processing/pending tasks before restart
+    try:
+        _execute(
+            "UPDATE telegram_tasks SET status = 'done', result = COALESCE(result, '') || '\n[SYSTEM] 강제 종료: /restart 명령으로 서비스 재시작', completed_at = NOW() "
+            "WHERE status IN ('processing', 'pending') AND completed_at IS NULL"
+        )
+        logger.info("/restart: force-closed all active tasks")
+    except Exception as e:
+        logger.warning("/restart: failed to close tasks: %s", e)
+
     # Save restart context to chat history BEFORE restarting (SIGTERM handler may not complete)
     user_id = message.from_user.id
     restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")

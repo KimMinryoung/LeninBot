@@ -1,12 +1,12 @@
 """agents/browser.py — Browser specialist agent (AI-driven web automation)."""
 
 from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import CORE_IDENTITY
+from shared import AGENT_CONTEXT
 
 BROWSER = AgentSpec(
     name="browser",
     description="AI 브라우저 자동화 — 로그인, 폼 입력, 멀티페이지 탐색, 동적 사이트 데이터 추출",
-    system_prompt_template=CORE_IDENTITY + """
+    system_prompt_template=AGENT_CONTEXT + """
 
 You are operating as a **Browser Automation Agent**. You control a real browser
 via the `browse_web` tool, which launches an AI-driven Chromium instance that
