@@ -21,6 +21,7 @@ graphiti-core[google-genai]
 
 # Browser automation (URL fetching for JS-rendered pages)
 playwright
+browser-use
 
 # Finance data
 yfinance

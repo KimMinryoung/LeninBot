@@ -1278,3 +1278,79 @@ async def _exec_generate_image(
 
 TOOLS.append(GENERATE_IMAGE_TOOL)
 TOOL_HANDLERS["generate_image"] = _exec_generate_image
+
+# ── AI Browser Automation (browser-use) ──────────────────────────────
+BROWSE_WEB_TOOL = {
+    "name": "browse_web",
+    "description": (
+        "AI-driven browser automation using browser-use. "
+        "An AI agent will autonomously navigate websites, fill forms, click buttons, "
+        "and extract information. Use for complex multi-step web interactions "
+        "(e.g., login flows, form submissions, multi-page navigation, data extraction "
+        "from dynamic sites). For simple page reads, prefer fetch_url (faster, cheaper)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "Natural language description of what to do in the browser. Be specific about the goal and expected output.",
+            },
+            "start_url": {
+                "type": "string",
+                "description": "Optional URL to navigate to before starting the task.",
+            },
+            "max_steps": {
+                "type": "integer",
+                "description": "Maximum browser interaction steps (default: 20, max: 50).",
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+
+async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
+    try:
+        from browser_use_agent import browse
+        max_steps = max(1, min(int(max_steps), 50))
+        result = await browse(task, max_steps=max_steps, start_url=start_url)
+
+        parts = []
+        if result["success"]:
+            parts.append("[OK] Task completed")
+        else:
+            parts.append("[FAIL] Task did not complete successfully")
+
+        parts.append(f"Steps: {result['steps']} | Duration: {result['duration_seconds']}s")
+
+        if result["urls"]:
+            parts.append(f"Visited: {', '.join(str(u) for u in result['urls'][:5])}")
+
+        if result["result"]:
+            text = result["result"]
+            if len(text) > 15000:
+                text = text[:15000] + f"\n... [truncated, total {len(result['result'])} chars]"
+            parts.append(f"\n--- Result ---\n{text}")
+
+        if result["extracted_content"]:
+            content_str = "\n".join(str(c) for c in result["extracted_content"] if c)
+            if content_str.strip():
+                if len(content_str) > 10000:
+                    content_str = content_str[:10000] + "\n... [truncated]"
+                parts.append(f"\n--- Extracted ---\n{content_str}")
+
+        if result["errors"]:
+            errs = [str(e) for e in result["errors"] if e]
+            if errs:
+                parts.append(f"\nErrors: {'; '.join(errs[:3])}")
+
+        return "\n".join(parts)
+    except Exception as e:
+        return f"browse_web error: {e}"
+
+
+# browse_web: Available to browser agent via filter_tools.
+# Orchestrator won't call it directly (delegated to browser agent per system prompt).
+TOOLS.append(BROWSE_WEB_TOOL)
+TOOL_HANDLERS["browse_web"] = _exec_browse_web

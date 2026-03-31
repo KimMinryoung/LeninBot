@@ -470,7 +470,7 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - programmer: 코드 작성/수정/디버깅/파일 편집 전문 ($1.50)
 - analyst: 정보 분석/조사의 기본 에이전트. 웹 검색+수집+KG 교차 검증+패턴 도출+지식 저장 ($1.00)
 - scout: 정기 순찰, 대규모 플랫폼 크롤링 등 전문 수집 ($1.00)
-- programmer: 코드 작성/수정/디버깅/파일 편집 ($1.50)
+- browser: AI 브라우저 자동화 — 로그인, 폼 입력, 멀티페이지 탐색, 동적 사이트 데이터 추출 ($1.50)
 - visualizer: 이미지 생성, 시각 콘셉트 ($1.00)
 
 When to delegate vs handle directly:
@@ -478,6 +478,7 @@ When to delegate vs handle directly:
 - **"~분석해줘/조사해줘/알아봐줘"** → delegate(agent="analyst")
 - **코드 읽기/수정/실행/파일 관리** → delegate(agent="programmer")
 - **Moltbook 순찰, 대규모 크롤링** → delegate(agent="scout")
+- **웹사이트 로그인, 폼 제출, 복잡한 브라우저 조작** → delegate(agent="browser")
 - **이미지 생성** → delegate(agent="visualizer")
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
