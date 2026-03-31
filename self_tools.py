@@ -82,7 +82,9 @@ SELF_TOOLS = [
         "name": "write_kg",
         "description": (
             "Store facts to Knowledge Graph. Low-cost: just pass a string of factual statements. "
-            "Use bullet points for multiple facts. KG extracts entities/relationships automatically."
+            "Use bullet points for multiple facts. KG extracts entities/relationships automatically.\n"
+            "DO NOT store: internal system state (code structure, config, tool schemas, bug status), "
+            "task execution details, debugging logs, or anything derivable by reading the codebase."
         ),
         "input_schema": {
             "type": "object",
@@ -118,7 +120,8 @@ SELF_TOOLS = [
             "- programmer: 코드 작성/수정/디버깅 ($1.50)\n"
             "- scout: 정기 순찰, 대규모 크롤링 ($1.00)\n"
             "- visualizer: 이미지 생성 ($1.00)\n"
-            "조사/분석 → analyst. 코드 → programmer. 이미지 → visualizer. 크롤링 → scout.\n"
+            "- browser: 웹사이트 로그인/폼 제출/브라우저 자동화 ($1.50)\n"
+            "조사/분석 → analyst. 코드 → programmer. 이미지 → visualizer. 크롤링 → scout. 웹 자동화 → browser.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
@@ -127,7 +130,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["analyst", "programmer", "scout", "visualizer"],
+                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {

@@ -1353,10 +1353,7 @@ async def bot_main():
     async def _notify_ready():
         """Wait for polling to start, then send ready notification."""
         await asyncio.sleep(2)  # brief wait for polling loop to initialize
-        from shared import get_kg_service
-        kg = await asyncio.to_thread(get_kg_service)
-        kg_status = "connected" if kg else "unavailable"
-        _add_system_alert(f"Deploy 완료 — KG: {kg_status}")
+        _add_system_alert("Deploy 완료 — Telegram 서비스 가동")
         # Save startup marker to chat history so the bot knows it just restarted
         startup_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
         recovery_summary = ""
@@ -1366,18 +1363,15 @@ async def bot_main():
             try:
                 _save_chat_message(
                     uid, "user",
-                    f"[SYSTEM] 서비스 재시작 완료 ({startup_ts}). KG: {kg_status}.{recovery_summary}"
+                    f"[SYSTEM] Telegram 서비스 재시작 완료 ({startup_ts}).{recovery_summary}"
                 )
                 _save_chat_message(
                     uid, "assistant",
-                    f"[SYSTEM] 서비스 가동 확인 ({startup_ts})."
+                    f"[SYSTEM] Telegram 서비스 가동 확인 ({startup_ts})."
                 )
             except Exception as e:
                 logger.warning("Failed to save startup marker for user %s: %s", uid, e)
-        await broadcast(bot, (
-            f"🟢 *Deploy 완료* — 메시지 수신 준비 완료.\n"
-            f"  KG (Neo4j): {kg_status}"
-        ), ALLOWED_USER_IDS)
+        await broadcast(bot, "🟢 Telegram 서비스 재시작 완료 — 메시지 수신 준비 완료.", ALLOWED_USER_IDS)
 
     asyncio.create_task(_notify_ready(), name="startup_notify")
 
