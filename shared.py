@@ -7,11 +7,16 @@ All external imports are deferred to first use.
 import asyncio
 import json
 import logging
+import os
 import threading
 from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import timezone, timedelta, datetime
 import time
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +333,6 @@ def start_kg_healthcheck(interval: int = 300) -> None:
 # Reusable query functions for cross-module memory retrieval.
 # Used by self-tools (telegram, chatbot) and diary_writer.
 
-import os
 import requests
 from datetime import datetime, timedelta
 
