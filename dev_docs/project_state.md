@@ -1,4 +1,4 @@
-# Project State — 2026-03-30
+# Project State — 2026-03-31
 
 ## Identity
 
@@ -39,6 +39,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │          │                  │            │              │               │
 │  ┌───────┴──────────────────┴────────────┴──────────────┴─────────┐    │
 │  │                     shared.py (공유 라이브러리)                    │    │
+│  │  CORE_IDENTITY (본체)   AGENT_CONTEXT (에이전트)                │    │
 │  │  similarity_search()    search_knowledge_graph()               │    │
 │  │  add_kg_episode()       upload_to_r2()                        │    │
 │  │  submit_kg_task()       fetch_server_logs()                   │    │
@@ -53,7 +54,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │  │ Claude/GPT 교체가능 │    │ (LangGraph RAG)  │                         │
 │  │ 에이전트 태스크큐    │    │ Gemini 3.1 FL    │                         │
 │  │ email_bridge.py   │    │ 9-node 워크플로우   │                         │
-│  │ 도구 17+개         │    │                  │                         │
+│  │ browser-use SDK   │    │                  │                         │
+│  │ 도구 20+개         │    │                  │                         │
 │  └──────────────────┘    └──────────────────┘                         │
 │  Telegram polling          :8000 (외부, 웹챗봇)                         │
 └───────────────────────────────────────────────────────────────────────┘
@@ -114,6 +116,15 @@ deploy.sh가 재시작하는 것:
 
 ## Telegram Agent System (CLAW Architecture)
 
+### Identity Architecture
+
+시스템 프롬프트 정체성이 본체와 에이전트로 분리됨:
+
+- **CORE_IDENTITY**: Orchestrator, chatbot, diary_writer 전용. "You are Cyber-Lenin."
+- **AGENT_CONTEXT**: Specialist 에이전트 전용. "You are a specialist agent in the Cyber-Lenin system. You serve Cyber-Lenin, but you are NOT Cyber-Lenin."
+
+각 에이전트는 고유 페르소나(Kitov, Varga 등)만 갖고, 사이버-레닌 본체와 정체성 충돌 없음.
+
 ### LLM Provider (런타임 교체 가능)
 
 `/provider` 명령으로 Claude ↔ OpenAI 실시간 전환. 시스템 프롬프트에 `<current-model>` 태그로 현재 모델 정보 자동 주입 — 에이전트가 자신의 모델을 인지.
@@ -126,27 +137,34 @@ deploy.sh가 재시작하는 것:
 
 `bot_config.py`에서 관리. chat은 medium tier, task는 에이전트별 budget/tier 설정. `/fallback`으로 medium ↔ low 토글.
 
+**browser-use SDK는 항상 Claude Sonnet 4.6 사용** (OpenAI 모델은 structured output parsing 실패).
+
 ### Orchestrator
-사용자 메시지를 받아 의도를 파악하고, 필요 시 전문 에이전트에 `delegate` tool로 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임.
+사용자 메시지를 받아 의도를 파악하고, 필요 시 전문 에이전트에 `delegate` tool로 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임. 텔레그램 메시지는 마크다운 서식 금지 (plain text only).
 
 ### Specialist Agents
 
 | 에이전트 | 페르소나 | 역할 | 주요 도구 |
 |---|---|---|---|
-| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg, send_email |
-| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2, send_email |
+| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg, send_email, check_inbox |
+| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2, send_email, check_inbox |
+| **browser** | 브라우저 자동화 | 로그인, 폼 제출, 동적 사이트 | browse_web, check_inbox, allowlist_sender, fetch_url |
 | **visualizer** (Rodchenko) | 이미지 생성 | 프로파간다 포스터/게임아트 | generate_image (Replicate FLUX), upload_to_r2 |
-| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file, upload_to_r2 |
+| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file, upload_to_r2, check_inbox |
 
 ### 핵심 도구
 
 - **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지. 재시작 시 자동 복구 태스크 생성 (request_continuation 불필요)
 - **send_email**: Resend API로 이메일 발신. HTML 지원, 서명 자동 삽입 (`config/email_signature.json`). DB 기록
+- **check_inbox**: IMAP 실시간 접속 (INBOX + Junk 양쪽 검색). 발신자/제목 필터, 링크 자동 추출. 뉴스레터 인증 메일 처리에 사용
+- **allowlist_sender**: Junk 폴더에서 특정 발신자 메일을 INBOX로 이동
+- **browse_web**: browser-use SDK (Playwright + LLM). AI가 스크린샷 보고 클릭/입력/탐색. 항상 Claude Sonnet 사용
 - **upload_to_r2**: Cloudflare R2에 파일 업로드 → 공개 URL 반환. file_registry DB 자동 등록
 - **save_finding**: 미션 타임라인에 중간 발견 기록
 - **request_continuation**: 예산 한계 시 자식 태스크 생성 (작업 이관 전용)
-- **write_kg**: 지식 그래프에 사실 저장 (KG 전용 루프에서 실행)
+- **write_kg**: 지식 그래프에 사실 저장 (KG 전용 루프에서 실행). 내부 시스템 상태 저장 금지
 - **mission**: 미션 상태 확인/종료 (delegate 시 자동 생성)
+- **delegate**: specialist 에이전트에 작업 위임 (analyst, programmer, scout, visualizer, browser)
 
 ### Task Lifecycle
 ```
@@ -158,18 +176,28 @@ delegate → pending → processing → done → LLM verification
                            handed_off (request_continuation → child task)
 ```
 
+### /restart Command
+- 실행 시 모든 processing/pending 태스크를 강제 종료(done) 후 서비스 재시작
+- 재시작 후 불필요한 태스크 재실행 방지
+
 ### Verification System
 - **Phase 1**: 자동 체크 (task_report 존재, url_access HTTP 상태)
 - **Phase 2**: LLM 기반 검증 — 같은 agent가 도구로 독립 검증 (로그 확인, 코드 확인, URL 접근)
 - 검증자가 서비스 재시작 필요 판단 시: api는 직접 재시작, telegram은 VERDICT: FAIL → child task 생성 후 재시작
 - chain depth guard: ancestor 순회로 무한 retry 차단
 - retry child에 부모 result 요약 포함 → 같은 접근 반복 방지
+- 외부 서비스 의존 실패(403, CAPTCHA, 메일 미수신 등)는 PASS 처리
 
 ### Service Restart Recovery
 - `restart_service` 호출 → `persist_task_restart_state` → 프로세스 사망
 - `recover_processing_tasks_on_startup` → child task 자동 생성 (`_RESTART_COMPLETED_MARKER` 포함)
 - child는 재시작 이미 완료된 상태로 인식 → 재시작 반복 없음
 - `request_continuation` 사전 호출 불필요
+
+### Tool Isolation
+- Orchestrator: 모든 도구 접근 가능 (단, 프로그래밍 도구 차단)
+- Specialist 에이전트: `AgentSpec.filter_tools()`로 역할별 도구만 노출
+- `delegate` 도구는 orchestrator만 접근 가능 — 에이전트 간 재위임 불가
 
 ---
 
@@ -214,6 +242,7 @@ START → analyze_intent
 - **group_ids**: geopolitics_conflict, economy, korea_domestic, diary_news, agent_knowledge
 - **KG 전용 이벤트 루프**: `run_kg_task()` / `submit_kg_task()` — cross-loop 오류 방지
 - **병렬 수집**: `submit_kg_task()` + `collect_kg_futures()` (diary 뉴스 수집에 사용)
+- **write_kg 제한**: 내부 시스템 상태(코드 구조, 설정, 버그, 태스크 로그) 저장 금지
 
 ### Embedding Server (독립 서비스)
 - **모델**: BAAI/bge-m3 (CPU, ~831MB)
@@ -228,17 +257,18 @@ START → analyze_intent
 leninbot/
 ├── api.py                     # FastAPI (SSE streaming, /chat, /logs, /session/*)
 ├── chatbot.py                 # LangGraph 9-node RAG pipeline (웹챗봇 전용)
-├── shared.py                  # 공유 라이브러리: CORE_IDENTITY, KG/벡터검색/메모리/URL
+├── shared.py                  # 공유 라이브러리: CORE_IDENTITY, AGENT_CONTEXT, KG/벡터검색/메모리/URL
 ├── embedding_server.py        # BGE-M3 임베딩 서버 (독립 FastAPI, :8100)
 ├── embedding_client.py        # 임베딩 HTTP 클라이언트 (fallback 내장)
 ├── bot_config.py              # LLM 클라이언트, 런타임 설정, 모델 해석
 ├── telegram_bot.py            # Telegram 봇 코어: 채팅, LLM 디스패치, 에이전트 실행
-├── telegram_commands.py       # 커맨드/메시지/콜백 핸들러
-├── telegram_tools.py          # 도구 정의 + 핸들러 (restart_service 포함)
+├── telegram_commands.py       # 커맨드/메시지/콜백 핸들러 (/restart: 태스크 강제종료 + 재시작)
+├── telegram_tools.py          # 도구 정의 + 핸들러 (check_inbox, allowlist_sender, browse_web 등)
 ├── telegram_tasks.py          # 백그라운드 태스크 워커, 스케줄러, 모니터
 ├── telegram_mission.py        # 미션 컨텍스트 시스템
 ├── self_tools.py              # delegate, save_finding, request_continuation, write_kg
 ├── claude_loop.py             # Claude tool-use 루프
+├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
 ├── diary_writer.py            # 자율 일기 작성 + 뉴스 KG 병렬 수집
@@ -255,8 +285,10 @@ leninbot/
 │   ├── base.py                # AgentSpec + 공통 컨텍스트 블록
 │   ├── analyst.py             # Varga — 정보 분석/KG 저장
 │   ├── programmer.py          # Kitov — 코드 수정 (restart_service 사용)
+│   ├── browser.py             # Browser — AI 브라우저 자동화 (browser-use SDK)
 │   ├── visualizer.py          # Rodchenko — 이미지 생성 (reference_image 지원)
-│   └── scout.py               # 외부 플랫폼 정찰
+│   ├── scout.py               # 외부 플랫폼 정찰
+│   └── general.py             # 범용 리서치 (도구 제한 없음)
 │
 ├── graph_memory/              # Graphiti 지식 그래프 모듈
 │   ├── service.py             # GraphMemoryService (Neo4j keepalive/liveness)
@@ -275,6 +307,56 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-03-31 — 에이전트 정체성 분리, browser agent, 이메일 도구, 톤 가이드
+
+#### Agent Identity 분리
+- `CORE_IDENTITY` (본체 전용) / `AGENT_CONTEXT` (에이전트 전용) 분리
+- 에이전트가 더 이상 "You are Cyber-Lenin"을 주입받지 않음 — 고유 페르소나만 보유
+- 정체성 충돌 제거
+
+#### Tone & Format
+- 안티-sycophancy 톤 가이드 (CORE_IDENTITY + AGENT_CONTEXT)
+- 텔레그램 메시지: 마크다운 서식 금지 (plain text only)
+
+#### Browser Agent
+- `browser_use_agent.py`: browser-use 0.12.5 SDK 래퍼
+- `agents/browser.py`: specialist agent 정의 ($1.50 budget, 30 rounds)
+- delegate 도구에 browser 추가 (self_tools.py enum + 설명)
+- 항상 Claude Sonnet 사용 (OpenAI structured output 호환성 문제)
+
+#### Email Tools
+- `check_inbox`: IMAP 실시간 접속, INBOX + Junk 양쪽 검색, 링크 자동 추출
+- `allowlist_sender`: Junk → INBOX 메일 이동
+- 모든 에이전트에 check_inbox 제공 (visualizer 제외)
+
+#### /restart 개선
+- 실행 시 processing + pending 태스크 모두 강제 종료 후 재시작
+- 재시작 후 불필요한 태스크 재실행 방지
+
+#### Tool Isolation 수정
+- specialist 에이전트가 `delegate` 도구에 접근 불가 — 재귀 위임 방지
+- task 실행 경로에서 `extra_tools`만 사용 (전체 TOOLS 머지 제거)
+
+#### API 공개 범위
+- programmer 태스크 리포트를 API에서 제외 (내부 서버 정보 노출 방지)
+
+#### fetch_url 안정성
+- shared.py에 `load_dotenv()` 추가 — Tavily API 키 로드 보장
+- Playwright: `networkidle` 대기 추가
+- Tavily Extract: API 키 명시 전달, 누락 시 스킵
+
+#### KG 정리
+- write_kg: 내부 시스템 상태 저장 금지 규칙 추가
+- agent_knowledge 그룹에서 시스템 내부 에피소드 18개 삭제
+
+#### Programmer 환경 주입
+- programmer agent에만 `<runtime-environment>` 블록 주입 (OS, Python, sudo apt 권한 등)
+- 환경 오진 방지
+
+#### Verification 개선
+- 외부 서비스 의존 실패는 PASS 처리 (403, CAPTCHA, 메일 미수신 등)
+- 재시도해도 결과 안 달라지는 문제로 FAIL 판정 금지
 
 ### 2026-03-30 — 이메일 브리지, 검증 루프 전면 수정, R2 파일 호스팅
 

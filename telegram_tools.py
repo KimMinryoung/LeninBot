@@ -1360,9 +1360,10 @@ TOOL_HANDLERS["browse_web"] = _exec_browse_web
 CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
-        "Check the email inbox (lenin@cyber-lenin.com) for recent messages. "
-        "Returns subject, sender, date, and all links found in the email body. "
-        "Use this to find confirmation/magic links from newsletter signups."
+        "Check the email inbox AND spam/junk folder (lenin@cyber-lenin.com) for recent messages. "
+        "Returns subject, sender, date, folder, and all links found in the email body. "
+        "Use this to find confirmation/magic links from newsletter signups. "
+        "Emails found in Junk are marked as [JUNK]."
     ),
     "input_schema": {
         "type": "object",
@@ -1386,114 +1387,131 @@ CHECK_INBOX_TOOL = {
 }
 
 
+def _imap_connect():
+    """Create and return an authenticated IMAP connection."""
+    import imaplib
+    host = os.environ.get("EMAIL_IMAP_HOST", "")
+    port = int(os.environ.get("EMAIL_IMAP_PORT", "993"))
+    username = os.environ.get("EMAIL_IMAP_USERNAME", "")
+    password = os.environ.get("EMAIL_IMAP_PASSWORD", "")
+    if not all([host, username, password]):
+        return None
+    conn = imaplib.IMAP4_SSL(host, port)
+    conn.login(username, password)
+    return conn
+
+
+def _parse_email_message(raw_bytes):
+    """Parse a raw email and return dict with subject, from, date, links."""
+    import email as _email
+    from email.header import decode_header
+    import re
+
+    msg = _email.message_from_bytes(raw_bytes)
+
+    subj_parts = decode_header(msg.get("Subject", ""))
+    subject = ""
+    for part, enc in subj_parts:
+        if isinstance(part, bytes):
+            subject += part.decode(enc or "utf-8", errors="replace")
+        else:
+            subject += part
+
+    sender = msg.get("From", "")
+    date = msg.get("Date", "")
+
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = part.get_content_type()
+            if ct == "text/html":
+                body = part.get_payload(decode=True).decode(errors="replace")
+                break
+            elif ct == "text/plain" and not body:
+                body = part.get_payload(decode=True).decode(errors="replace")
+    else:
+        body = msg.get_payload(decode=True).decode(errors="replace")
+
+    links = re.findall(r'href=["\']?(https?://[^"\'\s<>]+)', body)
+    seen = set()
+    unique_links = []
+    for lnk in links:
+        if lnk not in seen:
+            seen.add(lnk)
+            unique_links.append(lnk)
+
+    return {
+        "subject": subject,
+        "from": sender,
+        "date": date,
+        "links": unique_links[:20],
+    }
+
+
 async def _exec_check_inbox(
     sender_filter: str = "",
     subject_filter: str = "",
     limit: int = 5,
 ) -> str:
-    """Check IMAP inbox and extract links from recent emails."""
-    import imaplib
-    import email
-    from email.header import decode_header
-    import re
-
-    host = os.environ.get("EMAIL_IMAP_HOST", "")
-    port = int(os.environ.get("EMAIL_IMAP_PORT", "993"))
-    username = os.environ.get("EMAIL_IMAP_USERNAME", "")
-    password = os.environ.get("EMAIL_IMAP_PASSWORD", "")
-    mailbox = os.environ.get("EMAIL_IMAP_MAILBOX", "INBOX")
-
-    if not all([host, username, password]):
-        return "Error: IMAP credentials not configured in .env"
-
+    """Check IMAP INBOX + Junk folders and extract links from recent emails."""
     limit = max(1, min(20, limit))
 
     def _fetch():
-        conn = imaplib.IMAP4_SSL(host, port)
-        conn.login(username, password)
-        conn.select(mailbox, readonly=True)
-
-        # Search recent emails
-        _, data = conn.search(None, "ALL")
-        all_ids = data[0].split()
-        if not all_ids:
-            conn.logout()
-            return []
-
-        # Take last N*3 to have room for filtering
-        candidate_ids = all_ids[-(limit * 3):]
-        candidate_ids.reverse()  # newest first
+        conn = _imap_connect()
+        if conn is None:
+            return "Error: IMAP credentials not configured in .env"
 
         results = []
-        for mid in candidate_ids:
-            if len(results) >= limit:
-                break
-            _, msg_data = conn.fetch(mid, "(RFC822)")
-            raw = msg_data[0][1]
-            msg = email.message_from_bytes(raw)
-
-            # Decode subject
-            subj_parts = decode_header(msg.get("Subject", ""))
-            subject = ""
-            for part, enc in subj_parts:
-                if isinstance(part, bytes):
-                    subject += part.decode(enc or "utf-8", errors="replace")
-                else:
-                    subject += part
-
-            sender = msg.get("From", "")
-            date = msg.get("Date", "")
-
-            # Apply filters
-            if sender_filter and sender_filter.lower() not in sender.lower():
-                continue
-            if subject_filter and subject_filter.lower() not in subject.lower():
+        for folder in ["INBOX", "Junk"]:
+            try:
+                status, _ = conn.select(folder, readonly=True)
+                if status != "OK":
+                    continue
+            except Exception:
                 continue
 
-            # Extract body text
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    ct = part.get_content_type()
-                    if ct == "text/html":
-                        body = part.get_payload(decode=True).decode(errors="replace")
-                        break
-                    elif ct == "text/plain" and not body:
-                        body = part.get_payload(decode=True).decode(errors="replace")
-            else:
-                body = msg.get_payload(decode=True).decode(errors="replace")
+            _, data = conn.search(None, "ALL")
+            all_ids = data[0].split()
+            if not all_ids:
+                continue
 
-            # Extract links
-            links = re.findall(r'href=["\']?(https?://[^"\'\s<>]+)', body)
-            # Deduplicate while preserving order
-            seen = set()
-            unique_links = []
-            for lnk in links:
-                if lnk not in seen:
-                    seen.add(lnk)
-                    unique_links.append(lnk)
+            candidate_ids = all_ids[-(limit * 3):]
+            candidate_ids.reverse()
 
-            results.append({
-                "subject": subject,
-                "from": sender,
-                "date": date,
-                "links": unique_links[:20],  # cap links per email
-            })
+            for mid in candidate_ids:
+                if len(results) >= limit:
+                    break
+                _, msg_data = conn.fetch(mid, "(RFC822)")
+                raw = msg_data[0][1]
+                parsed = _parse_email_message(raw)
+
+                if sender_filter and sender_filter.lower() not in parsed["from"].lower():
+                    continue
+                if subject_filter and subject_filter.lower() not in parsed["subject"].lower():
+                    continue
+
+                parsed["folder"] = folder
+                results.append(parsed)
 
         conn.logout()
-        return results
+        # Sort by date descending (newest first) across folders
+        results.sort(key=lambda x: x["date"], reverse=True)
+        return results[:limit]
 
     try:
-        emails = await asyncio.to_thread(_fetch)
+        result = await asyncio.to_thread(_fetch)
     except Exception as e:
         return f"IMAP error: {e}"
 
-    if not emails:
+    if isinstance(result, str):
+        return result
+    if not result:
         return "No matching emails found."
 
     lines = []
-    for i, em in enumerate(emails, 1):
-        lines.append(f"[{i}] {em['subject']}")
+    for i, em in enumerate(result, 1):
+        junk_tag = " [JUNK]" if em["folder"] == "Junk" else ""
+        lines.append(f"[{i}]{junk_tag} {em['subject']}")
         lines.append(f"    From: {em['from']}")
         lines.append(f"    Date: {em['date']}")
         if em["links"]:
@@ -1506,5 +1524,70 @@ async def _exec_check_inbox(
     return "\n".join(lines)
 
 
+# ── allowlist_sender Tool ───────────────────────────────────────────
+ALLOWLIST_SENDER_TOOL = {
+    "name": "allowlist_sender",
+    "description": (
+        "Move emails from a sender out of Junk into INBOX, preventing future spam filtering. "
+        "Use after check_inbox shows [JUNK] emails from a legitimate sender."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sender_filter": {
+                "type": "string",
+                "description": "Sender address or domain to rescue from Junk (e.g. 'substack.com', 'noreply@platformer.news').",
+            },
+        },
+        "required": ["sender_filter"],
+    },
+}
+
+
+async def _exec_allowlist_sender(sender_filter: str) -> str:
+    """Move all Junk emails matching sender_filter to INBOX."""
+    def _move():
+        conn = _imap_connect()
+        if conn is None:
+            return "Error: IMAP credentials not configured"
+
+        status, _ = conn.select("Junk")
+        if status != "OK":
+            conn.logout()
+            return "Junk folder not found or empty."
+
+        _, data = conn.search(None, "ALL")
+        all_ids = data[0].split()
+        if not all_ids:
+            conn.logout()
+            return "Junk folder is empty."
+
+        import email as _email
+        from email.header import decode_header
+        moved = 0
+        for mid in all_ids:
+            _, msg_data = conn.fetch(mid, "(RFC822.HEADER)")
+            header_raw = msg_data[0][1]
+            msg = _email.message_from_bytes(header_raw)
+            sender = msg.get("From", "")
+            if sender_filter.lower() not in sender.lower():
+                continue
+            # COPY to INBOX then flag for deletion in Junk
+            conn.copy(mid, "INBOX")
+            conn.store(mid, "+FLAGS", "(\\Deleted)")
+            moved += 1
+
+        conn.expunge()
+        conn.logout()
+        return f"Moved {moved} email(s) from Junk to INBOX matching '{sender_filter}'."
+
+    try:
+        return await asyncio.to_thread(_move)
+    except Exception as e:
+        return f"IMAP error: {e}"
+
+
 TOOLS.append(CHECK_INBOX_TOOL)
 TOOL_HANDLERS["check_inbox"] = _exec_check_inbox
+TOOLS.append(ALLOWLIST_SENDER_TOOL)
+TOOL_HANDLERS["allowlist_sender"] = _exec_allowlist_sender

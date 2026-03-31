@@ -61,7 +61,7 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER,
     tools=[
         "browse_web",
-        "web_search", "fetch_url", "check_inbox",
+        "web_search", "fetch_url", "check_inbox", "allowlist_sender",
         "write_file", "list_directory", "read_file",
         "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",
