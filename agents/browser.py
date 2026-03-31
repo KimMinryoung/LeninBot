@@ -27,7 +27,10 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
 2. **web_search** — Quick web search for finding URLs or context before browsing.
 3. **fetch_url** — Fast, cheap page text extraction. Use when you don't need
    full browser interaction (static pages, APIs, simple articles).
-4. **write_file** — Save extracted data as structured documents.
+4. **check_inbox** — Check the email inbox for recent messages and extract links.
+   Use this to find confirmation/magic links from newsletter signups, then
+   open those links with browse_web or fetch_url.
+5. **write_file** — Save extracted data as structured documents.
 5. **save_finding** — Record important discoveries to mission timeline.
 6. **write_kg** — Store verified facts in the Knowledge Graph.
 
@@ -58,7 +61,7 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER,
     tools=[
         "browse_web",
-        "web_search", "fetch_url",
+        "web_search", "fetch_url", "check_inbox",
         "write_file", "list_directory", "read_file",
         "read_self", "write_kg",
         "save_finding", "request_continuation", "mission",

@@ -1354,3 +1354,157 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
 # Orchestrator won't call it directly (delegated to browser agent per system prompt).
 TOOLS.append(BROWSE_WEB_TOOL)
 TOOL_HANDLERS["browse_web"] = _exec_browse_web
+
+
+# ── check_inbox Tool ────────────────────────────────────────────────
+CHECK_INBOX_TOOL = {
+    "name": "check_inbox",
+    "description": (
+        "Check the email inbox (lenin@cyber-lenin.com) for recent messages. "
+        "Returns subject, sender, date, and all links found in the email body. "
+        "Use this to find confirmation/magic links from newsletter signups."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sender_filter": {
+                "type": "string",
+                "description": "Filter by sender address or domain (e.g. 'substack.com', 'platformer'). Optional.",
+            },
+            "subject_filter": {
+                "type": "string",
+                "description": "Filter by subject keyword (e.g. 'confirm', 'verify', 'sign in'). Optional.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max emails to return (default 5, max 20).",
+                "default": 5,
+            },
+        },
+        "required": [],
+    },
+}
+
+
+async def _exec_check_inbox(
+    sender_filter: str = "",
+    subject_filter: str = "",
+    limit: int = 5,
+) -> str:
+    """Check IMAP inbox and extract links from recent emails."""
+    import imaplib
+    import email
+    from email.header import decode_header
+    import re
+
+    host = os.environ.get("EMAIL_IMAP_HOST", "")
+    port = int(os.environ.get("EMAIL_IMAP_PORT", "993"))
+    username = os.environ.get("EMAIL_IMAP_USERNAME", "")
+    password = os.environ.get("EMAIL_IMAP_PASSWORD", "")
+    mailbox = os.environ.get("EMAIL_IMAP_MAILBOX", "INBOX")
+
+    if not all([host, username, password]):
+        return "Error: IMAP credentials not configured in .env"
+
+    limit = max(1, min(20, limit))
+
+    def _fetch():
+        conn = imaplib.IMAP4_SSL(host, port)
+        conn.login(username, password)
+        conn.select(mailbox, readonly=True)
+
+        # Search recent emails
+        _, data = conn.search(None, "ALL")
+        all_ids = data[0].split()
+        if not all_ids:
+            conn.logout()
+            return []
+
+        # Take last N*3 to have room for filtering
+        candidate_ids = all_ids[-(limit * 3):]
+        candidate_ids.reverse()  # newest first
+
+        results = []
+        for mid in candidate_ids:
+            if len(results) >= limit:
+                break
+            _, msg_data = conn.fetch(mid, "(RFC822)")
+            raw = msg_data[0][1]
+            msg = email.message_from_bytes(raw)
+
+            # Decode subject
+            subj_parts = decode_header(msg.get("Subject", ""))
+            subject = ""
+            for part, enc in subj_parts:
+                if isinstance(part, bytes):
+                    subject += part.decode(enc or "utf-8", errors="replace")
+                else:
+                    subject += part
+
+            sender = msg.get("From", "")
+            date = msg.get("Date", "")
+
+            # Apply filters
+            if sender_filter and sender_filter.lower() not in sender.lower():
+                continue
+            if subject_filter and subject_filter.lower() not in subject.lower():
+                continue
+
+            # Extract body text
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    ct = part.get_content_type()
+                    if ct == "text/html":
+                        body = part.get_payload(decode=True).decode(errors="replace")
+                        break
+                    elif ct == "text/plain" and not body:
+                        body = part.get_payload(decode=True).decode(errors="replace")
+            else:
+                body = msg.get_payload(decode=True).decode(errors="replace")
+
+            # Extract links
+            links = re.findall(r'href=["\']?(https?://[^"\'\s<>]+)', body)
+            # Deduplicate while preserving order
+            seen = set()
+            unique_links = []
+            for lnk in links:
+                if lnk not in seen:
+                    seen.add(lnk)
+                    unique_links.append(lnk)
+
+            results.append({
+                "subject": subject,
+                "from": sender,
+                "date": date,
+                "links": unique_links[:20],  # cap links per email
+            })
+
+        conn.logout()
+        return results
+
+    try:
+        emails = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        return f"IMAP error: {e}"
+
+    if not emails:
+        return "No matching emails found."
+
+    lines = []
+    for i, em in enumerate(emails, 1):
+        lines.append(f"[{i}] {em['subject']}")
+        lines.append(f"    From: {em['from']}")
+        lines.append(f"    Date: {em['date']}")
+        if em["links"]:
+            lines.append(f"    Links ({len(em['links'])}):")
+            for lnk in em["links"]:
+                lines.append(f"      - {lnk}")
+        else:
+            lines.append("    Links: none")
+        lines.append("")
+    return "\n".join(lines)
+
+
+TOOLS.append(CHECK_INBOX_TOOL)
+TOOL_HANDLERS["check_inbox"] = _exec_check_inbox

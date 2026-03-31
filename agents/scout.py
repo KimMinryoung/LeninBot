@@ -96,7 +96,7 @@ print(f"saved: {path}")
 """,
     tools=[
         "execute_python",
-        "web_search", "fetch_url", "download_image", "write_file", "list_directory",
+        "web_search", "fetch_url", "check_inbox", "download_image", "write_file", "list_directory",
         "read_self", "write_kg",
         "save_finding", "request_continuation", "mission", "upload_to_r2",
     ],
