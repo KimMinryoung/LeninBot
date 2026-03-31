@@ -924,25 +924,24 @@ async def _chat_with_tools(
         skills_section=build_skills_prompt(),
     )
     # Orchestrator context isolation: programming tools are reserved for programmer agent.
-    # When extra_tools is provided, caller is a task wrapper → no filtering.
     _ORCHESTRATOR_BLOCKED_TOOLS = {"read_file", "write_file", "patch_file", "list_directory", "execute_python"}
     is_orchestrator = extra_tools is None
 
-    # Deduplicate tools by name — extra_tools override TOOLS with the same name
-    seen_names: set[str] = set()
-    merged_tools: list[dict] = []
-    for t in (extra_tools or []):
-        name = t.get("name", "")
-        if name and name not in seen_names:
-            seen_names.add(name)
-            merged_tools.append(t)
-    for t in TOOLS:
-        name = t.get("name", "")
-        if name not in seen_names:
-            if is_orchestrator and name in _ORCHESTRATOR_BLOCKED_TOOLS:
-                continue
-            seen_names.add(name)
-            merged_tools.append(t)
+    if is_orchestrator:
+        # Orchestrator: use all TOOLS except blocked ones
+        seen_names: set[str] = set()
+        merged_tools: list[dict] = []
+        for t in TOOLS:
+            name = t.get("name", "")
+            if name not in seen_names:
+                if name in _ORCHESTRATOR_BLOCKED_TOOLS:
+                    continue
+                seen_names.add(name)
+                merged_tools.append(t)
+    else:
+        # Task/agent: use ONLY extra_tools (already filtered by agent spec).
+        # Do NOT merge full TOOLS — that would bypass agent tool restrictions.
+        merged_tools = list(extra_tools or [])
     merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
 
     # ── Provider dispatch: Claude vs OpenAI ──
