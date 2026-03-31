@@ -1342,27 +1342,31 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     except Exception as e:
         logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
 
-    # 2) Fallback: Tavily Extract
+    # 2) Fallback: Tavily Extract (skip if API key missing or quota exhausted)
     best_fallback = None
-    try:
-        from langchain_tavily import TavilyExtract
-        extractor = TavilyExtract()
-        result = extractor.invoke({"urls": [url]})
-        items = []
-        if isinstance(result, dict) and result.get("results"):
-            items = result["results"]
-        elif isinstance(result, list):
-            items = result
-        if items:
-            item = items[0] if isinstance(items[0], dict) else {"content": str(items[0])}
-            content = item.get("raw_content", "") or item.get("content", "")
-            if content and len(content) > 50:
-                cleaned = _clean_text(content)[:max_chars]
-                if not _is_low_quality(cleaned):
-                    return cleaned
-                best_fallback = cleaned
-    except Exception as e:
-        logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if tavily_key:
+        try:
+            from langchain_tavily import TavilyExtract
+            extractor = TavilyExtract(tavily_api_key=tavily_key)
+            result = extractor.invoke({"urls": [url]})
+            if isinstance(result, dict) and result.get("error"):
+                raise ValueError(result["error"])
+            items = []
+            if isinstance(result, dict) and result.get("results"):
+                items = result["results"]
+            elif isinstance(result, list):
+                items = result
+            if items:
+                item = items[0] if isinstance(items[0], dict) else {"content": str(items[0])}
+                content = item.get("raw_content", "") or item.get("content", "")
+                if content and len(content) > 50:
+                    cleaned = _clean_text(content)[:max_chars]
+                    if not _is_low_quality(cleaned):
+                        return cleaned
+                    best_fallback = cleaned
+        except Exception as e:
+            logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
     # 3) Fallback: requests + BeautifulSoup
     try:
@@ -1509,6 +1513,11 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
     try:
         page = context.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        # Give JS-rendered pages a moment to hydrate
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
 
         # Naver Cafe/Blog: content is inside an iframe
         target = page
