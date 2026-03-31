@@ -444,6 +444,60 @@ def _get_finance_context() -> str:
     return ""
 
 
+_env_context_cache: str | None = None
+_env_context_ts: float = 0
+
+
+def _build_env_context() -> str:
+    """Build runtime environment info block for agents. Cached for 1 hour."""
+    import time
+    global _env_context_cache, _env_context_ts
+    if _env_context_cache and (time.time() - _env_context_ts) < 3600:
+        return _env_context_cache
+
+    import subprocess, platform
+    lines = ["<runtime-environment>"]
+
+    # OS
+    lines.append(f"OS: {platform.platform()}")
+
+    # Python / venv
+    venv = "/home/grass/leninbot/venv"
+    lines.append(f"Python venv: {venv}/bin/python")
+    lines.append("패키지 설치 시 반드시 이 venv를 사용하라. 전역 설치(--break-system-packages) 금지.")
+
+    # Key packages
+    try:
+        r = subprocess.run(
+            [f"{venv}/bin/pip", "list", "--format=columns"],
+            capture_output=True, text=True, timeout=10,
+        )
+        pkg_names = {"playwright", "browser-use", "anthropic", "aiogram", "langchain-core", "graphiti-core"}
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if parts and parts[0].lower() in pkg_names:
+                lines.append(f"  {parts[0]}=={parts[1]}")
+    except Exception:
+        pass
+
+    # Playwright browsers
+    import glob
+    chromium = glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
+    if chromium:
+        chromium.sort(reverse=True)
+        lines.append(f"Playwright Chromium: {chromium[0]}")
+    lines.append(f"Xvfb: {'available' if os.path.exists('/usr/bin/xvfb-run') else 'not found'}")
+
+    # Services
+    lines.append("Services (systemd): leninbot-telegram, leninbot-api, leninbot-embedding, leninbot-neo4j")
+    lines.append("서비스 코드 수정 후 restart_service tool로 재시작. subprocess로 직접 재시작 금지.")
+
+    lines.append("</runtime-environment>")
+    _env_context_cache = "\n".join(lines)
+    _env_context_ts = time.time()
+    return _env_context_cache
+
+
 _SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + """
 Operating via Telegram. Use tools proactively when data would improve the answer — don't rely on memory alone.
 
@@ -1142,6 +1196,10 @@ async def bot_main():
             system_alerts=_format_system_alerts(),
             finance_data=_get_finance_context(),
         )
+
+        # Inject runtime environment info for agents that need it
+        if agent_type in ("programmer", "browser", "scout"):
+            system_prompt += "\n" + _build_env_context()
 
         # Send progress to the task's user (or all users if self-generated)
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
