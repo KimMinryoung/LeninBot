@@ -1197,8 +1197,8 @@ async def bot_main():
             finance_data=_get_finance_context(),
         )
 
-        # Inject runtime environment info for agents that need it
-        if agent_type in ("programmer", "browser", "scout"):
+        # Inject runtime environment info for programmer (needs venv, packages, services)
+        if agent_type == "programmer":
             system_prompt += "\n" + _build_env_context()
 
         # Send progress to the task's user (or all users if self-generated)
