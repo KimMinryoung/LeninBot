@@ -1277,42 +1277,31 @@ async def bot_main():
 
         # ── Browser task delegation to external worker process ──
         if agent_type == "browser":
-            result = await _delegate_to_browser_worker(task)
-            if result is not None:
-                # Worker handled it — send Telegram results from main process
+            worker_result = await _delegate_to_browser_worker(task)
+            if worker_result is not None:
+                # Worker handled it — trigger orchestrator callback from main process
                 task_id = task["id"]
                 user_id = task["user_id"]
-                status = result.get("status", "done")
-                summary = result.get("result_summary", "")
+                status = worker_result.get("status", "done")
+                summary = worker_result.get("result_summary", "")
 
-                # Notify via system alert
                 icon = "✅" if status == "done" else "❌"
                 _add_system_alert(f"{icon} 태스크 #{task_id} {status} (browser worker): {summary[:200]}")
 
-                # Send report file to user (result already saved to DB by worker)
-                if summary:
-                    from aiogram.types import BufferedInputFile
-                    target = user_id if user_id != 0 else next(iter(ALLOWED_USER_IDS), 0)
-                    if target:
-                        try:
-                            row = _query_one(
-                                "SELECT result FROM telegram_tasks WHERE id = %s", (task_id,),
-                            )
-                            full_result = (row or {}).get("result", summary)
-                            doc = BufferedInputFile(
-                                full_result.encode("utf-8"),
-                                filename=f"task_{task_id}_browser.md",
-                            )
-                            await b.send_document(chat_id=target, document=doc)
-                        except Exception as e:
-                            logger.warning("Failed to send browser task report: %s", e)
-                            try:
-                                await b.send_message(
-                                    chat_id=target,
-                                    text=f"🌐 Browser task #{task_id} {status}\n{summary[:300]}",
-                                )
-                            except Exception:
-                                pass
+                # Read full result from DB for orchestrator callback
+                row = _query_one("SELECT result FROM telegram_tasks WHERE id = %s", (task_id,))
+                full_report = (row or {}).get("result", summary)
+                orch_result = {
+                    "status": status,
+                    "task_id": task_id,
+                    "summary": summary,
+                    "report": full_report,
+                    "is_subtask": False,
+                    "was_interrupted": False,
+                }
+                target_uid = user_id if user_id != 0 else next(iter(ALLOWED_USER_IDS), 0)
+                if target_uid:
+                    await _orchestrator_report_task(b, task, orch_result, target_uid)
                 return  # Done — worker handled everything
             # else: worker unreachable, fall through to in-process execution
             logger.info("Browser worker unavailable; executing task #%d in-process", task["id"])

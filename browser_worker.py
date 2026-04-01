@@ -145,7 +145,7 @@ async def execute_browser_task(task: dict) -> dict:
             budget_tracker=budget_tracker,
         )
 
-    def _get_model():
+    async def _get_model():
         from bot_config import get_current_model_selection
         sel = get_current_model_selection("task")
         return sel["model_id"]
