@@ -1476,6 +1476,20 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
 
     logger.info("Schedule worker started")
     await asyncio.sleep(10)
+
+    # On startup, reset last_run_at to prevent stale schedules from firing en masse
+    try:
+        from shared import KST as _kst
+        now = datetime.now(_kst)
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE telegram_schedules SET last_run_at = %s WHERE enabled = TRUE AND (last_run_at IS NULL OR last_run_at < %s)",
+            (now, now),
+        )
+        logger.info("Schedule worker: reset stale last_run_at to now on startup")
+    except Exception as e:
+        logger.warning("Schedule worker: failed to reset last_run_at: %s", e)
+
     while True:
         try:
             schedules = await asyncio.to_thread(
