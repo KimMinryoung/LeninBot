@@ -145,7 +145,7 @@ async def execute_browser_task(task: dict) -> dict:
             tool_handlers=merged_handlers,
             system_prompt=system_prompt or "",
             max_rounds=max_rounds or spec.max_rounds,
-            max_tokens=max_tokens or 4096,
+            max_tokens=max_tokens or 8192,
             log_event=_log_event,
             budget_usd=budget_usd or spec.budget_usd,
             on_progress=on_progress,

@@ -1399,7 +1399,7 @@ async def bot_main():
                         tool_handlers=merged_handlers,
                         system_prompt=system_prompt,
                         max_rounds=max_rounds or spec.max_rounds,
-                        max_tokens=max_tokens or 4096,
+                        max_tokens=max_tokens or 8192,
                         log_event=_log_event,
                         budget_usd=budget_usd or 0.0,
                         budget_tracker=budget_tracker,
@@ -1407,7 +1407,7 @@ async def bot_main():
                     )
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
-                chosen_max_tokens = 4096
+                chosen_max_tokens = 8192
         else:
             chosen_chat_fn = _chat_with_tools
             chosen_model_fn = _get_model_task
