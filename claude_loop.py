@@ -834,7 +834,7 @@ async def chat_with_tools(
                     "type": "text",
                     "text": (
                         f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
-                        "마무리하거나 request_continuation 도구를 사용하세요."
+                        "작업을 계속하되, 한도에 가까워지면 request_continuation으로 이어가라."
                     ),
                 })
             working_msgs.append({"role": "user", "content": tool_results})
@@ -869,7 +869,8 @@ async def chat_with_tools(
         working_msgs,
         (
             f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, 라운드: {round_num if response else 0}/{max_rounds}). "
-            "추가 도구를 사용하지 말고, 지금까지 수집한 정보만으로 최선의 답변을 완성하세요."
+            "추가 도구를 사용하지 말고, 지금까지 수행한 작업과 수집한 데이터를 있는 그대로 정리하라. "
+            "보고서 형식이 아니어도 된다. 시행착오, 중간 결과, raw 데이터 모두 포함하라."
             + escalation_hint
         ),
     )

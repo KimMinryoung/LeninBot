@@ -36,6 +36,7 @@ _CONFIG_DEFAULTS = {
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
     "provider": "claude",      # "claude" | "openai"
+    "task_concurrency": 2,     # max parallel background tasks
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -85,6 +86,7 @@ _CONFIG_META = {
     "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
     "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai"]},
+    "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
 }
 
 _MODEL_ALIAS_MAP = {

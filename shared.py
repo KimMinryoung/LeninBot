@@ -499,6 +499,9 @@ def create_task_in_db(
     agent_type: str | None = None,
     metadata: dict | None = None,
     restart_state: dict | None = None,
+    plan_id: int | None = None,
+    plan_role: str | None = None,
+    status: str = "pending",
 ) -> dict:
     """Insert a task into telegram_tasks for background processing.
 
@@ -552,17 +555,21 @@ def create_task_in_db(
         restart_state = metadata.get("restart_state") if isinstance(metadata.get("restart_state"), dict) else None
         metadata_json = json.dumps(metadata) if metadata else None
         rows = db_query(
-            "INSERT INTO telegram_tasks (user_id, content, parent_task_id, depth, mission_id, agent_type, metadata, "
+            "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, depth, mission_id, agent_type, metadata, "
+            "plan_id, plan_role, "
             "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
                 user_id,
                 tagged_content,
+                status,
                 parent_task_id,
                 depth,
                 mission_id,
                 agent_type,
                 metadata_json,
+                plan_id,
+                plan_role,
                 bool((restart_state or {}).get("restart_initiated")),
                 (restart_state or {}).get("restart_target_service"),
                 bool((restart_state or {}).get("restart_completed")),

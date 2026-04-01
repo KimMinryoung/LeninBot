@@ -170,6 +170,43 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "multi_delegate",
+        "description": (
+            "Delegate multiple tasks in parallel with automatic result synthesis.\n"
+            "All subtasks run concurrently. After all complete, a synthesis task combines results.\n"
+            "Use when you need multiple agents working on different aspects of the same request.\n"
+            "For single-agent tasks, use `delegate` instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": {
+                                "type": "string",
+                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser"],
+                            },
+                            "task": {"type": "string", "description": "Task instructions for this agent."},
+                            "context": {"type": "string", "description": "Why this subtask exists."},
+                        },
+                        "required": ["agent", "task"],
+                    },
+                    "minItems": 2,
+                    "description": "List of subtasks to run in parallel.",
+                },
+                "synthesis_instructions": {
+                    "type": "string",
+                    "description": "Instructions for combining subtask results into a final report.",
+                },
+                "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
+            },
+            "required": ["tasks"],
+        },
+    },
+    {
         "name": "recall_experience",
         "description": "Search your experiential memory (past lessons, mistakes, insights, patterns). Stored daily from all conversations and tasks.",
         "input_schema": {
@@ -195,6 +232,28 @@ SELF_TOOLS = [
                 "target_name": {"type": "string", "description": "Entity to merge INTO (action=merge_entities)."},
             },
             "required": ["action"],
+        },
+    },
+    {
+        "name": "run_agent",
+        "description": (
+            "Run a sub-agent synchronously and get the result immediately in this turn.\n"
+            "Use for quick analysis/lookup tasks. For long-running tasks, use delegate.\n"
+            "Budget-capped at $0.50, max 10 rounds. Cost deducted from your budget."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "enum": ["analyst"],
+                    "description": "Agent to run (currently analyst only).",
+                },
+                "task": {"type": "string", "description": "Task instructions."},
+                "context": {"type": "string", "description": "Context for the agent."},
+                "budget_usd": {"type": "number", "description": "Budget cap (max $0.50).", "default": 0.30},
+            },
+            "required": ["agent", "task"],
         },
     },
 ]
@@ -639,7 +698,210 @@ async def _exec_delegate(
         return f"Failed to delegate task: {result['error']}"
 
 
-    # read_source_code removed — replaced by read_file tool in telegram_bot.py
+async def _exec_multi_delegate(
+    tasks: list[dict],
+    synthesis_instructions: str = "",
+    priority: str = "normal",
+) -> str:
+    """Delegate multiple tasks in parallel with automatic synthesis."""
+    from shared import create_task_in_db
+    from db import execute as db_execute
+
+    if len(tasks) < 2:
+        return "multi_delegate requires at least 2 tasks. Use delegate for single tasks."
+
+    # Validate all agents
+    try:
+        from agents import get_agent
+        for t in tasks:
+            get_agent(t["agent"])
+    except ValueError as e:
+        return str(e)
+
+    # Resolve mission (same logic as delegate)
+    task_mission_id = None
+    try:
+        from db import query as _db_q
+        active = _db_q(
+            "SELECT id FROM telegram_missions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+        )
+        if active:
+            task_mission_id = active[0]["id"]
+        else:
+            from telegram_mission import create_mission
+            mission_title = tasks[0]["task"][:80].replace("\n", " ").strip()
+            user_id_for_mission = 0
+            try:
+                recent_user = _db_q(
+                    "SELECT user_id FROM telegram_chat_history "
+                    "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
+                )
+                if recent_user:
+                    user_id_for_mission = recent_user[0]["user_id"]
+            except Exception:
+                pass
+            if user_id_for_mission:
+                new_mission = create_mission(user_id_for_mission, mission_title)
+                task_mission_id = new_mission["id"]
+    except Exception as e:
+        logger.debug("Mission resolution in multi_delegate failed: %s", e)
+
+    # Fetch recent chat for context (shared across all subtasks)
+    chat_block = ""
+    try:
+        from shared import fetch_chat_logs
+        recent_chats = await asyncio.to_thread(
+            fetch_chat_logs, 6, None, None, source="telegram"
+        )
+        if recent_chats:
+            chat_lines = []
+            for msg in reversed(recent_chats):
+                role = "사용자" if msg.get("role") == "user" else "에이전트"
+                text = str(msg.get("content") or "")[:500]
+                chat_lines.append(f"[{role}] {text}")
+            chat_block = (
+                "<recent-conversation>\n"
+                + "\n".join(chat_lines)
+                + "\n</recent-conversation>"
+            )
+    except Exception:
+        pass
+
+    # Create subtasks
+    created_ids = []
+    created_info = []
+    for t in tasks:
+        agent = t["agent"]
+        task_content = t["task"]
+        context = t.get("context", "")
+
+        content_parts = []
+        if context:
+            content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+        if chat_block:
+            content_parts.append(chat_block)
+        content_parts.append(f"<task agent=\"{agent}\">\n{task_content}\n</task>")
+        full_content = "\n\n".join(content_parts)
+
+        result = await asyncio.to_thread(
+            create_task_in_db, full_content, 0, priority,
+            mission_id=task_mission_id, agent_type=agent,
+            plan_role="subtask",
+        )
+        if result["status"] == "ok":
+            tid = result["task_id"]
+            created_ids.append(tid)
+            spec = get_agent(agent)
+            created_info.append(f"  #{tid} [{agent}] ${spec.budget_usd:.2f}")
+        else:
+            created_info.append(f"  FAILED [{agent}]: {result.get('error')}")
+
+    if not created_ids:
+        return "Failed to create any subtasks."
+
+    # Set plan_id = first subtask ID for all subtasks
+    plan_id = created_ids[0]
+    if len(created_ids) > 1:
+        id_list = ",".join(str(i) for i in created_ids)
+        await asyncio.to_thread(
+            db_execute,
+            f"UPDATE telegram_tasks SET plan_id = %s WHERE id IN ({id_list})",
+            (plan_id,),
+        )
+    else:
+        await asyncio.to_thread(
+            db_execute,
+            "UPDATE telegram_tasks SET plan_id = %s WHERE id = %s",
+            (plan_id, plan_id),
+        )
+
+    # Create synthesis task (blocked until subtasks complete)
+    subtask_summary = "\n".join(f"- #{tid}: [{tasks[i]['agent']}] {tasks[i]['task'][:200]}"
+                                for i, tid in enumerate(created_ids))
+    synthesis_content = (
+        f"<synthesis-task plan_id=\"{plan_id}\">\n"
+        f"이 태스크는 병렬 실행된 subtask들의 결과를 종합하는 태스크다.\n"
+        f"subtask 결과는 <subtask-results> 블록에 자동 주입된다.\n\n"
+        f"## Subtasks\n{subtask_summary}\n\n"
+        f"## 종합 지침\n{synthesis_instructions or '모든 subtask 결과를 분석하고 사용자에게 핵심 내용을 종합 보고하라.'}\n"
+        f"</synthesis-task>"
+    )
+    synthesis_result = await asyncio.to_thread(
+        create_task_in_db, synthesis_content, 0, priority,
+        mission_id=task_mission_id, agent_type="analyst",
+        plan_id=plan_id, plan_role="synthesis", status="blocked",
+    )
+    synthesis_id = synthesis_result.get("task_id", "?")
+
+    # Record to mission timeline
+    if task_mission_id:
+        try:
+            from telegram_mission import add_mission_event
+            await asyncio.to_thread(
+                add_mission_event, task_mission_id, "orchestrator", "decision",
+                f"Multi-delegate: {len(created_ids)} subtasks → synthesis #{synthesis_id}\n{subtask_summary}"
+            )
+        except Exception:
+            pass
+
+    return (
+        f"Plan #{plan_id} created: {len(created_ids)} parallel subtasks + synthesis #{synthesis_id}\n"
+        + "\n".join(created_info)
+        + f"\n  #{synthesis_id} [analyst] synthesis (blocked until subtasks complete)"
+    )
+
+
+# ── Inline Agent Execution ─────────────────────────────────────
+
+def build_run_agent_handler(chat_with_tools_fn):
+    """Build a run_agent handler with the chat function injected via closure."""
+
+    async def _exec_run_agent(
+        agent: str, task: str, context: str = "", budget_usd: float = 0.30,
+    ) -> str:
+        if agent != "analyst":
+            return f"run_agent currently supports 'analyst' only, got '{agent}'."
+
+        budget_usd = min(0.50, max(0.01, budget_usd))
+
+        try:
+            from agents import get_agent
+            from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+
+            spec = get_agent(agent)
+            agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+
+            from shared import AGENT_CONTEXT
+            system_prompt = spec.render_prompt(
+                current_datetime=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                system_alerts="",
+                finance_data="",
+            )
+
+            content_parts = []
+            if context:
+                content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+            content_parts.append(f"<task agent=\"{agent}\">\n{task}\n</task>")
+            full_content = "\n\n".join(content_parts)
+
+            result = await chat_with_tools_fn(
+                [{"role": "user", "content": full_content}],
+                system_prompt=system_prompt,
+                budget_usd=budget_usd,
+                max_rounds=10,
+                extra_tools=agent_tools,
+                extra_handlers=agent_handlers,
+            )
+            # Truncate to avoid blowing up orchestrator context
+            if len(result) > 4000:
+                result = result[:4000] + "\n\n[... truncated]"
+            return result
+
+        except Exception as e:
+            logger.error("run_agent failed: %s", e)
+            return f"run_agent error: {e}"
+
+    return _exec_run_agent
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -910,5 +1172,6 @@ SELF_TOOL_HANDLERS = {
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
     "delegate": _exec_delegate,
+    "multi_delegate": _exec_multi_delegate,
     "kg_admin": _exec_kg_admin,
 }

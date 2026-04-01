@@ -679,9 +679,10 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     project_root = os.path.dirname(os.path.abspath(__file__))
 
     try:
-        from telegram_bot import _runtime_state
+        from telegram_bot import current_task_ctx
         from telegram_tasks import persist_task_restart_state
-        current_task_id = (_runtime_state or {}).get("current_task_id")
+        ctx = current_task_ctx.get()
+        current_task_id = ctx["task_id"] if ctx else None
     except Exception:
         current_task_id = None
         persist_task_restart_state = None
@@ -903,8 +904,9 @@ async def _exec_upload_to_r2(
     task_id = None
     agent_type = None
     try:
-        from telegram_bot import _runtime_state
-        task_id = (_runtime_state or {}).get("current_task_id")
+        from telegram_bot import current_task_ctx
+        ctx = current_task_ctx.get()
+        task_id = ctx["task_id"] if ctx else None
     except Exception:
         pass
 

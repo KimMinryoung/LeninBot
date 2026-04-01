@@ -46,7 +46,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-_runtime_state: dict[str, int | None] = {"current_task_id": None}
+_runtime_state: dict = {"active_task_ids": set()}
+
+# Per-coroutine task context — allows concurrent tasks to know their own task_id
+import contextvars
+current_task_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_task_ctx", default=None)
 
 # Suppress TelegramConflictError spam during deploy (old/new instance overlap)
 class _ConflictFilter(logging.Filter):
@@ -146,6 +150,7 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES telegram_tasks(id)")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT DEFAULT ''")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS metadata JSONB")
@@ -161,9 +166,16 @@ def _ensure_table():
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_details TEXT")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_attempts INTEGER DEFAULT 0")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS last_verification_at TIMESTAMPTZ")
+    # Task group columns for parallel delegation + synthesis
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_id INTEGER")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_role VARCHAR(20)")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
         ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_tasks_plan
+        ON telegram_tasks(plan_id) WHERE plan_id IS NOT NULL
     """)
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_agent_user
@@ -539,8 +551,14 @@ When to delegate vs handle directly:
 - **Moltbook 순찰, 대규모 크롤링** → delegate(agent="scout")
 - **웹사이트 로그인, 폼 제출, 복잡한 브라우저 조작** → delegate(agent="browser")
 - **이미지 생성** → delegate(agent="visualizer")
+- **여러 에이전트가 동시에 작업해야 할 때** → multi_delegate (병렬 실행 + 결과 자동 종합)
 - 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
 - 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
+
+Parallel delegation with `multi_delegate`:
+- 복합 요청 (예: "X를 조사하고 Y 코드를 수정해")은 multi_delegate로 병렬 처리하라.
+- 모든 subtask 완료 후 자동으로 synthesis 태스크가 결과를 종합한다.
+- synthesis_instructions에 종합 기준을 명시하면 더 좋은 결과를 얻는다.
 
 Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 자동으로 받지만, 현재 대화의 핵심 맥락은 `context` 필드에 명시하라:
 1. 사용자의 원래 요청 (원문 또는 핵심 요약)
@@ -1004,6 +1022,11 @@ async def _chat_with_tools(
         merged_tools = list(extra_tools or [])
     merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
 
+    # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
+    if is_orchestrator and "run_agent" not in merged_handlers:
+        from self_tools import build_run_agent_handler
+        merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
+
     # ── Provider dispatch: Claude vs OpenAI ──
     if _config.get("provider") == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
@@ -1160,14 +1183,79 @@ async def bot_main():
         BotCommand(command="deploy", description="서버 배포 (git pull)"),
         BotCommand(command="modify", description="서버 파일 수정"),
         BotCommand(command="mission", description="미션 상태 / close"),
+        BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
 
     # Detect fresh deploy — inject context so the bot knows it was just updated
     await check_deploy_meta(bot, add_alert_fn=_add_system_alert)
 
+    # ── Orchestrator callback: interpret task results for the user ──
+    async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: int):
+        """Trigger an orchestrator turn to interpret and communicate task results."""
+        task_id = task["id"]
+        agent_type = task.get("agent_type") or "analyst"
+        status = result.get("status", "unknown")
+
+        try:
+            # Build context for the orchestrator
+            if status == "done":
+                report = result.get("report", "")
+                summary = result.get("summary", "")
+                verification = result.get("verification_status", "pending")
+                prompt = (
+                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 완료 (검증: {verification})\n\n"
+                    f"원본 요청:\n{task.get('content', '')[:1000]}\n\n"
+                    f"실행 결과:\n{report[:3000]}\n\n"
+                    f"위 결과를 사용자에게 핵심만 간결하게 전달하라. "
+                    f"마크다운 서식 쓰지 마라. 사람처럼 자연스럽게 말하라."
+                )
+            else:
+                error = result.get("error", "unknown error")
+                prompt = (
+                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 실패\n\n"
+                    f"원본 요청:\n{task.get('content', '')[:500]}\n\n"
+                    f"에러: {error}\n\n"
+                    f"사용자에게 실패 사실과 원인을 간결하게 알려라."
+                )
+
+            # Load recent chat history for context
+            history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
+            from telegram_commands import sanitize_messages
+            history = sanitize_messages(history)
+            history.append({"role": "user", "content": prompt})
+
+            # Run orchestrator with small budget
+            reply = await _chat_with_tools(
+                history,
+                budget_usd=0.10,
+                max_rounds=5,
+            )
+
+            # Save to chat history and send to user
+            await asyncio.to_thread(_save_chat_message, chat_id, "user", f"[SYSTEM] task #{task_id} [{agent_type}] {status}")
+            await asyncio.to_thread(_save_chat_message, chat_id, "assistant", reply)
+
+            for chunk in _split_message(reply):
+                await b.send_message(chat_id=chat_id, text=chunk)
+
+        except Exception as e:
+            logger.warning("Orchestrator callback failed for task #%d: %s", task_id, e)
+            # Fallback: send simple summary directly
+            try:
+                if status == "done":
+                    fallback = f"태스크 #{task_id} [{agent_type}] 완료: {result.get('summary', '')[:500]}"
+                else:
+                    fallback = f"태스크 #{task_id} [{agent_type}] 실패: {result.get('error', '')[:300]}"
+                await b.send_message(chat_id=chat_id, text=fallback)
+            except Exception:
+                pass
+
     # Build process_task closure with module-level dependencies
     async def _process_task_wrapper(b: Bot, task: dict):
+        # Set per-coroutine context so tools can identify the running task
+        current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
+
         from self_tools import build_task_context_tools
         from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
         from telegram_tools import MISSION_TOOL, build_mission_handler
@@ -1254,17 +1342,29 @@ async def bot_main():
         target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
 
-        # ── Provider dispatch: Claude vs MOON PC (OpenAI-compatible) ──
+        # ── Provider dispatch: Claude vs local LLM (OpenAI-compatible) ──
         if spec.provider == "moon":
             from openai_tool_loop import chat_with_tools as moon_chat_with_tools
-            from llm_client import MOON_BASE, MOON_MODEL, _health_ok
+            from llm_client import MOON_BASE, MOON_MODEL, LOCAL_BASE, LOCAL_MODEL, _health_ok
 
-            if not _health_ok(MOON_BASE):
-                logger.warning("MOON PC unavailable for agent %s; falling back to Claude", spec.name)
+            # Try MOON PC first, then local llama-server, then Claude
+            if _health_ok(MOON_BASE):
+                llm_base, llm_model = MOON_BASE, MOON_MODEL
+                logger.info("Agent %s: using MOON PC (%s)", spec.name, MOON_BASE)
+            elif _health_ok(LOCAL_BASE):
+                llm_base, llm_model = LOCAL_BASE, LOCAL_MODEL
+                logger.info("Agent %s: MOON unavailable, using local LLM (%s)", spec.name, LOCAL_BASE)
+            else:
+                llm_base = None
+                logger.warning("MOON PC and local LLM both unavailable for agent %s; falling back to Claude", spec.name)
+
+            if llm_base is None:
                 chosen_chat_fn = _chat_with_tools
                 chosen_model_fn = _get_model_task
                 chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
             else:
+                _llm_base, _llm_model = llm_base, llm_model  # capture for closure
+
                 async def _moon_chat_with_tools(
                     messages, max_rounds=None, system_prompt=None, model=None,
                     max_tokens=None, budget_usd=None, extra_tools=None,
@@ -1274,11 +1374,11 @@ async def bot_main():
                     merged_handlers = {**agent_handlers, **(extra_handlers or {})}
                     return await moon_chat_with_tools(
                         messages,
-                        base_url=MOON_BASE,
-                        model=model or MOON_MODEL,
+                        base_url=_llm_base,
+                        model=model or _llm_model,
                         tools=merged_tools,
                         tool_handlers=merged_handlers,
-                        system_prompt=system_prompt or system_prompt,
+                        system_prompt=system_prompt,
                         max_rounds=max_rounds or spec.max_rounds,
                         max_tokens=max_tokens or 4096,
                         log_event=_log_event,
@@ -1312,7 +1412,7 @@ async def bot_main():
                 alert += f" | 재시도 #{retry_result.get('task_id')}"
             _add_system_alert(alert)
 
-        await process_task(
+        result = await process_task(
             b, task,
             chat_with_tools_fn=chosen_chat_fn,
             get_model_fn=chosen_model_fn,
@@ -1330,10 +1430,18 @@ async def bot_main():
         if progress_cb and hasattr(progress_cb, "flush"):
             await progress_cb.flush()
 
+        # ── Orchestrator callback: report result to user via orchestrator ──
+        result = result or {}
+        is_subtask = result.get("is_subtask", False)
+        if not is_subtask and result.get("status") in ("done", "failed"):
+            target_uid = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
+            if target_uid:
+                await _orchestrator_report_task(b, task, result, target_uid)
+
     # Start background workers (keep handles for graceful cancellation)
     _bg_tasks = [
         asyncio.create_task(
-            task_worker(bot, process_task_fn=_process_task_wrapper, runtime_state=_runtime_state),
+            task_worker(bot, process_task_fn=_process_task_wrapper, runtime_state=_runtime_state, max_concurrency=_config.get("task_concurrency", 2)),
             name="task_worker",
         ),
         asyncio.create_task(
@@ -1360,11 +1468,14 @@ async def bot_main():
         logger.info("SIGTERM received — stopping polling gracefully")
         # Schedule shutdown notification before stopping
         async def _shutdown_notify_and_checkpoint():
-            task_id = _runtime_state.get("current_task_id")
-            if task_id:
-                ok = await checkpoint_task_on_shutdown(int(task_id))
-                if ok:
-                    logger.info("Shutdown checkpoint saved for in-flight task #%s", task_id)
+            active_ids = set(_runtime_state.get("active_task_ids", set()))
+            for task_id in active_ids:
+                try:
+                    ok = await checkpoint_task_on_shutdown(int(task_id))
+                    if ok:
+                        logger.info("Shutdown checkpoint saved for in-flight task #%s", task_id)
+                except Exception as e:
+                    logger.warning("Shutdown checkpoint failed for task #%s: %s", task_id, e)
             # Save restart marker to chat history so the bot retains awareness after restart
             restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
             for uid in ALLOWED_USER_IDS:

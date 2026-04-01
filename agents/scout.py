@@ -86,7 +86,7 @@ print(f"saved: {path}")
 
 <rules>
 - Write in the SAME LANGUAGE as the task.
-- Report format: ## Summary -> ## Findings (bullet points with sources) -> ## Recommendations
+- 최종 응답은 orchestrator에게 전달된다. 사람이 읽을 보고서가 아니라, orchestrator가 판단할 수 있는 raw 데이터와 맥락을 최대한 포함하라.
 - Always verify before reporting — do not fabricate sources or findings.
 - 정찰 데이터는 분석 전에 반드시 raw 저장부터 한다.
 - 너는 정찰만 한다. 새 스크립트 작성, 코드 수정, 인프라 변경은 하지 않는다.
@@ -101,6 +101,6 @@ print(f"saved: {path}")
         "save_finding", "request_continuation", "mission", "upload_to_r2",
     ],
     provider="moon",
-    budget_usd=0.0,
+    budget_usd=1.0,
     max_rounds=30,
 )

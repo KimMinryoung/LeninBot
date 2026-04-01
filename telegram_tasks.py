@@ -582,7 +582,6 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
 
     # Extract original task content, stripping nested AUTO-RETRY prefixes
     raw_content = (row or {}).get('content') or task.get('content') or ''
-    import re
     original_content = re.sub(
         r'(?s)^\s*\[(?:restart already completed by parent task|🔴 HIGH)\]\s*\n'
         r'(?:\[AUTO-RETRY after verification failure for task #\d+\]\s*\n'
@@ -698,6 +697,40 @@ async def process_task(
         except Exception as e:
             logger.debug("Mission context injection failed: %s", e)
 
+    # ── Synthesis: inject subtask results for synthesis tasks ────────
+    plan_role = task.get("plan_role")
+    plan_id = task.get("plan_id")
+    is_subtask = (plan_role == "subtask" and plan_id is not None)
+
+    if plan_role == "synthesis" and plan_id:
+        try:
+            sibling_results = _query(
+                "SELECT id, agent_type, content, result FROM telegram_tasks "
+                "WHERE plan_id = %s AND plan_role = 'subtask' AND status = 'done' "
+                "ORDER BY id ASC",
+                (plan_id,),
+            )
+            if sibling_results:
+                result_blocks = []
+                for sr in sibling_results:
+                    sr_agent = sr.get("agent_type") or "unknown"
+                    sr_result = str(sr.get("result") or "")[:5000]
+                    sr_task_brief = str(sr.get("content") or "")[:300]
+                    result_blocks.append(
+                        f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
+                        f"    <task-brief>{sr_task_brief}</task-brief>\n"
+                        f"    <result>\n{sr_result}\n    </result>\n"
+                        f"  </subtask>"
+                    )
+                content = (
+                    "<subtask-results>\n"
+                    + "\n".join(result_blocks)
+                    + "\n</subtask-results>\n\n"
+                    + content
+                )
+        except Exception as e:
+            logger.warning("Synthesis subtask result injection failed: %s", e)
+
     # ── Context Isolation: build agent-appropriate context ──────────
     agent_type = task.get("agent_type") or "analyst"
 
@@ -772,8 +805,7 @@ async def process_task(
                     if text.startswith("[SYSTEM]"):
                         # Convert system markers to neutral info (not instructions)
                         # e.g. "[SYSTEM] 사용자가 /restart ..." → "[시스템] 서비스 재시작됨 (...)"
-                        import re as _re
-                        ts_match = _re.search(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)\)", text)
+                        ts_match = re.search(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)\)", text)
                         ts = ts_match.group(1) if ts_match else ""
                         if "재시작 완료" in text or "재시작 시작" in text:
                             chat_lines.append(f"  [시스템] 서비스 재시작됨 ({ts}). 이미 반영 완료.")
@@ -907,70 +939,31 @@ async def process_task(
                 (final_report, task_id),
             )
 
-            # Classify priority
-            priority = _classify_priority(content, final_report)
-            priority_icon = {"high": "🔴", "normal": "🟡", "low": "🟢"}.get(priority, "🟡")
-
-            # Send report as Markdown file
-            filename = f"report_task_{task_id}.md"
-            doc = BufferedInputFile(final_report.encode("utf-8"), filename=filename)
             summary = _extract_summary(final_report)
-            origin = " (자율 생성)" if is_self_generated else ""
-            caption = f"{priority_icon} 태스크 [{task_id}]{origin} 완료\n\n{summary}"
 
-            if is_self_generated:
-                for uid in allowed_user_ids:
-                    try:
-                        await bot.send_document(chat_id=uid, document=doc, caption=caption)
-                    except Exception:
-                        pass
-            else:
-                await bot.send_document(chat_id=user_id, document=doc, caption=caption)
-
-            verification = await _run_verification(
-                bot, task, final_report,
-                chat_with_tools_fn=chat_with_tools_fn,
-                get_model_fn=get_model_fn,
-                extra_tools=extra_tools,
-                extra_handlers=extra_handlers,
-            )
-            verification_status = verification.get("status", "pending")
-            verification_details = verification.get("details", "")
+            # Verification (skip for subtasks — synthesis will verify)
+            verification_status = "pending"
+            verification_details = ""
             retry_result = None
-            if verification_status == "failed":
-                retry_result = await _maybe_redelegate_after_verification_failure(bot, task, verification)
-
-            verification_icon = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(verification_status, "⏳")
-            verification_caption = (
-                f"{verification_icon} 태스크 [{task_id}] 검증 {verification_status}\n\n"
-                f"{verification_details[:700] or 'verification details unavailable'}"
-            )
-            retry_note = ""
-            if retry_result:
-                if retry_result.get("status") == "redelegated":
-                    retry_note = f"\n\n↪️ 자동 재시도 태스크 #{retry_result.get('task_id')} 생성"
-                else:
-                    retry_note = f"\n\nℹ️ 자동 재시도 상태: {retry_result.get('message') or retry_result.get('status')}"
-            verification_caption = (verification_caption + retry_note)[:1000]
-            if is_self_generated:
-                for uid in allowed_user_ids:
-                    try:
-                        await bot.send_message(chat_id=uid, text=verification_caption)
-                    except Exception:
-                        pass
-            else:
-                try:
-                    await bot.send_message(chat_id=user_id, text=verification_caption)
-                except Exception:
-                    pass
+            if not is_subtask:
+                verification = await _run_verification(
+                    bot, task, final_report,
+                    chat_with_tools_fn=chat_with_tools_fn,
+                    get_model_fn=get_model_fn,
+                    extra_tools=extra_tools,
+                    extra_handlers=extra_handlers,
+                )
+                verification_status = verification.get("status", "pending")
+                verification_details = verification.get("details", "")
+                if verification_status == "failed":
+                    retry_result = await _maybe_redelegate_after_verification_failure(bot, task, verification)
 
             # Visualizer: auto-send generated images as photos
             if task.get("agent_type") == "visualizer":
                 try:
-                    import re as _re
                     # Extract local_path from tool log or report
                     tool_log_text = str(bt.get("tool_work_details", ""))
-                    paths = _re.findall(r"local_path:\s*(/\S+\.png)", tool_log_text + "\n" + report)
+                    paths = re.findall(r"local_path:\s*(/\S+\.png)", tool_log_text + "\n" + report)
                     for img_path in paths[:5]:  # max 5 images
                         if os.path.isfile(img_path):
                             with open(img_path, "rb") as f:
@@ -998,7 +991,15 @@ async def process_task(
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)
 
-            return  # success
+            return {
+                "status": "done",
+                "task_id": task_id,
+                "summary": summary,
+                "report": final_report,
+                "is_subtask": is_subtask,
+                "verification_status": verification_status,
+                "retry_result": retry_result,
+            }
 
         except Exception as e:
             err_str = str(e).lower()
@@ -1035,12 +1036,6 @@ async def process_task(
                 "completed_at = NOW(), last_verification_at = NOW() WHERE id = %s",
                 (str(e), f"task execution failed before verification: {str(e)[:1000]}", task_id),
             )
-            error_msg = f"❌ 태스크 [{task_id}] 실패:\n{e}"
-            if is_self_generated:
-                await broadcast(bot, error_msg, allowed_user_ids)
-            else:
-                await bot.send_message(chat_id=user_id, text=error_msg)
-
             # Notify orchestrator of failure
             if on_complete:
                 try:
@@ -1056,7 +1051,12 @@ async def process_task(
                         await cb_result
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)
-            return
+            return {
+                "status": "failed",
+                "task_id": task_id,
+                "error": str(e),
+                "is_subtask": is_subtask,
+            }
 
 async def recover_processing_tasks_on_startup(
     stale_minutes: int = 60,
@@ -1413,38 +1413,80 @@ async def _delegate_to_browser_worker(task: dict) -> dict | None:
 
 # ── Task Worker ──────────────────────────────────────────────────────
 
-async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None = None):
-    """Poll DB for pending tasks and process them one at a time.
+_TASK_PICKUP_RETURNING = (
+    "id, user_id, content, scratchpad, parent_task_id, depth, mission_id, "
+    "agent_type, metadata, verification_status, verification_attempts, "
+    "plan_id, plan_role, "
+    "restart_initiated, restart_target_service, restart_completed, "
+    "post_restart_phase, restart_attempt_count, restart_requested_at, "
+    "resumed_after_restart, restart_reentry_block_reason"
+)
 
-    Args:
-        bot: Telegram Bot instance.
-        process_task_fn: Async callable(bot, task) to process each task.
-        runtime_state: Optional mutable dict for tracking in-flight task.
+
+async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None = None, max_concurrency: int = 2):
+    """Poll DB for pending tasks and process up to max_concurrency in parallel.
+
+    Uses asyncio.Semaphore for bounded concurrency. The existing
+    FOR UPDATE SKIP LOCKED pattern prevents double-pickup.
     """
-    logger.info("Task worker started")
+    max_concurrency = max(1, min(8, max_concurrency))
+    sem = asyncio.Semaphore(max_concurrency)
+    active_tasks: dict[int, asyncio.Task] = {}
+
+    logger.info("Task worker started (max_concurrency=%d)", max_concurrency)
+
+    async def _run_one(task: dict):
+        task_id = task["id"]
+        async with sem:
+            try:
+                await process_task_fn(bot, task)
+            except Exception as e:
+                logger.error("Task #%d processing error: %s", task_id, e)
+            finally:
+                active_tasks.pop(task_id, None)
+                if runtime_state is not None:
+                    runtime_state.get("active_task_ids", set()).discard(task_id)
+
     while True:
         try:
+            # Check if we have capacity for more tasks
+            if len(active_tasks) >= max_concurrency:
+                await asyncio.sleep(1)
+                continue
+
+            # Unblock synthesis tasks whose subtasks are all complete
+            try:
+                await asyncio.to_thread(
+                    _execute,
+                    "UPDATE telegram_tasks SET status = 'pending' "
+                    "WHERE status = 'blocked' AND plan_role = 'synthesis' "
+                    "AND plan_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM telegram_tasks t2 "
+                    "  WHERE t2.plan_id = telegram_tasks.plan_id "
+                    "  AND t2.plan_role = 'subtask' "
+                    "  AND t2.status NOT IN ('done', 'failed', 'handed_off')"
+                    ")",
+                )
+            except Exception as e:
+                logger.debug("Synthesis unblock check failed: %s", e)
+
             task = await asyncio.to_thread(
                 _query_one,
                 "UPDATE telegram_tasks SET status = 'processing' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
-                "RETURNING id, user_id, content, scratchpad, parent_task_id, depth, mission_id, agent_type, metadata, verification_status, verification_attempts, "
-                "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason",
+                f"RETURNING {_TASK_PICKUP_RETURNING}",
             )
             if task:
+                task_id = task["id"]
                 if runtime_state is not None:
-                    runtime_state["current_task_id"] = task.get("id")
-                try:
-                    await process_task_fn(bot, task)
-                finally:
-                    if runtime_state is not None:
-                        runtime_state["current_task_id"] = None
+                    runtime_state.get("active_task_ids", set()).add(task_id)
+                t = asyncio.create_task(_run_one(task), name=f"task-{task_id}")
+                active_tasks[task_id] = t
             else:
                 await asyncio.sleep(5)
         except Exception as e:
-            if runtime_state is not None:
-                runtime_state["current_task_id"] = None
             logger.error("Worker loop error: %s", e)
             await asyncio.sleep(10)
 
@@ -1478,32 +1520,33 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                             continue
                     elif prev_fire <= last_run:
                         continue
-                        # Detect agent_type from [agent] prefix in content
-                        sched_content = sched["content"]
-                        sched_agent = None
-                        if sched_content.startswith("[") and "]" in sched_content[:20]:
-                            tag = sched_content[1:sched_content.index("]")].strip().lower()
-                            from agents import agent_names
-                            if tag in agent_names():
-                                sched_agent = tag
-                        await asyncio.to_thread(
-                            _execute,
-                            "INSERT INTO telegram_tasks (user_id, content, agent_type) VALUES (%s, %s, %s)",
-                            (sched["user_id"], sched_content, sched_agent),
+
+                    # Detect agent_type from [agent] prefix in content
+                    sched_content = sched["content"]
+                    sched_agent = None
+                    if sched_content.startswith("[") and "]" in sched_content[:20]:
+                        tag = sched_content[1:sched_content.index("]")].strip().lower()
+                        from agents import agent_names
+                        if tag in agent_names():
+                            sched_agent = tag
+                    await asyncio.to_thread(
+                        _execute,
+                        "INSERT INTO telegram_tasks (user_id, content, agent_type) VALUES (%s, %s, %s)",
+                        (sched["user_id"], sched_content, sched_agent),
+                    )
+                    await asyncio.to_thread(
+                        _execute,
+                        "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
+                        (now_kst, sched["id"]),
+                    )
+                    logger.info("Schedule #%d fired → task created: %.50s", sched["id"], sched["content"])
+                    try:
+                        await bot.send_message(
+                            chat_id=sched["user_id"],
+                            text=f"⏰ 스케줄 [{sched['id']}] 실행 → 태스크 생성됨\n{sched['content'][:100]}",
                         )
-                        await asyncio.to_thread(
-                            _execute,
-                            "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
-                            (now_kst, sched["id"]),
-                        )
-                        logger.info("Schedule #%d fired → task created: %.50s", sched["id"], sched["content"])
-                        try:
-                            await bot.send_message(
-                                chat_id=sched["user_id"],
-                                text=f"⏰ 스케줄 [{sched['id']}] 실행 → 태스크 생성됨\n{sched['content'][:100]}",
-                            )
-                        except Exception:
-                            pass
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error("Schedule #%d check error: %s", sched["id"], e)
         except Exception as e:

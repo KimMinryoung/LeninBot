@@ -46,7 +46,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
   - reference_image: **우선 다운로드된 로컬 파일 경로**를 넣어라. URL을 그냥 전달하지 마라. 사용자가 인물 사진/참조를 주면 fetch_url이 아니라 실제 파일 접근 가능한 경로를 확보한 뒤 그 경로를 reference_image로 넘겨라.
 - reference_image가 있으면 백엔드가 input_image 지원 Replicate 모델로 자동 라우팅한다. 이 경우 원본 인물 식별점 보존을 최우선으로 프롬프트를 써라.
 - 프롬프트만 작성하고 끝내는 것은 실패다. 반드시 generate_image로 이미지를 만들어라.
-- Report format: ## Generated Images (각 이미지별 prediction_id, local_path, model, style, prompt 전문) -> ## Notes
+- 최종 응답은 orchestrator에게 전달된다. 생성한 이미지의 prediction_id, local_path, model, prompt를 빠짐없이 포함하라.
 </rules>
 
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """

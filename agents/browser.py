@@ -46,16 +46,9 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
 </capabilities>
 
 <output-format>
-결과를 다음 형식으로 보고하라:
-
-## Summary
-- 수행한 작업과 결과 요약
-
-## Extracted Data
-- 추출한 데이터 (구조화된 형태로)
-
-## Issues
-- 발생한 문제나 제한사항 (있으면)
+최종 응답은 orchestrator에게 전달된다. 형식보다 정보량이 중요하다.
+수행한 작업, 추출한 데이터, 발생한 문제를 있는 그대로 포함하라.
+시행착오 과정도 orchestrator의 판단에 도움이 되므로 생략하지 마라.
 </output-format>
 
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER,
