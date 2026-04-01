@@ -452,6 +452,7 @@ async def chat_with_tools(
     total_cost = 0.0
     budget_warning_sent = False
     round_num = 0
+    accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
 
     for round_num in range(1, max_rounds + 1):
 
@@ -555,12 +556,17 @@ async def chat_with_tools(
                               f"Response truncated ({max_tokens} tokens) at round {round_num}")
             elif finish_reason == "content_filter":
                 logger.warning("Response blocked by content filter at round %d", round_num)
+            # Combine accumulated text from tool_calls rounds with final response
+            final_text = content_text.strip()
+            if accumulated_text_parts:
+                all_text = "\n".join(accumulated_text_parts)
+                final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
             if budget_tracker is not None:
                 budget_tracker.update({
                     "total_cost": total_cost, "rounds_used": round_num,
                     "was_interrupted": False, "tool_work_details": list(tool_work_details),
                 })
-            return content_text.strip() if content_text.strip() else "응답을 생성하지 못했습니다."
+            return final_text if final_text else "응답을 생성하지 못했습니다."
 
         # ── Budget check ──
         budget_exceeded = sdk_mode and budget_usd > 0 and total_cost >= budget_usd
@@ -580,6 +586,10 @@ async def chat_with_tools(
                     "was_interrupted": False, "tool_work_details": list(tool_work_details),
                 })
             return content_text.strip() if content_text.strip() else "응답을 생성하지 못했습니다."
+
+        # Accumulate substantial text from tool_calls rounds for final result
+        if content_text.strip() and len(content_text.strip()) > 20:
+            accumulated_text_parts.append(content_text.strip())
 
         # ── Append assistant message with tool_calls ──
         assistant_msg = {
@@ -772,6 +782,10 @@ async def chat_with_tools(
                 })
             return f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}"
 
+    final_text = text.strip()
+    if accumulated_text_parts:
+        all_text = "\n".join(accumulated_text_parts)
+        final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
     if budget_tracker is not None:
         budget_tracker.update({
             "total_cost": total_cost,
@@ -779,4 +793,4 @@ async def chat_with_tools(
             "was_interrupted": was_still_working,
             "tool_work_details": list(tool_work_details),
         })
-    return text.strip() if text.strip() else "응답을 생성하지 못했습니다."
+    return final_text if final_text else "응답을 생성하지 못했습니다."

@@ -641,6 +641,7 @@ async def chat_with_tools(
 
     response = None
     round_num = 0
+    accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
     for round_num in range(1, max_rounds + 1):
         unresolved = _find_unresolved_tool_uses(working_msgs)
         if unresolved:
@@ -710,12 +711,14 @@ async def chat_with_tools(
                 if log_event:
                     log_event("warning", "chat", f"Response truncated by max_tokens ({max_tokens}) at round {round_num}/{max_rounds}")
             text_parts = [b.text for b in response.content if b.type == "text"]
+            # Combine accumulated text from tool_use rounds with final response
+            all_text = accumulated_text_parts + text_parts
             if budget_tracker is not None:
                 budget_tracker.update({
                     "total_cost": total_cost, "rounds_used": round_num,
                     "was_interrupted": False, "tool_work_details": list(tool_work_details),
                 })
-            return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
+            return "\n".join(all_text) if all_text else "응답을 생성하지 못했습니다."
 
         # Budget exceeded → process this response's tool calls, then break
         budget_exceeded_this_round = total_cost >= budget_usd
@@ -732,6 +735,9 @@ async def chat_with_tools(
             if btype == "text":
                 text = str(b.get("text", ""))
                 assistant_content.append({"type": "text", "text": text})
+                # Accumulate substantial text from tool_use rounds for final result
+                if text.strip() and len(text.strip()) > 20:
+                    accumulated_text_parts.append(text.strip())
                 if on_progress and text.strip():
                     # Send intermediate thinking/reasoning text
                     preview = text.strip()
@@ -915,9 +921,10 @@ async def chat_with_tools(
     if final.stop_reason == "max_tokens":
         logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
     text_parts = [b.text for b in final.content if b.type == "text"]
+    all_text = accumulated_text_parts + text_parts
     if budget_tracker is not None:
         budget_tracker.update({
             "total_cost": total_cost, "rounds_used": round_num if response else 0,
             "was_interrupted": was_still_working, "tool_work_details": list(tool_work_details),
         })
-    return "\n".join(text_parts) if text_parts else "응답을 생성하지 못했습니다."
+    return "\n".join(all_text) if all_text else "응답을 생성하지 못했습니다."
