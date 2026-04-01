@@ -7,6 +7,7 @@ from dynamic sites, etc.
 Simple page fetches should still use shared.fetch_url_text (faster, cheaper).
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -108,7 +109,12 @@ async def _save_cookies_from_session(browser_session):
             ctx = getattr(browser_session, "context", None)
         if ctx is None:
             return
-        cookies = await ctx.cookies()
+        raw = ctx.cookies()
+        # Handle both sync (CDP) and async (Playwright) cookies() return
+        if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
+            cookies = await raw
+        else:
+            cookies = raw
         os.makedirs(_DATA_DIR, exist_ok=True)
         state = {"cookies": cookies, "origins": []}
         with open(_COOKIE_PATH, "w", encoding="utf-8") as f:
@@ -182,6 +188,8 @@ async def browse(
         }
     finally:
         try:
-            await browser.close()
+            raw = browser.close()
+            if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
+                await raw
         except Exception:
             pass

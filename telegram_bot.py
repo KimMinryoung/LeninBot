@@ -1321,6 +1321,8 @@ async def bot_main():
                     "is_subtask": False,
                     "was_interrupted": False,
                 }
+                if worker_result.get("error"):
+                    orch_result["error"] = worker_result["error"]
                 target_uid = user_id if user_id != 0 else next(iter(ALLOWED_USER_IDS), 0)
                 if target_uid:
                     await _orchestrator_report_task(b, task, orch_result, target_uid)

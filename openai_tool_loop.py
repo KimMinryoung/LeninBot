@@ -15,6 +15,7 @@ Error recovery strategy (ported from claude_loop.py):
   - Forced final response: escalation hints + preflight + last-resort strip
 """
 
+import asyncio
 import json
 import logging
 import httpx
@@ -630,7 +631,11 @@ async def chat_with_tools(
             if handler:
                 logger.info("Tool call: %s(%s)", func_name, input_summary[:200])
                 try:
-                    result = await handler(**func_args)
+                    raw = handler(**func_args)
+                    if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
+                        result = await raw
+                    else:
+                        result = raw
                     is_error = False
                 except Exception as e:
                     logger.error("Tool %s execution error: %s", func_name, e)

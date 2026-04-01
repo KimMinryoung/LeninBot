@@ -4,6 +4,7 @@ Extracted from telegram_bot.py. Dependencies injected via function parameters
 to avoid circular imports.
 """
 
+import asyncio
 import json
 import logging
 
@@ -778,7 +779,12 @@ async def chat_with_tools(
                 if handler:
                     logger.info("Tool call: %s(%s)", tname, json.dumps(tinput, ensure_ascii=False)[:200])
                     try:
-                        result = await handler(**tinput)
+                        raw = handler(**tinput)
+                        # Defensive: handle both async and sync handlers
+                        if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
+                            result = await raw
+                        else:
+                            result = raw
                         is_error = False
                     except Exception as e:
                         logger.error("Tool %s execution error: %s", tname, e)
