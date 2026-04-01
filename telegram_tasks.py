@@ -1326,6 +1326,91 @@ async def system_monitor(
             logger.error("System monitor error: %s", e)
 
 
+# ── Browser Worker Delegation ─────────────────────────────────────────
+
+BROWSER_SOCKET_PATH = "/tmp/leninbot-browser.sock"
+_BROWSER_DELEGATE_TIMEOUT = 180  # seconds
+
+
+async def check_browser_worker_alive() -> bool:
+    """Ping the browser worker via Unix socket. Returns True if alive."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(BROWSER_SOCKET_PATH), timeout=3,
+        )
+        writer.write(json.dumps({"cmd": "ping"}).encode("utf-8"))
+        await writer.drain()
+        writer.write_eof()
+        raw = await asyncio.wait_for(reader.read(4096), timeout=3)
+        writer.close()
+        resp = json.loads(raw.decode("utf-8"))
+        return resp.get("status") == "alive"
+    except Exception:
+        return False
+
+
+async def _delegate_to_browser_worker(task: dict) -> dict | None:
+    """Send a browser task to the external browser_worker process via Unix socket.
+
+    Returns:
+        Result dict {parent_id, status, result_summary} on success,
+        or None if the worker is unreachable (caller should fallback).
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(BROWSER_SOCKET_PATH), timeout=5,
+        )
+    except Exception as e:
+        logger.warning("Browser worker unreachable (%s); falling back to in-process", e)
+        return None
+
+    try:
+        payload = {
+            "cmd": "task",
+            "id": task["id"],
+            "user_id": task["user_id"],
+            "content": task["content"],
+            "mission_id": task.get("mission_id"),
+            "agent_type": task.get("agent_type", "browser"),
+            "parent_task_id": task.get("parent_task_id"),
+            "depth": task.get("depth", 0),
+            "metadata": task.get("metadata"),
+            "scratchpad": task.get("scratchpad"),
+            "verification_status": task.get("verification_status"),
+            "verification_attempts": task.get("verification_attempts"),
+            "restart_initiated": task.get("restart_initiated"),
+            "restart_target_service": task.get("restart_target_service"),
+            "restart_completed": task.get("restart_completed"),
+            "post_restart_phase": task.get("post_restart_phase"),
+            "restart_attempt_count": task.get("restart_attempt_count"),
+            "restart_requested_at": str(task.get("restart_requested_at") or ""),
+            "resumed_after_restart": task.get("resumed_after_restart"),
+            "restart_reentry_block_reason": task.get("restart_reentry_block_reason"),
+        }
+        writer.write(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+        await writer.drain()
+        writer.write_eof()
+
+        raw = await asyncio.wait_for(reader.read(1024 * 1024), timeout=_BROWSER_DELEGATE_TIMEOUT)
+        writer.close()
+
+        result = json.loads(raw.decode("utf-8"))
+        logger.info("Browser worker returned for task #%d: %s", task["id"], result.get("status"))
+        return result
+
+    except asyncio.TimeoutError:
+        logger.error("Browser worker timeout for task #%d after %ds", task["id"], _BROWSER_DELEGATE_TIMEOUT)
+        writer.close()
+        return None
+    except Exception as e:
+        logger.error("Browser worker communication error for task #%d: %s", task["id"], e)
+        try:
+            writer.close()
+        except Exception:
+            pass
+        return None
+
+
 # ── Task Worker ──────────────────────────────────────────────────────
 
 async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None = None):
