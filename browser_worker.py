@@ -200,11 +200,14 @@ async def execute_browser_task(task: dict) -> dict:
         summary = (result[:500] if result else "completed")
 
         logger.info("Browser task #%d finished: %s", task_id, status)
-        return {
+        resp = {
             "parent_id": task.get("parent_task_id"),
             "status": status,
             "result_summary": summary,
         }
+        if status == "failed":
+            resp["error"] = result[:1000] if result else "task failed (no detail)"
+        return resp
 
     except Exception as e:
         logger.error("Browser task #%d failed: %s", task_id, e, exc_info=True)
