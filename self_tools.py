@@ -989,18 +989,6 @@ TASK_CONTEXT_TOOLS = [
             "required": ["content"],
         },
     },
-    {
-        "name": "request_continuation",
-        "description": "Create a child task to continue unfinished work. Records progress to the mission timeline and spawns a new task. Use when budget/round limit is approaching.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "progress_summary": {"type": "string", "description": "What has been accomplished so far."},
-                "next_steps": {"type": "string", "description": "What the child task should do next. Be specific."},
-            },
-            "required": ["progress_summary", "next_steps"],
-        },
-    },
 ]
 
 
@@ -1024,60 +1012,8 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             logger.error("save_finding error (task %d): %s", task_id, e)
             return f"Failed to save finding: {e}"
 
-    async def _exec_request_continuation(
-        progress_summary: str,
-        next_steps: str,
-    ) -> str:
-        from shared import create_task_in_db
-
-        # 1. Record progress to mission timeline
-        if mission_id:
-            try:
-                from telegram_mission import add_mission_event
-                event_content = f"Progress: {progress_summary[:500]}\nNext: {next_steps[:500]}"
-                await asyncio.to_thread(
-                    add_mission_event, mission_id, f"task#{task_id}", "decision", event_content
-                )
-            except Exception:
-                pass
-
-        # 2. Create child task (inherits mission_id via parent lookup)
-        child_content = (
-            f"[continuation from task #{task_id}]\n"
-            f"## 이전 진행 상황\n{progress_summary}\n\n"
-            f"## 다음 할 일\n{next_steps}"
-        )
-        result = await asyncio.to_thread(
-            create_task_in_db,
-            child_content,
-            user_id=user_id,
-            parent_task_id=task_id,
-        )
-
-        if result["status"] == "ok":
-            child_id = result["task_id"]
-            child_depth = result.get("depth", depth + 1)
-            try:
-                from db import execute as db_execute
-                await asyncio.to_thread(
-                    db_execute,
-                    "UPDATE telegram_tasks SET status = 'handed_off', "
-                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
-                    "WHERE id = %s",
-                    (f"\n[HANDED-OFF] continued in child task #{child_id}.", task_id),
-                )
-            except Exception as e:
-                logger.warning("Failed to mark task #%d as handed_off: %s", task_id, e)
-            return (
-                f"Child task #{child_id} created (depth={child_depth}, parent=#{task_id}). "
-                f"Current task marked as handed_off. You can now finish your current response."
-            )
-        else:
-            return f"Failed to create continuation task: {result['error']}"
-
     handlers = {
         "save_finding": _exec_save_finding,
-        "request_continuation": _exec_request_continuation,
     }
     return list(TASK_CONTEXT_TOOLS), handlers
 

@@ -98,7 +98,7 @@ print(f"saved: {path}")
         "execute_python",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "write_file", "list_directory",
         "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission", "upload_to_r2",
+        "save_finding", "mission", "upload_to_r2",
     ],
     provider="moon",
     budget_usd=1.0,

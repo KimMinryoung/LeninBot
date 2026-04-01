@@ -1,4 +1,4 @@
-# Project State — 2026-03-31
+# Project State — 2026-04-01
 
 ## Identity
 
@@ -47,17 +47,17 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 │  └───────┬───────────────────────┬────────────────────────────────┘    │
 │          │                       │                                     │
 │  ┌───────┴──────────┐    ┌───────┴──────────┐                         │
-│  │ leninbot-telegram │    │ leninbot-api     │                         │
-│  │ telegram_bot.py   │    │ uvicorn :8000    │                         │
-│  │                   │    │                  │                         │
-│  │ aiogram 3.x       │    │ chatbot.py       │                         │
-│  │ Claude/GPT 교체가능 │    │ (LangGraph RAG)  │                         │
-│  │ 에이전트 태스크큐    │    │ Gemini 3.1 FL    │                         │
-│  │ email_bridge.py   │    │ 9-node 워크플로우   │                         │
-│  │ browser-use SDK   │    │                  │                         │
-│  │ 도구 20+개         │    │                  │                         │
-│  └──────────────────┘    └──────────────────┘                         │
-│  Telegram polling          :8000 (외부, 웹챗봇)                         │
+│  │ leninbot-telegram │  │ leninbot-browser │  │ leninbot-api     │    │
+│  │ telegram_bot.py   │  │ browser_worker.py│  │ uvicorn :8000    │    │
+│  │                   │  │                  │  │                  │    │
+│  │ aiogram 3.x       │  │ browser-use SDK  │  │ chatbot.py       │    │
+│  │ Claude/GPT 교체가능 │  │ Unix socket IPC  │  │ (LangGraph RAG)  │    │
+│  │ 에이전트 태스크큐    │  │ Chromium headless│  │ Gemini 3.1 FL    │    │
+│  │ email_bridge.py   │  │ MemoryMax=2G     │  │ 9-node 워크플로우   │    │
+│  │ 도구 20+개         │  │                  │  │                  │    │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘    │
+│  Telegram polling        UDS /tmp/leninbot-     :8000 (외부, 웹챗봇)    │
+│                          browser.sock                                  │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,6 +68,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 | `leninbot-neo4j` | Docker (neo4j:5-community) | :7687, :7474 | 지식 그래프 저장소 (Graphiti) |
 | `leninbot-embedding` | embedding_server.py | :8100 (내부) | BGE-M3 임베딩 서버 (831MB) |
 | `leninbot-telegram` | telegram_bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
+| `leninbot-browser` | browser_worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
 | `leninbot-api` | uvicorn api:app | :8000 (외부) | 웹 챗봇 API (LangGraph) |
 
 ### 타이머 서비스 (주기 실행 → 종료)
@@ -140,7 +141,14 @@ deploy.sh가 재시작하는 것:
 **browser-use SDK는 항상 Claude Sonnet 4.6 사용** (OpenAI 모델은 structured output parsing 실패).
 
 ### Orchestrator
-사용자 메시지를 받아 의도를 파악하고, 필요 시 전문 에이전트에 `delegate` tool로 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임. 텔레그램 메시지는 마크다운 서식 금지 (plain text only).
+사용자 메시지를 받아 의도를 파악하고, 전문 에이전트에 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임. 텔레그램 메시지는 마크다운 서식 금지 (plain text only).
+
+**위임 도구:**
+- `delegate`: 단일 에이전트에 비동기 위임
+- `multi_delegate`: 여러 에이전트에 병렬 위임 + 자동 결과 종합 (synthesis task)
+- `run_agent`: orchestrator 턴 안에서 sub-agent를 동기 실행 (빠른 분석용, analyst only)
+
+**Orchestrator Callback**: worker 완료 시 orchestrator가 결과를 받아 해석하고, 사용자에게 자연어로 전달. 미완료 작업이 있고 재시도로 개선 가능한 경우에만 재위임. worker가 사용자에게 직접 메시지를 보내지 않음.
 
 ### Specialist Agents
 
@@ -154,45 +162,51 @@ deploy.sh가 재시작하는 것:
 
 ### 핵심 도구
 
-- **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지. 재시작 시 자동 복구 태스크 생성 (request_continuation 불필요)
+- **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지. 재시작 시 자동 복구 태스크 생성
 - **send_email**: Resend API로 이메일 발신. HTML 지원, 서명 자동 삽입 (`config/email_signature.json`). DB 기록
 - **check_inbox**: IMAP 실시간 접속 (INBOX + Junk 양쪽 검색). 발신자/제목 필터, 링크 자동 추출. 뉴스레터 인증 메일 처리에 사용
 - **allowlist_sender**: Junk 폴더에서 특정 발신자 메일을 INBOX로 이동
 - **browse_web**: browser-use SDK (Playwright + LLM). AI가 스크린샷 보고 클릭/입력/탐색. 항상 Claude Sonnet 사용
 - **upload_to_r2**: Cloudflare R2에 파일 업로드 → 공개 URL 반환. file_registry DB 자동 등록
 - **save_finding**: 미션 타임라인에 중간 발견 기록
-- **request_continuation**: 예산 한계 시 자식 태스크 생성 (작업 이관 전용)
 - **write_kg**: 지식 그래프에 사실 저장 (KG 전용 루프에서 실행). 내부 시스템 상태 저장 금지
 - **mission**: 미션 상태 확인/종료 (delegate 시 자동 생성)
-- **delegate**: specialist 에이전트에 작업 위임 (analyst, programmer, scout, visualizer, browser)
+- **delegate**: specialist 에이전트에 비동기 작업 위임
+- **multi_delegate**: 여러 에이전트에 병렬 위임 + 자동 synthesis
+- **run_agent**: orchestrator 턴 내 동기 sub-agent 실행 (analyst only, $0.50 상한)
 
 ### Task Lifecycle
 ```
-delegate → pending → processing → done → LLM verification
-                                            ├─ passed → complete
-                                            └─ failed → auto-retry child (max chain depth = retry_limit+1)
-                                                         └─ includes parent result summary + verification details
-                                   ↓
-                           handed_off (request_continuation → child task)
+delegate/multi_delegate → pending → processing → done → orchestrator callback
+                                                          ├─ 사용자에게 결과 전달
+                                                          └─ 미완료 + 개선 가능 → 재위임 (delegate)
+
+multi_delegate 병렬 실행:
+  subtask A (pending) ──┐
+  subtask B (pending) ──┤→ 모두 완료 → synthesis task (blocked→pending) → orchestrator callback
+  subtask C (pending) ──┘
+
+task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조정)
 ```
 
 ### /restart Command
 - 실행 시 모든 processing/pending 태스크를 강제 종료(done) 후 서비스 재시작
 - 재시작 후 불필요한 태스크 재실행 방지
 
-### Verification System
-- **Phase 1**: 자동 체크 (task_report 존재, url_access HTTP 상태)
-- **Phase 2**: LLM 기반 검증 — 같은 agent가 도구로 독립 검증 (로그 확인, 코드 확인, URL 접근)
-- 검증자가 서비스 재시작 필요 판단 시: api는 직접 재시작, telegram은 VERDICT: FAIL → child task 생성 후 재시작
-- chain depth guard: ancestor 순회로 무한 retry 차단
-- retry child에 부모 result 요약 포함 → 같은 접근 반복 방지
-- 외부 서비스 의존 실패(403, CAPTCHA, 메일 미수신 등)는 PASS 처리
+### Verification & Redelegation
+- 별도 검증 단계 없음 — orchestrator callback이 검증을 겸함
+- orchestrator가 worker 결과를 보고 품질 판단 + 사용자 전달 + 재위임 결정
+- **재위임 조건** (모두 충족해야 함):
+  1. worker가 예산/턴 한도 때문에 작업을 완수하지 못함 (`was_interrupted=True`)
+  2. 추가 작업으로 실질적 개선이 가능함
+  3. 외부 요인(권한 거부, 차단, CAPTCHA, API 오류 등)이 원인이 아님
+- worker는 `request_continuation` 없음 — 미완료 시 수행한 것/못한 것/다음 할 것을 응답에 포함
+- orchestrator가 `delegate`로 후속 작업을 직접 위임
 
 ### Service Restart Recovery
 - `restart_service` 호출 → `persist_task_restart_state` → 프로세스 사망
 - `recover_processing_tasks_on_startup` → child task 자동 생성 (`_RESTART_COMPLETED_MARKER` 포함)
 - child는 재시작 이미 완료된 상태로 인식 → 재시작 반복 없음
-- `request_continuation` 사전 호출 불필요
 
 ### Tool Isolation
 - Orchestrator: 모든 도구 접근 가능 (단, 프로그래밍 도구 차단)
@@ -266,7 +280,8 @@ leninbot/
 ├── telegram_tools.py          # 도구 정의 + 핸들러 (check_inbox, allowlist_sender, browse_web 등)
 ├── telegram_tasks.py          # 백그라운드 태스크 워커, 스케줄러, 모니터
 ├── telegram_mission.py        # 미션 컨텍스트 시스템
-├── self_tools.py              # delegate, save_finding, request_continuation, write_kg
+├── browser_worker.py           # 브라우저 에이전트 전용 워커 (Unix socket IPC, systemd)
+├── self_tools.py              # delegate, multi_delegate, run_agent, save_finding, write_kg
 ├── claude_loop.py             # Claude tool-use 루프
 ├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
@@ -307,6 +322,51 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-01 — Orchestration 전면 개편: 병렬 실행, orchestrator 콜백, 검증 통합
+
+#### Concurrent Task Worker
+- `task_worker`를 `asyncio.Semaphore` 기반 동시실행으로 교체 (기본 2, `/config`으로 조정)
+- `contextvars.ContextVar`로 per-coroutine task context 관리 (동시 실행 시 task_id 구분)
+- SIGTERM handler가 모든 active task에 checkpoint 수행
+
+#### Browser Worker 분리
+- `browser_worker.py`: 독립 systemd 서비스 (`leninbot-browser`)
+- Unix domain socket IPC (`/tmp/leninbot-browser.sock`)
+- Chromium 메모리 격리 (MemoryMax=2G), worker 불가 시 in-process fallback
+
+#### Orchestrator Callback (agent→orchestrator→user)
+- worker가 사용자에게 .md 파일을 직접 전송하지 않음
+- task 완료 시 orchestrator가 결과를 받아 해석하고 자연어로 사용자에게 전달
+- 실패 시 fallback으로 간단 요약 직접 전송
+
+#### 병렬 위임 (multi_delegate)
+- `multi_delegate` 도구: 여러 에이전트에 병렬 위임, 완료 후 자동 synthesis
+- DB: `plan_id`, `plan_role` 컬럼 추가 (task 그룹 관리)
+- subtask는 개별 알림 없이 DB에 결과만 저장, synthesis task만 orchestrator에 보고
+
+#### Inline Sub-agent (run_agent)
+- `run_agent` 도구: orchestrator 턴 안에서 analyst를 동기 실행
+- budget $0.50 상한, max 10 rounds, orchestrator budget에서 차감
+
+#### Verification → Orchestrator 통합
+- 별도 `_run_verification` LLM 호출 제거 ($0.15/task 절약)
+- `request_continuation` 도구 완전 제거 — worker는 미완료 상태를 응답에 포함
+- orchestrator가 `was_interrupted` 플래그로 중단 여부 확인, 재위임 조건 충족 시에만 `delegate`
+- 재위임 조건: 예산/턴 한도 미완수 + 개선 가능 + 외부 요인 아님
+
+#### Agent Prompt 개편
+- 모든 에이전트: 고정 report format 제거, "orchestrator에게 전달됨, 형식보다 정보량" 통일
+- budget 경고: "마무리하라" → "계속 작업하라, 시스템이 자동 종료"
+- 종료 메시지: "orchestrator가 재위임 판단" 으로 변경
+
+#### 버그 수정
+- `schedule_worker`: `continue` 뒤 dead code (태스크 생성 로직 전체) — 스케줄 실행 불가 버그
+- `_ensure_table`: `agent_type` 컬럼 ALTER TABLE 누락
+- `system_prompt or system_prompt` no-op
+- 중복 `import re as _re` (3곳)
+- Scout: budget $0→$1, provider fallback에 로컬 LLM 단계 추가 (MOON→local→Claude)
+- `/agents` 텔레그램 autocomplete 누락
 
 ### 2026-03-31 — 에이전트 정체성 분리, browser agent, 이메일 도구, 톤 가이드
 

@@ -57,7 +57,7 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
         "web_search", "fetch_url", "check_inbox", "allowlist_sender",
         "write_file", "list_directory", "read_file",
         "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission",
+        "save_finding", "mission",
         "upload_to_r2",
     ],
     budget_usd=1.50,

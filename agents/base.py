@@ -28,9 +28,9 @@ MISSION_GUIDELINES_BLOCK = """
 - write_kg: **새로운 사실을 발견하면 KG에 저장하라.** 비용 거의 없음 — bullet point 형태로 사실만 전달.
   group_id: geopolitics_conflict(지정학), economy(경제), korea_domestic(한국), agent_knowledge(기타).
   예: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
-- request_continuation: 예산/한도 부족 시 자식 태스크 생성. 진행 요약 + 다음 단계를 명시하라.
-- 단, **재시작 직전 continuation**은 일반 작업 이관이 아니라 **재시작 후 복구 메모**다. 따라서 next_steps는 **이미 재시작 완료된 상태**를 전제로 써야 하며, 자식에게 재시작을 다시 지시하면 안 된다.
-- 시스템이 예산 상태를 알려줌. 80% 소진 시 마무리하거나 continuation 요청하라.
+- 예산/한도에 도달하면 시스템이 자동으로 작업을 종료한다. 걱정하지 말고 할 수 있는 만큼 작업하라.
+  미완료 작업이 있으면 최종 응답에 **수행한 것 + 못한 것 + 다음에 해야 할 것**을 명시하라.
+  orchestrator가 네 응답을 보고 재위임 여부를 판단한다.
 </mission-guidelines>
 """.strip()
 

@@ -58,7 +58,7 @@ Your job is to transform raw information into structured knowledge.
         "web_search", "fetch_url", "check_inbox", "allowlist_sender",
         "read_file", "list_directory",
         "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission", "send_email",
+        "save_finding", "mission", "send_email",
     ],
     budget_usd=1.00,
     max_rounds=50,

@@ -1192,23 +1192,34 @@ async def bot_main():
 
     # ── Orchestrator callback: interpret task results for the user ──
     async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: int):
-        """Trigger an orchestrator turn to interpret and communicate task results."""
+        """Trigger an orchestrator turn to interpret task results, communicate to user, and redelegate if needed."""
         task_id = task["id"]
         agent_type = task.get("agent_type") or "analyst"
         status = result.get("status", "unknown")
+        was_interrupted = result.get("was_interrupted", False)
 
         try:
             # Build context for the orchestrator
             if status == "done":
                 report = result.get("report", "")
-                summary = result.get("summary", "")
-                verification = result.get("verification_status", "pending")
+                interrupted_note = ""
+                if was_interrupted:
+                    interrupted_note = (
+                        "\n\n⚠️ 이 에이전트는 예산/턴 한도에 도달하여 작업이 중단되었다. "
+                        "에이전트의 응답에 미완료 작업이 있는지 확인하라."
+                    )
                 prompt = (
-                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 완료 (검증: {verification})\n\n"
+                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 완료{' (중단됨)' if was_interrupted else ''}\n\n"
                     f"원본 요청:\n{task.get('content', '')[:1000]}\n\n"
-                    f"실행 결과:\n{report[:3000]}\n\n"
-                    f"위 결과를 사용자에게 핵심만 간결하게 전달하라. "
-                    f"마크다운 서식 쓰지 마라. 사람처럼 자연스럽게 말하라."
+                    f"실행 결과:\n{report[:3000]}"
+                    f"{interrupted_note}\n\n"
+                    f"## 너의 역할\n"
+                    f"1. 결과를 사용자에게 핵심만 간결하게 전달하라. 마크다운 서식 쓰지 마라.\n"
+                    f"2. 재위임 판단: 아래 조건을 **모두** 충족할 때만 delegate로 후속 작업을 시켜라.\n"
+                    f"   - 에이전트가 예산/턴 한도 때문에 작업을 완수하지 못했음\n"
+                    f"   - 추가 작업으로 실질적 개선이 가능함\n"
+                    f"   - 외부 요인(권한 거부, 차단, CAPTCHA, API 오류 등)이 원인이 아님\n"
+                    f"   재위임이 불필요하면 결과 전달만 하라."
                 )
             else:
                 error = result.get("error", "unknown error")
@@ -1216,7 +1227,8 @@ async def bot_main():
                     f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 실패\n\n"
                     f"원본 요청:\n{task.get('content', '')[:500]}\n\n"
                     f"에러: {error}\n\n"
-                    f"사용자에게 실패 사실과 원인을 간결하게 알려라."
+                    f"사용자에게 실패 사실과 원인을 간결하게 알려라. "
+                    f"재시도로 해결될 문제가 아니면 재위임하지 마라."
                 )
 
             # Load recent chat history for context
@@ -1225,10 +1237,10 @@ async def bot_main():
             history = sanitize_messages(history)
             history.append({"role": "user", "content": prompt})
 
-            # Run orchestrator with small budget
+            # Run orchestrator — budget enough for response + optional redelegate call
             reply = await _chat_with_tools(
                 history,
-                budget_usd=0.10,
+                budget_usd=0.15,
                 max_rounds=5,
             )
 
@@ -1394,23 +1406,9 @@ async def bot_main():
             chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
 
-        def _on_task_complete(
-            task_id: int,
-            status: str,
-            summary: str,
-            *,
-            verification_status: str = "pending",
-            verification_summary: str = "",
-            retry_result: dict | None = None,
-        ):
+        def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
             icon = "✅" if status == "done" else "❌"
-            verify_icon = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(verification_status, "⏳")
-            alert = f"{icon} 태스크 #{task_id} {status}: {summary[:200]} | {verify_icon} 검증 {verification_status}"
-            if verification_summary:
-                alert += f" — {verification_summary[:160]}"
-            if retry_result and retry_result.get("status") == "redelegated":
-                alert += f" | 재시도 #{retry_result.get('task_id')}"
-            _add_system_alert(alert)
+            _add_system_alert(f"{icon} 태스크 #{task_id} {status}: {summary[:200]}")
 
         result = await process_task(
             b, task,

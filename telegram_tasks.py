@@ -940,23 +940,7 @@ async def process_task(
             )
 
             summary = _extract_summary(final_report)
-
-            # Verification (skip for subtasks — synthesis will verify)
-            verification_status = "pending"
-            verification_details = ""
-            retry_result = None
-            if not is_subtask:
-                verification = await _run_verification(
-                    bot, task, final_report,
-                    chat_with_tools_fn=chat_with_tools_fn,
-                    get_model_fn=get_model_fn,
-                    extra_tools=extra_tools,
-                    extra_handlers=extra_handlers,
-                )
-                verification_status = verification.get("status", "pending")
-                verification_details = verification.get("details", "")
-                if verification_status == "failed":
-                    retry_result = await _maybe_redelegate_after_verification_failure(bot, task, verification)
+            was_interrupted = bt.get("was_interrupted", False)
 
             # Visualizer: auto-send generated images as photos
             if task.get("agent_type") == "visualizer":
@@ -974,18 +958,11 @@ async def process_task(
                 except Exception as e:
                     logger.debug("Visualizer auto-send image failed: %s", e)
 
-            # Notify orchestrator of completion
+            # Notify via on_complete (system alert)
             if on_complete:
                 try:
                     agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
-                    cb_result = on_complete(
-                        task_id,
-                        "done",
-                        f"{agent_label} {summary}",
-                        verification_status=verification_status,
-                        verification_summary=verification_details[:300] if verification_details else verification_status,
-                        retry_result=retry_result,
-                    )
+                    cb_result = on_complete(task_id, "done", f"{agent_label} {summary}")
                     if asyncio.iscoroutine(cb_result):
                         await cb_result
                 except Exception:
@@ -997,8 +974,7 @@ async def process_task(
                 "summary": summary,
                 "report": final_report,
                 "is_subtask": is_subtask,
-                "verification_status": verification_status,
-                "retry_result": retry_result,
+                "was_interrupted": was_interrupted,
             }
 
         except Exception as e:

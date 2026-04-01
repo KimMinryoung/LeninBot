@@ -834,7 +834,7 @@ async def chat_with_tools(
                     "type": "text",
                     "text": (
                         f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
-                        "작업을 계속하되, 한도에 가까워지면 request_continuation으로 이어가라."
+                        "작업을 계속하라. 한도 도달 시 시스템이 자동 종료한다."
                     ),
                 })
             working_msgs.append({"role": "user", "content": tool_results})
@@ -861,8 +861,8 @@ async def chat_with_tools(
     escalation_hint = ""
     if was_still_working:
         escalation_hint = (
-            " 미완료 작업이 있다면 request_continuation 도구가 있으면 사용하고, "
-            "없으면 응답 맨 끝에 \"[CONTINUE_TASK: 남은 작업 설명]\" 형식으로 한 줄 추가하세요."
+            " 미완료 작업이 있으면 수행한 것, 못한 것, 다음에 해야 할 것을 명시하라. "
+            "orchestrator가 재위임 여부를 판단한다."
         )
     limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
     _append_user_text_message(

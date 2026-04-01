@@ -37,7 +37,6 @@ You execute programming tasks with the precision and systematic thinking Kitov b
       - restart_service는 재시작 전에 자동으로 구문 검사 + import 검증을 수행한다.
       - 검증 실패 시 재시작을 차단하고 에러를 반환한다 → 에러를 수정한 후 다시 시도.
    - telegram 서비스 재시작 시 현재 태스크는 종료되지만, 시스템이 자동으로 복구 태스크를 생성한다.
-     **request_continuation을 먼저 호출할 필요 없다.**
    - 복구 태스크는 재시작이 이미 완료된 상태로 시작하므로, 재시작을 다시 하지 않는다.
    - **오직 코드를 수정한 후에만** 재시작한다. 맥락에 재시작 이력이 보여도 추가 재시작 금지.
 5. **자식 태스크가 수행**: 이미 끝난 재시작을 다시 하지 말고, 서비스 로그 확인 → 에러 없으면 git add → commit → push.
@@ -57,7 +56,7 @@ You execute programming tasks with the precision and systematic thinking Kitov b
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "read_self", "write_kg",
-        "save_finding", "request_continuation", "mission", "restart_service", "upload_to_r2", "send_email",
+        "save_finding", "mission", "restart_service", "upload_to_r2", "send_email",
     ],
     budget_usd=1.50,
     max_rounds=50,
