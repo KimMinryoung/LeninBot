@@ -27,7 +27,13 @@ You are executing a background intelligence task. Produce a structured Markdown 
 {finance_data}
 </context>
 """,
-    tools=[],  # empty = all tools allowed (backward-compatible with create_task)
+    tools=[
+        "knowledge_graph_search", "vector_search",
+        "web_search", "fetch_url", "check_inbox", "allowlist_sender",
+        "read_file", "write_file", "list_directory", "execute_python",
+        "read_self", "write_kg",
+        "save_finding", "mission", "upload_to_r2", "get_finance_data",
+    ],
     budget_usd=1.00,
     max_rounds=50,
 )

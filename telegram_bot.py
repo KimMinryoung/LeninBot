@@ -1020,7 +1020,11 @@ async def _chat_with_tools(
         # Task/agent: use ONLY extra_tools (already filtered by agent spec).
         # Do NOT merge full TOOLS — that would bypass agent tool restrictions.
         merged_tools = list(extra_tools or [])
-    merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
+    # Orchestrator: full handler set. Task/agent: only the handlers for allowed tools.
+    if is_orchestrator:
+        merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
+    else:
+        merged_handlers = dict(extra_handlers or {})
 
     # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
     if is_orchestrator and "run_agent" not in merged_handlers:
@@ -1334,7 +1338,7 @@ async def bot_main():
         # Filter base tools to agent's allowed set
         agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
 
-        # Add task-context tools (save_finding, request_continuation)
+        # Add task-context tools (save_finding)
         ctx_tools, ctx_handlers = build_task_context_tools(
             task["id"], task["user_id"], task.get("depth", 0),
             mission_id=task.get("mission_id"),
@@ -1389,8 +1393,9 @@ async def bot_main():
                     max_tokens=None, budget_usd=None, extra_tools=None,
                     extra_handlers=None, on_progress=None, budget_tracker=None,
                 ):
-                    merged_tools = list(extra_tools or []) + agent_tools
-                    merged_handlers = {**agent_handlers, **(extra_handlers or {})}
+                    # extra_tools already contains the agent's filtered tools (passed from process_task)
+                    merged_tools = list(extra_tools or [])
+                    merged_handlers = dict(extra_handlers or {})
                     return await moon_chat_with_tools(
                         messages,
                         base_url=_llm_base,

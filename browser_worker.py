@@ -131,8 +131,9 @@ async def execute_browser_task(task: dict) -> dict:
         on_progress=None,
         budget_tracker=None,
     ):
+        # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
-        merged_handlers = {**all_handlers, **(extra_handlers or {})}
+        merged_handlers = dict(extra_handlers or {})
         from bot_config import get_current_model_selection
         sel = get_current_model_selection("task")
         resolved_model = model or sel["model_id"]

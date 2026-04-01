@@ -145,26 +145,6 @@ SELF_TOOLS = [
                 },
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
                 "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
-                "verification": {
-                    "type": "object",
-                    "description": "Optional verification policy for post-completion follow-up.",
-                    "properties": {
-                        "required": {"type": "boolean", "description": "Whether orchestrator verification is required.", "default": True},
-                        "checks": {
-                            "type": "array",
-                            "items": {"type": "string", "enum": ["task_report", "url_access", "server_logs"]},
-                            "description": "Verification checks to run after specialist completion."
-                        },
-                        "urls": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "URLs that should be reachable after task completion."
-                        },
-                        "log_service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "Optional log source to inspect."},
-                        "log_grep": {"type": "string", "description": "Optional grep text for log inspection."},
-                        "retry_limit": {"type": "integer", "description": "Max automatic redelegation count.", "default": 1}
-                    }
-                }
             },
             "required": ["agent", "task"],
         },
@@ -593,7 +573,6 @@ async def _exec_delegate(
     context: str = "",
     priority: str = "normal",
     parent_task_id: int | None = None,
-    verification: dict | None = None,
 ) -> str:
     from shared import create_task_in_db
 
@@ -681,11 +660,10 @@ async def _exec_delegate(
         except Exception:
             pass
 
-    task_metadata = {"verification": verification} if verification else None
     result = await asyncio.to_thread(
         create_task_in_db, full_content, 0, priority,
         parent_task_id=parent_task_id, mission_id=task_mission_id,
-        agent_type=agent, metadata=task_metadata,
+        agent_type=agent,
     )
     if result["status"] == "ok":
         depth_info = f", depth={result.get('depth', 0)}" if parent_task_id else ""
