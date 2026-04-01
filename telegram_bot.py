@@ -1199,6 +1199,17 @@ async def bot_main():
         was_interrupted = result.get("was_interrupted", False)
 
         try:
+            # Load tool_log from DB — contains the actual work done (tool calls + results)
+            tool_log = ""
+            try:
+                row = await asyncio.to_thread(
+                    _query_one,
+                    "SELECT tool_log FROM telegram_tasks WHERE id = %s", (task_id,),
+                )
+                tool_log = (row or {}).get("tool_log", "") or ""
+            except Exception:
+                pass
+
             # Build context for the orchestrator
             if status == "done":
                 report = result.get("report", "")
@@ -1208,10 +1219,17 @@ async def bot_main():
                         "\n\n⚠️ 이 에이전트는 예산/턴 한도에 도달하여 작업이 중단되었다. "
                         "에이전트의 응답에 미완료 작업이 있는지 확인하라."
                     )
+
+                # If report is thin but tool_log has substance, include tool_log
+                tool_log_section = ""
+                if tool_log and (len(report) < 200 or was_interrupted):
+                    tool_log_section = f"\n\n에이전트 작업 로그 (도구 호출 내역):\n{tool_log[:5000]}"
+
                 prompt = (
                     f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 완료{' (중단됨)' if was_interrupted else ''}\n\n"
                     f"원본 요청:\n{task.get('content', '')[:1000]}\n\n"
                     f"실행 결과:\n{report[:3000]}"
+                    f"{tool_log_section}"
                     f"{interrupted_note}\n\n"
                     f"## 너의 역할\n"
                     f"1. 결과를 사용자에게 핵심만 간결하게 전달하라. 마크다운 서식 쓰지 마라.\n"
