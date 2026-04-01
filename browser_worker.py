@@ -80,6 +80,13 @@ async def execute_browser_task(task: dict) -> dict:
     user_id = task["user_id"]
     agent_type = task.get("agent_type") or "browser"
 
+    # Set per-coroutine context so tools (upload_to_r2 etc.) can identify the task
+    try:
+        from telegram_bot import current_task_ctx
+        current_task_ctx.set({"task_id": task_id, "agent_type": agent_type})
+    except Exception:
+        pass
+
     logger.info("Processing browser task #%d for user %d", task_id, user_id)
 
     try:
