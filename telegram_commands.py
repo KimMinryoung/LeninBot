@@ -1022,11 +1022,10 @@ async def handle_photo(message: Message):
     _media_type_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
     media_type = _media_type_map.get(_ext, "image/jpeg")
 
-    # caption이 있으면 프롬프트로 사용
-    caption = message.caption or "이 이미지를 분석해줘."
+    caption = "이 이미지를 분석해줘."
 
     # 채팅 히스토리 저장 — user 메시지
-    user_history_text = f"[이미지] {caption}" if message.caption else "[이미지]"
+    user_history_text = "[이미지]"
     await asyncio.to_thread(_ctx["save_chat_message"], user_id, "user", user_history_text)
 
     # 직전 1턴(user+assistant)을 맥락으로 포함
