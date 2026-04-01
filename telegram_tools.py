@@ -775,7 +775,15 @@ async def _exec_restart_service(service: str = "telegram") -> str:
         except Exception as e:
             return f"❌ Restart blocked — failed to persist durable restart state: {e}"
 
-    # 4. All checks passed — restart
+    # 4. All checks passed — daemon-reload (picks up any unit file changes), then restart
+    try:
+        subprocess.run(
+            ["sudo", "-n", "systemctl", "daemon-reload"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        pass  # non-fatal: restart will still use previous unit config
+
     svc_map = {
         "telegram": ["leninbot-telegram"],
         "api": ["leninbot-api"],

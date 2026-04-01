@@ -9,7 +9,7 @@ EnvironmentFile=/home/grass/leninbot/.env
 ExecStart=/home/grass/leninbot/venv/bin/python browser_worker.py
 Restart=always
 RestartSec=10
-MemoryMax=2G
+MemoryMax=3G
 
 [Install]
 WantedBy=multi-user.target

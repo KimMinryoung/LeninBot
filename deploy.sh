@@ -178,7 +178,13 @@ cat > "$DEPLOY_META" <<METAEOF
 }
 METAEOF
 
-# 4. 서비스 재시작 (SERVICE 플래그에 따라 선택적)
+# 4. systemd unit 파일 변경 시 daemon-reload
+if [ "$DID_PULL" -eq 1 ] && git diff "$LOCAL" "$REMOTE" --name-only | grep -q "systemd/"; then
+    echo "systemd unit 파일 변경 감지 → daemon-reload"
+    _run_systemctl daemon-reload
+fi
+
+# 5. 서비스 재시작 (SERVICE 플래그에 따라 선택적)
 SUMMARY=$(git log --oneline -1)
 RESTARTED=""
 
@@ -189,7 +195,7 @@ if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api" ]; then
     RESTARTED="api"
 fi
 
-# 5. 성공 알림 (텔레그램 재시작 전에 전송)
+# 6. 성공 알림 (텔레그램 재시작 전에 전송)
 _notify_telegram "✅ *Deploy 완료* [$SERVICE]
 \`$SUMMARY\`
 변경 커밋:
@@ -197,14 +203,14 @@ _notify_telegram "✅ *Deploy 완료* [$SERVICE]
 $CHANGES
 \`\`\`"
 
-# 6. Browser worker 재시작 (코드 변경 시 lazy import 캐시 무효화 필요)
+# 7. Browser worker 재시작 (코드 변경 시 lazy import 캐시 무효화 필요)
 if [ "$SERVICE" = "all" ] && _run_systemctl is-active --quiet leninbot-browser 2>/dev/null; then
     echo "leninbot-browser 재시작..."
     _run_systemctl restart leninbot-browser
     RESTARTED="${RESTARTED:+$RESTARTED+}browser"
 fi
 
-# 7. 텔레그램 재시작은 마지막 단계
+# 8. 텔레그램 재시작은 마지막 단계
 # 주의: systemd 환경에서는 이 스크립트가 같은 cgroup에 있다면
 # telegram 서비스 재시작 시 즉시 종료될 수 있으므로, 이후 후처리는 두지 않는다.
 if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "telegram" ]; then
