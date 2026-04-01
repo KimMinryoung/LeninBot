@@ -1,0 +1,15 @@
+[Unit]
+Description=LeninBot Browser Worker (Chromium AI automation)
+After=network.target leninbot-telegram.service
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python browser_worker.py
+Restart=always
+RestartSec=10
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

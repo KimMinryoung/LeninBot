@@ -66,6 +66,7 @@ _HELP_TEXT = """\
 *시스템*
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
+/agents — 에이전트 현황 및 외부 프로세스 상태
 /config — 설정 패널 (모델, 예산, 라운드 수)
 /fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
 /provider — LLM 제공자 전환 (Claude ↔ OpenAI)
@@ -1599,6 +1600,31 @@ async def cb_config_close(callback: CallbackQuery):
 
 # ── Registration ───────────────────────────────────────────────────
 
+async def cmd_agents(message: Message):
+    """Show registered agents and external worker process status."""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+
+    from agents import list_agents
+    from telegram_tasks import check_browser_worker_alive
+
+    lines = ["*에이전트 현황*\n"]
+
+    for spec in list_agents():
+        lines.append(f"- *{spec.name}*: {spec.description} (${spec.budget_usd:.2f}, {spec.max_rounds}R)")
+
+    # Check browser worker external process
+    lines.append("\n*외부 프로세스:*")
+    try:
+        alive = await check_browser_worker_alive()
+        icon = "\U0001f7e2" if alive else "\U0001f534"  # green/red circle
+        lines.append(f"  browser worker: {icon} {'alive' if alive else 'dead'}")
+    except Exception as e:
+        lines.append(f"  browser worker: \U0001f534 error ({e})")
+
+    await message.answer("\n".join(lines), parse_mode="Markdown")
+
+
 def register_handlers(router: Router, ctx: dict):
     """Store dependencies and register all handlers on the router."""
     global _ctx
@@ -1628,6 +1654,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_provider, Command("provider"))
     router.message.register(cmd_modify, Command("modify"))
     router.message.register(cmd_config, Command("config"))
+    router.message.register(cmd_agents, Command("agents"))
 
     # Photo handler
     router.message.register(handle_photo, F.photo)

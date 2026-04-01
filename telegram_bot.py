@@ -38,6 +38,7 @@ from telegram_tasks import (
     task_worker, schedule_worker, check_deploy_meta,
     recover_processing_tasks_on_startup,
     checkpoint_task_on_shutdown, persist_task_restart_state,
+    _delegate_to_browser_worker, check_browser_worker_alive,
 )
 
 load_dotenv()
@@ -1173,6 +1174,49 @@ async def bot_main():
 
         # ── Agent-aware task execution ──────────────────────────────
         agent_type = task.get("agent_type") or "analyst"
+
+        # ── Browser task delegation to external worker process ──
+        if agent_type == "browser":
+            result = await _delegate_to_browser_worker(task)
+            if result is not None:
+                # Worker handled it — send Telegram results from main process
+                task_id = task["id"]
+                user_id = task["user_id"]
+                status = result.get("status", "done")
+                summary = result.get("result_summary", "")
+
+                # Notify via system alert
+                icon = "✅" if status == "done" else "❌"
+                _add_system_alert(f"{icon} 태스크 #{task_id} {status} (browser worker): {summary[:200]}")
+
+                # Send report file to user (result already saved to DB by worker)
+                if summary:
+                    from aiogram.types import BufferedInputFile
+                    target = user_id if user_id != 0 else next(iter(ALLOWED_USER_IDS), 0)
+                    if target:
+                        try:
+                            row = _query_one(
+                                "SELECT result FROM telegram_tasks WHERE id = %s", (task_id,),
+                            )
+                            full_result = (row or {}).get("result", summary)
+                            doc = BufferedInputFile(
+                                full_result.encode("utf-8"),
+                                filename=f"task_{task_id}_browser.md",
+                            )
+                            await b.send_document(chat_id=target, document=doc)
+                        except Exception as e:
+                            logger.warning("Failed to send browser task report: %s", e)
+                            try:
+                                await b.send_message(
+                                    chat_id=target,
+                                    text=f"🌐 Browser task #{task_id} {status}\n{summary[:300]}",
+                                )
+                            except Exception:
+                                pass
+                return  # Done — worker handled everything
+            # else: worker unreachable, fall through to in-process execution
+            logger.info("Browser worker unavailable; executing task #%d in-process", task["id"])
+
         try:
             from agents import get_agent
             spec = get_agent(agent_type)
