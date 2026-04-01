@@ -833,7 +833,7 @@ async def chat_with_tools(
         working_msgs.append({"role": "assistant", "content": assistant_content})
 
         if tool_results:
-            # Inject budget warning at 80% threshold (as separate text block in user message)
+            # Inject budget warning at 80% threshold
             if not budget_warning_sent and total_cost > budget_usd * 0.8:
                 budget_warning_sent = True
                 tool_results.insert(0, {
@@ -841,6 +841,15 @@ async def chat_with_tools(
                     "text": (
                         f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
                         "작업을 계속하라. 한도 도달 시 시스템이 자동 종료한다."
+                    ),
+                })
+            # Inject round limit warning 2 rounds before max
+            if round_num == max_rounds - 2:
+                tool_results.insert(0, {
+                    "type": "text",
+                    "text": (
+                        f"[SYSTEM] 라운드 한도 임박 ({round_num}/{max_rounds}). "
+                        "다음 라운드가 마지막이다. 파일 저장 등 최종 도구 호출을 지금 하라."
                     ),
                 })
             working_msgs.append({"role": "user", "content": tool_results})

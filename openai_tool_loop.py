@@ -693,6 +693,16 @@ async def chat_with_tools(
                 ),
             })
 
+        # ── Round limit warning 2 rounds before max ──
+        if round_num == max_rounds - 2:
+            working_msgs.append({
+                "role": "system",
+                "content": (
+                    f"[SYSTEM] 라운드 한도 임박 ({round_num}/{max_rounds}). "
+                    "다음 라운드가 마지막이다. 파일 저장 등 최종 도구 호출을 지금 하라."
+                ),
+            })
+
     # ══════════════════════════════════════════════════════════════════
     # Forced final response: max_rounds or budget exhausted
     # ══════════════════════════════════════════════════════════════════
