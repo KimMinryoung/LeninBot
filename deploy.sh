@@ -197,7 +197,14 @@ _notify_telegram "✅ *Deploy 완료* [$SERVICE]
 $CHANGES
 \`\`\`"
 
-# 6. 텔레그램 재시작은 마지막 단계
+# 6. Browser worker 재시작 (코드 변경 시 lazy import 캐시 무효화 필요)
+if [ "$SERVICE" = "all" ] && _run_systemctl is-active --quiet leninbot-browser 2>/dev/null; then
+    echo "leninbot-browser 재시작..."
+    _run_systemctl restart leninbot-browser
+    RESTARTED="${RESTARTED:+$RESTARTED+}browser"
+fi
+
+# 7. 텔레그램 재시작은 마지막 단계
 # 주의: systemd 환경에서는 이 스크립트가 같은 cgroup에 있다면
 # telegram 서비스 재시작 시 즉시 종료될 수 있으므로, 이후 후처리는 두지 않는다.
 if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "telegram" ]; then
