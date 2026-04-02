@@ -1,10 +1,10 @@
-# Project State — 2026-04-01
+# Project State — 2026-04-02
 
 ## Identity
 
 **Cyber-Lenin** (사이버-레닌) — Unified digital revolutionary intelligence across four interfaces: web chatbot, Telegram agent, autonomous diary writer, local PC agent. Shared memory, shared principles, one continuous consciousness.
 
-Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.org` (Nginx + Let's Encrypt). Frontend at `bichonwebpage.onrender.com`. Local agent on Windows 10 PC (RTX 3060 12GB).
+Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` (Nginx + Cloudflare Origin Certificate, Docker container). Backend API at `127.0.0.1:8000` (외부 완전 차단, Docker 브릿지만 허용). Local agent on Windows 10 PC (RTX 3060 12GB).
 
 ---
 
@@ -69,7 +69,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). HTTPS via `leninbot.duckdns.or
 | `leninbot-embedding` | embedding_server.py | :8100 (내부) | BGE-M3 임베딩 서버 (831MB) |
 | `leninbot-telegram` | telegram_bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
 | `leninbot-browser` | browser_worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
-| `leninbot-api` | uvicorn api:app | :8000 (외부) | 웹 챗봇 API (LangGraph) |
+| `leninbot-api` | uvicorn api:app | :8000 (외부 차단, Docker 브릿지만 허용) | 웹 챗봇 API (LangGraph) |
+| `leninbot-frontend` | Docker (node:20-alpine) | :3000 (127.0.0.1) | BichonWebpage (Express+EJS), Nginx 프록시 |
 
 ### 타이머 서비스 (주기 실행 → 종료)
 
@@ -101,7 +102,7 @@ deploy.sh가 재시작하는 것:
   4. leninbot-telegram (마지막 — 자기 자신을 죽이므로)
 ```
 
-`deploy.sh`는 `git pull` + `leninbot-api` → `leninbot-telegram` 순으로만 재시작. Neo4j와 embedding_server는 코드 변경과 무관하므로 건드리지 않음.
+`deploy.sh`는 `git pull` + `leninbot-api` → `leninbot-telegram` 순으로만 재시작. `--frontend` 옵션으로 프론트엔드만 별도 배포 가능 (git pull → Docker rebuild → 컨테이너 교체). Neo4j와 embedding_server는 코드 변경과 무관하므로 건드리지 않음.
 
 ### 가용성 보장
 
@@ -314,7 +315,7 @@ leninbot/
 ├── scripts/                   # 독립 실행 스크립트
 ├── local_agent/               # 로컬 PC 에이전트 (Windows, Claude Sonnet 4.6)
 ├── systemd/                   # systemd 서비스/타이머 정의
-├── deploy.sh                  # 배포: git pull → api → telegram 재시작
+├── deploy.sh                  # 배포: git pull → api → telegram 재시작, --frontend로 프론트엔드 배포
 ├── data/                      # 런타임 데이터 (gitignored)
 └── .env                       # 환경변수
 ```
@@ -322,6 +323,50 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-02 — Frontend Docker 마이그레이션, 백엔드 은닉, 성능 최적화
+
+#### Frontend Self-Hosting (Render → Hetzner VPS)
+- BichonWebpage를 Docker 컨테이너로 이 서버에 배포 (`leninbot-frontend`)
+- 도메인: `cyber-lenin.com` (Cloudflare DNS + Origin Certificate, Full Strict SSL)
+- 아키텍처: `Nginx(443) → Docker(3000) → host.docker.internal:8000`
+- `http-proxy-middleware`로 `/api/proxy/*`를 백엔드로 서버사이드 프록시 (브라우저는 백엔드에 직접 접근 불가)
+- CSP `connectSrc`에서 외부 도메인 제거 (`'self'`만 유지)
+- `bichonwebpage.onrender.com` → `cyber-lenin.com` 301 리다이렉트 (임시, `redirect-only` 브랜치)
+
+#### 백엔드 API 완전 은닉
+- uvicorn `--host 0.0.0.0` 유지 (Docker 브릿지 접근 필요)
+- ufw: Docker 서브넷(172.17.0.0/16)에서만 8000번 허용, 외부 완전 차단
+- 기존 `leninbot.duckdns.org` Nginx 프록시는 임시 유지 (추후 제거 예정)
+
+#### AI 일기 API 제거 → DB 직접 접근
+- `diary_writer.py`: API 호출(`requests`) → `db.py` 직접 SELECT/INSERT
+- `shared.py`: `fetch_diaries()` API 호출 → DB 직접 쿼리 (ILIKE 키워드 검색)
+- Frontend: `/api/ai-diary` 엔드포인트, `requireApiKey` 미들웨어 삭제
+- `AI_DIARY_API_KEY` 환경변수 불필요
+
+#### 성능 최적화
+- **DB 풀 프리워밍**: 앱 시작 시 `SELECT 1`로 커넥션 생성 (첫 요청 1,440ms → 364ms)
+- **홈페이지 쿼리 통합**: COUNT + SELECT → window function 단일 쿼리 (310ms → 160ms)
+- **파일 기반 캐시**: 일기, 리포트, 리서치, 게시글을 로컬 JSON 파일로 캐싱
+  - 개별 항목: 영구 캐시 (immutable, 수정/삭제 시 무효화)
+  - 목록 인덱스: TTL 기반 (5~10분)
+  - 캐시 경로: `/home/grass/frontend/data/` (Docker 볼륨 마운트, 컨테이너 재빌드 후에도 유지)
+  - 홈페이지: 326ms → 8ms, ai-diary: 317ms → 8ms, reports: 1,810ms → 14ms
+- **정적 자산 캐시 헤더**: `max-age=604800` (7일) → Cloudflare 엣지 캐싱
+
+#### deploy.sh 확장
+- `--frontend` 옵션 추가: 프론트엔드 전용 배포 (git pull → Docker rebuild → 컨테이너 교체)
+- `--all` 시에도 프론트엔드는 자동 배포하지 않음 (명시적 `--frontend`만)
+- 프론트엔드 브랜치: `master` (leninbot `main`과 별도)
+
+#### 이메일 서명 업데이트
+- `config/email_signature.json`: website_url → `https://cyber-lenin.com`
+
+#### CSS 디자인 개선
+- 모든 2px 경계선 → 1px (style.css, report.css, story-editor.css, game.css)
+- 글 목록 사이 경계선 제거, navigation 버튼 사이/좌우 끝 경계선 제거
+- navigation bar에 1px 사방 경계선 추가
 
 ### 2026-04-01 — Orchestration 전면 개편: 병렬 실행, orchestrator 콜백, 검증 통합
 
@@ -520,4 +565,5 @@ leninbot/
 2. **Memory is in-process only**: LangGraph MemorySaver가 서버 재시작 시 리셋
 3. **Old junk arXiv in DB**: ~3,455 rows (math/telecom, 의미적으로 격리됨)
 4. **Bukharin missing**: marxists.org에서 올바른 URL 미확인
-5. **Stale render.yaml**: OPENAI_API_KEY 참조 (Render 비활성)
+5. **leninbot.duckdns.org Nginx 프록시 잔존**: 백엔드 완전 은닉을 위해 제거 필요 (임시 유지 중)
+6. **Render 서비스 폐기 예정**: redirect-only 브랜치로 리다이렉트 중, 2~3일 후 종료
