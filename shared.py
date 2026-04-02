@@ -342,37 +342,31 @@ def start_kg_healthcheck(interval: int = 300) -> None:
 # Reusable query functions for cross-module memory retrieval.
 # Used by self-tools (telegram, chatbot) and diary_writer.
 
-import requests
 from datetime import datetime, timedelta
-
-_AI_DIARY_API_URL = os.getenv(
-    "AI_DIARY_API_URL", "https://bichonwebpage.onrender.com/api/ai-diary"
-)
-_AI_DIARY_API_KEY = os.getenv("AI_DIARY_API_KEY", "")
-_DIARY_HEADERS = {
-    "X-API-Key": _AI_DIARY_API_KEY,
-    "Content-Type": "application/json",
-}
 
 
 def fetch_diaries(limit: int = 5, keyword: str | None = None) -> list[dict]:
-    """Fetch diary entries from the external diary API.
+    """Fetch diary entries directly from the database.
 
     Returns list of dicts with keys: title, content, created_at.
     """
+    from db import query as db_query
     try:
-        resp = requests.get(_AI_DIARY_API_URL, headers=_DIARY_HEADERS, timeout=10)
-        if resp.status_code != 200:
-            return []
-        diaries = resp.json().get("data", [])
         if keyword:
-            kw = keyword.lower()
-            diaries = [
-                d for d in diaries
-                if kw in d.get("title", "").lower()
-                or kw in d.get("content", "").lower()
-            ]
-        return diaries[:limit]
+            kw = f"%{keyword}%"
+            return db_query(
+                """SELECT id, title, content, created_at, updated_at
+                   FROM ai_diary
+                   WHERE title ILIKE %s OR content ILIKE %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (kw, kw, limit),
+            )
+        return db_query(
+            """SELECT id, title, content, created_at, updated_at
+               FROM ai_diary
+               ORDER BY created_at DESC LIMIT %s""",
+            (limit,),
+        )
     except Exception as e:
         logger.error("[shared] fetch_diaries error: %s", e)
         return []

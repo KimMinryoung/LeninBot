@@ -11,11 +11,10 @@
 import json
 import os
 import re
-import requests
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dotenv import load_dotenv
-from db import query as db_query
+from db import query as db_query, execute as db_execute
 from langchain_google_genai import ChatGoogleGenerativeAI
 from shared import (
     extract_text_content, CORE_IDENTITY, KST, MODEL_MAIN, MODEL_LIGHT,
@@ -23,14 +22,6 @@ from shared import (
 )
 
 load_dotenv()
-
-# ── Configuration ──────────────────────────────────────────────
-AI_DIARY_API_URL = os.getenv("AI_DIARY_API_URL", "https://bichonwebpage.onrender.com/api/ai-diary")
-AI_DIARY_API_KEY = os.getenv("AI_DIARY_API_KEY", "")
-_HEADERS = {
-    "X-API-Key": AI_DIARY_API_KEY,
-    "Content-Type": "application/json",
-}
 
 # ── Time-of-day mapping ──────────────────────────────────────
 _TIME_LABELS = {
@@ -87,9 +78,10 @@ def _summarize(text: str, instruction: str, max_chars: int = 500) -> str:
 # ── Step 1: 이전 일기 조회 ─────────────────────────────────────
 def _get_previous_diaries() -> list[dict]:
     try:
-        resp = requests.get(AI_DIARY_API_URL, headers=_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            return resp.json().get("data", [])
+        return db_query(
+            """SELECT id, title, content, created_at, updated_at
+               FROM ai_diary ORDER BY created_at DESC LIMIT 20"""
+        )
     except Exception as e:
         print(f"⚠️ [일기] 이전 일기 조회 실패: {e}")
     return []
@@ -588,28 +580,20 @@ def _parse_title_content(text: str) -> tuple[str, str]:
 # ── Step 5: 일기 저장 ─────────────────────────────────────────
 def _save_diary(title: str, content: str) -> bool:
     try:
-        resp = requests.post(
-            AI_DIARY_API_URL,
-            headers=_HEADERS,
-            json={"title": title, "content": content},
-            timeout=10,
+        db_execute(
+            "INSERT INTO ai_diary (title, content) VALUES (%s, %s)",
+            (title, content),
         )
-        if resp.status_code in (200, 201):
-            print(f"✅ [일기] 저장 성공: {title}")
-            return True
-        print(f"⚠️ [일기] 저장 실패 ({resp.status_code}): {resp.text[:200]}")
+        print(f"✅ [일기] 저장 성공: {title}")
+        return True
     except Exception as e:
-        print(f"⚠️ [일기] 저장 요청 실패: {e}")
+        print(f"⚠️ [일기] 저장 실패: {e}")
     return False
 
 
 # ── Main: 일기 작성 ───────────────────────────────────────────
 def write_diary(dry_run: bool = False):
     """전체 일기 작성 파이프라인 실행. dry_run=True이면 저장 없이 CLI 출력만."""
-    if not AI_DIARY_API_KEY:
-        print("⚠️ [일기] AI_DIARY_API_KEY 미설정 — 건너뜀")
-        return
-
     _init()
     now = datetime.now(KST)
     print(f"\n📝 [일기] 자동 일기 작성 시작 — {now.strftime('%Y-%m-%d %H:%M')} KST")
