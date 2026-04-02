@@ -13,6 +13,7 @@ DEPLOY_META="/tmp/leninbot-deploy-meta.json"
 LOCK_FILE="/tmp/leninbot-deploy.lock"
 FORCE_RESTART=0
 SERVICE="all"  # all | api | telegram
+FRONTEND_DIR="/home/grass/frontend"
 
 for arg in "$@"; do
     case "$arg" in
@@ -25,15 +26,19 @@ for arg in "$@"; do
         --api)
             SERVICE="api"
             ;;
+        --frontend)
+            SERVICE="frontend"
+            ;;
         --all)
             SERVICE="all"
             ;;
         --help|-h)
-            echo "Usage: bash deploy.sh [--restart] [--telegram|--api|--all]"
+            echo "Usage: bash deploy.sh [--restart] [--telegram|--api|--frontend|--all]"
             echo "  --restart, -r   Restart services even when no new commit is found."
             echo "  --telegram      Restart leninbot-telegram only."
             echo "  --api           Restart leninbot-api only."
-            echo "  --all           Restart both services (default)."
+            echo "  --frontend      Rebuild and restart frontend container only."
+            echo "  --all           Restart all services (default)."
             exit 0
             ;;
         *)
@@ -217,6 +222,50 @@ if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "telegram" ]; then
     echo "leninbot-telegram 재시작..."
     _run_systemctl restart leninbot-telegram
     RESTARTED="${RESTARTED:+$RESTARTED+}telegram"
+fi
+
+# 9. 프론트엔드 배포 (Docker)
+_deploy_frontend() {
+    cd "$FRONTEND_DIR"
+
+    git fetch origin main
+    local LOCAL_FE
+    LOCAL_FE=$(git rev-parse HEAD)
+    local REMOTE_FE
+    REMOTE_FE=$(git rev-parse origin/main)
+
+    if [ "$LOCAL_FE" = "$REMOTE_FE" ] && [ "$FORCE_RESTART" -eq 0 ]; then
+        echo "프론트엔드: 변경 없음 → 스킵"
+        return 0
+    fi
+
+    git pull origin main
+
+    docker build -t leninbot-frontend .
+
+    docker stop leninbot-frontend 2>/dev/null || true
+    docker rm leninbot-frontend 2>/dev/null || true
+
+    docker run -d \
+        --name leninbot-frontend \
+        --add-host=host.docker.internal:host-gateway \
+        -p 127.0.0.1:3000:3000 \
+        --restart unless-stopped \
+        --env-file "$FRONTEND_DIR/.env" \
+        leninbot-frontend
+
+    docker image prune -f
+
+    echo "프론트엔드 배포 완료"
+    cd "$DEPLOY_DIR"
+}
+
+if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "frontend" ]; then
+    if [ -d "$FRONTEND_DIR" ]; then
+        echo "프론트엔드 배포 시작..."
+        _deploy_frontend
+        RESTARTED="${RESTARTED:+$RESTARTED+}frontend"
+    fi
 fi
 
 echo "=== Deploy 완료 [$RESTARTED]: $SUMMARY ==="
