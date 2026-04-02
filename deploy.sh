@@ -261,6 +261,7 @@ _deploy_frontend() {
         -p 127.0.0.1:3000:3000 \
         --restart unless-stopped \
         --env-file "$FRONTEND_DIR/.env" \
+        -v "$FRONTEND_DIR/data:/app/data" \
         leninbot-frontend
 
     docker image prune -f
