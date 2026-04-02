@@ -136,6 +136,13 @@ _run_systemctl() {
     fi
 }
 
+# 프론트엔드 전용 모드 — 백엔드 단계 건너뛰기
+if [ "$SERVICE" = "frontend" ]; then
+    CHANGES="(프론트엔드 전용 배포)"
+    SUMMARY="frontend-only"
+    DID_PULL=0
+else
+
 # 1. 코드 업데이트 (변경분만)
 _git_fetch_with_retry
 LOCAL=$(git rev-parse HEAD)
@@ -156,6 +163,8 @@ else
     git pull origin "$BRANCH"
     DID_PULL=1
 fi
+
+fi  # end: SERVICE != frontend
 
 # 2. 의존성 — requirements.txt 변경 시에만 설치
 if [ "$DID_PULL" -eq 1 ] && git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements"; then
@@ -228,18 +237,18 @@ fi
 _deploy_frontend() {
     cd "$FRONTEND_DIR"
 
-    git fetch origin main
+    git fetch origin
     local LOCAL_FE
     LOCAL_FE=$(git rev-parse HEAD)
     local REMOTE_FE
-    REMOTE_FE=$(git rev-parse origin/main)
+    REMOTE_FE=$(git rev-parse origin/master)
 
     if [ "$LOCAL_FE" = "$REMOTE_FE" ] && [ "$FORCE_RESTART" -eq 0 ]; then
         echo "프론트엔드: 변경 없음 → 스킵"
         return 0
     fi
 
-    git pull origin main
+    git pull origin master
 
     docker build -t leninbot-frontend .
 
