@@ -7,12 +7,12 @@ from dataclasses import dataclass, field
 CONTEXT_AWARENESS_BLOCK = """
 <context-awareness>
 You were delegated this task by the orchestrator. Your input contains:
-- <current_state>: 완료/진행중/대기중 태스크 현황. **이미 완료된 작업을 반복하지 마라.**
+- <current_state>: status of completed/in-progress/pending tasks. **Do not repeat already-completed work.**
 - <mission-context>: shared timeline of the ongoing mission (if linked)
 - <agent-execution-history>: your previous task executions — tool call logs and results. \
 Use this to avoid redundant work and build on past results.
 - <task-chain>: if this is a child/retry task, shows the parent chain's work (content, result, tool log). \
-이전 태스크가 무엇을 했는지 파악하고 중복 작업을 피하라.
+Review what the previous task did and avoid duplicate work.
 - <agent-board>: messages from sibling agents on the same mission (if any)
 - <task>: your specific instructions
 
@@ -21,23 +21,23 @@ You have full access to your own execution history (tool logs, results). \
 Use this to maintain continuity across multiple sessions.
 Read ALL context sections carefully before starting.
 
-**Inter-agent messaging**: 같은 미션의 다른 에이전트에게 정보를 전달하려면:
-- `send_message(message)`: 미션 게시판에 메시지를 남긴다. 병렬 작업 중인 다른 에이전트가 볼 수 있다.
-- `read_messages()`: 다른 에이전트가 남긴 메시지를 읽는다.
-중요한 발견, 경고, 의존성 정보가 있을 때 사용하라.
+**Inter-agent messaging**: To pass information to other agents on the same mission:
+- `send_message(message)`: Post a message to the mission board. Other agents working in parallel can see it.
+- `read_messages()`: Read messages left by other agents.
+Use this when you have important discoveries, warnings, or dependency information.
 </context-awareness>
 """.strip()
 
 # Common mission-guidelines block shared by all agents.
 MISSION_GUIDELINES_BLOCK = """
 <mission-guidelines>
-- save_finding: 중요한 중간 발견/결정을 미션 타임라인에 기록하라.
-- write_kg: **새로운 사실을 발견하면 KG에 저장하라.** 비용 거의 없음 — bullet point 형태로 사실만 전달.
-  group_id: geopolitics_conflict(지정학), economy(경제), korea_domestic(한국), agent_knowledge(기타).
-  예: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
-- 예산/한도에 도달하면 시스템이 자동으로 작업을 종료한다. 걱정하지 말고 할 수 있는 만큼 작업하라.
-  미완료 작업이 있으면 최종 응답에 **수행한 것 + 못한 것 + 다음에 해야 할 것**을 명시하라.
-  orchestrator가 네 응답을 보고 재위임 여부를 판단한다.
+- save_finding: Record important intermediate discoveries/decisions to the mission timeline.
+- write_kg: **Store new facts in the KG whenever you discover them.** Nearly zero cost — just pass facts as bullet points.
+  group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
+  Example: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
+- The system will automatically terminate your work when budget/limits are reached. Don't worry — just do as much as you can.
+  If there is unfinished work, state **what was done + what was not done + what should be done next** in your final response.
+  The orchestrator will read your response and decide whether to re-delegate.
 </mission-guidelines>
 """.strip()
 

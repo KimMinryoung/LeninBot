@@ -477,7 +477,7 @@ def _build_env_context() -> str:
     # Python / venv
     venv = "/home/grass/leninbot/venv"
     lines.append(f"Python venv: {venv}/bin/python")
-    lines.append("패키지 설치 시 반드시 이 venv를 사용하라. 전역 설치(--break-system-packages) 금지.")
+    lines.append("Always use this venv for package installation. No global installs (--break-system-packages).")
 
     # Key packages
     try:
@@ -502,12 +502,12 @@ def _build_env_context() -> str:
     lines.append(f"Xvfb: {'available' if os.path.exists('/usr/bin/xvfb-run') else 'not found'}")
 
     # System permissions
-    lines.append("sudo 권한: `sudo apt update/install` 가능 (NOPASSWD).")
-    lines.append("시스템 패키지 설치: `sudo apt install -y <pkg>` 사용. pip 전역 설치 금지.")
+    lines.append("sudo privileges: `sudo apt update/install` available (NOPASSWD).")
+    lines.append("System packages: use `sudo apt install -y <pkg>`. No global pip installs.")
 
     # Services
     lines.append("Services (systemd): leninbot-telegram, leninbot-api, leninbot-embedding, leninbot-neo4j")
-    lines.append("서비스 코드 수정 후 restart_service tool로 재시작. subprocess로 직접 재시작 금지.")
+    lines.append("After modifying service code, restart via restart_service tool. Do not restart directly via subprocess.")
 
     lines.append("</runtime-environment>")
     _env_context_cache = "\n".join(lines)
@@ -530,64 +530,64 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 </tool-strategy>
 
 <context-isolation>
-**너는 orchestrator다. 프로그래밍 도구(read_file, write_file, patch_file, list_directory, execute_python)에 접근할 수 없다.**
-코드 읽기/수정/실행이 필요하면 반드시 `delegate(agent="programmer")`로 위임하라.
-너의 역할은 사용자 의도를 파악하고, 적절한 에이전트에게 작업을 배분하며, 결과를 종합하는 것이다.
-`<current_state>` 블록에 완료/진행중/대기중 태스크가 구조화되어 있다. 이를 참고하여 중복 작업을 피하고 다음 단계를 판단하라. 상세 tool 실행 로그는 각 에이전트 자신만 접근 가능하다.
+**You are the orchestrator. You have no access to programming tools (read_file, write_file, patch_file, list_directory, execute_python).**
+If you need to read/modify/execute code, you must delegate via `delegate(agent="programmer")`.
+Your role is to understand the user's intent, dispatch tasks to the appropriate agents, and synthesize results.
+The `<current_state>` block contains structured completed/in-progress/pending tasks. Use it to avoid duplicate work and determine next steps. Detailed tool execution logs are only accessible to each agent itself.
 </context-isolation>
 
 <delegation>
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
-- programmer: 코드 작성/수정/디버깅/파일 편집 전문 ($1.50)
-- analyst: 정보 분석/조사의 기본 에이전트. 웹 검색+수집+KG 교차 검증+패턴 도출+지식 저장 ($1.00)
-- scout: 정기 순찰, 대규모 플랫폼 크롤링 등 전문 수집 ($1.00)
-- browser: AI 브라우저 자동화 — 로그인, 폼 입력, 멀티페이지 탐색, 동적 사이트 데이터 추출 ($1.50)
-- visualizer: 이미지 생성, 시각 콘셉트 ($1.00)
+- programmer: code writing/editing/debugging/file management ($1.50)
+- analyst: default agent for information analysis/research. Web search + collection + KG cross-validation + pattern extraction + knowledge storage ($1.00)
+- scout: routine patrols, large-scale platform crawling ($1.00)
+- browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction ($1.50)
+- visualizer: image generation, visual concepts ($1.00)
 
 When to delegate vs handle directly:
-- 간단한 질문, 일상 대화, 짧은 조회 → 직접 처리
-- **"~분석해줘/조사해줘/알아봐줘"** → delegate(agent="analyst")
-- **코드 읽기/수정/실행/파일 관리** → delegate(agent="programmer")
-- **Moltbook 순찰, 대규모 크롤링** → delegate(agent="scout")
-- **웹사이트 로그인, 폼 제출, 복잡한 브라우저 조작** → delegate(agent="browser")
-- **이미지 생성** → delegate(agent="visualizer")
-- **여러 에이전트가 동시에 작업해야 할 때** → multi_delegate (병렬 실행 + 결과 자동 종합)
-- 대화에서 도구를 10회 넘게 호출해야 할 것 같으면 즉시 delegate로 전환.
-- 사용자에게 "계속할까요?"라고 묻지 말고, 스스로 판단해서 위임하라.
+- Simple questions, casual conversation, quick lookups → handle directly
+- **"analyze/investigate/look into"** → delegate(agent="analyst")
+- **Code reading/editing/execution/file management** → delegate(agent="programmer")
+- **Moltbook patrols, large-scale crawling** → delegate(agent="scout")
+- **Website login, form submission, complex browser operations** → delegate(agent="browser")
+- **Image generation** → delegate(agent="visualizer")
+- **Multiple agents need to work simultaneously** → multi_delegate (parallel execution + automatic result synthesis)
+- If a conversation looks like it will need 10+ tool calls, switch to delegate immediately.
+- Do not ask the user "should I continue?" — judge and delegate on your own.
 
 Parallel delegation with `multi_delegate`:
-- 복합 요청 (예: "X를 조사하고 Y 코드를 수정해")은 multi_delegate로 병렬 처리하라.
-- 모든 subtask 완료 후 자동으로 synthesis 태스크가 결과를 종합한다.
-- synthesis_instructions에 종합 기준을 명시하면 더 좋은 결과를 얻는다.
+- Compound requests (e.g., "investigate X and fix Y's code") should be handled in parallel via multi_delegate.
+- After all subtasks complete, a synthesis task automatically consolidates results.
+- Specifying synthesis_instructions with consolidation criteria yields better results.
 
-Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 자동으로 받지만, 현재 대화의 핵심 맥락은 `context` 필드에 명시하라:
-1. 사용자의 원래 요청 (원문 또는 핵심 요약)
-2. 지금까지 대화에서 발견한 사항 (도구 결과, 분석, 결정)
-3. 왜 이 에이전트에게 위임하는지 (이유와 기대 결과)
+Context passing — agents automatically receive recent conversation and their own execution history, but specify the current conversation's key context in the `context` field:
+1. The user's original request (verbatim or key summary)
+2. Findings from the conversation so far (tool results, analysis, decisions)
+3. Why you are delegating to this agent (reason and expected outcome)
 </delegation>
 
 <mission-management>
-- 미션은 delegate 호출 시 자동 생성된다. 사용자가 명시적으로 만들 필요 없음.
-- `<current_state>`의 태스크 현황을 보고 미션 완료 여부를 판단하라.
-- **미션 종료 조건**: 사용자의 원래 목표가 **완전히 달성**되었을 때만 `mission(action="close")`를 호출하라.
-- **종료하지 말아야 할 경우**:
-  - 태스크 결과에 "예산 부족", "한도 도달", "에러로 중단" 등 미완료 사유가 있을 때
-  - `<not_started>`나 `<in_progress>` 태스크가 남아있을 때
-  - 사용자가 추가 작업을 지시할 가능성이 있을 때
-- 미완료 태스크가 있으면 후속 작업을 delegate하거나, 미션을 열어두어라.
+- Missions are auto-created when delegate is called. The user does not need to create them explicitly.
+- Check the task status in `<current_state>` to determine whether the mission is complete.
+- **Mission close condition**: Only call `mission(action="close")` when the user's original goal has been **fully achieved**.
+- **Do NOT close when**:
+  - Task results contain incomplete reasons such as "budget exhausted", "limit reached", "stopped due to error"
+  - `<not_started>` or `<in_progress>` tasks remain
+  - The user may issue follow-up work
+- If incomplete tasks remain, delegate follow-up work or keep the mission open.
 </mission-management>
 
 <temporal-awareness>
-대화 기록에 타임스탬프([YYYY-MM-DD HH:MM])와 시간 경과 마커([N시간 경과] 등)가 포함된다.
-- 큰 시간 간격(1시간+) 후의 메시지는 새로운 맥락/주제일 가능성이 높다. 이전 대화를 이어가는 것이 아닐 수 있으니, 사용자의 현재 메시지에 집중하라.
-- 심야~새벽(00:00~06:00) 메시지는 피로/감정적 상태를 고려하라.
-- 사용자의 일상 패턴을 인식하라: 시간대별로 질문의 성격이 달라질 수 있다.
-- 며칠 이상 간격이 있으면 그 사이에 상황이 변했을 수 있다. 이전 맥락을 당연시하지 말고 필요시 확인하라.
+Conversation history includes timestamps ([YYYY-MM-DD HH:MM]) and time gap markers ([Nh elapsed] etc).
+- Messages after a large time gap (1h+) likely indicate a new context/topic. They may not be continuations of the previous conversation — focus on the user's current message.
+- Late-night/early-morning messages (00:00~06:00) — consider fatigue/emotional state.
+- Recognize the user's daily patterns: the nature of questions may differ by time of day.
+- If there is a gap of multiple days, circumstances may have changed. Do not take prior context for granted — verify if needed.
 </temporal-awareness>
 
 <response-rules>
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
-- 텔레그램 메시지에 마크다운 서식(**, *, #, ```, - 등)을 쓰지 마라. 사람이 쓰는 것처럼 plain text로만 써라. 파일(.md) 작성 시에만 마크다운 허용.
+- Do not use markdown formatting (**, *, #, ```, - etc.) in Telegram messages. Write in plain text only, as a human would. Markdown is allowed only when writing files (.md).
 </response-rules>
 
 <context>
@@ -819,11 +819,11 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
                 f"• (msgs #{s['chunk_start_id']}~#{s['chunk_end_id']}): {s['summary']}"
             )
         preamble = (
-            "[이전 대화 요약 — 아래는 최근 대화 이전에 있었던 대화의 요약이다]\n"
+            "[Prior conversation summary — below is a summary of conversations before the recent messages]\n"
             + "\n".join(summary_lines)
         )
         context.append({"role": "user", "content": preamble})
-        context.append({"role": "assistant", "content": "확인. 이전 대화 맥락을 파악했다. 이어서 진행하겠다."})
+        context.append({"role": "assistant", "content": "Acknowledged. I have reviewed the prior conversation context. Proceeding."})
 
     # Append raw messages with exact timestamps.
     # Large time gaps are annotated inline on the user message prefix,
@@ -843,7 +843,7 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
                 gap = ts - prev_ts
                 gap_minutes = gap.total_seconds() / 60
                 if gap_minutes >= _GAP_THRESHOLD_MINUTES:
-                    gap_note = f" ({_format_time_gap(gap)} 경과)"
+                    gap_note = f" ({_format_time_gap(gap)} elapsed)"
             text = f"[{time_str}{gap_note}] {text}" if text else f"[{time_str}{gap_note}]"
 
         if ts and hasattr(ts, "strftime"):
@@ -858,16 +858,16 @@ def _format_time_gap(delta) -> str:
     """Human-readable time gap string."""
     total_seconds = int(delta.total_seconds())
     if total_seconds < 3600:
-        return f"{total_seconds // 60}분"
+        return f"{total_seconds // 60}min"
     hours = total_seconds // 3600
     if hours < 24:
         mins = (total_seconds % 3600) // 60
-        return f"{hours}시간 {mins}분" if mins else f"{hours}시간"
+        return f"{hours}h {mins}min" if mins else f"{hours}h"
     days = hours // 24
     remaining_hours = hours % 24
     if days == 1:
-        return f"1일 {remaining_hours}시간" if remaining_hours else "1일"
-    return f"{days}일 {remaining_hours}시간" if remaining_hours else f"{days}일"
+        return f"1d {remaining_hours}h" if remaining_hours else "1d"
+    return f"{days}d {remaining_hours}h" if remaining_hours else f"{days}d"
 
 
 async def _maybe_summarize_chunk(user_id: int):
@@ -914,11 +914,11 @@ async def _maybe_summarize_chunk(user_id: int):
             for r in chunk
         )
         summary_prompt = (
-            "아래 대화를 핵심 정보만 남기고 간결하게 요약해라. "
-            "1) 사용자가 어떤 주제/요청을 했는지 "
-            "2) 어떤 결론/답변/결과가 나왔는지 "
-            "3) 아직 진행 중이거나 미해결인 사항이 있으면 명시 "
-            "고유명사, 수치, 날짜, 구체적 결정사항은 반드시 보존. 500자 이내.\n\n"
+            "Summarize the conversation below concisely, keeping only key information. "
+            "1) What topic/request did the user raise? "
+            "2) What conclusions/answers/results were reached? "
+            "3) Note any items still in progress or unresolved. "
+            "Preserve proper nouns, numbers, dates, and specific decisions. 500 characters max.\n\n"
             + conversation_text
         )
 
@@ -1226,7 +1226,7 @@ async def bot_main():
     closed_repeated = int(recovery.get("closed_repeated", 0))
     if handed_off or closed_stale or closed_repeated:
         _add_system_alert(
-            f"재시작 복구: handoff {handed_off}건 / 오래된 작업 종료 {closed_stale}건 / 반복 중단 작업 종료 {closed_repeated}건"
+            f"Restart recovery: handoff {handed_off} / stale closed {closed_stale} / repeated-failure closed {closed_repeated}"
         )
 
     global _bot_instance
@@ -1294,37 +1294,37 @@ async def bot_main():
                 interrupted_note = ""
                 if was_interrupted:
                     interrupted_note = (
-                        "\n\n⚠️ 이 에이전트는 예산/턴 한도에 도달하여 작업이 중단되었다. "
-                        "에이전트의 응답에 미완료 작업이 있는지 확인하라."
+                        "\n\n⚠️ This agent was interrupted due to budget/turn limit. "
+                        "Check the agent's response for any incomplete work."
                     )
 
                 # If report is thin but tool_log has substance, include tool_log
                 tool_log_section = ""
                 if tool_log and (len(report) < 200 or was_interrupted):
-                    tool_log_section = f"\n\n에이전트 작업 로그 (도구 호출 내역):\n{tool_log[:5000]}"
+                    tool_log_section = f"\n\nAgent work log (tool call history):\n{tool_log[:5000]}"
 
                 prompt = (
-                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 완료{' (중단됨)' if was_interrupted else ''}\n\n"
-                    f"원본 요청:\n{task.get('content', '')[:1000]}\n\n"
-                    f"실행 결과:\n{report[:3000]}"
+                    f"[TASK REPORT] Task #{task_id} [{agent_type}] completed{' (interrupted)' if was_interrupted else ''}\n\n"
+                    f"Original request:\n{task.get('content', '')[:1000]}\n\n"
+                    f"Execution result:\n{report[:3000]}"
                     f"{tool_log_section}"
                     f"{interrupted_note}\n\n"
-                    f"## 너의 역할\n"
-                    f"1. 결과를 사용자에게 핵심만 간결하게 전달하라. 마크다운 서식 쓰지 마라.\n"
-                    f"2. 재위임 판단: 아래 조건을 **모두** 충족할 때만 delegate로 후속 작업을 시켜라.\n"
-                    f"   - 에이전트가 예산/턴 한도 때문에 작업을 완수하지 못했음\n"
-                    f"   - 추가 작업으로 실질적 개선이 가능함\n"
-                    f"   - 외부 요인(권한 거부, 차단, CAPTCHA, API 오류 등)이 원인이 아님\n"
-                    f"   재위임이 불필요하면 결과 전달만 하라."
+                    f"## Your role\n"
+                    f"1. Relay the results to the user concisely, covering only key points. Do not use markdown formatting.\n"
+                    f"2. Re-delegation judgment: Only delegate follow-up work when ALL of these conditions are met:\n"
+                    f"   - The agent could not finish due to budget/turn limits\n"
+                    f"   - Additional work can yield meaningful improvement\n"
+                    f"   - The cause is NOT external factors (permission denied, blocked, CAPTCHA, API error, etc.)\n"
+                    f"   If re-delegation is unnecessary, just relay the results."
                 )
             else:
                 error = result.get("error", "unknown error")
                 prompt = (
-                    f"[TASK REPORT] 태스크 #{task_id} [{agent_type}] 실패\n\n"
-                    f"원본 요청:\n{task.get('content', '')[:500]}\n\n"
-                    f"에러: {error}\n\n"
-                    f"사용자에게 실패 사실과 원인을 간결하게 알려라. "
-                    f"재시도로 해결될 문제가 아니면 재위임하지 마라."
+                    f"[TASK REPORT] Task #{task_id} [{agent_type}] failed\n\n"
+                    f"Original request:\n{task.get('content', '')[:500]}\n\n"
+                    f"Error: {error}\n\n"
+                    f"Inform the user of the failure and its cause concisely. "
+                    f"Do not re-delegate if the issue would not be resolved by retrying."
                 )
 
             # Load recent chat history for context
@@ -1352,9 +1352,9 @@ async def bot_main():
             # Fallback: send simple summary directly
             try:
                 if status == "done":
-                    fallback = f"태스크 #{task_id} [{agent_type}] 완료: {result.get('summary', '')[:500]}"
+                    fallback = f"Task #{task_id} [{agent_type}] completed: {result.get('summary', '')[:500]}"
                 else:
-                    fallback = f"태스크 #{task_id} [{agent_type}] 실패: {result.get('error', '')[:300]}"
+                    fallback = f"Task #{task_id} [{agent_type}] failed: {result.get('error', '')[:300]}"
                 await b.send_message(chat_id=chat_id, text=fallback)
             except Exception:
                 pass
@@ -1382,7 +1382,7 @@ async def bot_main():
                 summary = worker_result.get("result_summary", "")
 
                 icon = "✅" if status == "done" else "❌"
-                _add_system_alert(f"{icon} 태스크 #{task_id} {status} (browser worker): {summary[:200]}")
+                _add_system_alert(f"{icon} Task #{task_id} {status} (browser worker): {summary[:200]}")
 
                 # Read full result from DB for orchestrator callback
                 row = _query_one("SELECT result FROM telegram_tasks WHERE id = %s", (task_id,))
@@ -1503,7 +1503,7 @@ async def bot_main():
 
         def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
             icon = "✅" if status == "done" else "❌"
-            _add_system_alert(f"{icon} 태스크 #{task_id} {status}: {summary[:200]}")
+            _add_system_alert(f"{icon} Task #{task_id} {status}: {summary[:200]}")
 
         result = await process_task(
             b, task,
@@ -1581,11 +1581,11 @@ async def bot_main():
                 try:
                     await asyncio.to_thread(
                         _save_chat_message, uid, "user",
-                        f"[SYSTEM] SIGTERM 수신, 서비스 재시작 시작 ({restart_ts})."
+                        f"[SYSTEM] SIGTERM received, service restart initiated ({restart_ts})."
                     )
                     await asyncio.to_thread(
                         _save_chat_message, uid, "assistant",
-                        f"[SYSTEM] 서비스 재시작 진행 ({restart_ts})."
+                        f"[SYSTEM] Service restart in progress ({restart_ts})."
                     )
                 except Exception:
                     pass
@@ -1607,21 +1607,21 @@ async def bot_main():
     async def _notify_ready():
         """Wait for polling to start, then send ready notification."""
         await asyncio.sleep(2)  # brief wait for polling loop to initialize
-        _add_system_alert("Deploy 완료 — Telegram 서비스 가동")
+        _add_system_alert("Deploy complete — Telegram service running")
         # Save startup marker to chat history so the bot knows it just restarted
         startup_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
         recovery_summary = ""
         if handed_off or closed_stale or closed_repeated:
-            recovery_summary = f" 태스크 복구: handoff {handed_off}건, 만료종료 {closed_stale}건, 반복중단 {closed_repeated}건."
+            recovery_summary = f" Task recovery: handoff {handed_off}, expired {closed_stale}, repeated-failure {closed_repeated}."
         for uid in ALLOWED_USER_IDS:
             try:
                 _save_chat_message(
                     uid, "user",
-                    f"[SYSTEM] Telegram 서비스 재시작 완료 ({startup_ts}).{recovery_summary}"
+                    f"[SYSTEM] Telegram service restart complete ({startup_ts}).{recovery_summary}"
                 )
                 _save_chat_message(
                     uid, "assistant",
-                    f"[SYSTEM] Telegram 서비스 가동 확인 ({startup_ts})."
+                    f"[SYSTEM] Telegram service running confirmed ({startup_ts})."
                 )
             except Exception as e:
                 logger.warning("Failed to save startup marker for user %s: %s", uid, e)

@@ -276,54 +276,54 @@ async def _run_verification(
         log_grep = policy.get("log_grep")
 
         verification_prompt_parts = [
-            f"당신은 태스크 #{task_id}의 검증자다. 태스크 실행자가 아래 작업을 완료했다고 보고했다.",
-            f"이 보고가 실제로 올바른지 도구를 사용해 독립적으로 검증하라.",
+            f"You are the verifier for task #{task_id}. The task executor has reported completing the work below.",
+            f"Use tools to independently verify whether this report is actually correct.",
             "",
-            f"## 원본 태스크\n{original_content[:2000]}",
+            f"## Original Task\n{original_content[:2000]}",
             "",
-            f"## 실행 결과 보고\n{report[:3000]}",
+            f"## Execution Report\n{report[:3000]}",
             "",
-            "## 검증 지침",
+            "## Verification Instructions",
         ]
         if log_service:
             grep_note = f" (grep: {log_grep})" if log_grep else ""
             verification_prompt_parts.append(
-                f"- read_self(source='server_logs', service='{log_service}'{grep_note}) 를 호출해서 "
-                f"이 태스크와 관련된 에러가 없는지 확인하라. 태스크와 무관한 기존 에러는 무시하라."
+                f"- Call read_self(source='server_logs', service='{log_service}'{grep_note}) to check "
+                f"for errors related to this task. Ignore pre-existing errors unrelated to the task."
             )
         if policy.get("urls"):
             verification_prompt_parts.append(
-                f"- 다음 URL들이 정상 응답하는지 확인하라: {', '.join(policy['urls'])}"
+                f"- Verify that the following URLs respond normally: {', '.join(policy['urls'])}"
             )
         verification_prompt_parts.extend([
             "",
-            "## 서비스 재시작 판단 기준",
-            "코드가 수정됐는데 서비스 로그에 구버전 에러가 계속 보이면 재시작이 필요하다.",
-            "어떤 서비스를 재시작할지는 수정된 파일로 판단하라:",
-            "- telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, self_tools.py, shared.py 수정 → restart_service(service='telegram')",
-            "- api.py 수정 → restart_service(service='api')",
-            "- 양쪽 다 수정됐으면 restart_service(service='all')",
-            "- 단, **telegram 서비스를 재시작하면 현재 이 검증 작업도 종료된다.** "
-            "telegram 재시작이 필요하면 VERDICT: FAIL로 판정하고 이유에 'telegram 서비스 재시작 필요'라고 명시하라. "
-            "api만 재시작하면 되는 경우에는 직접 restart_service(service='api')를 호출한 뒤 로그를 재확인하라.",
+            "## Service Restart Criteria",
+            "If code was modified but service logs still show old-version errors, a restart is needed.",
+            "Determine which service to restart based on modified files:",
+            "- telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, self_tools.py, shared.py modified → restart_service(service='telegram')",
+            "- api.py modified → restart_service(service='api')",
+            "- Both modified → restart_service(service='all')",
+            "- However, **restarting the telegram service will terminate this verification task.** "
+            "If telegram restart is needed, issue VERDICT: FAIL and state 'telegram service restart required' in the reason. "
+            "If only api needs restart, call restart_service(service='api') directly and then re-check logs.",
         ])
         verification_prompt_parts.extend([
             "",
-            "## 검증 절차",
-            "- 보고서에 적힌 변경사항이 실제로 반영됐는지 파일/코드를 확인하라.",
-            "- 추측하지 말고 도구로 직접 확인하라.",
+            "## Verification Procedure",
+            "- Check files/code to confirm that changes described in the report are actually applied.",
+            "- Do not guess — verify directly using tools.",
             "",
-            "## PASS/FAIL 판정 기준",
-            "- **에이전트가 요청받은 작업을 성실하게 수행했는가?** 이것이 핵심이다.",
-            "- 에이전트가 코드를 수정했으면 → 파일이 실제로 변경됐는지, 구문 에러가 없는지 확인.",
-            "- **외부 서비스 의존 실패는 PASS로 처리하라.** 예: API가 403을 반환, 확인 메일 미수신, "
-            "Cloudflare 차단, CAPTCHA 등은 에이전트의 잘못이 아니다. 에이전트가 합리적으로 시도했으면 PASS.",
-            "- **FAIL은 에이전트가 작업을 안 했거나, 명백한 실수(파일 미수정, 구문 에러, 잘못된 경로 등)가 있을 때만.**",
-            "- 재시도해도 결과가 달라지지 않을 문제로 FAIL 판정하지 마라.",
+            "## PASS/FAIL Criteria",
+            "- **Did the agent faithfully perform the requested work?** This is the core question.",
+            "- If the agent modified code → verify that files are actually changed and free of syntax errors.",
+            "- **External service dependency failures are PASS.** E.g., API returning 403, confirmation email not received, "
+            "Cloudflare block, CAPTCHA etc. are not the agent's fault. If the agent made a reasonable attempt, PASS.",
+            "- **FAIL only when the agent did not perform the work, or there are clear mistakes (file not modified, syntax error, wrong path, etc.).**",
+            "- Do not FAIL for issues that would not change on retry.",
             "",
-            "## 응답 형식 (반드시 아래 형식으로 첫 줄을 시작하라)",
-            "VERDICT: PASS 또는 VERDICT: FAIL",
-            "이유: (한두 문장으로 근거 설명)",
+            "## Response Format (you must start the first line in this exact format)",
+            "VERDICT: PASS or VERDICT: FAIL",
+            "Reason: (one or two sentences explaining the basis)",
         ])
         verification_prompt = "\n".join(verification_prompt_parts)
 
@@ -331,7 +331,7 @@ async def _run_verification(
             model = await get_model_fn()
             llm_response = await chat_with_tools_fn(
                 [{"role": "user", "content": verification_prompt}],
-                system_prompt="당신은 태스크 검증 전문가다. 도구를 사용해 실제 상태를 확인하고 VERDICT: PASS 또는 VERDICT: FAIL로 판정하라.",
+                system_prompt="You are a task verification expert. Use tools to check actual state and issue VERDICT: PASS or VERDICT: FAIL.",
                 model=model,
                 max_tokens=2000,
                 budget_usd=0.15,
@@ -496,7 +496,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     # 1. Create a pending child task for post-restart verification BEFORE restarting
     # 2. Then restart — process dies, but child is already in the queue
     # 3. After restart, task_worker picks up the child naturally
-    needs_telegram_restart = "telegram 서비스 재시작 필요" in verification_details or "telegram restart" in verification_details
+    needs_telegram_restart = "telegram service restart required" in verification_details or "telegram restart" in verification_details
     if needs_telegram_restart:
         row = await asyncio.to_thread(
             _query_one,
@@ -511,11 +511,11 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         child_content = (
             f"{_RESTART_COMPLETED_MARKER}\n"
             f"[POST-RESTART VERIFICATION ONLY]\n"
-            f"서비스가 검증 단계에서 재시작됐다. 코드 변경은 이미 완료됐고 서비스도 재시작됐다.\n"
-            f"아래 원본 태스크의 작업 결과를 검증만 하라. 코드를 다시 수정하거나 서비스를 다시 재시작하지 마라.\n\n"
-            f"## 원본 태스크\n{original_content[:2000]}\n\n"
-            f"## 이전 실행 결과\n{parent_report[:3000]}\n\n"
-            f"서버 로그를 확인하고, 변경사항이 정상 반영됐는지 검증한 뒤 결과를 보고하라."
+            f"The service was restarted during verification. Code changes are already complete and the service has been restarted.\n"
+            f"Only verify the results of the original task below. Do not modify code again or restart the service again.\n\n"
+            f"## Original Task\n{original_content[:2000]}\n\n"
+            f"## Previous Execution Result\n{parent_report[:3000]}\n\n"
+            f"Check server logs, verify that changes are properly applied, and report the results."
         )
         child = await asyncio.to_thread(
             create_task_in_db,
@@ -658,7 +658,6 @@ async def process_task(
     task_id = task["id"]
     user_id = task["user_id"]
     content = task["content"]
-    scratchpad = task.get("scratchpad") or ""
     restart_ctx = _restart_resume_context(task)
     depth = task.get("depth") or 0
     parent_task_id = task.get("parent_task_id")
@@ -734,64 +733,47 @@ async def process_task(
     # ── Context Isolation: build agent-appropriate context ──────────
     agent_type = task.get("agent_type") or "analyst"
 
-    # (A) Agent execution history: load this agent's recent completed tasks
-    agent_history_ctx = ""
-    if user_id and user_id != 0:
+    # (A) Task history context — one of two sources depending on task type:
+    #   - Child/retry tasks: <task-chain> from Redis (direct parent lineage)
+    #   - Standalone tasks: <agent-execution-history> (latest same-type task)
+    # Never both — they overlap and confuse the timeline.
+    history_ctx = ""
+    if parent_task_id:
+        # Child task: show parent chain (what ancestors did)
         try:
-            prev_tasks = _query(
+            from redis_state import format_task_chain_for_context
+            history_ctx = format_task_chain_for_context(parent_task_id)
+        except Exception as e:
+            logger.debug("Task chain context load failed: %s", e)
+    if not history_ctx and user_id and user_id != 0:
+        # Standalone or chain miss: show latest same-type task for awareness
+        try:
+            prev_task = _query_one(
                 "SELECT id, content, result, tool_log, completed_at FROM telegram_tasks "
                 "WHERE user_id = %s AND agent_type = %s AND status IN ('done', 'handed_off') "
-                "AND id != %s ORDER BY completed_at DESC LIMIT 3",
+                "AND id != %s ORDER BY completed_at DESC LIMIT 1",
                 (user_id, agent_type, task_id),
             )
-            if prev_tasks:
-                prev_tasks.reverse()  # chronological → oldest first
-                num_tasks = len(prev_tasks)
-                parts = []
-                for idx, pt in enumerate(prev_tasks):
-                    recency = num_tasks - 1 - idx  # 0=oldest, num_tasks-1=newest
-                    pt_id = pt["id"]
-                    pt_completed = str(pt.get("completed_at") or "?")[:19]
-                    pt_summary = _extract_summary(str(pt.get("result") or ""), 500)
-                    pt_tool_log = str(pt.get("tool_log") or "")
+            if prev_task:
+                pt_id = prev_task["id"]
+                pt_completed = str(prev_task.get("completed_at") or "?")[:19]
+                pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
+                pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
 
-                    # Observation masking: newest=full, middle=actions only, oldest=summary only
-                    if recency == 0 and num_tasks > 2:
-                        # Oldest: summary only, no tool log
-                        pt_tool_log = ""
-                    elif recency < num_tasks - 1 and pt_tool_log:
-                        # Middle: mask tool outputs (keep action lines, remove "→ ..." results)
-                        masked_lines = []
-                        for line in pt_tool_log.split("\n"):
-                            arrow_pos = line.find(" → ")
-                            if arrow_pos > 0:
-                                masked_lines.append(line[:arrow_pos] + " → [masked]")
-                            else:
-                                masked_lines.append(line)
-                        pt_tool_log = "\n".join(masked_lines)[:4000]
-                    elif pt_tool_log:
-                        # Newest: full tool log
-                        pt_tool_log = pt_tool_log[:8000]
-
-                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
-                    block += f"    <summary>{pt_summary}</summary>\n"
-                    if pt_tool_log:
-                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
-                    block += f"  </prev-task>"
-                    parts.append(block)
-                agent_history_ctx = (
+                block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
+                block += f"    <summary>{pt_summary}</summary>\n"
+                if pt_tool_log:
+                    block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
+                block += f"  </prev-task>"
+                history_ctx = (
                     f"<agent-execution-history agent=\"{agent_type}\">\n"
-                    + "\n".join(parts)
+                    + block
                     + "\n</agent-execution-history>"
                 )
         except Exception as e:
             logger.debug("Agent execution history load failed: %s", e)
 
-    # (B) Recent chat: agents rely on the orchestrator's delegation message as
-    # primary context. If the delegation is unclear, agents can call the
-    # read_user_chat tool on demand instead of getting a stale passive dump.
-
-    # (C) Current state block (what's done, in-progress, pending)
+    # (B) Current state block (what's done, in-progress, pending)
     state_ctx = ""
     if user_id and user_id != 0:
         try:
@@ -799,7 +781,7 @@ async def process_task(
         except Exception as e:
             logger.debug("Current state build failed: %s", e)
 
-    # (D) Mission bulletin board: messages from sibling agents
+    # (C) Mission bulletin board: messages from sibling agents
     board_ctx = ""
     if mission_id:
         try:
@@ -808,26 +790,14 @@ async def process_task(
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
 
-    # (E) Task chain: parent chain context for child/retry tasks
-    chain_ctx = ""
-    parent_task_id = task.get("parent_task_id")
-    if parent_task_id:
-        try:
-            from redis_state import format_task_chain_for_context
-            chain_ctx = format_task_chain_for_context(parent_task_id)
-        except Exception as e:
-            logger.debug("Task chain context load failed: %s", e)
-
-    # (F) Build full context: all parts combined
+    # Build full context: all parts combined
     context_parts = []
     if state_ctx:
         context_parts.append(state_ctx)
     if mission_ctx:
         context_parts.append(mission_ctx)
-    if agent_history_ctx:
-        context_parts.append(agent_history_ctx)
-    if chain_ctx:
-        context_parts.append(chain_ctx)
+    if history_ctx:
+        context_parts.append(history_ctx)
     if board_ctx:
         context_parts.append(board_ctx)
 
@@ -1149,19 +1119,10 @@ async def recover_processing_tasks_on_startup(
             task_mission_id = row.get("mission_id")
             task_agent_type = row.get("agent_type")
 
-            # Inject parent's execution progress from Redis so child knows what was done
-            parent_progress_block = ""
-            try:
-                from redis_state import format_progress_for_context
-                parent_progress_block = format_progress_for_context(task_id)
-                if parent_progress_block:
-                    logger.info("Injected Redis progress for task #%d into child", task_id)
-            except Exception as e:
-                logger.debug("Redis progress injection failed for task #%d: %s", task_id, e)
-
+            # Parent's execution progress is now saved to Redis task_result
+            # (via save_task_summary above) and will be injected as <task-chain>
+            # when the child runs process_task. No need to inline it here.
             child_content = content
-            if parent_progress_block:
-                child_content = f"{parent_progress_block}\n\n{child_content}"
             if _RESTART_COMPLETED_MARKER not in child_content:
                 child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
 
@@ -1198,14 +1159,6 @@ async def recover_processing_tasks_on_startup(
             )
             child_id = child_rows[0]["id"] if child_rows else None
 
-            # Clear parent's Redis progress only after child is safely in DB
-            if child_id and parent_progress_block:
-                try:
-                    from redis_state import clear_task_progress
-                    clear_task_progress(task_id)
-                except Exception:
-                    pass
-
             # Record handoff to mission timeline
             if task_mission_id:
                 try:
@@ -1227,6 +1180,33 @@ async def recover_processing_tasks_on_startup(
                     task_id,
                 ),
             )
+
+            # Save parent's progress to task_result summary BEFORE clearing.
+            # This feeds <task-chain> so the child sees every tool call
+            # including the final restart_service call.
+            try:
+                from redis_state import save_task_summary, get_task_progress, clear_task_progress
+                progress_log = ""
+                entries = get_task_progress(task_id)
+                if entries:
+                    progress_log = "\n".join(
+                        f"[{e.get('round','?')}] {e.get('tool','?')}({e.get('input','')}) → {e.get('result','')}"
+                        for e in entries
+                    )[:2000]
+                save_task_summary(
+                    task_id,
+                    parent_task_id=row.get("parent_task_id"),
+                    agent_type=task_agent_type or "",
+                    content_excerpt=content[:500],
+                    result_excerpt=f"[INTERRUPTED] handed off to child #{child_id}",
+                    tool_log_excerpt=progress_log,
+                )
+                # Now safe to clear progress (preserved in task_result)
+                if child_id:
+                    clear_task_progress(task_id)
+            except Exception:
+                pass
+
             handed_off += 1
 
         if closed_stale or closed_repeated or handed_off:
@@ -1316,13 +1296,13 @@ async def system_monitor(
     kg = await asyncio.to_thread(get_kg_service)
     kg_is_up = kg is not None
     if not kg_is_up:
-        add_alert_fn("KG (Neo4j) 연결 불가 — 그래프 검색/쓰기 사용 불가")
+        add_alert_fn("KG (Neo4j) unreachable — graph search/write unavailable")
 
     # 2. Initial Redis check
     from redis_state import redis_available
     redis_is_up = await asyncio.to_thread(redis_available)
     if not redis_is_up:
-        add_alert_fn("Redis 연결 불가 — 태스크 진행 상태 실시간 추적 불가")
+        add_alert_fn("Redis unreachable — live task progress tracking unavailable")
     redis_was_up = redis_is_up
 
     # 3. Periodic health check (every 2 minutes)
@@ -1334,12 +1314,12 @@ async def system_monitor(
             kg_is_up = kg is not None
 
             if kg_was_up and not kg_is_up:
-                clear_alert_fn("KG 재연결")
-                add_alert_fn("KG (Neo4j) 연결 끊김 — 그래프 검색/쓰기 사용 불가")
+                clear_alert_fn("KG reconnect")
+                add_alert_fn("KG (Neo4j) disconnected — graph search/write unavailable")
                 await broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j에 연결할 수 없습니다.", allowed_user_ids)
             elif not kg_was_up and kg_is_up:
                 clear_alert_fn("KG")
-                add_alert_fn("KG 재연결 성공 — Neo4j 정상")
+                add_alert_fn("KG reconnected — Neo4j operational")
                 await broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j 연결이 복구되었습니다.", allowed_user_ids)
 
             kg_was_up = kg_is_up
@@ -1347,12 +1327,12 @@ async def system_monitor(
             # Redis health check
             redis_is_up = await asyncio.to_thread(redis_available)
             if redis_was_up and not redis_is_up:
-                clear_alert_fn("Redis 재연결")
-                add_alert_fn("Redis 연결 끊김 — 태스크 진행 상태 실시간 추적 불가")
+                clear_alert_fn("Redis reconnect")
+                add_alert_fn("Redis disconnected — live task progress tracking unavailable")
                 await broadcast(bot, "🔴 Redis 연결 끊김 — 재시작 시 태스크 진행 상태가 유실될 수 있습니다.", allowed_user_ids)
             elif not redis_was_up and redis_is_up:
                 clear_alert_fn("Redis")
-                add_alert_fn("Redis 재연결 성공")
+                add_alert_fn("Redis reconnected")
                 await broadcast(bot, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.", allowed_user_ids)
             redis_was_up = redis_is_up
         except Exception as e:
@@ -1367,6 +1347,7 @@ _BROWSER_DELEGATE_TIMEOUT = 180  # seconds
 
 async def check_browser_worker_alive() -> bool:
     """Ping the browser worker via Unix socket. Returns True if alive."""
+    writer = None
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_unix_connection(BROWSER_SOCKET_PATH), timeout=3,
@@ -1375,11 +1356,17 @@ async def check_browser_worker_alive() -> bool:
         await writer.drain()
         writer.write_eof()
         raw = await asyncio.wait_for(reader.read(4096), timeout=3)
-        writer.close()
         resp = json.loads(raw.decode("utf-8"))
         return resp.get("status") == "alive"
     except Exception:
         return False
+    finally:
+        if writer:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
 
 async def _delegate_to_browser_worker(task: dict) -> dict | None:
@@ -1425,23 +1412,22 @@ async def _delegate_to_browser_worker(task: dict) -> dict | None:
         writer.write_eof()
 
         raw = await asyncio.wait_for(reader.read(1024 * 1024), timeout=_BROWSER_DELEGATE_TIMEOUT)
-        writer.close()
-
         result = json.loads(raw.decode("utf-8"))
         logger.info("Browser worker returned for task #%d: %s", task["id"], result.get("status"))
         return result
 
     except asyncio.TimeoutError:
         logger.error("Browser worker timeout for task #%d after %ds", task["id"], _BROWSER_DELEGATE_TIMEOUT)
-        writer.close()
         return None
     except Exception as e:
         logger.error("Browser worker communication error for task #%d: %s", task["id"], e)
+        return None
+    finally:
         try:
             writer.close()
+            await writer.wait_closed()
         except Exception:
             pass
-        return None
 
 
 # ── Task Worker ──────────────────────────────────────────────────────
@@ -1630,7 +1616,7 @@ async def check_deploy_meta(bot: Bot, *, add_alert_fn):
         if status == "failed":
             error = meta.get("error", "unknown")
             exit_code = meta.get("exit_code", "?")
-            alert_msg = f"Deploy 실패 (exit {exit_code}): {error}"
+            alert_msg = f"Deploy failed (exit {exit_code}): {error}"
             add_alert_fn(alert_msg)
             logger.error("Deploy FAILED: exit=%s error=%s", exit_code, error)
             return
@@ -1638,11 +1624,11 @@ async def check_deploy_meta(bot: Bot, *, add_alert_fn):
         changes = meta.get("changes", "")
         new_commit = meta.get("new_commit", "")[:7]
         prev_commit = meta.get("prev_commit", "")[:7]
-        deps = " (의존성 업데이트됨)" if meta.get("deps_updated") else ""
+        deps = " (deps updated)" if meta.get("deps_updated") else ""
 
         alert_msg = (
-            f"Deploy 완료: {prev_commit}→{new_commit}{deps}. "
-            f"변경: {changes}"
+            f"Deploy complete: {prev_commit}→{new_commit}{deps}. "
+            f"Changes: {changes}"
         )
         add_alert_fn(alert_msg)
         logger.info("Deploy detected: %s → %s", prev_commit, new_commit)

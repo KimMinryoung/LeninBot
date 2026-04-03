@@ -93,7 +93,7 @@ SELF_TOOLS = [
                     "type": "string",
                     "description": (
                         "Factual statements to store. Use bullet points for multiple facts. "
-                        "Example: '- 미국이 2026-03-28 대중국 반도체 수출 규제 강화 발표\\n- 한국 삼성전자 주가 3.2% 하락'"
+                        "Example: '- US announced tightened semiconductor export controls against China on 2026-03-28\\n- Samsung Electronics stock fell 3.2%'"
                     ),
                 },
                 "group_id": {
@@ -116,12 +116,12 @@ SELF_TOOLS = [
         "description": (
             "Delegate a task to a specialized agent. Runs asynchronously in background.\n"
             "Agents:\n"
-            "- analyst: 정보 분석/조사 (웹 검색+KG+패턴 도출+지식 저장) ($1.00)\n"
-            "- programmer: 코드 작성/수정/디버깅 ($1.50)\n"
-            "- scout: 정기 순찰, 대규모 크롤링 ($1.00)\n"
-            "- visualizer: 이미지 생성 ($1.00)\n"
-            "- browser: 웹사이트 로그인/폼 제출/브라우저 자동화 ($1.50)\n"
-            "조사/분석 → analyst. 코드 → programmer. 이미지 → visualizer. 크롤링 → scout. 웹 자동화 → browser.\n"
+            "- analyst: information analysis/research (web search + KG + pattern extraction + knowledge storage) ($1.00)\n"
+            "- programmer: code writing/editing/debugging ($1.50)\n"
+            "- scout: routine patrols, large-scale crawling ($1.00)\n"
+            "- visualizer: image generation ($1.00)\n"
+            "- browser: website login/form submission/browser automation ($1.50)\n"
+            "Research/analysis → analyst. Code → programmer. Images → visualizer. Crawling → scout. Web automation → browser.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
@@ -258,7 +258,7 @@ async def _exec_read_diary(limit: int = 5, keyword: str | None = None) -> str:
         content = d.get("content", "")
         if len(content) > 800:
             content = content[:800] + "\n... (truncated)"
-        results.append(f"[{i}] {ts}\n제목: {title}\n내용:\n{content}")
+        results.append(f"[{i}] {ts}\nTitle: {title}\nContent:\n{content}")
 
     return f"Your diary entries ({len(diaries)} shown):\n\n" + "\n\n---\n\n".join(results)
 
@@ -633,7 +633,7 @@ async def _exec_delegate(
         if recent_chats:
             chat_lines = []
             for msg in reversed(recent_chats):  # chronological order
-                role = "사용자" if msg.get("role") == "user" else "에이전트"
+                role = "user" if msg.get("role") == "user" else "agent"
                 text = str(msg.get("content") or "")[:500]
                 chat_lines.append(f"[{role}] {text}")
             content_parts.append(
@@ -734,7 +734,7 @@ async def _exec_multi_delegate(
         if recent_chats:
             chat_lines = []
             for msg in reversed(recent_chats):
-                role = "사용자" if msg.get("role") == "user" else "에이전트"
+                role = "user" if msg.get("role") == "user" else "agent"
                 text = str(msg.get("content") or "")[:500]
                 chat_lines.append(f"[{role}] {text}")
             chat_block = (
@@ -798,10 +798,10 @@ async def _exec_multi_delegate(
                                 for i, tid in enumerate(created_ids))
     synthesis_content = (
         f"<synthesis-task plan_id=\"{plan_id}\">\n"
-        f"이 태스크는 병렬 실행된 subtask들의 결과를 종합하는 태스크다.\n"
-        f"subtask 결과는 <subtask-results> 블록에 자동 주입된다.\n\n"
+        f"This task synthesizes results from subtasks that were executed in parallel.\n"
+        f"Subtask results are auto-injected in the <subtask-results> block.\n\n"
         f"## Subtasks\n{subtask_summary}\n\n"
-        f"## 종합 지침\n{synthesis_instructions or '모든 subtask 결과를 분석하고 사용자에게 핵심 내용을 종합 보고하라.'}\n"
+        f"## Synthesis Instructions\n{synthesis_instructions or 'Analyze all subtask results and provide a consolidated report of key findings to the user.'}\n"
         f"</synthesis-task>"
     )
     synthesis_result = await asyncio.to_thread(
@@ -1041,7 +1041,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
                 return "No chat history found."
             lines = []
             for r in rows:
-                role_label = "사용자" if r["role"] == "user" else "레닌"
+                role_label = "user" if r["role"] == "user" else "lenin"
                 ts = r.get("created_at")
                 time_str = ts.strftime("%Y-%m-%d %H:%M") if ts and hasattr(ts, "strftime") else "?"
                 text = str(r["content"] or "")

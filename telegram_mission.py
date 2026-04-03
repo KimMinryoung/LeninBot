@@ -136,11 +136,22 @@ def add_mission_event(
 
 
 def close_mission(mission_id: int) -> str:
-    """Close a mission."""
+    """Close a mission and clean up associated Redis state."""
     _execute(
         "UPDATE telegram_missions SET status = 'done', closed_at = NOW() WHERE id = %s",
         (mission_id,),
     )
+    # Clean up Redis board and ephemeral task state for this mission
+    try:
+        task_rows = _query(
+            "SELECT id FROM telegram_tasks WHERE mission_id = %s",
+            (mission_id,),
+        )
+        task_ids = [r["id"] for r in task_rows] if task_rows else []
+        from redis_state import cleanup_mission
+        cleanup_mission(mission_id, task_ids)
+    except Exception:
+        pass  # best-effort cleanup
     return f"Mission #{mission_id} closed."
 
 

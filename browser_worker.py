@@ -45,10 +45,9 @@ def _normalize_browser_model(raw_model: str | None) -> str:
         return alias_map[lowered]
 
     if lowered.startswith("gpt") or lowered.startswith("o"):
-        logger.warning(
-            "Browser worker received non-Claude model override '%s'; forcing %s",
-            model,
-            BROWSER_MODEL,
+        # logger not yet initialized at module level; use print for early warning
+        print(
+            f"[browser_worker] WARNING: non-Claude model override '{model}'; forcing {BROWSER_MODEL}"
         )
         return BROWSER_MODEL
 
@@ -124,8 +123,10 @@ async def execute_browser_task(task: dict) -> dict:
     from shared import KST
     from db import query as db_query, execute as db_execute, query_one as db_query_one
 
-    task_id = task["id"]
-    user_id = task["user_id"]
+    task_id = task.get("id")
+    user_id = task.get("user_id")
+    if not task_id or not user_id:
+        return {"status": "error", "error": "Missing required fields: id, user_id"}
     agent_type = task.get("agent_type") or "browser"
 
     # Set per-coroutine context so tools (upload_to_r2 etc.) can identify the task
@@ -316,6 +317,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         raw = await asyncio.wait_for(reader.read(1024 * 1024), timeout=10)
         if not raw:
             writer.close()
+            await writer.wait_closed()
             return
 
         msg = json.loads(raw.decode("utf-8"))
@@ -346,9 +348,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
 async def main():
-    # Clean up stale socket
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
+    # Clean up stale socket (race-safe)
+    try:
+        os.unlink(SOCKET_PATH)
+    except FileNotFoundError:
+        pass
 
     server = await asyncio.start_unix_server(handle_client, path=SOCKET_PATH)
     os.chmod(SOCKET_PATH, 0o660)
@@ -370,9 +374,10 @@ async def main():
         await stop_event.wait()
 
     logger.info("Browser worker shutting down")
-    # Clean up socket
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
+    try:
+        os.unlink(SOCKET_PATH)
+    except FileNotFoundError:
+        pass
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-_KEY_TTL = 86400  # 24h auto-cleanup for orphaned keys
+_KEY_TTL = 604800  # 7 days — all ephemeral keys (progress, state, board)
 
 # ── Connection ────────────────────────────────────────────────────────
 
@@ -156,8 +156,8 @@ def format_progress_for_context(task_id: int) -> str:
     skipped_note = f" (earliest {skipped} entries omitted)" if skipped else ""
     return (
         f"<parent-execution-log task_id=\"{task_id}\" entries=\"{len(filtered)}\"{skipped_note}>\n"
-        "아래는 서비스 재시작 전에 이 태스크가 이미 수행한 작업 목록이다. "
-        "이미 완료된 작업을 반복하지 말고, 중단된 지점부터 이어서 진행하라.\n\n"
+        "Below is the list of actions this task already performed before the service restart. "
+        "Do not repeat completed work — resume from the point of interruption.\n\n"
         + body
         + "\n</parent-execution-log>"
     )
@@ -248,14 +248,14 @@ def register_active_task(task_id: int, agent_type: str = "", user_id: int = 0):
 
 
 def unregister_active_task(task_id: int):
-    """Remove task from active registry."""
+    """Remove task from active registry. Progress and summary are preserved
+    until mission close — they're cheap text and useful for chain context."""
     try:
         r = get_redis()
         if not r:
             return
         r.srem("active_tasks", str(task_id))
         clear_task_state(task_id)
-        clear_task_progress(task_id)
     except Exception as e:
         logger.debug("unregister_active_task failed (task %d): %s", task_id, e)
 
@@ -326,7 +326,7 @@ def format_board_for_context(mission_id: int) -> str:
         lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
     return (
         "<agent-board>\n"
-        "아래는 같은 미션에 참여 중인 다른 에이전트들이 남긴 메시지이다.\n"
+        "Below are messages left by other agents participating in the same mission.\n"
         + "\n".join(lines)
         + "\n</agent-board>"
     )
@@ -334,7 +334,7 @@ def format_board_for_context(mission_id: int) -> str:
 
 # ── Task Chain Memory (parent chain context) ─────────────────────────
 
-_CHAIN_TTL = 604800  # 7 days
+_CHAIN_TTL = 2592000  # 30 days — task chain history persists until mission cleanup
 
 
 def save_task_summary(
@@ -446,7 +446,37 @@ def format_task_chain_for_context(task_id: int) -> str:
         parts.append(block)
     return (
         f"<task-chain depth=\"{len(chain)}\">\n"
-        "아래는 현재 태스크의 부모 체인이다. 이전 태스크가 무엇을 했는지 파악하고, 중복 작업을 피하라.\n"
+        "Below is the parent chain of the current task. Understand what prior tasks did and avoid duplicate work.\n"
         + "\n".join(parts)
         + "\n</task-chain>"
     )
+
+
+# ── Mission-scoped Cleanup ────────────────────────────────────────────
+
+def cleanup_mission(mission_id: int, task_ids: list[int] | None = None):
+    """Clean up all Redis state for a completed mission.
+
+    Called when a mission is closed. Removes board messages and
+    optionally task progress/state/summaries for associated tasks.
+    """
+    try:
+        r = get_redis()
+        if not r:
+            return
+        # Board messages
+        r.delete(f"board:{mission_id}")
+        # Task-level keys
+        if task_ids:
+            keys_to_delete = []
+            for tid in task_ids:
+                keys_to_delete.extend([
+                    f"task:{tid}:progress",
+                    f"task:{tid}:state",
+                    # task_result kept — chain history is cheap and useful for future reference
+                ])
+            if keys_to_delete:
+                r.delete(*keys_to_delete)
+        logger.info("Cleaned up Redis state for mission #%d (%d tasks)", mission_id, len(task_ids or []))
+    except Exception as e:
+        logger.debug("cleanup_mission failed (mission %d): %s", mission_id, e)
