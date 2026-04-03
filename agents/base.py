@@ -11,13 +11,20 @@ You were delegated this task by the orchestrator. Your input contains:
 - <mission-context>: shared timeline of the ongoing mission (if linked)
 - <agent-execution-history>: your previous task executions — tool call logs and results. \
 Use this to avoid redundant work and build on past results.
-- <recent-chat>: recent messages between the user and orchestrator (high-level intent)
+- <task-chain>: if this is a child/retry task, shows the parent chain's work (content, result, tool log). \
+이전 태스크가 무엇을 했는지 파악하고 중복 작업을 피하라.
+- <agent-board>: messages from sibling agents on the same mission (if any)
 - <task>: your specific instructions
 
 **Context isolation**: The orchestrator only sees high-level summaries of your work. \
 You have full access to your own execution history (tool logs, results). \
 Use this to maintain continuity across multiple sessions.
 Read ALL context sections carefully before starting.
+
+**Inter-agent messaging**: 같은 미션의 다른 에이전트에게 정보를 전달하려면:
+- `send_message(message)`: 미션 게시판에 메시지를 남긴다. 병렬 작업 중인 다른 에이전트가 볼 수 있다.
+- `read_messages()`: 다른 에이전트가 남긴 메시지를 읽는다.
+중요한 발견, 경고, 의존성 정보가 있을 때 사용하라.
 </context-awareness>
 """.strip()
 

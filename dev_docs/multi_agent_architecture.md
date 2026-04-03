@@ -95,7 +95,19 @@ Redis holds ephemeral state that must survive process death but is not the long-
 - `register_active_task()` on pickup, `unregister_active_task()` on completion/failure
 - Merged with in-memory set during shutdown for checkpoint coverage
 
-All keys have 24h TTL. All operations are fail-safe (try-except, never crashes the bot).
+**Mission Bulletin Board** — `board:{mission_id}` (LIST)
+- Inter-agent messaging: agents post findings/warnings visible to all sibling agents on the same mission
+- Agents use `send_message` / `read_messages` tools
+- Auto-injected as `<agent-board>` block when task starts, if messages exist
+- Enables parallel agents (multi_delegate) to share discoveries during execution
+
+**Task Chain Memory** — `task_result:{task_id}` (HASH, 7-day TTL)
+- Completed task summaries: content excerpt, result excerpt, tool_log excerpt, parent_task_id
+- `get_task_chain(task_id)` walks the parent chain, loading each ancestor's summary
+- Injected as `<task-chain>` block for child/retry tasks — shows what each ancestor did
+- Falls back to PostgreSQL if a summary is missing from Redis
+
+All task progress/state keys have 24h TTL. Task chain summaries have 7-day TTL. All operations are fail-safe (try-except, never crashes the bot).
 
 ### 2. PostgreSQL — System of Record
 
@@ -128,6 +140,8 @@ When an agent task executes, its context is assembled from:
 | Current State | `build_current_state(user_id)` | Completed (24h), in-progress, pending tasks overview |
 | Mission Context | `get_mission_events(mission_id)` | Last 20 mission timeline events |
 | Execution History | `telegram_tasks` query | Last 3 completed/handed_off tasks by same agent type, with observation masking |
+| Task Chain | Redis `task_result:*` | Parent chain summaries for child/retry tasks (content, result, tool_log per ancestor) |
+| Agent Board | Redis `board:{mission_id}` | Messages from sibling agents on the same mission |
 | Task Content | Orchestrator delegation | The actual task instructions wrapped in `<task>` |
 
 **No passive chat dump** — agents rely on the orchestrator's delegation message as primary context. If the delegation is unclear, agents can call the `read_user_chat` tool on demand to read the user's actual timestamped messages.

@@ -981,6 +981,25 @@ TASK_CONTEXT_TOOLS = [
             },
         },
     },
+    {
+        "name": "send_message",
+        "description": "Post a message to the mission bulletin board, visible to all sibling agents working on the same mission. Use for: intermediate findings, warnings, or status updates that other agents should see before they finish.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "Message to share with sibling agents."},
+            },
+            "required": ["message"],
+        },
+    },
+    {
+        "name": "read_messages",
+        "description": "Read messages from sibling agents on the same mission bulletin board. Returns timestamped entries from other agents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 
@@ -1035,9 +1054,52 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             logger.error("read_user_chat error (task %d): %s", task_id, e)
             return f"Failed to read chat: {e}"
 
+    async def _exec_send_message(message: str) -> str:
+        """Post to mission bulletin board."""
+        if not mission_id:
+            return "No mission linked to this task — message not posted."
+        try:
+            from redis_state import post_to_board
+            agent_type_str = ""
+            try:
+                from telegram_bot import current_task_ctx
+                ctx = current_task_ctx.get()
+                agent_type_str = (ctx or {}).get("agent_type", "")
+            except Exception:
+                pass
+            post_to_board(mission_id, task_id, agent_type_str, message)
+            return f"Message posted to mission #{mission_id} board."
+        except Exception as e:
+            logger.error("send_message error (task %d): %s", task_id, e)
+            return f"Failed to post message: {e}"
+
+    async def _exec_read_messages() -> str:
+        """Read mission bulletin board messages from sibling agents."""
+        if not mission_id:
+            return "No mission linked to this task."
+        try:
+            from redis_state import read_board
+            from datetime import datetime
+            messages = read_board(mission_id)
+            if not messages:
+                return "No messages on the mission board."
+            lines = []
+            for m in messages:
+                ts = m.get("ts", 0)
+                time_str = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "?"
+                agent = m.get("agent", "?")
+                tid = m.get("task_id", "?")
+                lines.append(f"[{time_str}] [{agent} #{tid}] {m.get('message', '')}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error("read_messages error (task %d): %s", task_id, e)
+            return f"Failed to read messages: {e}"
+
     handlers = {
         "save_finding": _exec_save_finding,
         "read_user_chat": _exec_read_user_chat,
+        "send_message": _exec_send_message,
+        "read_messages": _exec_read_messages,
     }
     return list(TASK_CONTEXT_TOOLS), handlers
 

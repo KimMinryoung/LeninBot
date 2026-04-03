@@ -271,3 +271,182 @@ def get_active_task_ids() -> set[int]:
     except Exception as e:
         logger.debug("get_active_task_ids failed: %s", e)
         return set()
+
+
+# ── Mission Bulletin Board (inter-agent messaging) ───────────────────
+
+def post_to_board(mission_id: int, from_task_id: int, agent_type: str, message: str):
+    """Post a message to the mission bulletin board, visible to all sibling agents."""
+    try:
+        r = get_redis()
+        if not r:
+            return
+        key = f"board:{mission_id}"
+        entry = json.dumps({
+            "task_id": from_task_id,
+            "agent": agent_type,
+            "message": message[:2000],
+            "ts": time.time(),
+        }, ensure_ascii=False)
+        r.rpush(key, entry)
+        r.expire(key, _KEY_TTL)
+    except Exception as e:
+        logger.debug("post_to_board failed (mission %d): %s", mission_id, e)
+
+
+def read_board(mission_id: int, since_ts: float = 0.0) -> list[dict]:
+    """Read messages from the mission bulletin board, optionally filtering by timestamp."""
+    try:
+        r = get_redis()
+        if not r:
+            return []
+        key = f"board:{mission_id}"
+        entries = r.lrange(key, 0, -1)
+        result = []
+        for e in entries:
+            parsed = json.loads(e)
+            if parsed.get("ts", 0) > since_ts:
+                result.append(parsed)
+        return result
+    except Exception as e:
+        logger.debug("read_board failed (mission %d): %s", mission_id, e)
+        return []
+
+
+def format_board_for_context(mission_id: int) -> str:
+    """Format board messages as an injectable context block."""
+    messages = read_board(mission_id)
+    if not messages:
+        return ""
+    lines = []
+    for m in messages:
+        from datetime import datetime
+        ts = m.get("ts", 0)
+        time_str = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "?"
+        lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
+    return (
+        "<agent-board>\n"
+        "아래는 같은 미션에 참여 중인 다른 에이전트들이 남긴 메시지이다.\n"
+        + "\n".join(lines)
+        + "\n</agent-board>"
+    )
+
+
+# ── Task Chain Memory (parent chain context) ─────────────────────────
+
+_CHAIN_TTL = 604800  # 7 days
+
+
+def save_task_summary(
+    task_id: int,
+    parent_task_id: int | None,
+    agent_type: str,
+    content_excerpt: str,
+    result_excerpt: str,
+    tool_log_excerpt: str = "",
+):
+    """Save a completed task's summary to Redis for chain context retrieval."""
+    try:
+        r = get_redis()
+        if not r:
+            return
+        key = f"task_result:{task_id}"
+        r.hset(key, mapping={
+            "parent_task_id": str(parent_task_id or 0),
+            "agent_type": agent_type or "",
+            "content": content_excerpt[:500],
+            "result": result_excerpt[:1000],
+            "tool_log": tool_log_excerpt[:2000],
+            "ts": f"{time.time():.0f}",
+        })
+        r.expire(key, _CHAIN_TTL)
+    except Exception as e:
+        logger.debug("save_task_summary failed (task %d): %s", task_id, e)
+
+
+def get_task_summary(task_id: int) -> dict | None:
+    """Get a task's cached summary from Redis."""
+    try:
+        r = get_redis()
+        if not r:
+            return None
+        data = r.hgetall(f"task_result:{task_id}")
+        return data if data else None
+    except Exception as e:
+        logger.debug("get_task_summary failed (task %d): %s", task_id, e)
+        return None
+
+
+def get_task_chain(task_id: int, max_depth: int = 5) -> list[dict]:
+    """Walk the parent_task_id chain, loading each ancestor's summary.
+
+    Returns list from oldest ancestor to immediate parent (chronological order).
+    Falls back to PostgreSQL if a summary is missing from Redis.
+    """
+    chain = []
+    current_id = task_id
+    for _ in range(max_depth):
+        summary = get_task_summary(current_id)
+        if summary:
+            summary["task_id"] = str(current_id)
+            chain.append(summary)
+            parent = int(summary.get("parent_task_id", 0))
+            if parent <= 0:
+                break
+            current_id = parent
+        else:
+            # Fall back to PG
+            try:
+                from db import query_one
+                row = query_one(
+                    "SELECT id, parent_task_id, agent_type, content, result, tool_log "
+                    "FROM telegram_tasks WHERE id = %s",
+                    (current_id,),
+                )
+                if not row:
+                    break
+                chain.append({
+                    "task_id": str(current_id),
+                    "parent_task_id": str(row.get("parent_task_id") or 0),
+                    "agent_type": row.get("agent_type") or "",
+                    "content": (str(row.get("content") or ""))[:500],
+                    "result": (str(row.get("result") or ""))[:1000],
+                    "tool_log": (str(row.get("tool_log") or ""))[:2000],
+                })
+                parent = row.get("parent_task_id")
+                if not parent:
+                    break
+                current_id = parent
+            except Exception:
+                break
+
+    chain.reverse()  # oldest first
+    return chain
+
+
+def format_task_chain_for_context(task_id: int) -> str:
+    """Format the parent task chain as an injectable context block."""
+    chain = get_task_chain(task_id)
+    if not chain:
+        return ""
+    parts = []
+    for entry in chain:
+        tid = entry.get("task_id", "?")
+        agent = entry.get("agent_type", "?")
+        content = entry.get("content", "")
+        result = entry.get("result", "")
+        tool_log = entry.get("tool_log", "")
+        block = f"  <ancestor task_id=\"{tid}\" agent=\"{agent}\">\n"
+        block += f"    <task-content>{content}</task-content>\n"
+        if result:
+            block += f"    <result>{result}</result>\n"
+        if tool_log:
+            block += f"    <tool-log>{tool_log}</tool-log>\n"
+        block += f"  </ancestor>"
+        parts.append(block)
+    return (
+        f"<task-chain depth=\"{len(chain)}\">\n"
+        "아래는 현재 태스크의 부모 체인이다. 이전 태스크가 무엇을 했는지 파악하고, 중복 작업을 피하라.\n"
+        + "\n".join(parts)
+        + "\n</task-chain>"
+    )

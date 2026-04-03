@@ -799,9 +799,26 @@ async def process_task(
         except Exception as e:
             logger.debug("Current state build failed: %s", e)
 
-    # (D) Build full context: all parts combined
-    # Note: scratchpad is no longer injected as context (replaced by current_state +
-    # agent-execution-history + mission events). It's kept only for recovery marker counting.
+    # (D) Mission bulletin board: messages from sibling agents
+    board_ctx = ""
+    if mission_id:
+        try:
+            from redis_state import format_board_for_context
+            board_ctx = format_board_for_context(mission_id)
+        except Exception as e:
+            logger.debug("Board context load failed: %s", e)
+
+    # (E) Task chain: parent chain context for child/retry tasks
+    chain_ctx = ""
+    parent_task_id = task.get("parent_task_id")
+    if parent_task_id:
+        try:
+            from redis_state import format_task_chain_for_context
+            chain_ctx = format_task_chain_for_context(parent_task_id)
+        except Exception as e:
+            logger.debug("Task chain context load failed: %s", e)
+
+    # (F) Build full context: all parts combined
     context_parts = []
     if state_ctx:
         context_parts.append(state_ctx)
@@ -809,6 +826,10 @@ async def process_task(
         context_parts.append(mission_ctx)
     if agent_history_ctx:
         context_parts.append(agent_history_ctx)
+    if chain_ctx:
+        context_parts.append(chain_ctx)
+    if board_ctx:
+        context_parts.append(board_ctx)
 
     if context_parts:
         content = "\n\n".join(context_parts) + f"\n\n<task>\n{content}\n</task>"
@@ -853,6 +874,20 @@ async def process_task(
             try:
                 from redis_state import unregister_active_task
                 unregister_active_task(task_id)
+            except Exception:
+                pass
+
+            # Save task summary to Redis for chain context (7-day TTL)
+            try:
+                from redis_state import save_task_summary
+                save_task_summary(
+                    task_id,
+                    parent_task_id=task.get("parent_task_id"),
+                    agent_type=task.get("agent_type", ""),
+                    content_excerpt=content[:500],
+                    result_excerpt=report[:1000],
+                    tool_log_excerpt=(tool_log_text if tool_details else "")[:2000],
+                )
             except Exception:
                 pass
 
