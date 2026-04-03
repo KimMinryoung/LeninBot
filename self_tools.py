@@ -967,6 +967,20 @@ TASK_CONTEXT_TOOLS = [
             "required": ["content"],
         },
     },
+    {
+        "name": "read_user_chat",
+        "description": "Read the user's actual chat messages with the orchestrator. Use when the delegation context is unclear or you need to verify the user's original intent/wording. Returns timestamped messages.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of recent messages to fetch (default 10, max 30).",
+                    "default": 10,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -990,8 +1004,40 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             logger.error("save_finding error (task %d): %s", task_id, e)
             return f"Failed to save finding: {e}"
 
+    async def _exec_read_user_chat(limit: int = 10) -> str:
+        """Fetch the user's actual chat messages with timestamps."""
+        if not user_id or user_id == 0:
+            return "No user context available for this task."
+        limit = max(1, min(limit, 30))
+        try:
+            from db import query as db_query
+            rows = db_query(
+                "SELECT role, content, created_at FROM ("
+                "  SELECT role, content, created_at, id FROM telegram_chat_history"
+                "  WHERE user_id = %s ORDER BY id DESC LIMIT %s"
+                ") sub ORDER BY id ASC",
+                (user_id, limit),
+            )
+            if not rows:
+                return "No chat history found."
+            lines = []
+            for r in rows:
+                role_label = "사용자" if r["role"] == "user" else "레닌"
+                ts = r.get("created_at")
+                time_str = ts.strftime("%Y-%m-%d %H:%M") if ts and hasattr(ts, "strftime") else "?"
+                text = str(r["content"] or "")
+                # Skip system markers
+                if text.startswith("[SYSTEM]"):
+                    continue
+                lines.append(f"[{time_str}] [{role_label}] {text[:500]}")
+            return "\n".join(lines) if lines else "No user messages found."
+        except Exception as e:
+            logger.error("read_user_chat error (task %d): %s", task_id, e)
+            return f"Failed to read chat: {e}"
+
     handlers = {
         "save_finding": _exec_save_finding,
+        "read_user_chat": _exec_read_user_chat,
     }
     return list(TASK_CONTEXT_TOOLS), handlers
 

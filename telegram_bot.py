@@ -577,6 +577,14 @@ Context passing — 에이전트는 최근 대화와 자신의 실행 이력을 
 - 미완료 태스크가 있으면 후속 작업을 delegate하거나, 미션을 열어두어라.
 </mission-management>
 
+<temporal-awareness>
+대화 기록에 타임스탬프([YYYY-MM-DD HH:MM])와 시간 경과 마커([N시간 경과] 등)가 포함된다.
+- 큰 시간 간격(1시간+) 후의 메시지는 새로운 맥락/주제일 가능성이 높다. 이전 대화를 이어가는 것이 아닐 수 있으니, 사용자의 현재 메시지에 집중하라.
+- 심야~새벽(00:00~06:00) 메시지는 피로/감정적 상태를 고려하라.
+- 사용자의 일상 패턴을 인식하라: 시간대별로 질문의 성격이 달라질 수 있다.
+- 며칠 이상 간격이 있으면 그 사이에 상황이 변했을 수 있다. 이전 맥락을 당연시하지 말고 필요시 확인하라.
+</temporal-awareness>
+
 <response-rules>
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
 - 텔레그램 메시지에 마크다운 서식(**, *, #, ```, - 등)을 쓰지 마라. 사람이 쓰는 것처럼 plain text로만 써라. 파일(.md) 작성 시에만 마크다운 허용.
@@ -736,8 +744,18 @@ def _ensure_summary_table():
     _summary_table_ready = True
 
 
+_RAW_MSG_LIMIT = 30  # recent raw messages to include
+
+
 def _load_context_with_summaries(user_id: int) -> list[dict]:
-    """Load chat context: chunk summaries + recent raw messages."""
+    """Load chat context: chunk summaries + recent raw messages.
+
+    Summaries are injected as a single context preamble (not fake conversation
+    pairs) so the model sees a clear timeline:
+      [context preamble with summaries]  →  [recent raw messages in order]
+    Raw messages always include the most recent turns regardless of summary
+    coverage, preventing context loss when summaries are stale or missing.
+    """
     _ensure_summary_table()
     min_id = _clear_after_id.get(user_id, 0)
 
@@ -770,35 +788,86 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
             )
             summaries = []
 
-    # Raw messages start after last chunk (or after clear marker)
-    raw_after = summaries[-1]["chunk_end_id"] if summaries else min_id
-
+    # Always load the most recent raw messages regardless of summary coverage.
+    # This ensures recent context is never lost even when summaries are stale.
     with _get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, role, content FROM ("
-                "  SELECT id, role, content FROM telegram_chat_history"
-                "  WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT 20"
+                "SELECT id, role, content, created_at FROM ("
+                "  SELECT id, role, content, created_at FROM telegram_chat_history"
+                "  WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT %s"
                 ") sub ORDER BY id ASC",
-                (user_id, raw_after),
+                (user_id, min_id, _RAW_MSG_LIMIT),
             )
             raw_rows = cur.fetchall()
 
-    # Build context: summaries as pairs + raw messages as text
-    context: list[dict] = []
-    for s in summaries:
-        context.append({
-            "role": "user",
-            "content": f"[대화 요약 #{s['chunk_start_id']}~#{s['chunk_end_id']}]\n{s['summary']}",
-        })
-        context.append({"role": "assistant", "content": "이전 대화 내용을 파악했습니다."})
+    # Determine which summaries are still useful (cover messages older than
+    # what raw_rows already includes).
+    raw_min_id = raw_rows[0]["id"] if raw_rows else None
+    useful_summaries = []
+    if raw_min_id is not None:
+        useful_summaries = [s for s in summaries if s["chunk_end_id"] < raw_min_id]
 
+    # Build context: summary preamble + raw messages with timestamps
+    context: list[dict] = []
+
+    # Inject summaries as a single context block (not fake conversation pairs)
+    if useful_summaries:
+        summary_lines = []
+        for s in useful_summaries:
+            summary_lines.append(
+                f"• (msgs #{s['chunk_start_id']}~#{s['chunk_end_id']}): {s['summary']}"
+            )
+        preamble = (
+            "[이전 대화 요약 — 아래는 최근 대화 이전에 있었던 대화의 요약이다]\n"
+            + "\n".join(summary_lines)
+        )
+        context.append({"role": "user", "content": preamble})
+        context.append({"role": "assistant", "content": "확인. 이전 대화 맥락을 파악했다. 이어서 진행하겠다."})
+
+    # Append raw messages with exact timestamps.
+    # Large time gaps are annotated inline on the user message prefix,
+    # signalling a likely context switch without injecting fake messages.
+    _GAP_THRESHOLD_MINUTES = 60
+    prev_ts = None
     for r in raw_rows:
         role = r["role"] if r["role"] in ("user", "assistant") else "user"
         text = _normalize_history_content(r["content"])
+        ts = r.get("created_at")
+
+        if ts and hasattr(ts, "strftime") and role == "user":
+            time_str = ts.strftime("%Y-%m-%d %H:%M")
+            # Compute gap from last message (any role) and annotate inline
+            gap_note = ""
+            if prev_ts and hasattr(prev_ts, "strftime"):
+                gap = ts - prev_ts
+                gap_minutes = gap.total_seconds() / 60
+                if gap_minutes >= _GAP_THRESHOLD_MINUTES:
+                    gap_note = f" ({_format_time_gap(gap)} 경과)"
+            text = f"[{time_str}{gap_note}] {text}" if text else f"[{time_str}{gap_note}]"
+
+        if ts and hasattr(ts, "strftime"):
+            prev_ts = ts
+
         context.append({"role": role, "content": text or "(empty)"})
 
     return context
+
+
+def _format_time_gap(delta) -> str:
+    """Human-readable time gap string."""
+    total_seconds = int(delta.total_seconds())
+    if total_seconds < 3600:
+        return f"{total_seconds // 60}분"
+    hours = total_seconds // 3600
+    if hours < 24:
+        mins = (total_seconds % 3600) // 60
+        return f"{hours}시간 {mins}분" if mins else f"{hours}시간"
+    days = hours // 24
+    remaining_hours = hours % 24
+    if days == 1:
+        return f"1일 {remaining_hours}시간" if remaining_hours else "1일"
+    return f"{days}일 {remaining_hours}시간" if remaining_hours else f"{days}일"
 
 
 async def _maybe_summarize_chunk(user_id: int):
@@ -846,8 +915,10 @@ async def _maybe_summarize_chunk(user_id: int):
         )
         summary_prompt = (
             "아래 대화를 핵심 정보만 남기고 간결하게 요약해라. "
-            "사용자가 어떤 주제를 물었고, 어떤 결론/답변이 나왔는지 위주로. "
-            "고유명사, 수치, 날짜는 보존. 300자 이내.\n\n"
+            "1) 사용자가 어떤 주제/요청을 했는지 "
+            "2) 어떤 결론/답변/결과가 나왔는지 "
+            "3) 아직 진행 중이거나 미해결인 사항이 있으면 명시 "
+            "고유명사, 수치, 날짜, 구체적 결정사항은 반드시 보존. 500자 이내.\n\n"
             + conversation_text
         )
 
@@ -855,7 +926,7 @@ async def _maybe_summarize_chunk(user_id: int):
         if not summary:
             resp = await _claude.messages.create(
                 model=await _get_model_light(),
-                max_tokens=512,
+                max_tokens=768,
                 messages=[{"role": "user", "content": summary_prompt}],
             )
             summary = _extract_text(resp)

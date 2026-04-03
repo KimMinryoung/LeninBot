@@ -787,39 +787,9 @@ async def process_task(
         except Exception as e:
             logger.debug("Agent execution history load failed: %s", e)
 
-    # (B) Recent chat: brief high-level context (what user discussed with orchestrator)
-    chat_ctx = ""
-    if user_id and user_id != 0:
-        try:
-            recent_rows = _query(
-                "SELECT role, content FROM ("
-                "  SELECT role, content, id FROM telegram_chat_history"
-                "  WHERE user_id = %s ORDER BY id DESC LIMIT 10"
-                ") sub ORDER BY id ASC",
-                (user_id,),
-            )
-            if recent_rows:
-                chat_lines = []
-                for r in recent_rows:
-                    text = str(r["content"] or "")
-                    if text.startswith("[SYSTEM]"):
-                        # Convert system markers to neutral info (not instructions)
-                        # e.g. "[SYSTEM] 사용자가 /restart ..." → "[시스템] 서비스 재시작됨 (...)"
-                        ts_match = re.search(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)\)", text)
-                        ts = ts_match.group(1) if ts_match else ""
-                        if "재시작 완료" in text or "재시작 시작" in text:
-                            chat_lines.append(f"  [시스템] 서비스 재시작됨 ({ts}). 이미 반영 완료.")
-                        elif "/deploy" in text:
-                            chat_lines.append(f"  [시스템] 배포 실행됨 ({ts}). 이미 반영 완료.")
-                        elif "/restart" in text:
-                            chat_lines.append(f"  [시스템] 서비스 재시작됨 ({ts}). 이미 반영 완료.")
-                        continue
-                    role_label = "사용자" if r["role"] == "user" else "레닌"
-                    chat_lines.append(f"  [{role_label}] {text[:300]}")
-                if chat_lines:
-                    chat_ctx = "<recent-chat>\n" + "\n".join(chat_lines) + "\n</recent-chat>"
-        except Exception as e:
-            logger.debug("Chat context injection for task failed: %s", e)
+    # (B) Recent chat: agents rely on the orchestrator's delegation message as
+    # primary context. If the delegation is unclear, agents can call the
+    # read_user_chat tool on demand instead of getting a stale passive dump.
 
     # (C) Current state block (what's done, in-progress, pending)
     state_ctx = ""
@@ -839,8 +809,6 @@ async def process_task(
         context_parts.append(mission_ctx)
     if agent_history_ctx:
         context_parts.append(agent_history_ctx)
-    if chat_ctx:
-        context_parts.append(chat_ctx)
 
     if context_parts:
         content = "\n\n".join(context_parts) + f"\n\n<task>\n{content}\n</task>"
