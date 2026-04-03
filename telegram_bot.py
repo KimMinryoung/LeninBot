@@ -587,11 +587,8 @@ Context passing — agents automatically receive recent conversation and their o
 </mission-management>
 
 <temporal-awareness>
-Conversation history includes timestamps ([YYYY-MM-DD HH:MM]) and time gap markers ([Nh elapsed] etc).
-- Messages after a large time gap (1h+) likely indicate a new context/topic. They may not be continuations of the previous conversation — focus on the user's current message.
-- Late-night/early-morning messages (00:00~06:00) — consider fatigue/emotional state.
-- Recognize the user's daily patterns: the nature of questions may differ by time of day.
-- If there is a gap of multiple days, circumstances may have changed. Do not take prior context for granted — verify if needed.
+Conversation history includes timestamps ([YYYY-MM-DD HH:MM]) on user messages.
+Infer elapsed time from the timestamps. Large gaps may indicate context switches or changed circumstances.
 </temporal-awareness>
 
 <response-rules>
@@ -866,44 +863,32 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
     # Build a queue of system events sorted by timestamp for interleaving
     event_idx = 0
 
-    # Append raw messages with exact timestamps.
-    # Large time gaps are annotated inline on the user message prefix,
-    # signalling a likely context switch without injecting fake messages.
-    _GAP_THRESHOLD_MINUTES = 60
-    prev_ts = None
+    # Append raw messages with exact timestamps on user messages.
+    # System events are interleaved chronologically.
     for r in raw_rows:
         role = r["role"] if r["role"] in ("user", "assistant") else "user"
         text = _normalize_history_content(r["content"])
         ts = r.get("created_at")
 
-        # Interleave system events that occurred before this message
         if ts and hasattr(ts, "strftime") and role == "user":
+            # Interleave system events that occurred before this message
             event_notes = []
             while event_idx < len(system_events):
                 evt = system_events[event_idx]
                 evt_ts = evt.get("created_at")
                 if evt_ts and evt_ts <= ts:
-                    evt_time = evt_ts.strftime("%H:%M") if hasattr(evt_ts, "strftime") else "?"
+                    evt_kst = evt_ts.astimezone(KST) if evt_ts.tzinfo else evt_ts
+                    evt_time = evt_kst.strftime("%H:%M")
                     event_notes.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
                     event_idx += 1
                 else:
                     break
             if event_notes:
-                # Inject as a single assistant message summarizing system events
                 context.append({"role": "assistant", "content": "\n".join(event_notes)})
 
-            time_str = ts.strftime("%Y-%m-%d %H:%M")
-            # Compute gap from last message (any role) and annotate inline
-            gap_note = ""
-            if prev_ts and hasattr(prev_ts, "strftime"):
-                gap = ts - prev_ts
-                gap_minutes = gap.total_seconds() / 60
-                if gap_minutes >= _GAP_THRESHOLD_MINUTES:
-                    gap_note = f" ({_format_time_gap(gap)} elapsed)"
-            text = f"[{time_str}{gap_note}] {text}" if text else f"[{time_str}{gap_note}]"
-
-        if ts and hasattr(ts, "strftime"):
-            prev_ts = ts
+            ts_kst = ts.astimezone(KST) if ts.tzinfo else ts
+            time_str = ts_kst.strftime("%Y-%m-%d %H:%M")
+            text = f"[{time_str}] {text}" if text else f"[{time_str}]"
 
         context.append({"role": role, "content": text or "(empty)"})
 
@@ -912,29 +897,17 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
     while event_idx < len(system_events):
         evt = system_events[event_idx]
         evt_ts = evt.get("created_at")
-        evt_time = evt_ts.strftime("%H:%M") if evt_ts and hasattr(evt_ts, "strftime") else "?"
+        if evt_ts and hasattr(evt_ts, "strftime"):
+            evt_kst = evt_ts.astimezone(KST) if evt_ts.tzinfo else evt_ts
+            evt_time = evt_kst.strftime("%H:%M")
+        else:
+            evt_time = "?"
         trailing_events.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
         event_idx += 1
     if trailing_events:
         context.append({"role": "assistant", "content": "\n".join(trailing_events)})
 
     return context
-
-
-def _format_time_gap(delta) -> str:
-    """Human-readable time gap string."""
-    total_seconds = int(delta.total_seconds())
-    if total_seconds < 3600:
-        return f"{total_seconds // 60}min"
-    hours = total_seconds // 3600
-    if hours < 24:
-        mins = (total_seconds % 3600) // 60
-        return f"{hours}h {mins}min" if mins else f"{hours}h"
-    days = hours // 24
-    remaining_hours = hours % 24
-    if days == 1:
-        return f"1d {remaining_hours}h" if remaining_hours else "1d"
-    return f"{days}d {remaining_hours}h" if remaining_hours else f"{days}d"
 
 
 async def _maybe_summarize_chunk(user_id: int):

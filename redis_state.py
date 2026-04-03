@@ -320,9 +320,10 @@ def format_board_for_context(mission_id: int) -> str:
         return ""
     lines = []
     for m in messages:
-        from datetime import datetime
+        from datetime import datetime, timezone, timedelta
+        _KST = timezone(timedelta(hours=9))
         ts = m.get("ts", 0)
-        time_str = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "?"
+        time_str = datetime.fromtimestamp(ts, tz=_KST).strftime("%H:%M") if ts else "?"
         lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
     return (
         "<agent-board>\n"

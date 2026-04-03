@@ -851,7 +851,7 @@ def build_run_agent_handler(chat_with_tools_fn):
 
             from shared import AGENT_CONTEXT
             system_prompt = spec.render_prompt(
-                current_datetime=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                current_datetime=datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST"),
                 system_alerts="",
                 finance_data="",
             )
@@ -1043,7 +1043,11 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             for r in rows:
                 role_label = "user" if r["role"] == "user" else "lenin"
                 ts = r.get("created_at")
-                time_str = ts.strftime("%Y-%m-%d %H:%M") if ts and hasattr(ts, "strftime") else "?"
+                if ts and hasattr(ts, "strftime"):
+                    ts_kst = ts.astimezone(_KST) if ts.tzinfo else ts
+                    time_str = ts_kst.strftime("%Y-%m-%d %H:%M")
+                else:
+                    time_str = "?"
                 text = str(r["content"] or "")
                 # Skip system markers
                 if text.startswith("[SYSTEM]"):
@@ -1079,14 +1083,14 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             return "No mission linked to this task."
         try:
             from redis_state import read_board
-            from datetime import datetime
+            from datetime import datetime, timezone
             messages = read_board(mission_id)
             if not messages:
                 return "No messages on the mission board."
             lines = []
             for m in messages:
                 ts = m.get("ts", 0)
-                time_str = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "?"
+                time_str = datetime.fromtimestamp(ts, tz=_KST).strftime("%H:%M") if ts else "?"
                 agent = m.get("agent", "?")
                 tid = m.get("task_id", "?")
                 lines.append(f"[{time_str}] [{agent} #{tid}] {m.get('message', '')}")
