@@ -438,6 +438,7 @@ async def chat_with_tools(
     budget_usd: float = 0.0,
     budget_tracker: dict | None = None,
     on_progress=None,
+    task_id: int | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -545,6 +546,13 @@ async def chat_with_tools(
             if on_progress:
                 try:
                     await on_progress("budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
+                except Exception:
+                    pass
+            # Update live task state in Redis
+            if task_id is not None:
+                try:
+                    from redis_state import set_task_state
+                    set_task_state(task_id, round_num, total_cost, status="running")
                 except Exception:
                     pass
 
@@ -686,6 +694,13 @@ async def chat_with_tools(
 
             tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
             tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
+            # Persist to Redis incrementally (survives process death)
+            if task_id is not None:
+                try:
+                    from redis_state import save_task_progress
+                    save_task_progress(task_id, round_num, func_name, input_summary, result, is_error)
+                except Exception:
+                    pass
 
         # ── Safety net: ensure EVERY tool_call has a result ──
         for tc_item in tc_list:

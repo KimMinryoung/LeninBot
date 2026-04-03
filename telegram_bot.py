@@ -1048,6 +1048,7 @@ async def _chat_with_tools(
     extra_handlers: dict | None = None,
     on_progress=None,
     budget_tracker: dict | None = None,
+    task_id: int | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config."""
     # Resolve runtime defaults strictly by None (not truthiness).
@@ -1118,6 +1119,7 @@ async def _chat_with_tools(
             budget_usd=resolved_budget,
             on_progress=on_progress,
             budget_tracker=budget_tracker,
+            task_id=task_id,
         )
 
     return await chat_with_tools(
@@ -1133,6 +1135,7 @@ async def _chat_with_tools(
         budget_usd=resolved_budget,
         on_progress=on_progress,
         budget_tracker=budget_tracker,
+        task_id=task_id,
     )
 
 
@@ -1470,6 +1473,7 @@ async def bot_main():
                     messages, max_rounds=None, system_prompt=None, model=None,
                     max_tokens=None, budget_usd=None, extra_tools=None,
                     extra_handlers=None, on_progress=None, budget_tracker=None,
+                    task_id=None,
                 ):
                     # extra_tools already contains the agent's filtered tools (passed from process_task)
                     merged_tools = list(extra_tools or [])
@@ -1487,6 +1491,7 @@ async def bot_main():
                         budget_usd=budget_usd or 0.0,
                         budget_tracker=budget_tracker,
                         on_progress=on_progress,
+                        task_id=task_id,
                     )
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
@@ -1556,7 +1561,13 @@ async def bot_main():
         logger.info("SIGTERM received — stopping polling gracefully")
         # Schedule shutdown notification before stopping
         async def _shutdown_notify_and_checkpoint():
+            # Merge in-memory and Redis active task sets for comprehensive checkpoint
             active_ids = set(_runtime_state.get("active_task_ids", set()))
+            try:
+                from redis_state import get_active_task_ids
+                active_ids |= get_active_task_ids()
+            except Exception:
+                pass
             for task_id in active_ids:
                 try:
                     ok = await checkpoint_task_on_shutdown(int(task_id))

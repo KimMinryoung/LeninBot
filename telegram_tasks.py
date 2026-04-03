@@ -740,7 +740,7 @@ async def process_task(
         try:
             prev_tasks = _query(
                 "SELECT id, content, result, tool_log, completed_at FROM telegram_tasks "
-                "WHERE user_id = %s AND agent_type = %s AND status = 'done' "
+                "WHERE user_id = %s AND agent_type = %s AND status IN ('done', 'handed_off') "
                 "AND id != %s ORDER BY completed_at DESC LIMIT 3",
                 (user_id, agent_type, task_id),
             )
@@ -833,6 +833,7 @@ async def process_task(
                 extra_handlers=extra_handlers,
                 on_progress=on_progress,
                 budget_tracker=bt,
+                task_id=task_id,
             )
 
             # Save tool execution log for agent context isolation
@@ -847,6 +848,13 @@ async def process_task(
                     )
                 except Exception as e:
                     logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
+
+            # Clean up Redis live state (PG now has the record)
+            try:
+                from redis_state import unregister_active_task
+                unregister_active_task(task_id)
+            except Exception:
+                pass
 
             # Record task completion to mission (generous summary for context chain)
             if mission_id:
@@ -995,6 +1003,12 @@ async def process_task(
                         await cb_result
                 except Exception:
                     logger.debug("on_complete callback failed for task %d", task_id)
+            # Clean up Redis live state on failure
+            try:
+                from redis_state import unregister_active_task
+                unregister_active_task(task_id)
+            except Exception:
+                pass
             return {
                 "status": "failed",
                 "task_id": task_id,
@@ -1099,7 +1113,20 @@ async def recover_processing_tasks_on_startup(
 
             task_mission_id = row.get("mission_id")
             task_agent_type = row.get("agent_type")
+
+            # Inject parent's execution progress from Redis so child knows what was done
+            parent_progress_block = ""
+            try:
+                from redis_state import format_progress_for_context
+                parent_progress_block = format_progress_for_context(task_id)
+                if parent_progress_block:
+                    logger.info("Injected Redis progress for task #%d into child", task_id)
+            except Exception as e:
+                logger.debug("Redis progress injection failed for task #%d: %s", task_id, e)
+
             child_content = content
+            if parent_progress_block:
+                child_content = f"{parent_progress_block}\n\n{child_content}"
             if _RESTART_COMPLETED_MARKER not in child_content:
                 child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
 
@@ -1135,6 +1162,14 @@ async def recover_processing_tasks_on_startup(
                 ),
             )
             child_id = child_rows[0]["id"] if child_rows else None
+
+            # Clear parent's Redis progress only after child is safely in DB
+            if child_id and parent_progress_block:
+                try:
+                    from redis_state import clear_task_progress
+                    clear_task_progress(task_id)
+                except Exception:
+                    pass
 
             # Record handoff to mission timeline
             if task_mission_id:
@@ -1248,7 +1283,14 @@ async def system_monitor(
     if not kg_is_up:
         add_alert_fn("KG (Neo4j) 연결 불가 — 그래프 검색/쓰기 사용 불가")
 
-    # 2. Periodic KG health check (every 2 minutes)
+    # 2. Initial Redis check
+    from redis_state import redis_available
+    redis_is_up = await asyncio.to_thread(redis_available)
+    if not redis_is_up:
+        add_alert_fn("Redis 연결 불가 — 태스크 진행 상태 실시간 추적 불가")
+    redis_was_up = redis_is_up
+
+    # 3. Periodic health check (every 2 minutes)
     kg_was_up = kg_is_up
     while True:
         await asyncio.sleep(120)
@@ -1266,6 +1308,18 @@ async def system_monitor(
                 await broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j 연결이 복구되었습니다.", allowed_user_ids)
 
             kg_was_up = kg_is_up
+
+            # Redis health check
+            redis_is_up = await asyncio.to_thread(redis_available)
+            if redis_was_up and not redis_is_up:
+                clear_alert_fn("Redis 재연결")
+                add_alert_fn("Redis 연결 끊김 — 태스크 진행 상태 실시간 추적 불가")
+                await broadcast(bot, "🔴 Redis 연결 끊김 — 재시작 시 태스크 진행 상태가 유실될 수 있습니다.", allowed_user_ids)
+            elif not redis_was_up and redis_is_up:
+                clear_alert_fn("Redis")
+                add_alert_fn("Redis 재연결 성공")
+                await broadcast(bot, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.", allowed_user_ids)
+            redis_was_up = redis_is_up
         except Exception as e:
             logger.error("System monitor error: %s", e)
 
@@ -1390,6 +1444,11 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 active_tasks.pop(task_id, None)
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).discard(task_id)
+                try:
+                    from redis_state import unregister_active_task
+                    unregister_active_task(task_id)
+                except Exception:
+                    pass
 
     while True:
         try:
@@ -1426,6 +1485,11 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 task_id = task["id"]
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).add(task_id)
+                try:
+                    from redis_state import register_active_task
+                    register_active_task(task_id, task.get("agent_type", ""), task.get("user_id", 0))
+                except Exception:
+                    pass
                 t = asyncio.create_task(_run_one(task), name=f"task-{task_id}")
                 active_tasks[task_id] = t
             else:

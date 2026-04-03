@@ -30,3 +30,6 @@ yfinance
 aiogram>=3.0,<4.0
 anthropic
 croniter
+
+# State management
+redis>=5.0
