@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot Telegram Bot (aiogram)
-After=network.target
+After=network.target leninbot-neo4j.service leninbot-embedding.service
+Wants=leninbot-neo4j.service leninbot-embedding.service
 
 [Service]
 User=grass
