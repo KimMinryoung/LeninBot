@@ -1,4 +1,4 @@
-# Project State — 2026-04-02
+# Project State — 2026-04-03
 
 ## Identity
 
@@ -30,9 +30,16 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 │                    Hetzner VPS 서비스들     │                              │
 │                                          │                              │
 │  ┌───────────────┐  ┌───────────────┐    │    ┌────────────────────┐    │
-│  │ Neo4j Docker  │  │ embedding     │    │    │ MOON PC            │    │
-│  │ (:7687)       │  │ _server.py    │    │    │ (Tailscale 터널)    │    │
-│  │ 지식 그래프     │  │ (:8100)       │    │    │ qwen3.5-9b Q8_0   │    │
+│  │ Neo4j Docker  │  │ Redis Docker  │    │    │ MOON PC            │    │
+│  │ (:7687)       │  │ (:6379)       │    │    │ (Tailscale tunnel) │    │
+│  │ Knowledge     │  │ Live task     │    │    │ qwen3.5-9b Q8_0   │    │
+│  │ Graph         │  │ state/board   │    │    │                    │    │
+│  └───────┬───────┘  └───────┬───────┘    │    └─────────┬──────────┘    │
+│          │ Bolt             │            │              │ HTTP          │
+│          │                  │            │              │               │
+│  ┌───────┴──────────────────┴────────────┴──────────────┴─────────┐    │
+│  │                                                                │    │
+│  │  embedding_server.py (:8100)   BGE-M3 model                   │    │
 │  │               │  │ BGE-M3 모델    │    │    │ (:8080 via tunnel) │    │
 │  └───────┬───────┘  └───────┬───────┘    │    └─────────┬──────────┘    │
 │          │ Bolt             │ HTTP       │              │ HTTP          │
@@ -65,7 +72,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 
 | 서비스 | 프로세스 | 포트 | 역할 |
 |---|---|---|---|
-| `leninbot-neo4j` | Docker (neo4j:5-community) | :7687, :7474 | 지식 그래프 저장소 (Graphiti) |
+| `leninbot-neo4j` | Docker (neo4j:5-community + redis:7-alpine) | :7687, :7474, :6379 | 지식 그래프 + Redis 실시간 상태 |
 | `leninbot-embedding` | embedding_server.py | :8100 (내부) | BGE-M3 임베딩 서버 (831MB) |
 | `leninbot-telegram` | telegram_bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
 | `leninbot-browser` | browser_worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
@@ -79,40 +86,40 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | `leninbot-diary` | 매 3시간 | 일기 작성 + 뉴스 KG 수집 (병렬) |
 | `leninbot-experience` | 매일 15:30 UTC | 경험 메모리 정리/저장 |
 
-### 서비스 의존 관계
+### Service Dependencies
 
-| 서비스 | Supabase | Neo4j | embedding_server | chatbot.py |
+| Service | Supabase | Neo4j | Redis | embedding_server |
 |---|---|---|---|---|
-| **leninbot-embedding** | - | - | 자기 자신 | - |
-| **leninbot-neo4j** | - | 자기 자신 | - | - |
-| **leninbot-telegram** | O | O | O | - |
-| **leninbot-api** | O | O | O | O (LangGraph) |
-| **leninbot-diary** | O | O | O | - |
-| **leninbot-experience** | O | - | O | - |
+| **leninbot-neo4j** | - | self | self | - |
+| **leninbot-embedding** | - | - | - | self |
+| **leninbot-telegram** | O | O | O | O |
+| **leninbot-api** | O | O | - | O |
+| **leninbot-diary** | O | O | - | O |
+| **leninbot-experience** | O | - | - | O |
 
-### 기동/배포 순서
+### Boot Order (systemd)
 
 ```
-항상 ON (재시작 안 함):
-  1. leninbot-neo4j (Docker)
-  2. leninbot-embedding (Before=telegram,api)
-
-deploy.sh가 재시작하는 것:
-  3. leninbot-api
-  4. leninbot-telegram (마지막 — 자기 자신을 죽이므로)
+docker.service
+  → leninbot-neo4j (docker compose up --wait: Neo4j healthcheck + Redis healthcheck)
+  → leninbot-embedding (Before=telegram,api)
+    → leninbot-telegram (Wants=neo4j,embedding)
+    → leninbot-api (Requires=neo4j)
+      → leninbot-browser (After=telegram)
 ```
 
-`deploy.sh`는 `git pull` + `leninbot-api` → `leninbot-telegram` 순으로만 재시작. `--frontend` 옵션으로 프론트엔드만 별도 배포 가능 (git pull → Docker rebuild → 컨테이너 교체). Neo4j와 embedding_server는 코드 변경과 무관하므로 건드리지 않음.
+`deploy.sh`: `git pull` → `leninbot-api` → `leninbot-browser` → `leninbot-telegram` (last — kills itself). `--frontend` for frontend-only deploy. Neo4j/Redis/embedding are not restarted by deploy (code-independent).
 
-### 가용성 보장
+### Availability
 
-| 시나리오 | 대응 |
+| Scenario | Response |
 |---|---|
-| embedding_server 크래시 | systemd `Restart=always` (5초) + 클라이언트 15초 재시도 |
-| embedding_server 장기 다운 | 클라이언트 로컬 BGE-M3 fallback 자동 로딩 |
-| Neo4j 다운 | KG 기능만 비활성화, `_KG_RETRY_INTERVAL=120초` 후 재시도 |
-| telegram/api 재시작 | 임베딩/KG 재로딩 없음, 서비스 5초 내 복구 |
-| 서버 재부팅 | 모든 서비스 자동 시작 (enabled) |
+| embedding_server crash | systemd `Restart=always` (5s) + client 15s retry |
+| embedding_server prolonged down | Client auto-loads local BGE-M3 fallback |
+| Neo4j down | KG features disabled, `_KG_RETRY_INTERVAL=120s` retry. system_monitor broadcasts alert |
+| Redis down | Task progress tracking disabled (fail-safe, never crashes). system_monitor broadcasts alert |
+| telegram/api restart | No embedding/KG reload, service recovers in 5s |
+| Server reboot | All services auto-start (enabled). `--wait` ensures Neo4j+Redis healthy before telegram/api |
 
 ---
 
@@ -205,14 +212,17 @@ task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조
 - orchestrator가 `delegate`로 후속 작업을 직접 위임
 
 ### Service Restart Recovery
-- `restart_service` 호출 → `persist_task_restart_state` → 프로세스 사망
-- `recover_processing_tasks_on_startup` → child task 자동 생성 (`_RESTART_COMPLETED_MARKER` 포함)
-- child는 재시작 이미 완료된 상태로 인식 → 재시작 반복 없음
+- `restart_service` called → `persist_task_restart_state` → process dies
+- Tool progress saved incrementally to Redis during execution (survives process death)
+- `recover_processing_tasks_on_startup` → child task auto-created with `_RESTART_COMPLETED_MARKER`
+- Parent's Redis progress saved to `task_result:{id}` (7-day TTL) → child sees it via `<task-chain>`
+- Child recognizes restart already completed → no repeat restart
+- File-to-service mapping in restart_service tool + programmer prompt prevents wrong service restart
 
 ### Tool Isolation
-- Orchestrator: 모든 도구 접근 가능 (단, 프로그래밍 도구 차단)
-- Specialist 에이전트: `AgentSpec.filter_tools()`로 역할별 도구만 노출
-- `delegate` 도구는 orchestrator만 접근 가능 — 에이전트 간 재위임 불가
+- Orchestrator: all tools accessible (except programming tools — blocked)
+- Specialist agents: `AgentSpec.filter_tools()` restricts to role-specific tools
+- `delegate` tool only accessible to orchestrator — no inter-agent re-delegation
 
 ---
 
@@ -289,7 +299,8 @@ leninbot/
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
 ├── diary_writer.py            # 자율 일기 작성 + 뉴스 KG 병렬 수집
 ├── experience_writer.py       # 경험 메모리 일일 정리
-├── db.py                      # PostgreSQL 커넥션 풀 (psycopg2)
+├── redis_state.py             # Redis live state: task progress, chain memory, board, active registry
+├── db.py                      # PostgreSQL connection pool (psycopg2)
 ├── patch_file.py              # 토큰 효율적 파일 패치 (replace_block)
 ├── email_bridge.py            # 이메일 브리지 (IMAP 수신, Resend 발신, 분류, DB 기록)
 ├── self_modification_core.py  # Git backup + syntax check + rollback
@@ -323,6 +334,54 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-03 — Redis State Backbone, Context Pipeline Overhaul, English Standardization
+
+#### Redis as Live State Layer (`redis_state.py`)
+- Added `redis:7-alpine` to docker-compose with AOF persistence and healthcheck
+- **Task progress**: incremental tool call logging in both `claude_loop.py` and `openai_tool_loop.py` — survives process death
+- **Task chain memory**: completed task summaries with 30-day TTL, parent chain traversal via `get_task_chain()`. Handed-off (interrupted) tasks also save their progress
+- **Mission bulletin board**: `send_message` / `read_messages` tools for inter-agent communication during parallel execution
+- **Active task registry**: replaces in-memory set, survives restarts
+- **Mission-scoped cleanup**: `cleanup_mission()` called on mission close
+- All operations fail-safe (Redis unavailability never crashes the bot)
+
+#### Chat Context Pipeline Overhaul
+- **Summary injection**: replaced fake user/assistant pairs with single context preamble block
+- **Raw messages**: always load last 30 regardless of summary coverage; summary↔raw gap fixed (`<=` instead of `<`)
+- **Timestamps**: all agent-visible timestamps standardized to KST (UTC in storage)
+- **System events**: moved `[SYSTEM]` messages from `telegram_chat_history` to new `telegram_system_events` table. Interleaved chronologically into context at correct positions. Frees up raw message window for real conversation
+- **Agent context assembly simplified**: merged `agent_history_ctx` and `chain_ctx` into single `history_ctx` — task chain for child tasks, latest same-type for standalone, never both
+- **Removed**: time gap computation/annotation logic, `_format_time_gap()`. Agents infer gaps from timestamps
+
+#### Agent Context Isolation
+- Removed passive `<recent-chat>` dump from agent context. Agents call `read_user_chat` tool on demand
+- Added `read_user_chat` tool to all agents for on-demand conversation access
+- Task chain (`<task-chain>`) and agent board (`<agent-board>`) injected into agent context
+
+#### English Standardization
+- All internal system prompts, context blocks, tool descriptions, and agent specs translated from Korean to English (12 files)
+- User-facing messages (Telegram replies, alerts, broadcasts) remain Korean
+- Improves LLM reasoning quality for agent instruction-following
+
+#### Browser Worker Fixes
+- Fixed `logger` NameError before initialization
+- Fixed socket resource leaks in `check_browser_worker_alive` and `_delegate_to_browser_worker` (proper `finally` cleanup with `wait_closed()`)
+- Race-safe socket cleanup (`os.unlink` instead of `os.remove`)
+- Task field validation before execution
+
+#### Service Startup Ordering
+- `leninbot-neo4j` systemd unit now runs `docker compose up --wait` (blocks until healthchecks pass)
+- Docker healthchecks: Neo4j (wget HTTP), Redis (redis-cli ping)
+- `leninbot-telegram` now `Wants=leninbot-neo4j,leninbot-embedding` — waits for DB and embeddings before starting
+- Prevents KG disconnection errors on server reboot
+
+#### Programmer Agent Restart Intelligence
+- File-to-service mapping added to `restart_service` tool description and programmer agent prompt
+- Prevents restarting wrong service after code changes
+
+#### Documentation
+- New `dev_docs/multi_agent_architecture.md` — comprehensive architecture doc covering agents, task lifecycle, memory systems, context isolation, restart recovery, browser worker, verification
 
 ### 2026-04-02 — Frontend Docker 마이그레이션, 백엔드 은닉, 성능 최적화
 
