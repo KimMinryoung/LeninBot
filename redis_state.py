@@ -110,23 +110,55 @@ def clear_task_progress(task_id: int):
         logger.debug("clear_task_progress failed (task %d): %s", task_id, e)
 
 
+_MAX_PROGRESS_ENTRIES = 30  # cap injected entries to prevent context bloat
+_MAX_PROGRESS_CHARS = 8000  # hard limit on total formatted output
+
+
 def format_progress_for_context(task_id: int) -> str:
-    """Format Redis progress entries as a readable context block for child tasks."""
+    """Format Redis progress entries as a readable context block for child tasks.
+
+    Applies truncation:
+    - Caps at _MAX_PROGRESS_ENTRIES (keeps newest)
+    - Hard limit on total output chars
+    - Condenses read_file results to action-only
+    """
     entries = get_task_progress(task_id)
     if not entries:
         return ""
+
+    filtered = entries
+    if len(filtered) > _MAX_PROGRESS_ENTRIES:
+        skipped = len(filtered) - _MAX_PROGRESS_ENTRIES
+        filtered = filtered[-_MAX_PROGRESS_ENTRIES:]
+    else:
+        skipped = 0
+
     lines = []
-    for e in entries:
+    for e in filtered:
+        tool = e.get("tool", "?")
         status = "ERROR" if e.get("error") else "OK"
+        input_str = e.get("input", "")
+        result_str = e.get("result", "")
+
+        # Condense bulky read results — the child will re-read if needed
+        if tool in ("read_file", "list_directory") and not e.get("error"):
+            result_str = f"({len(result_str)} chars)"
+
         lines.append(
-            f"  [{e.get('round', '?')}] {e.get('tool', '?')}({e.get('input', '')}) "
-            f"→ [{status}] {e.get('result', '')}"
+            f"  [{e.get('round', '?')}] {tool}({input_str}) → [{status}] {result_str}"
         )
+
+    body = "\n".join(lines)
+    if len(body) > _MAX_PROGRESS_CHARS:
+        body = body[-_MAX_PROGRESS_CHARS:]
+        body = "  ...(truncated)\n" + body[body.index("\n") + 1:]
+
+    skipped_note = f" (earliest {skipped} entries omitted)" if skipped else ""
     return (
-        f"<parent-execution-log task_id=\"{task_id}\" entries=\"{len(entries)}\">\n"
+        f"<parent-execution-log task_id=\"{task_id}\" entries=\"{len(filtered)}\"{skipped_note}>\n"
         "아래는 서비스 재시작 전에 이 태스크가 이미 수행한 작업 목록이다. "
         "이미 완료된 작업을 반복하지 말고, 중단된 지점부터 이어서 진행하라.\n\n"
-        + "\n".join(lines)
+        + body
         + "\n</parent-execution-log>"
     )
 
