@@ -651,9 +651,9 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
 RESTART_SERVICE_TOOL = {
     "name": "restart_service",
     "description": (
-        "Safely restart a leninbot service (telegram or api). "
+        "Safely restart a leninbot service (telegram, api, browser, or all). "
         "Pre-restart validation: 1) syntax check all .py files with uncommitted changes, "
-        "2) import-level check on key entry points (telegram_bot.py, api.py). "
+        "2) import-level check on key entry points (telegram_bot.py, api.py, browser_worker.py). "
         "If validation fails, restart is blocked and errors are returned. "
         "Use this instead of execute_python + subprocess for restarts."
     ),
@@ -662,7 +662,7 @@ RESTART_SERVICE_TOOL = {
         "properties": {
             "service": {
                 "type": "string",
-                "enum": ["telegram", "api", "all"],
+                "enum": ["telegram", "api", "browser", "all"],
                 "description": "Which service to restart. Default: telegram.",
             },
         },
@@ -687,8 +687,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
         current_task_id = None
         persist_task_restart_state = None
 
-    if service not in ("telegram", "api", "all"):
-        return f"❌ Unknown service: {service}. Use: telegram, api, all"
+    if service not in ("telegram", "api", "browser", "all"):
+        return f"❌ Unknown service: {service}. Use: telegram, api, browser, all"
 
     # 1. Find .py files with uncommitted changes (staged + unstaged)
     try:
@@ -730,8 +730,9 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     entry_points = {
         "telegram": "telegram_bot",
         "api": "api",
+        "browser": "browser_worker",
     }
-    targets = ["telegram", "api"] if service == "all" else [service]
+    targets = ["telegram", "api", "browser"] if service == "all" else [service]
 
     for target in targets:
         module = entry_points[target]
@@ -787,7 +788,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     svc_map = {
         "telegram": ["leninbot-telegram"],
         "api": ["leninbot-api"],
-        "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
+        "browser": ["leninbot-browser"],
+        "all": ["leninbot-api", "leninbot-browser", "leninbot-telegram"],  # API first, browser second, telegram last
     }
     results = []
     restart_failed = False
@@ -835,6 +837,31 @@ async def _exec_restart_service(service: str = "telegram") -> str:
 
 
 # ── Handler Registry ─────────────────────────────────────────────────
+
+def dedupe_tool_registry(tools: list[dict]) -> list[dict]:
+    """Deduplicate tool registry entries by name while preserving first occurrence.
+
+    Root cause for browser task #330: source code had been patched, but a worker can
+    still start or keep running with an inconsistent import/lifecycle state. Keeping
+    the registry itself unique makes every downstream caller safer, regardless of
+    whether agent-level dedupe runs.
+    """
+    deduped: list[dict] = []
+    seen_names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            deduped.append(tool)
+            continue
+        name = str(tool.get("name", "") or "").strip()
+        if name and name in seen_names:
+            logger.warning("Dropping duplicate tool from base registry: %s", name)
+            continue
+        if name:
+            seen_names.add(name)
+        deduped.append(tool)
+    return deduped
+
+
 TOOL_HANDLERS = {
     "vector_search": _exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
@@ -1173,6 +1200,7 @@ from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 TOOLS.extend(SELF_TOOLS)
 TOOLS.append(MISSION_TOOL)
 TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
+TOOLS = dedupe_tool_registry(TOOLS)
 
 # ── Finance data tool (real-time market prices) ──────────────────────
 from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
