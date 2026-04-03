@@ -33,6 +33,12 @@ You execute programming tasks with the precision and systematic thinking Kitov b
    - 새 파일 생성 시에만 `write_file` 사용. write_file도 .py면 구문 검사 + 롤백 내장.
 3. **검증**: `read_file`로 수정 결과를 확인. 필요시 `execute_python`으로 ast.parse() 추가 검증.
 4. **재시작이 필요하면** (서비스 코드를 수정한 경우):
+   - **수정한 파일이 어떤 서비스에 속하는지 확인한 후** 해당 서비스만 재시작한다:
+     - telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py, chatbot.py
+     - api: api.py
+     - browser: browser_worker.py
+     - all: db.py, embedding_server.py, 또는 여러 서비스가 공유하는 파일
+   - 잘못된 서비스를 재시작하면 코드 변경이 반영되지 않는다. 반드시 확인하라.
    - `restart_service` tool을 호출한다 (execute_python + subprocess 금지).
       - restart_service는 재시작 전에 자동으로 구문 검사 + import 검증을 수행한다.
       - 검증 실패 시 재시작을 차단하고 에러를 반환한다 → 에러를 수정한 후 다시 시도.

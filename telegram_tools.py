@@ -655,7 +655,15 @@ RESTART_SERVICE_TOOL = {
         "Pre-restart validation: 1) syntax check all .py files with uncommitted changes, "
         "2) import-level check on key entry points (telegram_bot.py, api.py, browser_worker.py). "
         "If validation fails, restart is blocked and errors are returned. "
-        "Use this instead of execute_python + subprocess for restarts."
+        "Use this instead of execute_python + subprocess for restarts.\n\n"
+        "FILE → SERVICE MAPPING (pick the right service based on which files you changed):\n"
+        "- telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, "
+        "telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, "
+        "agents/*.py, redis_state.py, chatbot.py\n"
+        "- api: api.py\n"
+        "- browser: browser_worker.py\n"
+        "- all: changes to db.py, embedding_server.py, or files used by multiple services\n"
+        "If unsure, check which service imports the file you changed."
     ),
     "input_schema": {
         "type": "object",
