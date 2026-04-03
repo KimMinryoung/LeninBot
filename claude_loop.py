@@ -11,6 +11,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
+    """Deduplicate tool schemas by name while preserving first occurrence.
+
+    Anthropic can also reject malformed tool payloads, and sharing one dedupe
+    path with OpenAI removes repeated failure classes across providers.
+    """
+    if not tools:
+        return []
+
+    deduped: list[dict] = []
+    seen_names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            deduped.append(tool)
+            continue
+        name = str(tool.get("name", "") or "").strip()
+        if name and name in seen_names:
+            logger.warning("Dropping duplicate tool definition: %s", name)
+            continue
+        if name:
+            seen_names.add(name)
+        deduped.append(tool)
+    return deduped
+
+
 # ── Pricing Constants (USD per million tokens) ──────────────────────
 # Claude Sonnet 4.6 pricing — update when model pricing changes
 PRICING = {

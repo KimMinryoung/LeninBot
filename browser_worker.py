@@ -16,6 +16,43 @@ import logging
 import signal
 from datetime import datetime
 from pathlib import Path
+import importlib
+
+BROWSER_PROVIDER = "claude"
+BROWSER_MODEL = os.getenv("BROWSER_MODEL", "claude-sonnet-4-6")
+
+
+def _normalize_browser_model(raw_model: str | None) -> str:
+    model = str(raw_model or "").strip()
+    if not model:
+        return "claude-sonnet-4-6"
+
+    lowered = model.lower()
+    if lowered in {"high", "medium", "low"}:
+        tier_map = {
+            "high": "claude-opus-4-6",
+            "medium": "claude-sonnet-4-6",
+            "low": "claude-haiku-4-5",
+        }
+        return tier_map[lowered]
+
+    if lowered in {"opus", "sonnet", "haiku"}:
+        alias_map = {
+            "opus": "claude-opus-4-6",
+            "sonnet": "claude-sonnet-4-6",
+            "haiku": "claude-haiku-4-5",
+        }
+        return alias_map[lowered]
+
+    if lowered.startswith("gpt") or lowered.startswith("o"):
+        logger.warning(
+            "Browser worker received non-Claude model override '%s'; forcing %s",
+            model,
+            BROWSER_MODEL,
+        )
+        return BROWSER_MODEL
+
+    return model
 
 from dotenv import load_dotenv
 
@@ -46,14 +83,20 @@ def _init_claude_client():
     return _claude_client
 
 
-def _init_tools():
-    """Load tool definitions and handlers once."""
+def _init_tools(force_reload: bool = False):
+    """Load tool definitions and handlers once.
+
+    force_reload=True is used per task so the long-lived browser worker does not
+    keep serving stale tool registries after a telegram-only restart/deploy.
+    """
     global _tools, _tool_handlers
-    if _tools is not None:
+    if _tools is not None and not force_reload:
         return _tools, _tool_handlers
-    from telegram_tools import TOOLS, TOOL_HANDLERS
-    _tools = TOOLS
-    _tool_handlers = TOOL_HANDLERS
+    import telegram_tools as telegram_tools_module
+    if force_reload:
+        telegram_tools_module = importlib.reload(telegram_tools_module)
+    _tools = telegram_tools_module.TOOLS
+    _tool_handlers = telegram_tools_module.TOOL_HANDLERS
     return _tools, _tool_handlers
 
 
@@ -67,9 +110,14 @@ async def execute_browser_task(task: dict) -> dict:
 
     Returns: {parent_id, status, result_summary, error?}
     """
+    # Import task runtime dependencies lazily inside the worker process.
+    # Earlier task #329 only inspected source code and reconstructed tool lists.
+    # That missed the real failure mode: the long-lived browser worker can keep
+    # serving with stale pre-patch modules even after telegram service restart,
+    # because it is a separate process with its own import cache and lifecycle.
     from agents import get_agent
     from agents.base import AgentSpec
-    from claude_loop import chat_with_tools
+    from claude_loop import chat_with_tools, dedupe_tools_by_name
     from self_tools import build_task_context_tools
     from telegram_tools import MISSION_TOOL, build_mission_handler
     from telegram_tasks import process_task, build_current_state
@@ -87,15 +135,23 @@ async def execute_browser_task(task: dict) -> dict:
     except Exception:
         pass
 
-    logger.info("Processing browser task #%d for user %d", task_id, user_id)
+    logger.info(
+        "Processing browser task #%d for user %d (provider=%s, model=%s)",
+        task_id,
+        user_id,
+        BROWSER_PROVIDER,
+        BROWSER_MODEL,
+    )
 
     try:
         spec = get_agent(agent_type)
     except (ValueError, ImportError):
         spec = get_agent("browser")
 
-    # Load and filter tools
-    all_tools, all_handlers = _init_tools()
+    # Load and filter tools. Force module reload here because browser_worker is a
+    # separate long-lived process; a telegram service restart does not refresh its
+    # already-imported tool registry.
+    all_tools, all_handlers = _init_tools(force_reload=True)
     agent_tools, agent_handlers = spec.filter_tools(all_tools, all_handlers)
 
     # Add task-context tools
@@ -106,9 +162,15 @@ async def execute_browser_task(task: dict) -> dict:
     agent_tools.extend(ctx_tools)
     agent_handlers.update(ctx_handlers)
 
-    # Add mission tool
-    agent_tools.append(MISSION_TOOL)
-    agent_handlers["mission"] = build_mission_handler(user_id)
+    # Bind mission handler without re-adding schema.
+    # MISSION_TOOL is already present in the base tool registry, and re-appending it
+    # creates duplicate tool names in the API payload (task #326 failure).
+    if "mission" in {t.get("name") for t in agent_tools}:
+        agent_handlers["mission"] = build_mission_handler(user_id)
+
+    # Final safety net: task-context / future registry composition must never send
+    # duplicate tool names to the upstream API.
+    agent_tools = dedupe_tools_by_name(agent_tools)
 
     # Render system prompt
     system_prompt = spec.render_prompt(
@@ -134,9 +196,11 @@ async def execute_browser_task(task: dict) -> dict:
         # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
         merged_handlers = dict(extra_handlers or {})
-        from bot_config import get_current_model_selection
-        sel = get_current_model_selection("task")
-        resolved_model = model or sel["model_id"]
+        # Browser worker always runs on Claude. Runtime /config provider can be
+        # switched to OpenAI for chat/task orchestration, but this worker uses the
+        # Anthropic tool-calling loop and Anthropic client only. Guard here against
+        # any caller accidentally passing OpenAI model IDs or generic tiers.
+        resolved_model = _normalize_browser_model(model or BROWSER_MODEL)
 
         return await chat_with_tools(
             messages,
@@ -154,9 +218,10 @@ async def execute_browser_task(task: dict) -> dict:
         )
 
     async def _get_model():
-        from bot_config import get_current_model_selection
-        sel = get_current_model_selection("task")
-        return sel["model_id"]
+        # Keep browser worker provider/model pinned to Claude regardless of global
+        # runtime provider toggles. process_task() uses this for progress metadata
+        # and any fallback model lookup.
+        return _normalize_browser_model(BROWSER_MODEL)
 
     # Create a dummy bot-like object that skips Telegram sends
     class _NullBot:

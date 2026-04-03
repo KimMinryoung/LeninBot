@@ -32,7 +32,7 @@ from bot_config import (
     _extract_text,
 )
 from telegram_tools import TOOLS, TOOL_HANDLERS
-from claude_loop import chat_with_tools
+from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram_tasks import (
     process_task, broadcast, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
@@ -1292,7 +1292,7 @@ async def bot_main():
 
         from self_tools import build_task_context_tools
         from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
-        from telegram_tools import MISSION_TOOL, build_mission_handler
+        from telegram_tools import build_mission_handler
 
         # ── Agent-aware task execution ──────────────────────────────
         agent_type = task.get("agent_type") or "analyst"
@@ -1348,9 +1348,14 @@ async def bot_main():
         agent_tools.extend(ctx_tools)
         agent_handlers.update(ctx_handlers)
 
-        # Add mission tool
-        agent_tools.append(MISSION_TOOL)
-        agent_handlers["mission"] = build_mission_handler(task["user_id"])
+        # Bind mission handler without re-adding schema.
+        # MISSION_TOOL is already in BASE_TOOLS via telegram_tools.TOOLS append.
+        # Re-appending here duplicates the tool name and breaks API validation.
+        if "mission" in {t.get("name") for t in agent_tools}:
+            agent_handlers["mission"] = build_mission_handler(task["user_id"])
+
+        # Final safety net against future registry composition mistakes.
+        agent_tools = dedupe_tools_by_name(agent_tools)
 
         # Render agent-specific system prompt
         system_prompt = spec.render_prompt(

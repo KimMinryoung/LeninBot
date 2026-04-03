@@ -81,16 +81,32 @@ def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
 
 
 def _convert_tools(tools: list[dict]) -> list[dict]:
-    """Convert Anthropic-format tools to OpenAI format. Strips cache_control."""
+    """Convert Anthropic-format tools to OpenAI format and deduplicate by tool name.
+
+    OpenAI rejects duplicated tool names with:
+    `tools: Tool names must be unique.`
+    Keep first occurrence to preserve the originally registered schema.
+    """
     converted = []
+    seen_names: set[str] = set()
     for t in tools:
         clean = {k: v for k, v in t.items() if k != "cache_control"}
         if clean.get("type") == "function":
-            converted.append(clean)
+            candidate = clean
+            name = ((candidate.get("function") or {}).get("name") or "").strip()
         elif "input_schema" in clean:
-            converted.append(_convert_tool_anthropic_to_openai(clean))
+            candidate = _convert_tool_anthropic_to_openai(clean)
+            name = ((candidate.get("function") or {}).get("name") or "").strip()
         else:
-            converted.append(clean)
+            candidate = clean
+            name = str(candidate.get("name", "") or "").strip()
+
+        if name and name in seen_names:
+            logger.warning("Dropping duplicate tool definition for OpenAI payload: %s", name)
+            continue
+        if name:
+            seen_names.add(name)
+        converted.append(candidate)
     return converted
 
 
