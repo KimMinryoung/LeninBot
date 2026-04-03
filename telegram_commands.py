@@ -850,12 +850,8 @@ async def cmd_restart(message: Message):
     restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     try:
         await asyncio.to_thread(
-            _ctx["save_chat_message"], user_id, "user",
-            f"[SYSTEM] /restart {target} 실행 ({restart_ts})."
-        )
-        await asyncio.to_thread(
-            _ctx["save_chat_message"], user_id, "assistant",
-            f"[SYSTEM] 서비스 재시작 진행 ({restart_ts})."
+            _ctx["save_system_event"], user_id, "restart",
+            f"/restart {target} executed ({restart_ts})"
         )
     except Exception:
         pass
@@ -907,12 +903,8 @@ async def cmd_deploy(message: Message):
     deploy_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     try:
         await asyncio.to_thread(
-            _ctx["save_chat_message"], deploy_user_id, "user",
-            f"[SYSTEM] /deploy {target} 실행 ({deploy_ts})."
-        )
-        await asyncio.to_thread(
-            _ctx["save_chat_message"], deploy_user_id, "assistant",
-            f"[SYSTEM] 배포 진행 ({deploy_ts})."
+            _ctx["save_system_event"], deploy_user_id, "deploy",
+            f"/deploy {target} executed ({deploy_ts})"
         )
     except Exception:
         pass

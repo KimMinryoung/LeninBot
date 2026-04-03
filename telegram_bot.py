@@ -121,6 +121,15 @@ def _ensure_table():
         ON telegram_chat_history (user_id, id DESC)
     """)
     _execute("""
+        CREATE TABLE IF NOT EXISTS telegram_system_events (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            event_type  VARCHAR(50) NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
         CREATE TABLE IF NOT EXISTS telegram_schedules (
             id          SERIAL PRIMARY KEY,
             user_id     BIGINT NOT NULL,
@@ -688,6 +697,14 @@ def _save_chat_message(user_id: int, role: str, content: str):
     )
 
 
+def _save_system_event(user_id: int, event_type: str, content: str):
+    """Save a system event to the dedicated events table (not chat history)."""
+    _execute(
+        "INSERT INTO telegram_system_events (user_id, event_type, content) VALUES (%s, %s, %s)",
+        (user_id, event_type, content),
+    )
+
+
 def _clear_chat_history(user_id: int):
     """Mark current position as clear point — history before this is ignored.
 
@@ -801,12 +818,14 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
             )
             raw_rows = cur.fetchall()
 
-    # Determine which summaries are still useful (cover messages older than
-    # what raw_rows already includes).
+    # Determine which summaries are still useful (cover messages not fully
+    # included in the raw window). Use <= to avoid gaps: a summary whose
+    # chunk_end_id equals raw_min_id may overlap by one message, but that's
+    # better than losing the older messages in that chunk entirely.
     raw_min_id = raw_rows[0]["id"] if raw_rows else None
     useful_summaries = []
     if raw_min_id is not None:
-        useful_summaries = [s for s in summaries if s["chunk_end_id"] < raw_min_id]
+        useful_summaries = [s for s in summaries if s["chunk_end_id"] <= raw_min_id]
 
     # Build context: summary preamble + raw messages with timestamps
     context: list[dict] = []
@@ -825,6 +844,28 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
         context.append({"role": "user", "content": preamble})
         context.append({"role": "assistant", "content": "Acknowledged. I have reviewed the prior conversation context. Proceeding."})
 
+    # Load system events that fall within the raw message time window.
+    # These are interleaved chronologically with raw messages as inline
+    # annotations — not as fake conversation pairs.
+    system_events = []
+    if raw_rows:
+        first_ts = raw_rows[0].get("created_at")
+        if first_ts:
+            try:
+                with _get_conn() as conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            "SELECT event_type, content, created_at FROM telegram_system_events "
+                            "WHERE user_id = %s AND created_at >= %s ORDER BY created_at ASC",
+                            (user_id, first_ts),
+                        )
+                        system_events = cur.fetchall()
+            except Exception:
+                pass  # table might not exist yet
+
+    # Build a queue of system events sorted by timestamp for interleaving
+    event_idx = 0
+
     # Append raw messages with exact timestamps.
     # Large time gaps are annotated inline on the user message prefix,
     # signalling a likely context switch without injecting fake messages.
@@ -835,7 +876,22 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
         text = _normalize_history_content(r["content"])
         ts = r.get("created_at")
 
+        # Interleave system events that occurred before this message
         if ts and hasattr(ts, "strftime") and role == "user":
+            event_notes = []
+            while event_idx < len(system_events):
+                evt = system_events[event_idx]
+                evt_ts = evt.get("created_at")
+                if evt_ts and evt_ts <= ts:
+                    evt_time = evt_ts.strftime("%H:%M") if hasattr(evt_ts, "strftime") else "?"
+                    event_notes.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
+                    event_idx += 1
+                else:
+                    break
+            if event_notes:
+                # Inject as a single assistant message summarizing system events
+                context.append({"role": "assistant", "content": "\n".join(event_notes)})
+
             time_str = ts.strftime("%Y-%m-%d %H:%M")
             # Compute gap from last message (any role) and annotate inline
             gap_note = ""
@@ -850,6 +906,17 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
             prev_ts = ts
 
         context.append({"role": role, "content": text or "(empty)"})
+
+    # Append any remaining system events after the last message
+    trailing_events = []
+    while event_idx < len(system_events):
+        evt = system_events[event_idx]
+        evt_ts = evt.get("created_at")
+        evt_time = evt_ts.strftime("%H:%M") if evt_ts and hasattr(evt_ts, "strftime") else "?"
+        trailing_events.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
+        event_idx += 1
+    if trailing_events:
+        context.append({"role": "assistant", "content": "\n".join(trailing_events)})
 
     return context
 
@@ -1148,6 +1215,7 @@ register_handlers(router, ctx={
     "is_allowed": _is_allowed,
     "split_message": _split_message,
     "save_chat_message": _save_chat_message,
+    "save_system_event": _save_system_event,
     "load_chat_history": _load_chat_history,
     "load_context_with_summaries": _load_context_with_summaries,
     "clear_chat_history": _clear_chat_history,
@@ -1340,8 +1408,8 @@ async def bot_main():
                 max_rounds=5,
             )
 
-            # Save to chat history and send to user
-            await asyncio.to_thread(_save_chat_message, chat_id, "user", f"[SYSTEM] task #{task_id} [{agent_type}] {status}")
+            # Save orchestrator reply to chat history (system event to separate table)
+            await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
             await asyncio.to_thread(_save_chat_message, chat_id, "assistant", reply)
 
             for chunk in _split_message(reply):
@@ -1580,12 +1648,8 @@ async def bot_main():
             for uid in ALLOWED_USER_IDS:
                 try:
                     await asyncio.to_thread(
-                        _save_chat_message, uid, "user",
-                        f"[SYSTEM] SIGTERM received, service restart initiated ({restart_ts})."
-                    )
-                    await asyncio.to_thread(
-                        _save_chat_message, uid, "assistant",
-                        f"[SYSTEM] Service restart in progress ({restart_ts})."
+                        _save_system_event, uid, "restart",
+                        f"SIGTERM received, service restart initiated ({restart_ts})"
                     )
                 except Exception:
                     pass
@@ -1615,13 +1679,9 @@ async def bot_main():
             recovery_summary = f" Task recovery: handoff {handed_off}, expired {closed_stale}, repeated-failure {closed_repeated}."
         for uid in ALLOWED_USER_IDS:
             try:
-                _save_chat_message(
-                    uid, "user",
-                    f"[SYSTEM] Telegram service restart complete ({startup_ts}).{recovery_summary}"
-                )
-                _save_chat_message(
-                    uid, "assistant",
-                    f"[SYSTEM] Telegram service running confirmed ({startup_ts})."
+                _save_system_event(
+                    uid, "startup",
+                    f"Telegram service restart complete ({startup_ts}).{recovery_summary}"
                 )
             except Exception as e:
                 logger.warning("Failed to save startup marker for user %s: %s", uid, e)
