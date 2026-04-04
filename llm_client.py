@@ -6,6 +6,7 @@ OpenAI 호환 API (/v1/chat/completions).
 .env: MOON_LLM_BASE_URL, MOON_LLM_MODEL
 """
 
+import asyncio
 import os
 import time
 import logging
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 MOON_BASE       = os.getenv("MOON_LLM_BASE_URL", "http://moon:8080")
 MOON_MODEL      = os.getenv("MOON_LLM_MODEL", "qwen3.5-9b")
+
+# Concurrency limit: llama-server runs with 1 slot (no --parallel flag).
+# Serialize requests to avoid API errors under concurrent task load.
+LOCAL_SEMAPHORE = asyncio.Semaphore(1)
 
 TIMEOUT        = 300
 HEALTH_TIMEOUT = 3
