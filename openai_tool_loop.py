@@ -20,6 +20,13 @@ import json
 import logging
 import httpx
 
+from tool_loop_common import (
+    validate_budget, build_budget_tracker, emit_progress,
+    update_redis_state, save_redis_progress, execute_tool,
+    build_limit_message, build_budget_warning, build_round_warning,
+    build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -446,15 +453,7 @@ async def chat_with_tools(
     """
     sdk_mode = client is not None
 
-    # ── Budget validation (matches claude_loop.py) ──
-    try:
-        budget_usd = float(budget_usd)
-    except (TypeError, ValueError):
-        logger.warning("Invalid budget_usd=%r; falling back to 0.30", budget_usd)
-        budget_usd = 0.30
-    if budget_usd <= 0:
-        logger.warning("Non-positive budget_usd=%s; clamping to 0.01", budget_usd)
-        budget_usd = 0.01
+    budget_usd = validate_budget(budget_usd)
 
     openai_tools = _convert_tools(tools)
 
@@ -543,18 +542,8 @@ async def chat_with_tools(
             total_cost += round_cost
             logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)",
                          round_num, round_cost, total_cost, budget_usd)
-            if on_progress:
-                try:
-                    await on_progress("budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
-                except Exception:
-                    pass
-            # Update live task state in Redis
-            if task_id is not None:
-                try:
-                    from redis_state import set_task_state
-                    set_task_state(task_id, round_num, total_cost, status="running")
-                except Exception:
-                    pass
+            await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
+            update_redis_state(task_id, round_num, total_cost)
 
         # ── Handle refusal (OpenAI safety filter) ──
         refusal = None
@@ -565,10 +554,7 @@ async def chat_with_tools(
         if refusal:
             logger.warning("Model refused request at round %d: %s", round_num, refusal)
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num,
-                    "was_interrupted": False, "tool_work_details": list(tool_work_details),
-                })
+                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
             return f"⚠️ 모델이 요청을 거부했습니다: {refusal}"
 
         # ── No tool calls → return text response ──
@@ -587,11 +573,8 @@ async def chat_with_tools(
                 all_text = "\n".join(accumulated_text_parts)
                 final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num,
-                    "was_interrupted": False, "tool_work_details": list(tool_work_details),
-                })
-            return final_text if final_text else "응답을 생성하지 못했습니다."
+                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+            return final_text if final_text else EMPTY_RESPONSE_FALLBACK
 
         # ── Budget check (matches claude_loop.py) ──
         budget_exceeded = total_cost >= budget_usd
@@ -606,11 +589,8 @@ async def chat_with_tools(
             # All tool calls were malformed — return text content if any
             logger.warning("All tool_calls malformed at round %d — returning text", round_num)
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num,
-                    "was_interrupted": False, "tool_work_details": list(tool_work_details),
-                })
-            return content_text.strip() if content_text.strip() else "응답을 생성하지 못했습니다."
+                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+            return content_text.strip() if content_text.strip() else EMPTY_RESPONSE_FALLBACK
 
         # Accumulate substantial text from tool_calls rounds for final result
         if content_text.strip() and len(content_text.strip()) > 20:
@@ -624,11 +604,8 @@ async def chat_with_tools(
         }
         working_msgs.append(assistant_msg)
 
-        if on_progress and content_text.strip():
-            try:
-                await on_progress("thinking", f"[{round_num}] {content_text.strip()}")
-            except Exception:
-                pass
+        if content_text.strip():
+            await emit_progress(on_progress, "thinking", f"[{round_num}] {content_text.strip()}")
 
         # ── Execute tool calls ──
         executed_ids: set[str] = set()
@@ -645,38 +622,8 @@ async def chat_with_tools(
 
             input_summary = json.dumps(func_args, ensure_ascii=False)
 
-            if on_progress:
-                try:
-                    await on_progress("tool_call", f"[{round_num}] 🔧 {func_name}({input_summary})")
-                except Exception:
-                    pass
-
-            handler = tool_handlers.get(func_name)
-            if handler:
-                logger.info("Tool call: %s(%s)", func_name, input_summary[:200])
-                try:
-                    raw = handler(**func_args)
-                    if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
-                        result = await raw
-                    else:
-                        result = raw
-                    is_error = False
-                except Exception as e:
-                    logger.error("Tool %s execution error: %s", func_name, e)
-                    if log_event:
-                        log_event("warning", "tool", f"Tool {func_name} failed: {e}")
-                    result = f"Tool execution failed: {e}"
-                    is_error = True
-            else:
-                result = f"Unknown tool: {func_name}"
-                is_error = True
-
-            if not isinstance(result, str) or result is None:
-                result = str(result) if result is not None else "(no result)"
-
-            # Truncate oversized results to avoid context overflow
-            if len(result) > 50000:
-                result = result[:50000] + "\n... [truncated]"
+            await emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {func_name}({input_summary})")
+            result, is_error = await execute_tool(func_name, func_args, tool_handlers, log_event=log_event)
 
             working_msgs.append({
                 "role": "tool",
@@ -685,22 +632,11 @@ async def chat_with_tools(
             })
             executed_ids.add(tc_id)
 
-            if on_progress:
-                status = "❌" if is_error else "✓"
-                try:
-                    await on_progress("tool_result", f"  {status} {result[:200]}")
-                except Exception:
-                    pass
+            await emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {result[:200]}")
 
             tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
             tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
-            # Persist to Redis incrementally (survives process death)
-            if task_id is not None:
-                try:
-                    from redis_state import save_task_progress
-                    save_task_progress(task_id, round_num, func_name, input_summary, result, is_error)
-                except Exception:
-                    pass
+            save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
 
         # ── Safety net: ensure EVERY tool_call has a result ──
         for tc_item in tc_list:
@@ -718,26 +654,14 @@ async def chat_with_tools(
         if budget_exceeded:
             break
 
-        # ── Budget warning at 80% (matches claude_loop.py — injected as user message) ──
+        # ── Budget warning at 80% ──
         if not budget_warning_sent and total_cost > budget_usd * 0.8:
             budget_warning_sent = True
-            working_msgs.append({
-                "role": "user",
-                "content": (
-                    f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
-                    "작업을 계속하라. 한도 도달 시 시스템이 자동 종료한다."
-                ),
-            })
+            working_msgs.append({"role": "user", "content": build_budget_warning(total_cost, budget_usd)})
 
-        # ── Round limit warning 2 rounds before max (matches claude_loop.py) ──
+        # ── Round limit warning 2 rounds before max ──
         if round_num == max_rounds - 2:
-            working_msgs.append({
-                "role": "user",
-                "content": (
-                    f"[SYSTEM] 라운드 한도 임박 ({round_num}/{max_rounds}). "
-                    "다음 라운드가 마지막이다. 파일 저장 등 최종 도구 호출을 지금 하라."
-                ),
-            })
+            working_msgs.append({"role": "user", "content": build_round_warning(round_num, max_rounds)})
 
     # ══════════════════════════════════════════════════════════════════
     # Forced final response: max_rounds or budget exhausted
@@ -756,23 +680,10 @@ async def chat_with_tools(
         round_num, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
     )
 
-    # ── Escalation hint (like claude_loop.py) ──
-    escalation_hint = ""
-    if was_still_working:
-        escalation_hint = (
-            " 미완료 작업이 있으면 수행한 것, 못한 것, 다음에 해야 할 것을 명시하라. "
-            "orchestrator가 재위임 여부를 판단한다."
-        )
-
     working_msgs.append({
         "role": "user",
-        "content": (
-            f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, "
-            f"라운드: {round_num}/{max_rounds}). "
-            "추가 도구를 사용하지 말고, 지금까지 수행한 작업과 수집한 데이터를 있는 그대로 정리하라. "
-            "보고서 형식이 아니어도 된다. 시행착오, 중간 결과, raw 데이터 모두 포함하라."
-            + escalation_hint
-        ),
+        "content": build_limit_message(limit_reason, total_cost, budget_usd,
+                                       round_num, max_rounds, was_still_working),
     })
 
     # ── Preflight: validate tool result completeness ──
@@ -786,7 +697,7 @@ async def chat_with_tools(
         # Re-append the limit message (was lost in strip)
         working_msgs.append({
             "role": "user",
-            "content": f"[SYSTEM] {limit_reason}. 지금까지 수집한 정보만으로 답변하세요.",
+            "content": build_stripped_limit_message(limit_reason),
         })
 
     # ── Final API call (no tools → forces text-only response) ──
@@ -806,7 +717,7 @@ async def chat_with_tools(
             stripped.insert(0, {"role": "system", "content": system_prompt})
         stripped.append({
             "role": "user",
-            "content": f"[SYSTEM] {limit_reason}. 지금까지 수집한 정보만으로 답변하세요.",
+            "content": build_stripped_limit_message(limit_reason),
         })
         try:
             last_response = await _api_call(
@@ -821,11 +732,8 @@ async def chat_with_tools(
                 log_event("error", "final_response",
                           f"Final response failed even after strip: {e2}")
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num,
-                    "was_interrupted": was_still_working,
-                    "tool_work_details": list(tool_work_details),
-                })
+                budget_tracker.update(build_budget_tracker(
+                    total_cost, round_num, was_still_working, tool_work_details))
             return f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}"
 
     final_text = text.strip()
@@ -833,10 +741,6 @@ async def chat_with_tools(
         all_text = "\n".join(accumulated_text_parts)
         final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
     if budget_tracker is not None:
-        budget_tracker.update({
-            "total_cost": total_cost,
-            "rounds_used": round_num,
-            "was_interrupted": was_still_working,
-            "tool_work_details": list(tool_work_details),
-        })
-    return final_text if final_text else "응답을 생성하지 못했습니다."
+        budget_tracker.update(build_budget_tracker(
+            total_cost, round_num, was_still_working, tool_work_details))
+    return final_text if final_text else EMPTY_RESPONSE_FALLBACK

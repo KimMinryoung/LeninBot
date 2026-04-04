@@ -8,6 +8,13 @@ import asyncio
 import json
 import logging
 
+from tool_loop_common import (
+    validate_budget, build_budget_tracker, emit_progress,
+    update_redis_state, save_redis_progress, execute_tool,
+    build_limit_message, build_budget_warning, build_round_warning,
+    EMPTY_RESPONSE_FALLBACK,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -640,15 +647,7 @@ async def chat_with_tools(
             Events: "thinking" (model's intermediate text), "tool_call" (tool invoked),
             "tool_result" (tool finished), "budget" (budget status update).
     """
-    # Validate budget input early so comparisons/logging are reliable.
-    try:
-        budget_usd = float(budget_usd)
-    except (TypeError, ValueError):
-        logger.warning("Invalid budget_usd=%r; falling back to 0.30", budget_usd)
-        budget_usd = 0.30
-    if budget_usd <= 0:
-        logger.warning("Non-positive budget_usd=%s; clamping to 0.01", budget_usd)
-        budget_usd = 0.01
+    budget_usd = validate_budget(budget_usd)
 
     # Root-cause fix: start from text-only canonical history.
     # Tool protocol blocks are generated only within this call.
@@ -725,18 +724,8 @@ async def chat_with_tools(
             round_cost = _calculate_cost(response.usage)
             total_cost += round_cost
             logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)", round_num, round_cost, total_cost, budget_usd)
-            if on_progress:
-                try:
-                    await on_progress("budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
-                except Exception:
-                    pass
-            # Update live task state in Redis
-            if task_id is not None:
-                try:
-                    from redis_state import set_task_state
-                    set_task_state(task_id, round_num, total_cost, status="running")
-                except Exception:
-                    pass
+            await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
+            update_redis_state(task_id, round_num, total_cost)
 
         # If no custom tool use, extract and return text (check BEFORE budget)
         if response.stop_reason not in ("tool_use", "pause_turn"):
@@ -748,11 +737,8 @@ async def chat_with_tools(
             # Combine accumulated text from tool_use rounds with final response
             all_text = accumulated_text_parts + text_parts
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num,
-                    "was_interrupted": False, "tool_work_details": list(tool_work_details),
-                })
-            return "\n".join(all_text) if all_text else "응답을 생성하지 못했습니다."
+                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+            return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK
 
         # Budget exceeded → process this response's tool calls, then break
         budget_exceeded_this_round = total_cost >= budget_usd
@@ -772,13 +758,8 @@ async def chat_with_tools(
                 # Accumulate substantial text from tool_use rounds for final result
                 if text.strip() and len(text.strip()) > 20:
                     accumulated_text_parts.append(text.strip())
-                if on_progress and text.strip():
-                    # Send intermediate thinking/reasoning text
-                    preview = text.strip()
-                    try:
-                        await on_progress("thinking", f"[{round_num}] {preview}")
-                    except Exception:
-                        pass
+                if text.strip():
+                    await emit_progress(on_progress, "thinking", f"[{round_num}] {text.strip()}")
             elif btype in ("server_tool_use", "web_search_tool_result"):
                 # Defensive fallback: server-side tools are no longer used
                 # (replaced by Tavily client tool), but convert to text if
@@ -800,40 +781,10 @@ async def chat_with_tools(
                     "name": tname,
                     "input": tinput,
                 })
-                # Notify: tool call starting
+                # Execute tool via shared dispatch
                 input_summary = json.dumps(tinput, ensure_ascii=False)
-                if on_progress:
-                    try:
-                        await on_progress("tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
-                    except Exception:
-                        pass
-                # Execute custom tool
-                handler = tool_handlers.get(tname)
-                if handler:
-                    logger.info("Tool call: %s(%s)", tname, json.dumps(tinput, ensure_ascii=False)[:200])
-                    try:
-                        raw = handler(**tinput)
-                        # Defensive: handle both async and sync handlers
-                        if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
-                            result = await raw
-                        else:
-                            result = raw
-                        is_error = False
-                    except Exception as e:
-                        logger.error("Tool %s execution error: %s", tname, e)
-                        if log_event:
-                            log_event("warning", "tool", f"Tool {tname} failed: {e}")
-                        result = f"Tool execution failed: {e}"
-                        is_error = True
-                else:
-                    result = f"Unknown tool: {tname}"
-                    is_error = True
-                # Guard: ensure result is a non-None string
-                if not isinstance(result, str) or result is None:
-                    result = str(result) if result is not None else "(no result)"
-                # Truncate oversized results to avoid context overflow
-                if len(result) > 50000:
-                    result = result[:50000] + "\n... [truncated]"
+                await emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
+                result, is_error = await execute_tool(tname, tinput, tool_handlers, log_event=log_event)
                 tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": tid,
@@ -842,23 +793,11 @@ async def chat_with_tools(
                 if is_error:
                     tool_result_block["is_error"] = True
                 tool_results.append(tool_result_block)
-                # Notify: tool call completed
-                if on_progress:
-                    status = "❌" if is_error else "✓"
-                    try:
-                        await on_progress("tool_result", f"  {status} {result[:200]}")
-                    except Exception:
-                        pass
+                await emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {result[:200]}")
                 # Log for diagnostics
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
                 tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result}")
-                # Persist to Redis incrementally (survives process death)
-                if task_id is not None:
-                    try:
-                        from redis_state import save_task_progress
-                        save_task_progress(task_id, round_num, tname, input_summary, result, is_error)
-                    except Exception:
-                        pass
+                save_redis_progress(task_id, round_num, tname, input_summary, result, is_error)
             else:
                 # Preserve unknown future block types as text context.
                 assistant_content.append({"type": "text", "text": _coerce_text(b)})
@@ -884,22 +823,10 @@ async def chat_with_tools(
             # Inject budget warning at 80% threshold
             if not budget_warning_sent and total_cost > budget_usd * 0.8:
                 budget_warning_sent = True
-                tool_results.insert(0, {
-                    "type": "text",
-                    "text": (
-                        f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
-                        "작업을 계속하라. 한도 도달 시 시스템이 자동 종료한다."
-                    ),
-                })
+                tool_results.insert(0, {"type": "text", "text": build_budget_warning(total_cost, budget_usd)})
             # Inject round limit warning 2 rounds before max
             if round_num == max_rounds - 2:
-                tool_results.insert(0, {
-                    "type": "text",
-                    "text": (
-                        f"[SYSTEM] 라운드 한도 임박 ({round_num}/{max_rounds}). "
-                        "다음 라운드가 마지막이다. 파일 저장 등 최종 도구 호출을 지금 하라."
-                    ),
-                })
+                tool_results.insert(0, {"type": "text", "text": build_round_warning(round_num, max_rounds)})
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
@@ -920,22 +847,11 @@ async def chat_with_tools(
         round_num if response else 0, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
     )
 
-    # Inject a nudge so the model knows it must answer now
-    escalation_hint = ""
-    if was_still_working:
-        escalation_hint = (
-            " 미완료 작업이 있으면 수행한 것, 못한 것, 다음에 해야 할 것을 명시하라. "
-            "orchestrator가 재위임 여부를 판단한다."
-        )
     limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
     _append_user_text_message(
         working_msgs,
-        (
-            f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, 라운드: {round_num if response else 0}/{max_rounds}). "
-            "추가 도구를 사용하지 말고, 지금까지 수행한 작업과 수집한 데이터를 있는 그대로 정리하라. "
-            "보고서 형식이 아니어도 된다. 시행착오, 중간 결과, raw 데이터 모두 포함하라."
-            + escalation_hint
-        ),
+        build_limit_message(limit_reason, total_cost, budget_usd,
+                            round_num if response else 0, max_rounds, was_still_working),
     )
     # Final preflight
     unresolved = _find_unresolved_tool_uses(working_msgs)
@@ -967,10 +883,8 @@ async def chat_with_tools(
             if log_event:
                 log_event("error", "final_response", f"Final response failed even after strip: {e2}")
             if budget_tracker is not None:
-                budget_tracker.update({
-                    "total_cost": total_cost, "rounds_used": round_num if response else 0,
-                    "was_interrupted": was_still_working, "tool_work_details": list(tool_work_details),
-                })
+                budget_tracker.update(build_budget_tracker(
+                    total_cost, round_num if response else 0, was_still_working, tool_work_details))
             return f"⚠️ {limit_reason} 후 응답 생성 실패: {api_err}"
 
     if hasattr(final, "usage") and final.usage:
@@ -980,8 +894,6 @@ async def chat_with_tools(
     text_parts = [b.text for b in final.content if b.type == "text"]
     all_text = accumulated_text_parts + text_parts
     if budget_tracker is not None:
-        budget_tracker.update({
-            "total_cost": total_cost, "rounds_used": round_num if response else 0,
-            "was_interrupted": was_still_working, "tool_work_details": list(tool_work_details),
-        })
-    return "\n".join(all_text) if all_text else "응답을 생성하지 못했습니다."
+        budget_tracker.update(build_budget_tracker(
+            total_cost, round_num if response else 0, was_still_working, tool_work_details))
+    return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK
