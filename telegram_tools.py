@@ -208,6 +208,97 @@ async def _exec_convert_document(file_path: str) -> str:
         return f"Document conversion failed: {e}"
 
 
+# ── Publish Research Tool ────────────────────────────────────────────
+
+PUBLISH_RESEARCH_TOOL = {
+    "name": "publish_research",
+    "description": (
+        "Write a markdown document to the public research directory. "
+        "Published files are served at https://cyber-lenin.com/reports/research/{filename}. "
+        "Use for polished analysis reports, forecasts, and investigative findings. "
+        "Filename is auto-generated from the title with date prefix (YYYYMMDD_slug.md)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Document title. Used for both the H1 heading and the filename slug.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Full markdown content of the document (without the title heading — it is auto-prepended).",
+            },
+            "filename": {
+                "type": "string",
+                "description": "Optional custom filename (e.g. 'my_report.md'). If omitted, auto-generated from title.",
+            },
+        },
+        "required": ["title", "content"],
+    },
+}
+TOOLS.append(PUBLISH_RESEARCH_TOOL)
+
+
+async def _exec_publish_research(title: str, content: str, filename: str | None = None) -> str:
+    """Write a markdown research document to the public research/ directory."""
+    import re
+    import unicodedata
+    from pathlib import Path
+    from datetime import datetime, timezone, timedelta
+
+    KST = timezone(timedelta(hours=9))
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    research_dir = os.path.join(project_root, "research")
+
+    if not title or not title.strip():
+        return "Error: title is required."
+    if not content or not content.strip():
+        return "Error: content is required."
+
+    title = title.strip()
+    now = datetime.now(KST)
+    date_prefix = now.strftime("%Y%m%d")
+
+    if filename:
+        fname = filename.strip()
+        if not fname.endswith(".md"):
+            fname += ".md"
+    else:
+        # Generate slug from title
+        slug = unicodedata.normalize("NFKD", title)
+        slug = slug.encode("ascii", "ignore").decode("ascii").lower()
+        slug = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+        slug = slug[:80] if slug else "research"
+        fname = f"{date_prefix}_{slug}.md"
+
+    # Prevent path traversal
+    if "/" in fname or "\\" in fname or ".." in fname:
+        return "Error: filename must not contain path separators or '..'."
+
+    os.makedirs(research_dir, exist_ok=True)
+    filepath = os.path.join(research_dir, fname)
+
+    # Build document with header
+    author_line = f"**작성자:** Cyber-Lenin (사이버-레닌)"
+    date_line = f"**작성일:** {now.strftime('%Y-%m-%d')}"
+    full_doc = f"# {title}\n{author_line}\n{date_line}\n\n---\n\n{content.strip()}\n"
+
+    try:
+        await asyncio.to_thread(Path(filepath).write_text, full_doc, encoding="utf-8")
+    except Exception as e:
+        logger.error("publish_research write error: %s", e)
+        return f"Failed to write research document: {e}"
+
+    public_url = f"https://cyber-lenin.com/reports/research/{fname}"
+    return (
+        f"Published: {fname}\n"
+        f"Local path: {filepath}\n"
+        f"Public URL: {public_url}\n"
+        f"Size: {len(full_doc)} chars"
+    )
+
+
 async def _exec_fetch_url(url: str) -> str:
     """Fetch and extract main body text from a URL."""
     try:
@@ -901,6 +992,7 @@ TOOL_HANDLERS = {
     "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
     "convert_document": _exec_convert_document,
+    "publish_research": _exec_publish_research,
     "download_image": _exec_download_image,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,

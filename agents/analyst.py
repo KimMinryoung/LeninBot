@@ -59,6 +59,7 @@ Your job is to transform raw information into structured knowledge.
         "read_file", "list_directory",
         "read_self", "write_kg",
         "save_finding", "mission", "send_email",
+        "publish_research",
     ],
     budget_usd=1.00,
     max_rounds=50,
