@@ -256,6 +256,45 @@ def _get_model_metadata(model_name: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=16)
+def _get_model_input_schema(model_name: str) -> dict[str, Any]:
+    """Extract the Input schema properties from a model's OpenAPI spec.
+
+    Returns a dict of {param_name: schema_dict} for valid input parameters.
+    Empty dict if schema cannot be parsed (caller should skip filtering).
+    """
+    try:
+        meta = _get_model_metadata(model_name)
+        version = meta.get("latest_version") or {}
+        openapi = version.get("openapi_schema") or {}
+        schemas = openapi.get("components", {}).get("schemas", {})
+        input_schema = schemas.get("Input", {})
+        return input_schema.get("properties", {})
+    except Exception as e:
+        logger.debug("[replicate] Failed to parse input schema for %s: %s", model_name, e)
+        return {}
+
+
+def _filter_input_by_schema(model_name: str, payload_input: dict[str, Any]) -> dict[str, Any]:
+    """Filter payload input to only include parameters the model accepts.
+
+    Prevents 422 errors from sending unsupported parameters.
+    Always passes through 'prompt' regardless of schema parsing.
+    """
+    schema_props = _get_model_input_schema(model_name)
+    if not schema_props:
+        return payload_input  # schema unavailable, pass through as-is
+    valid_keys = set(schema_props.keys())
+    valid_keys.add("prompt")  # always required
+    filtered = {}
+    for k, v in payload_input.items():
+        if k in valid_keys:
+            filtered[k] = v
+        else:
+            logger.info("[replicate] Dropping unsupported param '%s' for model %s", k, model_name)
+    return filtered
+
+
+@lru_cache(maxsize=16)
 def _model_supports_official_endpoint(model_name: str) -> bool:
     data = _get_model_metadata(model_name)
     # Newer official models like black-forest-labs/flux-schnell reject POST /predictions
@@ -351,6 +390,10 @@ def create_prediction(
     }
     if model not in RETRO_DIFFUSION_MODELS:
         payload_input["aspect_ratio"] = aspect_ratio
+    if extra_input:
+        payload_input.update(extra_input)
+    # Filter out parameters the model doesn't accept (prevents 422 errors)
+    payload_input = _filter_input_by_schema(cfg["model"], payload_input)
     payload: dict[str, Any] = {"input": payload_input}
     official_prediction_url = str(cfg.get("official_prediction_url") or "").strip()
     if official_prediction_url:
@@ -360,8 +403,6 @@ def create_prediction(
     else:
         prediction_url = f"{REPLICATE_API_BASE}/predictions"
         payload["version"] = cfg["version"]
-    if extra_input:
-        payload["input"].update(extra_input)
     webhook = webhook_url or REPLICATE_WEBHOOK_URL
     if webhook:
         payload["webhook"] = webhook
