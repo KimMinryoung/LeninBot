@@ -900,6 +900,15 @@ async def process_task(
                     # Non-fatal: log but don't fail the task
                     logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
 
+            # Diary agent: if LLM returned empty fallback but save_diary succeeded, fix the report
+            if task.get("agent_type") == "diary" and "응답을 생성하지 못했습니다" in report:
+                tool_log_str = "\n".join(str(d) for d in bt.get("tool_work_details", []))
+                import re as _re
+                diary_match = _re.search(r'save_diary\(.*?"title":\s*"([^"]+)"', tool_log_str)
+                if diary_match or "Diary saved:" in tool_log_str:
+                    title = diary_match.group(1) if diary_match else "(title unknown)"
+                    report = f"Diary entry saved: {title}"
+
             restart_report_prefix = ""
             if restart_ctx["initiated"]:
                 restart_report_prefix = (
