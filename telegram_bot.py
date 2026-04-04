@@ -1133,7 +1133,28 @@ async def _chat_with_tools(
         from self_tools import build_run_agent_handler
         merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
 
-    # ── Provider dispatch: Claude vs OpenAI ──
+    # ── Provider dispatch: Claude vs OpenAI vs Local ──
+    if _config.get("provider") == "local":
+        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm_client import _resolve_backend
+        backend = _resolve_backend()
+        return await openai_chat(
+            messages,
+            client=None,
+            base_url=backend["base"],
+            model=model or backend["model"],
+            tools=merged_tools,
+            tool_handlers=merged_handlers,
+            system_prompt=sys_prompt,
+            max_rounds=resolved_max_rounds,
+            max_tokens=resolved_max_tokens,
+            log_event=_log_event,
+            budget_usd=resolved_budget,
+            on_progress=on_progress,
+            budget_tracker=budget_tracker,
+            task_id=task_id,
+        )
+
     if _config.get("provider") == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(

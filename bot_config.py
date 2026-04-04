@@ -35,7 +35,7 @@ _CONFIG_DEFAULTS = {
     "task_model": "high",      # "high" | "medium" | "low"
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
-    "provider": "claude",      # "claude" | "openai"
+    "provider": "claude",      # "claude" | "openai" | "local"
     "task_concurrency": 2,     # max parallel background tasks
 }
 
@@ -85,7 +85,7 @@ _CONFIG_META = {
     "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["high", "medium", "low"]},
     "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
-    "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai"]},
+    "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai", "local"]},
     "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
 }
 
@@ -105,7 +105,11 @@ _OPENAI_MODEL_MAP = {
 _TIER_MAP = {
     "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
     "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
+    "local":  {"high": "local",  "medium": "local",  "low": "local"},
 }
+
+# Local LLM model map (single model — all tiers resolve to the same)
+_LOCAL_MODEL_MAP = {"local": None}  # resolved at runtime via llm_client
 
 def _tier_to_display(tier: str) -> str:
     """Return a display label showing tier + actual model for current provider."""
@@ -114,6 +118,9 @@ def _tier_to_display(tier: str) -> str:
     alias = tier_map.get(tier, tier)
     if provider == "openai":
         model_name = _OPENAI_MODEL_MAP.get(alias, alias)
+    elif provider == "local":
+        from llm_client import MOON_MODEL
+        model_name = MOON_MODEL
     else:
         model_name = alias
     return f"{tier} ({model_name})"
@@ -165,7 +172,10 @@ def get_current_model_selection(kind: str = "chat") -> dict:
     tier_key = "task_model" if kind == "task" else "chat_model"
     tier = str(_config.get(tier_key, "high"))
     alias = _resolve_tier(tier)
-    if provider == "openai" or alias in _OPENAI_MODEL_MAP:
+    if provider == "local":
+        from llm_client import MOON_MODEL
+        model_id = MOON_MODEL
+    elif provider == "openai" or alias in _OPENAI_MODEL_MAP:
         model_id = _resolve_openai_model(alias)
     else:
         model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
@@ -176,12 +186,15 @@ def get_current_model_selection(kind: str = "chat") -> dict:
         "tier": tier,
         "alias": alias,
         "model_id": model_id,
-        "resolved": alias in _resolved_models if provider != "openai" else True,
+        "resolved": True if provider in ("openai", "local") else alias in _resolved_models,
     }
 
 
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
+    if _config.get("provider") == "local":
+        from llm_client import _resolve_backend
+        return _resolve_backend()["model"]
     alias = _resolve_tier(_config["chat_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
@@ -190,6 +203,9 @@ async def _get_model() -> str:
 
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
+    if _config.get("provider") == "local":
+        from llm_client import _resolve_backend
+        return _resolve_backend()["model"]
     alias = _resolve_tier(_config["task_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
