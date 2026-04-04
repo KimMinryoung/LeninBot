@@ -12,7 +12,7 @@
 | `active` | 과제 진행 중. 이벤트 기록 가능. 시스템 프롬프트에 주입됨. | `create_mission()` | `close_mission()` → `done` |
 | `done` | 과제 완료/종료. 읽기 전용. 시스템 프롬프트에 주입 안 됨. | `close_mission()` | (terminal) |
 
-**불변식**: 사용자당 `active` 미션은 최대 1개. (local_agent: 전역 최대 1개)
+**불변식**: 사용자당 `active` 미션은 최대 1개.
 
 ## 3. State Transitions
 
@@ -41,7 +41,6 @@
 | Trigger | 위치 | 조건 |
 |---------|------|------|
 | `/task` 커맨드 | `telegram_bot.py` `cmd_task` | `get_active_mission(uid)` 이 None |
-| `manage_task(add)` | `local_agent/handlers.py` | top-level task AND `get_active_mission()` 이 None |
 
 **부작용**:
 - 최근 채팅 5턴을 `context_capture` 이벤트로 캡처
@@ -58,7 +57,6 @@
 | `/mission close` 커맨드 | `telegram_bot.py` `cmd_mission` | **사용자** |
 | `/clear` 커맨드 | `telegram_bot.py` `cmd_clear` | **사용자** |
 | 24시간 이벤트 없음 | `telegram_mission.py` `get_active_mission` | **시스템** (접근 시 자동) |
-| `mission(action="close")` 도구 | `local_agent/mission.py` `handle_mission` | **에이전트** (local) |
 
 ## 5. Events (Timeline)
 
@@ -69,7 +67,6 @@
 | `context_capture` | `system` | 미션 생성 시 | 최근 채팅 5턴 |
 | `task_created` | `system` / `task#N` | 미션에 태스크 연결 시 | 태스크 내용 요약 |
 | `tool_result` | `chat` | 채팅 중단 시 (예산/한도) | 수행한 도구 호출 목록 |
-| `tool_result` | `chat` | local_agent tool 실행 시 | 도구 결과 (≥20자, ≤2000자) |
 | `finding` | `task#N` | `save_finding` 도구 호출 | 중간 발견 (≤2000자) |
 | `decision` | `task#N` | `request_continuation` 호출 | 진행 요약 + 다음 단계 |
 | `decision` | `system` | 서비스 재시작/종료 | handoff/shutdown 기록 |
@@ -171,7 +168,7 @@ ALTER TABLE tasks ADD COLUMN mission_id INTEGER;
 
 | Date | Change |
 |------|--------|
-| 2026-03-21 | Initial implementation: local_agent + telegram |
+| 2026-03-21 | Initial implementation: telegram agent system |
 | 2026-03-21 | Explicit mission_id inheritance across all task paths |
 | 2026-03-21 | Agent close tool, /mission command, 24h auto-expire |
 | 2026-03-21 | State machine spec document created |

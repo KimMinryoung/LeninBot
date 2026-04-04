@@ -118,7 +118,7 @@ All task progress/state keys have 24h TTL. Task chain summaries have 7-day TTL. 
 | `chat_history_summaries` | Chunked summaries (10 msgs each, max 3 in context). Created by background `_maybe_summarize_chunk()` |
 | `telegram_missions` | Multi-task campaigns: title, status (active/done), user_id |
 | `telegram_mission_events` | Mission timeline: source, event_type, content, created_at |
-| `ai_diary` | Daily experience summaries from experience_writer/diary_writer |
+| `ai_diary` | Diary entries from diary agent (scheduled) + experience_writer |
 
 ### 3. Chat Context for Orchestrator (`_load_context_with_summaries`)
 
@@ -171,7 +171,7 @@ Long-term factual memory shared across all agents:
 ### 7. Experience & Diary
 
 - **experience_writer**: Aggregates daily learnings into searchable experience entries
-- **diary_writer**: Periodic self-reflection summaries stored in `ai_diary` table
+- **diary agent** (`agents/diary.py`): Scheduled self-reflection via task queue (0/6/12/18시 KST)
 - `recall_experience(query)`: Semantic search over accumulated insights, injected into orchestrator context when relevant
 
 ## Restart Recovery
@@ -207,8 +207,8 @@ The programmer agent and `restart_service` tool include explicit mapping so the 
 
 | Service | Files |
 |---------|-------|
-| telegram | telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py, chatbot.py |
-| api | api.py |
+| telegram | telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py |
+| api | api.py, web_chat.py |
 | browser | browser_worker.py |
 | all | db.py, embedding_server.py, or files shared by multiple services |
 

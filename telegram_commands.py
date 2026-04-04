@@ -1302,7 +1302,7 @@ async def _reflect_on_recent(user_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  자가수정 핸들러 — Telegram 전용 (chatbot.py에는 없음)
+#  자가수정 핸들러 — Telegram 전용
 # ═══════════════════════════════════════════════════════════════
 
 async def cmd_modify(message: Message):

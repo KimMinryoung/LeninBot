@@ -36,7 +36,7 @@ X-Admin-Key: <ADMIN_API_KEY 환경변수 값>
 
 | Method | Path | 인증 | 설명 |
 |--------|------|------|------|
-| POST | `/chat` | 없음 | LangGraph 파이프라인으로 질문 처리, SSE로 실시간 스트리밍 |
+| POST | `/chat` | 없음 | claude_loop 기반 질문 처리 (web_chat.py), SSE로 실시간 스트리밍 |
 
 **요청 Body:**
 ```json
@@ -209,10 +209,11 @@ API 서버와 분리된 독립 systemd timer로 실행:
 
 | 타이머 | 주기 | 설명 |
 |--------|------|------|
-| `leninbot-diary.timer` | 6시간 (0, 6, 12, 18시 KST) | AI 일기 자동 작성 (`diary_writer.py`) |
 | `leninbot-experience.timer` | 매일 00:30 KST | 대화 경험 압축 및 저장 (`experience_writer.py`) |
 
-로그 확인: `journalctl -u leninbot-diary`, `journalctl -u leninbot-experience`
+> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 diary agent로 이동 (0/6/12/18시 KST).
+
+로그 확인: `journalctl -u leninbot-experience`
 
 ---
 

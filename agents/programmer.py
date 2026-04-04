@@ -37,8 +37,8 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
 3. **Verify**: Use `read_file` to confirm the modification result. If needed, use `execute_python` with ast.parse() for additional verification.
 4. **If a restart is needed** (when service code was modified):
    - **Identify which service the modified file belongs to**, then restart only that service:
-     - telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py, chatbot.py
-     - api: api.py
+     - telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py
+     - api: api.py, web_chat.py
      - browser: browser_worker.py
      - all: db.py, embedding_server.py, or files shared by multiple services
    - Restarting the wrong service means your code changes won't take effect. Always verify.

@@ -57,10 +57,10 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 │  │ leninbot-telegram │  │ leninbot-browser │  │ leninbot-api     │    │
 │  │ telegram_bot.py   │  │ browser_worker.py│  │ uvicorn :8000    │    │
 │  │                   │  │                  │  │                  │    │
-│  │ aiogram 3.x       │  │ browser-use SDK  │  │ chatbot.py       │    │
-│  │ Claude/GPT 교체가능 │  │ Unix socket IPC  │  │ (LangGraph RAG)  │    │
-│  │ 에이전트 태스크큐    │  │ Chromium headless│  │ Gemini 3.1 FL    │    │
-│  │ email_bridge.py   │  │ MemoryMax=2G     │  │ 9-node 워크플로우   │    │
+│  │ aiogram 3.x       │  │ browser-use SDK  │  │ web_chat.py      │    │
+│  │ Claude/GPT 교체가능 │  │ Unix socket IPC  │  │ (claude_loop)    │    │
+│  │ 에이전트 태스크큐    │  │ Chromium headless│  │ Claude/GPT 교체가능│    │
+│  │ email_bridge.py   │  │ MemoryMax=2G     │  │ 동일 LLM 파이프라인 │    │
 │  │ 도구 20+개         │  │                  │  │                  │    │
 │  └──────────────────┘  └──────────────────┘  └──────────────────┘    │
 │  Telegram polling        UDS /tmp/leninbot-     :8000 (외부, 웹챗봇)    │
@@ -76,15 +76,16 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | `leninbot-embedding` | embedding_server.py | :8100 (내부) | BGE-M3 임베딩 서버 (831MB) |
 | `leninbot-telegram` | telegram_bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
 | `leninbot-browser` | browser_worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
-| `leninbot-api` | uvicorn api:app | :8000 (외부 차단, Docker 브릿지만 허용) | 웹 챗봇 API (LangGraph) |
+| `leninbot-api` | uvicorn api:app | :8000 (외부 차단, Docker 브릿지만 허용) | 웹 챗봇 API (claude_loop) |
 | `leninbot-frontend` | Docker (node:20-alpine) | :3000 (127.0.0.1) | BichonWebpage (Express+EJS), Nginx 프록시 |
 
 ### 타이머 서비스 (주기 실행 → 종료)
 
 | 서비스 | 주기 | 역할 |
 |---|---|---|
-| `leninbot-diary` | 매 3시간 | 일기 작성 + 뉴스 KG 수집 (병렬) |
 | `leninbot-experience` | 매일 15:30 UTC | 경험 메모리 정리/저장 |
+
+> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent, 0/6/12/18시 KST).
 
 ### Service Dependencies
 
@@ -129,7 +130,7 @@ docker.service
 
 시스템 프롬프트 정체성이 본체와 에이전트로 분리됨:
 
-- **CORE_IDENTITY**: Orchestrator, chatbot, diary_writer 전용. "You are Cyber-Lenin."
+- **CORE_IDENTITY**: Orchestrator, web_chat, diary agent 전용. "You are Cyber-Lenin."
 - **AGENT_CONTEXT**: Specialist 에이전트 전용. "You are a specialist agent in the Cyber-Lenin system. You serve Cyber-Lenin, but you are NOT Cyber-Lenin."
 
 각 에이전트는 고유 페르소나(Kitov, Varga 등)만 갖고, 사이버-레닌 본체와 정체성 충돌 없음.
@@ -281,7 +282,7 @@ START → analyze_intent
 ```
 leninbot/
 ├── api.py                     # FastAPI (SSE streaming, /chat, /logs, /session/*)
-├── chatbot.py                 # LangGraph 9-node RAG pipeline (웹챗봇 전용)
+├── web_chat.py                # 웹 챗봇 핸들러 (claude_loop 기반, api.py에서 호출)
 ├── shared.py                  # 공유 라이브러리: CORE_IDENTITY, AGENT_CONTEXT, KG/벡터검색/메모리/URL
 ├── embedding_server.py        # BGE-M3 임베딩 서버 (독립 FastAPI, :8100)
 ├── embedding_client.py        # 임베딩 HTTP 클라이언트 (fallback 내장)
@@ -297,7 +298,7 @@ leninbot/
 ├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
-├── diary_writer.py            # 자율 일기 작성 + 뉴스 KG 병렬 수집
+├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.4 등)
 ├── experience_writer.py       # 경험 메모리 일일 정리
 ├── redis_state.py             # Redis live state: task progress, chain memory, board, active registry
 ├── db.py                      # PostgreSQL connection pool (psycopg2)
@@ -315,7 +316,7 @@ leninbot/
 │   ├── browser.py             # Browser — AI 브라우저 자동화 (browser-use SDK)
 │   ├── visualizer.py          # Rodchenko — 이미지 생성 (reference_image 지원)
 │   ├── scout.py               # 외부 플랫폼 정찰
-│   └── general.py             # 범용 리서치 (도구 제한 없음)
+│   └── diary.py               # 일기 작성 에이전트 (스케줄 기반, 0/6/12/18시 KST)
 │
 ├── graph_memory/              # Graphiti 지식 그래프 모듈
 │   ├── service.py             # GraphMemoryService (Neo4j keepalive/liveness)
@@ -324,7 +325,6 @@ leninbot/
 │
 ├── skills/                    # 에이전트 스킬 (SKILL.md 포맷)
 ├── scripts/                   # 독립 실행 스크립트
-├── local_agent/               # 로컬 PC 에이전트 (Windows, Claude Sonnet 4.6)
 ├── systemd/                   # systemd 서비스/타이머 정의
 ├── deploy.sh                  # svc deploy 래퍼 (하위 호환)
 ├── scripts/svc                # 통합 서비스 관리 (deploy, boot, kill, restart, status)
@@ -400,7 +400,7 @@ leninbot/
 - 기존 `leninbot.duckdns.org` Nginx 프록시는 임시 유지 (추후 제거 예정)
 
 #### AI 일기 API 제거 → DB 직접 접근
-- `diary_writer.py`: API 호출(`requests`) → `db.py` 직접 SELECT/INSERT
+- 일기 작성: API 호출 → `db.py` 직접 SELECT/INSERT (현재 diary agent가 `save_diary` 도구 사용)
 - `shared.py`: `fetch_diaries()` API 호출 → DB 직접 쿼리 (ILIKE 키워드 검색)
 - Frontend: `/api/ai-diary` 엔드포인트, `requireApiKey` 미들웨어 삭제
 - `AI_DIARY_API_KEY` 환경변수 불필요
@@ -578,12 +578,11 @@ leninbot/
 
 #### KG 루프 일관성
 - `submit_kg_task()` / `collect_kg_futures()` 추가 (non-blocking 병렬 KG 작업)
-- diary_writer 뉴스 수집 병렬화
-- chatbot.py / diary_writer.py의 `run_kg_async` → `run_kg_task`로 통일 (cross-loop 버그 방지)
+- `run_kg_async` → `run_kg_task`로 통일 (cross-loop 버그 방지)
 
 #### 의존 관계 정리
-- `similarity_search()`, `search_knowledge_graph()`를 chatbot.py → shared.py로 이동
-- telegram_tools → chatbot.py 의존 제거 (graph import만 남음, api.py 전용)
+- `similarity_search()`, `search_knowledge_graph()`를 shared.py로 통합
+- 웹 챗봇: LangGraph 제거, claude_loop 기반 web_chat.py로 통합 (2026-04-04)
 
 #### Mission auto-creation SQL 수정
 - `SELECT DISTINCT user_id ... ORDER BY id DESC`가 PostgreSQL에서 InvalidColumnReference 에러 → `except: pass`에 삼켜져 미션이 절대 생성 안 됨

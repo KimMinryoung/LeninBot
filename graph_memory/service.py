@@ -5,7 +5,7 @@ GraphMemoryService — Graphiti 기반 지식 그래프 서비스
 Cyber-Lenin의 정보 에이전트 기능을 위한 핵심 서비스 레이어.
 Neo4j + Gemini를 사용하여 에피소드 수집, 검색, 브리핑 생성을 수행.
 
-chatbot.py와 독립적으로 사용 가능. 통합은 별도 작업.
+모든 인터페이스(web_chat, telegram_bot, agents)에서 shared.py를 통해 사용.
 """
 
 import asyncio

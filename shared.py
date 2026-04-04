@@ -1,4 +1,4 @@
-"""shared.py — Shared resources across chatbot, diary_writer, and telegram_bot.
+"""shared.py — Shared resources across web_chat, telegram_bot, and agents.
 
 Lightweight module — no heavy dependencies (no BGE-M3, no LangGraph).
 All external imports are deferred to first use.
@@ -344,7 +344,7 @@ def start_kg_healthcheck(interval: int = 300) -> None:
 
 # ── Shared Memory Access ────────────────────────────────────────────
 # Reusable query functions for cross-module memory retrieval.
-# Used by self-tools (telegram, chatbot) and diary_writer.
+# Used by self-tools, web_chat, and agents.
 
 from datetime import datetime, timedelta
 
@@ -1116,7 +1116,7 @@ _exp_embeddings = None
 
 
 def set_shared_embeddings(emb):
-    """Allow modules that already have BGE-M3 loaded (e.g. chatbot.py) to share it."""
+    """Allow modules that already have BGE-M3 loaded (e.g. embedding_server.py) to share it."""
     global _exp_embeddings
     _exp_embeddings = emb
 
@@ -1744,9 +1744,9 @@ def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Architecture
-Modules: chatbot.py (LangGraph web pipeline), telegram_bot.py (Claude Haiku agent), \
-diary_writer.py (6h cron), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
-Data: PostgreSQL (Supabase), Neo4j (local Docker), external diary API.
+Modules: web_chat.py (claude_loop web pipeline), telegram_bot.py (multi-agent orchestrator), \
+agents/ (diary, analyst, scout, programmer, browser, visualizer), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
+Data: PostgreSQL (Supabase), Neo4j (local Docker), Redis (live state).
 ## Infrastructure
 Server: Hetzner VPS (Ubuntu 24.04, 16 GB RAM), HTTPS via Nginx + Let's Encrypt (leninbot.duckdns.org). \
 Deploy: git pull + systemctl restart, triggered by Telegram /deploy command."""
