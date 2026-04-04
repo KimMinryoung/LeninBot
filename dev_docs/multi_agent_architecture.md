@@ -253,4 +253,4 @@ After task completion, optional verification can run:
 | PostgreSQL | Supabase (remote) | System of record |
 | Local LLM | systemd (llama-server) | Qwen 3.5-4B fallback on port 11435 |
 
-Deployment via `deploy.sh`: git pull, conditional pip install, selective systemd restart.
+Deployment via `svc deploy`: git pull, conditional pip install, selective systemd restart. Full service management via `scripts/svc` (deploy, boot, kill, restart, status).

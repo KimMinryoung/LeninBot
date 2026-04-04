@@ -108,7 +108,7 @@ docker.service
       → leninbot-browser (After=telegram)
 ```
 
-`deploy.sh`: `git pull` → `leninbot-api` → `leninbot-browser` → `leninbot-telegram` (last — kills itself). `--frontend` for frontend-only deploy. Neo4j/Redis/embedding are not restarted by deploy (code-independent).
+`svc deploy`: `git pull` → `leninbot-api` → `leninbot-browser` → `leninbot-telegram` (last — kills itself). `--frontend` for frontend-only deploy. Neo4j/Redis/embedding are not restarted by deploy (code-independent). `svc boot` starts all services in dependency order after server reboot. `svc kill/restart` for force-stopping runaway jobs.
 
 ### Availability
 
@@ -326,7 +326,8 @@ leninbot/
 ├── scripts/                   # 독립 실행 스크립트
 ├── local_agent/               # 로컬 PC 에이전트 (Windows, Claude Sonnet 4.6)
 ├── systemd/                   # systemd 서비스/타이머 정의
-├── deploy.sh                  # 배포: git pull → api → telegram 재시작, --frontend로 프론트엔드 배포
+├── deploy.sh                  # svc deploy 래퍼 (하위 호환)
+├── scripts/svc                # 통합 서비스 관리 (deploy, boot, kill, restart, status)
 ├── data/                      # 런타임 데이터 (gitignored)
 └── .env                       # 환경변수
 ```
@@ -414,10 +415,15 @@ leninbot/
   - 홈페이지: 326ms → 8ms, ai-diary: 317ms → 8ms, reports: 1,810ms → 14ms
 - **정적 자산 캐시 헤더**: `max-age=604800` (7일) → Cloudflare 엣지 캐싱
 
-#### deploy.sh 확장
-- `--frontend` 옵션 추가: 프론트엔드 전용 배포 (git pull → Docker rebuild → 컨테이너 교체)
-- `--all` 시에도 프론트엔드는 자동 배포하지 않음 (명시적 `--frontend`만)
+#### 통합 서비스 관리 (`scripts/svc`)
+- `deploy.sh`를 `scripts/svc`로 통합. `deploy.sh`는 `svc deploy`를 호출하는 래퍼로 유지 (하위 호환)
+- `svc deploy [--api|--telegram|--frontend|--all] [--restart]`: git pull + 의존성 + 재시작 + Telegram 알림
+- `svc boot`: 서버 재부팅 후 의존성 순서대로 전체 서비스 시작 (health check 포함)
+- `svc kill/restart <service...>`: 실시간 실행 중인 작업 강제 중단/재시작 (SIGKILL)
+- `svc status`: 전체 서비스·타이머 상태 조회 (Telegram `/status` 대시보드에도 통합)
+- `--frontend` 옵션: 프론트엔드 전용 배포 (git pull → Docker rebuild → 컨테이너 교체)
 - 프론트엔드 브랜치: `master` (leninbot `main`과 별도)
+- 설정값(경로, 브랜치 등)은 `.env`에서 로드
 
 #### 이메일 서명 업데이트
 - `config/email_signature.json`: website_url → `https://cyber-lenin.com`

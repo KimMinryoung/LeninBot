@@ -33,7 +33,7 @@ logging.info(API_KEY)
 - `AUTHORIZED_USERS` 또는 `ADMIN_IDS` 수정
 - 텔레그램 봇 핸들러 추가/제거
 - DB 스키마 변경
-- 배포 스크립트(`deploy.sh`) 수정
+- 서비스 관리 스크립트(`scripts/svc`) 수정
 
 ## 🟢 자유롭게 수정 가능
 

@@ -32,6 +32,39 @@ from replicate_image_service import (
 
 logger = logging.getLogger(__name__)
 
+_SVC_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "svc")
+
+
+async def _svc_health() -> str:
+    """Run `svc status` and return a compact Telegram-friendly summary."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bash", _SVC_SCRIPT, "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        raw = stdout.decode(errors="replace")
+    except Exception as e:
+        return f"⚠️ svc status 실행 실패: {e}"
+
+    # Parse ANSI output into compact lines
+    import re
+    clean = re.sub(r'\x1b\[[0-9;]*m', '', raw)  # strip ANSI colors
+    lines = []
+    for line in clean.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("==="):
+            continue
+        # ● name: state  or  ● name (container): state
+        m = re.match(r'● (\S+)(?:\s+\([^)]+\))?: (\S+)', line)
+        if m:
+            name, state = m.group(1), m.group(2)
+            icon = "✅" if state in ("active", "activating", "running") else "❌"
+            lines.append(f"  {icon} {name}: {state}")
+    return "\n".join(lines) if lines else "⚠️ 파싱 실패"
+
+
 # ── Module-level state (local to handlers) ─────────────────────────
 _ctx: dict = {}
 _pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → entry)
@@ -71,7 +104,7 @@ _HELP_TEXT = """\
 /fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
 /provider — LLM 제공자 전환 (Claude ↔ OpenAI)
 /restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
-/deploy \\[telegram|api|all] — 서버 배포 (git pull + restart, 기본: all)
+/deploy \\[telegram|api|frontend|all] — 서버 배포 (git pull + restart, 기본: all)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
 
 /help — 이 도움말 표시
@@ -515,9 +548,12 @@ async def cmd_status(message: Message):
         "GROUP BY status",
         None,
     )
+    health_f = _svc_health()
 
     try:
-        tasks, errors, task_stats = await asyncio.gather(tasks_f, errors_f, task_stats_f)
+        tasks, errors, task_stats, svc_health = await asyncio.gather(
+            tasks_f, errors_f, task_stats_f, health_f
+        )
     except Exception as e:
         logger.error("Status dashboard query error: %s", e)
         await message.answer(f"대시보드 조회 실패: {e}")
@@ -549,7 +585,10 @@ async def cmd_status(message: Message):
     else:
         lines.append("*에러 (24h)*: 없음")
 
-    # 3. KG stats (quick, non-blocking)
+    # 3. Service health
+    lines.append(f"*서비스:*\n{svc_health}")
+
+    # 4. KG stats (quick, non-blocking)
     try:
         from shared import fetch_kg_stats
         kg = await asyncio.to_thread(fetch_kg_stats)
@@ -883,19 +922,19 @@ async def cmd_restart(message: Message):
 
 
 async def cmd_deploy(message: Message):
-    """Run deploy.sh — git pull + restart services. Output sent back via Telegram."""
+    """Run svc deploy — git pull + restart services. Output sent back via Telegram."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    deploy_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy.sh")
-    if not os.path.isfile(deploy_script):
-        await message.answer("deploy.sh를 찾을 수 없습니다.")
+    svc_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "svc")
+    if not os.path.isfile(svc_script):
+        await message.answer("scripts/svc를 찾을 수 없습니다.")
         return
 
-    # Parse service target: /deploy [telegram|api|all] (default: all)
+    # Parse service target: /deploy [telegram|api|frontend|all] (default: all)
     args = (message.text or "").split(maxsplit=1)
     target = args[1].strip().lower() if len(args) > 1 else "all"
-    if target not in ("telegram", "api", "all"):
-        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/deploy [telegram|api|all]`", parse_mode="Markdown")
+    if target not in ("telegram", "api", "frontend", "all"):
+        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/deploy [telegram|api|frontend|all]`", parse_mode="Markdown")
         return
 
     # Save deploy context to chat history BEFORE deploying
@@ -911,10 +950,9 @@ async def cmd_deploy(message: Message):
 
     status_msg = await message.answer(f"🚀 Deploy 시작... (대상: {target})")
     try:
-        # Run deploy.sh detached (setsid) so it survives bot restart
-        log_path = "/tmp/leninbot-deploy.log"
+        # Run svc deploy detached (setsid) so it survives bot restart
         proc = await asyncio.create_subprocess_exec(
-            "setsid", "bash", deploy_script, f"--{target}",
+            "setsid", "bash", svc_script, "deploy", f"--{target}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
@@ -926,7 +964,7 @@ async def cmd_deploy(message: Message):
                 output_lines.append(line.decode(errors="replace").rstrip())
             await proc.wait()
         except (asyncio.CancelledError, ConnectionError, OSError):
-            return  # bot is being restarted by deploy.sh — expected, curl handles notification
+            return  # bot is being restarted by svc deploy — expected, notification handled by svc
 
         result = "\n".join(output_lines[-30:])  # last 30 lines
         if proc.returncode == 0:
@@ -936,12 +974,11 @@ async def cmd_deploy(message: Message):
             _ctx["add_system_alert"](f"Deploy 실패 (대상: {target}, exit {proc.returncode})")
             await status_msg.edit_text(f"❌ Deploy 실패 (exit {proc.returncode})\n```\n{result}\n```", parse_mode="Markdown")
     except Exception as e:
-        # ServerDisconnectedError / CancelledError = bot killed by deploy restart — expected
         err_name = type(e).__name__
         err_str = str(e)
         if ("Disconnect" in err_name or "Disconnect" in err_str
                 or isinstance(e, (asyncio.CancelledError, ConnectionError, OSError))):
-            return  # deploy.sh curl handles notification
+            return  # bot killed by deploy restart — expected, svc handles notification
         _ctx["add_system_alert"](f"Deploy 오류 (대상: {target}): {type(e).__name__}")
         try:
             await status_msg.edit_text(f"❌ Deploy 오류: {e}")

@@ -15,7 +15,7 @@
 | 파일 | 용도 |
 |------|------|
 | `setup-server.sh` | Hetzner 서버 초기 프로비저닝 (1회) |
-| `deploy.sh` | 차분 배포 스크립트 (변경분만 pull + 재시작) |
+| `scripts/svc` | 통합 서비스 관리 (deploy, boot, kill, restart, status) |
 | `systemd/leninbot-api.service` | FastAPI 서비스 (port 8000) |
 | `systemd/leninbot-telegram.service` | Telegram 봇 서비스 |
 
@@ -25,7 +25,8 @@
 /home/grass/leninbot/
   ├── .env                  # 환경변수 (수동 생성)
   ├── venv/                 # Python 가상환경
-  ├── deploy.sh             # 배포 스크립트
+  ├── scripts/svc           # 통합 서비스 관리 스크립트
+  ├── deploy.sh             # svc deploy 래퍼 (하위 호환)
   ├── api.py                # FastAPI 서버
   ├── telegram_bot.py       # Telegram 봇
   ├── systemd/              # systemd 서비스 파일
@@ -48,7 +49,7 @@ ssh root@YOUR_HETZNER_IP 'bash -s' < setup-server.sh
 3. GitHub 저장소 클론 → `/home/grass/leninbot/`
 4. Python venv 생성 + `requirements.txt` 설치
 5. systemd 서비스 파일 복사 및 등록 (`enable`)
-6. `deploy.sh` 실행 권한 부여
+6. `scripts/svc` 실행 권한 부여
 
 ## 2단계: 환경변수 설정
 
@@ -102,7 +103,7 @@ journalctl -u leninbot-telegram -f  # 실시간 로그
 
 ## 4단계: sudoers 설정
 
-`deploy.sh`가 `grass` 유저로 `systemctl restart`를 실행하므로, 비밀번호 없이 허용:
+`scripts/svc`가 `grass` 유저로 `systemctl restart`를 실행하므로, 비밀번호 없이 허용:
 
 ```bash
 visudo
@@ -129,7 +130,7 @@ grass ALL=(ALL) NOPASSWD: /bin/systemctl restart leninbot-api, /bin/systemctl re
 ### 방법 B: SSH 직접 실행
 
 ```bash
-ssh grass@YOUR_HETZNER_IP '~/leninbot/deploy.sh'
+ssh grass@YOUR_HETZNER_IP '~/leninbot/scripts/svc deploy'
 ```
 
 ---
@@ -143,7 +144,7 @@ ssh grass@YOUR_HETZNER_IP '~/leninbot/deploy.sh'
     │
 git commit + push ──────→ origin/main 업데이트
 
-텔레그램 /deploy ──────────────────────────────────────→ deploy.sh 실행
+텔레그램 /deploy ──────────────────────────────────────→ scripts/svc deploy 실행
     (또는 SSH)                                              │
                                                             ├─ 1. git fetch
                                                             │   LOCAL vs REMOTE 비교
@@ -189,7 +190,7 @@ git commit + push ──────→ origin/main 업데이트
 
 | 경로 | 방식 | 목적 |
 |------|------|------|
-| deploy.sh → curl | Telegram Bot API 직접 호출 | 사용자에게 완료 통보 (봇 죽은 상태에서도 동작) |
+| svc deploy → curl | Telegram Bot API 직접 호출 | 사용자에게 완료 통보 (봇 죽은 상태에서도 동작) |
 | 새 봇 → system_alert | deploy-meta.json → `_system_alerts` 주입 | 봇이 자신의 업데이트를 인식, 대화 맥락에 반영 |
 
 ---
@@ -220,7 +221,7 @@ BichonWebsite에서의 연결:
 
 | 증상 | 확인 |
 |------|------|
-| `/deploy` 응답 없음 | `deploy.sh` 존재 + 실행 권한 확인 |
+| `/deploy` 응답 없음 | `scripts/svc` 존재 + 실행 권한 확인 |
 | "이미 최신" | `git push`를 먼저 했는지 확인 |
 | pip install 실패 | `journalctl -u leninbot-telegram`에서 에러 확인 |
 | 봇 기동 안 됨 | `.env` 파일의 `TELEGRAM_BOT_TOKEN` 확인 |
