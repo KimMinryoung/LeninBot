@@ -107,7 +107,7 @@ async def execute_tool(
         is_error = True
 
     # Guard: ensure result is a non-None string
-    if not isinstance(result, str) or result is None:
+    if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
     # Truncate oversized results to avoid context overflow
     if len(result) > 50000:

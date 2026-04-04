@@ -568,10 +568,8 @@ async def chat_with_tools(
             elif finish_reason == "content_filter":
                 logger.warning("Response blocked by content filter at round %d", round_num)
             # Combine accumulated text from tool_calls rounds with final response
-            final_text = content_text.strip()
-            if accumulated_text_parts:
-                all_text = "\n".join(accumulated_text_parts)
-                final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
+            all_parts = accumulated_text_parts + ([content_text.strip()] if content_text.strip() else [])
+            final_text = "\n".join(all_parts)
             if budget_tracker is not None:
                 budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
             return final_text if final_text else EMPTY_RESPONSE_FALLBACK
@@ -736,10 +734,8 @@ async def chat_with_tools(
                     total_cost, round_num, was_still_working, tool_work_details))
             return f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}"
 
-    final_text = text.strip()
-    if accumulated_text_parts:
-        all_text = "\n".join(accumulated_text_parts)
-        final_text = f"{all_text}\n\n{final_text}" if final_text else all_text
+    all_parts = accumulated_text_parts + ([text.strip()] if text.strip() else [])
+    final_text = "\n".join(all_parts)
     if budget_tracker is not None:
         budget_tracker.update(build_budget_tracker(
             total_cost, round_num, was_still_working, tool_work_details))
