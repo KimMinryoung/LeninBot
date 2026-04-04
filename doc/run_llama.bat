@@ -10,6 +10,7 @@ C:\Users\DESKTOP\llama-cpp\bin\llama-server.exe ^
   --cache-type-v q4_0 ^
   --ubatch-size 512 ^
   --threads 4 ^
+  --parallel 2 ^
   --cont-batching ^
   --no-mmap ^
   --slots ^

@@ -24,7 +24,7 @@ MOON_MODEL      = os.getenv("MOON_LLM_MODEL", "qwen3.5-9b")
 
 # Concurrency limit: llama-server runs with 1 slot (no --parallel flag).
 # Serialize requests to avoid API errors under concurrent task load.
-LOCAL_SEMAPHORE = asyncio.Semaphore(1)
+LOCAL_SEMAPHORE = asyncio.Semaphore(2)
 
 TIMEOUT        = 300
 HEALTH_TIMEOUT = 3
