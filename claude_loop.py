@@ -692,7 +692,7 @@ async def chat_with_tools(
         except Exception as api_err:
             err_str = str(api_err)
             recovered = False
-            if "tool_use" in err_str and "tool_result" in err_str:
+            if ("tool_use" in err_str and "tool_result" in err_str) or "tool" in err_str.lower() or "400" in err_str:
                 # Auto-recovery: strict re-canonicalization first, then strip.
                 _dump_messages_for_debug(api_msgs, round_num, api_err)
                 logger.warning("Auto-recovery: retrying once with strict canonicalization")
@@ -831,6 +831,9 @@ async def chat_with_tools(
                 # Guard: ensure result is a non-None string
                 if not isinstance(result, str) or result is None:
                     result = str(result) if result is not None else "(no result)"
+                # Truncate oversized results to avoid context overflow
+                if len(result) > 50000:
+                    result = result[:50000] + "\n... [truncated]"
                 tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": tid,
@@ -842,9 +845,8 @@ async def chat_with_tools(
                 # Notify: tool call completed
                 if on_progress:
                     status = "❌" if is_error else "✓"
-                    result_preview = result
                     try:
-                        await on_progress("tool_result", f"  {status} {result_preview}")
+                        await on_progress("tool_result", f"  {status} {result[:200]}")
                     except Exception:
                         pass
                 # Log for diagnostics

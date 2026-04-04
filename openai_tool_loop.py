@@ -432,10 +432,10 @@ async def chat_with_tools(
     tools: list[dict],
     tool_handlers: dict,
     system_prompt: str,
-    max_rounds: int = 30,
+    max_rounds: int = 50,
     max_tokens: int = 4096,
     log_event=None,
-    budget_usd: float = 0.0,
+    budget_usd: float = 0.30,
     budget_tracker: dict | None = None,
     on_progress=None,
     task_id: int | None = None,
@@ -446,13 +446,13 @@ async def chat_with_tools(
     """
     sdk_mode = client is not None
 
-    # ── Budget validation ──
+    # ── Budget validation (matches claude_loop.py) ──
     try:
         budget_usd = float(budget_usd)
     except (TypeError, ValueError):
         logger.warning("Invalid budget_usd=%r; falling back to 0.30", budget_usd)
         budget_usd = 0.30
-    if budget_usd <= 0 and sdk_mode:
+    if budget_usd <= 0:
         logger.warning("Non-positive budget_usd=%s; clamping to 0.01", budget_usd)
         budget_usd = 0.01
 
@@ -593,8 +593,8 @@ async def chat_with_tools(
                 })
             return final_text if final_text else "응답을 생성하지 못했습니다."
 
-        # ── Budget check ──
-        budget_exceeded = sdk_mode and budget_usd > 0 and total_cost >= budget_usd
+        # ── Budget check (matches claude_loop.py) ──
+        budget_exceeded = total_cost >= budget_usd
         if budget_exceeded:
             logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d — "
                            "processing final tool calls before exit",
@@ -718,21 +718,21 @@ async def chat_with_tools(
         if budget_exceeded:
             break
 
-        # ── Budget warning at 80% ──
-        if sdk_mode and budget_usd > 0 and not budget_warning_sent and total_cost > budget_usd * 0.8:
+        # ── Budget warning at 80% (matches claude_loop.py — injected as user message) ──
+        if not budget_warning_sent and total_cost > budget_usd * 0.8:
             budget_warning_sent = True
             working_msgs.append({
-                "role": "system",
+                "role": "user",
                 "content": (
-                    f"[BUDGET WARNING] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
+                    f"[SYSTEM] 예산 80% 소진 (${total_cost:.3f}/${budget_usd:.2f}). "
                     "작업을 계속하라. 한도 도달 시 시스템이 자동 종료한다."
                 ),
             })
 
-        # ── Round limit warning 2 rounds before max ──
+        # ── Round limit warning 2 rounds before max (matches claude_loop.py) ──
         if round_num == max_rounds - 2:
             working_msgs.append({
-                "role": "system",
+                "role": "user",
                 "content": (
                     f"[SYSTEM] 라운드 한도 임박 ({round_num}/{max_rounds}). "
                     "다음 라운드가 마지막이다. 파일 저장 등 최종 도구 호출을 지금 하라."
@@ -742,7 +742,7 @@ async def chat_with_tools(
     # ══════════════════════════════════════════════════════════════════
     # Forced final response: max_rounds or budget exhausted
     # ══════════════════════════════════════════════════════════════════
-    budget_exhausted = sdk_mode and budget_usd > 0 and total_cost >= budget_usd
+    budget_exhausted = total_cost >= budget_usd
     was_still_working = (
         response is not None
         and _extract_response(sdk_mode, response)[0] == "tool_calls"
