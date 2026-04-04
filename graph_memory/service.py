@@ -30,7 +30,6 @@ from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.gemini_client import GeminiClient
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
-from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.search.search_config import (
     SearchConfig,
@@ -102,13 +101,6 @@ class GraphMemoryService:
             )
         )
 
-        cross_encoder = GeminiRerankerClient(
-            config=LLMConfig(
-                api_key=gemini_api_key,
-                model="gemini-2.5-flash-lite",
-            )
-        )
-
         graph_driver = Neo4jDriver(
             uri=neo4j_uri,
             user=neo4j_user,
@@ -136,7 +128,6 @@ class GraphMemoryService:
             password=None,
             llm_client=llm_client,
             embedder=embedder,
-            cross_encoder=cross_encoder,
             graph_driver=graph_driver,
         )
 
