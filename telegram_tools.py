@@ -1243,17 +1243,32 @@ TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
 # ── Image generation tool (Replicate) ─────────────────────────────────
+def _build_generate_image_description() -> str:
+    """Build generate_image description with live model schemas."""
+    base = (
+        "Generate an image using Replicate models. "
+        "Returns prediction_id, model, final prompt, image URL, and local file path.\n\n"
+        "IMPORTANT: Each model accepts DIFFERENT parameters. "
+        "Check the per-model parameter list below and only use parameters valid for your chosen model.\n\n"
+    )
+    try:
+        from replicate_image_service import get_model_schemas_description
+        schemas = get_model_schemas_description()
+        if schemas:
+            base += f"Model parameters (from Replicate API):\n{schemas}\n\n"
+    except Exception:
+        pass
+    base += (
+        "reference_image: For FLUX editing only (local path, URL, or data URI). "
+        "Do not use with rd_fast or rd_plus. "
+        "You design the prompt; this tool executes it."
+    )
+    return base
+
+
 GENERATE_IMAGE_TOOL = {
     "name": "generate_image",
-        "description": (
-            "Generate an image using Replicate models. "
-            "Supports FLUX presets and Retro Diffusion pixel-art presets. "
-            "Returns prediction_id, model, final prompt, image URL, and local file path. "
-            "Supports optional reference_image input for FLUX editing paths only: pass a downloaded local image path, remote URL, or data URI. "
-            "If reference_image is provided, the backend routes to a Replicate image-editing model compatible with input_image. "
-            "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art / Retro Diffusion portrait alias), portrait, detailed, game_asset, 1_bit, low_res, mc_item. "
-            "You design the prompt; this tool executes it."
-        ),
+    "description": _build_generate_image_description(),
     "input_schema": {
         "type": "object",
         "properties": {

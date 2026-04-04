@@ -294,6 +294,43 @@ def _filter_input_by_schema(model_name: str, payload_input: dict[str, Any]) -> d
     return filtered
 
 
+def get_model_schemas_description() -> str:
+    """Build a human-readable summary of each model's valid input parameters.
+
+    Fetched live from Replicate API (cached). Used to populate the
+    generate_image tool description so agents know valid params upfront.
+    """
+    lines = []
+    for preset_key, preset in MODEL_PRESETS.items():
+        model_name = preset["model"]
+        try:
+            props = _get_model_input_schema(model_name)
+        except Exception:
+            props = {}
+        if not props:
+            continue
+        param_parts = []
+        for pname, pschema in sorted(props.items()):
+            if pname == "prompt":
+                continue  # always present, not interesting
+            info = pname
+            ptype = pschema.get("type", "")
+            default = pschema.get("default")
+            enum = pschema.get("allOf", [{}])[0].get("enum") or pschema.get("enum")
+            parts = []
+            if ptype:
+                parts.append(ptype)
+            if enum:
+                parts.append(f"enum={enum}")
+            elif default is not None:
+                parts.append(f"default={default}")
+            if parts:
+                info += f" ({', '.join(parts)})"
+            param_parts.append(info)
+        lines.append(f"  {preset_key} ({model_name}): {', '.join(param_parts)}")
+    return "\n".join(lines)
+
+
 @lru_cache(maxsize=16)
 def _model_supports_official_endpoint(model_name: str) -> bool:
     data = _get_model_metadata(model_name)
