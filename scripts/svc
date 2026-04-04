@@ -163,12 +163,13 @@ _notify_telegram() {
     local msg="$1"
     source "$DEPLOY_DIR/.env" 2>/dev/null || true
     if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${ALLOWED_USER_IDS:-}" ]]; then
-        IFS=',' read -ra UIDS <<< "$ALLOWED_USER_IDS"
-        for uid in "${UIDS[@]}"; do
-            uid=$(echo "$uid" | tr -d ' ')
+        # Single-owner: send to first (only) ID, no broadcast
+        local uid
+        uid=$(echo "$ALLOWED_USER_IDS" | cut -d',' -f1 | tr -d ' ')
+        if [[ -n "$uid" ]]; then
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
                 -d chat_id="$uid" -d text="$msg" -d parse_mode="Markdown" > /dev/null 2>&1 || true
-        done
+        fi
     fi
 }
 

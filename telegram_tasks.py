@@ -1281,6 +1281,16 @@ async def broadcast(bot: Bot, text: str, allowed_user_ids: set[int]):
 
 # ── System Monitor ───────────────────────────────────────────────────
 
+async def _send_owner(bot: Bot, owner_id: int, text: str):
+    """Send a message to the single owner user."""
+    if not owner_id:
+        return
+    try:
+        await bot.send_message(chat_id=owner_id, text=text)
+    except Exception as e:
+        logger.warning("Send to owner %d failed: %s", owner_id, e)
+
+
 async def system_monitor(
     bot: Bot,
     *,
@@ -1288,8 +1298,10 @@ async def system_monitor(
     add_alert_fn,
     clear_alert_fn,
 ):
-    """Background loop: monitor system events and broadcast notifications."""
+    """Background loop: monitor system events and notify the owner."""
     from shared import get_kg_service
+
+    owner_id = next(iter(allowed_user_ids)) if len(allowed_user_ids) == 1 else 0
 
     # 1. Initial KG check (startup notification is handled by bot_main)
     await asyncio.sleep(10)
@@ -1316,11 +1328,11 @@ async def system_monitor(
             if kg_was_up and not kg_is_up:
                 clear_alert_fn("KG reconnect")
                 add_alert_fn("KG (Neo4j) disconnected — graph search/write unavailable")
-                await broadcast(bot, "🔴 *KG 연결 끊김* — Neo4j에 연결할 수 없습니다.", allowed_user_ids)
+                await _send_owner(bot, owner_id, "🔴 *KG 연결 끊김* — Neo4j에 연결할 수 없습니다.")
             elif not kg_was_up and kg_is_up:
                 clear_alert_fn("KG")
                 add_alert_fn("KG reconnected — Neo4j operational")
-                await broadcast(bot, "🟢 *KG 재연결 성공* — Neo4j 연결이 복구되었습니다.", allowed_user_ids)
+                await _send_owner(bot, owner_id, "🟢 *KG 재연결 성공* — Neo4j 연결이 복구되었습니다.")
 
             kg_was_up = kg_is_up
 
@@ -1329,11 +1341,11 @@ async def system_monitor(
             if redis_was_up and not redis_is_up:
                 clear_alert_fn("Redis reconnect")
                 add_alert_fn("Redis disconnected — live task progress tracking unavailable")
-                await broadcast(bot, "🔴 Redis 연결 끊김 — 재시작 시 태스크 진행 상태가 유실될 수 있습니다.", allowed_user_ids)
+                await _send_owner(bot, owner_id, "🔴 Redis 연결 끊김 — 재시작 시 태스크 진행 상태가 유실될 수 있습니다.")
             elif not redis_was_up and redis_is_up:
                 clear_alert_fn("Redis")
                 add_alert_fn("Redis reconnected")
-                await broadcast(bot, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.", allowed_user_ids)
+                await _send_owner(bot, owner_id, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.")
             redis_was_up = redis_is_up
         except Exception as e:
             logger.error("System monitor error: %s", e)

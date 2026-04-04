@@ -34,7 +34,7 @@ from bot_config import (
 from telegram_tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram_tasks import (
-    process_task, broadcast, system_monitor,
+    process_task, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
     recover_processing_tasks_on_startup,
     checkpoint_task_on_shutdown, persist_task_restart_state,
@@ -87,6 +87,8 @@ ALLOWED_USER_IDS: set[int] = {
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
     if uid.strip()
 }
+# Single-owner enforcement: all outbound messages go to this user only.
+OWNER_USER_ID: int = next(iter(ALLOWED_USER_IDS)) if len(ALLOWED_USER_IDS) == 1 else 0
 EMAIL_BRIDGE_ENABLED = os.getenv("EMAIL_BRIDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS", "120")))
 EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
@@ -1258,6 +1260,9 @@ async def bot_main():
     if not ALLOWED_USER_IDS:
         logger.warning("ALLOWED_USER_IDS not set, skipping bot")
         return
+    if len(ALLOWED_USER_IDS) > 1:
+        logger.error("Security: ALLOWED_USER_IDS must contain exactly one user ID, got %d. Aborting.", len(ALLOWED_USER_IDS))
+        return
 
     # Ensure task table exists
     await asyncio.to_thread(_ensure_table)
@@ -1438,7 +1443,7 @@ async def bot_main():
                 }
                 if worker_result.get("error"):
                     orch_result["error"] = worker_result["error"]
-                target_uid = user_id if user_id != 0 else next(iter(ALLOWED_USER_IDS), 0)
+                target_uid = user_id if user_id != 0 else OWNER_USER_ID
                 if target_uid:
                     await _orchestrator_report_task(b, task, orch_result, target_uid)
                 return  # Done — worker handled everything
@@ -1484,7 +1489,7 @@ async def bot_main():
             system_prompt += "\n" + _build_env_context()
 
         # Send progress to the task's user (or all users if self-generated)
-        target_chat_id = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
+        target_chat_id = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
 
         # ── Provider dispatch: Claude vs local LLM (OpenAI-compatible) ──
@@ -1568,7 +1573,7 @@ async def bot_main():
         result = result or {}
         is_subtask = result.get("is_subtask", False)
         if not is_subtask and result.get("status") in ("done", "failed"):
-            target_uid = task["user_id"] if task["user_id"] != 0 else next(iter(ALLOWED_USER_IDS), 0)
+            target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
             if target_uid:
                 await _orchestrator_report_task(b, task, result, target_uid)
 
@@ -1618,15 +1623,19 @@ async def bot_main():
                     logger.warning("Shutdown checkpoint failed for task #%s: %s", task_id, e)
             # Save restart marker to chat history so the bot retains awareness after restart
             restart_ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-            for uid in ALLOWED_USER_IDS:
+            if OWNER_USER_ID:
                 try:
                     await asyncio.to_thread(
-                        _save_system_event, uid, "restart",
+                        _save_system_event, OWNER_USER_ID, "restart",
                         f"SIGTERM received, service restart initiated ({restart_ts})"
                     )
                 except Exception:
                     pass
-            await broadcast(bot, "🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.", ALLOWED_USER_IDS)
+            if OWNER_USER_ID:
+                try:
+                    await bot.send_message(chat_id=OWNER_USER_ID, text="🔄 *서버 재시작 중* — 새 버전 배포가 시작됩니다.")
+                except Exception:
+                    pass
         try:
             asyncio.get_event_loop().create_task(_shutdown_notify_and_checkpoint())
         except Exception:
@@ -1650,15 +1659,18 @@ async def bot_main():
         recovery_summary = ""
         if handed_off or closed_stale or closed_repeated:
             recovery_summary = f" Task recovery: handoff {handed_off}, expired {closed_stale}, repeated-failure {closed_repeated}."
-        for uid in ALLOWED_USER_IDS:
+        if OWNER_USER_ID:
             try:
                 _save_system_event(
-                    uid, "startup",
+                    OWNER_USER_ID, "startup",
                     f"Telegram service restart complete ({startup_ts}).{recovery_summary}"
                 )
             except Exception as e:
-                logger.warning("Failed to save startup marker for user %s: %s", uid, e)
-        await broadcast(bot, "🟢 Telegram 서비스 재시작 완료 — 메시지 수신 준비 완료.", ALLOWED_USER_IDS)
+                logger.warning("Failed to save startup marker for owner: %s", e)
+            try:
+                await bot.send_message(chat_id=OWNER_USER_ID, text="🟢 Telegram 서비스 재시작 완료 — 메시지 수신 준비 완료.")
+            except Exception:
+                pass
 
     asyncio.create_task(_notify_ready(), name="startup_notify")
 
