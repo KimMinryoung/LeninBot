@@ -167,12 +167,25 @@ async def handle_web_chat(
             if provider == "local":
                 provider = "openai" if _openai_client else "claude"
 
+            # Resolve model name for the effective provider (not global config)
+            if provider == "openai":
+                from bot_config import _resolve_openai_model, _TIER_MAP, _OPENAI_MODEL_MAP
+                tier = str(_config.get("chat_model", "high"))
+                alias = _TIER_MAP.get("openai", {}).get(tier, tier)
+                model = _resolve_openai_model(alias)
+            else:
+                # Claude: resolve via normal path (works even when global config is local)
+                from bot_config import _get_model_by_alias, _MODEL_ALIAS_MAP, _TIER_MAP
+                tier = str(_config.get("chat_model", "high"))
+                alias = _TIER_MAP.get("claude", {}).get(tier, tier)
+                model = await _get_model_by_alias(alias)
+
             if provider == "openai" and _openai_client:
                 from openai_tool_loop import chat_with_tools as openai_chat
                 result = await openai_chat(
                     history,
                     client=_openai_client,
-                    model=await _get_model(),
+                    model=model,
                     tools=_web_tools,
                     tool_handlers=_web_handlers,
                     system_prompt=system_prompt,
@@ -185,7 +198,7 @@ async def handle_web_chat(
                 result = await chat_with_tools(
                     history,
                     client=_claude,
-                    model=await _get_model(),
+                    model=model,
                     tools=_web_tools,
                     tool_handlers=_web_handlers,
                     system_prompt=system_prompt,

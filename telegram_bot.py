@@ -1577,8 +1577,24 @@ async def bot_main():
                     task_id=task_id, provider_override=_forced_provider,
                 )
             chosen_chat_fn = _corporate_chat_fn
-            chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+
+            # Resolve model name for the forced provider (not global config)
+            if _forced_provider == "openai":
+                from bot_config import _resolve_openai_model, _TIER_MAP
+                _fp_tier = str(_config.get("task_model", "high"))
+                _fp_alias = _TIER_MAP.get("openai", {}).get(_fp_tier, _fp_tier)
+                _fp_model = _resolve_openai_model(_fp_alias)
+                chosen_model_fn = lambda: _fp_model  # noqa: E731
+            else:
+                # Claude: resolve alias for claude tier map
+                from bot_config import _get_model_by_alias, _TIER_MAP
+                _fp_tier = str(_config.get("task_model", "high"))
+                _fp_alias = _TIER_MAP.get("claude", {}).get(_fp_tier, _fp_tier)
+
+                async def _get_corporate_model():
+                    return await _get_model_by_alias(_fp_alias)
+                chosen_model_fn = _get_corporate_model
         else:
             # provider=None: follow orchestrator's global config
             chosen_chat_fn = _chat_with_tools
