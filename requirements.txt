@@ -22,6 +22,7 @@ graphiti-core[google-genai]
 # Browser automation (URL fetching for JS-rendered pages)
 playwright
 browser-use
+crawl4ai
 
 # Finance data
 yfinance
@@ -30,6 +31,9 @@ yfinance
 aiogram>=3.0,<4.0
 anthropic
 croniter
+
+# Document conversion
+markitdown
 
 # State management
 redis>=5.0

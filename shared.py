@@ -1188,10 +1188,11 @@ def save_experiential_memory(
 # ── Vector Similarity Search ──────────────────────────────────────────
 # Shared across chatbot (RAG), telegram_tools (vector_search tool), etc.
 
-def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
+def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = False) -> list:
     """Search lenin_corpus via pgvector cosine similarity.
 
     Returns list of LangChain Document objects with page_content + metadata.
+    When rerank=True, re-scores results with a cross-encoder for better relevance.
     """
     from langchain_core.documents import Document
     from db import query as db_query
@@ -1199,10 +1200,11 @@ def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
     emb = _get_exp_embeddings()
     vec = emb.embed_query(query)
     embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
+    fetch_k = k * 3 if rerank else k
     try:
         rows = db_query(
             "SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)",
-            (embedding_str, k, layer),
+            (embedding_str, fetch_k, layer),
         )
     except Exception as e:
         error_msg = str(e)
@@ -1212,11 +1214,23 @@ def similarity_search(query: str, k: int = 5, layer: str = None) -> list:
             logger.warning("[shared] similarity_search error: %s", e)
         return []
 
-    return [
+    docs = [
         Document(page_content=row.get("content", ""), metadata=row.get("metadata", {}))
         for row in rows
         if row.get("content")
     ]
+
+    if rerank and len(docs) > 2:
+        try:
+            ranked = emb.rerank(query, [d.page_content for d in docs], top_k=k)
+            docs = [docs[idx] for idx, _score in ranked]
+        except Exception as e:
+            logger.warning("[shared] rerank failed, using original order: %s", e)
+            docs = docs[:k]
+    else:
+        docs = docs[:k]
+
+    return docs
 
 
 # ── Knowledge Graph Search ────────────────────────────────────────────
@@ -1331,6 +1345,41 @@ def _is_low_quality(text: str) -> bool:
     return False
 
 
+def _crawl4ai_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Fetch URL via Crawl4AI and return LLM-friendly markdown."""
+    try:
+        import asyncio as _aio
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
+        async def _run():
+            browser_cfg = BrowserConfig(headless=True, verbose=False)
+            run_cfg = CrawlerRunConfig(word_count_threshold=10)
+            async with AsyncWebCrawler(config=browser_cfg) as crawler:
+                result = await crawler.arun(url=url, config=run_cfg)
+                if result.success:
+                    md = result.markdown or ""
+                    return md[:max_chars] if md else None
+                return None
+
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: _aio.run(_run())).result(timeout=60)
+        else:
+            return _aio.run(_run())
+    except ImportError:
+        logger.debug("[URL] crawl4ai not installed, skipping")
+        return None
+    except Exception as e:
+        logger.info("[URL] Crawl4AI fetch error: %s", e)
+        return None
+
+
 def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     """Fetch and extract main body text from a URL (up to 10,000 chars).
 
@@ -1356,7 +1405,15 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     except Exception as e:
         logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
 
-    # 2) Fallback: Tavily Extract (skip if API key missing or quota exhausted)
+    # 2) Crawl4AI — LLM-friendly markdown extraction
+    try:
+        result = _crawl4ai_fetch(url, max_chars)
+        if result and not _is_low_quality(result):
+            return result
+    except Exception as e:
+        logger.info("[URL] Crawl4AI 실패 (%s): %s", url[:60], e)
+
+    # 3) Fallback: Tavily Extract (skip if API key missing or quota exhausted)
     best_fallback = None
     tavily_key = os.environ.get("TAVILY_API_KEY", "")
     if tavily_key:
@@ -1382,7 +1439,7 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
         except Exception as e:
             logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
-    # 3) Fallback: requests + BeautifulSoup
+    # 4) Fallback: requests + BeautifulSoup
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -1435,6 +1492,42 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
 
     # Return best fallback result even if low-quality (better than nothing)
     return best_fallback
+
+
+# ── Document Conversion (MarkItDown) ─────────────────────────────────
+
+_MAX_DOC_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_DOC_OUTPUT = 30000  # chars
+
+
+def convert_document(file_path: str, max_chars: int = _MAX_DOC_OUTPUT) -> _Optional[str]:
+    """Convert a document (PDF, DOCX, PPTX, XLSX, HTML) to markdown text.
+
+    Returns markdown string or None on failure.
+    """
+    try:
+        from markitdown import MarkItDown
+    except ImportError:
+        logger.warning("[shared] markitdown not installed")
+        return None
+
+    if not os.path.isfile(file_path):
+        logger.warning("[shared] convert_document: file not found: %s", file_path)
+        return None
+
+    size = os.path.getsize(file_path)
+    if size > _MAX_DOC_SIZE:
+        logger.warning("[shared] convert_document: file too large (%d bytes)", size)
+        return None
+
+    try:
+        converter = MarkItDown()
+        result = converter.convert(file_path)
+        text = result.text_content or ""
+        return text[:max_chars] if text else None
+    except Exception as e:
+        logger.warning("[shared] convert_document error: %s", e)
+        return None
 
 
 # ── Playwright Browser Pool (sync, singleton with persistent context) ──

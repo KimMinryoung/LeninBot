@@ -93,6 +93,20 @@ class EmbeddingClient:
             logger.debug("[EmbeddingClient] giving up: %s", e)
             return self._get_fallback().embed_documents(texts)
 
+    def rerank(
+        self, query: str, documents: list[str], top_k: int = 5
+    ) -> list[tuple[int, float]]:
+        """Rerank documents by relevance to query. Returns [(index, score), ...]."""
+        try:
+            data = self._post_with_retry(
+                "/rerank",
+                {"query": query, "documents": documents, "top_k": top_k},
+            )
+            return [(r["index"], r["score"]) for r in data["results"]]
+        except Exception:
+            logger.warning("[EmbeddingClient] rerank unavailable, returning original order")
+            return [(i, 0.0) for i in range(min(top_k, len(documents)))]
+
 
 # Module-level singleton
 _client = None

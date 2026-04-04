@@ -147,6 +147,20 @@ TOOLS = [
             "required": ["code"],
         },
     },
+    {
+        "name": "convert_document",
+        "description": (
+            "Convert a document file (PDF, DOCX, PPTX, XLSX, HTML) to markdown text. "
+            "Accepts a local file path. Returns extracted text content."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the document file."},
+            },
+            "required": ["file_path"],
+        },
+    },
 ]
 
 
@@ -156,7 +170,7 @@ async def _exec_vector_search(query: str, num_results: int = 5, layer: str | Non
     """Execute vector similarity search via chatbot module."""
     try:
         from shared import similarity_search
-        docs = await asyncio.to_thread(similarity_search, query, num_results, layer)
+        docs = await asyncio.to_thread(similarity_search, query, num_results, layer, rerank=True)
         if not docs:
             return "No documents found."
         results = []
@@ -181,6 +195,17 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
     except Exception as e:
         logger.error("kg_search error: %s", e)
         return f"Knowledge graph search failed: {e}"
+
+
+async def _exec_convert_document(file_path: str) -> str:
+    """Convert a document to markdown text."""
+    try:
+        from shared import convert_document
+        result = await asyncio.to_thread(convert_document, file_path)
+        return result or "Failed to convert document (unsupported format or empty content)."
+    except Exception as e:
+        logger.error("convert_document error: %s", e)
+        return f"Document conversion failed: {e}"
 
 
 async def _exec_fetch_url(url: str) -> str:
@@ -875,6 +900,7 @@ TOOL_HANDLERS = {
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
+    "convert_document": _exec_convert_document,
     "download_image": _exec_download_image,
     "read_file": _exec_read_file,
     "write_file": _exec_write_file,
