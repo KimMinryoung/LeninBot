@@ -360,12 +360,20 @@ def build_soviet_prompt(
     aspect_ratio: str = "1:1",
     *,
     model: str | None = None,
+    apply_style_prefix: bool = True,
 ) -> str:
+    base_prompt = prompt.strip().rstrip(".")
+
     if model in RETRO_DIFFUSION_MODELS:
-        return (
-            f"{prompt.strip()}. "
-            "pixel art, grid-aligned, clean silhouette, limited palette, no text, no watermark, no logo."
-        )
+        if apply_style_prefix:
+            return (
+                f"{base_prompt}. "
+                "pixel art, grid-aligned, clean silhouette, limited palette, no text, no watermark, no logo."
+            )
+        return base_prompt
+
+    if not apply_style_prefix:
+        return base_prompt
 
     style_map = {
         "poster": "simple Soviet propaganda poster aesthetic, bold geometric composition, limited red black cream palette, clean silhouette, strong contrast",
@@ -375,7 +383,7 @@ def build_soviet_prompt(
     style_prefix = style_map.get(style, style_map["poster"])
     return (
         f"{style_prefix}. "
-        f"{prompt.strip()}. "
+        f"{base_prompt}. "
         f"No text, no watermark, no logo. aspect ratio {aspect_ratio}."
     )
 
@@ -591,6 +599,7 @@ async def generate_image(
     if reference_image and resolved_model in RETRO_DIFFUSION_MODELS:
         raise ValueError("Retro Diffusion presets do not support reference_image in this wrapper")
 
+    apply_style_prefix = True
     if reference_image:
         normalized_reference, reference_source = prepare_reference_image(reference_image)
         merged_extra["input_image"] = normalized_reference
@@ -605,10 +614,18 @@ async def generate_image(
             num_outputs = 1
         if aspect_ratio == "match_input_image":
             logger.info("[replicate] reference_image using caller-requested match_input_image aspect ratio")
+        if resolved_model == "flux_kontext_dev":
+            apply_style_prefix = False
     else:
         merged_extra["num_outputs"] = num_outputs
 
-    final_prompt = build_soviet_prompt(prompt, style=style, aspect_ratio=aspect_ratio, model=resolved_model)
+    final_prompt = build_soviet_prompt(
+        prompt,
+        style=style,
+        aspect_ratio=aspect_ratio,
+        model=resolved_model,
+        apply_style_prefix=apply_style_prefix,
+    )
     logger.info(
         "[replicate] create prediction model=%s style=%s num_outputs=%d reference=%s",
         resolved_model,

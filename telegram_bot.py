@@ -988,18 +988,6 @@ async def _maybe_summarize_chunk(user_id: int):
         logger.warning("Chunk summarization failed: %s", e)
 
 
-# ── CLAW pipeline (lazy-loaded) ──────────────────────────────────────
-_graph = None
-
-
-def _get_graph():
-    global _graph
-    if _graph is None:
-        from chatbot import graph
-        _graph = graph
-    return _graph
-
-
 # ── Helpers ──────────────────────────────────────────────────────────
 def _split_message(text: str, max_len: int = 4096) -> list[str]:
     """Split text into chunks respecting Telegram's 4096 char limit."""
@@ -1212,7 +1200,6 @@ register_handlers(router, ctx={
     "claude_client": _claude,
     "openai_client": _openai_client,
     "extract_text": _extract_text,
-    "get_graph": _get_graph,
     "local_llm_generate": _local_llm_generate,
     "get_model_light": _get_model_light,
     "maybe_summarize_chunk": _maybe_summarize_chunk,

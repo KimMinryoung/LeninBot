@@ -1366,7 +1366,7 @@ GENERATE_IMAGE_TOOL = {
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "Image description prompt (English). Will be prefixed with style aesthetics automatically.",
+                "description": "Image description prompt (English). For standard FLUX text-to-image calls, style presets may prepend aesthetic scaffolding. For flux_kontext_dev reference-image editing, the prompt is sent as custom-only text with no automatic poster/game/pixel prefix unless you explicitly write that style yourself.",
             },
             "style": {
                 "type": "string",
@@ -1852,3 +1852,34 @@ TOOLS.append(CHECK_INBOX_TOOL)
 TOOL_HANDLERS["check_inbox"] = _exec_check_inbox
 TOOLS.append(ALLOWLIST_SENDER_TOOL)
 TOOL_HANDLERS["allowlist_sender"] = _exec_allowlist_sender
+
+# ── Diary Writer Tool ─────────────────────────────────────────────────
+SAVE_DIARY_TOOL = {
+    "name": "save_diary",
+    "description": "Save a diary entry to the ai_diary table. Used by the diary agent to persist generated diary entries.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "One-line title/summary of the diary entry (Korean)."},
+            "content": {"type": "string", "description": "Full diary body text (Korean, 2+ paragraphs)."},
+        },
+        "required": ["title", "content"],
+    },
+}
+
+
+async def _exec_save_diary(title: str, content: str) -> str:
+    from db import execute as db_execute
+    try:
+        await asyncio.to_thread(
+            db_execute,
+            "INSERT INTO ai_diary (title, content) VALUES (%s, %s)",
+            (title, content),
+        )
+        return f"Diary saved: {title}"
+    except Exception as e:
+        return f"Failed to save diary: {e}"
+
+
+TOOLS.append(SAVE_DIARY_TOOL)
+TOOL_HANDLERS["save_diary"] = _exec_save_diary

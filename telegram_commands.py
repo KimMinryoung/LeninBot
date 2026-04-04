@@ -277,51 +277,10 @@ async def cmd_errors(message: Message):
 
 
 async def cmd_chat(message: Message):
-    """Route message through the CLAW pipeline (LangGraph agent)."""
+    """Deprecated: CLAW pipeline has been replaced by unified claude_loop."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    content = (message.text or "").removeprefix("/chat").strip()
-    if not content:
-        await message.answer("사용법: /chat <메시지>")
-        return
-
-    user_id = message.from_user.id
-    await message.answer("CLAW 파이프라인 처리 중...")
-
-    try:
-        from langchain_core.messages import HumanMessage
-
-        g = _ctx["get_graph"]()
-        thread_id = f"tg_{user_id}"
-        inputs = {"messages": [HumanMessage(content=content)]}
-        config = {"configurable": {"thread_id": thread_id}}
-
-        answer = None
-        logs: list[str] = []
-        async for output in g.astream(inputs, config=config, stream_mode="updates"):
-            for node_name, node_content in output.items():
-                if node_name == "log_conversation":
-                    continue
-                if "logs" in node_content:
-                    logs.extend(node_content["logs"])
-                if node_name == "generate":
-                    last_msg = node_content["messages"][-1]
-                    answer = last_msg.content
-
-        if answer:
-            for chunk in _ctx["split_message"](answer):
-                await message.answer(chunk)
-        else:
-            await message.answer("파이프라인에서 답변을 생성하지 못했습니다.")
-
-        if logs:
-            log_summary = "\n".join(logs[-10:])  # last 10 log lines
-            for chunk in _ctx["split_message"](f"[처리 로그]\n{log_summary}"):
-                await message.answer(chunk)
-
-    except Exception as e:
-        logger.error("CLAW pipeline error: %s", e)
-        await message.answer(f"CLAW 파이프라인 오류: {e}")
+    await message.answer("이 명령은 더 이상 사용되지 않습니다. 직접 메시지를 보내세요.")
 
 
 async def cmd_task(message: Message):

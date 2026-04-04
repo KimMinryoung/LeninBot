@@ -31,9 +31,6 @@ crawler/
 docs/
 *.pdf
 
-# 로컬 에이전트 런타임 데이터 (SQLite, 쿠키, 캐시)
-local_agent/data/
-
 # 서버 명령 임시 스크립트
 tmp_cmd.sh
 

@@ -12,8 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
-#from sse_starlette.sse import EventSourceResponse
-from langchain_core.messages import HumanMessage
 from db import query as db_query, query_one as db_query_one
 from email_bridge import (
     build_reply_prompt_input,
@@ -108,16 +106,8 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
         _session_locks[session_id] = asyncio.Lock()
     return _session_locks[session_id]
 
-# Lazy-load chatbot so uvicorn can bind the port first
-_graph = None
 
 
-def get_graph():
-    global _graph
-    if _graph is None:
-        from chatbot import graph
-        _graph = graph
-    return _graph
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -174,10 +164,11 @@ def format_sse(data: dict):
 async def chat(request: ChatRequest, http_req: Request):
     """
     클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
+    Uses claude_loop via web_chat module.
     """
-    g = get_graph()
+    from web_chat import handle_web_chat
+
     user_agent = http_req.headers.get("user-agent", "")
-    # X-Forwarded-For is set by Render's proxy; fall back to direct client IP
     forwarded = http_req.headers.get("x-forwarded-for", "")
     ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host if http_req.client else "")
 
@@ -190,50 +181,17 @@ async def chat(request: ChatRequest, http_req: Request):
             return
 
         async with lock:
-            inputs = {"messages": [HumanMessage(content=request.message)]}
-            config = {
-                "configurable": {
-                    "thread_id": request.session_id,
-                    "fingerprint": request.fingerprint,
-                    "user_agent": user_agent,
-                    "ip_address": ip_address,
-                }
-            }
-            pending_answer = None
-
             print(f"\n{'='*60}", flush=True)
             print(f"📩 [요청] session={request.session_id} fp={request.fingerprint[:8] or 'none'} | \"{request.message[:80]}\"", flush=True)
 
-            try:
-                async for output in g.astream(inputs, config=config, stream_mode="updates"):
-                    for node_name, node_content in output.items():
-                        if node_name == "log_conversation":
-                            continue
-
-                        # Stream logs via SSE + print to console
-                        if "logs" in node_content:
-                            for log_line in node_content["logs"]:
-                                print(f"[{node_name}] {log_line}", flush=True)
-                                yield format_sse({
-                                    "type": "log",
-                                    "node": node_name,
-                                    "content": log_line
-                                })
-
-                        if node_name == "generate":
-                            last_message = node_content["messages"][-1]
-                            answer = last_message.content
-                            print(f"[generate] 답변 생성 완료 ({len(answer)}자)", flush=True)
-                            yield format_sse({
-                                "type": "answer",
-                                "content": answer
-                            })
-            except Exception as e:
-                print(f"❌ [오류] 그래프 실행 중 예외 발생: {e}", flush=True)
-                yield format_sse({
-                    "type": "error",
-                    "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."
-                })
+            async for sse_event in handle_web_chat(
+                message=request.message,
+                session_id=request.session_id,
+                fingerprint=request.fingerprint,
+                user_agent=user_agent,
+                ip_address=ip_address,
+            ):
+                yield sse_event
 
             print(f"{'='*60}\n", flush=True)
 
@@ -378,22 +336,13 @@ async def redirect_research_file(filename: str):
 
 @app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])
 async def clear_session(session_id: str):
-    """특정 세션의 대화 기록(체크포인트)을 삭제합니다."""
-    g = get_graph()
-    exists = session_id in g.checkpointer.storage
-    if exists:
-        await g.checkpointer.adelete_thread(session_id)
-    return {"session_id": session_id, "cleared": exists}
-
-
-@app.delete("/sessions", dependencies=[Depends(require_admin)])
-async def clear_all_sessions():
-    """모든 세션의 대화 기록(체크포인트)을 삭제합니다."""
-    g = get_graph()
-    session_ids = list(g.checkpointer.storage.keys())
-    for sid in session_ids:
-        await g.checkpointer.adelete_thread(sid)
-    return {"cleared_sessions": len(session_ids), "session_ids": session_ids}
+    """Clear chat history for a session (deletes from chat_logs)."""
+    result = await asyncio.to_thread(
+        db_query,
+        "DELETE FROM chat_logs WHERE session_id = %s RETURNING id",
+        (session_id,),
+    )
+    return {"session_id": session_id, "cleared": len(result) if result else 0}
 
 
 @app.post("/email/poll", dependencies=[Depends(require_admin)])
