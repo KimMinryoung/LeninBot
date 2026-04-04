@@ -1,12 +1,9 @@
 """
-llm_client.py — 프로젝트 공용 LLM 클라이언트 (MOON PC 우선, 로컬 llama-server 폴백)
+llm_client.py — 프로젝트 공용 LLM 클라이언트 (MOON PC llama-server)
 
-우선순위:
-    1차: MOON PC llama-server (qwen3.5-9b Q8_0, Tailscale magic DNS http://moon:8080)
-    2차: 로컬 llama-server (qwen3.5-4b Q4_K_M, localhost:11435)
-
-양쪽 모두 OpenAI 호환 API (/v1/chat/completions).
-.env: MOON_LLM_BASE_URL, MOON_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL
+MOON PC llama-server (qwen3.5-9b Q8_0, Tailscale magic DNS http://moon:8080)
+OpenAI 호환 API (/v1/chat/completions).
+.env: MOON_LLM_BASE_URL, MOON_LLM_MODEL
 """
 
 import os
@@ -24,16 +21,12 @@ logger = logging.getLogger(__name__)
 MOON_BASE       = os.getenv("MOON_LLM_BASE_URL", "http://moon:8080")
 MOON_MODEL      = os.getenv("MOON_LLM_MODEL", "qwen3.5-9b")
 
-LOCAL_BASE      = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11435")
-LOCAL_MODEL     = os.getenv("LOCAL_LLM_MODEL", "qwen3.5-4b")
-
 TIMEOUT        = 300
 HEALTH_TIMEOUT = 3
 
 # ── 백엔드 정의 ──────────────────────────────────────────────────────────────
 _BACKENDS = [
     {"name": "moon",  "base": MOON_BASE,  "model": MOON_MODEL},
-    {"name": "local", "base": LOCAL_BASE, "model": LOCAL_MODEL},
 ]
 
 _backend_cache: dict = {}  # {"name", "base", "model", "checked_at"}
@@ -65,7 +58,7 @@ def _resolve_backend(force_refresh: bool = False) -> dict:
             logger.info("[llm] %s 연결 → %s (%s)", b["name"], b["base"], b["model"])
             return result
 
-    raise ConnectionError("MOON PC와 로컬 llama-server 모두 응답 없음")
+    raise ConnectionError("MOON PC llama-server 응답 없음")
 
 
 # ── OpenAI 호환 호출 (공통) ───────────────────────────────────────────────────
@@ -180,17 +173,9 @@ def _call(base: str, model: str, messages: list[dict],
 
 def _call_llm(messages: list[dict], temperature: float = 0.7,
               timeout: int = TIMEOUT) -> str:
-    """백엔드 자동 선택 후 호출. 1차 실패 시 폴백."""
+    """백엔드 선택 후 호출."""
     b = _resolve_backend()
-    try:
-        return _call(b["base"], b["model"], messages, temperature, timeout)
-    except Exception as e:
-        logger.warning("[llm] %s 호출 실패: %s → 폴백 시도", b["name"], e)
-        _backend_cache.clear()
-        b2 = _resolve_backend(force_refresh=True)
-        if b2["name"] == b["name"]:
-            raise
-        return _call(b2["base"], b2["model"], messages, temperature, timeout)
+    return _call(b["base"], b["model"], messages, temperature, timeout)
 
 
 # ── 공개 API ─────────────────────────────────────────────────────────────────
@@ -238,8 +223,6 @@ def check_llm() -> dict:
     except Exception as e:
         return {"status": "error", "reason": str(e)}
 
-
-DEFAULT_MODEL = MOON_MODEL
 
 
 # ── 빠른 테스트 ──────────────────────────────────────────────────────────────
