@@ -1220,11 +1220,12 @@ TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 GENERATE_IMAGE_TOOL = {
     "name": "generate_image",
         "description": (
-            "Generate an image using Replicate FLUX models. "
+            "Generate an image using Replicate models. "
+            "Supports FLUX presets and Retro Diffusion pixel-art presets. "
             "Returns prediction_id, model, final prompt, image URL, and local file path. "
-            "Supports optional reference_image input: pass a downloaded local image path, remote URL, or data URI. "
+            "Supports optional reference_image input for FLUX editing paths only: pass a downloaded local image path, remote URL, or data URI. "
             "If reference_image is provided, the backend routes to a Replicate image-editing model compatible with input_image. "
-            "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art). "
+            "Styles: poster (Soviet propaganda), game (game concept art), pixel (retro game key art / Retro Diffusion portrait alias), portrait, detailed, game_asset, 1_bit, low_res, mc_item. "
             "You design the prompt; this tool executes it."
         ),
     "input_schema": {
@@ -1236,8 +1237,8 @@ GENERATE_IMAGE_TOOL = {
             },
             "style": {
                 "type": "string",
-                "enum": ["poster", "game", "pixel"],
-                "description": "Visual style preset. Default: poster.",
+                "enum": ["poster", "game", "pixel", "portrait", "detailed", "game_asset", "1_bit", "low_res", "mc_item", "default", "retro", "watercolor", "textured", "cartoon", "ui_element", "item_sheet", "character_turnaround", "environment", "isometric", "isometric_asset", "topdown_map", "topdown_asset", "classic", "topdown_item", "mc_texture", "skill_icon"],
+                "description": "Visual style preset. For FLUX use poster/game/pixel. For Retro Diffusion aliases: portrait→default, detailed→retro, game_asset→isometric_asset, 1_bit→classic. Direct Retro Diffusion styles also supported: default, retro, watercolor, textured, cartoon, ui_element, item_sheet, character_turnaround, environment, isometric, isometric_asset, topdown_map, topdown_asset, classic, topdown_item, low_res, mc_item, mc_texture, skill_icon. Default: poster.",
             },
             "aspect_ratio": {
                 "type": "string",
@@ -1246,8 +1247,8 @@ GENERATE_IMAGE_TOOL = {
             },
             "model": {
                 "type": "string",
-                "enum": ["flux_schnell", "flux_dev", "flux_kontext_dev"],
-                "description": "Model preset. flux_schnell (fast), flux_dev (higher quality), or flux_kontext_dev (reference-image editing). Default: flux_schnell.",
+                "enum": ["flux_schnell", "flux_dev", "flux_kontext_dev", "rd_fast", "rd_plus"],
+                "description": "Model preset. FLUX: flux_schnell (fast), flux_dev (higher quality), flux_kontext_dev (reference-image editing). Retro Diffusion: rd_fast (fast pixel art), rd_plus (higher quality pixel art). Default: flux_schnell.",
             },
             "count": {
                 "type": "integer",
@@ -1255,7 +1256,7 @@ GENERATE_IMAGE_TOOL = {
             },
             "reference_image": {
                 "type": "string",
-                "description": "Optional reference image. Prefer a downloaded local file path under the project root. Remote URL and data URI are also accepted. When set, backend uses input_image-compatible Replicate model routing.",
+                "description": "Optional reference image for FLUX editing only. Prefer a downloaded local file path under the project root. Remote URL and data URI are also accepted. When set, backend uses input_image-compatible Replicate model routing. Do not use with rd_fast or rd_plus.",
             },
         },
         "required": ["prompt"],
@@ -1265,6 +1266,23 @@ GENERATE_IMAGE_TOOL = {
 
 _last_image_gen_time: float = 0.0
 _IMAGE_GEN_INTERVAL: float = 8.0  # seconds between API calls
+
+
+def _is_retryable_image_error(message: str) -> bool:
+    lowered = str(message or "").lower()
+    retry_markers = (
+        "throttled",
+        "rate limit",
+        "too many requests",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "temporarily unstable",
+        "temporarily unstable",
+        "temporarily",
+        "network",
+    )
+    return any(marker in lowered for marker in retry_markers)
 
 
 async def _exec_generate_image(
@@ -1277,45 +1295,109 @@ async def _exec_generate_image(
 ) -> str:
     import time as _time
     global _last_image_gen_time
-    from replicate_image_service import generate_image, is_replicate_configured
+    from replicate_image_service import (
+        generate_image,
+        is_replicate_configured,
+        is_retro_diffusion_model,
+        normalize_retro_diffusion_style,
+    )
     if not is_replicate_configured():
         return "ERROR: REPLICATE_API_TOKEN is not configured"
 
-    count = max(1, min(4, count))
+    requested_count = max(1, min(4, count))
+    retro_model = is_retro_diffusion_model(model)
+    normalized_style = normalize_retro_diffusion_style(style) if retro_model else style
+    effective_count = 1 if retro_model else requested_count
+    sequential_mode = retro_model and requested_count > 1
 
-    # Rate limit: wait if called too soon after previous generation
-    elapsed = _time.monotonic() - _last_image_gen_time
-    if elapsed < _IMAGE_GEN_INTERVAL and _last_image_gen_time > 0:
-        wait = _IMAGE_GEN_INTERVAL - elapsed
-        await asyncio.sleep(wait)
+    async def _wait_turn(delay_floor: float = 0.0) -> None:
+        global _last_image_gen_time
+        elapsed = _time.monotonic() - _last_image_gen_time
+        minimum_wait = max(_IMAGE_GEN_INTERVAL, delay_floor)
+        if elapsed < minimum_wait and _last_image_gen_time > 0:
+            await asyncio.sleep(minimum_wait - elapsed)
 
     try:
-        result = await generate_image(
-            prompt,
-            model=model,
-            style=style,
-            aspect_ratio=aspect_ratio,
-            num_outputs=count,
-            download=True,
-            reference_image=reference_image,
-        )
-        _last_image_gen_time = _time.monotonic()
-        urls = result.get("image_urls", [])
-        local_paths = result.get("local_paths", [])
+        if retro_model and reference_image:
+            return "Image generation failed: reference_image is not supported with Retro Diffusion presets (rd_fast, rd_plus)"
+
+        if not sequential_mode:
+            await _wait_turn()
+            result = await generate_image(
+                prompt,
+                model=model,
+                style=normalized_style,
+                aspect_ratio=aspect_ratio,
+                num_outputs=effective_count,
+                download=True,
+                reference_image=reference_image,
+            )
+            _last_image_gen_time = _time.monotonic()
+            urls = result.get("image_urls", [])
+            local_paths = result.get("local_paths", [])
+            style_line = normalized_style if retro_model else style
+            lines = [
+                f"Generated {len(urls)} image(s) in 1 API call.",
+                f"  prediction_id: {result.get('prediction_id')}",
+                f"  model: {result.get('model')}",
+                f"  style_requested: {style}",
+                f"  style_effective: {style_line}",
+                f"  final_prompt: {result.get('prompt', '')[:300]}",
+            ]
+            if reference_image:
+                lines.append(f"  reference_image: {result.get('reference_image')}")
+                lines.append(f"  reference_image_source: {result.get('reference_image_source')}")
+            for i, url in enumerate(urls):
+                lp = local_paths[i] if i < len(local_paths) else "N/A"
+                lines.append(f"  [{i+1}] url: {url}")
+                lines.append(f"      local_path: {lp}")
+            return "\n".join(lines)
+
         lines = [
-            f"Batch generated {len(urls)} image(s) in 1 API call.",
-            f"  prediction_id: {result.get('prediction_id')}",
-            f"  model: {result.get('model')}",
-            f"  style: {style}",
-            f"  final_prompt: {result.get('prompt', '')[:300]}",
+            f"Requested {requested_count} Retro Diffusion image(s); executing sequentially to avoid credit/rate-limit failures.",
+            f"  model: {model}",
+            f"  style_requested: {style}",
+            f"  style_effective: {normalized_style}",
         ]
-        if reference_image:
-            lines.append(f"  reference_image: {result.get('reference_image')}")
-            lines.append(f"  reference_image_source: {result.get('reference_image_source')}")
-        for i, url in enumerate(urls):
-            lp = local_paths[i] if i < len(local_paths) else "N/A"
-            lines.append(f"  [{i+1}] url: {url}")
-            lines.append(f"      local_path: {lp}")
+        success_count = 0
+        for idx in range(requested_count):
+            backoff = 2.5
+            last_error: Exception | None = None
+            for attempt in range(1, 4):
+                await _wait_turn(delay_floor=backoff)
+                try:
+                    result = await generate_image(
+                        prompt,
+                        model=model,
+                        style=normalized_style,
+                        aspect_ratio=aspect_ratio,
+                        num_outputs=1,
+                        download=True,
+                        reference_image=reference_image,
+                    )
+                    _last_image_gen_time = _time.monotonic()
+                    success_count += 1
+                    url = (result.get("image_urls") or [None])[0]
+                    local_path = (result.get("local_paths") or [None])[0]
+                    lines.append(f"  [{idx+1}] prediction_id: {result.get('prediction_id')}")
+                    lines.append(f"      url: {url}")
+                    lines.append(f"      local_path: {local_path}")
+                    if attempt > 1:
+                        lines.append(f"      attempts: {attempt}")
+                    last_error = None
+                    break
+                except Exception as e:
+                    _last_image_gen_time = _time.monotonic()
+                    last_error = e
+                    if attempt < 3 and _is_retryable_image_error(str(e)):
+                        lines.append(f"  [{idx+1}] retrying after transient failure (attempt {attempt}/3): {e}")
+                        backoff = min(backoff * 2, 20.0)
+                        continue
+                    lines.append(f"  [{idx+1}] failed: {e}")
+                    break
+            if last_error is not None:
+                break
+        lines.insert(1, f"  completed: {success_count}/{requested_count}")
         return "\n".join(lines)
     except Exception as e:
         _last_image_gen_time = _time.monotonic()

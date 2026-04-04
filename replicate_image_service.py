@@ -64,7 +64,78 @@ MODEL_PRESETS: dict[str, dict[str, Any]] = {
             "aspect_ratio": "1:1",
         },
     },
+    "rd_fast": {
+        "model": "retro-diffusion/rd-fast",
+        "input": {
+            "output_format": "png",
+            "width": 256,
+            "height": 256,
+            "style": "portrait",
+        },
+    },
+    "rd_plus": {
+        "model": "retro-diffusion/rd-plus",
+        "input": {
+            "output_format": "png",
+            "width": 256,
+            "height": 256,
+            "style": "portrait",
+        },
+    },
 }
+
+RETRO_DIFFUSION_MODELS = {"rd_fast", "rd_plus"}
+RETRO_DIFFUSION_STYLE_ALIASES = {
+    "portrait": "default",
+    "detailed": "retro",
+    "game_asset": "isometric_asset",
+    "1_bit": "classic",
+    "one_bit": "classic",
+    "low_res": "low_res",
+    "mc_item": "mc_item",
+    "pixel": "default",
+    "default": "default",
+    "retro": "retro",
+    "watercolor": "watercolor",
+    "textured": "textured",
+    "cartoon": "cartoon",
+    "ui_element": "ui_element",
+    "item_sheet": "item_sheet",
+    "character_turnaround": "character_turnaround",
+    "environment": "environment",
+    "isometric": "isometric",
+    "isometric_asset": "isometric_asset",
+    "topdown_map": "topdown_map",
+    "topdown_asset": "topdown_asset",
+    "classic": "classic",
+    "topdown_item": "topdown_item",
+    "mc_texture": "mc_texture",
+    "skill_icon": "skill_icon",
+}
+
+
+def _normalize_retro_style(style: str) -> str:
+    key = str(style or "portrait").strip().lower().replace("-", "_").replace(" ", "_")
+    return RETRO_DIFFUSION_STYLE_ALIASES.get(key, "default")
+
+
+def is_retro_diffusion_model(model: str | None) -> bool:
+    return (model or "") in RETRO_DIFFUSION_MODELS
+
+
+def normalize_retro_diffusion_style(style: str | None) -> str:
+    return _normalize_retro_style(str(style or "portrait"))
+
+
+def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
+    mapping = {
+        "1:1": (256, 256),
+        "16:9": (320, 180),
+        "9:16": (180, 320),
+        "4:3": (256, 192),
+        "3:4": (192, 256),
+    }
+    return mapping.get(aspect_ratio, (256, 256))
 
 
 @dataclass
@@ -211,7 +282,15 @@ def build_soviet_prompt(
     prompt: str,
     style: str = "poster",
     aspect_ratio: str = "1:1",
+    *,
+    model: str | None = None,
 ) -> str:
+    if model in RETRO_DIFFUSION_MODELS:
+        return (
+            f"{prompt.strip()}. "
+            "pixel art, grid-aligned, clean silhouette, limited palette, no text, no watermark, no logo."
+        )
+
     style_map = {
         "poster": "simple Soviet propaganda poster aesthetic, bold geometric composition, limited red black cream palette, clean silhouette, strong contrast",
         "game": "simple Soviet-style game concept art, readable shapes, stylized propaganda mood, limited palette, clear focal point",
@@ -266,13 +345,13 @@ def create_prediction(
     extra_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = _resolve_model_config(model)
-    payload: dict[str, Any] = {
-        "input": {
-            **cfg["input"],
-            "prompt": prompt,
-            "aspect_ratio": aspect_ratio,
-        },
+    payload_input: dict[str, Any] = {
+        **cfg["input"],
+        "prompt": prompt,
     }
+    if model not in RETRO_DIFFUSION_MODELS:
+        payload_input["aspect_ratio"] = aspect_ratio
+    payload: dict[str, Any] = {"input": payload_input}
     official_prediction_url = str(cfg.get("official_prediction_url") or "").strip()
     if official_prediction_url:
         prediction_url = official_prediction_url
@@ -419,6 +498,21 @@ async def generate_image(
     resolved_model = model or REPLICATE_DEFAULT_MODEL
     reference_source: str | None = None
 
+    if resolved_model in RETRO_DIFFUSION_MODELS:
+        width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+        merged_extra.setdefault("width", width)
+        merged_extra.setdefault("height", height)
+        merged_extra["style"] = _normalize_retro_style(str(merged_extra.get("style") or style))
+        if num_outputs > 1:
+            logger.warning(
+                "[replicate] retro diffusion models do not use flux num_outputs; forcing num_outputs=1 requested=%d model=%s",
+                num_outputs,
+                resolved_model,
+            )
+        num_outputs = 1
+    if reference_image and resolved_model in RETRO_DIFFUSION_MODELS:
+        raise ValueError("Retro Diffusion presets do not support reference_image in this wrapper")
+
     if reference_image:
         normalized_reference, reference_source = prepare_reference_image(reference_image)
         merged_extra["input_image"] = normalized_reference
@@ -436,7 +530,7 @@ async def generate_image(
     else:
         merged_extra["num_outputs"] = num_outputs
 
-    final_prompt = build_soviet_prompt(prompt, style=style, aspect_ratio=aspect_ratio)
+    final_prompt = build_soviet_prompt(prompt, style=style, aspect_ratio=aspect_ratio, model=resolved_model)
     logger.info(
         "[replicate] create prediction model=%s style=%s num_outputs=%d reference=%s",
         resolved_model,
