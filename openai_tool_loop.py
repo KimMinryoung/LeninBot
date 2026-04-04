@@ -251,6 +251,66 @@ def _strip_tool_protocol(msgs: list[dict]) -> list[dict]:
     return [m for m in merged if m.get("content", "").strip()]
 
 
+def _ensure_system_first(msgs: list[dict], system_prompt: str) -> list[dict]:
+    """Remove all system messages from msgs and prepend a single system message.
+
+    Prevents duplicate/misplaced system messages that cause Jinja template
+    errors on local LLMs (e.g. Qwen's "System message must be at the beginning").
+    """
+    cleaned = [m for m in msgs if m.get("role") != "system"]
+    if system_prompt:
+        cleaned.insert(0, {"role": "system", "content": system_prompt})
+    return cleaned
+
+
+def _estimate_tokens(msgs: list[dict]) -> int:
+    """Rough token estimate: ~4 chars per token for mixed content."""
+    total = 0
+    for m in msgs:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total += len(content) // 4
+        elif isinstance(content, list):
+            total += sum(len(str(b)) for b in content) // 4
+        # tool_calls add overhead
+        if m.get("tool_calls"):
+            total += sum(len(json.dumps(tc)) for tc in m["tool_calls"]) // 4
+    return total
+
+
+def _truncate_to_context(msgs: list[dict], context_limit: int, max_tokens: int) -> list[dict]:
+    """Trim older messages to fit within context_limit, reserving space for output.
+
+    Keeps the system message (index 0) and trims from the front of the
+    conversation (oldest messages first), preserving the most recent exchanges.
+    """
+    if context_limit <= 0:
+        return msgs
+
+    budget = context_limit - max_tokens - 200  # 200 token safety margin
+    if budget <= 0:
+        budget = context_limit // 2
+
+    est = _estimate_tokens(msgs)
+    if est <= budget:
+        return msgs
+
+    # Keep system message + trim oldest non-system messages
+    system_msg = msgs[0] if msgs and msgs[0].get("role") == "system" else None
+    rest = msgs[1:] if system_msg else list(msgs)
+
+    # Remove oldest messages until we fit
+    while rest and _estimate_tokens(([system_msg] if system_msg else []) + rest) > budget:
+        rest.pop(0)
+
+    result = ([system_msg] if system_msg else []) + rest
+    if len(result) != len(msgs):
+        logger.warning("Context truncation: %d → %d messages (est %d → %d tokens, budget %d)",
+                       len(msgs), len(result), est,
+                       _estimate_tokens(result), budget)
+    return result
+
+
 def _validate_tool_results(msgs: list[dict]) -> list[str]:
     """Find tool_call IDs that are missing their tool result messages.
 
@@ -446,6 +506,7 @@ async def chat_with_tools(
     budget_tracker: dict | None = None,
     on_progress=None,
     task_id: int | None = None,
+    context_limit: int = 0,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -460,9 +521,11 @@ async def chat_with_tools(
     # ── Root-cause fix: start from text-only canonical history ──
     # Tool protocol blocks are generated only within this call.
     working_msgs = _normalize_messages(messages)
+    working_msgs = _ensure_system_first(working_msgs, system_prompt)
 
-    if system_prompt:
-        working_msgs.insert(0, {"role": "system", "content": system_prompt})
+    # ── Context window management for local LLMs ──
+    if context_limit > 0:
+        working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
 
     tool_call_log = []
     tool_work_details = []
@@ -491,8 +554,7 @@ async def chat_with_tools(
                 logger.error("Still missing after injection: %s — stripping tool protocol",
                              still_missing)
                 working_msgs = _strip_tool_protocol(working_msgs)
-                if system_prompt:
-                    working_msgs.insert(0, {"role": "system", "content": system_prompt})
+                working_msgs = _ensure_system_first(working_msgs, system_prompt)
 
         # ── API call with auto-recovery ──
         response = None
@@ -510,8 +572,7 @@ async def chat_with_tools(
                 logger.warning("Auto-recovery (round %d): stripping tool protocol and retrying",
                                round_num)
                 stripped = _strip_tool_protocol(working_msgs)
-                if system_prompt:
-                    stripped.insert(0, {"role": "system", "content": system_prompt})
+                stripped = _ensure_system_first(stripped, system_prompt)
                 try:
                     response = await _api_call(
                         sdk_mode, client, base_url, model, stripped,
@@ -690,8 +751,7 @@ async def chat_with_tools(
         logger.error("Forced-final preflight: %d missing tool results — stripping",
                      len(missing_ids))
         working_msgs = _strip_tool_protocol(working_msgs)
-        if system_prompt:
-            working_msgs.insert(0, {"role": "system", "content": system_prompt})
+        working_msgs = _ensure_system_first(working_msgs, system_prompt)
         # Re-append the limit message (was lost in strip)
         working_msgs.append({
             "role": "user",

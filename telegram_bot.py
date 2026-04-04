@@ -1079,8 +1079,13 @@ async def _chat_with_tools(
     on_progress=None,
     budget_tracker: dict | None = None,
     task_id: int | None = None,
+    provider_override: str | None = None,
 ) -> str:
-    """Call LLM with tools — dispatches to Claude or OpenAI based on provider config."""
+    """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
+
+    provider_override: if set, forces this provider instead of _config["provider"].
+    Used by web_chat, diary writer, etc. to always use corporate LLM.
+    """
     # Resolve runtime defaults strictly by None (not truthiness).
     resolved_max_rounds = _config["max_rounds_chat"] if max_rounds is None else max_rounds
     resolved_max_tokens = _CLAUDE_MAX_TOKENS if max_tokens is None else max_tokens
@@ -1134,9 +1139,10 @@ async def _chat_with_tools(
         merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
 
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
-    if _config.get("provider") == "local":
+    effective_provider = provider_override or _config.get("provider", "claude")
+    if effective_provider == "local":
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm_client import _resolve_backend, LOCAL_SEMAPHORE
+        from llm_client import _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT
         backend = _resolve_backend()
         async with LOCAL_SEMAPHORE:
             return await openai_chat(
@@ -1154,9 +1160,10 @@ async def _chat_with_tools(
                 on_progress=on_progress,
                 budget_tracker=budget_tracker,
                 task_id=task_id,
+                context_limit=LOCAL_CONTEXT_LIMIT,
             )
 
-    if _config.get("provider") == "openai" and _openai_client:
+    if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             messages,
@@ -1551,7 +1558,29 @@ async def bot_main():
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
                 chosen_max_tokens = 8192
+        elif spec.provider in ("claude", "openai"):
+            # Agent explicitly requests corporate LLM (e.g. diary writer)
+            _forced_provider = spec.provider
+            _orig_fn = _chat_with_tools
+
+            async def _corporate_chat_fn(
+                messages, max_rounds=None, system_prompt=None, model=None,
+                max_tokens=None, budget_usd=None, extra_tools=None,
+                extra_handlers=None, on_progress=None, budget_tracker=None,
+                task_id=None,
+            ):
+                return await _orig_fn(
+                    messages, max_rounds=max_rounds, system_prompt=system_prompt,
+                    model=model, max_tokens=max_tokens, budget_usd=budget_usd,
+                    extra_tools=extra_tools, extra_handlers=extra_handlers,
+                    on_progress=on_progress, budget_tracker=budget_tracker,
+                    task_id=task_id, provider_override=_forced_provider,
+                )
+            chosen_chat_fn = _corporate_chat_fn
+            chosen_model_fn = _get_model_task
+            chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
         else:
+            # provider=None: follow orchestrator's global config
             chosen_chat_fn = _chat_with_tools
             chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK

@@ -56,6 +56,7 @@ Do NOT output the diary as plain text. You MUST call save_diary to persist it.
         "get_finance_data",
         "save_diary",
     ],
+    provider="claude",
     budget_usd=0.50,
     max_rounds=30,
 )

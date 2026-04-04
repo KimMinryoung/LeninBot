@@ -162,27 +162,12 @@ async def handle_web_chat(
             if budget <= 0:
                 budget = 0.30
 
+            # Web chatbot always uses corporate LLM (local is for Telegram only)
             provider = _config.get("provider", "claude")
-
             if provider == "local":
-                from openai_tool_loop import chat_with_tools as openai_chat
-                from llm_client import _resolve_backend, LOCAL_SEMAPHORE
-                backend = _resolve_backend()
-                async with LOCAL_SEMAPHORE:
-                    result = await openai_chat(
-                        history,
-                        client=None,
-                        base_url=backend["base"],
-                        model=backend["model"],
-                        tools=_web_tools,
-                        tool_handlers=_web_handlers,
-                        system_prompt=system_prompt,
-                        max_rounds=20,
-                        max_tokens=_CLAUDE_MAX_TOKENS,
-                        budget_usd=budget,
-                        on_progress=on_progress,
-                    )
-            elif provider == "openai" and _openai_client:
+                provider = "openai" if _openai_client else "claude"
+
+            if provider == "openai" and _openai_client:
                 from openai_tool_loop import chat_with_tools as openai_chat
                 result = await openai_chat(
                     history,
