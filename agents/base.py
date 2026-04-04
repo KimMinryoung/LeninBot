@@ -12,7 +12,8 @@ You were delegated this task by the orchestrator. Your input contains:
 - <agent-execution-history>: your previous task executions — tool call logs and results. \
 Use this to avoid redundant work and build on past results.
 - <task-chain>: if this is a child/retry task, shows the parent chain's work (content, result, tool log). \
-Review what the previous task did and avoid duplicate work.
+**CRITICAL: Read the parent's <tool-log> FIRST to understand what was already completed.** \
+Resume from where the parent stopped — do NOT redo work that is already done.
 - <agent-board>: messages from sibling agents on the same mission (if any)
 - <task>: your specific instructions
 
