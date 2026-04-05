@@ -1495,6 +1495,17 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 await process_task_fn(bot, task)
             except Exception as e:
                 logger.error("Task #%d processing error: %s", task_id, e)
+                # Mark as failed so the task doesn't stay as a zombie in 'processing'
+                try:
+                    await asyncio.to_thread(
+                        _execute,
+                        "UPDATE telegram_tasks SET status = 'failed', "
+                        "result = COALESCE(result, '') || %s, completed_at = NOW() "
+                        "WHERE id = %s AND status IN ('processing', 'queued')",
+                        (f"\n[WORKER ERROR] {e}", task_id),
+                    )
+                except Exception:
+                    logger.error("Task #%d: also failed to mark as failed in DB", task_id)
             finally:
                 active_tasks.pop(task_id, None)
                 if runtime_state is not None:
