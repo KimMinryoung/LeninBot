@@ -1512,18 +1512,15 @@ async def bot_main():
         # ── Provider dispatch: Claude vs local LLM (OpenAI-compatible) ──
         if spec.provider == "moon":
             from openai_tool_loop import chat_with_tools as moon_chat_with_tools
-            from llm_client import MOON_BASE, MOON_MODEL, LOCAL_BASE, LOCAL_MODEL, _health_ok
+            from llm_client import MOON_BASE, MOON_MODEL, _health_ok
 
-            # Try MOON PC first, then local llama-server, then Claude
+            # Try MOON PC, then fall back to Claude
             if _health_ok(MOON_BASE):
                 llm_base, llm_model = MOON_BASE, MOON_MODEL
                 logger.info("Agent %s: using MOON PC (%s)", spec.name, MOON_BASE)
-            elif _health_ok(LOCAL_BASE):
-                llm_base, llm_model = LOCAL_BASE, LOCAL_MODEL
-                logger.info("Agent %s: MOON unavailable, using local LLM (%s)", spec.name, LOCAL_BASE)
             else:
                 llm_base = None
-                logger.warning("MOON PC and local LLM both unavailable for agent %s; falling back to Claude", spec.name)
+                logger.warning("MOON PC unavailable for agent %s; falling back to Claude", spec.name)
 
             if llm_base is None:
                 chosen_chat_fn = _chat_with_tools
