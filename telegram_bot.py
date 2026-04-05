@@ -456,17 +456,6 @@ def _format_system_alerts() -> str:
     return f"\n<system-alerts>\n{items}\n</system-alerts>"
 
 
-def _get_finance_context() -> str:
-    """Get finance data summary for prompt injection. Never fails."""
-    try:
-        from finance_data import finance_summary
-        summary = finance_summary()
-        if summary:
-            return f"\n<market-data>\n{summary}\n</market-data>"
-    except Exception as e:
-        logger.debug("Finance data unavailable: %s", e)
-    return ""
-
 
 _env_context_cache: str | None = None
 _env_context_ts: float = 0
@@ -1509,7 +1498,6 @@ async def bot_main():
         system_prompt = spec.render_prompt(
             current_datetime=_current_datetime_str(),
             system_alerts=_format_system_alerts(),
-            finance_data=_get_finance_context(),
         )
 
         # Inject runtime environment info for programmer (needs venv, packages, services)

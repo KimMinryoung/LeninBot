@@ -851,7 +851,6 @@ def build_run_agent_handler(chat_with_tools_fn):
             system_prompt = spec.render_prompt(
                 current_datetime=datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST"),
                 system_alerts="",
-                finance_data="",
             )
 
             content_parts = []

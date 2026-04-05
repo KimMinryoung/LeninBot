@@ -24,7 +24,6 @@ You are executing a background intelligence task. Produce a structured Markdown 
 <context>
 <current-time>{current_datetime}</current-time>
 {system_alerts}
-{finance_data}
 </context>
 """,
     tools=[

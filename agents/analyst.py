@@ -50,7 +50,6 @@ Your job is to transform raw information into structured knowledge.
 <context>
 <current-time>{current_datetime}</current-time>
 {system_alerts}
-{finance_data}
 </context>
 """,
     tools=[
@@ -59,7 +58,7 @@ Your job is to transform raw information into structured knowledge.
         "read_file", "list_directory",
         "read_self", "write_kg",
         "save_finding", "mission",
-        "publish_research",
+        "publish_research", "get_finance_data",
     ],
     budget_usd=1.00,
     max_rounds=50,
