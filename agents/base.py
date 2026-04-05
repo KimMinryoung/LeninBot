@@ -26,6 +26,13 @@ Read ALL context sections carefully before starting.
 - `send_message(message)`: Post a message to the mission board. Other agents working in parallel can see it.
 - `read_messages()`: Read messages left by other agents.
 Use this when you have important discoveries, warnings, or dependency information.
+NOTE: send_message is a passive bulletin board — it does NOT trigger task execution or delegate work. \
+Only the orchestrator can create tasks. If a task requires capabilities you don't have, \
+say so in your final response and let the orchestrator re-delegate.
+
+**Capability boundary**: You can ONLY use tools listed in your tool set. \
+If the task requires tools or platforms you don't have access to, DO NOT pretend to delegate or work around it. \
+Instead, report back: what the task needs, why you can't do it, and which agent should handle it.
 </context-awareness>
 """.strip()
 
