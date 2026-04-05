@@ -143,7 +143,6 @@ SELF_TOOLS = [
                     "the user's original request, any discoveries or tool results so far, and why you chose this agent. "
                     "This helps the agent understand the full picture.",
                 },
-                "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
                 "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
             },
             "required": ["agent", "task"],
@@ -181,7 +180,6 @@ SELF_TOOLS = [
                     "type": "string",
                     "description": "Instructions for combining subtask results into a final report.",
                 },
-                "priority": {"type": "string", "enum": ["high", "normal", "low"], "default": "normal"},
             },
             "required": ["tasks"],
         },

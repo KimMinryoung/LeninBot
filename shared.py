@@ -519,8 +519,7 @@ def create_task_in_db(
     """
     from db import execute as db_execute, query as db_query
 
-    priority_tag = {"high": "[🔴 HIGH]", "normal": "[🟡 NORMAL]", "low": "[🟢 LOW]"}.get(priority, "")
-    tagged_content = f"{priority_tag} {content}".strip() if priority_tag else content
+    tagged_content = content
 
     # Determine depth (and inherit mission_id/agent_type) from parent
     depth = 0

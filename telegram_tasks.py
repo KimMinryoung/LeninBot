@@ -145,11 +145,7 @@ def _extract_summary(report: str, max_len: int = 300) -> str:
 
 
 def _classify_priority(content: str, report: str) -> str:
-    """Classify task result priority from content tags or report urgency keywords."""
-    if "[🔴 HIGH]" in content:
-        return "high"
-    if "[🟢 LOW]" in content:
-        return "low"
+    """Classify task result priority from report urgency keywords."""
     report_lower = report[:2000].lower()
     if any(k in report_lower for k in ("urgent", "critical", "긴급", "위기", "경고", "즉시")):
         return "high"
@@ -583,7 +579,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     # Extract original task content, stripping nested AUTO-RETRY prefixes
     raw_content = (row or {}).get('content') or task.get('content') or ''
     original_content = re.sub(
-        r'(?s)^\s*\[(?:restart already completed by parent task|🔴 HIGH)\]\s*\n'
+        r'(?s)^\s*\[restart already completed by parent task\]\s*\n'
         r'(?:\[AUTO-RETRY after verification failure for task #\d+\]\s*\n'
         r'Original task:\s*\n)*',
         '',
