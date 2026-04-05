@@ -647,7 +647,7 @@ async def cmd_status_auto(message: Message):
     try:
         rows = await asyncio.to_thread(
             _query,
-            "SELECT id, content, status, created_at FROM telegram_tasks "
+            "SELECT id, content, status, agent_type, created_at FROM telegram_tasks "
             "WHERE user_id = 0 ORDER BY created_at DESC LIMIT 10",
         )
     except Exception as e:
@@ -663,7 +663,8 @@ async def cmd_status_auto(message: Message):
         icon = status_icons.get(r["status"], "❓")
         ts = r["created_at"].strftime("%m/%d %H:%M")
         preview = r["content"][:60]
-        lines.append(f"{icon} [{r['id']}] {preview}\n   상태: {r['status']} | {ts}")
+        agent = r.get("agent_type") or "?"
+        lines.append(f"{icon} [{r['id']}] [{agent}] {preview}\n   상태: {r['status']} | {ts}")
     await message.answer("\n\n".join(lines))
 
 
