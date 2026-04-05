@@ -1,51 +1,70 @@
 ---
 name: kg-maintenance
 description: Maintains Neo4j Knowledge Graph quality: merges duplicate entities, assigns missing entity types (Person/Organization/Location/Event/Concept), removes orphaned nodes, and validates relationship integrity. Use when KG has duplicate entities, untyped nodes, or after bulk data ingestion. Keywords: KG 정리, 중복 병합, 엔티티 타입, 고아 노드, knowledge graph cleanup, deduplication.
-compatibility: Requires Neo4j connection and Python 3.10+. Scripts use neo4j driver and anthropic SDK.
+compatibility: Requires Neo4j connection and Python 3.10+.
 metadata:
   author: cyber-lenin
-  version: "1.0"
-allowed-tools: kg_query kg_merge_entities kg_delete_episode execute_python read_kg_status
+  version: "2.0"
+allowed-tools: kg_admin read_self execute_python
 ---
 
 # KG Maintenance Skill
 
-## 언제 실행하나
-- 대량 데이터 수집 후
-- `read_kg_status`에서 untyped 엔티티가 100개 이상일 때
-- 중복 엔티티가 의심될 때 (예: "미국" vs "USA" vs "United States")
-- 주간 정기 정리 (매주 월요일)
+## When to run
+- After bulk data ingestion
+- When `read_self(source="kg_status")` shows 100+ untyped entities
+- When duplicate entities are suspected (e.g. "미국" vs "USA" vs "United States")
+- Weekly cleanup (every Monday)
 
-## Step 1 — 현황 파악
+## Step 1 — Check current status
 ```
-read_kg_status() 실행 → 총 엔티티 수, 엣지 수, 최근 에피소드 확인
+read_self(source="kg_status")
+```
+Review total entities, edges, recent episodes.
+
+## Step 2 — Find duplicate entities
+```
+kg_admin(action="query", query="MATCH (a), (b) WHERE a.name CONTAINS b.name AND id(a) <> id(b) RETURN a.name, b.name LIMIT 50")
+```
+Evaluate candidates manually:
+- Same entity, different spelling → merge (prefer Korean name)
+- Similar but distinct entities → do NOT merge
+
+## Step 3 — Merge duplicates
+```
+kg_admin(action="merge_entities", source_name="USA", target_name="미국")
+```
+This merges the source entity INTO the target, transferring all relationships.
+
+## Step 4 — Assign missing types
+Run the existing classification script:
+```python
+import subprocess, os
+result = subprocess.run(
+    [os.environ.get("VENV_PYTHON", "python"), "scripts/classify_untyped_entities.py"],
+    capture_output=True, text=True,
+    cwd=os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"),
+    timeout=120,
+)
+print(result.stdout[-2000:])
+```
+Assigns `Person/Organization/Location/Event/Concept` types via LLM inference, batch of 50.
+
+## Step 5 — Find orphan nodes
+```
+kg_admin(action="query", query="MATCH (n) WHERE NOT (n)--() RETURN n.name, n.type LIMIT 50")
+```
+Review orphans. If truly disconnected and not in any episode, delete the episode:
+```
+kg_admin(action="delete_episode", episode_name="episode_name_here")
 ```
 
-## Step 2 — 중복 엔티티 탐지
-[scripts/dedup_entities.py](scripts/dedup_entities.py) 실행:
-- 이름 유사도 기반 후보 쌍 추출
-- 출력: `[(source, target, similarity_score), ...]`
-
-병합 기준:
-- 동일 실체, 다른 표기 → 병합 (한국어 우선)
-- 유사하지만 다른 실체 → 병합 금지
-
-## Step 3 — 타입 부여
-[scripts/assign_types.py](scripts/assign_types.py) 실행:
-- 타입 없는 엔티티에 `Person/Organization/Location/Event/Concept` 부여
-- LLM 추론 기반, 배치 50개씩 처리
-
-## Step 4 — 고아 노드 정리
-[scripts/cleanup_orphans.py](scripts/cleanup_orphans.py) 실행:
-- 관계가 0개인 엔티티 탐지
-- 에피소드에도 미등장 확인 후 삭제
-
-## Step 5 — 검증
-```cypher
-MATCH (n) RETURN n.type, count(n) ORDER BY count(n) DESC
+## Step 6 — Validate
 ```
-타입별 분포 확인 후 이상치 재검토.
+kg_admin(action="query", query="MATCH (n) RETURN n.type, count(n) ORDER BY count(n) DESC")
+```
+Check type distribution for anomalies.
 
-## 주의사항
-- 병합은 되돌릴 수 없다. 확신이 없으면 skip
-- 대량 삭제 전 반드시 백업: `scripts/backup_kg.sh`
+## Cautions
+- Merges are irreversible. Skip if uncertain.
+- Delete only after confirming the node is truly orphaned.
