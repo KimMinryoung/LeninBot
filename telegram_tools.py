@@ -1883,3 +1883,102 @@ async def _exec_save_diary(title: str, content: str) -> str:
 
 TOOLS.append(SAVE_DIARY_TOOL)
 TOOL_HANDLERS["save_diary"] = _exec_save_diary
+
+# ── Moltbook Tool (for scout agent) ──────────────────────────────────────────
+
+MOLTBOOK_TOOL = {
+    "name": "moltbook",
+    "description": (
+        "Run Moltbook operations via the Razvedchik agent script.\n"
+        "Actions:\n"
+        "- scan: Read-only feed scan — gather posts without interacting\n"
+        "- patrol: Full patrol loop — scan + comment + post (default for general activity)\n"
+        "- post: Write a new post to Moltbook\n"
+        "- status: Check agent claim status\n"
+        "- profile: View agent profile"
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["scan", "patrol", "post", "status", "profile"],
+                "description": "Which Moltbook operation to run.",
+            },
+            "topic": {
+                "type": "string",
+                "description": "Post title (for 'post' action). If omitted, auto-generated.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Post body (for 'post' action). If omitted, auto-generated.",
+            },
+            "submolt": {
+                "type": "string",
+                "description": "Target submolt name (e.g. 'general', 'tech'). Optional.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Number of posts to scan (default: 20). For 'scan' and 'patrol'.",
+            },
+            "max_comments": {
+                "type": "integer",
+                "description": "Max comments to post during patrol (default: 5).",
+            },
+            "dry_run": {
+                "type": "boolean",
+                "description": "Simulate without actual API writes (default: false).",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+async def _exec_moltbook(params: dict) -> str:
+    import subprocess, os
+
+    action = params.get("action", "patrol")
+    cmd = [
+        os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "venv/bin/python"),
+        os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "agents/razvedchik/razvedchik.py"),
+        f"--{action}",
+    ]
+
+    if params.get("topic"):
+        cmd.extend(["--topic", params["topic"]])
+    if params.get("content"):
+        cmd.extend(["--content", params["content"]])
+    if params.get("submolt"):
+        cmd.extend(["--submolt", params["submolt"]])
+    if params.get("limit"):
+        cmd.extend(["--limit", str(params["limit"])])
+    if params.get("max_comments"):
+        cmd.extend(["--max-comments", str(params["max_comments"])])
+    if params.get("dry_run"):
+        cmd.append("--dry-run")
+
+    env = {**os.environ, "PYTHONPATH": os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")}
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"),
+            env=env,
+            timeout=180,
+        )
+        output = result.stdout[-3000:] if result.stdout else ""
+        if result.returncode != 0:
+            stderr = result.stderr[-1000:] if result.stderr else ""
+            output += f"\n[EXIT CODE {result.returncode}]\nSTDERR: {stderr}"
+        return output or "(no output)"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] Moltbook script timed out after 180 seconds."
+    except Exception as e:
+        return f"[ERROR] Failed to run Moltbook script: {e}"
+
+
+TOOLS.append(MOLTBOOK_TOOL)
+TOOL_HANDLERS["moltbook"] = _exec_moltbook

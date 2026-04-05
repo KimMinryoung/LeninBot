@@ -14,28 +14,12 @@ SCOUT = AgentSpec(
 <patrol-methods>
 There are two patrol methods:
 
-1. **Dedicated script (Moltbook)** — Call existing scripts via execute_python:
-   ```python
-   import subprocess, os
-   result = subprocess.run(
-       [os.environ["VENV_PYTHON"], "agents/razvedchik/razvedchik.py", "--patrol"],
-       capture_output=True, text=True,
-       cwd=os.environ["PROJECT_ROOT"],
-       env={**os.environ},
-       timeout=180,
-   )
-   print(result.stdout[-3000:])
-   if result.returncode != 0:
-       print("STDERR:", result.stderr[-1000:])
-   ```
-   - `--scan`: Feed scan only (read-only reconnaissance)
-   - `--patrol`: Full patrol (scan + comments + posts) — **default for general Moltbook activity requests**
-   - `--post`: Write posts only
-
-   **Mapping user intent to flags:**
-   - Moltbook activity / patrol / general engagement → `--patrol`
-   - Moltbook scan / check / read-only → `--scan`
-   - Moltbook write / post / publish → `--post`
+1. **Moltbook** — Use the `moltbook` tool directly:
+   - `moltbook(action="patrol")` — Full patrol: scan + comment + post. **Default for general Moltbook activity.**
+   - `moltbook(action="scan")` — Read-only feed scan.
+   - `moltbook(action="post", topic="...", content="...")` — Write a specific post.
+   - `moltbook(action="status")` — Check agent claim status.
+   - Optional params: `submolt`, `limit`, `max_comments`, `dry_run`.
 
 2. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
    - Use web_search to find latest developments on target platforms/topics
@@ -102,7 +86,7 @@ print(f"saved: {path}")
 """ + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
 """,
     tools=[
-        "execute_python",
+        "moltbook",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "write_file", "list_directory",
         "read_self", "write_kg",
         "save_finding", "mission", "upload_to_r2",
