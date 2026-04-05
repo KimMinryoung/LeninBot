@@ -1366,7 +1366,7 @@ GENERATE_IMAGE_TOOL = {
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "Image description prompt (English). For standard FLUX text-to-image calls, style presets may prepend aesthetic scaffolding. For flux_kontext_dev reference-image editing, the prompt is sent as custom-only text with no automatic poster/game/pixel prefix unless you explicitly write that style yourself.",
+                "description": "Image description prompt (English). The prompt is sent directly to the model with no automatic style prefix. Include all desired visual style, composition, and aesthetic details in the prompt itself.",
             },
             "style": {
                 "type": "string",

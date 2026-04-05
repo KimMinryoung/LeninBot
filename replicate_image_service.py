@@ -599,7 +599,7 @@ async def generate_image(
     if reference_image and resolved_model in RETRO_DIFFUSION_MODELS:
         raise ValueError("Retro Diffusion presets do not support reference_image in this wrapper")
 
-    apply_style_prefix = True
+    apply_style_prefix = False
     if reference_image:
         normalized_reference, reference_source = prepare_reference_image(reference_image)
         merged_extra["input_image"] = normalized_reference
