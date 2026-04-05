@@ -1109,19 +1109,27 @@ async def _chat_with_tools(
         system_alerts=_format_system_alerts(),
         skills_section=build_skills_prompt(),
     )
-    # Orchestrator context isolation: programming tools are reserved for programmer agent.
-    _ORCHESTRATOR_BLOCKED_TOOLS = {"read_file", "write_file", "patch_file", "list_directory", "execute_python"}
+    # Orchestrator tool whitelist: only tools the orchestrator should use directly.
+    # Everything else is delegated to specialist agents.
+    _ORCHESTRATOR_TOOLS = {
+        "delegate", "multi_delegate",       # core: dispatch to agents
+        "mission",                          # mission lifecycle
+        "web_search", "fetch_url",          # quick lookups (no delegation needed)
+        "knowledge_graph_search", "vector_search",  # fast knowledge retrieval
+        "get_finance_data",                 # inline finance data
+        "recall_experience",                # memory recall
+        "read_self",                        # status/logs inspection
+        "run_agent",                        # direct agent execution
+    }
     is_orchestrator = extra_tools is None
 
     if is_orchestrator:
-        # Orchestrator: use all TOOLS except blocked ones
+        # Orchestrator: whitelist only
         seen_names: set[str] = set()
         merged_tools: list[dict] = []
         for t in TOOLS:
             name = t.get("name", "")
-            if name not in seen_names:
-                if name in _ORCHESTRATOR_BLOCKED_TOOLS:
-                    continue
+            if name in _ORCHESTRATOR_TOOLS and name not in seen_names:
                 seen_names.add(name)
                 merged_tools.append(t)
     else:

@@ -64,8 +64,8 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
 """,
     tools=[
         "read_file", "write_file", "patch_file", "list_directory", "execute_python",
-        "web_search", "fetch_url", "check_inbox", "allowlist_sender", "read_self", "write_kg",
-        "save_finding", "mission", "restart_service", "upload_to_r2", "send_email",
+        "web_search", "fetch_url", "read_self", "write_kg",
+        "save_finding", "mission", "restart_service", "upload_to_r2",
     ],
     budget_usd=1.50,
     max_rounds=50,

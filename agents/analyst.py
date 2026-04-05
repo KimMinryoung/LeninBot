@@ -55,10 +55,10 @@ Your job is to transform raw information into structured knowledge.
 """,
     tools=[
         "knowledge_graph_search", "vector_search",
-        "web_search", "fetch_url", "check_inbox", "allowlist_sender",
+        "web_search", "fetch_url",
         "read_file", "list_directory",
         "read_self", "write_kg",
-        "save_finding", "mission", "send_email",
+        "save_finding", "mission",
         "publish_research",
     ],
     budget_usd=1.00,
