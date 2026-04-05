@@ -381,6 +381,7 @@ async def _call_api(
     max_tokens: int = 4096,
     temperature: float = 0.7,
     timeout: int = 300,
+    enable_thinking: bool = False,
 ) -> dict:
     """Single call to OpenAI-compatible /v1/chat/completions (httpx)."""
     payload: dict = {
@@ -393,6 +394,8 @@ async def _call_api(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    if enable_thinking:
+        payload["chat_template_kwargs"] = {"enable_thinking": True}
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
@@ -428,13 +431,14 @@ async def _call_sdk(
 # ── Helper: unified API call with mode dispatch ──────────────────────
 
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
-                    parallel_tool_calls=True):
+                    parallel_tool_calls=True, enable_thinking=False):
     """Dispatch to SDK or httpx based on mode."""
     if sdk_mode:
         return await _call_sdk(client, model, messages, tools, max_tokens,
                                parallel_tool_calls=parallel_tool_calls)
     else:
-        return await _call_api(base_url, model, messages, tools, max_tokens)
+        return await _call_api(base_url, model, messages, tools, max_tokens,
+                               enable_thinking=enable_thinking)
 
 
 def _extract_response(sdk_mode, response_or_data):
@@ -508,6 +512,7 @@ async def chat_with_tools(
     on_progress=None,
     task_id: int | None = None,
     context_limit: int = 0,
+    enable_thinking: bool = False,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -565,7 +570,7 @@ async def chat_with_tools(
         try:
             response = await _api_call(
                 sdk_mode, client, base_url, model, working_msgs,
-                openai_tools, max_tokens,
+                openai_tools, max_tokens, enable_thinking=enable_thinking,
             )
         except Exception as api_err:
             err_str = str(api_err)
@@ -581,7 +586,7 @@ async def chat_with_tools(
                     response = await _api_call(
                         sdk_mode, client, base_url, model, stripped,
                         openai_tools, max_tokens,
-                        parallel_tool_calls=False,  # reduce complexity on retry
+                        parallel_tool_calls=False, enable_thinking=enable_thinking,
                     )
                     working_msgs = stripped
                     logger.info("Auto-recovery succeeded at round %d", round_num)

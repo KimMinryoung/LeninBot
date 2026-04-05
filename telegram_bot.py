@@ -1172,6 +1172,7 @@ async def _chat_with_tools(
                 budget_tracker=budget_tracker,
                 task_id=task_id,
                 context_limit=LOCAL_CONTEXT_LIMIT,
+                enable_thinking=is_orchestrator,
             )
 
     if effective_provider == "openai" and _openai_client:
