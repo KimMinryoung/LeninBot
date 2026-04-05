@@ -1,4 +1,4 @@
-# Project State — 2026-04-03
+# Project State — 2026-04-04
 
 ## Identity
 
@@ -32,8 +32,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 │  ┌───────────────┐  ┌───────────────┐    │    ┌────────────────────┐    │
 │  │ Neo4j Docker  │  │ Redis Docker  │    │    │ MOON PC            │    │
 │  │ (:7687)       │  │ (:6379)       │    │    │ (Tailscale tunnel) │    │
-│  │ Knowledge     │  │ Live task     │    │    │ qwen3.5-9b Q8_0   │    │
-│  │ Graph         │  │ state/board   │    │    │                    │    │
+│  │ Knowledge     │  │ Live task     │    │    │ qwen3.5-9b Q4_K_M │    │
+│  │ Graph         │  │ state/board   │    │    │ 131K ctx, FA+Q4 KV│    │
 │  └───────┬───────┘  └───────┬───────┘    │    └─────────┬──────────┘    │
 │          │ Bolt             │            │              │ HTTP          │
 │          │                  │            │              │               │
@@ -137,17 +137,39 @@ docker.service
 
 ### LLM Provider (런타임 교체 가능)
 
-`/provider` 명령으로 Claude ↔ OpenAI 실시간 전환. 시스템 프롬프트에 `<current-model>` 태그로 현재 모델 정보 자동 주입 — 에이전트가 자신의 모델을 인지.
+`/provider` 명령으로 Claude ↔ OpenAI ↔ Local 실시간 전환. 시스템 프롬프트에 `<current-model>` 태그로 현재 모델 정보 자동 주입 — 에이전트가 자신의 모델을 인지.
 
-| Tier | Claude | OpenAI |
-|------|--------|--------|
-| high | Claude Opus 4.6 | GPT-5.4 |
-| medium | Claude Sonnet 4.6 | GPT-5.4-mini |
-| low | Claude Haiku 4.5 | GPT-5.4-nano |
+| Tier | Claude | OpenAI | Local |
+|------|--------|--------|-------|
+| high | Claude Opus 4.6 | GPT-5.4 | qwen3.5-9b |
+| medium | Claude Sonnet 4.6 | GPT-5.4-mini | qwen3.5-9b |
+| low | Claude Haiku 4.5 | GPT-5.4-nano | qwen3.5-9b |
 
 `bot_config.py`에서 관리. chat은 medium tier, task는 에이전트별 budget/tier 설정. `/fallback`으로 medium ↔ low 토글.
 
-**browser-use SDK는 항상 Claude Sonnet 4.6 사용** (OpenAI 모델은 structured output parsing 실패).
+**Provider routing by component:**
+
+| Component | Provider | 비고 |
+|---|---|---|
+| Telegram chat (orchestrator) | global config 따름 | `/provider`로 전환 |
+| Telegram tasks/agents | global config 따름 | orchestrator와 동일 모델 |
+| Diary agent | **항상 Claude API** | `AgentSpec.provider="claude"` 강제 |
+| Web chatbot | **항상 corporate** (OpenAI/Claude) | local 설정 시 OpenAI fallback |
+| browser-use SDK | **항상 Claude Sonnet 4.6** | OpenAI structured output 호환성 문�� |
+
+**Per-agent provider override**: `AgentSpec.provider` 필드로 에이전트별 LLM 강제 지정 가능. `None` = orchestrator config 따름, `"claude"`/`"openai"` = corporate 강제, `"moon"` = local LLM. `_chat_with_tools(provider_override=...)` 파라미터로 구현.
+
+#### Local LLM (MOON PC)
+- **��델**: Qwen3.5-9B Q4_K_M (GGUF), llama-server (llama.cpp)
+- **컨텍스트**: 131,072 tokens (128K) — Qwen3.5의 Gated DeltaNet 아키텍처 덕분에 12GB VRAM에서 가능
+- **핵심 ��래그**: `--flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 -np 1`
+  - Flash Attention: KV cache 양자화 시 필수
+  - Q4_0 KV cache: 4배 압축 (FP16 대비). Qwen3.5는 75% 레이어가 linear attention → KV cache 사용량 1/4
+  - VRAM: 모델 ~5.8GB + KV cache ~0.5GB + overhead ~0.7GB ≈ 7GB / 12GB
+- **연결**: Tailscale magic DNS (`http://moon:8080`), OpenAI 호환 API
+- **동시성**: `--parallel 1`, `LOCAL_SEMAPHORE=1` (단일 슬롯)
+- **컨텍스트 관리**: `openai_tool_loop.py`에서 `_truncate_to_context()` + `_ensure_system_first()`로 overflow 방지
+- **설정 파일**: `doc/run_llama.bat` (MOON PC Windows), `llm_client.py` (`LOCAL_CONTEXT_LIMIT`)
 
 ### Orchestrator
 사용자 메시지를 받아 의도를 파악하고, 전문 에이전트에 위임. 프로그래밍 도구 직접 접근 차단 — 코드 작업은 반드시 programmer에게 위임. 텔레그램 메시지는 마크다운 서식 금지 (plain text only).
@@ -298,7 +320,7 @@ leninbot/
 ├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
-├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.4 등)
+├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.4, local LLM 등)
 ├── experience_writer.py       # 경험 메모리 일일 정리
 ├── redis_state.py             # Redis live state: task progress, chain memory, board, active registry
 ├── db.py                      # PostgreSQL connection pool (psycopg2)
@@ -310,7 +332,7 @@ leninbot/
 │   └── email_signature.json   # 이메일 서명 설정 (agent 수정 가능)
 │
 ├── agents/                    # 에이전트 정의
-│   ├── base.py                # AgentSpec + 공통 컨텍스트 블록
+│   ├── base.py                # AgentSpec (provider override 지원) + 공통 컨텍스트 블록
 │   ├── analyst.py             # Varga — 정보 분석/KG 저장
 │   ├── programmer.py          # Kitov — 코드 수정 (restart_service 사용)
 │   ├── browser.py             # Browser — AI 브라우저 자동화 (browser-use SDK)
@@ -335,6 +357,34 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-04 — Local LLM 131K Context, Provider Routing, System Message Fix
+
+#### Local LLM 131K Context (`doc/run_llama.bat`, `llm_client.py`)
+- MOON PC llama-server: `-c 32768` → `-c 131072`, `--parallel 2` → `--parallel 1`
+- Qwen3.5-9B Q4_K_M의 Gated DeltaNet 아키텍처 활용: 75% 레이어가 linear attention → KV cache 1/4
+- Flash Attention + Q4_0 KV cache 양자화로 12GB VRAM에서 128K 컨텍스트 가능
+- 참고: sudo su (Hermes Agent 개발자)의 RTX 3060 12GB 설정
+
+#### System Message Ordering Fix (`openai_tool_loop.py`)
+- **근본 원인**: `_strip_tool_protocol()`이 기존 system 메시지를 보존 → 재삽입 시 중복 → Qwen Jinja 템플릿 "System message must be at the beginning" 에러
+- **수정**: `_ensure_system_first()` 헬퍼 — 모든 system 메시지 제거 후 단일 system 메시지를 position 0에 삽입. 4곳의 재삽입 포인트 모두 적용
+
+#### Context Window Management (`openai_tool_loop.py`)
+- `_estimate_tokens()`: 대략적 토큰 추정 (~4 chars/token)
+- `_truncate_to_context()`: context_limit 초과 시 오래된 메시지부터 삭제 (system 메시지 보존)
+- `chat_with_tools()`에 `context_limit` 파라미터 추가
+
+#### Per-Component Provider Routing (`telegram_bot.py`, `web_chat.py`, `agents/base.py`, `agents/diary.py`)
+- `_chat_with_tools()`에 `provider_override` 파라미터 추가
+- `AgentSpec.provider` 기본값: `"claude"` → `None` (orchestrator config 따름)
+- Diary agent만 `provider="claude"` 명시 — 항상 Claude API 사용
+- 다른 task/agent는 orchestrator의 global config 따름 (local 포함)
+- Web chatbot: local config 시 OpenAI/Claude fallback (local LLM 사용 안 함)
+
+#### 동시성 조정 (`llm_client.py`)
+- `LOCAL_SEMAPHORE`: 2 → 1 (`--parallel 1` 대응)
+- `LOCAL_CONTEXT_LIMIT`: 환경변수 `MOON_LLM_CONTEXT` (기본 131072)
 
 ### 2026-04-03 — Redis State Backbone, Context Pipeline Overhaul, English Standardization
 

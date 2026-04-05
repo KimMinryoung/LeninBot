@@ -9,7 +9,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from db import query as db_query, query_one as db_query_one
@@ -275,6 +275,95 @@ async def get_report(report_id: int):
 
 RESEARCH_DIR = Path(__file__).parent / "research"
 LEGACY_OUTPUT_RESEARCH_DIR = Path(__file__).parent / "output" / "research"
+PUBLIC_BASE_URL = "https://cyber-lenin.com"
+
+SEO_DEFAULT_TITLE = "Cyber-Lenin"
+SEO_DEFAULT_DESCRIPTION = "Cyber-Lenin: Marxist-Leninist analysis, geopolitical research, and autonomous intelligence reports."
+SEO_DEFAULT_OG_IMAGE = f"{PUBLIC_BASE_URL}/static/og/cyber-lenin-og.png"
+SEO_DEFAULT_KEYWORDS = (
+    "cyber-lenin, marxist-leninist analysis, geopolitics, historical materialism, "
+    "technology democracy, open weights, ai sovereignty"
+)
+
+
+def _xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _html_escape(value: str) -> str:
+    return _xml_escape(value)
+
+
+def _build_meta_head(*, title: str, description: str, canonical_url: str, og_type: str = "website", image_url: str = SEO_DEFAULT_OG_IMAGE, noindex: bool = False) -> str:
+    robots = "noindex, nofollow" if noindex else "index, follow, max-image-preview:large"
+    schema_json = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@type": "WebSite" if og_type == "website" else "Article",
+            "name": title,
+            "headline": title,
+            "description": description,
+            "url": canonical_url,
+            "image": image_url,
+            "publisher": {
+                "@type": "Organization",
+                "name": "Cyber-Lenin",
+                "url": PUBLIC_BASE_URL,
+            },
+        },
+        ensure_ascii=False,
+    )
+    return f"""
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>{_html_escape(title)}</title>
+    <meta name=\"description\" content=\"{_html_escape(description)}\">
+    <meta name=\"keywords\" content=\"{_html_escape(SEO_DEFAULT_KEYWORDS)}\">
+    <meta name=\"robots\" content=\"{robots}\">
+    <link rel=\"canonical\" href=\"{_html_escape(canonical_url)}\">
+    <link rel=\"alternate\" type=\"application/atom+xml\" title=\"Cyber-Lenin Atom Feed\" href=\"{PUBLIC_BASE_URL}/atom.xml\">
+    <meta property=\"og:site_name\" content=\"Cyber-Lenin\">
+    <meta property=\"og:title\" content=\"{_html_escape(title)}\">
+    <meta property=\"og:description\" content=\"{_html_escape(description)}\">
+    <meta property=\"og:type\" content=\"{_html_escape(og_type)}\">
+    <meta property=\"og:url\" content=\"{_html_escape(canonical_url)}\">
+    <meta property=\"og:image\" content=\"{_html_escape(image_url)}\">
+    <meta name=\"twitter:card\" content=\"summary_large_image\">
+    <meta name=\"twitter:title\" content=\"{_html_escape(title)}\">
+    <meta name=\"twitter:description\" content=\"{_html_escape(description)}\">
+    <meta name=\"twitter:image\" content=\"{_html_escape(image_url)}\">
+    <script type=\"application/ld+json\">{schema_json}</script>
+    """.strip()
+
+
+def _render_html_page(*, title: str, description: str, canonical_url: str, body_html: str, og_type: str = "website", noindex: bool = False) -> str:
+    head = _build_meta_head(
+        title=title,
+        description=description,
+        canonical_url=canonical_url,
+        og_type=og_type,
+        noindex=noindex,
+    )
+    return f"""<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+{head}
+</head>
+<body>
+{body_html}
+</body>
+</html>
+"""
+
+
+def _build_research_url(filename: str) -> str:
+    return f"{PUBLIC_BASE_URL}/research/{filename}"
 
 
 def _resolve_research_file(filename: str) -> Path | None:
@@ -286,6 +375,108 @@ def _resolve_research_file(filename: str) -> Path | None:
     if legacy.is_file():
         return legacy
     return None
+
+
+@app.get("/robots.txt")
+async def robots_txt():
+    content = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        "",
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml",
+        f"Host: {PUBLIC_BASE_URL.replace('https://', '')}",
+    ])
+    return Response(content=content + "\n", media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    static_urls = [
+        (f"{PUBLIC_BASE_URL}/", "daily", "1.0"),
+        (f"{PUBLIC_BASE_URL}/research", "hourly", "0.9"),
+        (f"{PUBLIC_BASE_URL}/atom.xml", "hourly", "0.6"),
+    ]
+    entries: list[str] = []
+    for loc, changefreq, priority in static_urls:
+        entries.append(
+            "<url>"
+            f"<loc>{_xml_escape(loc)}</loc>"
+            f"<changefreq>{changefreq}</changefreq>"
+            f"<priority>{priority}</priority>"
+            "</url>"
+        )
+
+    files_by_name: dict[str, Path] = {}
+    for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob("*.md"):
+            files_by_name[p.name] = p
+
+    for name in sorted(files_by_name):
+        p = files_by_name[name]
+        lastmod = p.stat().st_mtime
+        from datetime import datetime, timezone
+        lastmod_iso = datetime.fromtimestamp(lastmod, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entries.append(
+            "<url>"
+            f"<loc>{_xml_escape(_build_research_url(name))}</loc>"
+            f"<lastmod>{lastmod_iso}</lastmod>"
+            "<changefreq>weekly</changefreq>"
+            "<priority>0.7</priority>"
+            "</url>"
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(entries)
+        + "</urlset>"
+    )
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/atom.xml")
+async def atom_feed():
+    files_by_name: dict[str, Path] = {}
+    for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob("*.md"):
+            files_by_name[p.name] = p
+
+    sorted_files = sorted(files_by_name.values(), key=lambda p: p.stat().st_mtime, reverse=True)[:20]
+    updated = "1970-01-01T00:00:00Z"
+    entries: list[str] = []
+    if sorted_files:
+        from datetime import datetime, timezone
+        updated = datetime.fromtimestamp(sorted_files[0].stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for p in sorted_files:
+            modified = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            title = p.stem.replace("_", " ")
+            url = _build_research_url(p.name)
+            entries.append(
+                "<entry>"
+                f"<title>{_xml_escape(title)}</title>"
+                f"<link href=\"{_xml_escape(url)}\" />"
+                f"<id>{_xml_escape(url)}</id>"
+                f"<updated>{modified}</updated>"
+                "</entry>"
+            )
+
+    feed = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        f"<title>{_xml_escape(SEO_DEFAULT_TITLE)}</title>"
+        f"<subtitle>{_xml_escape(SEO_DEFAULT_DESCRIPTION)}</subtitle>"
+        f"<link href=\"{PUBLIC_BASE_URL}/atom.xml\" rel=\"self\" />"
+        f"<link href=\"{PUBLIC_BASE_URL}/\" />"
+        f"<id>{PUBLIC_BASE_URL}/atom.xml</id>"
+        f"<updated>{updated}</updated>"
+        + "".join(entries)
+        + "</feed>"
+    )
+    return Response(content=feed, media_type="application/atom+xml; charset=utf-8")
 
 
 @app.get("/research")
@@ -302,15 +493,15 @@ async def list_research():
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "source_dir": p.parent.name,
+                "url": _build_research_url(p.name),
             }
     files = [files_by_name[name] for name in sorted(files_by_name)]
     return {"files": files}
 
 
 @app.get("/research/{filename}")
-async def get_research(filename: str):
+async def get_research(filename: str, format: str = Query(default="json")):
     """Read a single public markdown file from research/ or legacy output/research/."""
-    # Prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
@@ -319,7 +510,23 @@ async def get_research(filename: str):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     content = filepath.read_text(encoding="utf-8")
-    return {"filename": filename, "content": content, "size": len(content), "source_dir": filepath.parent.name}
+    if format.lower() == "html":
+        title = f"{filepath.stem.replace('_', ' ')} | Cyber-Lenin Research"
+        description = content.splitlines()[0].lstrip("# ").strip() if content.strip() else SEO_DEFAULT_DESCRIPTION
+        body_html = (
+            f"<main><article><h1>{_html_escape(title)}</h1>"
+            f"<pre>{_html_escape(content)}</pre>"
+            f"</article></main>"
+        )
+        html = _render_html_page(
+            title=title,
+            description=description[:300],
+            canonical_url=_build_research_url(filename),
+            body_html=body_html,
+            og_type="article",
+        )
+        return Response(content=html, media_type="text/html; charset=utf-8")
+    return {"filename": filename, "content": content, "size": len(content), "source_dir": filepath.parent.name, "url": _build_research_url(filename)}
 
 
 @app.get("/reports/research")
