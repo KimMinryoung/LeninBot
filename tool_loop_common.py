@@ -51,6 +51,39 @@ async def emit_progress(on_progress, event: str, detail: str):
         pass
 
 
+# ── Task cancellation ─────────────────────────────────────────────────
+
+class TaskCancelledError(Exception):
+    """Raised when a task is cancelled via Redis signal."""
+    pass
+
+
+def check_cancelled(task_id: int | None):
+    """Check if a task has been cancelled. Raises TaskCancelledError if so."""
+    if task_id is None:
+        return
+    try:
+        from redis_state import get_redis
+        r = get_redis()
+        if r.exists(f"task:{task_id}:cancel"):
+            r.delete(f"task:{task_id}:cancel")
+            raise TaskCancelledError(f"Task #{task_id} cancelled by user")
+    except TaskCancelledError:
+        raise
+    except Exception:
+        pass
+
+
+def request_cancel(task_id: int):
+    """Set a cancel flag in Redis for a running task."""
+    try:
+        from redis_state import get_redis
+        r = get_redis()
+        r.set(f"task:{task_id}:cancel", "1", ex=300)  # 5 min TTL
+    except Exception:
+        pass
+
+
 # ── Redis state ──────────────────────────────────────────────────────
 
 def update_redis_state(task_id: int | None, round_num: int, total_cost: float):

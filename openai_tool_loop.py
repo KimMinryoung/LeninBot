@@ -25,6 +25,7 @@ from tool_loop_common import (
     update_redis_state, save_redis_progress, execute_tool,
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
+    check_cancelled, TaskCancelledError,
 )
 
 logger = logging.getLogger(__name__)
@@ -535,6 +536,9 @@ async def chat_with_tools(
     accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
 
     for round_num in range(1, max_rounds + 1):
+
+        # ── Cancel check ──
+        check_cancelled(task_id)
 
         # ── Pre-API validation: check tool result completeness ──
         missing_ids = _validate_tool_results(working_msgs)

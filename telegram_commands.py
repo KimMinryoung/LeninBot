@@ -817,6 +817,30 @@ async def cmd_unschedule(message: Message):
         await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
 
 
+async def cmd_cancel(message: Message):
+    """Cancel a running task by ID. Usage: /cancel <task_id>"""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    args = (message.text or "").split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("사용법: `/cancel <task_id>`", parse_mode="Markdown")
+        return
+    task_id = int(args[1])
+    from tool_loop_common import request_cancel
+    request_cancel(task_id)
+    # Also mark in DB as failed immediately
+    try:
+        _execute(
+            "UPDATE telegram_tasks SET status = 'failed', "
+            "result = COALESCE(result, '') || %s, completed_at = NOW() "
+            "WHERE id = %s AND status IN ('processing', 'queued')",
+            (f"\n[CANCELLED] Stopped by user via /cancel.", task_id),
+        )
+    except Exception:
+        pass
+    await message.answer(f"✅ Task #{task_id} 취소 신호 전송. 다음 라운드에서 중단됩니다.")
+
+
 async def cmd_restart(message: Message):
     """Restart service(s) without git pull. Pure systemctl restart."""
     if not _ctx["is_allowed"](message.from_user.id):
@@ -1636,6 +1660,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_schedule, Command("schedule"))
     router.message.register(cmd_schedules, Command("schedules"))
     router.message.register(cmd_unschedule, Command("unschedule"))
+    router.message.register(cmd_cancel, Command("cancel"))
     router.message.register(cmd_restart, Command("restart"))
     router.message.register(cmd_deploy, Command("deploy"))
     router.message.register(cmd_fallback, Command("fallback"))

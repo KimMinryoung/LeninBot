@@ -13,6 +13,7 @@ from tool_loop_common import (
     update_redis_state, save_redis_progress, execute_tool,
     build_limit_message, build_budget_warning, build_round_warning,
     EMPTY_RESPONSE_FALLBACK,
+    check_cancelled, TaskCancelledError,
 )
 
 logger = logging.getLogger(__name__)
@@ -669,6 +670,9 @@ async def chat_with_tools(
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
     for round_num in range(1, max_rounds + 1):
+        # ── Cancel check ──
+        check_cancelled(task_id)
+
         unresolved = _find_unresolved_tool_uses(working_msgs)
         if unresolved:
             # Should not happen in normal flow; sanitize as a hard fail-safe.
