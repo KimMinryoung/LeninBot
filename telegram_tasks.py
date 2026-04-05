@@ -67,7 +67,7 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
         # In-progress tasks
         processing_rows = _query(
             "SELECT id, agent_type, content, created_at FROM telegram_tasks "
-            "WHERE user_id = %s AND status = 'processing' "
+            "WHERE user_id = %s AND status IN ('processing', 'queued') "
             "ORDER BY created_at ASC",
             (user_id,),
         )
@@ -1048,7 +1048,7 @@ async def recover_processing_tasks_on_startup(
         processing_rows = await asyncio.to_thread(
             _query,
             "SELECT id, user_id, content, depth, created_at, scratchpad, mission_id, agent_type FROM telegram_tasks "
-            "WHERE status = 'processing' AND completed_at IS NULL "
+            "WHERE status IN ('processing', 'queued') AND completed_at IS NULL "
             "ORDER BY created_at ASC",
         )
         if not processing_rows:
@@ -1478,6 +1478,19 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
     async def _run_one(task: dict):
         task_id = task["id"]
         async with sem:
+            # Set status to 'processing' only after acquiring the concurrency
+            # semaphore.  Previously, status was set in the SQL pickup query
+            # *before* entering _run_one, which meant tasks could sit in
+            # 'processing' while actually blocked on the semaphore — appearing
+            # as zombie tasks (especially with LOCAL_SEMAPHORE=1).
+            try:
+                await asyncio.to_thread(
+                    _execute,
+                    "UPDATE telegram_tasks SET status = 'processing' WHERE id = %s",
+                    (task_id,),
+                )
+            except Exception as e:
+                logger.warning("Task #%d: failed to set processing status: %s", task_id, e)
             try:
                 await process_task_fn(bot, task)
             except Exception as e:
@@ -1518,7 +1531,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
 
             task = await asyncio.to_thread(
                 _query_one,
-                "UPDATE telegram_tasks SET status = 'processing' "
+                "UPDATE telegram_tasks SET status = 'queued' "
                 "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
                 f"RETURNING {_TASK_PICKUP_RETURNING}",

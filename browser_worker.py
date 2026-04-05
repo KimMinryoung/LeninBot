@@ -281,7 +281,7 @@ async def execute_browser_task(task: dict) -> dict:
         try:
             db_execute(
                 "UPDATE telegram_tasks SET status = 'failed', result = %s, completed_at = NOW() "
-                "WHERE id = %s AND status = 'processing'",
+                "WHERE id = %s AND status IN ('processing', 'queued')",
                 (f"browser_worker error: {e}", task_id),
             )
         except Exception:

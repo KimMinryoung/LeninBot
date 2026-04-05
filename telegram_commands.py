@@ -528,7 +528,7 @@ async def cmd_status(message: Message):
         f"*태스크* ({total_tasks}건): "
         f"✅{stat_map.get('done', 0)} "
         f"⏳{stat_map.get('pending', 0)} "
-        f"🔄{stat_map.get('processing', 0)} "
+        f"🔄{stat_map.get('processing', 0) + stat_map.get('queued', 0)} "
         f"❌{stat_map.get('failed', 0)} "
         f"🔀{stat_map.get('handed_off', 0)}"
     )
@@ -566,7 +566,7 @@ async def cmd_status(message: Message):
     # 4. Recent tasks
     if tasks:
         lines.append("\n*최근 태스크:*")
-        status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌", "handed_off": "🔀"}
+        status_icons = {"pending": "⏳", "processing": "🔄", "queued": "📋", "done": "✅", "failed": "❌", "handed_off": "🔀"}
         for r in tasks:
             icon = status_icons.get(r["status"], "❓")
             ts = r["created_at"].strftime("%m/%d %H:%M")
@@ -657,7 +657,7 @@ async def cmd_status_auto(message: Message):
     if not rows:
         await message.answer("자율 생성된 태스크가 없습니다.")
         return
-    status_icons = {"pending": "⏳", "processing": "🔄", "done": "✅", "failed": "❌", "handed_off": "🔀"}
+    status_icons = {"pending": "⏳", "processing": "🔄", "queued": "📋", "done": "✅", "failed": "❌", "handed_off": "🔀"}
     lines = ["🤖 *자율 생성 태스크* (최근 10건)\n"]
     for r in rows:
         icon = status_icons.get(r["status"], "❓")
@@ -837,7 +837,7 @@ async def cmd_restart(message: Message):
     try:
         _execute(
             "UPDATE telegram_tasks SET status = 'done', result = COALESCE(result, '') || '\n[SYSTEM] 강제 종료: /restart 명령으로 서비스 재시작', completed_at = NOW() "
-            "WHERE status IN ('processing', 'pending') AND completed_at IS NULL"
+            "WHERE status IN ('processing', 'queued', 'pending') AND completed_at IS NULL"
         )
         logger.info("/restart: force-closed all active tasks")
     except Exception as e:

@@ -45,7 +45,7 @@ def get_active_mission(user_id: int) -> dict | None:
             # Don't auto-close if there are pending/processing tasks linked to this mission
             active_tasks = _query(
                 "SELECT COUNT(*) AS cnt FROM telegram_tasks "
-                "WHERE mission_id = %s AND status IN ('pending', 'processing')",
+                "WHERE mission_id = %s AND status IN ('pending', 'processing', 'queued')",
                 (mission["id"],),
             )
             if active_tasks and active_tasks[0]["cnt"] > 0:

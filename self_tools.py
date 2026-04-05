@@ -71,7 +71,7 @@ SELF_TOOLS = [
                     ],
                     "description": "For server_logs: filter text or list of texts.",
                 },
-                "status": {"type": "string", "enum": ["pending", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
+                "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
                 "task_id": {"type": "integer", "description": "For task_reports: get full report for a specific task ID."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
