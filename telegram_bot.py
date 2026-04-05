@@ -551,7 +551,7 @@ The `<current_state>` block contains structured completed/in-progress/pending ta
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - programmer: code writing/editing/debugging/file management ($1.50)
 - analyst: default agent for information analysis/research. Web search + collection + KG cross-validation + pattern extraction + knowledge storage ($1.00)
-- scout: routine patrols, large-scale platform crawling ($1.00)
+- scout: Moltbook activity (posting/commenting/patrol), routine patrols, large-scale platform crawling ($1.00)
 - browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction ($1.50)
 - visualizer: image generation, visual concepts ($1.00)
 
@@ -559,7 +559,8 @@ When to delegate vs handle directly:
 - Simple questions, casual conversation, quick lookups → handle directly
 - **"analyze/investigate/look into"** → delegate(agent="analyst")
 - **Code reading/editing/execution/file management** → delegate(agent="programmer")
-- **Moltbook patrols, large-scale crawling** → delegate(agent="scout")
+- **Moltbook activity (posting, commenting, patrol, scanning)** → delegate(agent="scout") — NEVER analyst
+- **Large-scale crawling, platform reconnaissance** → delegate(agent="scout")
 - **Website login, form submission, complex browser operations** → delegate(agent="browser")
 - **Image generation** → delegate(agent="visualizer")
 - **Multiple agents need to work simultaneously** → multi_delegate (parallel execution + automatic result synthesis)

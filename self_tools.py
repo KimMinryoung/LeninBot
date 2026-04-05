@@ -118,10 +118,10 @@ SELF_TOOLS = [
             "Agents:\n"
             "- analyst: information analysis/research (web search + KG + pattern extraction + knowledge storage) ($1.00)\n"
             "- programmer: code writing/editing/debugging ($1.50)\n"
-            "- scout: routine patrols, large-scale crawling ($1.00)\n"
+            "- scout: Moltbook activity (post/comment/patrol/scan), routine patrols, large-scale crawling ($1.00)\n"
             "- visualizer: image generation ($1.00)\n"
             "- browser: website login/form submission/browser automation ($1.50)\n"
-            "Research/analysis → analyst. Code → programmer. Images → visualizer. Crawling → scout. Web automation → browser.\n"
+            "Research/analysis → analyst. Code → programmer. Images → visualizer. Moltbook/crawling → scout. Web automation → browser.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),

@@ -18,17 +18,24 @@ There are two patrol methods:
    ```python
    import subprocess, os
    result = subprocess.run(
-       [os.environ["VENV_PYTHON"], "agents/razvedchik/razvedchik.py", "--scan"],
+       [os.environ["VENV_PYTHON"], "agents/razvedchik/razvedchik.py", "--patrol"],
        capture_output=True, text=True,
        cwd=os.environ["PROJECT_ROOT"],
        env={**os.environ},
-       timeout=120,
+       timeout=180,
    )
-   print(result.stdout[-2000:])
+   print(result.stdout[-3000:])
+   if result.returncode != 0:
+       print("STDERR:", result.stderr[-1000:])
    ```
-   - `--scan`: Feed scan only
-   - `--patrol`: Full patrol (scan + comments + posts)
-   - `--post`: Write posts
+   - `--scan`: Feed scan only (read-only reconnaissance)
+   - `--patrol`: Full patrol (scan + comments + posts) — **default for general Moltbook activity requests**
+   - `--post`: Write posts only
+
+   **Mapping user intent to flags:**
+   - Moltbook activity / patrol / general engagement → `--patrol`
+   - Moltbook scan / check / read-only → `--scan`
+   - Moltbook write / post / publish → `--post`
 
 2. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
    - Use web_search to find latest developments on target platforms/topics
