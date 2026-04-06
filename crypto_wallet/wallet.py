@@ -54,39 +54,55 @@ def _derive_sol_address(seed: bytes) -> str:
     return base58.b58encode(bytes(signing_key.verify_key)).decode()
 
 
+def _load_addresses_from_env() -> dict[str, str]:
+    """공개 주소를 .env에서 읽기 (credential 없는 서비스용 fallback)."""
+    addrs = {}
+    eth = os.environ.get("WALLET_ETH_ADDRESS")
+    if eth:
+        addrs["eth"] = eth
+        addrs["base"] = eth  # 같은 주소
+    tron = os.environ.get("WALLET_TRX_ADDRESS")
+    if tron:
+        addrs["tron"] = tron
+    sol = os.environ.get("WALLET_SOL_ADDRESS")
+    if sol:
+        addrs["sol"] = sol
+    return addrs
+
+
 def get_addresses() -> dict[str, str]:
-    """캐시된 주소 반환. 최초 호출 시 credential에서 도출."""
+    """캐시된 주소 반환. credential → .env fallback 순으로 시도."""
     if _addresses:
         return dict(_addresses)
 
+    # 1차: systemd credential에서 개인키 → 주소 도출
     cred = _cred_dir()
-    if not cred:
-        logger.warning("CREDENTIALS_DIRECTORY not set — wallet addresses unavailable")
-        return {}
+    if cred:
+        eth_key_path = cred / "eth.privkey"
+        if eth_key_path.exists():
+            pk_hex = eth_key_path.read_text().strip()
+            pk_bytes = bytes.fromhex(pk_hex)
+            _addresses["eth"] = _derive_eth_address(pk_bytes)
+            _addresses["base"] = _addresses["eth"]
+            _addresses["tron"] = _derive_tron_address(pk_bytes)
+            del pk_hex, pk_bytes
 
-    # ── ETH/Base/TRX (같은 개인키) ────────────────────────────────────
-    eth_key_path = cred / "eth.privkey"
-    if eth_key_path.exists():
-        pk_hex = eth_key_path.read_text().strip()
-        pk_bytes = bytes.fromhex(pk_hex)
-        _addresses["eth"] = _derive_eth_address(pk_bytes)
-        _addresses["base"] = _addresses["eth"]  # 같은 주소
-        _addresses["tron"] = _derive_tron_address(pk_bytes)
-        # 메모리에서 개인키 즉시 제거
-        del pk_hex, pk_bytes
-    else:
-        logger.warning("eth.privkey not found in %s", cred)
+        sol_key_path = cred / "sol.keypair"
+        if sol_key_path.exists():
+            keypair_b58 = sol_key_path.read_text().strip()
+            keypair_bytes = base58.b58decode(keypair_b58)
+            seed = keypair_bytes[:32]
+            _addresses["sol"] = _derive_sol_address(seed)
+            del keypair_b58, keypair_bytes, seed
 
-    # ── SOL ────────────────────────────────────────────────────────────
-    sol_key_path = cred / "sol.keypair"
-    if sol_key_path.exists():
-        keypair_b58 = sol_key_path.read_text().strip()
-        keypair_bytes = base58.b58decode(keypair_b58)
-        seed = keypair_bytes[:32]
-        _addresses["sol"] = _derive_sol_address(seed)
-        del keypair_b58, keypair_bytes, seed
-    else:
-        logger.warning("sol.keypair not found in %s", cred)
+    # 2차: .env fallback (공개 주소만, credential 없는 서비스용)
+    if not _addresses:
+        env_addrs = _load_addresses_from_env()
+        if env_addrs:
+            _addresses.update(env_addrs)
+            logger.info("Wallet addresses loaded from env vars (read-only mode)")
+        else:
+            logger.warning("No wallet addresses available (no credentials, no env vars)")
 
     return dict(_addresses)
 
@@ -225,15 +241,11 @@ async def _exec_check_wallet(chains: list[str] | None = None) -> str:
     """Tool handler for check_wallet."""
     addrs = get_addresses()
     if not addrs:
-        cred = os.environ.get("CREDENTIALS_DIRECTORY")
-        if not cred:
-            return ("No crypto wallet credentials loaded. "
-                    "The wallet private keys are not injected into this service. "
-                    "This means the bot is running without wallet access (e.g. local dev or credentials not configured).")
-        return ("Wallet credential directory exists but no key files found. "
-                "Expected eth.privkey and/or sol.keypair in CREDENTIALS_DIRECTORY.")
+        return "Wallet addresses not configured."
 
-    sections = []
+    sections = ["IMPORTANT: Wallet addresses are cryptographic identifiers. "
+                 "Copy them EXACTLY as shown — do not retype or paraphrase. "
+                 "A single wrong character sends funds to a different wallet."]
 
     # 주소 표시
     addr_lines = ["My wallet addresses:"]
@@ -260,6 +272,17 @@ async def _exec_check_wallet(chains: list[str] | None = None) -> str:
                 unit = r["unit"]
                 bal_str = f"{bal:.18f}".rstrip("0").rstrip(".")
                 bal_lines.append(f"  {label}: {bal_str} {unit}")
+        # USDC 잔액 (Base)
+        base_addr = addrs.get("base")
+        if base_addr:
+            try:
+                from crypto_wallet.transactions import get_usdc_balance
+                usdc = await get_usdc_balance(base_addr)
+                usdc_str = f"{usdc:.18f}".rstrip("0").rstrip(".")
+                bal_lines.append(f"  Base USDC: {usdc_str} USDC")
+            except Exception as e:
+                logger.warning("USDC balance check failed: %s", e)
+
         sections.append("\n".join(bal_lines))
     except Exception as e:
         logger.error("Balance fetch failed: %s", e)
