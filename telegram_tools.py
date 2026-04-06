@@ -1334,6 +1334,12 @@ from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
+# ── Crypto wallet tool (address + balance) ────────────────────────────
+from crypto_wallet import WALLET_TOOL, WALLET_TOOL_HANDLER
+
+TOOLS.append(WALLET_TOOL)
+TOOL_HANDLERS["check_wallet"] = WALLET_TOOL_HANDLER
+
 # ── Image generation tool (Replicate) ─────────────────────────────────
 def _build_generate_image_description() -> str:
     """Build generate_image description with live model schemas."""

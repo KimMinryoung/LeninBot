@@ -1588,7 +1588,7 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
         try:
             schedules = await asyncio.to_thread(
                 _query,
-                "SELECT id, user_id, content, cron_expr, last_run_at "
+                "SELECT id, user_id, content, cron_expr, last_run_at, agent_type "
                 "FROM telegram_schedules WHERE enabled = TRUE",
             )
             now_kst = datetime.now(KST)
@@ -1605,14 +1605,15 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                     elif prev_fire <= last_run:
                         continue
 
-                    # Detect agent_type from [agent] prefix in content
+                    # Determine agent_type: DB column first, then [agent] prefix fallback
                     sched_content = sched["content"]
-                    sched_agent = None
-                    if sched_content.startswith("[") and "]" in sched_content[:20]:
-                        tag = sched_content[1:sched_content.index("]")].strip().lower()
-                        from agents import agent_names
-                        if tag in agent_names():
-                            sched_agent = tag
+                    sched_agent = sched.get("agent_type")
+                    if not sched_agent:
+                        if sched_content.startswith("[") and "]" in sched_content[:20]:
+                            tag = sched_content[1:sched_content.index("]")].strip().lower()
+                            from agents import agent_names
+                            if tag in agent_names():
+                                sched_agent = tag
                     await asyncio.to_thread(
                         _execute,
                         "INSERT INTO telegram_tasks (user_id, content, agent_type) VALUES (%s, %s, %s)",

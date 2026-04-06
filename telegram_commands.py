@@ -721,17 +721,31 @@ async def cmd_schedule(message: Message):
     arg = (message.text or "").removeprefix("/schedule").strip()
     if not arg or "|" not in arg:
         await message.answer(
-            "사용법: /schedule <cron식> | <태스크 내용>\n\n"
+            "사용법: /schedule <cron식> | <태스크 내용> [| <agent>]\n\n"
             "예시:\n"
             "  /schedule 0 9 * * * | 오늘의 국제 뉴스 브리핑\n"
-            "  /schedule 0 8 * * 1 | 주간 지정학 정세 분석\n"
-            "  /schedule 0 */6 * * * | 6시간마다 KG 상태 점검\n\n"
-            "cron 형식: 분 시 일 월 요일 (KST 기준)"
+            "  /schedule 0 8 * * 1 | 주간 지정학 정세 분석 | analyst\n"
+            "  /schedule 0 9 * * * | 메일함 브리핑 | scout\n\n"
+            "cron 형식: 분 시 일 월 요일 (KST 기준)\n"
+            "agent: programmer, scout, visualizer, analyst, browser, diary"
         )
         return
-    parts = arg.split("|", 1)
+    parts = arg.split("|")
     cron_expr = parts[0].strip()
     content = parts[1].strip()
+    # Optional agent_type from third segment
+    agent_type = None
+    if len(parts) >= 3:
+        from agents import agent_names
+        candidate = parts[2].strip().lower()
+        if candidate in agent_names():
+            agent_type = candidate
+        else:
+            await message.answer(
+                f"알 수 없는 agent: {candidate}\n"
+                f"사용 가능: {', '.join(agent_names())}"
+            )
+            return
     if not content:
         await message.answer("태스크 내용이 비어있습니다.")
         return
@@ -746,13 +760,15 @@ async def cmd_schedule(message: Message):
         # Set last_run_at = NOW() so the first fire waits for the next cron window
         await asyncio.to_thread(
             _execute,
-            "INSERT INTO telegram_schedules (user_id, content, cron_expr, last_run_at) "
-            "VALUES (%s, %s, %s, NOW())",
-            (message.from_user.id, content, cron_expr),
+            "INSERT INTO telegram_schedules (user_id, content, cron_expr, last_run_at, agent_type) "
+            "VALUES (%s, %s, %s, NOW(), %s)",
+            (message.from_user.id, content, cron_expr, agent_type),
         )
+        agent_info = f"  agent: {agent_type}\n" if agent_type else ""
         await message.answer(
             f"✅ 스케줄 등록 완료\n"
             f"  cron: `{cron_expr}` (KST)\n"
+            f"{agent_info}"
             f"  내용: {content[:100]}"
         )
     except Exception as e:
@@ -766,7 +782,7 @@ async def cmd_schedules(message: Message):
     try:
         rows = await asyncio.to_thread(
             _query,
-            "SELECT id, content, cron_expr, enabled, last_run_at "
+            "SELECT id, content, cron_expr, enabled, last_run_at, agent_type "
             "FROM telegram_schedules WHERE user_id = %s ORDER BY id",
             (message.from_user.id,),
         )
@@ -781,8 +797,9 @@ async def cmd_schedules(message: Message):
         status = "✅" if r["enabled"] else "⏸️"
         last = r["last_run_at"].strftime("%m/%d %H:%M") if r["last_run_at"] else "미실행"
         preview = r["content"][:60]
+        agent = r.get("agent_type") or "auto"
         lines.append(
-            f"{status} [{r['id']}] `{r['cron_expr']}`\n"
+            f"{status} [{r['id']}] `{r['cron_expr']}` ({agent})\n"
             f"   {preview}\n"
             f"   마지막 실행: {last}"
         )
@@ -813,6 +830,51 @@ async def cmd_unschedule(message: Message):
         return
     if row:
         await message.answer(f"🗑️ 스케줄 [{sched_id}] 삭제 완료")
+    else:
+        await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
+
+
+async def cmd_schedule_agent(message: Message):
+    """Set agent for a schedule: /schedule_agent <id> <agent>"""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    arg = (message.text or "").removeprefix("/schedule_agent").strip()
+    parts = arg.split()
+    if len(parts) < 2:
+        await message.answer(
+            "사용법: /schedule_agent <schedule_id> <agent>\n"
+            "agent: programmer, scout, visualizer, analyst, browser, diary\n"
+            "agent를 해제하려면: /schedule_agent <id> auto"
+        )
+        return
+    try:
+        sched_id = int(parts[0])
+    except ValueError:
+        await message.answer("schedule_id는 숫자여야 합니다.")
+        return
+    agent = parts[1].strip().lower()
+    if agent == "auto":
+        agent = None
+    else:
+        from agents import agent_names
+        if agent not in agent_names():
+            await message.answer(
+                f"알 수 없는 agent: {agent}\n"
+                f"사용 가능: {', '.join(agent_names())}, auto"
+            )
+            return
+    try:
+        row = await asyncio.to_thread(
+            _query_one,
+            "UPDATE telegram_schedules SET agent_type = %s WHERE id = %s AND user_id = %s RETURNING id",
+            (agent, sched_id, message.from_user.id),
+        )
+    except Exception as e:
+        await message.answer(f"수정 실패: {e}")
+        return
+    if row:
+        label = agent or "auto"
+        await message.answer(f"✅ 스케줄 [{sched_id}] agent → {label}")
     else:
         await message.answer(f"스케줄 [{sched_id}]을(를) 찾을 수 없습니다.")
 
@@ -1660,6 +1722,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_schedule, Command("schedule"))
     router.message.register(cmd_schedules, Command("schedules"))
     router.message.register(cmd_unschedule, Command("unschedule"))
+    router.message.register(cmd_schedule_agent, Command("schedule_agent"))
     router.message.register(cmd_cancel, Command("cancel"))
     router.message.register(cmd_restart, Command("restart"))
     router.message.register(cmd_deploy, Command("deploy"))

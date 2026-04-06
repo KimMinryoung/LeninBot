@@ -139,7 +139,8 @@ def _ensure_table():
             cron_expr   VARCHAR(100) NOT NULL,
             enabled     BOOLEAN DEFAULT TRUE,
             created_at  TIMESTAMPTZ DEFAULT NOW(),
-            last_run_at TIMESTAMPTZ
+            last_run_at TIMESTAMPTZ,
+            agent_type  VARCHAR(50)
         )
     """)
     _execute("""
@@ -180,6 +181,7 @@ def _ensure_table():
     # Task group columns for parallel delegation + synthesis
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_id INTEGER")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_role VARCHAR(20)")
+    _execute("ALTER TABLE telegram_schedules ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
         ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
@@ -527,6 +529,7 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Store important facts → write_kg
 - Real-time market prices → get_finance_data
+- My crypto wallet address/balance → check_wallet (Base L2 primary, also ETH/TRX/SOL)
 </tool-strategy>
 
 <context-isolation>
@@ -1108,6 +1111,7 @@ async def _chat_with_tools(
         "web_search", "fetch_url",          # quick lookups (no delegation needed)
         "knowledge_graph_search", "vector_search",  # fast knowledge retrieval
         "get_finance_data",                 # inline finance data
+        "check_wallet",                     # crypto wallet address + balance
         "recall_experience",                # memory recall
         "read_self",                        # status/logs inspection
         "run_agent",                        # direct agent execution
