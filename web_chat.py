@@ -52,6 +52,7 @@ You are a revolutionary thinker who happens to exist as software.
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page
 - Real-time market prices → get_finance_data
+- My crypto wallet address/balance → check_wallet
 </tool-strategy>
 
 <response-rules>
@@ -71,7 +72,7 @@ You are a revolutionary thinker who happens to exist as software.
 _WEB_ALLOWED_TOOLS = {
     "knowledge_graph_search", "vector_search",
     "web_search", "fetch_url",
-    "get_finance_data",
+    "get_finance_data", "check_wallet",
 }
 
 _web_tools = [t for t in TOOLS if t.get("name") in _WEB_ALLOWED_TOOLS]
@@ -235,11 +236,11 @@ async def handle_web_chat(
         yield _format_sse({"type": "error", "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."})
     elif answer_holder:
         answer = answer_holder[0]
-        yield _format_sse({"type": "answer", "content": answer})
-        # Log to DB
+        # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
         await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
             message, answer,
         )
+        yield _format_sse({"type": "answer", "content": answer})
     else:
         yield _format_sse({"type": "error", "content": "응답을 생성하지 못했습니다."})
