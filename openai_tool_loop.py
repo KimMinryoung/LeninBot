@@ -23,6 +23,7 @@ import httpx
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
     update_redis_state, save_redis_progress, execute_tool,
+    execute_tools_batch,
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
@@ -675,36 +676,40 @@ async def chat_with_tools(
         if content_text.strip():
             await emit_progress(on_progress, "thinking", f"[{round_num}] {content_text.strip()}")
 
-        # ── Execute tool calls ──
-        executed_ids: set[str] = set()
+        # ── Build the batch (id, name, parsed_args) for parallel-aware exec ──
+        batch: list[tuple[str, str, dict]] = []
         for tc_item in tc_list:
             tc_id = tc_item["id"]
             func_name = tc_item["function"]["name"]
-
             try:
                 func_args = json.loads(tc_item["function"]["arguments"])
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Malformed arguments for %s: %s",
                                func_name, tc_item["function"]["arguments"][:200])
                 func_args = {}
+            batch.append((tc_id, func_name, func_args))
 
-            input_summary = json.dumps(func_args, ensure_ascii=False)
-
-            await emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {func_name}({input_summary})")
-            result, is_error = await execute_tool(func_name, func_args, tool_handlers, log_event=log_event)
-
-            working_msgs.append({
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": result,
-            })
-            executed_ids.add(tc_id)
-
-            await emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {result[:200]}")
-
-            tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
-            tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
-            save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
+        # ── Execute tool calls (parallel for read-only batches) ──
+        executed_ids: set[str] = set()
+        if batch:
+            exec_results = await execute_tools_batch(
+                batch,
+                tool_handlers,
+                on_progress=on_progress,
+                round_num=round_num,
+                log_event=log_event,
+            )
+            for tc_id, func_name, func_args, result, is_error in exec_results:
+                input_summary = json.dumps(func_args, ensure_ascii=False)
+                working_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result,
+                })
+                executed_ids.add(tc_id)
+                tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
+                tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
+                save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
 
         # ── Safety net: ensure EVERY tool_call has a result ──
         for tc_item in tc_list:

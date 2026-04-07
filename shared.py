@@ -1383,12 +1383,11 @@ def _crawl4ai_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
         return None
 
 
-def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fetch and extract main body text from a URL (up to 10,000 chars).
-
-    Tries Playwright (persistent context) first, then Tavily Extract and
-    requests+BS4 as fallbacks. Low-quality / JS-placeholder results from
-    any method are skipped in favor of the next.
+def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Fallback chain when Playwright is unavailable or returns low-quality
+    content: Crawl4AI → Tavily Extract → requests+BeautifulSoup. Returns the
+    best available result (low-quality only if no high-quality option found).
+    Synchronous and thread-safe (no shared state).
     """
     def _clean_text(raw: str) -> str:
         """Strip boilerplate noise and keep only substantive paragraphs."""
@@ -1400,15 +1399,7 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
             cleaned.append(line)
         return "\n".join(cleaned)
 
-    # 1) Playwright first — handles JS-rendered pages, iframes, cookies
-    try:
-        result = _playwright_fetch(url, max_chars)
-        if result and not _is_low_quality(result):
-            return result
-    except Exception as e:
-        logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
-
-    # 2) Crawl4AI — LLM-friendly markdown extraction
+    # 1) Crawl4AI — LLM-friendly markdown extraction
     try:
         result = _crawl4ai_fetch(url, max_chars)
         if result and not _is_low_quality(result):
@@ -1416,7 +1407,7 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     except Exception as e:
         logger.info("[URL] Crawl4AI 실패 (%s): %s", url[:60], e)
 
-    # 3) Fallback: Tavily Extract (skip if API key missing or quota exhausted)
+    # 2) Tavily Extract (skip if API key missing or quota exhausted)
     best_fallback = None
     tavily_key = os.environ.get("TAVILY_API_KEY", "")
     if tavily_key:
@@ -1442,13 +1433,14 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
         except Exception as e:
             logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
-    # 4) Fallback: requests + BeautifulSoup
+    # 3) requests + BeautifulSoup
     try:
+        import requests as _req
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
         }
-        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        resp = _req.get(url, headers=headers, timeout=15, allow_redirects=True)
         resp.raise_for_status()
         resp.encoding = resp.apparent_encoding or "utf-8"
 
@@ -1497,6 +1489,35 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     return best_fallback
 
 
+def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Sync entry point. Tries Playwright first (via dedicated async loop),
+    then Crawl4AI / Tavily / requests fallbacks. Low-quality results from any
+    method are skipped in favor of the next.
+    """
+    try:
+        result = _playwright_fetch(url, max_chars)
+        if result and not _is_low_quality(result):
+            return result
+    except Exception as e:
+        logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
+    return _fetch_url_fallbacks(url, max_chars)
+
+
+async def fetch_url_content_async(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Async entry point. Playwright runs on the dedicated Playwright loop,
+    so concurrent calls share one Chromium process and execute pages in
+    parallel. Sync fallbacks are offloaded to a worker thread.
+    """
+    try:
+        fut = _pw_submit(_playwright_fetch_async(url, max_chars))
+        result = await asyncio.wrap_future(fut)
+        if result and not _is_low_quality(result):
+            return result
+    except Exception as e:
+        logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
+    return await asyncio.to_thread(_fetch_url_fallbacks, url, max_chars)
+
+
 # ── Document Conversion (MarkItDown) ─────────────────────────────────
 
 _MAX_DOC_SIZE = 50 * 1024 * 1024  # 50 MB
@@ -1533,47 +1554,107 @@ def convert_document(file_path: str, max_chars: int = _MAX_DOC_OUTPUT) -> _Optio
         return None
 
 
-# ── Playwright Browser Pool (sync, singleton with persistent context) ──
-_pw_instance = None
-_pw_browser = None
-_pw_context = None
-_pw_lock = threading.Lock()
+# ── Playwright Browser Pool (async, dedicated event loop) ───────────
+#
+# Architecture:
+#   * One Chromium browser + one persistent context, owned by an asyncio
+#     event loop running on a dedicated daemon thread (`_apw_loop`).
+#   * All Playwright calls go through that loop, so transport access is
+#     serialized to one thread (avoids the thread-affinity bugs of the
+#     sync API) while many pages can still be in flight concurrently.
+#   * Sync callers go through `_playwright_fetch` (a thin blocking wrapper).
+#   * Async callers go through `_playwright_fetch_async` via `_pw_submit`,
+#     which schedules the coroutine on `_apw_loop` and returns a future
+#     awaitable from the caller's own loop.
+
 _PW_COOKIE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pw_cookies.json")
 
+# Sites whose article body lives in an iframe (Naver cafe / blog).
+_IFRAME_SITES = ("cafe.naver.com", "blog.naver.com", "m.blog.naver.com")
 
-def _get_pw_context():
-    """Lazy singleton: persistent Chromium context with cookie/session reuse."""
-    global _pw_instance, _pw_browser, _pw_context
+# Loop-thread plumbing (touched only via `_apw_loop_lock`)
+_apw_loop: _Optional[asyncio.AbstractEventLoop] = None
+_apw_thread: _Optional[threading.Thread] = None
+_apw_loop_lock = threading.Lock()
 
-    with _pw_lock:
-        if _pw_context is not None:
+# State pinned to `_apw_loop` — only mutate from coroutines running on it.
+_apw_instance = None
+_apw_browser = None
+_apw_context = None
+_apw_init_lock: _Optional[asyncio.Lock] = None
+_apw_cookies_lock: _Optional[asyncio.Lock] = None
+
+
+def _ensure_pw_loop() -> asyncio.AbstractEventLoop:
+    """Lazily start the dedicated Playwright event-loop thread."""
+    global _apw_loop, _apw_thread
+    with _apw_loop_lock:
+        if _apw_loop is not None and _apw_thread is not None and _apw_thread.is_alive():
+            return _apw_loop
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+
+        def _run():
+            asyncio.set_event_loop(loop)
+            ready.set()
+            loop.run_forever()
+
+        thread = threading.Thread(target=_run, name="playwright-loop", daemon=True)
+        thread.start()
+        if not ready.wait(timeout=5):
+            raise RuntimeError("Playwright event loop failed to start")
+        _apw_loop = loop
+        _apw_thread = thread
+        logger.info("[Playwright] Dedicated event loop thread started")
+        return loop
+
+
+def _pw_submit(coro):
+    """Submit a coroutine to the Playwright loop. Returns concurrent.futures.Future.
+
+    Sync callers can call `.result(timeout=...)` to block; async callers in
+    other event loops can do `await asyncio.wrap_future(fut)`.
+    """
+    loop = _ensure_pw_loop()
+    return asyncio.run_coroutine_threadsafe(coro, loop)
+
+
+async def _get_apw_context():
+    """Lazy singleton: persistent Chromium async context with cookie reuse.
+    Must be awaited from the dedicated Playwright loop.
+    """
+    global _apw_instance, _apw_browser, _apw_context, _apw_init_lock
+    if _apw_init_lock is None:
+        _apw_init_lock = asyncio.Lock()
+    async with _apw_init_lock:
+        if _apw_context is not None:
             try:
-                _pw_context.pages  # noqa — will raise if dead
-                return _pw_context
+                _ = _apw_context.pages  # liveness probe
+                return _apw_context
             except Exception:
-                _pw_context = None
+                _apw_context = None
 
-        if _pw_browser is not None:
+        if _apw_browser is not None:
             try:
-                _pw_browser.contexts  # noqa
+                _ = _apw_browser.contexts
             except Exception:
-                _pw_browser = None
-                if _pw_instance is not None:
+                _apw_browser = None
+                if _apw_instance is not None:
                     try:
-                        _pw_instance.stop()
+                        await _apw_instance.stop()
                     except Exception:
                         pass
-                    _pw_instance = None
+                    _apw_instance = None
 
         try:
-            from playwright.sync_api import sync_playwright
+            from playwright.async_api import async_playwright
         except ImportError:
             return None
 
-        pw = sync_playwright().start()
+        pw = await async_playwright().start()
         try:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
+            browser = await pw.chromium.launch(headless=True)
+            context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 800},
                 locale="ko-KR",
@@ -1582,57 +1663,63 @@ def _get_pw_context():
                 try:
                     with open(_PW_COOKIE_PATH, "r", encoding="utf-8") as f:
                         cookies = _json.load(f)
-                    context.add_cookies(cookies)
+                    await context.add_cookies(cookies)
                     logger.info("[Playwright] Restored %d cookies", len(cookies))
                 except Exception:
                     pass
-            _pw_instance = pw
-            _pw_browser = browser
-            _pw_context = context
+            _apw_instance = pw
+            _apw_browser = browser
+            _apw_context = context
+            logger.info("[Playwright] Async browser context started")
+            return _apw_context
         except Exception:
-            pw.stop()
+            try:
+                await pw.stop()
+            except Exception:
+                pass
             raise
-        logger.info("[Playwright] Browser context started")
-        return _pw_context
 
 
-def _save_pw_cookies():
-    """Persist current cookies to disk."""
-    if _pw_context is None:
+async def _save_apw_cookies():
+    """Persist current cookies to disk. Runs on the Playwright loop."""
+    global _apw_cookies_lock
+    if _apw_context is None:
         return
-    try:
-        cookies = _pw_context.cookies()
-        with open(_PW_COOKIE_PATH, "w", encoding="utf-8") as f:
-            _json.dump(cookies, f, ensure_ascii=False)
-    except Exception:
-        pass
+    if _apw_cookies_lock is None:
+        _apw_cookies_lock = asyncio.Lock()
+    async with _apw_cookies_lock:
+        try:
+            cookies = await _apw_context.cookies()
+            with open(_PW_COOKIE_PATH, "w", encoding="utf-8") as f:
+                _json.dump(cookies, f, ensure_ascii=False)
+        except Exception:
+            pass
 
 
-# Sites that need Playwright directly (JS-rendered or iframe-based)
-# Sites with content in iframes
-_IFRAME_SITES = ("cafe.naver.com", "blog.naver.com", "m.blog.naver.com")
-
-
-def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fetch URL content via Playwright (persistent context with cookies). Handles JS + iframe."""
-    context = _get_pw_context()
+async def _playwright_fetch_async(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Async Playwright fetch. Many invocations on the same loop run concurrently."""
+    context = await _get_apw_context()
     if context is None:
         return None
 
     page = None
     try:
-        page = context.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page = await context.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            logger.warning("[URL] Playwright goto error (%s): %s", url[:60], e)
+            return None
         # Give JS-rendered pages a moment to hydrate
         try:
-            page.wait_for_load_state("networkidle", timeout=8000)
+            await page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:
             pass
 
         # Naver Cafe/Blog: content is inside an iframe
         target = page
         if any(site in url for site in _IFRAME_SITES):
-            page.wait_for_timeout(3000)
+            await page.wait_for_timeout(3000)
             for frame in page.frames:
                 if any(p in frame.url for p in ("/ca-fe/cafes/", "ArticleRead", "PostView.naver")):
                     target = frame
@@ -1640,7 +1727,7 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
 
         # YouTube: extract video title + description
         if "youtube.com" in url or "youtu.be" in url:
-            text = page.evaluate("""() => {
+            text = await page.evaluate("""() => {
                 const title = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1')?.innerText || '';
                 const desc = document.querySelector('#description-inline-expander, #description')?.innerText || '';
                 const chapters = [...document.querySelectorAll('ytd-macro-markers-list-item-renderer')]
@@ -1662,28 +1749,40 @@ def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
                 }
                 return document.body ? document.body.innerText.trim() : '';
             }"""
-            text = target.evaluate(_js_extract)
+            text = await target.evaluate(_js_extract)
             # Loading 감지 시 최대 10초간 재시도 (2초 간격)
             import time as _time
             _deadline = _time.time() + 10
             while _is_low_quality(text) and _time.time() < _deadline:
-                page.wait_for_timeout(2000)
-                text = target.evaluate(_js_extract)
+                await page.wait_for_timeout(2000)
+                text = await target.evaluate(_js_extract)
 
         if text and len(text) > 50:
             logger.info("[URL] Playwright 성공 (%s): %d chars", url[:60], len(text))
-            _save_pw_cookies()
+            await _save_apw_cookies()
             return text[:max_chars]
     except Exception as e:
         logger.warning("[URL] Playwright page error (%s): %s", url[:60], e)
     finally:
-        if page:
+        if page is not None:
             try:
-                page.close()
-            except Exception:
-                pass
+                await page.close()
+            except Exception as e:
+                logger.warning("[URL] Playwright page.close failed (%s): %s", url[:60], e)
 
     return None
+
+
+def _playwright_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Sync wrapper: schedules the async fetch on the dedicated Playwright loop
+    and blocks for its result. Safe to call from any thread.
+    """
+    try:
+        fut = _pw_submit(_playwright_fetch_async(url, max_chars))
+        return fut.result(timeout=90)
+    except Exception as e:
+        logger.warning("[URL] Playwright fetch wrapper error (%s): %s", url[:60], e)
+        return None
 
 
 def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:

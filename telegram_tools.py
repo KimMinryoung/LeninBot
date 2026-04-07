@@ -302,8 +302,8 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
 async def _exec_fetch_url(url: str) -> str:
     """Fetch and extract main body text from a URL."""
     try:
-        from shared import fetch_url_content
-        content = await asyncio.to_thread(fetch_url_content, url)
+        from shared import fetch_url_content_async
+        content = await fetch_url_content_async(url)
         return content or "Failed to extract content from this URL."
     except Exception as e:
         logger.error("fetch_url error: %s", e)

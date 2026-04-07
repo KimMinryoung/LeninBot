@@ -149,6 +149,80 @@ async def execute_tool(
     return result, is_error
 
 
+# ── Parallel batch execution ─────────────────────────────────────────
+
+# Tools that are safe to run concurrently with each other within a single
+# round. They must be:
+#   * Read-only (no disk/DB/network writes that could race)
+#   * Idempotent (multiple calls produce the same result)
+#   * Free of order-dependent side effects on other tools in the same batch
+#
+# Anything not on this list is run sequentially in original emission order.
+# Tools that download files, execute code, send messages, modify files,
+# spawn agents, or perform financial transactions are intentionally excluded.
+PARALLEL_SAFE_TOOLS = frozenset({
+    "fetch_url",
+    "web_search",
+    "vector_search",
+    "knowledge_graph_search",
+    "read_file",
+    "list_directory",
+    "convert_document",
+    "get_finance_data",
+    "check_wallet",
+    "recall_experience",
+    "read_self",
+})
+
+
+async def execute_tools_batch(
+    tool_uses: list[tuple[str, str, dict]],
+    handlers: dict,
+    *,
+    on_progress=None,
+    round_num: int,
+    log_event=None,
+    parallel_safe: frozenset = PARALLEL_SAFE_TOOLS,
+) -> list[tuple[str, str, dict, str, bool]]:
+    """Execute a sequence of (id, name, input) tool calls.
+
+    Consecutive parallel-safe tools are run concurrently via ``asyncio.gather``;
+    any tool not on the safe-list breaks the batch and runs sequentially in its
+    original position. Results are returned in input order so the caller can
+    build tool_result blocks / messages without re-sorting.
+    """
+    n = len(tool_uses)
+    results: list = [None] * n
+
+    async def _run_one(idx: int, tid: str, tname: str, tinput: dict):
+        input_summary = json.dumps(tinput, ensure_ascii=False)
+        await emit_progress(on_progress, "tool_call",
+                            f"[{round_num}] 🔧 {tname}({input_summary})")
+        result, is_error = await execute_tool(tname, tinput, handlers, log_event=log_event)
+        await emit_progress(on_progress, "tool_result",
+                            f"  {'❌' if is_error else '✓'} {result[:200]}")
+        results[idx] = (tid, tname, tinput, result, is_error)
+
+    i = 0
+    while i < n:
+        tid_i, tname_i, tinput_i = tool_uses[i]
+        if tname_i in parallel_safe:
+            # Greedily collect the longest run of consecutive parallel-safe tools.
+            j = i
+            tasks = []
+            while j < n and tool_uses[j][1] in parallel_safe:
+                tid_j, tname_j, tinput_j = tool_uses[j]
+                tasks.append(_run_one(j, tid_j, tname_j, tinput_j))
+                j += 1
+            await asyncio.gather(*tasks)
+            i = j
+        else:
+            await _run_one(i, tid_i, tname_i, tinput_i)
+            i += 1
+
+    return results  # type: ignore[return-value]
+
+
 # ── System messages (forced final response, warnings) ────────────────
 
 def build_limit_message(

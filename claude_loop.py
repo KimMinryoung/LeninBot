@@ -11,6 +11,7 @@ import logging
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
     update_redis_state, save_redis_progress, execute_tool,
+    execute_tools_batch,
     build_limit_message, build_budget_warning, build_round_warning,
     EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
@@ -749,9 +750,9 @@ async def chat_with_tools(
         if budget_exceeded_this_round:
             logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d — processing final tool calls before exit", total_cost, budget_usd, round_num)
 
-        # Process tool calls
+        # First pass: build assistant_content and collect tool_uses to execute.
         assistant_content = []
-        tool_results = []
+        tool_uses_to_execute: list[tuple[str, str, dict]] = []
         for block in response.content:
             b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
             btype = b.get("type")
@@ -785,10 +786,24 @@ async def chat_with_tools(
                     "name": tname,
                     "input": tinput,
                 })
-                # Execute tool via shared dispatch
+                tool_uses_to_execute.append((tid, tname, tinput))
+            else:
+                # Preserve unknown future block types as text context.
+                assistant_content.append({"type": "text", "text": _coerce_text(b)})
+
+        # Second pass: execute tool calls. Consecutive read-only tools run in
+        # parallel via execute_tools_batch; everything else stays sequential.
+        tool_results = []
+        if tool_uses_to_execute:
+            exec_results = await execute_tools_batch(
+                tool_uses_to_execute,
+                tool_handlers,
+                on_progress=on_progress,
+                round_num=round_num,
+                log_event=log_event,
+            )
+            for tid, tname, tinput, result, is_error in exec_results:
                 input_summary = json.dumps(tinput, ensure_ascii=False)
-                await emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
-                result, is_error = await execute_tool(tname, tinput, tool_handlers, log_event=log_event)
                 tool_result_block = {
                     "type": "tool_result",
                     "tool_use_id": tid,
@@ -797,14 +812,10 @@ async def chat_with_tools(
                 if is_error:
                     tool_result_block["is_error"] = True
                 tool_results.append(tool_result_block)
-                await emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {result[:200]}")
-                # Log for diagnostics
+                # Log for diagnostics (post-execution, in input order)
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
                 tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result}")
                 save_redis_progress(task_id, round_num, tname, input_summary, result, is_error)
-            else:
-                # Preserve unknown future block types as text context.
-                assistant_content.append({"type": "text", "text": _coerce_text(b)})
 
         # Safety net: ensure EVERY tool_use block has a matching tool_result
         resolved_ids = {r["tool_use_id"] for r in tool_results}
