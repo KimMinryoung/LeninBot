@@ -1334,11 +1334,12 @@ from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
-# ── Crypto wallet tools (address + balance + swap + transfer) ─────────
+# ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (
     WALLET_TOOL, WALLET_TOOL_HANDLER,
     SWAP_TOOL, SWAP_TOOL_HANDLER,
     TRANSFER_TOOL, TRANSFER_TOOL_HANDLER,
+    PAY_AND_FETCH_TOOL, PAY_AND_FETCH_TOOL_HANDLER,
 )
 
 TOOLS.append(WALLET_TOOL)
@@ -1347,6 +1348,8 @@ TOOLS.append(SWAP_TOOL)
 TOOL_HANDLERS["swap_eth_to_usdc"] = SWAP_TOOL_HANDLER
 TOOLS.append(TRANSFER_TOOL)
 TOOL_HANDLERS["transfer_usdc"] = TRANSFER_TOOL_HANDLER
+TOOLS.append(PAY_AND_FETCH_TOOL)
+TOOL_HANDLERS["pay_and_fetch"] = PAY_AND_FETCH_TOOL_HANDLER
 
 # ── Image generation tool (Replicate) ─────────────────────────────────
 def _build_generate_image_description() -> str:

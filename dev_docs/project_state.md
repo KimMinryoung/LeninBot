@@ -1,4 +1,4 @@
-# Project State — 2026-04-04
+# Project State — 2026-04-07
 
 ## Identity
 
@@ -345,6 +345,11 @@ leninbot/
 │   ├── kr_news_fetcher.py     # 한국 뉴스 수집 파이프라인
 │   └── cli.py                 # KG 질의 CLI
 │
+├── crypto_wallet/             # 멀티체인 지갑 + Base L2 트랜잭션 + x402 결제
+│   ├── wallet.py              # 주소 도출 + 잔액 조회 (read-only)
+│   ├── transactions.py        # ETH↔USDC swap, USDC transfer (web3.py)
+│   └── x402.py                # x402 결제 프로토콜 (sign/verify/settle/pay_and_fetch)
+│
 ├── skills/                    # 에이전트 스킬 (SKILL.md 포맷)
 ├── scripts/                   # 독립 실행 스크립트
 ├── systemd/                   # systemd 서비스/타이머 정의
@@ -357,6 +362,39 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-07 — x402 마이크로페이먼트, Playwright async 리팩터, 병렬 도구 실행
+
+#### x402 Payment Protocol (`crypto_wallet/x402.py`, `api.py`, `telegram_tools.py`, `telegram_bot.py`)
+- 새 모듈 `crypto_wallet/x402.py` — x402 v2 `exact` scheme on Base mainnet
+- ERC-3009 `transferWithAuthorization` EIP-712 서명 (USDC name="USD Coin", version="2")
+- USDC `DOMAIN_SEPARATOR`와 client-side hash 일치 검증 완료
+- 클라이언트: `pay_and_fetch(url, max_usdc)` — GET → 402 → sign → retry → settle 결과 반환
+- 서버: `verify_payment` + `settle_payment` (USDC.transferWithAuthorization 온체인 호출)
+- 새 도구 `pay_and_fetch` 등록, orchestrator 화이트리스트에 추가
+- 새 라우트 `/x402-demo/quote` — self-loop 데모 (0.001 USDC, leninbot이 자기 자신에게 결제)
+- 안전 가드: per-call hard cap ($0.05 default), scheme/network/asset 화이트리스트, 유효기간/금액/recipient 재검증, privkey just-in-time 로드 후 즉시 del
+- `leninbot-api`에 LoadCredentialEncrypted override 추가 (eth.privkey) — 서버 측 settle 필요
+- 첫 self-loop 성공 (2026-04-07): TX `0xfad05f83e786...ddb7a`, 가스 75,656
+- 상세: `dev_docs/x402_design.md`
+
+#### Playwright Renderer Leak Fix (`shared.py`, `telegram_tools.py`, `claude_loop.py`, `openai_tool_loop.py`, `tool_loop_common.py`)
+- **근본 원인**: Sync Playwright API가 thread-affinity가 있는데 `asyncio.to_thread`로 매번 다른 워커에서 호출 → `page.close()`가 silently 실패 → 22시간 동안 25개 zombie renderer 누적
+- **수정**: dedicated asyncio 이벤트 루프를 별도 daemon thread에 띄우고 모든 Playwright 호출을 그 루프 위에서 실행 (`_apw_loop` 싱글톤)
+- 동기 호출자(`_playwright_fetch`)는 `_pw_submit` 통해 future로 블록, 비동기 호출자(`fetch_url_content_async`)는 `asyncio.wrap_future`로 직접 await
+- `crypto_wallet/x402` 패턴과 비슷하게 자원 분리
+
+#### Parallel-Safe Tool Batch Execution (`tool_loop_common.py`, `claude_loop.py`, `openai_tool_loop.py`)
+- 새 `PARALLEL_SAFE_TOOLS` frozenset (fetch_url, web_search, vector_search, kg_search, read_file, list_directory, convert_document, get_finance_data, check_wallet, recall_experience, read_self)
+- 새 `execute_tools_batch()` — 한 라운드의 tool_use 블록 중 연속된 read-only 도구는 `asyncio.gather`, 그 사이 unsafe 도구는 sequential
+- 결과는 input 순서로 반환 (assistant_content / tool_results 매핑 보존)
+- claude_loop.py와 openai_tool_loop.py 둘 다 첫 패스(블록 분류) + 둘째 패스(batch 실행)로 재구조화
+- 검증: 6개 도구 batch (3 safe + 1 unsafe + 2 safe) 0.7s vs sequential 1.6s, 순서 보존 확인
+
+#### Latent `requests` Import Bug Fix (`shared.py`)
+- `_fetch_url_fallbacks`의 bare `requests.get(...)`가 모듈 상단 import 없이 호출되어 NameError 잠복 (silently 잡혀서 fallback이 항상 None 반환하던 상태)
+- `import requests as _req` → `_req.get(...)`로 수정
+- 별개 이슈: venv의 certifi 2026.02.25 번들이 Cloudflare ECC 체인의 AAA Certificate Services 루트를 제거해서 SSL 검증 실패 → `.env`에 `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` 추가로 우회 (시스템 CA 사용)
 
 ### 2026-04-04 — Local LLM 131K Context, Provider Routing, System Message Fix
 

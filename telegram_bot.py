@@ -532,6 +532,7 @@ Operating via Telegram. Use tools proactively when data would improve the answer
 - My crypto wallet address/balance → check_wallet (Base L2 primary, also ETH/TRX/SOL)
 - ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)
 - USDC payment/transfer → transfer_usdc (Base L2, auto-limit $10)
+- x402 paid HTTP fetch → pay_and_fetch (Base L2 USDC micropayment, hard cap $0.05/call). Self-loop demo at http://localhost:8000/x402-demo/quote (my own API, 0.001 USDC, returns an aphorism). Use that URL when asked to demonstrate x402 without a specific external target.
 </tool-strategy>
 
 <context-isolation>
@@ -1116,6 +1117,7 @@ async def _chat_with_tools(
         "check_wallet",                     # crypto wallet address + balance
         "swap_eth_to_usdc",                 # ETH → USDC swap on Base
         "transfer_usdc",                    # USDC payment/transfer on Base
+        "pay_and_fetch",                    # x402 paid HTTP fetch (USDC micropayment)
         "recall_experience",                # memory recall
         "read_self",                        # status/logs inspection
         "run_agent",                        # direct agent execution

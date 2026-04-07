@@ -3,3 +3,6 @@ from crypto_wallet.transactions import (
     SWAP_TOOL, SWAP_TOOL_HANDLER,
     TRANSFER_TOOL, TRANSFER_TOOL_HANDLER,
 )
+from crypto_wallet.x402 import (
+    PAY_AND_FETCH_TOOL, PAY_AND_FETCH_TOOL_HANDLER,
+)
