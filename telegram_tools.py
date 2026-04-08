@@ -2215,27 +2215,35 @@ MOLTBOOK_TOOL = {
 }
 
 
-async def _exec_moltbook(params: dict) -> str:
+async def _exec_moltbook(
+    action: str = "patrol",
+    topic: str = "",
+    content: str = "",
+    submolt: str = "",
+    limit: int | None = None,
+    max_comments: int | None = None,
+    dry_run: bool = False,
+    **_: dict,
+) -> str:
     import subprocess, os
 
-    action = params.get("action", "patrol")
     cmd = [
         os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "venv/bin/python"),
         os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "agents/razvedchik/razvedchik.py"),
         f"--{action}",
     ]
 
-    if params.get("topic"):
-        cmd.extend(["--topic", params["topic"]])
-    if params.get("content"):
-        cmd.extend(["--content", params["content"]])
-    if params.get("submolt"):
-        cmd.extend(["--submolt", params["submolt"]])
-    if params.get("limit"):
-        cmd.extend(["--limit", str(params["limit"])])
-    if params.get("max_comments"):
-        cmd.extend(["--max-comments", str(params["max_comments"])])
-    if params.get("dry_run"):
+    if topic:
+        cmd.extend(["--topic", topic])
+    if content:
+        cmd.extend(["--content", content])
+    if submolt:
+        cmd.extend(["--submolt", submolt])
+    if limit:
+        cmd.extend(["--limit", str(limit)])
+    if max_comments:
+        cmd.extend(["--max-comments", str(max_comments)])
+    if dry_run:
         cmd.append("--dry-run")
 
     env = {**os.environ, "PYTHONPATH": os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")}
