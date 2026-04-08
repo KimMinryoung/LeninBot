@@ -288,6 +288,115 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 
 ---
 
+## 5.5. 오염 방어 / Provenance & Trust Tiering (2026-04-08)
+
+> Mythos Preview 같은 고능력 모델이 indirect prompt injection으로 KG에 거짓 사실을 심으려는 공격을 가정한 방어 레이어. Palantir Foundry 류의 4가지 원리 중 LeninBot 규모에 맞는 부분을 발췌 적용.
+
+### 위협 모델
+
+적이 웹페이지/PDF/이메일에 거짓 "사실"을 심는다 → analyst가 fetch_url/convert_document로 읽는다 → "중요한 fact를 KG에 저장하라"는 지시대로 `write_kg`를 호출 → 이후 모든 세션에서 LeninBot이 자기 KG를 신뢰할 만한 1차 출처처럼 인용 → **RAG self-poisoning loop**가 형성되고 매 사이클마다 거짓이 더 단단해진다. 일단 들어가면 출처 추적 수단이 없어 사후 청소가 거의 불가능.
+
+### 4가지 메커니즘 (모두 단일 패스로 wired)
+
+#### (1) Provenance auto-attachment
+
+`shared.ProvenanceBuffer` — per-agent-run 버퍼. `contextvars.ContextVar` 기반이라 parallel `asyncio.gather` tool 호출이 부모 컨텍스트 reference를 공유 (asyncio task가 부모 context를 copy하지만 list 객체 reference가 같으므로 mutation이 양쪽에서 보임).
+
+- 초기화: `claude_loop.chat_with_tools` / `openai_tool_loop.chat_with_tools` 진입 직후 `init_provenance_buffer(agent=..., mission_id=...)` 호출
+- `telegram_bot._chat_with_tools`가 `task_id`로 DB 조회해 `agent_type` + `mission_id`를 전달, orchestrator는 `"orchestrator"` 고정
+- 자동 기록 hook: `tool_loop_common.execute_tool`이 매 성공 호출 후 `_record_tool_provenance(name, args, result)`를 호출
+  - external sources → `buf.external_calls` (fetch_url/web_search/convert_document/check_inbox/network-sourced read_file/search_files)
+  - KG 검색 결과 → `buf.kg_reads`
+- 실패해도 silent (try/except no-op) — provenance bookkeeping이 tool 실행을 깨지 않음
+
+#### (2) Trust tiering (4단)
+
+`ProvenanceBuffer.infer_trust_tier()` — 최근 external call의 도메인 다양성으로 자동 추론:
+
+| Tier | 조건 |
+|------|------|
+| `anchor` | operator-asserted (현재는 수동 부여만, 자동 추론 안 함) |
+| `corroborated` | ≥2 distinct external 도메인에서 ingest |
+| `single` | 1 도메인 또는 local-file source |
+| `unverified` | external call 없음 |
+
+- `write_kg`는 자동으로 추론된 tier를 episode 이름에 인코딩: `[T:tier]name`. Graphiti가 sanitize해서 `T-tier-name`으로 저장됨 (round-trip survives).
+- Read 시 `search_knowledge_graph`가 두 단계 Cypher pass로:
+  1. `MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $euuids RETURN r.uuid, r.episodes` — Graphiti edge dict에는 `episodes`가 빠져있어서 직접 조회 필요
+  2. `MATCH (e:Episodic) WHERE e.uuid IN $uuids RETURN e.uuid, e.name` — 이름에서 tier 파싱
+- 각 fact 라인 앞에 `[T:tier]` 인라인 표시. 옛 facts(이전 시스템)는 `[T:?]`. Edge가 여러 episode를 reference하면 highest tier 채택 (anchor > corroborated > single > unverified).
+
+#### (3) Append-only
+
+엔진 레벨 보장:
+- analyst/programmer/scout 화이트리스트에 `kg_delete_episode`, `kg_merge_entities`, `kg_query`, `kg_admin` **모두 부재**
+- 변경 가능한 KG 작업은 orchestrator의 self_tools 경로로만 도달 가능 — prompt injection에 노출된 sub-agent가 직접 못 만짐
+- 정정/철회는 `write_kg`의 신규 옵셔널 파라미터 `supersedes`로: 새 episode + footer에 `supersedes: <old_name>` 마커. 옛 fact는 절대 silent overwrite/delete 되지 않음 → 사후 롤백 항상 가능.
+
+#### (4) Self-poisoning loop break
+
+`_self_poisoning_overlap()` — 새 content와 같은 agent run 내 최근 KG 검색 결과 사이의 Jaccard 토큰 overlap 계산.
+
+- 임계치 0.55 — 넘으면 `[KG AUDIT] BLOCKED self-poisoning write` 로그 + 거부
+- 거부 메시지는 친절하게: "100% overlaps with text you just retrieved... rewrite in your own words with the new source cited"
+- 정확히 RAG echo-chamber("내가 이미 알고 있는 걸 다시 KG에 쓴다") 패턴을 끊는다. 이게 가장 흔하고 위험한 자기 강화 메커니즘.
+
+### Provenance footer 형식
+
+`write_kg` 성공 시 episode body에 자동 첨부:
+
+```
+<원래 content>
+
+— provenance —
+agent: analyst | mission=42
+ingested_at: 2026-04-08 21:21 KST
+trust_tier: corroborated
+sources:
+  - url:https://en.wikipedia.org/wiki/...
+  - url:https://reuters.com/...
+  - web_search:Iran ceasefire 2026
+  - document:/home/grass/leninbot/data/downloads/un_report.pdf
+supersedes: <optional, when correcting a prior episode>
+```
+
+### Audit log 강화
+
+`logger.info("[KG AUDIT] wrote episode | name=... | group=... | tier=... | agent=... | sources=N | supersedes=... | time=... | content_len=...")` — 사후 어떤 fact가 어느 세션 어느 출처에서 들어왔는지 grep으로 추적 가능.
+
+### 의도적으로 미적용
+
+Palantir 스타일 중 LeninBot 규모에서 과잉인 부분:
+
+- **Quarantine 2단 레이어** (pending → canonical) — 단일 사용자 환경에서 review queue 운영 비용이 가치보다 큼
+- **Bitemporal modeling** (valid_time / transaction_time 분리) — Graphiti가 `valid_at`/`invalid_at`/`created_at`/`expired_at`을 이미 추적하므로 충분
+- **Cell-level classification** — single tenant
+- **Anomaly drift detection** — 추후 옵션, 현재는 audit log + 수동 검토로 충분
+- **Reality anchors layer** — 별도 group_id로 가능하지만 현재 명시적 분리 안 됨. 필요 시 `group_id="anchor_facts"` + 소스 코드에서 operator-only로 protect.
+
+### 검증 시나리오
+
+| 시나리오 | 결과 |
+|----------|------|
+| 두 독립 도메인 fetch + write_kg | `[T:corroborated]` tier, 검색 시 인라인 표시 ✅ |
+| KG 검색 결과를 그대로 write_kg | "Refused: 100% overlaps..." ✅ |
+| External 호출 없이 write_kg | tier=unverified + 친절한 경고 메시지 ✅ |
+| 옛 fact 검색 | `[T:?]` 표시 (이전 시스템 산물) ✅ |
+| Sub-agent KG 변경 시도 | 화이트리스트에 delete/merge 없음 — 호출 자체 불가 ✅ |
+
+### External-source envelope와의 관계
+
+같은 위협(indirect prompt injection)에 대한 두 레이어 방어:
+
+| 방어 | 막는 것 |
+|------|---------|
+| `<external source="...">` envelope (`shared.EXTERNAL_SOURCE_RULE` + `_wrap_external`) | 외부 콘텐츠의 *명령형*이 사용자 지시로 둔갑하는 것 |
+| Provenance + trust tier + self-poisoning break | 외부 콘텐츠의 *명제*가 KG에 무신경하게 박혀서 자기 강화 루프를 만드는 것 |
+
+Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 둘은 짝이고 의도적으로 분리됐다 — envelope는 명제 신뢰를 떨어뜨리지 *않고* (Gemini식 paranoia 회피), provenance는 명제를 막지 *않고* tier로 표시만 해서 모델이 가중치를 매기게 한다.
+
+---
+
 ## 6. 현재 데이터 상태
 
 ### Local Neo4j Docker (v2.1 스키마, 2026-03-29 기준)
@@ -359,6 +468,7 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 | 2026-03-19 | **v2.1 스키마: Concept 타입 신설** — 엔티티 7→8종. 추상 개념/이론/이데올로기/사회현상을 포괄하는 Concept 타입(5 필드) 추가. Gemini 배치 분류로 미분류 엔티티 131개 전량 타입 부여 (Concept 99, Asset 11, Organization 8, Incident 5, Person 5, Location 1, Campaign 1). `scripts/classify_untyped_entities.py` 재사용 가능. |
 | 2026-03-21 | **Neo4j AuraDB → Local Docker 이전**: `docker-compose.neo4j.yml` (Neo4j 5 Community + APOC), `systemd/leninbot-neo4j.service`, `scripts/migrate_neo4j.py`. 엔티티 2,116개, 관계 1,826개, 에피소드 761건 전량 이전 완료. AuraDB 연결 끊김 문제 해소. |
 | 2026-03-29 | **KG 데이터 품질 개선**: (1) 중복 엔티티 병합 스크립트 `merge_entities.py` — Gemini 배치 분류 + canonical 선택 + 엣지 이전 + duplicate 삭제. (2) 관계명 정규화 스크립트 `normalize_edge_names.py` — 비표준/NULL r.name을 10개 표준 타입으로 분류. (3) KG 백업 스크립트 `backup_kg.py`. (4) 추출 지시문 강화 — 국가/조직/인물 정식명 사용 규칙 추가, 약어 금지. (5) 이름 정규화 패치 — `graphiti_patches.py`에 `NAME_NORMALIZATION` 딕셔너리 + 텍스트 레벨 약어→정식명 치환 (Graphiti entity resolution 실패 방지). |
+| 2026-04-08 | **KG 오염 방어 (Palantir-style robustness)**: indirect prompt injection으로 거짓 fact가 KG에 박히는 위협에 대한 4-레이어 방어. (1) `shared.ProvenanceBuffer` + `contextvars` per-agent-run 버퍼; `tool_loop_common.execute_tool`이 external-source 툴 호출과 KG 읽기를 자동 기록; `chat_with_tools` 진입 시 초기화. (2) Trust tiering — 4단(anchor/corroborated/single/unverified), 도메인 다양성으로 자동 추론, episode 이름에 `[T:tier]` 인코딩(graphiti가 `T-tier-`로 sanitize), `search_knowledge_graph`가 두 단계 Cypher pass로 각 fact에 인라인 표시. (3) Append-only — analyst/programmer/scout 화이트리스트에서 delete/merge/query/admin 모두 부재 확인, `write_kg`에 `supersedes` 옵션 추가. (4) Self-poisoning loop break — Jaccard ≥0.55면 거부, friendly 메시지로 fresh source 인용 안내. Provenance footer 자동 첨부 + audit log 보강. 자세한 설계는 §5.5 참조. |
 
 ---
 
