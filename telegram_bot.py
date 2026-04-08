@@ -1122,6 +1122,7 @@ async def _chat_with_tools(
         "recall_experience",                # memory recall
         "read_self",                        # status/logs inspection
         "run_agent",                        # direct agent execution
+        "send_email",                       # outbound email (kept here only — not on sub-agents to limit prompt-injection blast radius)
     }
     is_orchestrator = extra_tools is None
 
