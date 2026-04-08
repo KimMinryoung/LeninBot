@@ -67,6 +67,18 @@ TOOLS = [
         },
     },
     {
+        "name": "download_file",
+        "description": "Download URL → data/downloads/. Returns local path. For PDFs/docs to feed convert_document. Max 100 MB.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "filename": {"type": "string", "description": "Optional; auto from URL."},
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "download_image",
         "description": (
             "Download an image from a URL and save it locally. "
@@ -85,15 +97,34 @@ TOOLS = [
     # ── File system tools (Hetzner VPS) ──
     {
         "name": "read_file",
-        "description": "Read a file on the server. Returns content with line numbers.",
+        "description": "Read a text file with line numbers. Format: 'LINE|CONTENT'. Use offset+limit for big files (default limit 500, max 2000). Reads >100K chars are rejected — paginate.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path (absolute or relative to project root)."},
-                "line_start": {"type": "integer", "description": "Start line (1-based). Omit for beginning."},
-                "line_end": {"type": "integer", "description": "End line (inclusive). Omit for end."},
+                "path": {"type": "string", "description": "Absolute or project-relative."},
+                "offset": {"type": "integer", "description": "Start line, 1-indexed. Default 1."},
+                "limit": {"type": "integer", "description": "Max lines. Default 500, max 2000."},
             },
             "required": ["path"],
+        },
+    },
+    {
+        "name": "search_files",
+        "description": "Ripgrep-backed search. target='content' regex-searches inside files; target='files' finds files by glob (sorted by mtime). Use instead of execute_python+grep/find. output_mode: content|files_only|count. file_glob filters which files to search (e.g. '*.py'). Default path = project root.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regex (content) or glob (files), e.g. '5\\.1\\.2' or '*.md'."},
+                "target": {"type": "string", "enum": ["content", "files"], "description": "Default 'content'."},
+                "path": {"type": "string", "description": "Dir or file to search. Default: project root."},
+                "file_glob": {"type": "string", "description": "Filter files in content mode (e.g. '*.py')."},
+                "output_mode": {"type": "string", "enum": ["content", "files_only", "count"], "description": "Default 'content'."},
+                "context": {"type": "integer", "description": "Context lines around match. Default 2."},
+                "ignore_case": {"type": "boolean", "description": "Default false."},
+                "limit": {"type": "integer", "description": "Max results. Default 50."},
+                "offset": {"type": "integer", "description": "Skip N results. Default 0."},
+            },
+            "required": ["pattern"],
         },
     },
     {
@@ -149,14 +180,11 @@ TOOLS = [
     },
     {
         "name": "convert_document",
-        "description": (
-            "Convert a document file (PDF, DOCX, PPTX, XLSX, HTML) to markdown text. "
-            "Accepts a local file path. Returns extracted text content."
-        ),
+        "description": "Local PDF/DOCX/PPTX/XLSX/HTML → markdown saved to data/converted/. Returns path + head preview; use read_file to paginate.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Absolute path to the document file."},
+                "file_path": {"type": "string", "description": "Absolute path."},
             },
             "required": ["file_path"],
         },
@@ -197,15 +225,47 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
         return f"Knowledge graph search failed: {e}"
 
 
-async def _exec_convert_document(file_path: str) -> str:
-    """Convert a document to markdown text."""
+async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str:
+    """Convert a document to markdown, save to data/converted/, return path + preview.
+
+    The full markdown is written to disk so the agent can paginate via
+    read_file (line_start/line_end) instead of dumping the whole document
+    into the tool result. We return only basic metadata + a head preview.
+    """
     try:
+        from pathlib import Path
         from shared import convert_document
-        result = await asyncio.to_thread(convert_document, file_path)
-        return result or "Failed to convert document (unsupported format or empty content)."
+
+        if not os.path.isfile(file_path):
+            return f"❌ File not found: {file_path}"
+
+        text = await asyncio.to_thread(convert_document, file_path, 0)  # 0 = unlimited
+        if not text:
+            return "❌ Conversion failed (unsupported format or empty content)."
+
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        out_dir = Path(project_root) / "data" / "converted"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = Path(file_path).stem
+        out_path = out_dir / f"{stem}.md"
+        out_path.write_text(text, encoding="utf-8")
+
+        lines = text.splitlines()
+        total_lines = len(lines)
+        total_chars = len(text)
+        preview = "\n".join(lines[:preview_lines])
+
+        return (
+            f"✅ Converted → {out_path}\n"
+            f"   {total_lines} lines, {total_chars} chars\n"
+            f"   Use read_file with line_start/line_end to paginate.\n\n"
+            f"── preview (first {min(preview_lines, total_lines)} lines) ──\n"
+            f"{preview}"
+        )
     except Exception as e:
         logger.error("convert_document error: %s", e)
-        return f"Document conversion failed: {e}"
+        return f"❌ Document conversion failed: {e}"
 
 
 # ── Publish Research Tool ────────────────────────────────────────────
@@ -310,6 +370,65 @@ async def _exec_fetch_url(url: str) -> str:
         return f"URL fetch failed: {e}"
 
 
+async def _exec_download_file(url: str, filename: str = "") -> str:
+    """Download an arbitrary file from a URL and save under data/downloads/."""
+    import re
+    import time
+    import mimetypes
+    from urllib.parse import urlparse, unquote
+    from pathlib import Path
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    out_dir = Path(project_root) / "data" / "downloads"
+    MAX_SIZE = 100 * 1024 * 1024  # 100 MB
+
+    def _download():
+        import requests as _req
+
+        with _req.get(url, timeout=120, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as resp:
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            content_length = int(resp.headers.get("Content-Length", "0") or 0)
+            if content_length and content_length > MAX_SIZE:
+                return f"❌ File too large ({content_length / 1024 / 1024:.1f} MB > 100 MB limit)"
+
+            # Determine filename
+            if filename:
+                safe_name = re.sub(r"[^a-zA-Z0-9가-힣._-]+", "-", filename).strip("-")[:120]
+            else:
+                url_path = unquote(urlparse(url).path)
+                base = os.path.basename(url_path) or time.strftime("%Y%m%d_%H%M%S")
+                safe_name = re.sub(r"[^a-zA-Z0-9가-힣._-]+", "-", base).strip("-")[:120]
+                if "." not in safe_name:
+                    ext = mimetypes.guess_extension(content_type) or ""
+                    safe_name += ext
+
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / safe_name
+
+            written = 0
+            with open(path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    written += len(chunk)
+                    if written > MAX_SIZE:
+                        f.close()
+                        path.unlink(missing_ok=True)
+                        return f"❌ File exceeded 100 MB limit during download"
+                    f.write(chunk)
+
+            size_mb = written / 1024 / 1024
+            return f"✅ Downloaded: {path} ({size_mb:.2f} MB, {content_type or 'unknown'})"
+
+    try:
+        return await asyncio.to_thread(_download)
+    except Exception as e:
+        logger.error("download_file error: %s", e)
+        return f"❌ Download failed: {e}"
+
+
 async def _exec_download_image(url: str, filename: str = "") -> str:
     """Download an image from a URL and save locally."""
     import re
@@ -351,13 +470,32 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
         return f"❌ Download failed: {e}"
 
 
-async def _exec_read_file(path: str, line_start: int | None = None, line_end: int | None = None, **kwargs) -> str:
-    # Accept common LLM misspellings
-    if line_start is None and "startline" in kwargs:
-        line_start = kwargs["startline"]
-    if line_end is None:
-        line_end = kwargs.get("endline") or kwargs.get("end_line") or kwargs.get("lineend")
-    """Read a file on the server."""
+_READ_DEFAULT_LIMIT = 500
+_READ_MAX_LIMIT = 2000
+_READ_MAX_CHARS = 100_000
+
+
+async def _exec_read_file(
+    path: str,
+    offset: int | None = None,
+    limit: int | None = None,
+    **kwargs,
+) -> str:
+    """Read a text file with line numbers and pagination."""
+    # Backward-compat aliases (line_start/line_end and common misspellings)
+    if offset is None:
+        offset = (
+            kwargs.get("line_start")
+            or kwargs.get("startline")
+            or kwargs.get("start_line")
+        )
+    line_end = (
+        kwargs.get("line_end")
+        or kwargs.get("endline")
+        or kwargs.get("end_line")
+        or kwargs.get("lineend")
+    )
+
     project_root = os.path.dirname(os.path.abspath(__file__))
     if not os.path.isabs(path):
         path = os.path.join(project_root, path)
@@ -365,21 +503,118 @@ async def _exec_read_file(path: str, line_start: int | None = None, line_end: in
         return f"Error: File not found: {path}"
     if os.path.isdir(path):
         return f"Error: Path is a directory: {path}"
-    # Block direct access to .env files (credentials protection)
     _basename = os.path.basename(path)
     if _basename == ".env" or _basename.startswith(".env."):
         return "Error: Access to .env files is blocked for security reasons."
+
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        total = len(lines)
-        start = max(1, line_start or 1)
-        end = min(total, line_end or total)
-        selected = lines[start - 1 : end]
-        numbered = [f"{start + i:>6}\t{line.rstrip()}" for i, line in enumerate(selected)]
-        return f"[{path}] lines {start}-{end} of {total}\n" + "\n".join(numbered)
     except Exception as e:
         return f"Error reading file: {e}"
+
+    total = len(lines)
+    start = max(1, offset or 1)
+    if line_end is not None:
+        end = min(total, line_end)
+    else:
+        eff_limit = limit if limit else _READ_DEFAULT_LIMIT
+        eff_limit = min(eff_limit, _READ_MAX_LIMIT)
+        end = min(total, start + eff_limit - 1)
+
+    selected = lines[start - 1 : end]
+    body = "".join(selected)
+    if len(body) > _READ_MAX_CHARS:
+        return (
+            f"Error: read range {start}-{end} is {len(body)} chars (>{_READ_MAX_CHARS}). "
+            f"Use a smaller limit or narrower offset range."
+        )
+
+    numbered = [f"{start + i:>6}|{line.rstrip()}" for i, line in enumerate(selected)]
+    header = f"[{path}] lines {start}-{end} of {total}"
+    if end < total:
+        header += f"  (next: offset={end + 1})"
+    return header + "\n" + "\n".join(numbered)
+
+
+async def _exec_search_files(
+    pattern: str,
+    target: str = "content",
+    path: str | None = None,
+    file_glob: str | None = None,
+    output_mode: str = "content",
+    context: int = 2,
+    ignore_case: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    **kwargs,
+) -> str:
+    """Ripgrep-backed search. target=content (regex in files) or files (glob by name)."""
+    import subprocess
+    import shlex
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    search_path = path or project_root
+    if not os.path.isabs(search_path):
+        search_path = os.path.join(project_root, search_path)
+    if not os.path.exists(search_path):
+        return f"Error: path not found: {search_path}"
+
+    if target == "files":
+        # Glob-by-name file search using rg --files. pattern is a glob.
+        cmd = ["rg", "--files", "--hidden", "--glob", "!.git", "--glob", pattern, search_path]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            return "Error: search timed out"
+        if proc.returncode not in (0, 1):
+            return f"Error: rg exited {proc.returncode}: {proc.stderr.strip()}"
+        files = [l for l in proc.stdout.splitlines() if l.strip()]
+        # Sort by mtime desc
+        try:
+            files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        except OSError:
+            pass
+        total = len(files)
+        page = files[offset : offset + limit]
+        if not page:
+            return f"[search files /{pattern}/ in {search_path}] 0 matches"
+        header = f"[search files /{pattern}/ in {search_path}] {total} match(es), showing {offset + 1}-{offset + len(page)}"
+        if offset + len(page) < total:
+            header += f"  (next: offset={offset + len(page)})"
+        return header + "\n" + "\n".join(page)
+
+    # target == "content" — regex search inside files
+    cmd = ["rg", "--line-number", "--no-heading", "--color=never"]
+    if ignore_case:
+        cmd.append("-i")
+    if file_glob:
+        cmd += ["-g", file_glob]
+    if output_mode == "files_only":
+        cmd.append("-l")
+    elif output_mode == "count":
+        cmd.append("-c")
+    else:  # content
+        if context and context > 0:
+            cmd += ["-C", str(context)]
+    cmd += ["-e", pattern, search_path]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return "Error: search timed out"
+    if proc.returncode == 1:
+        return f"[search /{pattern}/ in {search_path}] 0 matches"
+    if proc.returncode != 0:
+        return f"Error: rg exited {proc.returncode}: {proc.stderr.strip()}"
+
+    out_lines = proc.stdout.splitlines()
+    total = len(out_lines)
+    page = out_lines[offset : offset + limit]
+    header = f"[search {output_mode} /{pattern}/ in {search_path}] {total} line(s), showing {offset + 1}-{offset + len(page)}"
+    if offset + len(page) < total:
+        header += f"  (next: offset={offset + len(page)})"
+    return header + "\n" + "\n".join(page)
 
 
 _WRITE_ALLOWED_DIRS = ["research", "docs", "logs", "temp_dev", "data"]
@@ -993,8 +1228,10 @@ TOOL_HANDLERS = {
     "fetch_url": _exec_fetch_url,
     "convert_document": _exec_convert_document,
     "publish_research": _exec_publish_research,
+    "download_file": _exec_download_file,
     "download_image": _exec_download_image,
     "read_file": _exec_read_file,
+    "search_files": _exec_search_files,
     "write_file": _exec_write_file,
     "patch_file": _exec_patch_file,
     "list_directory": _exec_list_directory,

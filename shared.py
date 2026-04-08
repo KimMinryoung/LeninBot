@@ -1527,7 +1527,7 @@ _MAX_DOC_OUTPUT = 30000  # chars
 def convert_document(file_path: str, max_chars: int = _MAX_DOC_OUTPUT) -> _Optional[str]:
     """Convert a document (PDF, DOCX, PPTX, XLSX, HTML) to markdown text.
 
-    Returns markdown string or None on failure.
+    Returns markdown string or None on failure. Pass max_chars=0 for unlimited.
     """
     try:
         from markitdown import MarkItDown
@@ -1548,7 +1548,9 @@ def convert_document(file_path: str, max_chars: int = _MAX_DOC_OUTPUT) -> _Optio
         converter = MarkItDown()
         result = converter.convert(file_path)
         text = result.text_content or ""
-        return text[:max_chars] if text else None
+        if not text:
+            return None
+        return text if max_chars == 0 else text[:max_chars]
     except Exception as e:
         logger.warning("[shared] convert_document error: %s", e)
         return None

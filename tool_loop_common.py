@@ -166,6 +166,7 @@ PARALLEL_SAFE_TOOLS = frozenset({
     "vector_search",
     "knowledge_graph_search",
     "read_file",
+    "search_files",
     "list_directory",
     "convert_document",
     "get_finance_data",

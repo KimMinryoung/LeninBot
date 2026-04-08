@@ -54,8 +54,8 @@ Your job is to transform raw information into structured knowledge.
 """,
     tools=[
         "knowledge_graph_search", "vector_search",
-        "web_search", "fetch_url",
-        "read_file", "list_directory",
+        "web_search", "fetch_url", "download_file", "convert_document",
+        "read_file", "search_files", "list_directory",
         "read_self", "write_kg",
         "save_finding", "mission",
         "publish_research", "get_finance_data",
