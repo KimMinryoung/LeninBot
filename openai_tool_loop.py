@@ -514,6 +514,8 @@ async def chat_with_tools(
     task_id: int | None = None,
     context_limit: int = 0,
     enable_thinking: bool = False,
+    agent_name: str = "agent",
+    mission_id: int | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -522,6 +524,10 @@ async def chat_with_tools(
     sdk_mode = client is not None
 
     budget_usd = validate_budget(budget_usd)
+
+    # Per-agent-run provenance buffer for KG write/read trust tracking.
+    from shared import init_provenance_buffer
+    init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
     openai_tools = _convert_tools(tools)
 

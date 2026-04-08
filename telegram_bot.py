@@ -1149,6 +1149,22 @@ async def _chat_with_tools(
         from self_tools import build_run_agent_handler
         merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
 
+    # Resolve agent name + mission for provenance tracking
+    _agent_name = "orchestrator" if is_orchestrator else "agent"
+    _mission_id: int | None = None
+    if not is_orchestrator and task_id is not None:
+        try:
+            from db import query as _db_q
+            row = _db_q(
+                "SELECT agent_type, mission_id FROM telegram_tasks WHERE id = %s",
+                (task_id,),
+            )
+            if row:
+                _agent_name = str(row[0].get("agent_type") or "agent")
+                _mission_id = row[0].get("mission_id")
+        except Exception:
+            pass
+
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
     effective_provider = provider_override or _config.get("provider", "claude")
     if effective_provider == "local":
@@ -1173,6 +1189,8 @@ async def _chat_with_tools(
                 task_id=task_id,
                 context_limit=LOCAL_CONTEXT_LIMIT,
                 enable_thinking=is_orchestrator,
+                agent_name=_agent_name,
+                mission_id=_mission_id,
             )
 
     if effective_provider == "openai" and _openai_client:
@@ -1191,6 +1209,8 @@ async def _chat_with_tools(
             on_progress=on_progress,
             budget_tracker=budget_tracker,
             task_id=task_id,
+            agent_name=_agent_name,
+            mission_id=_mission_id,
         )
 
     return await chat_with_tools(
@@ -1207,6 +1227,8 @@ async def _chat_with_tools(
         on_progress=on_progress,
         budget_tracker=budget_tracker,
         task_id=task_id,
+        agent_name=_agent_name,
+        mission_id=_mission_id,
     )
 
 

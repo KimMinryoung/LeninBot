@@ -629,6 +629,8 @@ async def chat_with_tools(
     budget_tracker: dict | None = None,
     on_progress=None,
     task_id: int | None = None,
+    agent_name: str = "agent",
+    mission_id: int | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -650,6 +652,10 @@ async def chat_with_tools(
             "tool_result" (tool finished), "budget" (budget status update).
     """
     budget_usd = validate_budget(budget_usd)
+
+    # Per-agent-run provenance buffer for KG write/read trust tracking.
+    from shared import init_provenance_buffer
+    init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
     # Root-cause fix: start from text-only canonical history.
     # Tool protocol blocks are generated only within this call.

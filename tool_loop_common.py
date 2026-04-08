@@ -113,6 +113,36 @@ def save_redis_progress(
 
 # ── Tool execution ───────────────────────────────────────────────────
 
+def _record_tool_provenance(name: str, args: dict, result: str) -> None:
+    """Record external-source tool calls and KG reads into the per-run buffer.
+
+    Used by write_kg to auto-attach provenance metadata and to detect
+    self-poisoning loops where the agent re-ingests text it just retrieved.
+    Never raises — provenance bookkeeping must not break tool execution.
+    """
+    try:
+        from shared import get_provenance_buffer
+        buf = get_provenance_buffer()
+        if buf is None:
+            return
+        if name == "fetch_url":
+            buf.record_external(name, f"url:{args.get('url', '')}")
+        elif name == "web_search":
+            buf.record_external(name, f"web_search:{args.get('query', '')}")
+        elif name == "convert_document":
+            buf.record_external(name, f"document:{args.get('file_path', '')}")
+        elif name == "check_inbox":
+            buf.record_external(name, "imap_inbox")
+        elif name in ("read_file", "search_files"):
+            path = args.get("path") or ""
+            if "data/downloads" in path or "data/converted" in path:
+                buf.record_external(name, f"file:{path}")
+        elif name == "knowledge_graph_search":
+            buf.record_kg_read(result)
+    except Exception:
+        pass
+
+
 async def execute_tool(
     name: str, args: dict, handlers: dict, *, log_event=None,
 ) -> tuple[str, bool]:
@@ -145,6 +175,9 @@ async def execute_tool(
     # Truncate oversized results to avoid context overflow
     if len(result) > 50000:
         result = result[:50000] + "\n... [truncated]"
+
+    if not is_error:
+        _record_tool_provenance(name, args, result)
 
     return result, is_error
 

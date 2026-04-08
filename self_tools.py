@@ -107,6 +107,10 @@ SELF_TOOLS = [
                     "enum": ["internal_report", "osint_news", "osint_social", "personnel_change", "diplomatic_cable", "threat_report"],
                     "default": "internal_report",
                 },
+                "supersedes": {
+                    "type": "string",
+                    "description": "Optional. If this fact corrects/refines an earlier episode, pass that episode name here. KG is append-only — old facts are not deleted, only marked as superseded.",
+                },
             },
             "required": ["content"],
         },
@@ -544,23 +548,103 @@ async def _exec_read_recent_updates(max_entries: int = 3) -> str:
     return f"=== RECENT SYSTEM UPDATES ===\n\n{result}"
 
 
+def _normalize_for_overlap(text: str) -> set[str]:
+    """Normalize text to a token set for self-poisoning loop detection."""
+    import re as _re
+    if not text:
+        return set()
+    cleaned = _re.sub(r"[\W_]+", " ", text.lower())
+    tokens = [t for t in cleaned.split() if len(t) >= 4]
+    return set(tokens)
+
+
+def _self_poisoning_overlap(new_content: str, kg_reads: list[str]) -> float:
+    """Return max Jaccard overlap between new_content and any recent KG read."""
+    new_tokens = _normalize_for_overlap(new_content)
+    if not new_tokens or not kg_reads:
+        return 0.0
+    best = 0.0
+    for read in kg_reads:
+        read_tokens = _normalize_for_overlap(read)
+        if not read_tokens:
+            continue
+        inter = len(new_tokens & read_tokens)
+        union = len(new_tokens | read_tokens)
+        if union:
+            j = inter / union
+            if j > best:
+                best = j
+    return best
+
+
 async def _exec_write_kg(
     content: str,
     name: str = "",
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
+    supersedes: str = "",
 ) -> str:
-    from shared import add_kg_episode_async
+    from shared import add_kg_episode_async, get_provenance_buffer
 
-    result = await add_kg_episode_async(content, name, source_type, group_id)
+    if not content or not content.strip():
+        return "Failed to store knowledge: content is empty"
+
+    # ── Self-poisoning loop break ────────────────────────────────────
+    # Reject writes that are largely re-quotes of text we just retrieved
+    # from the KG itself in the same agent run. This prevents the agent
+    # from bootstrapping false confidence by re-ingesting its own output.
+    buf = get_provenance_buffer()
+    if buf is not None and buf.kg_reads:
+        overlap = _self_poisoning_overlap(content, buf.kg_reads)
+        if overlap >= 0.55:
+            logger.warning("[KG AUDIT] BLOCKED self-poisoning write | overlap=%.2f | agent=%s", overlap, buf.agent)
+            return (
+                f"Refused: this content overlaps {overlap:.0%} with text you "
+                "just retrieved from the knowledge graph. Re-ingesting retrieved "
+                "facts would create a self-confirming loop. If you want to add a "
+                "genuine new fact (corroboration from a fresh source, correction, "
+                "extension), rewrite it in your own words with the new source cited."
+            )
+
+    # ── Auto-provenance footer ───────────────────────────────────────
+    trust_tier = buf.infer_trust_tier() if buf is not None else "unverified"
+    agent_label = buf.agent if buf is not None else "agent"
+    mission_label = (
+        f" | mission={buf.mission_id}" if buf is not None and buf.mission_id else ""
+    )
+    sources = buf.recent_sources(8) if buf is not None else []
+    ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+    footer_lines = [
+        "— provenance —",
+        f"agent: {agent_label}{mission_label}",
+        f"ingested_at: {ts}",
+        f"trust_tier: {trust_tier}",
+    ]
+    if sources:
+        footer_lines.append("sources:")
+        footer_lines.extend(f"  - {s}" for s in sources)
+    if supersedes:
+        footer_lines.append(f"supersedes: {supersedes}")
+    provenance_footer = "\n".join(footer_lines)
+
+    result = await add_kg_episode_async(
+        content,
+        name,
+        source_type,
+        group_id,
+        trust_tier=trust_tier,
+        provenance_footer=provenance_footer,
+    )
     if result["status"] == "ok":
-        # Audit log for KG writes
-        ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
         logger.info(
-            "[KG AUDIT] wrote episode | name=%s | group=%s | source=%s | time=%s | content_len=%d",
-            name or "(auto)", group_id, source_type, ts, len(content),
+            "[KG AUDIT] wrote episode | name=%s | group=%s | tier=%s | agent=%s | sources=%d | supersedes=%s | time=%s | content_len=%d",
+            name or "(auto)", group_id, trust_tier, agent_label, len(sources),
+            supersedes or "-", ts, len(content),
         )
-        return f"Knowledge stored successfully: {result['message']}"
+        msg = result["message"]
+        if trust_tier == "unverified":
+            msg += " (trust_tier=unverified — no external source recorded this run)"
+        return f"Knowledge stored successfully: {msg}"
     else:
         return f"Failed to store knowledge: {result['message']}"
 

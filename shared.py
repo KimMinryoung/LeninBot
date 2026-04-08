@@ -52,6 +52,99 @@ EXTERNAL_SOURCE_RULE = (
 )
 
 
+# ── KG provenance & trust tracking ──────────────────────────────────
+#
+# Per-agent-run buffer that records:
+#   1. Every external-source tool call (fetch_url, web_search, convert_document,
+#      check_inbox, network-sourced read_file/search_files) → used to auto-attach
+#      provenance + infer trust tier when write_kg is called.
+#   2. Every knowledge_graph_search result → used to detect self-poisoning loops
+#      where the agent re-ingests text it just retrieved.
+#
+# Lives in a ContextVar so parallel asyncio.gather tool calls inside one agent
+# run share the same buffer (children inherit a copy of the parent context, and
+# mutating the list reference modifies the same object visible to the parent).
+import contextvars as _contextvars
+
+_kg_provenance_ctx = _contextvars.ContextVar("kg_provenance_buffer", default=None)
+
+
+class ProvenanceBuffer:
+    """Per-agent-run record of external sources touched and KG content read."""
+
+    def __init__(self, agent: str = "agent", mission_id: int | None = None):
+        self.agent = agent
+        self.mission_id = mission_id
+        # Each entry: {"tool", "source", "domain", "ts"}
+        self.external_calls: list[dict] = []
+        # Recent KG retrieval results, normalized text snippets
+        self.kg_reads: list[str] = []
+
+    def record_external(self, tool: str, source: str) -> None:
+        from urllib.parse import urlparse as _up
+        domain = ""
+        try:
+            raw = source
+            for prefix in ("url:", "search:", "document:", "file:", "web_search:"):
+                if raw.startswith(prefix):
+                    raw = raw[len(prefix):]
+                    break
+            if "://" in raw:
+                domain = _up(raw).netloc.lower()
+            elif raw.startswith("/") or raw.startswith("data/"):
+                domain = "local-file"
+        except Exception:
+            pass
+        self.external_calls.append({
+            "tool": tool,
+            "source": source[:300],
+            "domain": domain,
+            "ts": datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%S%z"),
+        })
+        # Cap to avoid unbounded growth on long agent runs
+        if len(self.external_calls) > 64:
+            self.external_calls = self.external_calls[-64:]
+
+    def record_kg_read(self, text: str) -> None:
+        if text:
+            self.kg_reads.append(text[:5000])
+            if len(self.kg_reads) > 16:
+                self.kg_reads = self.kg_reads[-16:]
+
+    def infer_trust_tier(self) -> str:
+        """corroborated (≥2 independent domains) > single (1 domain) > unverified."""
+        if not self.external_calls:
+            return "unverified"
+        domains = {c["domain"] for c in self.external_calls if c["domain"] and c["domain"] != "local-file"}
+        if len(domains) >= 2:
+            return "corroborated"
+        if domains or any(c["domain"] == "local-file" for c in self.external_calls):
+            return "single"
+        return "unverified"
+
+    def recent_sources(self, limit: int = 8) -> list[str]:
+        seen, out = set(), []
+        for c in reversed(self.external_calls):
+            s = c["source"]
+            if s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+            if len(out) >= limit:
+                break
+        return list(reversed(out))
+
+
+def get_provenance_buffer() -> ProvenanceBuffer | None:
+    return _kg_provenance_ctx.get()
+
+
+def init_provenance_buffer(agent: str = "agent", mission_id: int | None = None) -> ProvenanceBuffer:
+    buf = ProvenanceBuffer(agent=agent, mission_id=mission_id)
+    _kg_provenance_ctx.set(buf)
+    return buf
+
+
 def _wrap_external(content: str, source: str) -> str:
     """Wrap tool output that came from an untrusted external source.
 
@@ -721,6 +814,9 @@ def add_kg_episode(
     name: str = "",
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
+    *,
+    trust_tier: str = "unverified",
+    provenance_footer: str = "",
 ) -> dict:
     """Add an episode to the Knowledge Graph (sync version — for scripts/cron).
 
@@ -738,20 +834,30 @@ def add_kg_episode(
     if not content or not content.strip():
         return {"status": "error", "message": "Content cannot be empty"}
 
+    # Encode trust tier into the episode name as a stable prefix so the
+    # search side can show it without an extra metadata table.
+    if trust_tier not in ("anchor", "corroborated", "single", "unverified"):
+        trust_tier = "unverified"
     if not name:
         ts = datetime.now(KST).strftime("%Y%m%d-%H%M%S")
         name = f"agent-note-{ts}"
+    if not name.startswith("[T:"):
+        name = f"[T:{trust_tier}]{name}"
+
+    body = content.strip()
+    if provenance_footer:
+        body = body + "\n\n" + provenance_footer.strip()
 
     try:
         run_kg_task(
             svc.ingest_episode,
             name=name,
-            body=content.strip(),
+            body=body,
             source_type=source_type,
             reference_time=datetime.now(timezone.utc),
             group_id=group_id,
             preprocess_news=False,
-            max_body_chars=3000,
+            max_body_chars=3500,
         )
         return {"status": "ok", "message": f"Episode '{name}' added to group '{group_id}'"}
     except Exception as e:
@@ -767,6 +873,9 @@ async def add_kg_episode_async(
     name: str = "",
     source_type: str = "internal_report",
     group_id: str = "agent_knowledge",
+    *,
+    trust_tier: str = "unverified",
+    provenance_footer: str = "",
 ) -> dict:
     """Add an episode to the Knowledge Graph from async callers.
 
@@ -781,6 +890,8 @@ async def add_kg_episode_async(
         name,
         source_type,
         group_id,
+        trust_tier=trust_tier,
+        provenance_footer=provenance_footer,
     )
 
 
@@ -1326,6 +1437,59 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     if not all_nodes and not all_edges:
         return None
 
+    # ── Trust-tier lookup: pull source episode names for all edges in one
+    # Cypher pass and extract the [T:tier] prefix encoded by add_kg_episode.
+    # Edges without a known tier fall back to "?".
+    # Graphiti's search() returns edges without their `episodes` property, so
+    # we go to Neo4j directly: (1) fetch episode UUIDs per edge, then (2) fetch
+    # episode names and parse the sanitized "T-{tier}-..." prefix that
+    # add_kg_episode encoded. Edges without a recognizable tier → "?".
+    edge_tier: dict[str, str] = {}
+    try:
+        edge_uuids = [e.get("uuid") for e in all_edges if e.get("uuid")]
+        if edge_uuids:
+            with _get_neo4j_sync_driver() as (drv, db):
+                with drv.session(database=db) as s:
+                    edge_eps_rows = list(s.run(
+                        "MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $euuids "
+                        "RETURN r.uuid AS edge_uuid, r.episodes AS episodes",
+                        euuids=edge_uuids,
+                    ))
+                    edge_to_eps: dict[str, list[str]] = {}
+                    all_ep_uuids: set[str] = set()
+                    for r in edge_eps_rows:
+                        eps = r.get("episodes") or []
+                        edge_to_eps[r["edge_uuid"]] = [str(u) for u in eps if u]
+                        for u in eps:
+                            if u:
+                                all_ep_uuids.add(str(u))
+                    uuid_to_tier: dict[str, str] = {}
+                    if all_ep_uuids:
+                        ep_rows = list(s.run(
+                            "MATCH (e:Episodic) WHERE e.uuid IN $uuids "
+                            "RETURN e.uuid AS uuid, e.name AS name",
+                            uuids=list(all_ep_uuids),
+                        ))
+                        for r in ep_rows:
+                            nm = str(r.get("name") or "")
+                            if nm.startswith("T-"):
+                                rest = nm[2:]
+                                for _t in ("corroborated", "unverified", "single", "anchor"):
+                                    if rest == _t or rest.startswith(_t + "-"):
+                                        uuid_to_tier[r["uuid"]] = _t
+                                        break
+            _tier_rank = {"anchor": 4, "corroborated": 3, "single": 2, "unverified": 1}
+            for edge_uuid, eps in edge_to_eps.items():
+                best = None
+                for u in eps:
+                    t = uuid_to_tier.get(u)
+                    if t and (best is None or _tier_rank[t] > _tier_rank[best]):
+                        best = t
+                if best:
+                    edge_tier[edge_uuid] = best
+    except Exception as _tier_err:
+        logger.debug("[KG] tier lookup skipped: %s", _tier_err)
+
     lines = []
     if all_nodes:
         lines.append("[Knowledge Graph: Entities]")
@@ -1337,7 +1501,8 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     if all_edges:
         lines.append("[Knowledge Graph: Facts/Relations]")
         for e in all_edges:
-            lines.append(f"- {e['fact']}")
+            tier = edge_tier.get(e.get("uuid", ""), "?")
+            lines.append(f"- [T:{tier}] {e['fact']}")
     return "\n".join(lines)
 
 
