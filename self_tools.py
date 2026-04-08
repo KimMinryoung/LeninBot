@@ -1242,7 +1242,7 @@ async def _exec_read_file_registry(limit: int = 20, keyword: str | None = None, 
         return "=== FILE REGISTRY ===\n(no files registered)"
     lines = ["=== FILE REGISTRY ==="]
     for r in rows:
-        ts = _fmt_ts(r.get("created_at"))
+        ts = _to_kst(r.get("created_at"))
         size_kb = round((r.get("file_size") or 0) / 1024, 1)
         lines.append(
             f"[{r['id']}] {r['filename']} ({size_kb}KB, {r.get('category', '-')})\n"
