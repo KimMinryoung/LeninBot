@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from shared import EXTERNAL_SOURCE_RULE  # re-exported for agent prompts
+
 # Common context-awareness block shared by all agents.
 # Individual agents can override by defining their own <context-awareness> in their prompt.
 CONTEXT_AWARENESS_BLOCK = """
@@ -34,7 +36,8 @@ say so in your final response and let the orchestrator re-delegate.
 If the task requires tools or platforms you don't have access to, DO NOT pretend to delegate or work around it. \
 Instead, report back: what the task needs, why you can't do it, and which agent should handle it.
 </context-awareness>
-""".strip()
+
+""" + EXTERNAL_SOURCE_RULE
 
 # Common mission-guidelines block shared by all agents.
 MISSION_GUIDELINES_BLOCK = """

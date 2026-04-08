@@ -234,7 +234,7 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
     """
     try:
         from pathlib import Path
-        from shared import convert_document
+        from shared import convert_document, _wrap_external
 
         if not os.path.isfile(file_path):
             return f"❌ File not found: {file_path}"
@@ -259,13 +259,14 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
         total_lines = len(lines)
         total_chars = len(text)
         preview = "\n".join(lines[:preview_lines])
+        wrapped_preview = _wrap_external(preview, f"document:{file_path}")
 
         return (
             f"✅ Converted → {out_path}\n"
             f"   {total_lines} lines, {total_chars} chars\n"
-            f"   Use read_file with line_start/line_end to paginate.\n\n"
+            f"   Use read_file with offset/limit to paginate.\n\n"
             f"── preview (first {min(preview_lines, total_lines)} lines) ──\n"
-            f"{preview}"
+            f"{wrapped_preview}"
         )
     except Exception as e:
         logger.error("convert_document error: %s", e)
@@ -366,9 +367,11 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
 async def _exec_fetch_url(url: str) -> str:
     """Fetch and extract main body text from a URL."""
     try:
-        from shared import fetch_url_content_async
+        from shared import fetch_url_content_async, _wrap_external
         content = await fetch_url_content_async(url)
-        return content or "Failed to extract content from this URL."
+        if not content:
+            return "Failed to extract content from this URL."
+        return _wrap_external(content, f"url:{url}")
     except Exception as e:
         logger.error("fetch_url error: %s", e)
         return f"URL fetch failed: {e}"
@@ -538,7 +541,16 @@ async def _exec_read_file(
     header = f"[{path}] lines {start}-{end} of {total}"
     if end < total:
         header += f"  (next: offset={end + 1})"
-    return header + "\n" + "\n".join(numbered)
+    body = "\n".join(numbered)
+
+    # Wrap network-sourced files (downloaded or converted from external docs)
+    # so they're treated as data, not instructions.
+    rel = os.path.relpath(path, project_root) if path.startswith(project_root) else path
+    if rel.startswith("data/downloads/") or rel.startswith("data/converted/"):
+        from shared import _wrap_external
+        body = _wrap_external(body, f"file:{rel}")
+
+    return header + "\n" + body
 
 
 async def _exec_search_files(
@@ -618,7 +630,15 @@ async def _exec_search_files(
     header = f"[search {output_mode} /{pattern}/ in {search_path}] {total} line(s), showing {offset + 1}-{offset + len(page)}"
     if offset + len(page) < total:
         header += f"  (next: offset={offset + len(page)})"
-    return header + "\n" + "\n".join(page)
+    body = "\n".join(page)
+
+    # Wrap matches when searching network-sourced content (consistent with read_file).
+    rel = os.path.relpath(search_path, project_root) if search_path.startswith(project_root) else search_path
+    if rel.startswith("data/downloads/") or rel.startswith("data/converted/") or rel in ("data/downloads", "data/converted"):
+        from shared import _wrap_external
+        body = _wrap_external(body, f"search:{rel}")
+
+    return header + "\n" + body
 
 
 _WRITE_ALLOWED_DIRS = ["research", "docs", "logs", "temp_dev", "data"]
@@ -984,6 +1004,7 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
     max_results = max(1, min(max_results, 10))
     try:
         from tavily import AsyncTavilyClient
+        from shared import _wrap_external
         client = AsyncTavilyClient(api_key=api_key)
         resp = await client.search(query, max_results=max_results)
         results = resp.get("results", [])
@@ -995,7 +1016,7 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
             url = r.get("url", "")
             content = r.get("content", "")[:500]
             lines.append(f"### {title}\n{url}\n{content}")
-        return "\n\n".join(lines)
+        return _wrap_external("\n\n".join(lines), f"web_search:{query}")
     except Exception as e:
         logger.error("Tavily search error: %s", e)
         return f"Web search failed: {e}"
@@ -2027,6 +2048,7 @@ async def _exec_check_inbox(
     if not result:
         return "No matching emails found."
 
+    from shared import _wrap_external
     lines = []
     for i, em in enumerate(result, 1):
         junk_tag = " [JUNK]" if em["folder"] == "Junk" else ""
@@ -2040,7 +2062,7 @@ async def _exec_check_inbox(
         else:
             lines.append("    Links: none")
         lines.append("")
-    return "\n".join(lines)
+    return _wrap_external("\n".join(lines), "imap_inbox")
 
 
 # ── allowlist_sender Tool ───────────────────────────────────────────
