@@ -1544,16 +1544,12 @@ def convert_document(file_path: str, max_chars: int = _MAX_DOC_OUTPUT) -> _Optio
         logger.warning("[shared] convert_document: file too large (%d bytes)", size)
         return None
 
-    try:
-        converter = MarkItDown()
-        result = converter.convert(file_path)
-        text = result.text_content or ""
-        if not text:
-            return None
-        return text if max_chars == 0 else text[:max_chars]
-    except Exception as e:
-        logger.warning("[shared] convert_document error: %s", e)
+    converter = MarkItDown()
+    result = converter.convert(file_path)  # raises on failure — caller surfaces it
+    text = result.text_content or ""
+    if not text:
         return None
+    return text if max_chars == 0 else text[:max_chars]
 
 
 # ── Playwright Browser Pool (async, dedicated event loop) ───────────

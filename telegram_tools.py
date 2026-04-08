@@ -239,9 +239,13 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
         if not os.path.isfile(file_path):
             return f"❌ File not found: {file_path}"
 
-        text = await asyncio.to_thread(convert_document, file_path, 0)  # 0 = unlimited
+        try:
+            text = await asyncio.to_thread(convert_document, file_path, 0)  # 0 = unlimited
+        except Exception as conv_err:
+            logger.error("convert_document inner error: %s", conv_err)
+            return f"❌ Conversion failed: {conv_err}"
         if not text:
-            return "❌ Conversion failed (unsupported format or empty content)."
+            return "❌ Conversion produced empty content."
 
         project_root = os.path.dirname(os.path.abspath(__file__))
         out_dir = Path(project_root) / "data" / "converted"

@@ -33,7 +33,7 @@ anthropic
 croniter
 
 # Document conversion
-markitdown
+markitdown[pdf]
 
 # State management
 redis>=5.0
