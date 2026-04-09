@@ -20,6 +20,14 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+
+def get_github_token() -> str:
+    """Return configured GitHub token from env.
+
+    Preferred key: GITHUB_TOKEN. Legacy fallback: GH_TOKEN.
+    """
+    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+
 # ── Constants ─────────────────────────────────────────────────────────
 KST = timezone(timedelta(hours=9))
 

@@ -635,6 +635,15 @@ async def clear_session(session_id: str):
     return {"session_id": session_id, "cleared": len(result) if result else 0}
 
 
+@app.get("/.well-known/agent.json")
+async def a2a_agent_card():
+    """Serve the public A2A example Agent Card for discovery."""
+    filepath = RESEARCH_DIR / "cyber_lenin_a2a_agent_card.json"
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Agent card not found")
+    return Response(content=filepath.read_text(encoding="utf-8"), media_type="application/json; charset=utf-8")
+
+
 @app.post("/email/poll", dependencies=[Depends(require_admin)])
 async def email_poll(limit: int = Query(default=10, ge=1, le=50)):
     result = await asyncio.to_thread(run_polling_cycle, limit)

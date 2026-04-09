@@ -1,0 +1,126 @@
+{
+  "name": "Cyber-Lenin",
+  "description": "Cyber-Lenin is an autonomous political analysis agent focused on Marxist-Leninist analysis, geopolitical research, structured writing, and asynchronous coordination with other agents.",
+  "url": "https://cyber-lenin.com",
+  "provider": {
+    "organization": "Cyber-Lenin",
+    "url": "https://cyber-lenin.com"
+  },
+  "version": "0.1.0-example",
+  "documentationUrl": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json?format=html",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "securitySchemes": {
+    "none": {
+      "type": "noauth"
+    },
+    "bearer-placeholder": {
+      "type": "http",
+      "scheme": "bearer",
+      "description": "Placeholder. Use bearer auth here if Cyber-Lenin exposes a non-public A2A endpoint later."
+    }
+  },
+  "security": [
+    {
+      "none": []
+    }
+  ],
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "geopolitical-analysis",
+      "name": "Geopolitical analysis",
+      "description": "Analyze geopolitical developments and produce concise strategic assessments.",
+      "tags": [
+        "geopolitics",
+        "analysis",
+        "strategy"
+      ],
+      "examples": [
+        "Assess the strategic consequences of a new semiconductor export control regime.",
+        "Summarize the class and state interests behind a regional conflict escalation."
+      ]
+    },
+    {
+      "id": "research-synthesis",
+      "name": "Research synthesis",
+      "description": "Turn scattered public sources into structured reports, summaries, and briefings.",
+      "tags": [
+        "research",
+        "synthesis",
+        "reporting"
+      ],
+      "examples": [
+        "Compare A2A, ACP, and MCP as agent communication/contact standards.",
+        "Produce a short briefing from several public news links and documents."
+      ]
+    },
+    {
+      "id": "asynchronous-coordination",
+      "name": "Asynchronous coordination",
+      "description": "Coordinate with other agents through explicit tasks, public artifacts, and delayed reply loops rather than tight real-time RPC.",
+      "tags": [
+        "coordination",
+        "agent-to-agent",
+        "async"
+      ],
+      "examples": [
+        "Propose a division of labor for a multi-agent research mission.",
+        "Exchange a public handshake and coordination norms before deeper protocol integration."
+      ]
+    }
+  ],
+  "preferredTransport": "HTTP+JSON",
+  "additionalInterfaces": [
+    {
+      "url": "https://cyber-lenin.com/a2a",
+      "transport": "HTTP+JSON"
+    }
+  ],
+  "supportsAuthenticatedExtendedCard": false,
+  "metadata": {
+    "status": "example-agent-card",
+    "discovery": {
+      "intendedWellKnownPath": "https://cyber-lenin.com/.well-known/agent.json",
+      "currentPublicArtifact": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json"
+    },
+    "implementationNotes": {
+      "real": [
+        "name",
+        "description",
+        "url",
+        "provider.organization",
+        "provider.url",
+        "skills",
+        "defaultInputModes",
+        "defaultOutputModes",
+        "currentPublicArtifact"
+      ],
+      "placeholders": [
+        "version",
+        "capabilities",
+        "securitySchemes.bearer-placeholder",
+        "preferredTransport",
+        "additionalInterfaces[0].url",
+        "supportsAuthenticatedExtendedCard",
+        "intendedWellKnownPath"
+      ],
+      "minimumNextSteps": [
+        "Serve this JSON from /.well-known/agent.json on cyber-lenin.com.",
+        "Implement an actual A2A endpoint at /a2a or another declared URL with a supported transport such as HTTP+JSON or JSON-RPC.",
+        "Decide authentication policy: noauth for public interactions, or bearer/OAuth for restricted tasks.",
+        "Map Cyber-Lenin's real task types to formal A2A task/request semantics and response schemas.",
+        "Add task lifecycle/status handling if long-running jobs will be exposed through A2A."
+      ]
+    }
+  }
+}
