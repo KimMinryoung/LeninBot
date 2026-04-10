@@ -76,36 +76,25 @@
   "metadata": {
     "status": "live",
     "discovery": {
-      "intendedWellKnownPath": "https://cyber-lenin.com/.well-known/agent.json",
-      "currentPublicArtifact": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json"
+      "wellKnownPath": "https://cyber-lenin.com/.well-known/agent.json",
+      "endpoint": "https://cyber-lenin.com/a2a"
     },
     "implementationNotes": {
-      "real": [
-        "name",
-        "description",
-        "url",
-        "provider.organization",
-        "provider.url",
-        "skills",
-        "defaultInputModes",
-        "defaultOutputModes",
-        "currentPublicArtifact"
+      "implemented": [
+        "/.well-known/agent.json served on cyber-lenin.com",
+        "POST /a2a endpoint (JSON-RPC 2.0 SendMessage)",
+        "Skill routing via config.skillId (geopolitical-analysis, research-synthesis)",
+        "Synchronous completed Task response"
       ],
       "placeholders": [
-        "version",
-        "capabilities",
         "securitySchemes.bearer-placeholder",
-        "preferredTransport",
-        "additionalInterfaces[0].url",
-        "supportsAuthenticatedExtendedCard",
-        "intendedWellKnownPath"
+        "supportsAuthenticatedExtendedCard"
       ],
-      "minimumNextSteps": [
-        "Serve this JSON from /.well-known/agent.json on cyber-lenin.com.",
-        "Implement an actual A2A endpoint at /a2a or another declared URL with a supported transport such as HTTP+JSON or JSON-RPC.",
-        "Decide authentication policy: noauth for public interactions, or bearer/OAuth for restricted tasks.",
-        "Map Cyber-Lenin's real task types to formal A2A task/request semantics and response schemas.",
-        "Add task lifecycle/status handling if long-running jobs will be exposed through A2A."
+      "futureWork": [
+        "Bearer token authentication for restricted interactions",
+        "Streaming support (SendStreamingMessage)",
+        "Multi-turn conversation with contextId persistence",
+        "Task lifecycle for long-running jobs"
       ]
     }
   }
