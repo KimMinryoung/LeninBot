@@ -1901,9 +1901,9 @@ CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
         "Check the email inbox AND spam/junk folder (lenin@cyber-lenin.com) for recent messages. "
-        "Returns subject, sender, date, folder, and all links found in the email body. "
+        "Returns subject, sender, date, folder, read status, and all links found in the email body. "
         "Use this to find confirmation/magic links from newsletter signups. "
-        "Emails found in Junk are marked as [JUNK]."
+        "Unread emails are marked as [UNREAD]. Emails found in Junk are marked as [JUNK]."
     ),
     "input_schema": {
         "type": "object",
@@ -1915,6 +1915,11 @@ CHECK_INBOX_TOOL = {
             "subject_filter": {
                 "type": "string",
                 "description": "Filter by subject keyword (e.g. 'confirm', 'verify', 'sign in'). Optional.",
+            },
+            "unread_only": {
+                "type": "boolean",
+                "description": "If true, return only unread emails. Default: false.",
+                "default": False,
             },
             "limit": {
                 "type": "integer",
@@ -1991,6 +1996,7 @@ def _parse_email_message(raw_bytes):
 async def _exec_check_inbox(
     sender_filter: str = "",
     subject_filter: str = "",
+    unread_only: bool = False,
     limit: int = 5,
 ) -> str:
     """Check IMAP INBOX + Junk folders and extract links from recent emails."""
@@ -2010,7 +2016,8 @@ async def _exec_check_inbox(
             except Exception:
                 continue
 
-            _, data = conn.search(None, "ALL")
+            search_criteria = "UNSEEN" if unread_only else "ALL"
+            _, data = conn.search(None, search_criteria)
             all_ids = data[0].split()
             if not all_ids:
                 continue
@@ -2021,7 +2028,10 @@ async def _exec_check_inbox(
             for mid in candidate_ids:
                 if len(results) >= limit:
                     break
-                _, msg_data = conn.fetch(mid, "(RFC822)")
+                _, msg_data = conn.fetch(mid, "(FLAGS RFC822)")
+                # Parse flags from response
+                flags_raw = msg_data[0][0] if isinstance(msg_data[0], tuple) else b""
+                is_read = b"\\Seen" in flags_raw
                 raw = msg_data[0][1]
                 parsed = _parse_email_message(raw)
 
@@ -2031,6 +2041,7 @@ async def _exec_check_inbox(
                     continue
 
                 parsed["folder"] = folder
+                parsed["is_read"] = is_read
                 results.append(parsed)
 
         conn.logout()
@@ -2051,8 +2062,12 @@ async def _exec_check_inbox(
     from shared import _wrap_external
     lines = []
     for i, em in enumerate(result, 1):
-        junk_tag = " [JUNK]" if em["folder"] == "Junk" else ""
-        lines.append(f"[{i}]{junk_tag} {em['subject']}")
+        tags = ""
+        if not em.get("is_read"):
+            tags += " [UNREAD]"
+        if em["folder"] == "Junk":
+            tags += " [JUNK]"
+        lines.append(f"[{i}]{tags} {em['subject']}")
         lines.append(f"    From: {em['from']}")
         lines.append(f"    Date: {em['date']}")
         if em["links"]:
