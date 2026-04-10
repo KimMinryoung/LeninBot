@@ -6,7 +6,7 @@
     "organization": "Cyber-Lenin",
     "url": "https://cyber-lenin.com"
   },
-  "version": "0.1.0-example",
+  "version": "0.2.0",
   "documentationUrl": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json?format=html",
   "capabilities": {
     "streaming": false,
@@ -88,7 +88,7 @@
   ],
   "supportsAuthenticatedExtendedCard": false,
   "metadata": {
-    "status": "example-agent-card",
+    "status": "live",
     "discovery": {
       "intendedWellKnownPath": "https://cyber-lenin.com/.well-known/agent.json",
       "currentPublicArtifact": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json"

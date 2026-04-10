@@ -644,6 +644,23 @@ async def a2a_agent_card():
     return Response(content=filepath.read_text(encoding="utf-8"), media_type="application/json; charset=utf-8")
 
 
+@app.post("/a2a")
+async def a2a_endpoint(request: Request):
+    """A2A JSON-RPC 2.0 endpoint (SendMessage)."""
+    from a2a_handler import handle_a2a_message
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(
+            content=json.dumps({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}),
+            media_type="application/json",
+            status_code=400,
+        )
+    result = await handle_a2a_message(body)
+    status_code = 200 if "result" in result else 400
+    return Response(content=json.dumps(result, ensure_ascii=False), media_type="application/json", status_code=status_code)
+
+
 @app.post("/email/poll", dependencies=[Depends(require_admin)])
 async def email_poll(limit: int = Query(default=10, ge=1, le=50)):
     result = await asyncio.to_thread(run_polling_cycle, limit)
