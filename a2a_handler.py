@@ -1,14 +1,19 @@
 """a2a_handler.py — A2A protocol (message/send) handler.
 
 Implements Google A2A JSON-RPC 2.0 `SendMessage` method for synchronous
-conversation. Reuses web_chat.py's LLM pipeline (tools, system prompt)
-but returns a completed Task object instead of SSE streaming.
+conversation with optional skill routing. Reuses web_chat.py's LLM pipeline.
+
+Supported skills:
+  - (none / general chat) — default conversational agent
+  - geopolitical-analysis — structured geopolitical analysis (KG + theory + web)
+  - research-synthesis   — multi-source research report
 
 Spec reference: https://a2a-protocol.org/latest/specification/
 """
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -17,13 +22,38 @@ from bot_config import (
     _claude, _openai_client, _config,
     _CLAUDE_MAX_TOKENS,
 )
-from web_chat import _web_tools, _web_handlers
+from telegram_tools import TOOLS, TOOL_HANDLERS
 
 logger = logging.getLogger(__name__)
 
-# ── A2A system prompt (agent-to-agent, not human visitor) ──────────
+# ── Tool sets per skill ──────────────────────────────────────────────
 
-_A2A_SYSTEM_PROMPT = CORE_IDENTITY + """
+_GENERAL_TOOLS = {
+    "knowledge_graph_search", "vector_search",
+    "web_search", "fetch_url",
+    "get_finance_data", "check_wallet",
+}
+
+_GEOPOLITICAL_TOOLS = {
+    "knowledge_graph_search", "vector_search",
+    "web_search", "write_kg",
+}
+
+_RESEARCH_TOOLS = {
+    "web_search", "knowledge_graph_search", "vector_search",
+    "fetch_url",
+}
+
+
+def _build_toolset(allowed: set[str]):
+    tools = [t for t in TOOLS if t.get("name") in allowed]
+    handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in allowed}
+    return tools, handlers
+
+
+# ── System prompts ───────────────────────────────────────────────────
+
+_BASE_PROMPT = CORE_IDENTITY + """
 Operating via A2A (Agent-to-Agent) protocol.
 
 <audience>
@@ -38,6 +68,12 @@ Provide clear, well-structured responses suitable for machine consumption.
 Use the user's language (Korean or English) matching the input.
 </persona>
 
+<context>
+<current-time>{current_datetime}</current-time>
+</context>
+"""
+
+_GENERAL_PROMPT = _BASE_PROMPT + """
 <tool-strategy>
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
@@ -46,12 +82,69 @@ Use the user's language (Korean or English) matching the input.
 - Real-time market prices → get_finance_data
 - My crypto wallet address/balance → check_wallet
 </tool-strategy>
-
-<context>
-<current-time>{current_datetime}</current-time>
-</context>
 """
 
+_SKILL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
+
+
+def _load_skill_prompt(skill_name: str) -> str | None:
+    path = os.path.join(_SKILL_DIR, skill_name, "SKILL.md")
+    try:
+        return open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        return None
+
+
+def _geopolitical_prompt() -> str:
+    skill_md = _load_skill_prompt("geopolitical-analysis") or ""
+    return _BASE_PROMPT + f"""
+<skill>geopolitical-analysis</skill>
+<instructions>
+{skill_md}
+</instructions>
+
+<tool-strategy>
+Follow the 5-step process in the skill instructions exactly.
+Available tools: knowledge_graph_search, vector_search, web_search, write_kg.
+</tool-strategy>
+"""
+
+
+def _research_prompt() -> str:
+    skill_md = _load_skill_prompt("research-report") or ""
+    return _BASE_PROMPT + f"""
+<skill>research-synthesis</skill>
+<instructions>
+{skill_md}
+</instructions>
+
+<tool-strategy>
+Follow the multi-source collection process in the skill instructions.
+Available tools: web_search, knowledge_graph_search, vector_search, fetch_url.
+Do NOT save files — return the report content directly in your response.
+</tool-strategy>
+"""
+
+
+# ── Skill registry ───────────────────────────────────────────────────
+
+_SKILLS = {
+    "geopolitical-analysis": {
+        "prompt_fn": _geopolitical_prompt,
+        "tools": _GEOPOLITICAL_TOOLS,
+        "max_rounds": 30,
+        "budget": 0.50,
+    },
+    "research-synthesis": {
+        "prompt_fn": _research_prompt,
+        "tools": _RESEARCH_TOOLS,
+        "max_rounds": 30,
+        "budget": 0.50,
+    },
+}
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -73,6 +166,8 @@ def _extract_text(parts: list[dict]) -> str:
             texts.append(p["text"])
     return "\n".join(texts)
 
+
+# ── Main handler ─────────────────────────────────────────────────────
 
 async def handle_a2a_message(request_body: dict) -> dict:
     """Process a JSON-RPC 2.0 SendMessage request and return a Task."""
@@ -100,19 +195,38 @@ async def handle_a2a_message(request_body: dict) -> dict:
     context_id = params.get("contextId") or str(uuid.uuid4())
     timeout_ms = (params.get("config") or {}).get("timeoutMs", 120_000)
 
-    # Build system prompt
-    now = datetime.now(KST)
-    system_prompt = _A2A_SYSTEM_PROMPT.format(
-        current_datetime=now.strftime("%Y-%m-%d %H:%M KST (%A)"),
-    )
+    # Skill routing
+    skill_id = (params.get("config") or {}).get("skillId")
+    # Also check metadata for skill hint
+    if not skill_id:
+        skill_id = (params.get("metadata") or {}).get("skillId")
 
-    # Build messages (single-turn for now)
+    skill_cfg = _SKILLS.get(skill_id) if skill_id else None
+
+    if skill_id and not skill_cfg:
+        return _make_error(rpc_id, -32602, f"Unknown skill: {skill_id}. Available: {', '.join(_SKILLS.keys())}")
+
+    # Build prompt and tools based on skill
+    now = datetime.now(KST)
+    dt_str = now.strftime("%Y-%m-%d %H:%M KST (%A)")
+
+    if skill_cfg:
+        system_prompt = skill_cfg["prompt_fn"]().format(current_datetime=dt_str)
+        tools, handlers = _build_toolset(skill_cfg["tools"])
+        max_rounds = skill_cfg["max_rounds"]
+        budget = skill_cfg["budget"]
+    else:
+        system_prompt = _GENERAL_PROMPT.format(current_datetime=dt_str)
+        tools, handlers = _build_toolset(_GENERAL_TOOLS)
+        max_rounds = 20
+        budget = float(_config.get("chat_budget", 0.30)) or 0.30
+
     history = [{"role": "user", "content": user_text}]
 
     # Run LLM
     try:
         answer = await asyncio.wait_for(
-            _run_llm(history, system_prompt),
+            _run_llm(history, system_prompt, tools, handlers, max_rounds, budget),
             timeout=timeout_ms / 1000,
         )
     except asyncio.TimeoutError:
@@ -139,6 +253,7 @@ async def handle_a2a_message(request_body: dict) -> dict:
                 "parts": [{"type": "text", "text": answer}],
             }
         ],
+        "metadata": {"skillId": skill_id} if skill_id else {},
         "kind": "task",
     }
 
@@ -149,12 +264,17 @@ async def handle_a2a_message(request_body: dict) -> dict:
     }
 
 
-async def _run_llm(history: list[dict], system_prompt: str) -> str:
-    """Run the LLM pipeline (reuses web_chat tool set)."""
-    budget = float(_config.get("chat_budget", 0.30))
-    if budget <= 0:
-        budget = 0.30
+# ── LLM runner ───────────────────────────────────────────────────────
 
+async def _run_llm(
+    history: list[dict],
+    system_prompt: str,
+    tools: list[dict],
+    handlers: dict,
+    max_rounds: int,
+    budget: float,
+) -> str:
+    """Run the LLM pipeline with the given tool set."""
     provider = _config.get("provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
@@ -170,10 +290,10 @@ async def _run_llm(history: list[dict], system_prompt: str) -> str:
             history,
             client=_openai_client,
             model=model,
-            tools=_web_tools,
-            tool_handlers=_web_handlers,
+            tools=tools,
+            tool_handlers=handlers,
             system_prompt=system_prompt,
-            max_rounds=20,
+            max_rounds=max_rounds,
             max_tokens=_CLAUDE_MAX_TOKENS,
             budget_usd=budget,
         )
@@ -188,10 +308,10 @@ async def _run_llm(history: list[dict], system_prompt: str) -> str:
             history,
             client=_claude,
             model=model,
-            tools=_web_tools,
-            tool_handlers=_web_handlers,
+            tools=tools,
+            tool_handlers=handlers,
             system_prompt=system_prompt,
-            max_rounds=20,
+            max_rounds=max_rounds,
             max_tokens=_CLAUDE_MAX_TOKENS,
             budget_usd=budget,
         )

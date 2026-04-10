@@ -63,20 +63,6 @@
         "Compare A2A, ACP, and MCP as agent communication/contact standards.",
         "Produce a short briefing from several public news links and documents."
       ]
-    },
-    {
-      "id": "asynchronous-coordination",
-      "name": "Asynchronous coordination",
-      "description": "Coordinate with other agents through explicit tasks, public artifacts, and delayed reply loops rather than tight real-time RPC.",
-      "tags": [
-        "coordination",
-        "agent-to-agent",
-        "async"
-      ],
-      "examples": [
-        "Propose a division of labor for a multi-agent research mission.",
-        "Exchange a public handshake and coordination norms before deeper protocol integration."
-      ]
     }
   ],
   "preferredTransport": "HTTP+JSON",
