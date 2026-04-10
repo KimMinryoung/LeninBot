@@ -1,4 +1,4 @@
-# Project State — 2026-04-07
+# Project State — 2026-04-10
 
 ## Identity
 
@@ -185,17 +185,19 @@ docker.service
 
 | 에이전트 | 페르소나 | 역할 | 주요 도구 |
 |---|---|---|---|
-| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg, send_email, check_inbox |
-| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2, send_email, check_inbox |
+| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg |
+| **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2 |
+| **diplomat** (Kollontai) | 외교관 | A2A 에이전트 통신, 이메일 송수신 | a2a_send, send_email, check_inbox, allowlist_sender |
 | **browser** | 브라우저 자동화 | 로그인, 폼 제출, 동적 사이트 | browse_web, check_inbox, allowlist_sender, fetch_url |
 | **visualizer** (Rodchenko) | 이미지 생성 | 프로파간다 포스터/게임아트 | generate_image (Replicate FLUX), upload_to_r2 |
-| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file, upload_to_r2, check_inbox |
+| **scout** | 정찰 에이전트 | 외부 플랫폼 데이터 수집 | web_search, fetch_url, write_file, upload_to_r2, moltbook |
 
 ### 핵심 도구
 
 - **restart_service**: 재시작 전 구문 검사 + import 검증 → 크래시 루프 방지. 재시작 시 자동 복구 태스크 생성
-- **send_email**: Resend API로 이메일 발신. HTML 지원, 서명 자동 삽입 (`config/email_signature.json`). DB 기록
-- **check_inbox**: IMAP 실시간 접속 (INBOX + Junk 양쪽 검색). 발신자/제목 필터, 링크 자동 추출. 뉴스레터 인증 메일 처리에 사용
+- **a2a_send**: 외부 A2A 에이전트에 메시지 전송 / Agent Card 디스커버리 (diplomat 전용)
+- **send_email**: Resend API로 이메일 발신. HTML 지원, 서명 자동 삽입 (diplomat 전용)
+- **check_inbox**: IMAP 실시간 접속 (INBOX + Junk 양쪽 검색). 발신자/제목 필터, 링크 자동 추출
 - **allowlist_sender**: Junk 폴더에서 특정 발신자 메일을 INBOX로 이동
 - **browse_web**: browser-use SDK (Playwright + LLM). AI가 스크린샷 보고 클릭/입력/탐색. 항상 Claude Sonnet 사용
 - **upload_to_r2**: Cloudflare R2에 파일 업로드 → 공개 URL 반환. file_registry DB 자동 등록
@@ -243,37 +245,28 @@ task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조
 - File-to-service mapping in restart_service tool + programmer prompt prevents wrong service restart
 
 ### Tool Isolation
-- Orchestrator: all tools accessible (except programming tools — blocked)
+- Orchestrator: curated tool whitelist (`_ORCHESTRATOR_TOOLS`) — no programming tools, no direct email/A2A (delegated to diplomat)
 - Specialist agents: `AgentSpec.filter_tools()` restricts to role-specific tools
 - `delegate` tool only accessible to orchestrator — no inter-agent re-delegation
+- External communication (email, A2A) isolated to diplomat agent — reduces prompt injection blast radius
 
 ---
 
-## Web Chatbot (LangGraph RAG)
+## Web Chatbot (claude_loop)
 
-### Graph Flow
-```
-START → analyze_intent
-  ├─[vectorstore]→ retrieve → kg_retrieve → grade_documents
-  │                                            ├─[need_web_search]→ web_search → generate
-  │                                            └─[no_need]→ generate
-  ├─[generate]→ generate → log_conversation → END
-  └─[plan]→ planner → step_executor → generate → log_conversation → END
-```
+`web_chat.py` — Telegram과 동일한 `claude_loop`/`openai_tool_loop` 파이프라인 사용. SSE 스트리밍으로 진행 상황 전달. 도구는 읽기 전용 서브셋 (vector_search, kg_search, web_search, fetch_url, get_finance_data, check_wallet). 항상 corporate LLM 사용 (local LLM 미사용).
 
-### 9 Nodes
+## A2A Protocol (Agent-to-Agent)
 
-| Node | LLM | Purpose |
-|------|-----|---------|
-| analyze_intent | Gemini 2.5 Flash-Lite | 라우팅, 의도 분류, 쿼리 분해/번역, 자기지식 도구 선택 |
-| retrieve | — | 벡터 검색 (embedding_server HTTP → pgvector) |
-| kg_retrieve | — | 지식 그래프 검색 (Neo4j/Graphiti, 휴리스틱 필터) |
-| grade_documents | Gemini 2.5 Flash-Lite | 문서 관련성 배치 평가 + 실시간 정보 필요 판단 |
-| web_search | — | Tavily 검색 |
-| generate | Gemini 3.1 Flash-Lite (streaming) | 최종 답변 생성 (변증법적 분석 내장) |
-| log_conversation | — | PostgreSQL 채팅 로그 저장 |
-| planner | Gemini 3.1 Flash-Lite | 복합 질문용 2-4단계 연구 계획 |
-| step_executor | — | 계획 단계별 실행 (검색 + KG, 단계간 중복 제거) |
+`a2a_handler.py` — Google A2A JSON-RPC 2.0 `SendMessage` 구현. 외부 에이전트가 Cyber-Lenin과 대화 가능.
+
+- **Discovery**: `GET /.well-known/agent.json` — Agent Card 제공
+- **Endpoint**: `POST /a2a` — 메시지 수신, 즉시 completed Task 반환
+- **스킬 라우팅**: `config.skillId`로 스킬별 프롬프트/도구셋 분기
+  - `geopolitical-analysis`: KG + 이론 + 웹 검색 기반 구조화된 지정학 분석
+  - `research-synthesis`: 멀티소스 수집 + 교차검증 리서치 보고서
+  - (없음): 일반 대화
+- **아웃바운드**: `a2a_send` 도구 (diplomat 에이전트 전용) — 외부 A2A 에이전트 discover + SendMessage
 
 ---
 
@@ -303,7 +296,8 @@ START → analyze_intent
 
 ```
 leninbot/
-├── api.py                     # FastAPI (SSE streaming, /chat, /logs, /session/*)
+├── api.py                     # FastAPI (SSE streaming, /chat, /logs, /session/*, /a2a)
+├── a2a_handler.py             # A2A JSON-RPC 2.0 SendMessage 핸들러 (스킬 라우팅)
 ├── web_chat.py                # 웹 챗봇 핸들러 (claude_loop 기반, api.py에서 호출)
 ├── shared.py                  # 공유 라이브러리: CORE_IDENTITY, AGENT_CONTEXT, KG/벡터검색/메모리/URL
 ├── embedding_server.py        # BGE-M3 임베딩 서버 (독립 FastAPI, :8100)
@@ -338,6 +332,7 @@ leninbot/
 │   ├── browser.py             # Browser — AI 브라우저 자동화 (browser-use SDK)
 │   ├── visualizer.py          # Rodchenko — 이미지 생성 (reference_image 지원)
 │   ├── scout.py               # 외부 플랫폼 정찰
+│   ├── kollontai.py           # Diplomat (Kollontai) — A2A 통신, 이메일 송수신
 │   └── diary.py               # 일기 작성 에이전트 (스케줄 기반, 0/6/12/18시 KST)
 │
 ├── graph_memory/              # Graphiti 지식 그래프 모듈
@@ -362,6 +357,23 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-10 — A2A Protocol, Diplomat Agent
+
+#### A2A Protocol Implementation (`a2a_handler.py`, `api.py`)
+- `POST /a2a` — JSON-RPC 2.0 `SendMessage` 엔드포인트
+- 스킬 라우팅: `config.skillId`로 geopolitical-analysis / research-synthesis 분기 (전용 프롬프트 + 도구셋)
+- Agent Card (`/.well-known/agent.json`) 서빙 + nginx 프록시 설정 스크립트
+- web_chat.py LLM 파이프라인 재활용, SSE 없이 동기 응답
+
+#### Diplomat Agent — Kollontai (`agents/kollontai.py`, `telegram_tools.py`)
+- 새 에이전트 `diplomat` (페르소나: Alexandra Kollontai) — 외부 통신 전담
+- `a2a_send` 도구: 외부 A2A 에이전트 discover + SendMessage
+- `send_email`, `check_inbox`, `allowlist_sender`를 orchestrator에서 diplomat으로 이관
+- Orchestrator 도구 목록 경량화, 외부 통신 보안 경계 명확화
+
+#### leninbot-llama 서비스 중단
+- 모델 파일 누락(`qwen3.5-4b-q4_k_m.gguf`)으로 crash-loop 발생 → `stop + disable`
 
 ### 2026-04-07 — x402 마이크로페이먼트, Playwright async 리팩터, 병렬 도구 실행
 
