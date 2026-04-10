@@ -15,6 +15,7 @@ from agents.visualizer import VISUALIZER
 from agents.analyst import ANALYST
 from agents.browser import BROWSER
 from agents.diary import DIARY
+from agents.kollontai import KOLLONTAI
 
 _REGISTRY: dict[str, AgentSpec] = {
     "programmer": PROGRAMMER,
@@ -23,6 +24,7 @@ _REGISTRY: dict[str, AgentSpec] = {
     "analyst": ANALYST,
     "browser": BROWSER,
     "diary": DIARY,
+    "diplomat": KOLLONTAI,
 }
 
 

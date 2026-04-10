@@ -125,7 +125,8 @@ SELF_TOOLS = [
             "- scout: Moltbook activity (post/comment/patrol/scan), routine patrols, large-scale crawling ($1.00)\n"
             "- visualizer: image generation ($1.00)\n"
             "- browser: website login/form submission/browser automation ($1.50)\n"
-            "Research/analysis → analyst. Code → programmer. Images → visualizer. Moltbook/crawling → scout. Web automation → browser.\n"
+            "- diplomat: external communications — A2A agent messaging, email send/receive ($1.00)\n"
+            "Research/analysis → analyst. Code → programmer. Images → visualizer. Moltbook/crawling → scout. Web automation → browser. Email/A2A → diplomat.\n"
             "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
             "so the agent understands WHY this task exists and WHAT the user wants."
         ),
@@ -134,7 +135,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser"],
+                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {
@@ -170,7 +171,7 @@ SELF_TOOLS = [
                         "properties": {
                             "agent": {
                                 "type": "string",
-                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser"],
+                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat"],
                             },
                             "task": {"type": "string", "description": "Task instructions for this agent."},
                             "context": {"type": "string", "description": "Why this subtask exists."},
