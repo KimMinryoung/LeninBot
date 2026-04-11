@@ -99,43 +99,45 @@ GraphMemoryService()
 
 > 재설계 근거: `temp_dev/entity_redesign_form.md` 참조
 
-### 엔티티 8종 (58 필드)
+### 엔티티 10종 (v2.2 — Role/Industry 추가)
 
 | 엔티티 | 필드 수 | 설명 | 주요 필드 |
 |--------|---------|------|-----------|
-| **Person** | 9 | 개인 인물 | alias, nationality, role, expertise, ideological_alignment, network_role, recruitment_potential, reliability_rating, influence_level |
-| **Organization** | 10 | 조직 | org_type, industry, headquarters, country, parent_org, ideological_orientation, alliance_bloc, state_sponsor, threat_classification, known_ttps |
+| **Person** | 9 | 개인 인물 (NOT roles) | alias, nationality, role, expertise, ideological_alignment, network_role, recruitment_potential, reliability_rating, influence_level |
+| **Organization** | 10 | 조직 (institutional bodies) | org_type, industry, headquarters, country, parent_org, ideological_orientation, alliance_bloc, state_sponsor, threat_classification, known_ttps |
 | **Location** | 5 | 지리적 장소 | location_type, coordinates, significance, strategic_resources, geopolitical_bloc |
-| **Asset** | 7 | 자산/기술 | asset_type, classification, strategic_value, description_detail, supply_chain_role, dual_use_potential, controlling_entity |
-| **Incident** | 9 | 특이사건 | incident_type, severity, occurred_at, detected_at, status, confidence, impact_summary, geopolitical_context, information_source_type |
-| **Policy** | 6 | 정책/제도 | policy_type, issuing_entity, target_scope, status, effective_date, strategic_impact |
-| **Campaign** | 7 | 캠페인/작전 | campaign_type, objective, status, scale, started_at, ideological_framing, effectiveness |
-| **Concept** | 5 | 추상 개념/이론 (v2.1 신설) | concept_type, domain, related_thinkers, historical_period, contemporary_relevance |
+| **Asset** | 7 | 기술/제품/IP/무기 등 가치 있는 것 | asset_type, classification, strategic_value, description_detail, supply_chain_role, dual_use_potential, controlling_entity |
+| **Incident** | 9 | 특정 시점의 단발 사건 | incident_type, severity, occurred_at, detected_at, status, confidence, impact_summary, geopolitical_context, information_source_type |
+| **Policy** | 6 | 제도적 수단 (법령/조약/제재) | policy_type, issuing_entity, target_scope, status, effective_date, strategic_impact |
+| **Campaign** | 7 | 지속적 조직 활동 (작전/운동) | campaign_type, objective, status, scale, started_at, ideological_framing, effectiveness |
+| **Concept** | 5 | 이데올로기·이론·계급·시기 등 추상 | concept_type, domain, related_thinkers, historical_period, contemporary_relevance |
+| **Role** ✨ | 5 | 직책·직위 (점유자와 별개) | role_type, domain, jurisdiction, seniority, selection_method |
+| **Industry** ✨ | 6 | 경제 산업·섹터 (특정 조직 위 추상) | sector_type, value_chain_position, strategic_importance, geographic_concentration, regulatory_status, capital_composition |
 
-- 모든 필드는 `Optional` — 수집 누적 시 Graphiti 엔티티 해소(entity resolution)가 점진적으로 채움
-- `ENTITY_TYPES` 레지스트리: `{"Person": Person, ..., "Campaign": Campaign, "Concept": Concept}`
-- v1→v2 변경: Person -clearance_level +3, Organization -employee_count +3, Location +2, Asset +3, Incident +2, Policy 신설, Campaign 신설
-- v2→v2.1 변경: Concept 신설 (5 필드) — 기존 7종에 분류 불가능한 추상적 엔티티(이데올로기, 사회현상, 학문 등) 포괄
+- 모든 필드는 `Optional` — 수집 누적 시 점진적으로 채워짐
+- v2.1 → **v2.2** 변경: **Role 신설**, **Industry 신설**. Concept의 enum에 `social_class`, `historical_era`, `movement_doctrine` 추가.
+- 미스분류 마이그레이션 (v2.1 → v2.2): Person→Role 12건, Asset→Industry 13건, Concept→Role 2건, Concept→Industry 3건, 내부 노이즈 entities 39건 삭제.
 
-### 엣지 10종
+### 엣지 12종 (v2.2 — Statement/Causation 추가)
 
 | 엣지 | 설명 | 주요 필드 |
 |------|------|-----------|
-| **Affiliation** | 사람→조직 소속 | position, department, affiliation_type, start_date, end_date, is_current, access_level |
+| **Affiliation** | 사람→조직, 사람→Role, 조직→Industry 소속 | position, department, affiliation_type, start_date, end_date, is_current, access_level |
 | **PersonalRelation** | 사람↔사람 | relation_type, context, strength, first_observed |
 | **OrgRelation** | 조직↔조직 | relation_type, agreement_type, financial_value, strategic_significance |
 | **Funding** | 자금 흐름 | funding_type, amount, purpose, is_verified |
 | **AssetTransfer** | 기술/자산 이전 | transfer_type, asset_description, legality, export_control |
-| **ThreatAction** | 공격/위협 행위 | action_type, technique, target_asset, outcome, confidence |
+| **ThreatAction** | 공격/위협 행위 (군사·사이버) | action_type, technique, target_asset, outcome, confidence |
 | **Involvement** | 엔티티→사건/캠페인 관여 | role_in_incident, evidence_basis, confidence |
 | **Presence** | 엔티티→장소 관련 | presence_type, frequency, purpose |
-| **PolicyEffect** | 정책↔엔티티 영향 (신설) | effect_type, impact_description, compliance_status |
-| **Participation** | 엔티티→캠페인 참여 (신설) | role, contribution, commitment_level |
+| **PolicyEffect** | 정책↔엔티티 영향 | effect_type, impact_description, compliance_status |
+| **Participation** | 엔티티→캠페인 참여 | role, contribution, commitment_level |
+| **Statement** ✨ | 발화·성명·인용 (X said about Y) | statement_type, medium, audience, statement_date, verbatim_excerpt |
+| **Causation** ✨ | 인과 관계 (X caused Y) | causal_type, confidence, mechanism |
 
-- Graphiti 바이-템포럴 타임스탬프 자동 부여: `valid_at`/`invalid_at`, `created_at`/`expired_at`
-- `EDGE_TYPES` 레지스트리: `{"Affiliation": Affiliation, ..., "PolicyEffect": PolicyEffect, "Participation": Participation}`
+- v2.2 변경: **Statement 신설** (speech acts — 정치적 비판/대립도 여기로), **Causation 신설** (명시적 인과). 모든 entity 쌍에 대해 wildcard로 사용 가능.
 
-### EDGE_TYPE_MAP (24 entries)
+### EDGE_TYPE_MAP (32 entries)
 
 어떤 엔티티 쌍 사이에 어떤 관계가 허용되는지 정의. 매핑에 없는 쌍은 `RELATES_TO`로 캡처.
 
@@ -164,7 +166,15 @@ GraphMemoryService()
 | Campaign → Location | Presence |
 | Campaign → Incident | Involvement |
 | Campaign → Policy | PolicyEffect |
-| Entity → Entity (폴백) | Funding, AssetTransfer |
+| **Person → Role** ✨ | Affiliation (X holds role Y) |
+| **Role → Organization** ✨ | Affiliation (Role is part of Org) |
+| **Role → Location** ✨ | Presence (Role's jurisdiction) |
+| **Organization → Industry** ✨ | Affiliation (Org belongs to industry) |
+| **Industry → Location** ✨ | Presence (geographic concentration) |
+| **Policy → Industry** ✨ | PolicyEffect |
+| **Industry → Asset** ✨ | AssetTransfer |
+| **Campaign → Industry** ✨ | ThreatAction |
+| **Entity → Entity (폴백)** | Funding, AssetTransfer, **Statement** ✨, **Causation** ✨ |
 
 ### EPISODE_SOURCE_MAP (12 소스 타입)
 
@@ -469,6 +479,7 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 | 2026-03-21 | **Neo4j AuraDB → Local Docker 이전**: `docker-compose.neo4j.yml` (Neo4j 5 Community + APOC), `systemd/leninbot-neo4j.service`, `scripts/migrate_neo4j.py`. 엔티티 2,116개, 관계 1,826개, 에피소드 761건 전량 이전 완료. AuraDB 연결 끊김 문제 해소. |
 | 2026-03-29 | **KG 데이터 품질 개선**: (1) 중복 엔티티 병합 스크립트 `merge_entities.py` — Gemini 배치 분류 + canonical 선택 + 엣지 이전 + duplicate 삭제. (2) 관계명 정규화 스크립트 `normalize_edge_names.py` — 비표준/NULL r.name을 10개 표준 타입으로 분류. (3) KG 백업 스크립트 `backup_kg.py`. (4) 추출 지시문 강화 — 국가/조직/인물 정식명 사용 규칙 추가, 약어 금지. (5) 이름 정규화 패치 — `graphiti_patches.py`에 `NAME_NORMALIZATION` 딕셔너리 + 텍스트 레벨 약어→정식명 치환 (Graphiti entity resolution 실패 방지). |
 | 2026-04-08 | **KG 오염 방어 (Palantir-style robustness)**: indirect prompt injection으로 거짓 fact가 KG에 박히는 위협에 대한 4-레이어 방어. (1) `shared.ProvenanceBuffer` + `contextvars` per-agent-run 버퍼; `tool_loop_common.execute_tool`이 external-source 툴 호출과 KG 읽기를 자동 기록; `chat_with_tools` 진입 시 초기화. (2) Trust tiering — 4단(anchor/corroborated/single/unverified), 도메인 다양성으로 자동 추론, episode 이름에 `[T:tier]` 인코딩(graphiti가 `T-tier-`로 sanitize), `search_knowledge_graph`가 두 단계 Cypher pass로 각 fact에 인라인 표시. (3) Append-only — analyst/programmer/scout 화이트리스트에서 delete/merge/query/admin 모두 부재 확인, `write_kg`에 `supersedes` 옵션 추가. (4) Self-poisoning loop break — Jaccard ≥0.55면 거부, friendly 메시지로 fresh source 인용 안내. Provenance footer 자동 첨부 + audit log 보강. 자세한 설계는 §5.5 참조. |
+| 2026-04-11 | **KG cleanup + invariant + structured writes + v2.2 schema**: 단일 라운드에 5가지 변화. (1) **데이터 cleanup**: exact-name dup 250건 머지(merge_entities.py 버그 발견 후 recover_lost_edges.py로 277건 복구), orphan 11건 삭제, 비표준 19건 삭제, untyped 6건 분류, fact_embedding 436건 재생성. backup_kg.py가 fact_embedding/episodes 보존하도록 수정. (2) **write-time conformance gate** (`graph_memory/conformance.py`): 모든 `add_episode` 후 자동 검증 — self-loop/non-Entity endpoint auto-fix, non-standard edge name/type-map violation/untyped node 로깅. 동일 validator가 daily scanner에도 재사용 가능. (3) **`write_kg_structured` 도구** (`graph_memory/structured_writer.py`): typed (subject, predicate, object) 직접 단언. graphiti의 LLM extraction 우회, deterministic name+type 매칭, 합성 episode로 trust tier 보존. 6개 agent에 추가, MISSION_GUIDELINES_BLOCK 업데이트. (4) **v2.2 schema**: Role/Industry entity 신설, Statement/Causation predicate 신설. EDGE_TYPE_MAP에 9개 매핑 추가. CUSTOM_EXTRACTION_INSTRUCTIONS에 entity-type 가이드 + 내부 노이즈 필터 추가. (5) **마이그레이션** (`migrate_to_v22_schema.py`): heuristic + Gemini 배치 confirmation으로 Person→Role 12건, Asset→Industry 13건, Concept→Role 2건, Concept→Industry 3건 재분류, 내부 노이즈 entities 39건 삭제. 최종: 3914 entities, 4053 RELATES_TO, 0 untyped/dup/orphan. |
 
 ---
 

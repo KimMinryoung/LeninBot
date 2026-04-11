@@ -116,10 +116,43 @@ EDGE_TYPE_MAP = {
         "PolicyEffect",      # 캠페인과 정책의 관계
     ],
 
+    # ─── Role 관련 (v2.2 신설) ────────────────────────
+    # Role = 직책/직위 자체. Person이 Role을 점유한다 = Affiliation.
+    ("Person", "Role"): [
+        "Affiliation",       # Person이 그 Role을 보유 (X holds role Y)
+    ],
+    ("Role", "Organization"): [
+        "Affiliation",       # Role이 어느 조직 안의 자리인가
+    ],
+    ("Role", "Location"): [
+        "Presence",          # Role의 관할 지역 (e.g. Vice Mayor of Livorno)
+    ],
+
+    # ─── Industry 관련 (v2.2 신설) ────────────────────
+    # Industry = 산업/섹터. 조직이 산업에 속한다 = Affiliation.
+    ("Organization", "Industry"): [
+        "Affiliation",       # 조직이 그 산업에 속함
+    ],
+    ("Industry", "Location"): [
+        "Presence",          # 산업의 지리적 집중지
+    ],
+    ("Policy", "Industry"): [
+        "PolicyEffect",      # 정책이 산업에 미치는 영향
+    ],
+    ("Industry", "Asset"): [
+        "AssetTransfer",     # 산업이 사용/생산하는 자산
+    ],
+    ("Campaign", "Industry"): [
+        "ThreatAction",      # 캠페인이 산업을 타겟 (e.g. tariff war)
+    ],
+
     # ─── 폴백 ────────────────────────────────────────
+    # Statement와 Causation은 모든 entity 쌍에 대해 사용 가능 — 주제 무관성 때문.
     ("Entity", "Entity"): [
         "Funding",           # 모든 엔티티 간 자금 흐름 가능
         "AssetTransfer",     # 모든 엔티티 간 자산 이전 가능
+        "Statement",         # X가 Y에 대해/Y에게 발화 (v2.2)
+        "Causation",         # X가 Y의 원인 (v2.2)
     ],
 }
 
@@ -189,10 +222,72 @@ CUSTOM_EXTRACTION_INSTRUCTIONS = """\
 - People: Use "FirstName LastName" (e.g., "Donald Trump" not "Trump", "Vladimir Putin" not "Putin")
 - Use "Russia" not "Russian Federation", "China" not "People's Republic of China"
 
-## RELATION TYPE RULES (OVERRIDE)
-- relation_type MUST be one of: Affiliation, OrgRelation, PersonalRelation, Funding, AssetTransfer, ThreatAction, Involvement, Presence, PolicyEffect, Participation
-- Pick the closest match. Do NOT invent new types or use SCREAMING_SNAKE_CASE variants.
-- If unsure between two types, prefer the more specific one.
+## ENTITY TYPE SELECTION (CRITICAL — common mistakes to avoid)
+
+10 entity types are available. Pick the most semantically accurate one.
+
+- **Person**: actual individual humans only. NOT roles, NOT positions, NOT collectives.
+  WRONG: "Senate Minority Leader", "Secretary of Energy", "senior executives", "Multi-home owners"
+  RIGHT: "Chuck Schumer", "Jennifer Granholm", "Vladimir Putin"
+
+- **Role**: official titles and positions, distinct from the people who hold them. Roles persist across holders.
+  RIGHT: "Senate Minority Leader", "United States Secretary of Energy", "CEO of Anthropic", "Vice Mayor of Livorno"
+  Use Affiliation edges to connect a Person to a Role they hold.
+
+- **Organization**: actual institutional bodies (companies, agencies, NGOs, political parties).
+  WRONG: "South Korean financial market" (that's a market/system, not an org), "Manufacturing" (that's an industry)
+  RIGHT: "Samsung Electronics", "Federal Reserve", "Democratic Party of Korea"
+
+- **Industry**: economic sectors / value chains, one abstraction level above specific organizations.
+  RIGHT: "semiconductor industry", "AI industry", "Bitcoin mining", "defense contracting", "fossil fuels"
+  Use Affiliation to connect an Organization to the Industry it belongs to.
+
+- **Asset**: technologies, products, IP, weapons, infrastructure. Tangible or intangible things of strategic value.
+  WRONG: "Bitcoin mining" (industry, not asset), "Lost Decades" (era, not asset),
+         "EBS social inquiry video", "EMAIL_BRIDGE_ENABLED", "Octree", "task #184" (internal noise — DO NOT extract)
+
+- **Concept**: abstract ideas, ideologies, theories, social phenomena, social classes, historical eras.
+  RIGHT: "Marxism", "neoliberalism", "Working Class", "Lost Decades", "stagflation", "non-regular labor"
+  WRONG: "Anarcho-capitalism" as Policy (it's an ideology = Concept), "Strategic autonomy" as Policy (it's a doctrine = Concept)
+
+- **Incident**: specific time-bounded events with severity/impact. Real, single events.
+  WRONG: "Demonstrations" (too generic), "drone attacks" (too generic), "task #184" (internal noise)
+  RIGHT: "Minnesota shooting incident on 2026-03-15", "Israel airstrike on Gaza residential complex"
+
+- **Policy**: enacted institutional measures (laws, sanctions, executive orders, treaties, regulations).
+  RIGHT: "Reciprocal Tariff Act 2026", "Section 301", "Executive Order 14123"
+
+- **Campaign**: sustained organized activities (military operations, social movements, propaganda campaigns, wars).
+  WRONG: "Task #210" (internal noise), "Trade war" (too generic if no specific framing)
+  RIGHT: "Belt and Road Initiative", "MAGA movement", "Iran-Iraq War", "Operation Inherent Resolve"
+
+- **Location**: geographic places, facilities, regions.
+
+## INTERNAL NOISE FILTER (CRITICAL — DO NOT EXTRACT)
+
+NEVER create entities for any of these — they pollute the graph:
+- Internal task IDs ("Task #184", "task #210")
+- Code identifiers ("EMAIL_BRIDGE_ENABLED", "NameError", "Octree", any UPPER_SNAKE_CASE)
+- File paths, environment variables, function/class names
+- LLM model identifiers when used as software components ("flux_dev", "rd_fast" — UNLESS the article is specifically about that model)
+- Generic placeholders ("the user", "the agent", "the system")
+- Game/example code references unless central to the article
+- Bot operational details (commit hashes, branch names)
+
+If a sentence is about LeninBot internals or programming details, SKIP it entirely.
+
+## RELATION TYPE RULES (OVERRIDE — 12 valid types)
+
+relation_type MUST be one of: Affiliation, OrgRelation, PersonalRelation, Funding,
+AssetTransfer, ThreatAction, Involvement, Presence, PolicyEffect, Participation,
+**Statement**, **Causation**.
+
+Pick the most specific match. Notes on the new ones:
+- **Statement**: use for "X said/announced/criticized/endorsed/quoted Y". Replaces awkward Affiliation/Involvement uses for speech acts. Direction: speaker → topic.
+- **Causation**: use for explicit causal claims ("X caused/triggered/enabled Y"). Direction: cause → effect. Do NOT use for mere temporal sequence or correlation.
+- **Affiliation** is now also used for: Person → Role (holds), Role → Organization (part of), Organization → Industry (sector membership).
+
+Do NOT invent new types or use SCREAMING_SNAKE_CASE variants.
 """
 
 

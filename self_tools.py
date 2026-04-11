@@ -126,17 +126,34 @@ SELF_TOOLS = [
             "Use this when you want PRECISE control: agent-asserted single facts, "
             "structured analyst conclusions, KG corrections. Recommended for `agent_knowledge` group.\n"
             "\n"
-            "Entity types (subject_type / object_type): "
-            "Person, Organization, Location, Asset, Incident, Policy, Campaign, Concept.\n"
-            "Predicates: Affiliation (Person↔Org), PersonalRelation (Person↔Person), "
-            "OrgRelation (Org↔Org), Funding (any↔any), AssetTransfer (any↔any), "
-            "ThreatAction (Org/Person/Campaign target), Involvement (Person/Org/Campaign↔Incident), "
-            "Presence (Person/Org/Incident/Campaign↔Location), "
-            "PolicyEffect (Policy↔target), Participation (Person/Org↔Campaign).\n"
+            "Entity types (10): "
+            "Person (actual humans, NOT roles), "
+            "Organization (institutional bodies), "
+            "Location, "
+            "Asset (technologies/products/IP), "
+            "Incident (specific time-bounded events), "
+            "Policy (laws/sanctions/treaties), "
+            "Campaign (sustained operations/movements), "
+            "Concept (ideologies/theories/social classes/eras), "
+            "Role (titles/positions distinct from holder), "
+            "Industry (economic sectors above specific orgs).\n"
+            "\n"
+            "Predicates (12): "
+            "Affiliation (Person↔Org, Person↔Role, Org↔Industry), "
+            "PersonalRelation (Person↔Person), "
+            "OrgRelation (Org↔Org), "
+            "Funding (any↔any), AssetTransfer (any↔any), "
+            "ThreatAction (X targets Y militarily/cyber), "
+            "Involvement (X in Incident/Campaign), "
+            "Presence (X↔Location), "
+            "PolicyEffect (Policy↔target), "
+            "Participation (X↔Campaign), "
+            "**Statement** (speaker → topic for any speech act: said/announced/criticized/endorsed/quoted), "
+            "**Causation** (cause → effect, explicit causal claim).\n"
             "\n"
             "Each fact requires the natural-language `fact` text — that's what gets embedded "
-            "for vector search, and what shows up in retrieval results. Make it self-contained "
-            "(don't write 'they did X' — write 'Anthropic announced partnership with OpenAI on 2026-04-11').\n"
+            "for vector search and shows up in retrieval results. Make it self-contained "
+            "(don't write 'they did X' — write 'Anthropic announced Claude Opus 4.6 on 2026-04-11').\n"
             "\n"
             "If the subject or object already exists in the KG by exact name, this tool reuses it. "
             "If not, it creates a new entity with the type label you specified. "
@@ -156,19 +173,22 @@ SELF_TOOLS = [
                             "subject_type": {
                                 "type": "string",
                                 "enum": ["Person", "Organization", "Location", "Asset",
-                                         "Incident", "Policy", "Campaign", "Concept"],
+                                         "Incident", "Policy", "Campaign", "Concept",
+                                         "Role", "Industry"],
                             },
                             "predicate": {
                                 "type": "string",
                                 "enum": ["Affiliation", "PersonalRelation", "OrgRelation",
                                          "Funding", "AssetTransfer", "ThreatAction",
-                                         "Involvement", "Presence", "PolicyEffect", "Participation"],
+                                         "Involvement", "Presence", "PolicyEffect", "Participation",
+                                         "Statement", "Causation"],
                             },
                             "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
                             "object_type": {
                                 "type": "string",
                                 "enum": ["Person", "Organization", "Location", "Asset",
-                                         "Incident", "Policy", "Campaign", "Concept"],
+                                         "Incident", "Policy", "Campaign", "Concept",
+                                         "Role", "Industry"],
                             },
                             "fact": {
                                 "type": "string",

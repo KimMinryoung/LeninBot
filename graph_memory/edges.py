@@ -341,6 +341,101 @@ class Participation(BaseModel):
 
 
 # ============================================================
+# 11. 발화·성명 (Statement) — v2.2 신설
+# ============================================================
+
+class Statement(BaseModel):
+    """
+    공개 발언, 성명, 선언, 인용 관계.
+
+    Use this for:
+    - 누가(Person/Organization/Campaign) 무엇에 대해 무엇을 말했는가
+    - 발표, 비판, 부인, 옹호, 위협, 약속, 인용
+    - 정치적 입장 표명 (특히 ThreatAction에 해당하지 않는 비물리적 비판/대립)
+
+    Do NOT use for:
+    - 단순 멘션·연관성 (RELATES_TO/MENTIONS)
+    - 물리적/사이버 공격 (ThreatAction)
+    - 정책 시행 (PolicyEffect)
+
+    Examples:
+    - "Vladimir Putin stated Russia's position on sanctions" -> Statement
+    - "Anthropic announced Claude Opus 4.6 release" -> Statement (Org → Asset)
+    - "Lee Jae-myung criticized Yoon Suk-yeol's economic policy" -> Statement (Person → Policy)
+    - "Marx wrote Capital Volume I" -> Statement (Person → Asset)
+    """
+    statement_type: Optional[str] = Field(
+        None,
+        description=(
+            "Type: announcement / declaration / claim / accusation / "
+            "denial / threat / promise / criticism / endorsement / "
+            "quote / authored / commented / other"
+        )
+    )
+    medium: Optional[str] = Field(
+        None,
+        description=(
+            "Where the statement was made: press_conference / social_media / "
+            "interview / speech / op_ed / official_release / book / paper / "
+            "leak / court_filing / unknown"
+        )
+    )
+    audience: Optional[str] = Field(
+        None,
+        description="Intended or actual audience"
+    )
+    statement_date: Optional[str] = Field(
+        None,
+        description="When the statement was made (ISO 8601)"
+    )
+    verbatim_excerpt: Optional[str] = Field(
+        None,
+        description="Short verbatim quote if available"
+    )
+
+
+# ============================================================
+# 12. 인과 관계 (Causation) — v2.2 신설
+# ============================================================
+
+class Causation(BaseModel):
+    """
+    인과 관계 — 한 entity/사건이 다른 entity/사건의 원인이거나 기여요인.
+
+    Use this for:
+    - "X가 Y를 야기했다" / "X가 Y로 이어졌다"
+    - "X는 Y의 기여요인이었다"
+    - "X 없이는 Y가 불가능했다"
+    - 분석가가 명시적으로 주장하는 인과 사슬
+
+    Do NOT use for:
+    - 단순 시간순 (먼저 일어났다고 인과 아님)
+    - 정책의 기계적 효과 (PolicyEffect를 사용)
+    - 단순 상관관계나 동시 발생
+
+    Examples:
+    - "2008 financial crisis triggered global recession" -> Causation
+    - "Inflation accelerated by Fed rate cuts" -> Causation
+    - "Trump tariffs led to retaliatory Chinese rare-earth restrictions" -> Causation
+    """
+    causal_type: Optional[str] = Field(
+        None,
+        description=(
+            "Type: direct_cause / contributing_factor / triggered / "
+            "enabled / prevented / accelerated / mitigated / counterfactual"
+        )
+    )
+    confidence: Optional[str] = Field(
+        None,
+        description="Causal claim confidence: confirmed / probable / hypothesized / disputed / unknown"
+    )
+    mechanism: Optional[str] = Field(
+        None,
+        description="Brief description of the causal mechanism if known"
+    )
+
+
+# ============================================================
 # 엣지 타입 레지스트리
 # ============================================================
 
@@ -355,4 +450,6 @@ EDGE_TYPES = {
     "Presence": Presence,
     "PolicyEffect": PolicyEffect,
     "Participation": Participation,
+    "Statement": Statement,
+    "Causation": Causation,
 }

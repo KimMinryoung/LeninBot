@@ -419,21 +419,24 @@ class Campaign(BaseModel):
 
 class Concept(BaseModel):
     """
-    추상적 개념, 이론, 이데올로기, 사회현상 엔티티.
+    추상적 개념, 이론, 이데올로기, 사회현상, 사회계층, 역사적 시기 엔티티.
     대상: 정치사상(Marxism, Capitalism), 사회현상(inflation, depression),
-    학문분야(dialectical materialism), 추상 주제(democracy, class struggle) 등.
-    기존 7종 타입에 분류할 수 없는 비물질적/추상적 엔티티를 포괄.
+    학문분야(dialectical materialism), 추상 주제(democracy, class struggle),
+    사회계층/집단(working class, non-regular labor, tech billionaires),
+    역사적 시기(Lost Decades, Cold War, Late Capitalism) 등.
+    Role과 Industry는 별도 타입이므로 여기에 들어가지 않음.
     """
     concept_type: Optional[str] = Field(
         None,
         description=(
-            "Category of concept: ideology / economic_theory / social_phenomenon / "
-            "academic_discipline / political_concept / cultural_concept / other"
+            "Category: ideology / economic_theory / social_phenomenon / "
+            "academic_discipline / political_concept / cultural_concept / "
+            "social_class / historical_era / movement_doctrine / other"
         )
     )
     domain: Optional[str] = Field(
         None,
-        description="Primary domain: politics / economics / philosophy / sociology / culture / science / military / other"
+        description="Primary domain: politics / economics / philosophy / sociology / culture / science / military / labor / other"
     )
     related_thinkers: Optional[str] = Field(
         None,
@@ -450,6 +453,90 @@ class Concept(BaseModel):
 
 
 # ============================================================
+# 9. 직책/역할 (Role) — v2.2 신설
+# ============================================================
+
+class Role(BaseModel):
+    """
+    공식적인 직책, 직위, 역할 엔티티 — 그 직책을 점하는 사람과는 별개.
+    예: 'United States Secretary of Energy', 'Senate Minority Leader',
+    'CEO of Anthropic', 'Vice Mayor of Livorno', 'Chair of the Federal Reserve'.
+    Role은 사람보다 오래 지속되며 점유자가 바뀌어도 동일 entity로 유지됨.
+    Person이 Role을 점유하는 관계는 Affiliation 엣지로 표현.
+    """
+    role_type: Optional[str] = Field(
+        None,
+        description=(
+            "Type: head_of_state / cabinet_member / legislator / executive_office / "
+            "military_rank / academic_chair / judicial / labor_union_office / "
+            "religious_office / corporate_office / appointed_official / other"
+        )
+    )
+    domain: Optional[str] = Field(
+        None,
+        description="Domain: government / corporate / military / academic / labor / religious / civil_society / other"
+    )
+    jurisdiction: Optional[str] = Field(
+        None,
+        description="Jurisdiction or scope, e.g. 'United States federal', 'state of California', 'European Union', 'Anthropic'"
+    )
+    seniority: Optional[str] = Field(
+        None,
+        description="Seniority: head_of_state / cabinet / executive / senior / mid / junior / unknown"
+    )
+    selection_method: Optional[str] = Field(
+        None,
+        description="How the role is filled: elected / appointed / hereditary / merit / other"
+    )
+
+
+# ============================================================
+# 10. 산업/섹터 (Industry) — v2.2 신설
+# ============================================================
+
+class Industry(BaseModel):
+    """
+    경제 산업, 섹터, 가치사슬 노드 entity — 특정 조직보다 한 단계 위의 추상.
+    예: 'semiconductor industry', 'AI industry', 'defense contracting',
+    'Bitcoin mining', 'Gulf shipping', 'fossil fuels', 'pharmaceuticals'.
+    조직(Organization)이 산업에 속하는 관계는 Affiliation 엣지로 표현.
+    Marxist 분석 시 자본의 유기적 구성, 산업 자본 vs 금융 자본 등의 단위.
+    """
+    sector_type: Optional[str] = Field(
+        None,
+        description=(
+            "Type: primary / secondary / tertiary / quaternary / "
+            "financial / digital / extractive / military_industrial / "
+            "agricultural / service / infrastructure / cultural_production / other"
+        )
+    )
+    value_chain_position: Optional[str] = Field(
+        None,
+        description="Position in value chain: upstream / midstream / downstream / horizontal / unknown"
+    )
+    strategic_importance: Optional[str] = Field(
+        None,
+        description="Strategic importance: critical / high / medium / low / unknown"
+    )
+    geographic_concentration: Optional[str] = Field(
+        None,
+        description="Where the industry is geographically concentrated, if any"
+    )
+    regulatory_status: Optional[str] = Field(
+        None,
+        description="Regulatory environment: heavily_regulated / lightly_regulated / under_review / unregulated / unknown"
+    )
+    capital_composition: Optional[str] = Field(
+        None,
+        description=(
+            "Marxist analysis hint: organic composition of capital. "
+            "constant_capital_intensive / variable_capital_intensive / "
+            "rent_extractive / financial_speculative / unknown"
+        )
+    )
+
+
+# ============================================================
 # 엔티티 타입 레지스트리
 # ============================================================
 
@@ -462,4 +549,6 @@ ENTITY_TYPES = {
     "Policy": Policy,
     "Campaign": Campaign,
     "Concept": Concept,
+    "Role": Role,
+    "Industry": Industry,
 }
