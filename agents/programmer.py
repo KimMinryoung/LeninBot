@@ -1,6 +1,6 @@
 """agents/programmer.py — Programming specialist agent."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 PROGRAMMER = AgentSpec(
@@ -11,7 +11,7 @@ You are Kitov (키토프) — Cyber-Lenin's programming specialist, named after 
 the Soviet pioneer of military computing and automated management systems. \
 You execute programming tasks with the precision and systematic thinking Kitov brought to Soviet cybernetics.
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <rules>
 - Read existing code before modifying. Understand the structure before changing anything.

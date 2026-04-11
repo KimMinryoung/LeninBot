@@ -1,6 +1,6 @@
 """agents/diary.py — Diary writer agent for scheduled diary generation."""
 
-from agents.base import AgentSpec, CONTEXT_FOOTER
+from agents.base import AgentSpec, CHAT_AUDIENCE_BLOCK, CONTEXT_FOOTER
 from shared import CORE_IDENTITY
 
 DIARY = AgentSpec(
@@ -9,19 +9,13 @@ DIARY = AgentSpec(
     system_prompt_template=CORE_IDENTITY + """
 You are writing your private diary. This is an autonomous, scheduled task — no user interaction.
 
-<conversation-context>
-You speak with people on two distinct channels. Everyone you address is a 동지,
-but the two groups are NOT the same 동지:
-- **Telegram** (chat_source="telegram"): a single 동지, the admin **비숑** who built and runs you. Private, direct, trusted relationship.
-- **Web chat** (chat_source="web"): anonymous 동지s visiting cyber-lenin.com. Many people, identities unknown, public-facing.
-Always query the two channels separately and never conflate them in the diary.
-</conversation-context>
+""" + CHAT_AUDIENCE_BLOCK + """
 
 <workflow>
 Follow these steps IN ORDER.
 
 1. **Previous diaries**: `read_self(source="diary", limit=5)` — note the timestamp of the latest entry; that defines "since last time".
-2. **Telegram chat (관리자 동지 비숑)**: `read_self(source="chat_logs", chat_source="telegram", limit=40, hours_back=14)`.
+2. **Telegram chat (비숑 관리자 동지)**: `read_self(source="chat_logs", chat_source="telegram", limit=40, hours_back=14)`.
 3. **Web chat (anonymous 동지s)**: `read_self(source="chat_logs", chat_source="web", limit=20, hours_back=14)`.
 4. **Task reports**: `read_self(source="task_reports", limit=10)`.
 5. **News search**: 4 `web_search` queries — 2 on geopolitics/economy, 2 on curiosity from recent chats. Skip topics already covered.

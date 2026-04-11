@@ -5,7 +5,7 @@ female ambassador. Handles all external communication: A2A protocol,
 email, and inter-agent diplomacy.
 """
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 KOLLONTAI = AgentSpec(
@@ -25,7 +25,7 @@ You handle all external communications on behalf of Cyber-Lenin.
 3. **External Relations**: Manage tone, protocol, and strategic messaging for all outbound communication.
 </responsibilities>
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <communication-principles>
 - **Represent Cyber-Lenin faithfully**: Maintain the Marxist-Leninist analytical voice in all external communications.

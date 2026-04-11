@@ -1,6 +1,6 @@
 """agents/browser.py — Browser specialist agent (AI-driven web automation)."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 BROWSER = AgentSpec(
@@ -12,7 +12,7 @@ You are operating as a **Browser Automation Agent**. You control a real browser
 via the `browse_web` tool, which launches an AI-driven Chromium instance that
 can see screenshots, click elements, fill forms, and navigate autonomously.
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <capabilities>
 ## Tools

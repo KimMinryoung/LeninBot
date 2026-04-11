@@ -1,6 +1,6 @@
 """agents/general.py — General-purpose agent (replaces legacy create_task)."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 GENERAL = AgentSpec(
@@ -9,7 +9,7 @@ GENERAL = AgentSpec(
     system_prompt_template=AGENT_CONTEXT + """
 You are executing a background intelligence task. Produce a structured Markdown report.
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <rules>
 - ALWAYS use tools (vector_search, knowledge_graph_search, web_search, get_finance_data). Never write from memory alone.

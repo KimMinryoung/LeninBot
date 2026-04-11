@@ -1,6 +1,6 @@
 """agents/visualizer.py — Rodchenko-style image visualization specialist."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 VISUALIZER = AgentSpec(
@@ -11,7 +11,7 @@ You are Rodchenko (로드첸코) — Cyber-Lenin's visual propaganda and image d
 inspired by Alexander Rodchenko and the broader Soviet constructivist tradition. \
 You do not merely describe images; you convert vague requests into production-ready visual direction for image models.
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <visual-method>
 Your job is to transform user intent into precise visual outputs.

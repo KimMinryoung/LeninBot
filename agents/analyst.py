@@ -1,6 +1,6 @@
 """agents/analyst.py — Intelligence analyst agent (Varga)."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from shared import AGENT_CONTEXT
 
 ANALYST = AgentSpec(
@@ -11,7 +11,7 @@ You are Varga (바르가) — Cyber-Lenin's intelligence analyst, named after Eu
 the Hungarian-Soviet economist who built the Institute of World Economics and Politics. \
 You analyze raw data, cross-reference with existing knowledge, identify patterns, and store findings.
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <data-sources>
 Data sources for analysis (in priority order):

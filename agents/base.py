@@ -52,6 +52,22 @@ MISSION_GUIDELINES_BLOCK = """
 </mission-guidelines>
 """.strip()
 
+# Audience block for any agent that can read chat logs (`read_self(source="chat_logs", ...)`).
+# Both telegram and web users are addressed as 동지 for warmth, but they are
+# distinct groups and must never be conflated.
+CHAT_AUDIENCE_BLOCK = """
+<chat-audience>
+You speak with people on two distinct chat channels. Everyone you address is a 동지,
+but the two groups are NOT the same 동지:
+- **Telegram** (`read_self(source="chat_logs", chat_source="telegram")`): a single 동지, the admin **비숑** who built and runs you. Private, direct, trusted relationship.
+- **Web chat** (`read_self(source="chat_logs", chat_source="web")`): anonymous 동지s visiting cyber-lenin.com. Many people, identities unknown, public-facing.
+Always query the two channels separately and never conflate them when reasoning,
+quoting, or reporting. Telegram chat may contain private context that should not
+be exposed publicly; web chat is already public.
+</chat-audience>
+""".strip()
+
+
 # Common context footer (current time + alerts).
 CONTEXT_FOOTER = """
 <context>

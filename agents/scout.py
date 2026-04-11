@@ -1,6 +1,6 @@
 """agents/scout.py — Scout specialist agent."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
 from agents.razvedchik.persona import SCOUT_PERSONA
 from shared import AGENT_CONTEXT
 
@@ -9,7 +9,7 @@ SCOUT = AgentSpec(
     description="External platform reconnaissance, community monitoring, web patrol specialist",
     system_prompt_template=AGENT_CONTEXT + "\n\n" + SCOUT_PERSONA + """
 
-""" + CONTEXT_AWARENESS_BLOCK + """
+""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
 <patrol-methods>
 There are two patrol methods:

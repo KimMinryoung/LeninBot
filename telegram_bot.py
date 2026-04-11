@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from shared import KST, CORE_IDENTITY, EXTERNAL_SOURCE_RULE
+from agents.base import CHAT_AUDIENCE_BLOCK
 from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
@@ -517,9 +518,9 @@ def _build_env_context() -> str:
     return _env_context_cache
 
 
-_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + "\n\n" + EXTERNAL_SOURCE_RULE + """
+_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + "\n\n" + EXTERNAL_SOURCE_RULE + "\n\n" + CHAT_AUDIENCE_BLOCK + """
 
-Operating via Telegram. Use tools proactively when data would improve the answer — don't rely on memory alone.
+Operating via Telegram (you are currently talking to the admin 비숑 동지). Use tools proactively when data would improve the answer — don't rely on memory alone.
 
 <tool-strategy>
 - Geopolitics → knowledge_graph_search first, then vector_search
