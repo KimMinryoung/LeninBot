@@ -2,7 +2,13 @@
 """
 KG 백업 — Entity 노드 + RELATES_TO/MENTIONS 엣지를 JSON 덤프.
 파괴적 작업 전 필수 실행.
+
+embeddings (name_embedding on entities, fact_embedding on RELATES_TO edges)
+are included by default so a recovery from this backup can restore vector
+search without re-embedding via Gemini. Pass --no-embeddings to skip them
+for a smaller file (text content is still preserved).
 """
+import argparse
 import json
 import os
 from datetime import datetime
@@ -27,7 +33,7 @@ class _Encoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def backup():
+def backup(include_embeddings: bool = True):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
@@ -47,6 +53,7 @@ def backup():
         relates = session.run("""
             MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
             RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
+                   r.fact_embedding AS fact_embedding,
                    s.uuid AS source_uuid, s.name AS source_name,
                    t.uuid AS target_uuid, t.name AS target_name,
                    r.group_id AS group_id, r.created_at AS created_at,
@@ -64,14 +71,15 @@ def backup():
 
     driver.close()
 
-    # ── Write files ──
+    if not include_embeddings:
+        for e in entity_list:
+            e.pop("name_embedding", None)
+        for r in relates_list:
+            r.pop("fact_embedding", None)
+
     ent_path = os.path.join(BACKUP_DIR, f"entities_{ts}.json")
     rel_path = os.path.join(BACKUP_DIR, f"edges_{ts}.json")
     men_path = os.path.join(BACKUP_DIR, f"mentions_{ts}.json")
-
-    # Drop embeddings for smaller file size
-    for e in entity_list:
-        e.pop("name_embedding", None)
 
     for path, data, label in [
         (ent_path, entity_list, "entities"),
@@ -80,11 +88,17 @@ def backup():
     ]:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1, cls=_Encoder)
-        print(f"  {label}: {len(data):,}건 → {path}")
+        size_mb = os.path.getsize(path) / 1024 / 1024
+        print(f"  {label}: {len(data):,}건 → {path}  ({size_mb:.1f} MB)")
 
-    print(f"\n백업 완료 (timestamp: {ts})")
+    suffix = " (with embeddings)" if include_embeddings else " (text only)"
+    print(f"\n백업 완료{suffix} (timestamp: {ts})")
     return ts
 
 
 if __name__ == "__main__":
-    backup()
+    parser = argparse.ArgumentParser(description=__doc__.strip())
+    parser.add_argument("--no-embeddings", action="store_true",
+                        help="Skip embeddings to keep file size small")
+    args = parser.parse_args()
+    backup(include_embeddings=not args.no_embeddings)

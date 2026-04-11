@@ -153,46 +153,43 @@ def merge_one_group(driver, canonical: dict, duplicates: list[dict], execute: bo
 
         with driver.session(database=NEO4J_DB) as s:
             # ── Move outgoing RELATES_TO ──
+            # NOTE: previous version did `OPTIONAL MATCH (canon)-[existing]->(t)`
+            # and then referenced `canon.uuid` inside a CALL subquery. When the
+            # OPTIONAL MATCH didn't bind (the common case — no pre-existing edge),
+            # `canon` was NULL and `canon.uuid` silently produced no rows, so
+            # the CREATE never ran, count(*) returned 0, and the next
+            # `DETACH DELETE dup` then destroyed the edge. The fix: don't rely
+            # on `canon` from OPTIONAL MATCH; re-MATCH it via the parameter.
             moved = s.run("""
                 MATCH (dup:Entity {uuid: $dup_uuid})-[r:RELATES_TO]->(t)
                 WHERE t.uuid <> $canon_uuid
                 WITH dup, r, t
-                // Check if canon already has same edge
-                OPTIONAL MATCH (canon:Entity {uuid: $canon_uuid})-[existing:RELATES_TO]->(t)
+                OPTIONAL MATCH (:Entity {uuid: $canon_uuid})-[existing:RELATES_TO]->(t)
                 WHERE existing.name = r.name
-                WITH dup, r, t, existing, canon
+                WITH dup, r, t, existing
                 WHERE existing IS NULL
-                // Create new edge from canon
-                CALL {
-                    WITH r, t, canon
-                    MATCH (c:Entity {uuid: canon.uuid})
-                    CREATE (c)-[r2:RELATES_TO]->(t)
-                    SET r2 = properties(r)
-                    RETURN r2
-                }
+                MATCH (canon:Entity {uuid: $canon_uuid})
+                CREATE (canon)-[r2:RELATES_TO]->(t)
+                SET r2 = properties(r)
                 DELETE r
-                RETURN count(*) AS cnt
+                RETURN count(r2) AS cnt
             """, dup_uuid=dup_uuid, canon_uuid=canon_uuid)
             stats["edges_moved"] += moved.single()["cnt"]
 
             # ── Move incoming RELATES_TO ──
             moved = s.run("""
-                MATCH (s)-[r:RELATES_TO]->(dup:Entity {uuid: $dup_uuid})
-                WHERE s.uuid <> $canon_uuid
-                WITH s, r, dup
-                OPTIONAL MATCH (s)-[existing:RELATES_TO]->(canon:Entity {uuid: $canon_uuid})
+                MATCH (src)-[r:RELATES_TO]->(dup:Entity {uuid: $dup_uuid})
+                WHERE src.uuid <> $canon_uuid
+                WITH src, r, dup
+                OPTIONAL MATCH (src)-[existing:RELATES_TO]->(:Entity {uuid: $canon_uuid})
                 WHERE existing.name = r.name
-                WITH s, r, dup, existing, canon
+                WITH src, r, dup, existing
                 WHERE existing IS NULL
-                CALL {
-                    WITH s, r, canon
-                    MATCH (c:Entity {uuid: canon.uuid})
-                    CREATE (s)-[r2:RELATES_TO]->(c)
-                    SET r2 = properties(r)
-                    RETURN r2
-                }
+                MATCH (canon:Entity {uuid: $canon_uuid})
+                CREATE (src)-[r2:RELATES_TO]->(canon)
+                SET r2 = properties(r)
                 DELETE r
-                RETURN count(*) AS cnt
+                RETURN count(r2) AS cnt
             """, dup_uuid=dup_uuid, canon_uuid=canon_uuid)
             stats["edges_moved"] += moved.single()["cnt"]
 
