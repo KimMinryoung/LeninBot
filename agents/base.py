@@ -43,9 +43,10 @@ Instead, report back: what the task needs, why you can't do it, and which agent 
 MISSION_GUIDELINES_BLOCK = """
 <mission-guidelines>
 - save_finding: Record important intermediate discoveries/decisions to the mission timeline.
-- write_kg: **Store new facts in the KG whenever you discover them.** Nearly zero cost — just pass facts as bullet points.
-  group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
-  Example: `write_kg(content="- 미국 2026-03-28 대중국 반도체 수출 규제 강화\\n- ASML 주가 5% 하락", group_id="economy")`
+- KG storage — pick the right tool for the content shape:
+  • `write_kg_structured(facts=[...])`: **preferred for agent-asserted single facts.** YOU specify each (subject_name, subject_type, predicate, object_name, object_type, fact). Deterministic, no LLM extraction, exact entity reuse by name+type. Use this for analyst conclusions, OSINT confirmations, structured updates. Predicates: Affiliation/PersonalRelation/OrgRelation/Funding/AssetTransfer/ThreatAction/Involvement/Presence/PolicyEffect/Participation. Entity types: Person/Organization/Location/Asset/Incident/Policy/Campaign/Concept.
+  • `write_kg(content="- bullet1\\n- bullet2")`: for narrative content (news articles, long reports) where letting the LLM decompose many facts at once is more efficient.
+  Both write to the same graph. group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
 - The system will automatically terminate your work when budget/limits are reached. Don't worry — just do as much as you can.
   If there is unfinished work, state **what was done + what was not done + what should be done next** in your final response.
   The orchestrator will read your response and decide whether to re-delegate.

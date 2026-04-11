@@ -88,7 +88,7 @@ print(f"saved: {path}")
     tools=[
         "moltbook",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
-        "read_self", "write_kg",
+        "read_self", "write_kg", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2",
     ],
     provider="moon",

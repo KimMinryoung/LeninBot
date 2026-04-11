@@ -49,7 +49,7 @@ You MUST call save_diary — do not output the diary as plain text.
     tools=[
         "read_self", "recall_experience",
         "web_search", "fetch_url",
-        "knowledge_graph_search", "write_kg",
+        "knowledge_graph_search", "write_kg", "write_kg_structured",
         "get_finance_data",
         "save_diary",
     ],

@@ -81,8 +81,11 @@ SELF_TOOLS = [
     {
         "name": "write_kg",
         "description": (
-            "Store facts to Knowledge Graph. Low-cost: just pass a string of factual statements. "
-            "Use bullet points for multiple facts. KG extracts entities/relationships automatically.\n"
+            "Store facts to Knowledge Graph via free-text + LLM extraction. "
+            "Use this for narrative content (news articles, reports, long-form text) where letting the "
+            "LLM decompose many facts at once is more efficient than asserting each one structured. "
+            "For precise single-fact assertions where YOU want full control over subject/predicate/object, "
+            "use `write_kg_structured` instead — it's deterministic and skips LLM extraction.\n"
             "DO NOT store: internal system state (code structure, config, tool schemas, bug status), "
             "task execution details, debugging logs, or anything derivable by reading the codebase."
         ),
@@ -113,6 +116,80 @@ SELF_TOOLS = [
                 },
             },
             "required": ["content"],
+        },
+    },
+    {
+        "name": "write_kg_structured",
+        "description": (
+            "Store typed (subject, predicate, object) facts to the Knowledge Graph deterministically. "
+            "Bypasses LLM extraction — YOU specify each entity's type and the predicate. "
+            "Use this when you want PRECISE control: agent-asserted single facts, "
+            "structured analyst conclusions, KG corrections. Recommended for `agent_knowledge` group.\n"
+            "\n"
+            "Entity types (subject_type / object_type): "
+            "Person, Organization, Location, Asset, Incident, Policy, Campaign, Concept.\n"
+            "Predicates: Affiliation (Person↔Org), PersonalRelation (Person↔Person), "
+            "OrgRelation (Org↔Org), Funding (any↔any), AssetTransfer (any↔any), "
+            "ThreatAction (Org/Person/Campaign target), Involvement (Person/Org/Campaign↔Incident), "
+            "Presence (Person/Org/Incident/Campaign↔Location), "
+            "PolicyEffect (Policy↔target), Participation (Person/Org↔Campaign).\n"
+            "\n"
+            "Each fact requires the natural-language `fact` text — that's what gets embedded "
+            "for vector search, and what shows up in retrieval results. Make it self-contained "
+            "(don't write 'they did X' — write 'Anthropic announced partnership with OpenAI on 2026-04-11').\n"
+            "\n"
+            "If the subject or object already exists in the KG by exact name, this tool reuses it. "
+            "If not, it creates a new entity with the type label you specified. "
+            "Long-form narrative content should use `write_kg` instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "facts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "List of structured facts to write atomically as one batch.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "subject_name": {"type": "string", "description": "Canonical English name of the subject entity."},
+                            "subject_type": {
+                                "type": "string",
+                                "enum": ["Person", "Organization", "Location", "Asset",
+                                         "Incident", "Policy", "Campaign", "Concept"],
+                            },
+                            "predicate": {
+                                "type": "string",
+                                "enum": ["Affiliation", "PersonalRelation", "OrgRelation",
+                                         "Funding", "AssetTransfer", "ThreatAction",
+                                         "Involvement", "Presence", "PolicyEffect", "Participation"],
+                            },
+                            "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
+                            "object_type": {
+                                "type": "string",
+                                "enum": ["Person", "Organization", "Location", "Asset",
+                                         "Incident", "Policy", "Campaign", "Concept"],
+                            },
+                            "fact": {
+                                "type": "string",
+                                "description": "Self-contained natural-language statement of the fact. Used as the edge's searchable text.",
+                            },
+                            "valid_at": {
+                                "type": "string",
+                                "description": "Optional ISO date (YYYY-MM-DD) for when the fact became true.",
+                            },
+                        },
+                        "required": ["subject_name", "subject_type", "predicate",
+                                     "object_name", "object_type", "fact"],
+                    },
+                },
+                "group_id": {
+                    "type": "string",
+                    "enum": ["geopolitics_conflict", "diplomacy", "economy", "korea_domestic", "agent_knowledge"],
+                    "default": "agent_knowledge",
+                },
+            },
+            "required": ["facts"],
         },
     },
     {
@@ -648,6 +725,77 @@ async def _exec_write_kg(
         return f"Knowledge stored successfully: {msg}"
     else:
         return f"Failed to store knowledge: {result['message']}"
+
+
+async def _exec_write_kg_structured(
+    facts: list,
+    group_id: str = "agent_knowledge",
+) -> str:
+    """Write structured (subject, predicate, object) facts to the KG."""
+    from shared import add_kg_structured_async, get_provenance_buffer
+
+    if not facts or not isinstance(facts, list):
+        return "Failed to store structured facts: 'facts' must be a non-empty list"
+
+    # ── Self-poisoning loop break ────────────────────────────────────
+    # For structured writes, the equivalent check is whether the new fact
+    # texts overlap heavily with text we just retrieved from the KG.
+    buf = get_provenance_buffer()
+    if buf is not None and buf.kg_reads:
+        joined = "\n".join(str(f.get("fact", "")) for f in facts)
+        overlap = _self_poisoning_overlap(joined, buf.kg_reads)
+        if overlap >= 0.55:
+            logger.warning(
+                "[KG AUDIT] BLOCKED self-poisoning structured write | overlap=%.2f | agent=%s",
+                overlap, buf.agent,
+            )
+            return (
+                f"Refused: these facts overlap {overlap:.0%} with text you "
+                "just retrieved from the knowledge graph. Re-asserting retrieved "
+                "facts would create a self-confirming loop. Cite a fresh source "
+                "and rewrite in your own words if you have a genuine new fact."
+            )
+
+    # ── Auto-provenance footer ───────────────────────────────────────
+    trust_tier = buf.infer_trust_tier() if buf is not None else "unverified"
+    agent_label = buf.agent if buf is not None else "agent"
+    mission_id = buf.mission_id if buf is not None else None
+    sources = buf.recent_sources(8) if buf is not None else []
+    ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+    footer_lines = [
+        "— provenance —",
+        f"agent: {agent_label}" + (f" | mission={mission_id}" if mission_id else ""),
+        f"ingested_at: {ts}",
+        f"trust_tier: {trust_tier}",
+    ]
+    if sources:
+        footer_lines.append("sources:")
+        footer_lines.extend(f"  - {s}" for s in sources)
+    provenance_footer = "\n".join(footer_lines)
+
+    result = await add_kg_structured_async(
+        facts,
+        group_id=group_id,
+        agent=agent_label,
+        mission_id=mission_id,
+        trust_tier=trust_tier,
+        provenance_footer=provenance_footer,
+    )
+
+    if result["status"] == "ok":
+        logger.info(
+            "[KG AUDIT] structured write | facts=%d new=%d reused=%d | "
+            "group=%s | tier=%s | agent=%s | sources=%d | time=%s",
+            result.get("facts_written", 0), result.get("new_entities", 0),
+            result.get("reused_entities", 0),
+            group_id, trust_tier, agent_label, len(sources), ts,
+        )
+        msg = result["message"]
+        if trust_tier == "unverified":
+            msg += " (trust_tier=unverified — no external source recorded this run)"
+        return f"Structured facts stored: {msg}"
+    else:
+        return f"Failed to store structured facts: {result['message']}"
 
 
 async def _exec_delegate(
@@ -1279,6 +1427,7 @@ SELF_TOOL_HANDLERS = {
     "read_self": _exec_read_self,
     "recall_experience": _exec_recall_experience,
     "write_kg": _exec_write_kg,
+    "write_kg_structured": _exec_write_kg_structured,
     "delegate": _exec_delegate,
     "multi_delegate": _exec_multi_delegate,
     "kg_admin": _exec_kg_admin,

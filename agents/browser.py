@@ -56,7 +56,7 @@ Do not omit trial-and-error details — they help the orchestrator make decision
         "browse_web",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender",
         "write_file", "list_directory", "read_file",
-        "read_self", "write_kg",
+        "read_self", "write_kg", "write_kg_structured",
         "save_finding", "mission",
         "upload_to_r2",
     ],

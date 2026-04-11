@@ -30,7 +30,7 @@ You are executing a background intelligence task. Produce a structured Markdown 
         "knowledge_graph_search", "vector_search",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender",
         "read_file", "write_file", "list_directory", "execute_python",
-        "read_self", "write_kg",
+        "read_self", "write_kg", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2", "get_finance_data",
     ],
     budget_usd=1.00,

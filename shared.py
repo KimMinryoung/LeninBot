@@ -903,6 +903,66 @@ async def add_kg_episode_async(
     )
 
 
+def add_kg_structured(
+    facts: list[dict],
+    *,
+    group_id: str = "agent_knowledge",
+    agent: str = "agent",
+    mission_id: int | None = None,
+    trust_tier: str = "unverified",
+    provenance_footer: str = "",
+) -> dict:
+    """Write structured facts to the KG (sync — for scripts/cron).
+
+    See graph_memory.structured_writer.write_structured_facts for details.
+    Runs on the dedicated KG event loop to avoid cross-loop contamination.
+    """
+    svc = get_kg_service()
+    if svc is None:
+        return {"status": "error", "message": "Knowledge Graph service unavailable"}
+
+    try:
+        from graph_memory.structured_writer import write_structured_facts
+        return run_kg_task(
+            write_structured_facts,
+            svc.graphiti,
+            facts,
+            group_id=group_id,
+            agent=agent,
+            mission_id=mission_id,
+            trust_tier=trust_tier,
+            provenance_footer=provenance_footer,
+        )
+    except Exception as e:
+        logger.error("[shared] add_kg_structured error: %s", e)
+        err_str = str(e).lower()
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+            reset_kg_service()
+        return {"status": "error", "message": str(e)}
+
+
+async def add_kg_structured_async(
+    facts: list[dict],
+    *,
+    group_id: str = "agent_knowledge",
+    agent: str = "agent",
+    mission_id: int | None = None,
+    trust_tier: str = "unverified",
+    provenance_footer: str = "",
+) -> dict:
+    """Async wrapper around add_kg_structured. Hops to the KG loop via
+    asyncio.to_thread for the same reasons as add_kg_episode_async."""
+    return await asyncio.to_thread(
+        add_kg_structured,
+        facts,
+        group_id=group_id,
+        agent=agent,
+        mission_id=mission_id,
+        trust_tier=trust_tier,
+        provenance_footer=provenance_footer,
+    )
+
+
 def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:
     """Read recent feature updates from dev_docs/project_state.md.
 
