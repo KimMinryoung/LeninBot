@@ -172,9 +172,15 @@ def main():
                 "created_at": p.get("created_at"),
                 "valid_at": p.get("valid_at"),
                 "invalid_at": p.get("invalid_at"),
+                "expired_at": p.get("expired_at"),
+                # episodes MUST be a list (not None) — graphiti's Pydantic
+                # EntityEdge model rejects None on reads. Default to empty.
+                "episodes": p.get("episodes") if p.get("episodes") is not None else [],
             }
             # Drop nulls so we don't write them as Cypher properties
-            props = {k: v for k, v in props.items() if v is not None and v != ""}
+            # (but keep episodes=[] explicitly — empty list is required)
+            props = {k: v for k, v in props.items()
+                     if v is not None and (v != "" or k == "episodes")}
             try:
                 s.run("""
                     MATCH (a:Entity {uuid: $src})

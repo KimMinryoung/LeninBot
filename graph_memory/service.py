@@ -53,6 +53,7 @@ from .config import (
     NEWS_PREPROCESS_PROMPT_TEMPLATE,
     CUSTOM_EXTRACTION_INSTRUCTIONS,
 )
+from .conformance import validate_episode_result, apply_hard_fixes
 
 
 class GraphMemoryService:
@@ -280,7 +281,7 @@ class GraphMemoryService:
             ingest_body = ingest_body[:max_body_chars]
 
         print(f"    [graphiti] add_episode 시작 (name={sanitized_name}, body {len(ingest_body)}자)...", flush=True)
-        await graphiti.add_episode(
+        result = await graphiti.add_episode(
             name=sanitized_name,
             episode_body=ingest_body,
             source=episode_type,
@@ -294,6 +295,23 @@ class GraphMemoryService:
             custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS,
         )
         print(f"    [graphiti] add_episode 완료", flush=True)
+
+        # ── Conformance gate ──
+        # Validate the just-created entities/edges against the schema. Hard
+        # violations (self-loops, non-Entity endpoints) are auto-deleted; soft
+        # violations (non-standard edge names, EDGE_TYPE_MAP mismatches,
+        # untyped nodes) are logged for the daily scanner to pick up.
+        try:
+            report = validate_episode_result(result, log_audit=True)
+            if report.hard_violation_count() > 0:
+                await apply_hard_fixes(
+                    graphiti.driver.client,
+                    os.getenv("NEO4J_DATABASE", "neo4j"),
+                    report,
+                )
+        except Exception as exc:
+            # Conformance is best-effort — never break ingestion on validator errors
+            print(f"    [conformance] check failed (non-fatal): {exc}", flush=True)
 
     async def ingest_episodes_bulk(self, episodes: list[dict]) -> None:
         """대량 에피소드 일괄 수집.

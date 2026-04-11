@@ -50,6 +50,9 @@ def backup(include_embeddings: bool = True):
         entity_list = [dict(r) for r in entities]
 
         # ── RELATES_TO edges ──
+        # NOTE: r.episodes is required by graphiti's EntityEdge Pydantic model
+        # (must not be NULL). Backups MUST capture it so a recovery preserves
+        # the field, otherwise graphiti will fail to read the recovered edges.
         relates = session.run("""
             MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
             RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
@@ -57,7 +60,9 @@ def backup(include_embeddings: bool = True):
                    s.uuid AS source_uuid, s.name AS source_name,
                    t.uuid AS target_uuid, t.name AS target_name,
                    r.group_id AS group_id, r.created_at AS created_at,
-                   r.valid_at AS valid_at, r.invalid_at AS invalid_at
+                   r.valid_at AS valid_at, r.invalid_at AS invalid_at,
+                   r.episodes AS episodes, r.expired_at AS expired_at,
+                   r.attributes AS attributes
         """)
         relates_list = [dict(r) for r in relates]
 
