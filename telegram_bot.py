@@ -1079,6 +1079,7 @@ async def _chat_with_tools(
     budget_tracker: dict | None = None,
     task_id: int | None = None,
     provider_override: str | None = None,
+    finalization_tools: list[str] | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
@@ -1192,6 +1193,7 @@ async def _chat_with_tools(
                 enable_thinking=is_orchestrator,
                 agent_name=_agent_name,
                 mission_id=_mission_id,
+                finalization_tools=finalization_tools,
             )
 
     if effective_provider == "openai" and _openai_client:
@@ -1212,6 +1214,7 @@ async def _chat_with_tools(
             task_id=task_id,
             agent_name=_agent_name,
             mission_id=_mission_id,
+            finalization_tools=finalization_tools,
         )
 
     return await chat_with_tools(
@@ -1230,6 +1233,7 @@ async def _chat_with_tools(
         task_id=task_id,
         agent_name=_agent_name,
         mission_id=_mission_id,
+        finalization_tools=finalization_tools,
     )
 
 
@@ -1566,7 +1570,7 @@ async def bot_main():
                     messages, max_rounds=None, system_prompt=None, model=None,
                     max_tokens=None, budget_usd=None, extra_tools=None,
                     extra_handlers=None, on_progress=None, budget_tracker=None,
-                    task_id=None,
+                    task_id=None, finalization_tools=None,
                 ):
                     # extra_tools already contains the agent's filtered tools (passed from process_task)
                     merged_tools = list(extra_tools or [])
@@ -1585,6 +1589,7 @@ async def bot_main():
                         budget_tracker=budget_tracker,
                         on_progress=on_progress,
                         task_id=task_id,
+                        finalization_tools=finalization_tools,
                     )
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
@@ -1598,7 +1603,7 @@ async def bot_main():
                 messages, max_rounds=None, system_prompt=None, model=None,
                 max_tokens=None, budget_usd=None, extra_tools=None,
                 extra_handlers=None, on_progress=None, budget_tracker=None,
-                task_id=None,
+                task_id=None, finalization_tools=None,
             ):
                 return await _orig_fn(
                     messages, max_rounds=max_rounds, system_prompt=system_prompt,
@@ -1606,6 +1611,7 @@ async def bot_main():
                     extra_tools=extra_tools, extra_handlers=extra_handlers,
                     on_progress=on_progress, budget_tracker=budget_tracker,
                     task_id=task_id, provider_override=_forced_provider,
+                    finalization_tools=finalization_tools,
                 )
             chosen_chat_fn = _corporate_chat_fn
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
@@ -1647,6 +1653,7 @@ async def bot_main():
             extra_tools=agent_tools,
             extra_handlers=agent_handlers,
             budget_usd=spec.budget_usd,
+            finalization_tools=list(spec.finalization_tools),
             on_progress=progress_cb,
             on_complete=_on_task_complete,
         )

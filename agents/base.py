@@ -72,6 +72,10 @@ class AgentSpec:
     description: str                          # shown in delegate tool description
     system_prompt_template: str               # supports {current_datetime}, {system_alerts}, etc.
     tools: list[str] = field(default_factory=list)  # empty = all tools allowed
+    # Tools that MUST remain callable even after budget/round limits are hit,
+    # so the agent can persist its work on its way out (e.g. save_diary for the
+    # diary agent). Forced-final response path will expose only these tools.
+    finalization_tools: list[str] = field(default_factory=list)
     model: str | None = None                  # None = use default model
     provider: str | None = None                # None = follow orchestrator config; "claude"/"openai" = force corporate; "moon" = local LLM
     budget_usd: float = 1.00

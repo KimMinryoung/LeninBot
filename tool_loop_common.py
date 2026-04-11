@@ -262,13 +262,28 @@ async def execute_tools_batch(
 def build_limit_message(
     limit_reason: str, total_cost: float, budget_usd: float,
     round_num: int, max_rounds: int, was_still_working: bool,
+    finalization_tools: list[str] | None = None,
 ) -> str:
-    """Build the [SYSTEM] message injected when budget/round limit is reached."""
+    """Build the [SYSTEM] message injected when budget/round limit is reached.
+
+    If finalization_tools is provided, instruct the agent to call those tools
+    to persist its work (they remain available in the forced-final call).
+    """
     escalation_hint = ""
     if was_still_working:
         escalation_hint = (
             " 미완료 작업이 있으면 수행한 것, 못한 것, 다음에 해야 할 것을 명시하라. "
             "orchestrator가 재위임 여부를 판단한다."
+        )
+    if finalization_tools:
+        names = ", ".join(finalization_tools)
+        return (
+            f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, "
+            f"라운드: {round_num}/{max_rounds}). "
+            f"다른 도구는 사용할 수 없다. 그러나 마감 도구({names})는 "
+            "아직 호출할 수 있다. 지금까지 준비한 결과를 반드시 해당 도구로 저장한 뒤, "
+            "수행한 작업과 수집한 데이터를 있는 그대로 정리하라."
+            + escalation_hint
         )
     return (
         f"[SYSTEM] {limit_reason} (비용: ${total_cost:.3f}/${budget_usd:.2f}, "

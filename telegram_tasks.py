@@ -630,6 +630,7 @@ async def process_task(
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
     budget_usd: float = 1.00,
+    finalization_tools: list[str] | None = None,
     on_progress=None,
     on_complete=None,
 ):
@@ -821,6 +822,7 @@ async def process_task(
                 on_progress=on_progress,
                 budget_tracker=bt,
                 task_id=task_id,
+                finalization_tools=finalization_tools,
             )
 
             # Save tool execution log for agent context isolation

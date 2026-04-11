@@ -631,6 +631,7 @@ async def chat_with_tools(
     task_id: int | None = None,
     agent_name: str = "agent",
     mission_id: int | None = None,
+    finalization_tools: list[str] | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -869,10 +870,26 @@ async def chat_with_tools(
     )
 
     limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
+
+    # Build the finalization tool whitelist (subset of the agent's allowed
+    # tools). If provided, expose only these tools on the forced-final call so
+    # the agent can persist its work (e.g. save_diary) on the way out.
+    final_tools = None
+    final_tool_names: list[str] = []
+    if finalization_tools:
+        final_tool_names = [t["name"] for t in cached_tools if t.get("name") in set(finalization_tools)]
+        if final_tool_names:
+            final_tools = [dict(t) for t in cached_tools if t.get("name") in set(final_tool_names)]
+            # Preserve prompt caching semantics on the filtered list
+            final_tools[-1] = {**final_tools[-1], "cache_control": {"type": "ephemeral"}}
+
     _append_user_text_message(
         working_msgs,
-        build_limit_message(limit_reason, total_cost, budget_usd,
-                            round_num if response else 0, max_rounds, was_still_working),
+        build_limit_message(
+            limit_reason, total_cost, budget_usd,
+            round_num if response else 0, max_rounds, was_still_working,
+            finalization_tools=final_tool_names or None,
+        ),
     )
     # Final preflight
     unresolved = _find_unresolved_tool_uses(working_msgs)
@@ -881,12 +898,15 @@ async def chat_with_tools(
         working_msgs = _strip_tool_blocks(working_msgs)
     try:
         final_api_msgs = _build_api_payload(working_msgs, round_num if response else 0)
-        final = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=cached_system,
-            messages=final_api_msgs,  # no tools parameter — forces text-only response
-        )
+        create_kwargs = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": cached_system,
+            "messages": final_api_msgs,
+        }
+        if final_tools:
+            create_kwargs["tools"] = final_tools
+        final = await client.messages.create(**create_kwargs)
     except Exception as api_err:
         # Last resort: strip all tool blocks and retry with plain text
         _dump_messages_for_debug(working_msgs, -1, api_err)
@@ -912,7 +932,70 @@ async def chat_with_tools(
         total_cost += _calculate_cost(final.usage)
     if final.stop_reason == "max_tokens":
         logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
-    text_parts = [b.text for b in final.content if b.type == "text"]
+
+    # If the finalization call returned tool_use blocks, execute them once
+    # and then make a plain text follow-up call to collect the final answer.
+    final_tool_uses: list[tuple[str, str, dict]] = []
+    final_assistant_content: list[dict] = []
+    for block in final.content:
+        b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
+        btype = b.get("type")
+        if btype == "text":
+            final_assistant_content.append({"type": "text", "text": str(b.get("text", ""))})
+        elif btype == "tool_use":
+            tid = str(b.get("id", "")).strip()
+            tname = str(b.get("name", "")).strip()
+            tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
+            if tid and tname and tname in set(final_tool_names):
+                final_assistant_content.append({
+                    "type": "tool_use", "id": tid, "name": tname, "input": tinput,
+                })
+                final_tool_uses.append((tid, tname, tinput))
+            else:
+                logger.warning("Forced-final: ignoring non-finalization tool_use name=%s", tname)
+
+    if final_tool_uses:
+        logger.info("Forced-final: executing %d finalization tool call(s)", len(final_tool_uses))
+        exec_results = await execute_tools_batch(
+            final_tool_uses,
+            tool_handlers,
+            on_progress=on_progress,
+            round_num=(round_num if response else 0) + 1,
+            log_event=log_event,
+        )
+        final_tool_results = []
+        for tid, tname, tinput, result, is_error in exec_results:
+            input_summary = json.dumps(tinput, ensure_ascii=False)
+            tr = {"type": "tool_result", "tool_use_id": tid, "content": result}
+            if is_error:
+                tr["is_error"] = True
+            final_tool_results.append(tr)
+            tool_call_log.append(f"  [final] {tname}({input_summary})")
+            tool_work_details.append(f"  [final] {tname}({input_summary}) → {result}")
+            save_redis_progress(task_id, (round_num if response else 0) + 1, tname, input_summary, result, is_error)
+
+        working_msgs.append({"role": "assistant", "content": final_assistant_content})
+        working_msgs.append({"role": "user", "content": final_tool_results})
+
+        # Plain text follow-up to collect the final answer.
+        try:
+            followup_api_msgs = _build_api_payload(working_msgs, (round_num if response else 0) + 1)
+            followup = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=cached_system,
+                messages=followup_api_msgs,  # no tools — force text
+            )
+            if hasattr(followup, "usage") and followup.usage:
+                total_cost += _calculate_cost(followup.usage)
+            followup_text_parts = [b.text for b in followup.content if b.type == "text"]
+            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
+        except Exception as fe:
+            logger.error("Forced-final follow-up failed: %s", fe)
+            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"]
+    else:
+        text_parts = [b.text for b in final.content if b.type == "text"]
+
     all_text = accumulated_text_parts + text_parts
     if budget_tracker is not None:
         budget_tracker.update(build_budget_tracker(

@@ -56,7 +56,10 @@ Do NOT output the diary as plain text. You MUST call save_diary to persist it.
         "get_finance_data",
         "save_diary",
     ],
+    # Keep save_diary callable even after the budget runs out, so a finished
+    # draft is never lost to the forced-final path.
+    finalization_tools=["save_diary"],
     provider="claude",
-    budget_usd=0.50,
+    budget_usd=1.00,
     max_rounds=30,
 )

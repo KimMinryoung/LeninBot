@@ -516,6 +516,7 @@ async def chat_with_tools(
     enable_thinking: bool = False,
     agent_name: str = "agent",
     mission_id: int | None = None,
+    finalization_tools: list[str] | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -759,10 +760,30 @@ async def chat_with_tools(
         round_num, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
     )
 
+    # Build the finalization tool whitelist so the agent can still persist its
+    # work (e.g. save_diary) on the way out. Filter by name against the
+    # already-converted OpenAI tool list.
+    finalization_names: list[str] = []
+    final_openai_tools = None
+    if finalization_tools:
+        allowed_set = set(finalization_tools)
+        final_openai_tools = [
+            t for t in openai_tools
+            if t.get("function", {}).get("name") in allowed_set
+        ]
+        finalization_names = [
+            t["function"]["name"] for t in final_openai_tools
+        ]
+        if not final_openai_tools:
+            final_openai_tools = None
+
     working_msgs.append({
         "role": "user",
-        "content": build_limit_message(limit_reason, total_cost, budget_usd,
-                                       round_num, max_rounds, was_still_working),
+        "content": build_limit_message(
+            limit_reason, total_cost, budget_usd,
+            round_num, max_rounds, was_still_working,
+            finalization_tools=finalization_names or None,
+        ),
     })
 
     # ── Preflight: validate tool result completeness ──
@@ -778,14 +799,68 @@ async def chat_with_tools(
             "content": build_stripped_limit_message(limit_reason),
         })
 
-    # ── Final API call (no tools → forces text-only response) ──
+    # ── Final API call: expose finalization tools if any, else plain text ──
     try:
         final_response = await _api_call(
-            sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
+            sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
         )
-        _, text, _, _, final_usage = _extract_response(sdk_mode, final_response)
+        _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
         if sdk_mode and final_usage:
             total_cost += _calculate_cost(final_usage, model)
+
+        # If the agent called finalization tools, execute them and do a
+        # text-only follow-up to collect the final answer.
+        if final_tool_calls and finalization_names:
+            final_tc_list = _build_tc_list(sdk_mode, final_tool_calls)
+            if final_tc_list:
+                working_msgs.append({
+                    "role": "assistant",
+                    "content": text if text.strip() else None,
+                    "tool_calls": final_tc_list,
+                })
+                allowed = set(finalization_names)
+                final_batch: list[tuple[str, str, dict]] = []
+                for tc_item in final_tc_list:
+                    fname = tc_item["function"]["name"]
+                    if fname not in allowed:
+                        # Inject an error result so the protocol stays valid.
+                        working_msgs.append({
+                            "role": "tool",
+                            "tool_call_id": tc_item["id"],
+                            "content": f"Tool {fname} blocked: budget exhausted.",
+                        })
+                        continue
+                    try:
+                        fargs = json.loads(tc_item["function"]["arguments"])
+                    except (json.JSONDecodeError, TypeError):
+                        fargs = {}
+                    final_batch.append((tc_item["id"], fname, fargs))
+
+                if final_batch:
+                    logger.info("Forced-final: executing %d finalization tool call(s)", len(final_batch))
+                    final_exec = await execute_tools_batch(
+                        final_batch, tool_handlers,
+                        on_progress=on_progress, round_num=round_num + 1, log_event=log_event,
+                    )
+                    for tc_id, fname, fargs, result, is_error in final_exec:
+                        input_summary = json.dumps(fargs, ensure_ascii=False)
+                        working_msgs.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": result,
+                        })
+                        tool_call_log.append(f"  [final] {fname}({input_summary})")
+                        tool_work_details.append(f"  [final] {fname}({input_summary}) → {result}")
+                        save_redis_progress(task_id, round_num + 1, fname, input_summary, result, is_error)
+
+                # Plain text follow-up to collect the final answer.
+                followup = await _api_call(
+                    sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
+                )
+                _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
+                if sdk_mode and followup_usage:
+                    total_cost += _calculate_cost(followup_usage, model)
+                text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
     except Exception as final_err:
         # ── Last resort: strip all tool protocol and retry ──
         _dump_messages_for_debug(working_msgs, -1, final_err)
