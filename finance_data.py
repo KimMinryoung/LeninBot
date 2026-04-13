@@ -236,15 +236,101 @@ def fetch_news(ticker_symbol: str, max_items: int = 5) -> list[dict]:
         return [{"error": str(e)}]
 
 
+
+# ── Korean stock name → yfinance ticker mapping ─────────────────────
+# Yahoo Finance Search API doesn't handle Korean queries. This table
+# maps common Korean names (and short aliases) to KRX ticker symbols.
+# Covers KOSPI/KOSDAQ top ~40 by market cap.
+
+KR_STOCK_ALIASES: dict[str, tuple[str, str]] = {
+    # (yfinance symbol, English display name)
+    # ── KOSPI top 20 ──
+    "삼성전자":      ("005930.KS", "Samsung Electronics"),
+    "SK하이닉스":    ("000660.KS", "SK hynix"),
+    "현대차":        ("005380.KS", "Hyundai Motor"),
+    "현대자동차":    ("005380.KS", "Hyundai Motor"),
+    "셀트리온":      ("068270.KS", "Celltrion"),
+    "KB금융":        ("105560.KS", "KB Financial Group"),
+    "기아":          ("000270.KS", "Kia"),
+    "신한지주":      ("055550.KS", "Shinhan Financial"),
+    "POSCO홀딩스":   ("005490.KS", "POSCO Holdings"),
+    "포스코홀딩스":  ("005490.KS", "POSCO Holdings"),
+    "삼성바이오로직스": ("207940.KS", "Samsung Biologics"),
+    "삼성바이오":    ("207940.KS", "Samsung Biologics"),
+    "하나금융지주":  ("086790.KS", "Hana Financial Group"),
+    "하나금융":      ("086790.KS", "Hana Financial Group"),
+    "현대모비스":    ("012330.KS", "Hyundai Mobis"),
+    "삼성SDI":       ("006400.KS", "Samsung SDI"),
+    "LG에너지솔루션": ("373220.KS", "LG Energy Solution"),
+    "LG엔솔":       ("373220.KS", "LG Energy Solution"),
+    "카카오":        ("035720.KS", "Kakao"),
+    "LG화학":        ("051910.KS", "LG Chem"),
+    "삼성물산":      ("028260.KS", "Samsung C&T"),
+    "NAVER":         ("035420.KS", "NAVER"),
+    "네이버":        ("035420.KS", "NAVER"),
+    "삼성전자우":    ("005935.KS", "Samsung Electronics (Pref)"),
+    "SK이노베이션":  ("096770.KS", "SK Innovation"),
+    "SK":            ("034730.KS", "SK Inc."),
+    "LG전자":        ("066570.KS", "LG Electronics"),
+    "한국전력":      ("015760.KS", "KEPCO"),
+    "한전":          ("015760.KS", "KEPCO"),
+    "우리금융지주":  ("316140.KS", "Woori Financial Group"),
+    "우리금융":      ("316140.KS", "Woori Financial Group"),
+    "SK텔레콤":      ("017670.KS", "SK Telecom"),
+    "KT":            ("030200.KS", "KT Corp"),
+    "KT&G":          ("033780.KS", "KT&G"),
+    "삼성생명":      ("032830.KS", "Samsung Life Insurance"),
+    "삼성화재":      ("000810.KS", "Samsung Fire & Marine"),
+    "HD현대":        ("267250.KS", "HD Hyundai"),
+    "한화에어로스페이스": ("012450.KS", "Hanwha Aerospace"),
+    "한화에어로":    ("012450.KS", "Hanwha Aerospace"),
+    # ── KOSDAQ notable ──
+    "에코프로비엠":  ("247540.KQ", "EcoPro BM"),
+    "에코프로":      ("086520.KQ", "EcoPro"),
+    "알테오젠":      ("196170.KQ", "Alteogen"),
+    "HLB":           ("028300.KQ", "HLB"),
+    "리가켐바이오":  ("141080.KQ", "LegoChem Biosciences"),
+}
+
+# Build reverse index: lowercase aliases for fuzzy matching
+_KR_ALIAS_INDEX: dict[str, tuple[str, str]] = {
+    k.lower(): v for k, v in KR_STOCK_ALIASES.items()
+}
+
+
+def _lookup_kr_alias(query: str) -> tuple[str, str] | None:
+    """Try to match a query against Korean stock aliases.
+    Returns (yf_symbol, display_name) or None."""
+    q = query.strip().lower()
+    if q in _KR_ALIAS_INDEX:
+        return _KR_ALIAS_INDEX[q]
+    # Partial match: check if query is a substring of any alias
+    for alias, val in _KR_ALIAS_INDEX.items():
+        if q in alias or alias in q:
+            return val
+    return None
+
+
 def search_ticker(query: str, max_results: int = 5) -> list[dict]:
     """Search for yfinance ticker symbols by name.
 
+    Checks Korean stock alias table first (Yahoo Finance doesn't handle
+    Korean queries), then falls back to yfinance Search API.
+
     Args:
-        query: Search term (e.g. "Samsung Electronics", "bitcoin", "Tesla").
+        query: Search term (e.g. "삼성전자", "Samsung Electronics", "bitcoin").
 
     Returns:
         List of dicts with symbol, name, exchange, type.
     """
+    # 1. Try Korean alias table first
+    kr_match = _lookup_kr_alias(query)
+    if kr_match:
+        symbol, name = kr_match
+        exchange = "KOSDAQ" if symbol.endswith(".KQ") else "Korea"
+        return [{"symbol": symbol, "name": name, "exchange": exchange, "type": "equity"}]
+
+    # 2. Fall back to yfinance Search API
     yf = _get_yf()
     if not yf:
         return [{"error": "yfinance not installed"}]
