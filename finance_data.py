@@ -237,85 +237,98 @@ def fetch_news(ticker_symbol: str, max_items: int = 5) -> list[dict]:
 
 
 
-# ── Korean stock name → yfinance ticker mapping ─────────────────────
-# Yahoo Finance Search API doesn't handle Korean queries. This table
-# maps common Korean names (and short aliases) to KRX ticker symbols.
-# Covers KOSPI/KOSDAQ top ~40 by market cap.
+# ── Korean stock name → yfinance ticker resolution ──────────────────
+# Yahoo Finance Search API doesn't handle Korean queries.
+# Primary data: data/kr_stocks.json (4000+ stocks, fetched from NAVER Finance).
+# Refresh with: python scripts/fetch_kr_stocks.py
+# Fallback aliases: common colloquial names that differ from official KRX names.
 
-KR_STOCK_ALIASES: dict[str, tuple[str, str]] = {
-    # (yfinance symbol, English display name)
-    # ── KOSPI top 20 ──
-    "삼성전자":      ("005930.KS", "Samsung Electronics"),
-    "SK하이닉스":    ("000660.KS", "SK hynix"),
-    "현대차":        ("005380.KS", "Hyundai Motor"),
-    "현대자동차":    ("005380.KS", "Hyundai Motor"),
-    "셀트리온":      ("068270.KS", "Celltrion"),
-    "KB금융":        ("105560.KS", "KB Financial Group"),
-    "기아":          ("000270.KS", "Kia"),
-    "신한지주":      ("055550.KS", "Shinhan Financial"),
-    "POSCO홀딩스":   ("005490.KS", "POSCO Holdings"),
-    "포스코홀딩스":  ("005490.KS", "POSCO Holdings"),
-    "삼성바이오로직스": ("207940.KS", "Samsung Biologics"),
-    "삼성바이오":    ("207940.KS", "Samsung Biologics"),
-    "하나금융지주":  ("086790.KS", "Hana Financial Group"),
-    "하나금융":      ("086790.KS", "Hana Financial Group"),
-    "현대모비스":    ("012330.KS", "Hyundai Mobis"),
-    "삼성SDI":       ("006400.KS", "Samsung SDI"),
-    "LG에너지솔루션": ("373220.KS", "LG Energy Solution"),
-    "LG엔솔":       ("373220.KS", "LG Energy Solution"),
-    "카카오":        ("035720.KS", "Kakao"),
-    "LG화학":        ("051910.KS", "LG Chem"),
-    "삼성물산":      ("028260.KS", "Samsung C&T"),
-    "NAVER":         ("035420.KS", "NAVER"),
-    "네이버":        ("035420.KS", "NAVER"),
-    "삼성전자우":    ("005935.KS", "Samsung Electronics (Pref)"),
-    "SK이노베이션":  ("096770.KS", "SK Innovation"),
-    "SK":            ("034730.KS", "SK Inc."),
-    "LG전자":        ("066570.KS", "LG Electronics"),
-    "한국전력":      ("015760.KS", "KEPCO"),
-    "한전":          ("015760.KS", "KEPCO"),
-    "우리금융지주":  ("316140.KS", "Woori Financial Group"),
-    "우리금융":      ("316140.KS", "Woori Financial Group"),
-    "SK텔레콤":      ("017670.KS", "SK Telecom"),
-    "KT":            ("030200.KS", "KT Corp"),
-    "KT&G":          ("033780.KS", "KT&G"),
-    "삼성생명":      ("032830.KS", "Samsung Life Insurance"),
-    "삼성화재":      ("000810.KS", "Samsung Fire & Marine"),
-    "HD현대":        ("267250.KS", "HD Hyundai"),
-    "한화에어로스페이스": ("012450.KS", "Hanwha Aerospace"),
-    "한화에어로":    ("012450.KS", "Hanwha Aerospace"),
-    # ── KOSDAQ notable ──
-    "에코프로비엠":  ("247540.KQ", "EcoPro BM"),
-    "에코프로":      ("086520.KQ", "EcoPro"),
-    "알테오젠":      ("196170.KQ", "Alteogen"),
-    "HLB":           ("028300.KQ", "HLB"),
-    "리가켐바이오":  ("141080.KQ", "LegoChem Biosciences"),
+import json as _json
+import os as _os
+
+_KR_DATA_PATH = _os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), "data", "kr_stocks.json"
+)
+
+# Colloquial aliases → official KRX stock name (for names that differ)
+_KR_COLLOQUIAL: dict[str, str] = {
+    "네이버": "NAVER",
+    "포스코홀딩스": "POSCO홀딩스",
+    "포스코": "POSCO홀딩스",
+    "현대자동차": "현대차",
+    "삼성바이오": "삼성바이오로직스",
+    "LG엔솔": "LG에너지솔루션",
+    "한전": "한국전력",
+    "하나금융": "하나금융지주",
+    "우리금융": "우리금융지주",
+    "한화에어로": "한화에어로스페이스",
 }
 
-# Build reverse index: lowercase aliases for fuzzy matching
-_KR_ALIAS_INDEX: dict[str, tuple[str, str]] = {
-    k.lower(): v for k, v in KR_STOCK_ALIASES.items()
-}
+_kr_stocks: dict[str, dict] | None = None  # lazy-loaded
 
 
-def _lookup_kr_alias(query: str) -> tuple[str, str] | None:
-    """Try to match a query against Korean stock aliases.
-    Returns (yf_symbol, display_name) or None."""
-    q = query.strip().lower()
-    if q in _KR_ALIAS_INDEX:
-        return _KR_ALIAS_INDEX[q]
-    # Partial match: check if query is a substring of any alias
-    for alias, val in _KR_ALIAS_INDEX.items():
-        if q in alias or alias in q:
-            return val
+def _load_kr_stocks() -> dict[str, dict]:
+    """Load Korean stock data from JSON file. Cached after first call."""
+    global _kr_stocks
+    if _kr_stocks is not None:
+        return _kr_stocks
+    try:
+        with open(_KR_DATA_PATH, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        _kr_stocks = data.get("stocks", {})
+        logger.info("Loaded %d Korean stocks from %s", len(_kr_stocks), _KR_DATA_PATH)
+    except FileNotFoundError:
+        logger.warning("Korean stock data not found at %s — run scripts/fetch_kr_stocks.py", _KR_DATA_PATH)
+        _kr_stocks = {}
+    except Exception as e:
+        logger.warning("Failed to load Korean stock data: %s", e)
+        _kr_stocks = {}
+    return _kr_stocks
+
+
+def _lookup_kr_stock(query: str) -> tuple[str, str] | None:
+    """Resolve a Korean stock name to (yf_symbol, display_name) or None.
+
+    Checks: colloquial alias → exact match → substring match.
+    """
+    stocks = _load_kr_stocks()
+    q = query.strip()
+
+    # Resolve colloquial alias to official name first
+    official = _KR_COLLOQUIAL.get(q)
+    if official:
+        q = official
+
+    # Exact match (case-sensitive for Korean, case-insensitive for English)
+    if q in stocks:
+        s = stocks[q]
+        suffix = ".KQ" if s["market"] == "KOSDAQ" else ".KS"
+        return (s["code"] + suffix, q)
+
+    # Case-insensitive exact match
+    q_lower = q.lower()
+    for name, s in stocks.items():
+        if name.lower() == q_lower:
+            suffix = ".KQ" if s["market"] == "KOSDAQ" else ".KS"
+            return (s["code"] + suffix, name)
+
+    # Substring match — only when the query looks Korean (contains Hangul)
+    # to avoid false positives like "Samsung" matching random KRX tickers.
+    has_hangul = any('\uac00' <= c <= '\ud7a3' for c in q)
+    if has_hangul:
+        for name, s in stocks.items():
+            if q_lower in name.lower() or name.lower() in q_lower:
+                suffix = ".KQ" if s["market"] == "KOSDAQ" else ".KS"
+                return (s["code"] + suffix, name)
+
     return None
 
 
 def search_ticker(query: str, max_results: int = 5) -> list[dict]:
     """Search for yfinance ticker symbols by name.
 
-    Checks Korean stock alias table first (Yahoo Finance doesn't handle
-    Korean queries), then falls back to yfinance Search API.
+    Checks Korean stock data (data/kr_stocks.json) first, then falls
+    back to yfinance Search API.
 
     Args:
         query: Search term (e.g. "삼성전자", "Samsung Electronics", "bitcoin").
@@ -323,11 +336,11 @@ def search_ticker(query: str, max_results: int = 5) -> list[dict]:
     Returns:
         List of dicts with symbol, name, exchange, type.
     """
-    # 1. Try Korean alias table first
-    kr_match = _lookup_kr_alias(query)
+    # 1. Try Korean stock data first
+    kr_match = _lookup_kr_stock(query)
     if kr_match:
         symbol, name = kr_match
-        exchange = "KOSDAQ" if symbol.endswith(".KQ") else "Korea"
+        exchange = "KOSDAQ" if symbol.endswith(".KQ") else "KOSPI"
         return [{"symbol": symbol, "name": name, "exchange": exchange, "type": "equity"}]
 
     # 2. Fall back to yfinance Search API
