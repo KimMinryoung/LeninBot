@@ -125,7 +125,7 @@ async def execute_browser_task(task: dict) -> dict:
 
     task_id = task.get("id")
     user_id = task.get("user_id")
-    if not task_id or not user_id:
+    if task_id is None or user_id is None:
         return {"status": "error", "error": "Missing required fields: id, user_id"}
     agent_type = task.get("agent_type") or "browser"
 
@@ -193,6 +193,8 @@ async def execute_browser_task(task: dict) -> dict:
         extra_handlers=None,
         on_progress=None,
         budget_tracker=None,
+        task_id=None,
+        finalization_tools=None,
     ):
         # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
@@ -216,6 +218,8 @@ async def execute_browser_task(task: dict) -> dict:
             budget_usd=budget_usd or spec.budget_usd,
             on_progress=on_progress,
             budget_tracker=budget_tracker,
+            task_id=task_id,
+            finalization_tools=finalization_tools,
         )
 
     async def _get_model():
