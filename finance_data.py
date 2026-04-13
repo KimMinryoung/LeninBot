@@ -27,6 +27,10 @@ TICKERS = {
     "sp500": "^GSPC",
     "us10y": "^TNX",
     "kospi": "^KS11",
+    "btc": "BTC-USD",
+    "eth": "ETH-USD",
+    "sol": "SOL-USD",
+    "usdc": "USDC-USD",
 }
 
 LABELS = {
@@ -38,6 +42,10 @@ LABELS = {
     "sp500": "S&P 500",
     "us10y": "미국채10Y(%)",
     "kospi": "KOSPI",
+    "btc": "Bitcoin(USD)",
+    "eth": "Ethereum(USD)",
+    "sol": "Solana(USD)",
+    "usdc": "USDC(USD)",
 }
 
 CACHE_TTL = 600  # 10 minutes
@@ -369,9 +377,13 @@ def search_ticker(query: str, max_results: int = 5) -> list[dict]:
 FINANCE_TOOL = {
     "name": "get_finance_data",
     "description": (
-        "Get financial market data. Preset assets (gold, silver, DXY, WTI/Brent oil, "
-        "S&P 500, US 10Y yield, KOSPI) or any yfinance ticker (stocks, crypto, forex). "
+        "Get financial market data. Preset assets: gold, silver, DXY, WTI/Brent oil, "
+        "S&P 500, US 10Y yield, KOSPI, BTC, ETH, SOL, USDC. "
+        "Also supports any yfinance ticker (stocks, crypto, forex). "
         "Use 'query' to search by name when you don't know the ticker symbol. "
+        "Korean stocks can be queried in Korean (e.g. '삼성전자', '카카오'). "
+        "For all other assets, use English names or ticker symbols "
+        "(e.g. 'Apple', 'AAPL', 'bitcoin', 'BTC-USD', 'EURUSD=X'). "
         "Supports historical period data and news headlines."
     ),
     "input_schema": {
@@ -396,7 +408,8 @@ FINANCE_TOOL = {
             "query": {
                 "type": "string",
                 "description": (
-                    "Search by company/asset name (e.g. 'Samsung Electronics', 'bitcoin'). "
+                    "Search by company/asset name. Korean stocks: use Korean name (e.g. '삼성전자', '카카오'). "
+                    "All other assets: use English name or ticker (e.g. 'Apple', 'bitcoin', 'Tesla'). "
                     "Resolves to ticker automatically and fetches data for the top match."
                 ),
             },
