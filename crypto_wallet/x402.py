@@ -521,7 +521,12 @@ PAY_AND_FETCH_TOOL = {
             "method": {
                 "type": "string",
                 "enum": ["GET", "POST"],
-                "description": "HTTP method. Default GET. Use POST for APIs that require it.",
+                "description": (
+                    "HTTP method. Default GET. IMPORTANT: Most external x402 services "
+                    "require POST — a GET often returns free metadata instead of triggering "
+                    "the 402 paywall. When the user says 'POST' or the target is an external "
+                    "x402 API, always set method to POST."
+                ),
                 "default": "GET",
             },
             "body": {
