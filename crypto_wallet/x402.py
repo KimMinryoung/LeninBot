@@ -358,20 +358,32 @@ async def settle_payment(payload: dict) -> dict:
 
 # ── Top-level client flow: pay_and_fetch ────────────────────────────
 
-async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> dict:
-    """GET `url`. If the server returns 402, sign an x402 payment within
-    `max_usdc` and retry. Returns a dict describing the outcome.
+async def pay_and_fetch(
+    url: str,
+    max_usdc: float = PAY_AND_FETCH_MAX_USDC,
+    method: str = "GET",
+    body: dict | None = None,
+    headers: dict | None = None,
+) -> dict:
+    """Request `url`. If the server returns 402, sign an x402 payment within
+    `max_usdc` and retry. Supports GET and POST.
 
     The hard amount cap (in atomic USDC) = max_usdc * 1e6, capped further by
     the per-call ceiling from sign_payment.
     """
     max_atomic = int(max_usdc * (10 ** USDC_DECIMALS))
+    method = method.upper()
+    extra_headers = dict(headers or {})
 
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        # ── First request ───────────────────────────────────────
         try:
-            resp1 = await client.get(url)
+            if method == "POST":
+                resp1 = await client.post(url, json=body, headers=extra_headers)
+            else:
+                resp1 = await client.get(url, headers=extra_headers)
         except Exception as e:
-            return {"status": "error", "stage": "initial_get", "error": str(e)}
+            return {"status": "error", "stage": "initial_request", "error": str(e)}
 
         if resp1.status_code == 200:
             return {
@@ -383,20 +395,38 @@ async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> d
         if resp1.status_code != 402:
             return {
                 "status": "error",
-                "stage": "initial_get",
+                "stage": "initial_request",
                 "http_status": resp1.status_code,
                 "body": resp1.text[:500],
             }
 
-        # Parse 402 body
+        # ── Parse 402 PaymentRequirements ───────────────────────
+        # Some servers put requirements in the response body, others in
+        # the `payment-required` or `x-payment-required` header (base64 JSON).
+        accepts = []
+
+        # Try body first
         try:
             req_body = resp1.json()
+            accepts = req_body.get("accepts") or req_body.get("accepted") or []
         except Exception:
-            return {"status": "error", "stage": "parse_402", "body": resp1.text[:500]}
+            pass
 
-        accepts = req_body.get("accepts") or req_body.get("accepted") or []
+        # Try headers if body had no accepts
         if not accepts:
-            return {"status": "error", "stage": "parse_402", "error": "no accepts list"}
+            for hdr_name in ("payment-required", "x-payment-required"):
+                raw_hdr = resp1.headers.get(hdr_name)
+                if raw_hdr:
+                    try:
+                        decoded = json.loads(base64.b64decode(raw_hdr.encode()).decode())
+                        accepts = decoded.get("accepts") or decoded.get("accepted") or []
+                        if accepts:
+                            break
+                    except Exception:
+                        continue
+
+        if not accepts:
+            return {"status": "error", "stage": "parse_402", "error": "no accepts list in body or headers", "body": resp1.text[:500]}
 
         # Pick first compatible (exact / Base mainnet)
         chosen = None
@@ -412,7 +442,7 @@ async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> d
                 "accepts": accepts,
             }
 
-        # Sign (enforces cap)
+        # ── Sign (enforces cap) ─────────────────────────────────
         try:
             payload = await asyncio.to_thread(sign_payment, chosen, max_atomic)
         except (ValueError, RuntimeError) as e:
@@ -420,16 +450,21 @@ async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> d
 
         amount_atomic = int(chosen.get("maxAmountRequired") or chosen.get("amount"))
         logger.info(
-            "[x402] Paying %s atomic USDC (%.6f USDC) to %s for %s",
-            amount_atomic, amount_atomic / 10**USDC_DECIMALS, chosen["payTo"], url,
+            "[x402] Paying %s atomic USDC (%.6f USDC) to %s for %s (%s)",
+            amount_atomic, amount_atomic / 10**USDC_DECIMALS, chosen["payTo"], url, method,
         )
 
         header_val = encode_payment_header(chosen, payload, resource=url)
+        pay_headers = {**extra_headers, "PAYMENT-SIGNATURE": header_val}
 
+        # ── Retry with payment ──────────────────────────────────
         try:
-            resp2 = await client.get(url, headers={"PAYMENT-SIGNATURE": header_val})
+            if method == "POST":
+                resp2 = await client.post(url, json=body, headers=pay_headers)
+            else:
+                resp2 = await client.get(url, headers=pay_headers)
         except Exception as e:
-            return {"status": "error", "stage": "retry_get", "error": str(e)}
+            return {"status": "error", "stage": "retry_request", "error": str(e)}
 
         # Decode settlement details if present
         settlement = None
@@ -443,7 +478,7 @@ async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> d
         if resp2.status_code != 200:
             return {
                 "status": "error",
-                "stage": "retry_get",
+                "stage": "retry_request",
                 "http_status": resp2.status_code,
                 "body": resp2.text[:500],
                 "settlement": settlement,
@@ -465,9 +500,9 @@ async def pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> d
 PAY_AND_FETCH_TOOL = {
     "name": "pay_and_fetch",
     "description": (
-        "Fetch a URL that requires an x402 payment. Performs the full client "
-        "round-trip: GET → 402 PaymentRequirements → sign EIP-3009 USDC "
-        "transferWithAuthorization → retry GET with PAYMENT-SIGNATURE header. "
+        "Fetch a URL that requires an x402 payment. Supports both GET and POST. "
+        "Performs the full client round-trip: request → 402 PaymentRequirements → "
+        "sign EIP-3009 USDC transferWithAuthorization → retry with PAYMENT-SIGNATURE header. "
         "Hard-capped per call (default $0.05 USDC). Use only when a normal "
         "fetch_url returns 402 or you specifically need a paid resource. "
         "Returns the response body plus settlement details (tx hash, gas used). "
@@ -483,6 +518,16 @@ PAY_AND_FETCH_TOOL = {
                 "type": "string",
                 "description": "URL to fetch (must support x402 / return 402 with PaymentRequirements).",
             },
+            "method": {
+                "type": "string",
+                "enum": ["GET", "POST"],
+                "description": "HTTP method. Default GET. Use POST for APIs that require it.",
+                "default": "GET",
+            },
+            "body": {
+                "type": "object",
+                "description": "JSON request body for POST requests (e.g. {\"query\": \"...\", \"maxResults\": 5}).",
+            },
             "max_usdc": {
                 "type": "number",
                 "description": (
@@ -497,10 +542,16 @@ PAY_AND_FETCH_TOOL = {
 }
 
 
-async def _exec_pay_and_fetch(url: str, max_usdc: float = PAY_AND_FETCH_MAX_USDC) -> str:
+async def _exec_pay_and_fetch(
+    url: str,
+    max_usdc: float = PAY_AND_FETCH_MAX_USDC,
+    method: str = "GET",
+    body: dict | None = None,
+    **_kw,
+) -> str:
     """Tool handler: invoke pay_and_fetch and format result for the LLM."""
     try:
-        result = await pay_and_fetch(url, max_usdc=max_usdc)
+        result = await pay_and_fetch(url, max_usdc=max_usdc, method=method, body=body)
     except Exception as e:
         logger.error("pay_and_fetch error: %s", e)
         return f"x402 error: {e}"
