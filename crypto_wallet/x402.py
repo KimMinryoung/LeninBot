@@ -233,15 +233,18 @@ def sign_payment(requirements: dict, max_atomic: int) -> dict:
 # ── Header encoding ─────────────────────────────────────────────────
 
 def encode_payment_header(requirements: dict, payload: dict, resource: str | None = None) -> str:
-    """Build the PAYMENT-SIGNATURE header value."""
-    obj = {
+    """Build the PAYMENT-SIGNATURE header value (x402 V2 format).
+
+    V2 spec (per x402 SDK PaymentPayload schema):
+      { x402Version, payload, accepted: <full requirements>, resource? }
+    """
+    obj: dict = {
         "x402Version": X402_VERSION,
-        "scheme": requirements["scheme"],
-        "network": requirements["network"],
         "payload": payload,
+        "accepted": requirements,
     }
     if resource:
-        obj["resource"] = resource
+        obj["resource"] = {"url": resource}
     return base64.b64encode(json.dumps(obj, separators=(",", ":")).encode()).decode()
 
 
@@ -264,9 +267,11 @@ def verify_payment(payment: dict, requirements: dict) -> str:
     """
     if payment.get("x402Version") != X402_VERSION:
         raise ValueError(f"x402Version mismatch (got {payment.get('x402Version')})")
-    if payment.get("scheme") != requirements["scheme"]:
+    # V2: scheme/network live inside "accepted"; fall back to top-level for V1 compat
+    accepted = payment.get("accepted") or payment
+    if accepted.get("scheme") != requirements["scheme"]:
         raise ValueError(f"scheme mismatch")
-    if payment.get("network") != requirements["network"]:
+    if accepted.get("network") != requirements["network"]:
         raise ValueError(f"network mismatch")
 
     payload = payment.get("payload") or {}
@@ -585,12 +590,17 @@ async def _exec_pay_and_fetch(
             f"  Reason: {result.get('error')}"
         )
     # error
-    return (
+    parts = [
         f"x402 fetch failed.\n"
         f"  URL: {url}\n"
-        f"  Stage: {result.get('stage', '(unknown)')}\n"
-        f"  Error: {result.get('error') or result.get('body', '(none)')}"
-    )
+        f"  Stage: {result.get('stage', '(unknown)')}"
+    ]
+    if result.get("http_status"):
+        parts.append(f"  HTTP status: {result['http_status']}")
+    parts.append(f"  Error: {result.get('error') or result.get('body', '(none)')}")
+    if result.get("settlement"):
+        parts.append(f"  Settlement: {result['settlement']}")
+    return "\n".join(parts)
 
 
 PAY_AND_FETCH_TOOL_HANDLER = _exec_pay_and_fetch
