@@ -1377,6 +1377,31 @@ async def bot_main():
         agent_type = task.get("agent_type") or "analyst"
         status = result.get("status", "unknown")
         was_interrupted = result.get("was_interrupted", False)
+        mission_id = task.get("mission_id")
+
+        # Check if this was the last active task in the mission
+        mission_close_hint = ""
+        if mission_id and status in ("done", "failed"):
+            try:
+                remaining = await asyncio.to_thread(
+                    _query_one,
+                    "SELECT COUNT(*) AS cnt FROM telegram_tasks "
+                    "WHERE mission_id = %s AND id != %s AND status IN ('pending', 'processing', 'queued')",
+                    (mission_id, task_id),
+                )
+                if remaining and remaining["cnt"] == 0:
+                    mission_row = await asyncio.to_thread(
+                        _query_one,
+                        "SELECT id, title FROM telegram_missions WHERE id = %s AND status = 'active'",
+                        (mission_id,),
+                    )
+                    if mission_row:
+                        mission_close_hint = (
+                            f"\n\n📋 Mission #{mission_row['id']} \"{mission_row['title']}\" has no remaining active tasks. "
+                            f"If the user's original goal has been addressed, call `mission(action=\"close\")` to close it."
+                        )
+            except Exception:
+                pass
 
         try:
             # Load tool_log from DB — contains the actual work done (tool calls + results)
@@ -1418,6 +1443,7 @@ async def bot_main():
                     f"   - Additional work can yield meaningful improvement\n"
                     f"   - The cause is NOT external factors (permission denied, blocked, CAPTCHA, API error, etc.)\n"
                     f"   If re-delegation is unnecessary, just relay the results."
+                    f"{mission_close_hint}"
                 )
             else:
                 error = result.get("error", "unknown error")
@@ -1427,6 +1453,7 @@ async def bot_main():
                     f"Error: {error}\n\n"
                     f"Inform the user of the failure and its cause concisely. "
                     f"Do not re-delegate if the issue would not be resolved by retrying."
+                    f"{mission_close_hint}"
                 )
 
             # Load recent chat history for context
