@@ -35,6 +35,31 @@ logger = logging.getLogger(__name__)
 _SVC_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "svc")
 
 
+def _model_name_for_provider(provider: str) -> str:
+    """Resolve the current chat-tier model name for a given provider."""
+    from bot_config import (
+        _TIER_MAP, _OPENAI_MODEL_MAP, _MODEL_ALIAS_MAP, _resolved_models,
+    )
+    tier = _ctx["config"].get("chat_model", "high")
+    alias = _TIER_MAP.get(provider, _TIER_MAP["claude"]).get(tier, tier)
+    if provider == "local":
+        from llm_client import MOON_MODEL
+        return MOON_MODEL
+    if provider == "openai":
+        return _OPENAI_MODEL_MAP.get(alias, alias)
+    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
+    return _resolved_models.get(alias, fallback)
+
+
+def _notify_model_switch(old_provider: str, new_provider: str):
+    """Log a provider/model switch to system alerts and DB."""
+    old_model = _model_name_for_provider(old_provider)
+    new_model = _model_name_for_provider(new_provider)
+    alert = f"LLM 전환: {old_model} → {new_model} ({old_provider} → {new_provider})"
+    _ctx["add_system_alert"](alert)
+    _ctx["log_event"]("warning", "config", alert)
+
+
 async def _svc_health() -> str:
     """Run `svc status` and return a compact Telegram-friendly summary."""
     try:
@@ -1072,17 +1097,19 @@ async def cmd_provider(message: Message):
         await message.answer("❌ OPENAI_API_KEY가 설정되지 않아 전환할 수 없습니다.")
         return
     config = _ctx["config"]
-    current = config.get("provider", "claude")
-    if current == "claude":
+    old_provider = config.get("provider", "claude")
+    if old_provider == "claude":
         config["provider"] = "openai"
-        _ctx["add_system_alert"]("🔄 Provider 전환: Claude → OpenAI")
-        await message.answer(f"🔄 OpenAI로 전환\n대화: {_ctx['tier_to_display'](config['chat_model'])}\n태스크: {_ctx['tier_to_display'](config['task_model'])}")
     else:
         config["provider"] = "claude"
         _ctx["resolved_models"].clear()
-        _ctx["add_system_alert"]("🔄 Provider 전환: OpenAI → Claude")
-        await message.answer(f"🔄 Claude로 전환\n대화: {_ctx['tier_to_display'](config['chat_model'])}\n태스크: {_ctx['tier_to_display'](config['task_model'])}")
+    _notify_model_switch(old_provider, config["provider"])
     _ctx["save_config"]()
+    await message.answer(
+        f"🔄 {config['provider']}로 전환\n"
+        f"대화: {_ctx['tier_to_display'](config['chat_model'])}\n"
+        f"태스크: {_ctx['tier_to_display'](config['task_model'])}"
+    )
 
 
 async def handle_photo(message: Message):
@@ -1649,6 +1676,10 @@ async def cb_config_set(callback: CallbackQuery):
     # If model changed, clear resolved cache so it re-resolves on next use
     if key in ("chat_model", "task_model") and new_val != old_val:
         _ctx["resolved_models"].pop(new_val, None)
+
+    # Provider switch: log with actual model names
+    if key == "provider" and new_val != old_val:
+        _notify_model_switch(str(old_val), str(new_val))
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
     _ctx["save_config"]()

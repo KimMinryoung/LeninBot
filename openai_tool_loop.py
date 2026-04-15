@@ -517,12 +517,26 @@ async def chat_with_tools(
     agent_name: str = "agent",
     mission_id: int | None = None,
     finalization_tools: list[str] | None = None,
+    api_semaphore: asyncio.Semaphore | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
     Interface mirrors claude_loop.chat_with_tools() for drop-in use.
+
+    api_semaphore: if provided, acquired/released around each individual LLM
+    API call (not the entire tool loop).  This prevents deadlocks when a tool
+    handler (e.g. run_agent) recursively invokes chat_with_tools on the same
+    single-slot backend.
     """
     sdk_mode = client is not None
+
+    # Wrap _api_call with per-call semaphore so the lock is held only during
+    # the HTTP POST, not during tool execution between rounds.
+    async def _guarded_api_call(*a, **kw):
+        if api_semaphore is not None:
+            async with api_semaphore:
+                return await _api_call(*a, **kw)
+        return await _api_call(*a, **kw)
 
     budget_usd = validate_budget(budget_usd)
 
@@ -576,7 +590,7 @@ async def chat_with_tools(
         # ── API call with auto-recovery ──
         response = None
         try:
-            response = await _api_call(
+            response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, working_msgs,
                 openai_tools, max_tokens, enable_thinking=enable_thinking,
             )
@@ -591,7 +605,7 @@ async def chat_with_tools(
                 stripped = _strip_tool_protocol(working_msgs)
                 stripped = _ensure_system_first(stripped, system_prompt)
                 try:
-                    response = await _api_call(
+                    response = await _guarded_api_call(
                         sdk_mode, client, base_url, model, stripped,
                         openai_tools, max_tokens,
                         parallel_tool_calls=False, enable_thinking=enable_thinking,
@@ -801,7 +815,7 @@ async def chat_with_tools(
 
     # ── Final API call: expose finalization tools if any, else plain text ──
     try:
-        final_response = await _api_call(
+        final_response = await _guarded_api_call(
             sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
         )
         _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
@@ -854,7 +868,7 @@ async def chat_with_tools(
                         save_redis_progress(task_id, round_num + 1, fname, input_summary, result, is_error)
 
                 # Plain text follow-up to collect the final answer.
-                followup = await _api_call(
+                followup = await _guarded_api_call(
                     sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
                 )
                 _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
@@ -873,7 +887,7 @@ async def chat_with_tools(
             "content": build_stripped_limit_message(limit_reason),
         })
         try:
-            last_response = await _api_call(
+            last_response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, stripped, None, max_tokens,
             )
             _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
