@@ -85,7 +85,7 @@ _HELP_TEXT = """\
 /report <id> — 태스크 리포트 파일 재전송
 
 *이메일*
-/email — 이메일 현황 (폴링 + 최근 기록)
+/email — 이메일 현황 (폴링 + 최근 기록 + 본문 미리보기)
 
 *이미지*
 /image <프롬프트> — Replicate로 소련풍 게임/포스터 이미지 생성
@@ -669,11 +669,20 @@ async def cmd_status_auto(message: Message):
 
 
 async def cmd_email(message: Message):
-    """Show recent email activity and poll for new messages."""
+    """Show recent email activity, poll for new messages, and include body previews."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
 
-    # Poll first
+    def _clean_preview(value: str | None, max_chars: int = 280) -> str:
+        if not value:
+            return ""
+        import re
+        text = str(value).replace("```", "'''")
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > max_chars:
+            return text[:max_chars].rstrip() + "…"
+        return text
+
     poll_line = ""
     try:
         from email_bridge import run_polling_cycle
@@ -684,12 +693,11 @@ async def cmd_email(message: Message):
     except Exception:
         pass
 
-    # Show recent messages
     rows = await asyncio.to_thread(
         _query,
         """
         SELECT id, direction, status, sender_email, recipient_emails, subject,
-               LEFT(COALESCE(text_body, html_body, ''), 120) AS preview,
+               LEFT(COALESCE(text_body, html_body, ''), 4000) AS preview,
                created_at, received_at
         FROM email_messages
         ORDER BY COALESCE(received_at, created_at) DESC
@@ -705,11 +713,15 @@ async def cmd_email(message: Message):
         ts_str = ts.strftime("%m/%d %H:%M") if ts else "-"
         direction = "← 수신" if row.get("direction") == "inbound" else "→ 발신"
         peer = row.get("sender_email") if row.get("direction") == "inbound" else ", ".join(row.get("recipient_emails") or [])
-        lines.append(
+        preview = _clean_preview(row.get("preview"))
+        block = (
             f"`[{row['id']}]` {direction} / {row['status']} / {ts_str}\n"
             f"{row.get('subject') or '(no subject)'}\n"
             f"{peer or '-'}"
         )
+        if preview:
+            block += f"\n미리보기: {preview}"
+        lines.append(block)
     for chunk in _ctx["split_message"]("\n\n".join(lines)):
         await message.answer(chunk, parse_mode="Markdown")
 

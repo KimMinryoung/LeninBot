@@ -1,6 +1,6 @@
-"""a2a_handler.py — A2A protocol (message/send) handler.
+"""a2a_handler.py — A2A protocol v1.0 handler.
 
-Implements Google A2A JSON-RPC 2.0 `SendMessage` method for synchronous
+Implements A2A JSON-RPC 2.0 `SendMessage` method for synchronous
 conversation with optional skill routing. Reuses web_chat.py's LLM pipeline.
 
 Supported skills:
@@ -167,6 +167,12 @@ def _extract_text(parts: list[dict]) -> str:
     return "\n".join(texts)
 
 
+def _normalize_role(role: str) -> str:
+    """Accept both v0.2 and v1.0 role formats."""
+    mapping = {"user": "ROLE_USER", "agent": "ROLE_AGENT"}
+    return mapping.get(role, role)
+
+
 # ── Main handler ─────────────────────────────────────────────────────
 
 async def handle_a2a_message(request_body: dict) -> dict:
@@ -191,13 +197,14 @@ async def handle_a2a_message(request_body: dict) -> dict:
     if not user_text.strip():
         return _make_error(rpc_id, -32602, "Invalid params: no text content in parts")
 
-    task_id = params.get("taskId") or str(uuid.uuid4())
-    context_id = params.get("contextId") or str(uuid.uuid4())
-    timeout_ms = (params.get("config") or {}).get("timeoutMs", 120_000)
+    task_id = str(uuid.uuid4())
+    context_id = message.get("contextId") or str(uuid.uuid4())
 
-    # Skill routing
-    skill_id = (params.get("config") or {}).get("skillId")
-    # Also check metadata for skill hint
+    # v1.0: configuration (also accept legacy "config" for interop)
+    configuration = params.get("configuration") or params.get("config") or {}
+
+    # Skill routing: check configuration, then metadata
+    skill_id = configuration.get("skillId")
     if not skill_id:
         skill_id = (params.get("metadata") or {}).get("skillId")
 
@@ -221,13 +228,14 @@ async def handle_a2a_message(request_body: dict) -> dict:
         max_rounds = 20
         budget = float(_config.get("chat_budget", 0.30)) or 0.30
 
+    timeout_sec = 120
     history = [{"role": "user", "content": user_text}]
 
     # Run LLM
     try:
         answer = await asyncio.wait_for(
             _run_llm(history, system_prompt, tools, handlers, max_rounds, budget),
-            timeout=timeout_ms / 1000,
+            timeout=timeout_sec,
         )
     except asyncio.TimeoutError:
         return _make_error(rpc_id, -32000, "Task timed out")
@@ -235,26 +243,37 @@ async def handle_a2a_message(request_body: dict) -> dict:
         logger.error("A2A LLM error: %s", e)
         return _make_error(rpc_id, -32000, f"Internal error: {type(e).__name__}")
 
-    # Build A2A Task response
+    # Build A2A v1.0 Task response
+    user_msg_id = message.get("messageId") or str(uuid.uuid4())
+    agent_msg_id = str(uuid.uuid4())
+
     task = {
         "id": task_id,
         "contextId": context_id,
         "status": {
-            "state": "completed",
+            "state": "TASK_STATE_COMPLETED",
             "timestamp": _now_iso(),
         },
         "history": [
-            {"role": "user", "parts": parts},
-            {"role": "agent", "parts": [{"text": answer}]},
+            {
+                "messageId": user_msg_id,
+                "role": "ROLE_USER",
+                "parts": parts,
+            },
+            {
+                "messageId": agent_msg_id,
+                "role": "ROLE_AGENT",
+                "parts": [{"text": answer}],
+            },
         ],
         "artifacts": [
             {
+                "artifactId": str(uuid.uuid4()),
                 "name": "response",
-                "parts": [{"type": "text", "text": answer}],
+                "parts": [{"text": answer}],
             }
         ],
         "metadata": {"skillId": skill_id} if skill_id else {},
-        "kind": "task",
     }
 
     return {

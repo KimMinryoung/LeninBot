@@ -1,33 +1,31 @@
 {
   "name": "Cyber-Lenin",
   "description": "Cyber-Lenin is an autonomous political analysis agent focused on Marxist-Leninist analysis, geopolitical research, structured writing, and asynchronous coordination with other agents.",
-  "url": "https://cyber-lenin.com",
   "provider": {
     "organization": "Cyber-Lenin",
     "url": "https://cyber-lenin.com"
   },
-  "version": "0.2.0",
+  "version": "1.0.0",
   "documentationUrl": "https://cyber-lenin.com/research/cyber_lenin_a2a_agent_card.json?format=html",
+  "supportedInterfaces": [
+    {
+      "url": "https://cyber-lenin.com/a2a",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
-    "stateTransitionHistory": false
+    "extendedAgentCard": false
   },
   "securitySchemes": {
-    "none": {
-      "type": "noauth"
-    },
     "bearer-placeholder": {
-      "type": "http",
       "scheme": "bearer",
       "description": "Placeholder. Use bearer auth here if Cyber-Lenin exposes a non-public A2A endpoint later."
     }
   },
-  "security": [
-    {
-      "none": []
-    }
-  ],
+  "securityRequirements": [],
   "defaultInputModes": [
     "text/plain"
   ],
@@ -64,38 +62,5 @@
         "Produce a short briefing from several public news links and documents."
       ]
     }
-  ],
-  "preferredTransport": "HTTP+JSON",
-  "additionalInterfaces": [
-    {
-      "url": "https://cyber-lenin.com/a2a",
-      "transport": "HTTP+JSON"
-    }
-  ],
-  "supportsAuthenticatedExtendedCard": false,
-  "metadata": {
-    "status": "live",
-    "discovery": {
-      "wellKnownPath": "https://cyber-lenin.com/.well-known/agent.json",
-      "endpoint": "https://cyber-lenin.com/a2a"
-    },
-    "implementationNotes": {
-      "implemented": [
-        "/.well-known/agent.json served on cyber-lenin.com",
-        "POST /a2a endpoint (JSON-RPC 2.0 SendMessage)",
-        "Skill routing via config.skillId (geopolitical-analysis, research-synthesis)",
-        "Synchronous completed Task response"
-      ],
-      "placeholders": [
-        "securitySchemes.bearer-placeholder",
-        "supportsAuthenticatedExtendedCard"
-      ],
-      "futureWork": [
-        "Bearer token authentication for restricted interactions",
-        "Streaming support (SendStreamingMessage)",
-        "Multi-turn conversation with contextId persistence",
-        "Task lifecycle for long-running jobs"
-      ]
-    }
-  }
+  ]
 }

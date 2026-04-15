@@ -635,13 +635,24 @@ async def clear_session(session_id: str):
     return {"session_id": session_id, "cleared": len(result) if result else 0}
 
 
-@app.get("/.well-known/agent.json")
-async def a2a_agent_card():
-    """Serve the public A2A example Agent Card for discovery."""
+async def _serve_agent_card():
+    """Serve the public A2A Agent Card for discovery."""
     filepath = RESEARCH_DIR / "cyber_lenin_a2a_agent_card.json"
     if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Agent card not found")
     return Response(content=filepath.read_text(encoding="utf-8"), media_type="application/json; charset=utf-8")
+
+
+@app.get("/.well-known/agent-card.json")
+async def a2a_agent_card_v1():
+    """v1.0 canonical discovery endpoint."""
+    return await _serve_agent_card()
+
+
+@app.get("/.well-known/agent.json")
+async def a2a_agent_card_legacy():
+    """Legacy discovery endpoint (v0.2 compat)."""
+    return await _serve_agent_card()
 
 
 @app.post("/a2a")

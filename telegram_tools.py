@@ -1901,8 +1901,9 @@ CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
         "Check the email inbox AND spam/junk folder (lenin@cyber-lenin.com) for recent messages. "
-        "Returns subject, sender, date, folder, read status, and all links found in the email body. "
-        "Use this to find confirmation/magic links from newsletter signups. "
+        "Returns subject, sender, date, folder, read status, extracted body text, and links found in the email body. "
+        "Prefer text/plain when available; otherwise derive readable text from text/html. "
+        "Use this to inspect actual email contents, including confirmation codes or reply text. "
         "Unread emails are marked as [UNREAD]. Emails found in Junk are marked as [JUNK]."
     ),
     "input_schema": {
@@ -1926,6 +1927,16 @@ CHECK_INBOX_TOOL = {
                 "description": "Max emails to return (default 5, max 20).",
                 "default": 5,
             },
+            "include_body": {
+                "type": "boolean",
+                "description": "If true, include extracted body text. Default: true.",
+                "default": True,
+            },
+            "body_max_chars": {
+                "type": "integer",
+                "description": "Maximum extracted body characters per email (default 4000, max 12000).",
+                "default": 4000,
+            },
         },
         "required": [],
     },
@@ -1946,10 +1957,11 @@ def _imap_connect():
     return conn
 
 
-def _parse_email_message(raw_bytes):
-    """Parse a raw email and return dict with subject, from, date, links."""
+def _parse_email_message(raw_bytes, *, include_body: bool = True, body_max_chars: int = 4000):
+    """Parse a raw email and return dict with subject, from, date, links, and extracted body text."""
     import email as _email
     from email.header import decode_header
+    from html import unescape
     import re
 
     msg = _email.message_from_bytes(raw_bytes)
@@ -1965,31 +1977,82 @@ def _parse_email_message(raw_bytes):
     sender = msg.get("From", "")
     date = msg.get("Date", "")
 
-    body = ""
+    def _decode_payload(part):
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            raw = part.get_payload()
+            if isinstance(raw, str):
+                return raw
+            if isinstance(raw, bytes):
+                payload = raw
+            else:
+                return ""
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            return payload.decode(charset, errors="replace")
+        except Exception:
+            return payload.decode("utf-8", errors="replace")
+
+    def _html_to_text(html: str) -> str:
+        text = re.sub(r"<\s*br\s*/?>", "\n", html, flags=re.IGNORECASE)
+        text = re.sub(r"</\s*(p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = unescape(text)
+        text = text.replace("\xa0", " ")
+        text = re.sub(r"\r\n?", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        return text.strip()
+
+    text_parts = []
+    html_parts = []
     if msg.is_multipart():
         for part in msg.walk():
-            ct = part.get_content_type()
-            if ct == "text/html":
-                body = part.get_payload(decode=True).decode(errors="replace")
-                break
-            elif ct == "text/plain" and not body:
-                body = part.get_payload(decode=True).decode(errors="replace")
+            content_disposition = (part.get("Content-Disposition") or "").lower()
+            if "attachment" in content_disposition:
+                continue
+            ct = (part.get_content_type() or "").lower()
+            if ct == "text/plain":
+                decoded = _decode_payload(part).strip()
+                if decoded:
+                    text_parts.append(decoded)
+            elif ct == "text/html":
+                decoded = _decode_payload(part).strip()
+                if decoded:
+                    html_parts.append(decoded)
     else:
-        body = msg.get_payload(decode=True).decode(errors="replace")
+        ct = (msg.get_content_type() or "").lower()
+        decoded = _decode_payload(msg).strip()
+        if ct == "text/html":
+            html_parts.append(decoded)
+        elif decoded:
+            text_parts.append(decoded)
 
-    links = re.findall(r'href=["\']?(https?://[^"\'\s<>]+)', body)
+    raw_body_for_links = "\n\n".join([*html_parts, *text_parts])
+    extracted_body = "\n\n".join(text_parts).strip()
+    if not extracted_body and html_parts:
+        extracted_body = "\n\n".join(_html_to_text(part) for part in html_parts if part.strip()).strip()
+    if body_max_chars > 0 and extracted_body:
+        extracted_body = extracted_body[:body_max_chars]
+
+    links = re.findall(r'https?://[^\s<>")\']+', raw_body_for_links)
     seen = set()
     unique_links = []
     for lnk in links:
-        if lnk not in seen:
-            seen.add(lnk)
-            unique_links.append(lnk)
+        cleaned = lnk.rstrip('.,);>\"\'')
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            unique_links.append(cleaned)
 
     return {
         "subject": subject,
         "from": sender,
         "date": date,
-        "links": unique_links[:20],
+        "links": unique_links[:50],
+        "body": extracted_body if include_body else "",
+        "body_truncated": bool(extracted_body) and body_max_chars > 0 and len(extracted_body) >= body_max_chars,
     }
 
 
@@ -1998,9 +2061,12 @@ async def _exec_check_inbox(
     subject_filter: str = "",
     unread_only: bool = False,
     limit: int = 5,
+    include_body: bool = True,
+    body_max_chars: int = 4000,
 ) -> str:
-    """Check IMAP INBOX + Junk folders and extract links from recent emails."""
+    """Check IMAP INBOX + Junk folders and extract readable body text plus links from recent emails."""
     limit = max(1, min(20, limit))
+    body_max_chars = max(0, min(12000, body_max_chars))
 
     def _fetch():
         conn = _imap_connect()
@@ -2008,44 +2074,48 @@ async def _exec_check_inbox(
             return "Error: IMAP credentials not configured in .env"
 
         results = []
-        for folder in ["INBOX", "Junk"]:
-            try:
-                status, _ = conn.select(folder, readonly=True)
-                if status != "OK":
-                    continue
-            except Exception:
-                continue
-
-            search_criteria = "UNSEEN" if unread_only else "ALL"
-            _, data = conn.search(None, search_criteria)
-            all_ids = data[0].split()
-            if not all_ids:
-                continue
-
-            candidate_ids = all_ids[-(limit * 3):]
-            candidate_ids.reverse()
-
-            for mid in candidate_ids:
-                if len(results) >= limit:
-                    break
-                _, msg_data = conn.fetch(mid, "(FLAGS RFC822)")
-                # Parse flags from response
-                flags_raw = msg_data[0][0] if isinstance(msg_data[0], tuple) else b""
-                is_read = b"\\Seen" in flags_raw
-                raw = msg_data[0][1]
-                parsed = _parse_email_message(raw)
-
-                if sender_filter and sender_filter.lower() not in parsed["from"].lower():
-                    continue
-                if subject_filter and subject_filter.lower() not in parsed["subject"].lower():
+        try:
+            for folder in ["INBOX", "Junk"]:
+                try:
+                    status, _ = conn.select(folder, readonly=True)
+                    if status != "OK":
+                        continue
+                except Exception:
                     continue
 
-                parsed["folder"] = folder
-                parsed["is_read"] = is_read
-                results.append(parsed)
+                search_criteria = "UNSEEN" if unread_only else "ALL"
+                _, data = conn.search(None, search_criteria)
+                all_ids = data[0].split()
+                if not all_ids:
+                    continue
 
-        conn.logout()
-        # Sort by date descending (newest first) across folders
+                candidate_ids = all_ids[-(limit * 5):]
+                candidate_ids.reverse()
+
+                for mid in candidate_ids:
+                    if len(results) >= limit:
+                        break
+                    _, msg_data = conn.fetch(mid, "(FLAGS RFC822)")
+                    if not msg_data or not isinstance(msg_data[0], tuple):
+                        continue
+                    flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
+                    raw = msg_data[0][1]
+                    if not raw:
+                        continue
+                    is_read = b"\\Seen" in flags_raw
+                    parsed = _parse_email_message(raw, include_body=include_body, body_max_chars=body_max_chars)
+
+                    if sender_filter and sender_filter.lower() not in parsed["from"].lower():
+                        continue
+                    if subject_filter and subject_filter.lower() not in parsed["subject"].lower():
+                        continue
+
+                    parsed["folder"] = folder
+                    parsed["is_read"] = is_read
+                    results.append(parsed)
+        finally:
+            conn.logout()
+
         results.sort(key=lambda x: x["date"], reverse=True)
         return results[:limit]
 
@@ -2070,6 +2140,13 @@ async def _exec_check_inbox(
         lines.append(f"[{i}]{tags} {em['subject']}")
         lines.append(f"    From: {em['from']}")
         lines.append(f"    Date: {em['date']}")
+        if include_body:
+            body = (em.get("body") or "").strip()
+            if body:
+                suffix = " …[truncated]" if em.get("body_truncated") else ""
+                lines.append(f"    Body:\n      {body.replace(chr(10), chr(10) + '      ')}{suffix}")
+            else:
+                lines.append("    Body: none")
         if em["links"]:
             lines.append(f"    Links ({len(em['links'])}):")
             for lnk in em["links"]:
@@ -2294,8 +2371,8 @@ A2A_SEND_TOOL = {
     "name": "a2a_send",
     "description": (
         "Send a message to an external A2A-compatible agent and get the response. "
-        "First discovers the agent via /.well-known/agent.json, then sends a SendMessage JSON-RPC request. "
-        "Use this to collaborate with other AI agents that support the A2A protocol.\n\n"
+        "Discovers the agent via /.well-known/agent-card.json (v1.0) or /.well-known/agent.json (legacy), "
+        "then sends a SendMessage JSON-RPC request.\n\n"
         "Examples:\n"
         "- a2a_send(agent_url='https://other-agent.com', message='Analyze the latest EU AI Act changes')\n"
         "- a2a_send(agent_url='https://other-agent.com', message='...', skill_id='research-synthesis')"
@@ -2313,7 +2390,7 @@ A2A_SEND_TOOL = {
             },
             "skill_id": {
                 "type": "string",
-                "description": "Optional skill ID to request from the target agent (passed as config.skillId).",
+                "description": "Optional skill ID to request from the target agent (passed as configuration.skillId).",
             },
             "timeout_sec": {
                 "type": "integer",
@@ -2348,16 +2425,23 @@ async def _exec_a2a_send(
         # Discovery mode
         if discover:
             try:
-                r = await client.get(f"{base}/.well-known/agent.json")
+                # v1.0 canonical path first, fallback to legacy
+                r = await client.get(f"{base}/.well-known/agent-card.json")
+                if r.status_code == 404:
+                    r = await client.get(f"{base}/.well-known/agent.json")
                 r.raise_for_status()
                 card = r.json()
                 name = card.get("name", "unknown")
                 skills = card.get("skills", [])
                 skill_list = ", ".join(s.get("id", "?") for s in skills) if skills else "none declared"
                 desc = card.get("description", "")
+                # Detect A2A endpoint from supportedInterfaces (v1.0) or url (legacy)
+                interfaces = card.get("supportedInterfaces", [])
+                endpoint = interfaces[0].get("url") if interfaces else card.get("url", base + "/a2a")
                 return (
                     f"Agent: {name}\n"
                     f"Description: {desc}\n"
+                    f"Endpoint: {endpoint}\n"
                     f"Skills: {skill_list}\n"
                     f"Full card:\n{json.dumps(card, indent=2, ensure_ascii=False)}"
                 )
@@ -2370,12 +2454,14 @@ async def _exec_a2a_send(
         if not message.strip():
             return "❌ message is required when discover=false"
 
+        msg_id = str(uuid.uuid4())
         payload = {
             "jsonrpc": "2.0",
             "method": "SendMessage",
             "params": {
                 "message": {
-                    "role": "user",
+                    "messageId": msg_id,
+                    "role": "ROLE_USER",
                     "parts": [{"text": message}],
                 },
             },
@@ -2383,7 +2469,7 @@ async def _exec_a2a_send(
         }
 
         if skill_id:
-            payload["params"]["config"] = {"skillId": skill_id}
+            payload["params"]["configuration"] = {"skillId": skill_id}
 
         try:
             r = await client.post(
@@ -2408,11 +2494,12 @@ async def _exec_a2a_send(
         status = result.get("status", {})
         state = status.get("state", "unknown")
 
-        # Extract agent reply text
+        # Extract agent reply text (accept both v1.0 and legacy role values)
         history = result.get("history", [])
         agent_reply = ""
         for msg in reversed(history):
-            if msg.get("role") == "agent":
+            role = msg.get("role", "")
+            if role in ("ROLE_AGENT", "agent"):
                 parts = msg.get("parts", [])
                 agent_reply = "\n".join(p.get("text", "") for p in parts if "text" in p)
                 break
