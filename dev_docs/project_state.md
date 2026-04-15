@@ -256,17 +256,18 @@ task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조
 
 `web_chat.py` — Telegram과 동일한 `claude_loop`/`openai_tool_loop` 파이프라인 사용. SSE 스트리밍으로 진행 상황 전달. 도구는 읽기 전용 서브셋 (vector_search, kg_search, web_search, fetch_url, get_finance_data, check_wallet). 항상 corporate LLM 사용 (local LLM 미사용).
 
-## A2A Protocol (Agent-to-Agent)
+## A2A Protocol (Agent-to-Agent) — v1.0
 
-`a2a_handler.py` — Google A2A JSON-RPC 2.0 `SendMessage` 구현. 외부 에이전트가 Cyber-Lenin과 대화 가능.
+`a2a_handler.py` — A2A v1.0 JSON-RPC 2.0 `SendMessage` 구현. 외부 에이전트가 Cyber-Lenin과 대화 가능.
 
-- **Discovery**: `GET /.well-known/agent.json` — Agent Card 제공
-- **Endpoint**: `POST /a2a` — 메시지 수신, 즉시 completed Task 반환
-- **스킬 라우팅**: `config.skillId`로 스킬별 프롬프트/도구셋 분기
+- **Discovery**: `GET /.well-known/agent-card.json` — v1.0 정규 경로 (레거시 `/.well-known/agent.json`도 호환 유지)
+- **Endpoint**: `POST /a2a` — 메시지 수신, 즉시 `TASK_STATE_COMPLETED` Task 반환
+- **스킬 라우팅**: `configuration.skillId`로 스킬별 프롬프트/도구셋 분기
   - `geopolitical-analysis`: KG + 이론 + 웹 검색 기반 구조화된 지정학 분석
   - `research-synthesis`: 멀티소스 수집 + 교차검증 리서치 보고서
   - (없음): 일반 대화
-- **아웃바운드**: `a2a_send` 도구 (diplomat 에이전트 전용) — 외부 A2A 에이전트 discover + SendMessage
+- **v1.0 준수 사항**: `TASK_STATE_*` / `ROLE_USER` / `ROLE_AGENT` enum, `messageId` / `artifactId` 필수 필드, `supportedInterfaces` 기반 Agent Card, `kind` 필드 제거
+- **아웃바운드**: `a2a_send` 도구 (diplomat 에이전트 전용) — `agent-card.json` 우선 디스커버리 + `agent.json` 폴백, v1.0 SendMessage
 
 ---
 
@@ -358,12 +359,22 @@ leninbot/
 
 ## Recent Changes
 
+### 2026-04-15 — A2A v1.0 업그레이드
+
+#### A2A v1.0 스펙 준수 (`a2a_handler.py`, `api.py`, `telegram_tools.py`, `research/cyber_lenin_a2a_agent_card.json`)
+- Agent Card: `supportedInterfaces` 배열, `securityRequirements`, `capabilities.extendedAgentCard` (레거시 `url`/`preferredTransport`/`additionalInterfaces`/`security` 제거)
+- 디스커버리: `GET /.well-known/agent-card.json` 정규 경로 추가 (레거시 `agent.json` 호환 유지)
+- 응답 포맷: `TASK_STATE_COMPLETED`, `ROLE_USER`/`ROLE_AGENT`, `messageId`/`artifactId` 필수 필드, `kind` 제거
+- 요청 파라미터: `config` → `configuration` (하위호환 위해 둘 다 수용)
+- 아웃바운드 클라이언트: `agent-card.json` 우선 디스커버리, v1.0 payload (`messageId`, `ROLE_USER`, `configuration`)
+- nginx: `/.well-known/agent-card.json`, `/.well-known/agent.json`, `/a2a` → FastAPI 백엔드(:8000) 직접 프록시 (프론트엔드 CSRF 우회)
+
 ### 2026-04-10 — A2A Protocol, Diplomat Agent
 
 #### A2A Protocol Implementation (`a2a_handler.py`, `api.py`)
-- `POST /a2a` — JSON-RPC 2.0 `SendMessage` 엔드포인트
+- `POST /a2a` — JSON-RPC 2.0 `SendMessage` 엔드포인트 (초기 v0.2 구현)
 - 스킬 라우팅: `config.skillId`로 geopolitical-analysis / research-synthesis 분기 (전용 프롬프트 + 도구셋)
-- Agent Card (`/.well-known/agent.json`) 서빙 + nginx 프록시 설정 스크립트
+- Agent Card (`/.well-known/agent.json`) 서빙
 - web_chat.py LLM 파이프라인 재활용, SSE 없이 동기 응답
 
 #### Diplomat Agent — Kollontai (`agents/kollontai.py`, `telegram_tools.py`)
