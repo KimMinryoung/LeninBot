@@ -387,14 +387,10 @@ def search_ticker(query: str, max_results: int = 5) -> list[dict]:
 FINANCE_TOOL = {
     "name": "get_finance_data",
     "description": (
-        "Get financial market data. Preset assets: gold, silver, DXY, WTI/Brent oil, "
-        "S&P 500, US 10Y yield, KOSPI, BTC, ETH, SOL, USDC. "
-        "Also supports any yfinance ticker (stocks, crypto, forex). "
-        "Use 'query' to search by name when you don't know the ticker symbol. "
-        "Korean stocks can be queried in Korean (e.g. '삼성전자', '카카오'). "
-        "For all other assets, use English names or ticker symbols "
-        "(e.g. 'Apple', 'AAPL', 'bitcoin', 'BTC-USD', 'EURUSD=X'). "
-        "Supports historical period data and news headlines."
+        "Market data via yfinance. Presets: gold, silver, DXY, WTI/Brent, "
+        "S&P 500, US 10Y, KOSPI, BTC, ETH, SOL, USDC. Accepts any yfinance "
+        "ticker (stocks/crypto/forex). `query` resolves a name to a ticker "
+        "(Korean names OK for KR stocks). Optional period + news headlines."
     ),
     "input_schema": {
         "type": "object",

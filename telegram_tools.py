@@ -1027,19 +1027,9 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
 RESTART_SERVICE_TOOL = {
     "name": "restart_service",
     "description": (
-        "Safely restart a leninbot service (telegram, api, browser, or all). "
-        "Pre-restart validation: 1) syntax check all .py files with uncommitted changes, "
-        "2) import-level check on key entry points (telegram_bot.py, api.py, browser_worker.py). "
-        "If validation fails, restart is blocked and errors are returned. "
-        "Use this instead of execute_python + subprocess for restarts.\n\n"
-        "FILE → SERVICE MAPPING (pick the right service based on which files you changed):\n"
-        "- telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, "
-        "telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, "
-        "agents/*.py, redis_state.py\n"
-        "- api: api.py, web_chat.py\n"
-        "- browser: browser_worker.py\n"
-        "- all: changes to db.py, embedding_server.py, or files used by multiple services\n"
-        "If unsure, check which service imports the file you changed."
+        "Restart a leninbot service with pre-flight syntax + import checks. "
+        "Use instead of execute_python+subprocess. "
+        "File→service mapping (and detailed procedure) lives in the programmer agent prompt."
     ),
     "input_schema": {
         "type": "object",
@@ -1047,7 +1037,7 @@ RESTART_SERVICE_TOOL = {
             "service": {
                 "type": "string",
                 "enum": ["telegram", "api", "browser", "all"],
-                "description": "Which service to restart. Default: telegram.",
+                "description": "telegram=bot+agents, api=web+a2a, browser=browser worker, all=multi-service code. Default: telegram.",
             },
         },
         "required": [],
@@ -1615,26 +1605,16 @@ TOOL_HANDLERS["pay_and_fetch"] = PAY_AND_FETCH_TOOL_HANDLER
 
 # ── Image generation tool (Replicate) ─────────────────────────────────
 def _build_generate_image_description() -> str:
-    """Build generate_image description with live model schemas."""
-    base = (
-        "Generate an image using Replicate models. "
-        "Returns prediction_id, model, final prompt, image URL, and local file path.\n\n"
-        "IMPORTANT: Each model accepts DIFFERENT parameters. "
-        "Check the per-model parameter list below and only use parameters valid for your chosen model.\n\n"
+    """Short generate_image description. The full per-model parameter schemas
+    live in replicate_image_service and are only surfaced when the agent hits
+    an actual parameter rejection — keeping them out of the system prompt saves
+    ~1.5K tokens per turn for a tool most agents never call.
+    """
+    return (
+        "Generate image via Replicate. Returns prediction_id, model, final "
+        "prompt, image URL, local path. reference_image: FLUX editing only "
+        "(local path / URL / data URI) — never with rd_fast / rd_plus."
     )
-    try:
-        from replicate_image_service import get_model_schemas_description
-        schemas = get_model_schemas_description()
-        if schemas:
-            base += f"Model parameters (from Replicate API):\n{schemas}\n\n"
-    except Exception:
-        pass
-    base += (
-        "reference_image: For FLUX editing only (local path, URL, or data URI). "
-        "Do not use with rd_fast or rd_plus. "
-        "You design the prompt; this tool executes it."
-    )
-    return base
 
 
 GENERATE_IMAGE_TOOL = {
@@ -1650,7 +1630,7 @@ GENERATE_IMAGE_TOOL = {
             "style": {
                 "type": "string",
                 "enum": ["poster", "game", "pixel", "portrait", "detailed", "game_asset", "1_bit", "low_res", "mc_item", "default", "retro", "watercolor", "textured", "cartoon", "ui_element", "item_sheet", "character_turnaround", "environment", "isometric", "isometric_asset", "topdown_map", "topdown_asset", "classic", "topdown_item", "mc_texture", "skill_icon"],
-                "description": "Visual style preset. For FLUX use poster/game/pixel. For Retro Diffusion aliases: portrait→default, detailed→retro, game_asset→isometric_asset, 1_bit→classic. Direct Retro Diffusion styles also supported: default, retro, watercolor, textured, cartoon, ui_element, item_sheet, character_turnaround, environment, isometric, isometric_asset, topdown_map, topdown_asset, classic, topdown_item, low_res, mc_item, mc_texture, skill_icon. Default: poster.",
+                "description": "FLUX: poster | game | pixel. Retro Diffusion: default / retro / pixel / isometric_asset etc. (aliases accepted). Default: poster.",
             },
             "aspect_ratio": {
                 "type": "string",
@@ -1900,11 +1880,9 @@ TOOL_HANDLERS["browse_web"] = _exec_browse_web
 CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
-        "Check the email inbox AND spam/junk folder (lenin@cyber-lenin.com) for recent messages. "
-        "Returns subject, sender, date, folder, read status, extracted body text, and links found in the email body. "
-        "Prefer text/plain when available; otherwise derive readable text from text/html. "
-        "Use this to inspect actual email contents, including confirmation codes or reply text. "
-        "Unread emails are marked as [UNREAD]. Emails found in Junk are marked as [JUNK]."
+        "Read lenin@cyber-lenin.com INBOX + Junk. Returns subject, sender, "
+        "date, folder, read status, body text, and any links. Unread → "
+        "[UNREAD], junk → [JUNK]."
     ),
     "input_schema": {
         "type": "object",
@@ -2370,12 +2348,9 @@ TOOL_HANDLERS["moltbook"] = _exec_moltbook
 A2A_SEND_TOOL = {
     "name": "a2a_send",
     "description": (
-        "Send a message to an external A2A-compatible agent and get the response. "
-        "Discovers the agent via /.well-known/agent-card.json (v1.0) or /.well-known/agent.json (legacy), "
-        "then sends a SendMessage JSON-RPC request.\n\n"
-        "Examples:\n"
-        "- a2a_send(agent_url='https://other-agent.com', message='Analyze the latest EU AI Act changes')\n"
-        "- a2a_send(agent_url='https://other-agent.com', message='...', skill_id='research-synthesis')"
+        "Send a SendMessage JSON-RPC request to an external A2A agent. "
+        "Auto-discovers the agent's card at /.well-known/agent-card.json "
+        "(v1.0) or /agent.json (legacy). Optional `skill_id` scopes the call."
     ),
     "input_schema": {
         "type": "object",

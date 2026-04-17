@@ -82,13 +82,11 @@ SELF_TOOLS = [
     {
         "name": "write_kg",
         "description": (
-            "Store facts to Knowledge Graph via free-text + LLM extraction. "
-            "Use this for narrative content (news articles, reports, long-form text) where letting the "
-            "LLM decompose many facts at once is more efficient than asserting each one structured. "
-            "For precise single-fact assertions where YOU want full control over subject/predicate/object, "
-            "use `write_kg_structured` instead — it's deterministic and skips LLM extraction.\n"
-            "DO NOT store: internal system state (code structure, config, tool schemas, bug status), "
-            "task execution details, debugging logs, or anything derivable by reading the codebase."
+            "Narrative-mode KG writer: feed free-text (news articles, reports, "
+            "long-form prose) and let the LLM extract multiple facts at once. "
+            "For precise single-fact asserts use `write_kg_structured` instead. "
+            "DO NOT store: internal system state (code/config/tool schemas), "
+            "task execution details, or anything derivable from the codebase."
         ),
         "input_schema": {
             "type": "object",
@@ -123,43 +121,14 @@ SELF_TOOLS = [
     {
         "name": "write_kg_structured",
         "description": (
-            "Store typed (subject, predicate, object) facts to the Knowledge Graph deterministically. "
-            "Bypasses LLM extraction — YOU specify each entity's type and the predicate. "
-            "Use this when you want PRECISE control: agent-asserted single facts, "
-            "structured analyst conclusions, KG corrections. Recommended for `agent_knowledge` group.\n"
-            "\n"
-            "Entity types (10): "
-            "Person (actual humans, NOT roles), "
-            "Organization (institutional bodies), "
-            "Location, "
-            "Asset (technologies/products/IP), "
-            "Incident (specific time-bounded events), "
-            "Policy (laws/sanctions/treaties), "
-            "Campaign (sustained operations/movements), "
-            "Concept (ideologies/theories/social classes/eras), "
-            "Role (titles/positions distinct from holder), "
-            "Industry (economic sectors above specific orgs).\n"
-            "\n"
-            "Predicates (12): "
-            "Affiliation (Person↔Org, Person↔Role, Org↔Industry), "
-            "PersonalRelation (Person↔Person), "
-            "OrgRelation (Org↔Org), "
-            "Funding (any↔any), AssetTransfer (any↔any), "
-            "ThreatAction (X targets Y militarily/cyber), "
-            "Involvement (X in Incident/Campaign), "
-            "Presence (X↔Location), "
-            "PolicyEffect (Policy↔target), "
-            "Participation (X↔Campaign), "
-            "**Statement** (speaker → topic for any speech act: said/announced/criticized/endorsed/quoted), "
-            "**Causation** (cause → effect, explicit causal claim).\n"
-            "\n"
-            "Each fact requires the natural-language `fact` text — that's what gets embedded "
-            "for vector search and shows up in retrieval results. Make it self-contained "
-            "(don't write 'they did X' — write 'Anthropic announced Claude Opus 4.6 on 2026-04-11').\n"
-            "\n"
-            "If the subject or object already exists in the KG by exact name, this tool reuses it. "
-            "If not, it creates a new entity with the type label you specified. "
-            "Long-form narrative content should use `write_kg` instead."
+            "Deterministic typed-triple writer for the KG. No LLM extraction — "
+            "you pick every subject_type / predicate / object_type from the "
+            "enums. Use for precise single-fact asserts, analyst conclusions, "
+            "KG corrections. For long-form narrative prose use `write_kg`. "
+            "Existing entities are matched by exact name; unknown names create "
+            "new nodes with your declared type. `fact` must be self-contained "
+            "(e.g. 'Anthropic announced Claude Opus 4.6 on 2026-04-11'), "
+            "because it is what gets embedded for vector search."
         ),
         "input_schema": {
             "type": "object",
@@ -177,6 +146,7 @@ SELF_TOOLS = [
                                 "enum": ["Person", "Organization", "Location", "Asset",
                                          "Incident", "Policy", "Campaign", "Concept",
                                          "Role", "Industry"],
+                                "description": "Person=actual human (not title), Organization=institution, Asset=tech/product/IP, Incident=time-bounded event, Policy=law/sanction/treaty, Campaign=sustained op, Concept=ideology/theory, Role=title (distinct from holder), Industry=sector.",
                             },
                             "predicate": {
                                 "type": "string",
@@ -184,6 +154,7 @@ SELF_TOOLS = [
                                          "Funding", "AssetTransfer", "ThreatAction",
                                          "Involvement", "Presence", "PolicyEffect", "Participation",
                                          "Statement", "Causation"],
+                                "description": "Affiliation (Person↔Org/Role), PersonalRelation (Person↔Person), OrgRelation (Org↔Org), Funding / AssetTransfer (any↔any), ThreatAction (military/cyber), Involvement (Incident/Campaign), Presence (↔Location), PolicyEffect, Participation, Statement (speech act: said/announced/criticized), Causation (cause→effect).",
                             },
                             "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
                             "object_type": {
@@ -191,6 +162,7 @@ SELF_TOOLS = [
                                 "enum": ["Person", "Organization", "Location", "Asset",
                                          "Incident", "Policy", "Campaign", "Concept",
                                          "Role", "Industry"],
+                                "description": "Same semantic rules as subject_type.",
                             },
                             "fact": {
                                 "type": "string",
@@ -218,17 +190,9 @@ SELF_TOOLS = [
     {
         "name": "delegate",
         "description": (
-            "Delegate a task to a specialized agent. Runs asynchronously in background.\n"
-            "Agents:\n"
-            "- analyst: information analysis/research (web search + KG + pattern extraction + knowledge storage) ($1.00)\n"
-            "- programmer: code writing/editing/debugging ($1.50)\n"
-            "- scout: Moltbook activity (post/comment/patrol/scan), routine patrols, large-scale crawling ($1.00)\n"
-            "- visualizer: image generation ($1.00)\n"
-            "- browser: website login/form submission/browser automation ($1.50)\n"
-            "- diplomat: external communications — A2A agent messaging, email send/receive ($1.00)\n"
-            "Research/analysis → analyst. Code → programmer. Images → visualizer. Moltbook/crawling → scout. Web automation → browser. Email/A2A → diplomat.\n"
-            "IMPORTANT: Always provide context — summarize the conversation and your reasoning "
-            "so the agent understands WHY this task exists and WHAT the user wants."
+            "Dispatch an async task to one specialist agent. Always pass `context` "
+            "(conversation summary + why this agent). Agent roster and routing rules "
+            "are in the orchestrator prompt's <delegation> section."
         ),
         "input_schema": {
             "type": "object",

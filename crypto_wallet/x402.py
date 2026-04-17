@@ -505,16 +505,11 @@ async def pay_and_fetch(
 PAY_AND_FETCH_TOOL = {
     "name": "pay_and_fetch",
     "description": (
-        "Fetch a URL that requires an x402 payment. Supports both GET and POST. "
-        "Performs the full client round-trip: request → 402 PaymentRequirements → "
-        "sign EIP-3009 USDC transferWithAuthorization → retry with PAYMENT-SIGNATURE header. "
-        "Hard-capped per call (default $0.05 USDC). Use only when a normal "
-        "fetch_url returns 402 or you specifically need a paid resource. "
-        "Returns the response body plus settlement details (tx hash, gas used). "
-        "DEMO ENDPOINT: http://localhost:8000/x402-demo/quote — leninbot's own "
-        "API exposes a self-loop x402 route that demands 0.001 USDC and returns "
-        "an aphorism. Use that URL whenever the user asks for an x402 demo "
-        "without naming a specific provider."
+        "Fetch an x402-paywalled URL (GET/POST). Auto-signs USDC on 402 "
+        "response and retries. Hard-capped $0.05/call by default. Returns body "
+        "+ settlement details. Demo: http://localhost:8000/x402-demo/quote "
+        "(self-loop, 0.001 USDC) — use this when asked for an x402 demo with "
+        "no specific target."
     ),
     "input_schema": {
         "type": "object",
