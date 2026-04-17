@@ -77,8 +77,41 @@ def _calculate_cost(usage, model: str) -> float:
 
 # ── Anthropic → OpenAI tool format conversion ────────────────────────
 
+def _is_strict_safe_schema(params: dict) -> bool:
+    """Whether a JSON schema is safe to use with OpenAI's strict mode.
+
+    Strict mode additionally requires:
+      * ``required`` must list every property name in ``properties``.
+      * No property may carry a ``default`` (strict mode drops the default
+        silently, which masks bugs).
+      * ``anyOf`` / ``oneOf`` at the top level of a property is partially
+        supported and pragmatically best avoided to keep the API happy.
+    """
+    if params.get("type") != "object":
+        return False
+    props = params.get("properties") or {}
+    required = set(params.get("required") or [])
+    if any(pname not in required for pname in props):
+        return False
+    for p in props.values():
+        if not isinstance(p, dict):
+            continue
+        if "default" in p:
+            return False
+        if "anyOf" in p or "oneOf" in p:
+            return False
+    return True
+
+
 def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
-    """Anthropic tool definition → OpenAI function tool definition."""
+    """Anthropic tool definition → OpenAI function tool definition.
+
+    ``additionalProperties: false`` is propagated unconditionally so both
+    llama-server's constrained decoding and OpenAI's validator benefit.
+    The ``strict: true`` flag — which also forces OpenAI to enforce
+    ``required`` coverage — is only set when the schema actually meets
+    strict-mode's preconditions, otherwise the API rejects the tool list.
+    """
     params = tool.get("input_schema", {"type": "object", "properties": {}})
     params = {k: v for k, v in params.items() if k != "cache_control"}
     func_def: dict = {
@@ -86,7 +119,7 @@ def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
         "description": tool.get("description", ""),
         "parameters": params,
     }
-    if params.get("additionalProperties") is False:
+    if params.get("additionalProperties") is False and _is_strict_safe_schema(params):
         func_def["strict"] = True
     return {"type": "function", "function": func_def}
 

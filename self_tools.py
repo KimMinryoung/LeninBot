@@ -59,6 +59,7 @@ SELF_TOOLS = [
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
                              "kg_status", "system_status", "server_logs", "recent_updates",
                              "file_registry"],
+                    "description": "Which internal store to read — see tool description for per-source semantics.",
                 },
                 "limit": {"type": "integer", "description": "Results count."},
                 "keyword": {"type": "string", "description": "Filter keyword."},
@@ -108,6 +109,7 @@ SELF_TOOLS = [
                 "source_type": {
                     "type": "string",
                     "enum": ["internal_report", "osint_news", "osint_social", "personnel_change", "diplomatic_cable", "threat_report"],
+                    "description": "Provenance tag for the stored facts. Default: internal_report.",
                     "default": "internal_report",
                 },
                 "supersedes": {
@@ -206,6 +208,7 @@ SELF_TOOLS = [
                 "group_id": {
                     "type": "string",
                     "enum": ["geopolitics_conflict", "diplomacy", "economy", "korea_domestic", "agent_knowledge"],
+                    "description": "Topic group bucket for later retrieval. Default: agent_knowledge.",
                     "default": "agent_knowledge",
                 },
             },
@@ -304,7 +307,11 @@ SELF_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["query", "delete_episode", "merge_entities"]},
+                "action": {
+                    "type": "string",
+                    "enum": ["query", "delete_episode", "merge_entities"],
+                    "description": "query: run Cypher (needs `query`). delete_episode: remove by episode name. merge_entities: fold `source_name` into `target_name`.",
+                },
                 "query": {"type": "string", "description": "Cypher query (action=query)."},
                 "write": {"type": "boolean", "description": "Allow writes (action=query). Default false."},
                 "episode_name": {"type": "string", "description": "Episode name (action=delete_episode)."},

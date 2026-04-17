@@ -72,7 +72,7 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string"},
+                "url": {"type": "string", "description": "Absolute URL of the file to download (http/https)."},
                 "filename": {"type": "string", "description": "Optional; auto from URL."},
             },
             "required": ["url"],
@@ -2521,3 +2521,26 @@ async def _exec_a2a_send(
 
 TOOLS.append(A2A_SEND_TOOL)
 TOOL_HANDLERS["a2a_send"] = _exec_a2a_send
+
+
+# ── Schema normalization ─────────────────────────────────────────────
+#
+# Runs last — after every module-level TOOLS.append/extend above — so every
+# registered tool acquires ``additionalProperties: false`` unless it
+# deliberately opts out. Effects per provider:
+#   * llama-server: constrains grammar-based tool-call decoding so Qwen
+#     can't emit parameter names outside the declared schema.
+#   * Anthropic: treats it as advisory (no behavioral change).
+#   * OpenAI: strict mode is enabled only when the schema is also
+#     "strict-safe" (see openai_tool_loop._convert_tool_anthropic_to_openai).
+
+def _normalize_tool_schemas_inplace(tools: list[dict]) -> None:
+    for t in tools:
+        schema = t.get("input_schema")
+        if not isinstance(schema, dict):
+            continue
+        if schema.get("type") == "object" and "additionalProperties" not in schema:
+            schema["additionalProperties"] = False
+
+
+_normalize_tool_schemas_inplace(TOOLS)
