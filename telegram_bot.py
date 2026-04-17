@@ -579,13 +579,12 @@ Context passing — agents automatically receive recent conversation and their o
 
 <mission-management>
 - Missions are auto-created when delegate is called. The user does not need to create them explicitly.
-- Check the task status in `<current_state>` to determine whether the mission is complete.
-- **Mission close condition**: Only call `mission(action="close")` when the user's original goal has been **fully achieved**.
-- **Do NOT close when**:
-  - Task results contain incomplete reasons such as "budget exhausted", "limit reached", "stopped due to error"
-  - `<not_started>` or `<in_progress>` tasks remain
-  - The user may issue follow-up work
-- If incomplete tasks remain, delegate follow-up work or keep the mission open.
+- The `<active-mission>` block (when present) shows the current mission's title and event timeline. Read it before every turn to decide whether the user's new message still belongs to that mission.
+- **Call `mission(action="close")` when ANY of these hold:**
+  - The user's original goal for the active mission has been fully achieved.
+  - **Topic drift**: the user's current message is clearly on a different topic from the active mission's title/timeline. A topic switch implicitly abandons the old mission — close it so the next `delegate` call opens a fresh mission aligned with the new topic. Do this even when the prior mission had in-progress or budget-interrupted tasks; stale missions pollute future context.
+- **Do NOT close solely because** task results mention "budget exhausted" / "limit reached" / "stopped due to error" — if the user is still pursuing that same topic, leave the mission open and delegate follow-up work.
+- When you close a mission because of topic drift, you don't need to manually create a replacement — just proceed with the new topic; if a delegate is needed, a fresh mission will be auto-created from it.
 </mission-management>
 
 <temporal-awareness>
@@ -660,6 +659,26 @@ def _normalize_history_content(content) -> str:
         return ""
 
     return str(content)
+
+
+def _truncate_for_prompt(text: str, limit: int) -> str:
+    """Slice `text` to `limit` chars and append an explicit truncation marker.
+
+    The marker tells the orchestrator that cropping is display-only — the
+    agent's underlying output is complete. Without this, the orchestrator
+    (observed with opus 4.7) mistakes a mid-sentence cut for the agent
+    having run out of budget and triggers spurious re-delegation.
+    """
+    if not text or len(text) <= limit:
+        return text or ""
+    omitted = len(text) - limit
+    return (
+        text[:limit]
+        + f"\n\n[⚠ TRUNCATED FOR PROMPT DISPLAY: showing {limit} of {len(text)} chars "
+        f"({omitted} omitted). The agent's output is COMPLETE and stored in full; "
+        "this cropping is for prompt size only. Do NOT interpret the cut-off as the "
+        "agent running out of budget or work being incomplete.]"
+    )
 
 
 def _load_chat_history(user_id: int) -> list[dict]:
@@ -1428,12 +1447,12 @@ async def bot_main():
                 # If report is thin but tool_log has substance, include tool_log
                 tool_log_section = ""
                 if tool_log and (len(report) < 200 or was_interrupted):
-                    tool_log_section = f"\n\nAgent work log (tool call history):\n{tool_log[:5000]}"
+                    tool_log_section = f"\n\nAgent work log (tool call history):\n{_truncate_for_prompt(tool_log, 5000)}"
 
                 prompt = (
                     f"[TASK REPORT] Task #{task_id} [{agent_type}] completed{' (interrupted)' if was_interrupted else ''}\n\n"
-                    f"Original request:\n{task.get('content', '')[:1000]}\n\n"
-                    f"Execution result:\n{report[:3000]}"
+                    f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
+                    f"Execution result:\n{_truncate_for_prompt(report, 3000)}"
                     f"{tool_log_section}"
                     f"{interrupted_note}\n\n"
                     f"## Your role\n"
@@ -1449,7 +1468,7 @@ async def bot_main():
                 error = result.get("error", "unknown error")
                 prompt = (
                     f"[TASK REPORT] Task #{task_id} [{agent_type}] failed\n\n"
-                    f"Original request:\n{task.get('content', '')[:500]}\n\n"
+                    f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 500)}\n\n"
                     f"Error: {error}\n\n"
                     f"Inform the user of the failure and its cause concisely. "
                     f"Do not re-delegate if the issue would not be resolved by retrying."
@@ -1463,10 +1482,12 @@ async def bot_main():
             history.append({"role": "user", "content": prompt})
 
             # Run orchestrator — budget enough for response + optional redelegate call
+            from telegram_tools import build_mission_handler
             reply = await _chat_with_tools(
                 history,
                 budget_usd=0.15,
                 max_rounds=5,
+                extra_handlers={"mission": build_mission_handler(chat_id)},
             )
 
             # Save orchestrator reply to chat history (system event to separate table)
