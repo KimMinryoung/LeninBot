@@ -19,7 +19,6 @@ from aiogram.types import (
 from aiogram.filters import Command
 
 from shared import KST
-from skills_loader import build_skills_prompt
 from claude_loop import sanitize_messages
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
@@ -1251,23 +1250,16 @@ async def handle_message(message: Message):
         state_context = "\n" + state_context
 
     try:
-        system_override = None
         extra_context = (experience_context or "") + mission_context + state_context
-        if extra_context:
-            system_override = _ctx["SYSTEM_PROMPT_TEMPLATE"].format(
-                current_datetime=_ctx["current_datetime_str"](),
-                current_model=_ctx["format_current_model_context"]("chat"),
-                system_alerts=_ctx["format_system_alerts"](),
-                skills_section=build_skills_prompt(),
-            ) + extra_context
         # Bind mission tool handler to this user
         from telegram_tools import build_mission_handler
         mission_handler = build_mission_handler(user_id)
         progress_cb = _ctx["make_progress_callback"](message.chat.id)
         bt = {}
         reply = await _ctx["chat_with_tools"](
-            history, system_prompt=system_override, on_progress=progress_cb, budget_tracker=bt,
+            history, on_progress=progress_cb, budget_tracker=bt,
             extra_handlers={"mission": mission_handler},
+            extra_system_context=extra_context,
         )
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()

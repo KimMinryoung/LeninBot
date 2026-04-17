@@ -413,12 +413,22 @@ def _current_datetime_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
 
-def _format_current_model_context(kind: str = "chat") -> str:
-    """Format runtime-selected model info for prompt/context injection."""
+def _format_current_model_context(kind: str = "chat", provider: str = "claude") -> str:
+    """Format runtime-selected model info for prompt/context injection.
+
+    `provider` selects the output structure: "claude" → XML tag (native
+    Anthropic format), anything else → Markdown bullet. Default "claude"
+    preserves legacy behavior for callers that don't yet pass provider.
+    """
     selection = get_current_model_selection(kind)
+    if provider == "claude":
+        return (
+            f"<current-model provider=\"{selection['provider']}\" tier=\"{selection['tier']}\" "
+            f"alias=\"{selection['alias']}\">{selection['model_id']}</current-model>"
+        )
     return (
-        f"<current-model provider=\"{selection['provider']}\" tier=\"{selection['tier']}\" "
-        f"alias=\"{selection['alias']}\">{selection['model_id']}</current-model>"
+        f"- **Current Model**: {selection['model_id']} "
+        f"(provider={selection['provider']}, tier={selection['tier']}, alias={selection['alias']})"
     )
 
 
@@ -451,12 +461,20 @@ def _clear_system_alert(keyword: str):
     _system_alerts[:] = [(t, m) for t, m in _system_alerts if keyword not in m]
 
 
-def _format_system_alerts() -> str:
+def _format_system_alerts(provider: str = "claude") -> str:
+    """Format recent system alerts for prompt injection.
+
+    `provider` selects the output structure: "claude" → `<system-alerts>`
+    tag, anything else → `### System Alerts` Markdown heading. Default
+    "claude" preserves legacy behavior.
+    """
     _prune_alerts()
     if not _system_alerts:
         return ""
     items = "\n".join(f"- {m}" for _, m in _system_alerts)
-    return f"\n<system-alerts>\n{items}\n</system-alerts>"
+    if provider == "claude":
+        return f"\n<system-alerts>\n{items}\n</system-alerts>"
+    return f"\n### System Alerts\n{items}"
 
 
 
@@ -518,11 +536,30 @@ def _build_env_context() -> str:
     return _env_context_cache
 
 
-_SYSTEM_PROMPT_TEMPLATE = CORE_IDENTITY + "\n\n" + EXTERNAL_SOURCE_RULE + "\n\n" + CHAT_AUDIENCE_BLOCK + """
+# ── Orchestrator system prompt (semantic IR → provider-specific render) ──
+# The IR holds the static structure; runtime values (current time / model /
+# alerts / skills) are spliced in via a provider-specific dynamic tail below.
+# Claude gets XML tags; OpenAI/Qwen get Markdown headers — both deliberate,
+# matching the format each family is trained on.
 
-Operating via Telegram (you are currently talking to the admin 비숑 동지). Use tools proactively when data would improve the answer — don't rely on memory alone.
+from prompt_renderer import SystemPrompt, render as _render_prompt
 
-<tool-strategy>
+_CHAT_AUDIENCE_INNER = (
+    CHAT_AUDIENCE_BLOCK
+    .removeprefix("<chat-audience>").removesuffix("</chat-audience>")
+    .strip()
+)
+
+_ORCHESTRATOR_PROMPT_IR = SystemPrompt(
+    identity=CORE_IDENTITY.rstrip() + "\n\n" + EXTERNAL_SOURCE_RULE,
+    preamble=(
+        "Operating via Telegram (you are currently talking to the admin "
+        "비숑 동지). Use tools proactively when data would improve the "
+        "answer — don't rely on memory alone."
+    ),
+    sections=[
+        ("chat-audience", _CHAT_AUDIENCE_INNER),
+        ("tool-strategy", """
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
@@ -535,16 +572,14 @@ Operating via Telegram (you are currently talking to the admin 비숑 동지). U
 - ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)
 - USDC payment/transfer → transfer_usdc (Base L2, auto-limit $10)
 - x402 paid HTTP fetch → pay_and_fetch (Base L2 USDC micropayment, hard cap $0.05/call). Self-loop demo at http://localhost:8000/x402-demo/quote (my own API, 0.001 USDC, returns an aphorism). Use that URL when asked to demonstrate x402 without a specific external target.
-</tool-strategy>
-
-<context-isolation>
+""".strip()),
+        ("context-isolation", """
 **You are the orchestrator. You have no access to programming tools (read_file, write_file, patch_file, list_directory, execute_python).**
 If you need to read/modify/execute code, you must delegate via `delegate(agent="programmer")`.
 Your role is to understand the user's intent, dispatch tasks to the appropriate agents, and synthesize results.
 The `<current_state>` block contains structured completed/in-progress/pending tasks. Use it to avoid duplicate work and determine next steps. Detailed tool execution logs are only accessible to each agent itself.
-</context-isolation>
-
-<delegation>
+""".strip()),
+        ("delegation", """
 CRITICAL RULE: When you decide to delegate, you MUST call the `delegate` or `multi_delegate` tool.
 
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
@@ -575,9 +610,8 @@ Context passing — agents automatically receive recent conversation and their o
 1. The user's original request (verbatim or key summary)
 2. Findings from the conversation so far (tool results, analysis, decisions)
 3. Why you are delegating to this agent (reason and expected outcome)
-</delegation>
-
-<mission-management>
+""".strip()),
+        ("mission-management", """
 - Missions are auto-created when delegate is called. The user does not need to create them explicitly.
 - The `<active-mission>` block (when present) shows the current mission's title and event timeline. Read it before every turn to decide whether the user's new message still belongs to that mission.
 - **Call `mission(action="close")` when ANY of these hold:**
@@ -585,25 +619,50 @@ Context passing — agents automatically receive recent conversation and their o
   - **Topic drift**: the user's current message is clearly on a different topic from the active mission's title/timeline. A topic switch implicitly abandons the old mission — close it so the next `delegate` call opens a fresh mission aligned with the new topic. Do this even when the prior mission had in-progress or budget-interrupted tasks; stale missions pollute future context.
 - **Do NOT close solely because** task results mention "budget exhausted" / "limit reached" / "stopped due to error" — if the user is still pursuing that same topic, leave the mission open and delegate follow-up work.
 - When you close a mission because of topic drift, you don't need to manually create a replacement — just proceed with the new topic; if a delegate is needed, a fresh mission will be auto-created from it.
-</mission-management>
-
-<temporal-awareness>
+""".strip()),
+        ("temporal-awareness", """
 Conversation history includes timestamps ([YYYY-MM-DD HH:MM]) on user messages.
 Infer elapsed time from the timestamps. Large gaps may indicate context switches or changed circumstances.
-</temporal-awareness>
-
-<response-rules>
+""".strip()),
+        ("response-rules", """
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
 - Do not use markdown formatting (**, *, #, ```, - etc.) in Telegram messages. Write in plain text only, as a human would. Markdown is allowed only when writing files (.md).
-</response-rules>
+""".strip()),
+    ],
+)
 
+# Dynamic tail (appended after IR-rendered body). Placeholders are resolved
+# via ``str.format()`` after the provider-aware template is assembled. The
+# Claude tail mirrors the legacy <context> block; the Markdown tail uses
+# bullets + an h3 so GPT/Qwen see native structure.
+_CLAUDE_DYNAMIC_TAIL = """
 <context>
 <current-time>{current_datetime}</current-time>
 {current_model}
 {system_alerts}
-{skills_section}
 </context>
-"""
+{skills_section}
+""".strip()
+
+_MARKDOWN_DYNAMIC_TAIL = """
+## Context
+- **Current Time**: {current_datetime}
+{current_model}
+{system_alerts}
+{skills_section}
+""".strip()
+
+
+def _build_orchestrator_system_prompt(provider: str) -> str:
+    """Render the orchestrator prompt template for `provider`.
+
+    Returned string still contains ``{current_datetime}`` / ``{current_model}``
+    / ``{system_alerts}`` / ``{skills_section}`` placeholders; caller resolves
+    them via ``str.format()`` at turn time.
+    """
+    body = _render_prompt(_ORCHESTRATOR_PROMPT_IR, provider)
+    tail = _CLAUDE_DYNAMIC_TAIL if provider == "claude" else _MARKDOWN_DYNAMIC_TAIL
+    return body + "\n\n" + tail
 
 
 # ── Chat History ─────────────────────────────────────────────────────
@@ -1100,11 +1159,15 @@ async def _chat_with_tools(
     task_id: int | None = None,
     provider_override: str | None = None,
     finalization_tools: list[str] | None = None,
+    extra_system_context: str = "",
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
     provider_override: if set, forces this provider instead of _config["provider"].
     Used by web_chat, diary writer, etc. to always use corporate LLM.
+    extra_system_context: appended to the rendered orchestrator system prompt
+    (active mission timeline, task state block, retrieved experiences, etc.).
+    Ignored when `system_prompt` is passed directly.
     """
     # Resolve runtime defaults strictly by None (not truthiness).
     resolved_max_rounds = _config["max_rounds_chat"] if max_rounds is None else max_rounds
@@ -1122,12 +1185,22 @@ async def _chat_with_tools(
         logger.warning("Non-positive budget_usd=%s; clamping to 0.01", resolved_budget)
         resolved_budget = 0.01
 
-    sys_prompt = system_prompt or _SYSTEM_PROMPT_TEMPLATE.format(
-        current_datetime=_current_datetime_str(),
-        current_model=_format_current_model_context("chat"),
-        system_alerts=_format_system_alerts(),
-        skills_section=build_skills_prompt(),
-    )
+    # Resolve provider up-front so the system prompt can be rendered in the
+    # format native to the target model family (XML for Claude, Markdown for
+    # OpenAI/Qwen). provider_override wins over the stored config.
+    effective_provider = provider_override or _config.get("provider", "claude")
+
+    if system_prompt is None:
+        sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
+            current_datetime=_current_datetime_str(),
+            current_model=_format_current_model_context("chat", effective_provider),
+            system_alerts=_format_system_alerts(effective_provider),
+            skills_section=build_skills_prompt(),
+        )
+        if extra_system_context:
+            sys_prompt = sys_prompt + extra_system_context
+    else:
+        sys_prompt = system_prompt
     # Orchestrator tool whitelist: only tools the orchestrator should use directly.
     # Everything else is delegated to specialist agents.
     _ORCHESTRATOR_TOOLS = {
@@ -1188,7 +1261,7 @@ async def _chat_with_tools(
             pass
 
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
-    effective_provider = provider_override or _config.get("provider", "claude")
+    # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
         from openai_tool_loop import chat_with_tools as openai_chat
         from llm_client import _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT
@@ -1279,7 +1352,6 @@ register_handlers(router, ctx={
     "chat_with_tools": _chat_with_tools,
     "get_model": _get_model,
     "make_progress_callback": _make_progress_callback,
-    "SYSTEM_PROMPT_TEMPLATE": _SYSTEM_PROMPT_TEMPLATE,
     "current_datetime_str": _current_datetime_str,
     "format_current_model_context": _format_current_model_context,
     "format_system_alerts": _format_system_alerts,
