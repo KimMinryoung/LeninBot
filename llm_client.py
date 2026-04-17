@@ -30,6 +30,19 @@ TIMEOUT        = 300
 HEALTH_TIMEOUT = 3
 LOCAL_CONTEXT_LIMIT = int(os.getenv("MOON_LLM_CONTEXT", "131072"))
 
+# Generation-side defaults for local (llama-server) dispatch.
+# Tool calls fail silently when the thinking block consumes the entire
+# completion budget before a <tool_call> can be emitted. 8192 gives room
+# for both reasoning and the tool-call payload on Q4 quantizations; scout
+# agent already runs with 8192 for the same reason.
+LOCAL_MAX_TOKENS = int(os.getenv("LOCAL_LLM_MAX_TOKENS", "8192"))
+
+# Qwen3 thinking mode often hurts tool-call reliability on Q4 quantized
+# weights — the <think> block eats the token budget and the tool_call
+# token is never emitted. Env-overridable so a healthier model (e.g.
+# Qwen3.6) can re-enable it without a code change.
+LOCAL_ENABLE_THINKING = os.getenv("LOCAL_LLM_ENABLE_THINKING", "true").strip().lower() != "false"
+
 # ── 백엔드 정의 ──────────────────────────────────────────────────────────────
 _BACKENDS = [
     {"name": "moon",  "base": MOON_BASE,  "model": MOON_MODEL},

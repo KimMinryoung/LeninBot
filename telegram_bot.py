@@ -1264,8 +1264,16 @@ async def _chat_with_tools(
     # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm_client import _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT
+        from llm_client import (
+            _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT,
+            LOCAL_MAX_TOKENS, LOCAL_ENABLE_THINKING,
+        )
         backend = _resolve_backend()
+        # Floor the completion budget at LOCAL_MAX_TOKENS (default 8192).
+        # The 4096 default shared with Claude truncates Qwen3 responses
+        # mid-<think> on Q4 quantizations, so the tool_call is never
+        # emitted and the loop returns an empty answer.
+        local_max_tokens = max(resolved_max_tokens, LOCAL_MAX_TOKENS)
         return await openai_chat(
             messages,
             client=None,
@@ -1275,14 +1283,14 @@ async def _chat_with_tools(
             tool_handlers=merged_handlers,
             system_prompt=sys_prompt,
             max_rounds=resolved_max_rounds,
-            max_tokens=resolved_max_tokens,
+            max_tokens=local_max_tokens,
             log_event=_log_event,
             budget_usd=resolved_budget,
             on_progress=on_progress,
             budget_tracker=budget_tracker,
             task_id=task_id,
             context_limit=LOCAL_CONTEXT_LIMIT,
-            enable_thinking=is_orchestrator,
+            enable_thinking=is_orchestrator and LOCAL_ENABLE_THINKING,
             agent_name=_agent_name,
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
