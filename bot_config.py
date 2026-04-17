@@ -92,7 +92,7 @@ _CONFIG_META = {
 _MODEL_ALIAS_MAP = {
     "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
     "sonnet": ("claude-sonnet-4-6", "claude-sonnet-4-6"),
-    "opus":   ("claude-opus-4-6", "claude-opus-4-6"),
+    "opus":   ("claude-opus-4-7", "claude-opus-4-7"),
 }
 
 _OPENAI_MODEL_MAP = {

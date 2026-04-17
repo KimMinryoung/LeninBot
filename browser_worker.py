@@ -30,7 +30,7 @@ def _normalize_browser_model(raw_model: str | None) -> str:
     lowered = model.lower()
     if lowered in {"high", "medium", "low"}:
         tier_map = {
-            "high": "claude-opus-4-6",
+            "high": "claude-opus-4-7",
             "medium": "claude-sonnet-4-6",
             "low": "claude-haiku-4-5",
         }
@@ -38,7 +38,7 @@ def _normalize_browser_model(raw_model: str | None) -> str:
 
     if lowered in {"opus", "sonnet", "haiku"}:
         alias_map = {
-            "opus": "claude-opus-4-6",
+            "opus": "claude-opus-4-7",
             "sonnet": "claude-sonnet-4-6",
             "haiku": "claude-haiku-4-5",
         }

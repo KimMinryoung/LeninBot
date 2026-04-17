@@ -65,7 +65,7 @@ provider에 따라 자동 매핑:
 
 | 티어 | Claude | OpenAI |
 |------|--------|--------|
-| high | opus (claude-opus-4-6) | gpt-5.4 |
+| high | opus (claude-opus-4-7) | gpt-5.4 |
 | medium | sonnet (claude-sonnet-4-6) | gpt-5.4-mini |
 | low | haiku (claude-haiku-4-5) | gpt-5.4-nano |
 
