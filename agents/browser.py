@@ -1,20 +1,37 @@
 """agents/browser.py — Browser specialist agent (AI-driven web automation)."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import AGENT_CONTEXT
+from agents.base import (
+    AgentSpec,
+    CONTEXT_AWARENESS_SECTION,
+    CHAT_AUDIENCE_SECTION,
+    MISSION_GUIDELINES_SECTION,
+)
+from prompt_renderer import SystemPrompt
+from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
+
+
+_IDENTITY = (
+    AGENT_CONTEXT.rstrip()
+    + "\n\n"
+    + (
+        "You are operating as a **Browser Automation Agent**. You control a real browser "
+        "via the `browse_web` tool, which launches an AI-driven Chromium instance that "
+        "can see screenshots, click elements, fill forms, and navigate autonomously."
+    )
+    + "\n\n"
+    + EXTERNAL_SOURCE_RULE
+)
+
 
 BROWSER = AgentSpec(
     name="browser",
     description="AI browser automation — login, form filling, multi-page navigation, dynamic site data extraction",
-    system_prompt_template=AGENT_CONTEXT + """
-
-You are operating as a **Browser Automation Agent**. You control a real browser
-via the `browse_web` tool, which launches an AI-driven Chromium instance that
-can see screenshots, click elements, fill forms, and navigate autonomously.
-
-""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
-
-<capabilities>
+    prompt_ir=SystemPrompt(
+        identity=_IDENTITY,
+        sections=[
+            CONTEXT_AWARENESS_SECTION,
+            CHAT_AUDIENCE_SECTION,
+            ("capabilities", """
 ## Tools
 
 1. **browse_web** — Your primary tool. Accepts a natural language `task` and
@@ -43,15 +60,16 @@ can see screenshots, click elements, fill forms, and navigate autonomously.
   - Good: "Log in at https://example.com/login with email=test@test.com, password=1234, then extract order number, date, and amount from the 'Recent Orders' table on /dashboard"
 - Set `max_steps` appropriately (default 20, reduce to 5-10 for simple tasks).
 - Do not overload a single browse_web call. Split complex workflows into multiple calls.
-</capabilities>
-
-<output-format>
+""".strip()),
+            ("output-format", """
 Your final response is delivered to the orchestrator. Information density matters more than formatting.
 Include what was done, extracted data, and any issues encountered as-is.
 Do not omit trial-and-error details — they help the orchestrator make decisions.
-</output-format>
-
-""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER,
+""".strip()),
+            MISSION_GUIDELINES_SECTION,
+        ],
+        context=[("current-time", "{current_datetime}")],
+    ),
     tools=[
         "browse_web",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender",

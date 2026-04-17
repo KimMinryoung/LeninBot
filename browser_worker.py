@@ -173,8 +173,11 @@ async def execute_browser_task(task: dict) -> dict:
     # duplicate tool names to the upstream API.
     agent_tools = dedupe_tools_by_name(agent_tools)
 
-    # Render system prompt
+    # Render system prompt. Browser worker always runs on Claude (XML format)
+    # regardless of the orchestrator's global provider toggle — see the model-
+    # normalization and _get_model overrides below.
     system_prompt = spec.render_prompt(
+        provider="claude",
         current_datetime=datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
         system_alerts="",
     )

@@ -1653,10 +1653,15 @@ async def bot_main():
         # Final safety net against future registry composition mistakes.
         agent_tools = dedupe_tools_by_name(agent_tools)
 
-        # Render agent-specific system prompt
+        # Render agent-specific system prompt in the format native to the
+        # provider that will actually run this agent (local/openai → Markdown,
+        # claude → XML). spec.effective_provider falls back to config when
+        # the agent has no pinned provider.
+        _agent_provider = spec.effective_provider(_config.get("provider", "claude"))
         system_prompt = spec.render_prompt(
+            provider=_agent_provider,
             current_datetime=_current_datetime_str(),
-            system_alerts=_format_system_alerts(),
+            system_alerts=_format_system_alerts(_agent_provider),
         )
 
         # Inject runtime environment info for programmer (needs venv, packages, services)

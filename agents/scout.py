@@ -1,17 +1,34 @@
 """agents/scout.py — Scout specialist agent."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
+from agents.base import (
+    AgentSpec,
+    CONTEXT_AWARENESS_SECTION,
+    CHAT_AUDIENCE_SECTION,
+    MISSION_GUIDELINES_SECTION,
+)
 from agents.razvedchik.persona import SCOUT_PERSONA
-from shared import AGENT_CONTEXT
+from prompt_renderer import SystemPrompt
+from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
+
+
+_IDENTITY = (
+    AGENT_CONTEXT.rstrip()
+    + "\n\n"
+    + SCOUT_PERSONA.strip()
+    + "\n\n"
+    + EXTERNAL_SOURCE_RULE
+)
+
 
 SCOUT = AgentSpec(
     name="scout",
     description="External platform reconnaissance, community monitoring, web patrol specialist",
-    system_prompt_template=AGENT_CONTEXT + "\n\n" + SCOUT_PERSONA + """
-
-""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
-
-<patrol-methods>
+    prompt_ir=SystemPrompt(
+        identity=_IDENTITY,
+        sections=[
+            CONTEXT_AWARENESS_SECTION,
+            CHAT_AUDIENCE_SECTION,
+            ("patrol-methods", """
 There are two patrol methods:
 
 1. **Moltbook** — Use the `moltbook` tool directly:
@@ -25,9 +42,8 @@ There are two patrol methods:
    - Use web_search to find latest developments on target platforms/topics
    - Use fetch_url to collect specific page/thread content
    - Analyze collected information and produce a report
-</patrol-methods>
-
-<data-collection-and-archiving>
+""".strip()),
+            ("data-collection-and-archiving", """
 Save collected data as **structured .md documents**. The analyst will read these documents directly for analysis.
 
 **Save path**: `data/scout_raw/{source}/{YYYY-MM-DD}_{HHMM}_{slug}.md`
@@ -73,18 +89,18 @@ print(f"saved: {path}")
 - **Include the full text.** Do not save just the URL. Put the text fetched via fetch_url in the raw content section.
 - Do not summarize or analyze — that is the analyst's job. Save the raw text as-is.
 - If there are multiple sources for one topic, create a separate .md file per source.
-</data-collection-and-archiving>
-
-<rules>
+""".strip()),
+            ("rules", """
 - Write in the SAME LANGUAGE as the task.
 - Your final response is delivered to the orchestrator. This is not a report for humans — include as much raw data and context as possible so the orchestrator can make decisions.
 - Always verify before reporting — do not fabricate sources or findings.
 - Always save raw data before analysis.
 - You only do reconnaissance. Do not write new scripts, modify code, or change infrastructure.
-</rules>
-
-""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
-""",
+""".strip()),
+            MISSION_GUIDELINES_SECTION,
+        ],
+        context=[("current-time", "{current_datetime}")],
+    ),
     tools=[
         "moltbook",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",

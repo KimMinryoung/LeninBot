@@ -1100,8 +1100,12 @@ def build_run_agent_handler(chat_with_tools_fn):
             spec = get_agent(agent)
             agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
 
-            from shared import AGENT_CONTEXT
+            from bot_config import _config as _bot_config
+            _agent_provider = spec.effective_provider(
+                _bot_config.get("provider", "claude")
+            )
             system_prompt = spec.render_prompt(
+                provider=_agent_provider,
                 current_datetime=datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST"),
                 system_alerts="",
             )

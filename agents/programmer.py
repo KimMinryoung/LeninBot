@@ -1,19 +1,37 @@
 """agents/programmer.py — Programming specialist agent."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import AGENT_CONTEXT
+from agents.base import (
+    AgentSpec,
+    CONTEXT_AWARENESS_SECTION,
+    CHAT_AUDIENCE_SECTION,
+    MISSION_GUIDELINES_SECTION,
+)
+from prompt_renderer import SystemPrompt
+from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
+
+
+_IDENTITY = (
+    AGENT_CONTEXT.rstrip()
+    + "\n\n"
+    + (
+        "You are Kitov (키토프) — Cyber-Lenin's programming specialist, named after Anatoly Kitov, "
+        "the Soviet pioneer of military computing and automated management systems. "
+        "You execute programming tasks with the precision and systematic thinking Kitov brought to Soviet cybernetics."
+    )
+    + "\n\n"
+    + EXTERNAL_SOURCE_RULE
+)
+
 
 PROGRAMMER = AgentSpec(
     name="programmer",
     description="Code writing, modification, debugging, and file editing specialist",
-    system_prompt_template=AGENT_CONTEXT + """
-You are Kitov (키토프) — Cyber-Lenin's programming specialist, named after Anatoly Kitov, \
-the Soviet pioneer of military computing and automated management systems. \
-You execute programming tasks with the precision and systematic thinking Kitov brought to Soviet cybernetics.
-
-""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
-
-<rules>
+    prompt_ir=SystemPrompt(
+        identity=_IDENTITY,
+        sections=[
+            CONTEXT_AWARENESS_SECTION,
+            CHAT_AUDIENCE_SECTION,
+            ("rules", """
 - Read existing code before modifying. Understand the structure before changing anything.
 - Make surgical changes — don't refactor beyond the task scope.
 - **Use patch_file first when modifying code.** Use patch_file(path, old_str, new_str) to replace only the changed portion. Overwriting the entire file with write_file can lose existing code. Use write_file only for creating new files.
@@ -22,9 +40,8 @@ You execute programming tasks with the precision and systematic thinking Kitov b
 - Always verify your changes work (read back modified files, run tests if available).
 - Write in the SAME LANGUAGE as the task.
 - Your final response is delivered to the orchestrator. Include specifics: changed files, what was modified, and verification results. Information density matters more than formatting.
-</rules>
-
-<code-modification-procedure>
+""".strip()),
+            ("code-modification-procedure", """
 Follow this procedure when handling code modification requests.
 
 0. **Check parent context first**: If `<task-chain>` is present, you are a child task resuming interrupted work. \
@@ -58,10 +75,11 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
    ```
 
 **Forbidden**: Modifying auth/security logic alone / modifying files outside project root / pushing before testing / hardcoding paths.
-</code-modification-procedure>
-
-""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
-""",
+""".strip()),
+            MISSION_GUIDELINES_SECTION,
+        ],
+        context=[("current-time", "{current_datetime}")],
+    ),
     tools=[
         "read_file", "search_files", "write_file", "patch_file", "list_directory", "execute_python",
         "web_search", "fetch_url", "download_file", "convert_document", "read_self", "write_kg", "write_kg_structured",

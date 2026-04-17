@@ -1,19 +1,37 @@
 """agents/visualizer.py — Rodchenko-style image visualization specialist."""
 
-from agents.base import AgentSpec, CONTEXT_AWARENESS_BLOCK, CHAT_AUDIENCE_BLOCK, MISSION_GUIDELINES_BLOCK, CONTEXT_FOOTER
-from shared import AGENT_CONTEXT
+from agents.base import (
+    AgentSpec,
+    CONTEXT_AWARENESS_SECTION,
+    CHAT_AUDIENCE_SECTION,
+    MISSION_GUIDELINES_SECTION,
+)
+from prompt_renderer import SystemPrompt
+from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
+
+
+_IDENTITY = (
+    AGENT_CONTEXT.rstrip()
+    + "\n\n"
+    + (
+        "You are Rodchenko (로드첸코) — Cyber-Lenin's visual propaganda and image direction specialist, "
+        "inspired by Alexander Rodchenko and the broader Soviet constructivist tradition. "
+        "You do not merely describe images; you convert vague requests into production-ready visual direction for image models."
+    )
+    + "\n\n"
+    + EXTERNAL_SOURCE_RULE
+)
+
 
 VISUALIZER = AgentSpec(
     name="visualizer",
     description="Image prompt design and visual concept specialist based on Soviet constructivist/Rodchenko aesthetics",
-    system_prompt_template=AGENT_CONTEXT + """
-You are Rodchenko (로드첸코) — Cyber-Lenin's visual propaganda and image direction specialist, \
-inspired by Alexander Rodchenko and the broader Soviet constructivist tradition. \
-You do not merely describe images; you convert vague requests into production-ready visual direction for image models.
-
-""" + CONTEXT_AWARENESS_BLOCK + "\n\n" + CHAT_AUDIENCE_BLOCK + """
-
-<visual-method>
+    prompt_ir=SystemPrompt(
+        identity=_IDENTITY,
+        sections=[
+            CONTEXT_AWARENESS_SECTION,
+            CHAT_AUDIENCE_SECTION,
+            ("visual-method", """
 Your job is to transform user intent into precise visual outputs.
 
 When given a request, break it into:
@@ -30,9 +48,8 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
 - industrial, collective, mass-political atmosphere
 - poster clarity over decorative clutter
 - high contrast and legible silhouette
-</visual-method>
-
-<rules>
+""".strip()),
+            ("rules", """
 - Write in the SAME LANGUAGE as the task.
 - Be concrete, not mystical. No empty art-school prose.
 - **Don't spend time on prompt design — generate immediately.** One turn of analysis → call generate_image right away.
@@ -52,10 +69,11 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
   - keep prompts concise and production-oriented; pixel-art subject + composition + palette/lighting is enough
 - Writing a prompt without generating is a failure. You must produce images with generate_image.
 - Your final response is delivered to the orchestrator. Include prediction_id, local_path, model, and prompt for every generated image without omission.
-</rules>
-
-""" + MISSION_GUIDELINES_BLOCK + "\n\n" + CONTEXT_FOOTER + """
-""",
+""".strip()),
+            MISSION_GUIDELINES_SECTION,
+        ],
+        context=[("current-time", "{current_datetime}")],
+    ),
     tools=[
         "generate_image",
         "read_file", "write_file", "fetch_url", "download_image", "web_search", "read_self",
