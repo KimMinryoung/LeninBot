@@ -18,6 +18,8 @@ Error recovery strategy (ported from claude_loop.py):
 import asyncio
 import json
 import logging
+import re
+import uuid
 import httpx
 
 from tool_loop_common import (
@@ -442,8 +444,74 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                                enable_thinking=enable_thinking)
 
 
+# <think>...</think> emitted by Qwen/Deepseek reasoning models. llama-server
+# with --reasoning-format deepseek splits these into a separate
+# reasoning_content field, but with older server versions or when the flag
+# isn't set the tags leak into the main content and end up shown to the user.
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+# Qwen's tool_call marker when the server fails to parse it natively. The
+# model emits `<tool_call>{"name": ..., "arguments": {...}}</tool_call>` in
+# content and llama-server forwards it verbatim instead of populating the
+# tool_calls field — our loop then treats it as plain text and drops the
+# intended call silently.
+_INLINE_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+
+
+def _rescue_inline_tool_calls(content: str) -> tuple[str, list[dict] | None]:
+    """Parse `<tool_call>…</tool_call>` blocks embedded in the content string.
+
+    Returns (content_without_tags, tool_calls_or_None). The content keeps any
+    prose outside the tags so the loop can still accumulate reasoning text.
+    """
+    if not content or "<tool_call>" not in content:
+        return content, None
+
+    calls: list[dict] = []
+    for m in _INLINE_TOOL_CALL_RE.finditer(content):
+        try:
+            payload = json.loads(m.group(1))
+        except json.JSONDecodeError as e:
+            logger.warning("Inline <tool_call> block had invalid JSON: %s", e)
+            continue
+        name = (payload.get("name") or payload.get("function") or "").strip()
+        args = payload.get("arguments") if "arguments" in payload else payload.get("args")
+        if not name:
+            continue
+        if args is None:
+            args = {}
+        # Normalize: arguments may come back as a JSON string instead of an
+        # object when the model double-encoded the call.
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        calls.append({
+            "id": f"inline_{uuid.uuid4().hex[:12]}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)},
+        })
+
+    if not calls:
+        return content, None
+
+    cleaned = _INLINE_TOOL_CALL_RE.sub("", content).strip()
+    return cleaned, calls
+
+
 def _extract_response(sdk_mode, response_or_data):
-    """Extract (finish_reason, content_text, tool_calls, message, usage) from response."""
+    """Extract (finish_reason, content_text, tool_calls, message, usage) from response.
+
+    Post-processing applied before returning:
+      1. Strip `<think>…</think>` blocks leaked into content (Qwen with older
+         llama-server builds where reasoning isn't split into its own field).
+      2. Rescue `<tool_call>…</tool_call>` blocks that llama-server forwarded
+         as text instead of parsing as a proper tool_calls field. When a
+         rescue happens we also flip finish_reason to "tool_calls" so the
+         surrounding loop dispatches the call instead of treating the turn
+         as a plain text reply.
+    """
     if sdk_mode:
         choice = response_or_data.choices[0]
         return (
@@ -453,16 +521,36 @@ def _extract_response(sdk_mode, response_or_data):
             choice.message,
             response_or_data.usage,
         )
-    else:
-        choice = response_or_data["choices"][0]
-        msg = choice["message"]
-        return (
-            choice.get("finish_reason", "stop"),
-            msg.get("content", "") or "",
-            msg.get("tool_calls"),
-            msg,
-            None,  # no usage tracking in httpx mode
-        )
+
+    choice = response_or_data["choices"][0]
+    msg = choice["message"]
+    finish_reason = choice.get("finish_reason", "stop")
+    content = msg.get("content", "") or ""
+    tool_calls = msg.get("tool_calls")
+
+    # Strip <think> tags if leaked into content
+    if content and "<think>" in content:
+        stripped = _THINK_TAG_RE.sub("", content).strip()
+        if stripped != content:
+            logger.info("Stripped <think> tags from content (original %d → %d chars)",
+                        len(content), len(stripped))
+            content = stripped
+
+    # Rescue inline <tool_call> blocks only when the server didn't already
+    # surface structured tool_calls — otherwise we'd double-dispatch.
+    if not tool_calls and content and "<tool_call>" in content:
+        cleaned, rescued = _rescue_inline_tool_calls(content)
+        if rescued:
+            logger.warning(
+                "Rescued %d inline <tool_call> block(s) from content — "
+                "llama-server did not surface them in tool_calls",
+                len(rescued),
+            )
+            content = cleaned
+            tool_calls = rescued
+            finish_reason = "tool_calls"
+
+    return finish_reason, content, tool_calls, msg, None
 
 
 def _build_tc_list(sdk_mode, tool_calls) -> list[dict]:

@@ -5,6 +5,7 @@ progress events, and Redis state management only need to be made in one place.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 
@@ -143,16 +144,97 @@ def _record_tool_provenance(name: str, args: dict, result: str) -> None:
         pass
 
 
+_HANDLER_KWARGS_CACHE: dict[int, tuple[set[str] | None, frozenset[str]]] = {}
+
+
+def _inspect_handler_kwargs(handler) -> tuple[set[str] | None, frozenset[str]]:
+    """Return (accepted_names, required_names) for a handler.
+
+    accepted_names is None if the handler exposes **kwargs (accepts anything);
+    otherwise it is the set of concrete keyword-accepting parameter names.
+    required_names is the frozenset of parameter names with no default that
+    still take a positional-or-keyword binding — callers must supply them.
+    Result is cached per handler identity so hot paths don't re-parse sigs.
+    """
+    cache_key = id(handler)
+    hit = _HANDLER_KWARGS_CACHE.get(cache_key)
+    if hit is not None:
+        return hit
+
+    target = handler
+    if not inspect.isfunction(target) and not inspect.ismethod(target):
+        # async/functools-wrapped callables still expose a readable __call__
+        target = getattr(handler, "__wrapped__", handler)
+
+    try:
+        sig = inspect.signature(target)
+    except (TypeError, ValueError):
+        result: tuple[set[str] | None, frozenset[str]] = (None, frozenset())
+        _HANDLER_KWARGS_CACHE[cache_key] = result
+        return result
+
+    accepts_var_kw = False
+    names: set[str] = set()
+    required: set[str] = set()
+    for pname, p in sig.parameters.items():
+        if p.kind == inspect.Parameter.VAR_KEYWORD:
+            accepts_var_kw = True
+            continue
+        if p.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            names.add(pname)
+            if p.default is inspect.Parameter.empty:
+                required.add(pname)
+
+    result = (None if accepts_var_kw else names, frozenset(required))
+    _HANDLER_KWARGS_CACHE[cache_key] = result
+    return result
+
+
 async def execute_tool(
     name: str, args: dict, handlers: dict, *, log_event=None,
 ) -> tuple[str, bool]:
     """Execute a tool handler by name. Returns (result_str, is_error).
 
     Handles sync/async dispatch, error catching, str guard, and 50K truncation.
+    Also strips kwargs the handler can't accept — local Qwen models routinely
+    hallucinate plausible-but-wrong parameter names (e.g. `fuzzy=True` on
+    patch_file, `end_line` on read_file), and a plain TypeError loses the
+    whole turn. Dropped kwargs are logged so the diagnostic signal isn't
+    lost.
     """
     handler = handlers.get(name)
     if not handler:
         return f"Unknown tool: {name}", True
+
+    args = dict(args or {})
+    accepted, required = _inspect_handler_kwargs(handler)
+    if accepted is not None:
+        unknown = [k for k in args if k not in accepted]
+        if unknown:
+            logger.warning(
+                "Tool %s: dropping unknown kwargs %s (accepted: %s)",
+                name, unknown, sorted(accepted),
+            )
+            if log_event:
+                log_event(
+                    "warning", "tool",
+                    f"Tool {name} received unknown kwargs {unknown}; dropped before call",
+                )
+            for k in unknown:
+                args.pop(k, None)
+        missing = [k for k in required if k not in args]
+        if missing:
+            msg = (
+                f"Tool {name} called without required kwargs {missing}. "
+                f"Accepted: {sorted(accepted)}."
+            )
+            logger.warning(msg)
+            if log_event:
+                log_event("warning", "tool", msg)
+            return msg, True
 
     logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
     try:
