@@ -155,25 +155,48 @@ def close_mission(mission_id: int) -> str:
     return f"Mission #{mission_id} closed."
 
 
-def build_mission_context(user_id: int) -> str:
-    """Build mission context string for system prompt injection."""
+def build_mission_context(user_id: int, provider: str = "claude") -> str:
+    """Build mission context string for system prompt injection.
+
+    `provider` selects the output structure so the injected block matches
+    the surrounding system prompt style: "claude" → `<active-mission>` XML
+    tag, anything else → `### Active Mission` Markdown heading. Default
+    "claude" preserves legacy callers that don't yet pass provider.
+    """
     try:
         mission = get_active_mission(user_id)
         if not mission:
             return ""
         events = get_mission_events(mission["id"], limit=20)
+
+        if provider == "claude":
+            lines = [
+                f"\n<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
+                f"Started: {mission['created_at']}",
+            ]
+            if events:
+                lines.append("Timeline:")
+                for e in events:
+                    content_preview = str(e["content"] or "")[:500]
+                    lines.append(
+                        f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {content_preview}"
+                    )
+            lines.append("</active-mission>")
+            return "\n".join(lines)
+
+        # Markdown (OpenAI / Qwen)
         lines = [
-            f"\n<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
+            f"\n### Active Mission #{mission['id']} — \"{mission['title']}\"",
             f"Started: {mission['created_at']}",
         ]
         if events:
-            lines.append("Timeline:")
+            lines.append("")
+            lines.append("**Timeline:**")
             for e in events:
                 content_preview = str(e["content"] or "")[:500]
                 lines.append(
-                    f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {content_preview}"
+                    f"- [{e['created_at']}] ({e['source']}) {e['event_type']}: {content_preview}"
                 )
-        lines.append("</active-mission>")
         return "\n".join(lines)
     except Exception as e:
         logger.debug("Mission context build failed: %s", e)

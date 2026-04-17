@@ -1239,13 +1239,19 @@ async def handle_message(message: Message):
     # Auto-recall: fetch relevant past experiences for context injection
     experience_context = await _fetch_relevant_experiences(user_text)
 
+    # Resolve provider so the dynamic context blocks match the system-prompt
+    # style (XML for Claude, Markdown for OpenAI/Qwen).
+    _provider = _ctx["config"].get("provider", "claude")
+
     # Mission context: inject active mission timeline
     from telegram_mission import build_mission_context
-    mission_context = await asyncio.to_thread(build_mission_context, user_id)
+    mission_context = await asyncio.to_thread(build_mission_context, user_id, _provider)
 
     # Orchestrator context: structured state block (completed/in-progress/pending)
     from telegram_tasks import build_current_state
-    state_context = await asyncio.to_thread(build_current_state, user_id)
+    state_context = await asyncio.to_thread(
+        build_current_state, user_id, provider=_provider
+    )
     if state_context:
         state_context = "\n" + state_context
 

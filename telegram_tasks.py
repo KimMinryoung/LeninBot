@@ -29,20 +29,26 @@ _RESTART_PHASE_KEY = "restart_state"
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
 
-def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
-    """Build a <current_state> block showing completed/in-progress/pending tasks.
+def build_current_state(
+    user_id: int, *, detail_level: str = "high", provider: str = "claude"
+) -> str:
+    """Build a task-state block showing completed/in-progress/pending tasks.
 
     Args:
         user_id: Telegram user ID
         detail_level: "high" = orchestrator (summaries only), "low" = brief
+        provider: "claude" → `<current_state>` XML block (legacy format).
+                  Anything else → `### Current State` Markdown heading with
+                  **bold** subsection labels. Default preserves legacy
+                  behavior for callers that don't yet pass provider.
     Returns:
-        XML string or empty string if no relevant state
+        Provider-formatted string, or empty string if no relevant state
     """
     try:
         now_ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M+09:00")
 
         # Active mission
-        mission_line = ""
+        mission_row = None
         try:
             mission_rows = _query(
                 "SELECT id, title FROM telegram_missions WHERE user_id = %s AND status = 'active' "
@@ -50,8 +56,7 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
                 (user_id,),
             )
             if mission_rows:
-                m = mission_rows[0]
-                mission_line = f'  <active_mission id="{m["id"]}">{m["title"]}</active_mission>\n'
+                mission_row = mission_rows[0]
         except Exception:
             pass
 
@@ -80,44 +85,67 @@ def build_current_state(user_id: int, *, detail_level: str = "high") -> str:
             (user_id,),
         )
 
-        if not done_rows and not processing_rows and not pending_rows and not mission_line:
+        if not done_rows and not processing_rows and not pending_rows and not mission_row:
             return ""
 
-        lines = [f'<current_state timestamp="{now_ts}">']
-        if mission_line:
-            lines.append(mission_line.rstrip())
+        def _done_line(t: dict) -> str:
+            agent = t.get("agent_type") or "analyst"
+            result_summary = (str(t.get("result") or "")[:150]).replace("\n", " ").strip()
+            if not result_summary:
+                result_summary = (str(t.get("content") or "")[:80]).replace("\n", " ")
+            ts = str(t.get("completed_at") or "")[:16]
+            return f"[{agent}] #{t['id']} ({ts}): {result_summary}"
 
-        # Completed
+        def _running_line(t: dict) -> str:
+            agent = t.get("agent_type") or "analyst"
+            content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
+            return f"[{agent}] #{t['id']}: {content_brief}"
+
+        if provider == "claude":
+            lines = [f'<current_state timestamp="{now_ts}">']
+            if mission_row:
+                lines.append(
+                    f'  <active_mission id="{mission_row["id"]}">{mission_row["title"]}</active_mission>'
+                )
+            if done_rows:
+                lines.append("  <completed>")
+                for t in done_rows:
+                    lines.append(f"    - {_done_line(t)}")
+                lines.append("  </completed>")
+            if processing_rows:
+                lines.append("  <in_progress>")
+                for t in processing_rows:
+                    lines.append(f"    - {_running_line(t)}")
+                lines.append("  </in_progress>")
+            if pending_rows:
+                lines.append("  <not_started>")
+                for t in pending_rows:
+                    lines.append(f"    - {_running_line(t)}")
+                lines.append("  </not_started>")
+            lines.append("</current_state>")
+            return "\n".join(lines)
+
+        # Markdown (OpenAI / Qwen)
+        lines = [f"### Current State ({now_ts})"]
+        if mission_row:
+            lines.append(
+                f"- **Active Mission** #{mission_row['id']}: {mission_row['title']}"
+            )
         if done_rows:
-            lines.append("  <completed>")
+            lines.append("")
+            lines.append("**Completed (last 24h):**")
             for t in done_rows:
-                agent = t.get("agent_type") or "analyst"
-                result_summary = (str(t.get("result") or "")[:150]).replace("\n", " ").strip()
-                if not result_summary:
-                    result_summary = (str(t.get("content") or "")[:80]).replace("\n", " ")
-                ts = str(t.get("completed_at") or "")[:16]
-                lines.append(f"    - [{agent}] #{t['id']} ({ts}): {result_summary}")
-            lines.append("  </completed>")
-
-        # In-progress
+                lines.append(f"- {_done_line(t)}")
         if processing_rows:
-            lines.append("  <in_progress>")
+            lines.append("")
+            lines.append("**In Progress:**")
             for t in processing_rows:
-                agent = t.get("agent_type") or "analyst"
-                content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
-                lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
-            lines.append("  </in_progress>")
-
-        # Pending
+                lines.append(f"- {_running_line(t)}")
         if pending_rows:
-            lines.append("  <not_started>")
+            lines.append("")
+            lines.append("**Not Started:**")
             for t in pending_rows:
-                agent = t.get("agent_type") or "analyst"
-                content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
-                lines.append(f"    - [{agent}] #{t['id']}: {content_brief}")
-            lines.append("  </not_started>")
-
-        lines.append("</current_state>")
+                lines.append(f"- {_running_line(t)}")
         return "\n".join(lines)
 
     except Exception as e:
