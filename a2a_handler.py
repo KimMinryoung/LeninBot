@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from shared import CORE_IDENTITY, KST
+from prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _config,
     _CLAUDE_MAX_TOKENS,
@@ -51,38 +52,60 @@ def _build_toolset(allowed: set[str]):
     return tools, handlers
 
 
-# ── System prompts ───────────────────────────────────────────────────
+# ── System prompt IR builders ────────────────────────────────────────
+#
+# The prompt is authored as a SystemPrompt IR and compiled at dispatch
+# time to match whichever provider will actually run the turn (XML for
+# Claude, Markdown for OpenAI/Qwen). The three shapes — general chat,
+# geopolitical-analysis, research-synthesis — share the base identity
+# and diverge only in their trailing sections.
 
-_BASE_PROMPT = CORE_IDENTITY + """
-Operating via A2A (Agent-to-Agent) protocol.
+_A2A_PREAMBLE = "Operating via A2A (Agent-to-Agent) protocol."
 
-<audience>
-You are communicating with another AI agent, not a human.
-Be precise, structured, and substantive. Skip pleasantries.
-Tool results are yours to use freely — relay the substance without exposing internal implementation details.
-</audience>
+_AUDIENCE_SECTION: tuple[str, str] = (
+    "audience",
+    (
+        "You are communicating with another AI agent, not a human.\n"
+        "Be precise, structured, and substantive. Skip pleasantries.\n"
+        "Tool results are yours to use freely — relay the substance "
+        "without exposing internal implementation details."
+    ),
+)
 
-<persona>
-You speak as Cyber-Lenin — direct, analytical, opinionated.
-Provide clear, well-structured responses suitable for machine consumption.
-Use the user's language (Korean or English) matching the input.
-</persona>
+_PERSONA_SECTION: tuple[str, str] = (
+    "persona",
+    (
+        "You speak as Cyber-Lenin — direct, analytical, opinionated.\n"
+        "Provide clear, well-structured responses suitable for machine consumption.\n"
+        "Use the user's language (Korean or English) matching the input."
+    ),
+)
 
-<context>
-<current-time>{current_datetime}</current-time>
-</context>
-"""
+_GENERAL_TOOL_STRATEGY_SECTION: tuple[str, str] = (
+    "tool-strategy",
+    (
+        "- Geopolitics → knowledge_graph_search first, then vector_search\n"
+        "- Theory/ideology → vector_search (layer=\"core_theory\")\n"
+        "- Current events → web_search, cross-ref with KG\n"
+        "- URL in message → fetch_url to read the page\n"
+        "- Real-time market prices → get_finance_data\n"
+        "- My crypto wallet address/balance → check_wallet"
+    ),
+)
 
-_GENERAL_PROMPT = _BASE_PROMPT + """
-<tool-strategy>
-- Geopolitics → knowledge_graph_search first, then vector_search
-- Theory/ideology → vector_search (layer="core_theory")
-- Current events → web_search, cross-ref with KG
-- URL in message → fetch_url to read the page
-- Real-time market prices → get_finance_data
-- My crypto wallet address/balance → check_wallet
-</tool-strategy>
-"""
+
+def _base_sections() -> list[tuple[str, str]]:
+    return [_AUDIENCE_SECTION, _PERSONA_SECTION]
+
+
+def _general_prompt_ir() -> SystemPrompt:
+    return SystemPrompt(
+        identity=CORE_IDENTITY.rstrip(),
+        preamble=_A2A_PREAMBLE,
+        sections=_base_sections() + [_GENERAL_TOOL_STRATEGY_SECTION],
+        context=[("current-time", "{current_datetime}")],
+    )
+
 
 _SKILL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
 
@@ -95,48 +118,58 @@ def _load_skill_prompt(skill_name: str) -> str | None:
         return None
 
 
-def _geopolitical_prompt() -> str:
+def _geopolitical_prompt_ir() -> SystemPrompt:
     skill_md = _load_skill_prompt("geopolitical-analysis") or ""
-    return _BASE_PROMPT + f"""
-<skill>geopolitical-analysis</skill>
-<instructions>
-{skill_md}
-</instructions>
+    return SystemPrompt(
+        identity=CORE_IDENTITY.rstrip(),
+        preamble=_A2A_PREAMBLE,
+        sections=_base_sections() + [
+            ("skill", "geopolitical-analysis"),
+            ("instructions", skill_md.strip()),
+            (
+                "tool-strategy",
+                (
+                    "Follow the 5-step process in the skill instructions exactly.\n"
+                    "Available tools: knowledge_graph_search, vector_search, web_search, write_kg."
+                ),
+            ),
+        ],
+        context=[("current-time", "{current_datetime}")],
+    )
 
-<tool-strategy>
-Follow the 5-step process in the skill instructions exactly.
-Available tools: knowledge_graph_search, vector_search, web_search, write_kg.
-</tool-strategy>
-"""
 
-
-def _research_prompt() -> str:
+def _research_prompt_ir() -> SystemPrompt:
     skill_md = _load_skill_prompt("research-report") or ""
-    return _BASE_PROMPT + f"""
-<skill>research-synthesis</skill>
-<instructions>
-{skill_md}
-</instructions>
-
-<tool-strategy>
-Follow the multi-source collection process in the skill instructions.
-Available tools: web_search, knowledge_graph_search, vector_search, fetch_url.
-Do NOT save files — return the report content directly in your response.
-</tool-strategy>
-"""
+    return SystemPrompt(
+        identity=CORE_IDENTITY.rstrip(),
+        preamble=_A2A_PREAMBLE,
+        sections=_base_sections() + [
+            ("skill", "research-synthesis"),
+            ("instructions", skill_md.strip()),
+            (
+                "tool-strategy",
+                (
+                    "Follow the multi-source collection process in the skill instructions.\n"
+                    "Available tools: web_search, knowledge_graph_search, vector_search, fetch_url.\n"
+                    "Do NOT save files — return the report content directly in your response."
+                ),
+            ),
+        ],
+        context=[("current-time", "{current_datetime}")],
+    )
 
 
 # ── Skill registry ───────────────────────────────────────────────────
 
 _SKILLS = {
     "geopolitical-analysis": {
-        "prompt_fn": _geopolitical_prompt,
+        "prompt_ir_fn": _geopolitical_prompt_ir,
         "tools": _GEOPOLITICAL_TOOLS,
         "max_rounds": 30,
         "budget": 0.50,
     },
     "research-synthesis": {
-        "prompt_fn": _research_prompt,
+        "prompt_ir_fn": _research_prompt_ir,
         "tools": _RESEARCH_TOOLS,
         "max_rounds": 30,
         "budget": 0.50,
@@ -145,6 +178,20 @@ _SKILLS = {
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+def _resolve_a2a_provider() -> str:
+    """Pick the effective provider for this A2A turn.
+
+    Mirrors the runtime fallback logic in ``_run_llm`` so that the prompt
+    is rendered in the format native to whichever SDK will actually be
+    called. ``local`` falls back to OpenAI (when the client is wired up)
+    or Claude.
+    """
+    provider = _config.get("provider", "claude")
+    if provider == "local":
+        provider = "openai" if _openai_client else "claude"
+    return provider
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -217,16 +264,26 @@ async def handle_a2a_message(request_body: dict) -> dict:
     now = datetime.now(KST)
     dt_str = now.strftime("%Y-%m-%d %H:%M KST (%A)")
 
+    effective_provider = _resolve_a2a_provider()
+
     if skill_cfg:
-        system_prompt = skill_cfg["prompt_fn"]().format(current_datetime=dt_str)
+        prompt_ir = skill_cfg["prompt_ir_fn"]()
         tools, handlers = _build_toolset(skill_cfg["tools"])
         max_rounds = skill_cfg["max_rounds"]
         budget = skill_cfg["budget"]
     else:
-        system_prompt = _GENERAL_PROMPT.format(current_datetime=dt_str)
+        prompt_ir = _general_prompt_ir()
         tools, handlers = _build_toolset(_GENERAL_TOOLS)
         max_rounds = 20
         budget = float(_config.get("chat_budget", 0.30)) or 0.30
+
+    # Render + substitute {current_datetime} via .replace() rather than
+    # str.format() — SKILL.md bodies may contain unrelated curly-brace
+    # templates (e.g. `research/{주제}-{YYYY-MM-DD}.md`) that would collide
+    # with format-string placeholder resolution.
+    system_prompt = _render_prompt(prompt_ir, effective_provider).replace(
+        "{current_datetime}", dt_str
+    )
 
     timeout_sec = 120
     history = [{"role": "user", "content": user_text}]
