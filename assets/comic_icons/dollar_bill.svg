@@ -1,0 +1,14 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bill body -->
+  <rect x="8" y="28" width="84" height="44" rx="2" fill="#9fd8ae" stroke="#145a32" stroke-width="2.5"/>
+  <!-- Inner dashed border -->
+  <rect x="13" y="33" width="74" height="34" rx="1" fill="none" stroke="#145a32" stroke-width="1" stroke-dasharray="2 2"/>
+  <!-- Center dollar medallion -->
+  <circle cx="50" cy="50" r="11" fill="#dff2e4" stroke="#145a32" stroke-width="2"/>
+  <text x="50" y="56" font-family="system-ui, sans-serif" font-size="14" font-weight="800" fill="#145a32" text-anchor="middle">$</text>
+  <!-- Corner denominations -->
+  <text x="20" y="44" font-family="system-ui, sans-serif" font-size="7" font-weight="800" fill="#145a32">100</text>
+  <text x="72" y="44" font-family="system-ui, sans-serif" font-size="7" font-weight="800" fill="#145a32">100</text>
+  <text x="20" y="66" font-family="system-ui, sans-serif" font-size="7" font-weight="800" fill="#145a32">100</text>
+  <text x="72" y="66" font-family="system-ui, sans-serif" font-size="7" font-weight="800" fill="#145a32">100</text>
+</svg>

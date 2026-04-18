@@ -1,0 +1,15 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Paper with jagged torn bottom edge -->
+  <path d="M 14 12 L 86 12 L 86 68 L 82 64 L 78 72 L 72 64 L 66 72 L 60 64 L 54 74 L 48 64 L 42 74 L 36 64 L 30 72 L 24 64 L 18 72 L 14 66 Z" fill="#fefcf5" stroke="#2d3436" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Header -->
+  <text x="50" y="24" font-family="system-ui, sans-serif" font-size="7" font-weight="900" fill="#c0392b" text-anchor="middle">약 속</text>
+  <line x1="30" y1="28" x2="70" y2="28" stroke="#c0392b" stroke-width="1.2"/>
+  <!-- Body text lines -->
+  <line x1="22" y1="36" x2="76" y2="36" stroke="#2d3436" stroke-width="1"/>
+  <line x1="22" y1="42" x2="78" y2="42" stroke="#2d3436" stroke-width="1"/>
+  <line x1="22" y1="48" x2="72" y2="48" stroke="#2d3436" stroke-width="1"/>
+  <line x1="22" y1="54" x2="64" y2="54" stroke="#2d3436" stroke-width="1"/>
+  <!-- Tear detail highlights -->
+  <line x1="30" y1="72" x2="34" y2="76" stroke="#2d3436" stroke-width="1"/>
+  <line x1="54" y1="74" x2="58" y2="78" stroke="#2d3436" stroke-width="1"/>
+</svg>
