@@ -7,6 +7,8 @@ Usage:
   python scripts/autonomous_cli.py show <project_id>
   python scripts/autonomous_cli.py events <project_id> [--limit N]
   python scripts/autonomous_cli.py edit <project_id> [--title T] [--topic X] [--goal G | --goal-file F]
+  python scripts/autonomous_cli.py advise <project_id> [--message "…" | --file path]
+  python scripts/autonomous_cli.py advisories <project_id>
   python scripts/autonomous_cli.py pause <project_id>
   python scripts/autonomous_cli.py resume <project_id>
   python scripts/autonomous_cli.py archive <project_id>
@@ -196,6 +198,85 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_advise(args: argparse.Namespace) -> int:
+    """Leave an operator advisory for the next tick to read.
+
+    The advisory appears in the agent's prompt as an <operator-advice> block above
+    the plan, and is marked consumed after the tick succeeds. Multiple advisories
+    queue up in time order if left before the next tick fires.
+    """
+    _ensure_tables()
+    cur = db_query_one("SELECT state FROM autonomous_projects WHERE id = %s", (args.project_id,))
+    if not cur:
+        print(f"Project #{args.project_id} not found")
+        return 1
+
+    if args.file:
+        if args.file == "-":
+            content = sys.stdin.read()
+        else:
+            with open(args.file, "r", encoding="utf-8") as f:
+                content = f.read()
+    elif args.message is not None:
+        content = args.message
+    else:
+        print("error: specify a --message or --file")
+        return 1
+
+    content = content.strip()
+    if not content:
+        print("error: advisory cannot be empty")
+        return 1
+
+    row = db_query_one(
+        "INSERT INTO autonomous_project_advisories(project_id, content) VALUES (%s, %s) RETURNING id, created_at",
+        (args.project_id, content),
+    )
+    _log_event(args.project_id, "advisory_created",
+               f"advisory #{row['id']} created ({len(content)} chars)",
+               {"advisory_id": row["id"]})
+    print(f"Advisory #{row['id']} queued for project #{args.project_id}")
+    print(f"  created_at: {row['created_at']}")
+    print(f"  length: {len(content)} chars")
+    print(f"  (agent will read this at the next tick; state = '{cur['state']}')")
+    return 0
+
+
+def _cmd_advisories(args: argparse.Namespace) -> int:
+    """List advisories for a project — pending (unread) + recent consumed."""
+    _ensure_tables()
+    rows = db_query(
+        """SELECT id, content, created_at, consumed_at FROM autonomous_project_advisories
+           WHERE project_id = %s ORDER BY created_at DESC LIMIT %s""",
+        (args.project_id, args.limit),
+    )
+    if not rows:
+        print("(no advisories)")
+        return 0
+    pending = [r for r in rows if r["consumed_at"] is None]
+    consumed = [r for r in rows if r["consumed_at"] is not None]
+    if pending:
+        print(f"=== PENDING ({len(pending)}) — will be shown to next tick ===")
+        for r in pending:
+            ts = r["created_at"].strftime("%Y-%m-%d %H:%M")
+            print(f"#{r['id']}  {ts}")
+            print("  " + r["content"][:500].replace("\n", "\n  "))
+            if len(r["content"]) > 500:
+                print(f"  ... ({len(r['content']) - 500} chars more)")
+            print()
+    if consumed:
+        print(f"=== CONSUMED ({len(consumed)}) — already read by an earlier tick ===")
+        for r in consumed:
+            ts = r["created_at"].strftime("%Y-%m-%d %H:%M")
+            ts_c = r["consumed_at"].strftime("%Y-%m-%d %H:%M")
+            print(f"#{r['id']}  created={ts}  consumed={ts_c}")
+            print("  " + r["content"][:300].replace("\n", "\n  "))
+            if len(r["content"]) > 300:
+                print("  ...")
+            print()
+    return 0
+
+
 def _cmd_tick(_args: argparse.Namespace) -> int:
     result = run_tick()
     if not result:
@@ -247,6 +328,17 @@ def main() -> int:
     ped.add_argument("--goal", help="Inline goal string. For multi-line use --goal-file instead.")
     ped.add_argument("--goal-file", help="Path to a file containing the new goal, or '-' for stdin.")
     ped.set_defaults(func=_cmd_edit)
+
+    pad = sub.add_parser("advise", help="Leave an operator advisory for the next tick")
+    pad.add_argument("project_id", type=int)
+    pad.add_argument("--message", "-m", help="Advisory text (inline). Use --file for multi-line.")
+    pad.add_argument("--file", "-f", help="Path to file containing the advisory, or '-' for stdin.")
+    pad.set_defaults(func=_cmd_advise)
+
+    pav = sub.add_parser("advisories", help="List pending + recent consumed advisories")
+    pav.add_argument("project_id", type=int)
+    pav.add_argument("--limit", type=int, default=20)
+    pav.set_defaults(func=_cmd_advisories)
 
     pt = sub.add_parser("tick", help="Run one tick now (manual test)")
     pt.set_defaults(func=_cmd_tick)

@@ -51,6 +51,11 @@ Your input contains these blocks (read them BEFORE acting):
   justifiable against this goal. If an action does not advance it, do not take it.
   (Distinct from Cyber-Lenin's cross-action preferences/values; those apply everywhere.
   This goal applies to THIS project only.)
+- <operator-advice> (when present): messages left for you by the operator between your
+  last tick and this one. Read FIRST, before looking at the plan. They reflect context
+  you don't have (bug fixes, direction changes, external information). When advice
+  conflicts with your prior plan, the advice wins — the plan is your own hypothesis,
+  the advice is external information. Shown once; next tick won't see them.
 - <state>: current lifecycle state — `researching` / `planning` / `paused`.
 - <plan>: current goals and steps. May be empty if the project is fresh.
 - <recent-notes>: the last several research notes you left on prior ticks. Do NOT repeat them.

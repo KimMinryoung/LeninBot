@@ -1450,6 +1450,30 @@ async def _exec_read_autonomous_project(
     out.append((proj.get("goal") or "").strip())
     out.append("")
 
+    # Operator advisories (pending + recent consumed)
+    try:
+        advisories = await asyncio.to_thread(
+            db_query,
+            "SELECT id, content, created_at, consumed_at FROM autonomous_project_advisories "
+            "WHERE project_id = %s ORDER BY created_at DESC LIMIT 10",
+            (project_id,),
+        )
+    except Exception:
+        advisories = []
+    if advisories:
+        pending = [a for a in advisories if a["consumed_at"] is None]
+        consumed = [a for a in advisories if a["consumed_at"] is not None]
+        out.append(f"-- operator advisories (pending: {len(pending)}, recent consumed: {len(consumed)}) --")
+        for a in pending:
+            ts = _to_kst(a.get("created_at"))
+            out.append(f"[PENDING #{a['id']} @ {ts}]")
+            out.append(f"  {(a.get('content') or '')[:500]}")
+        for a in consumed[:3]:
+            ts = _to_kst(a.get("created_at"))
+            out.append(f"[consumed #{a['id']} @ {ts}]")
+            out.append(f"  {(a.get('content') or '')[:300]}")
+        out.append("")
+
     out.append("-- plan --")
     goals = plan.get("goals") or []
     steps = plan.get("steps") or []

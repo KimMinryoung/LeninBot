@@ -81,7 +81,50 @@ def _ensure_tables() -> None:
         CREATE INDEX IF NOT EXISTS autonomous_project_events_project_idx
         ON autonomous_project_events(project_id, created_at DESC)
     """)
+    # Operator advisories — one-shot messages that the next tick reads and then
+    # the system marks consumed. Separate from research_notes (different
+    # authority: operator vs agent-self) and from events (events are passive
+    # logs, advisories are active directives).
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS autonomous_project_advisories (
+            id          SERIAL PRIMARY KEY,
+            project_id  INT NOT NULL REFERENCES autonomous_projects(id) ON DELETE CASCADE,
+            content     TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            consumed_at TIMESTAMPTZ
+        )
+    """)
+    db_execute("""
+        CREATE INDEX IF NOT EXISTS autonomous_project_advisories_pending_idx
+        ON autonomous_project_advisories(project_id, created_at)
+        WHERE consumed_at IS NULL
+    """)
     _tables_ensured = True
+
+
+# ── Advisories ──────────────────────────────────────────────────────
+def _fetch_pending_advisories(project_id: int) -> list[dict]:
+    """Return operator advisories for this project that the agent has not
+    yet consumed, oldest first."""
+    return db_query(
+        "SELECT id, content, created_at FROM autonomous_project_advisories "
+        "WHERE project_id = %s AND consumed_at IS NULL "
+        "ORDER BY created_at ASC",
+        (project_id,),
+    )
+
+
+def _mark_advisories_consumed(project_id: int, advisory_ids: list[int]) -> None:
+    if not advisory_ids:
+        return
+    try:
+        db_execute(
+            "UPDATE autonomous_project_advisories SET consumed_at = NOW() "
+            "WHERE project_id = %s AND id = ANY(%s)",
+            (project_id, advisory_ids),
+        )
+    except Exception as e:
+        logger.warning("Failed to mark advisories consumed (project=%s): %s", project_id, e)
 
 
 def _log_event(project_id: int, event_type: str, content: str = "", meta: dict | None = None) -> None:
@@ -419,12 +462,30 @@ def _format_notes(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_task_prompt(project: dict, turn_budget: int) -> str:
+def _build_task_prompt(project: dict, turn_budget: int, advisories: list[dict] | None = None) -> str:
     plan_text = _format_plan(project.get("plan"))
     notes_text = _format_notes(_recent_notes(project))
     parts = [
         f"<project>\nid: {project['id']}\ntitle: {project['title']}\ntopic: {project['topic']}\n</project>",
         f"<goal>\n{project['goal']}\n</goal>",
+    ]
+    # Operator advisories sit between <goal> and <state> — above the plan so
+    # they can redirect it. Omitted entirely when empty.
+    if advisories:
+        advisory_lines = []
+        for a in advisories:
+            ts = a["created_at"].astimezone(KST).strftime("%Y-%m-%d %H:%M KST") if a.get("created_at") else "?"
+            advisory_lines.append(f"[from operator @ {ts}]\n{a['content']}")
+        parts.append(
+            "<operator-advice>\n"
+            "The following messages were left for you by the operator between your last tick "
+            "and this one. Read them BEFORE acting. They override your prior plan when they "
+            "conflict — the operator sees context you don't. These messages are shown once; "
+            "after this tick they are marked consumed.\n\n"
+            + "\n\n".join(advisory_lines)
+            + "\n</operator-advice>"
+        )
+    parts.extend([
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
         f"<recent-notes>\n{notes_text}\n</recent-notes>",
@@ -435,7 +496,7 @@ def _build_task_prompt(project: dict, turn_budget: int) -> str:
         "Advance this project by exactly one concrete step. Save findings via add_research_note "
         "BEFORE your final response. End with a one-paragraph self-critique: did this tick "
         "advance the goal? what is the next tick's focus?",
-    ]
+    ])
     return "\n\n".join(parts)
 
 
@@ -466,7 +527,13 @@ async def _run_one_tick(project: dict) -> dict:
         system_alerts="",
     )
 
-    user_content = _build_task_prompt(project, turn_budget=spec.max_rounds)
+    # Fetch pending operator advisories. Marked consumed AFTER the tick
+    # succeeds — if the tick raises, advisories remain pending for the next
+    # tick to see so the operator's message isn't lost to an infra error.
+    pending_advisories = _fetch_pending_advisories(project["id"])
+    user_content = _build_task_prompt(
+        project, turn_budget=spec.max_rounds, advisories=pending_advisories,
+    )
 
     # Spec pins provider="claude" (same pattern as diary — research work needs
     # Claude regardless of the config's chat provider toggle). Tier follows the
@@ -514,6 +581,16 @@ async def _run_one_tick(project: dict) -> dict:
         "UPDATE autonomous_projects SET turn_count = turn_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
         (project["id"],),
     )
+    # Mark pending advisories as consumed — tick saw them, job done.
+    if pending_advisories:
+        _mark_advisories_consumed(
+            project["id"], [a["id"] for a in pending_advisories]
+        )
+        _log_event(
+            project["id"], "advisories_consumed",
+            f"{len(pending_advisories)} advisories marked consumed",
+            {"ids": [a["id"] for a in pending_advisories]},
+        )
     _log_event(
         project["id"], "tick_end",
         (result_text or "")[:3000],
