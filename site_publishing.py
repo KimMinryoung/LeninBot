@@ -303,11 +303,19 @@ async def _exec_publish_static_page(
         return "Error: html_body is required."
 
     # Forbid full-document HTML — the frontend provides the layout wrapper.
+    # Use regex so semantic tags like <header> do not false-positive on '<head'.
     lower = html_body.lower()
-    for forbidden in ("<html", "<body", "<head", "</html", "</body", "</head"):
-        if forbidden in lower:
+    for forbidden_re, label in (
+        (r"<html(?:\s|>)", "<html"),
+        (r"<body(?:\s|>)", "<body"),
+        (r"<head(?:\s|>)", "<head"),
+        (r"</html\s*>", "</html"),
+        (r"</body\s*>", "</body"),
+        (r"</head\s*>", "</head"),
+    ):
+        if re.search(forbidden_re, lower):
             return (
-                f"Error: html_body must be inner content only — found {forbidden!r}. "
+                f"Error: html_body must be inner content only — found {label!r}. "
                 "Provide semantic body content (<article>, <section>, etc.); the site "
                 "wraps it with nav/layout/css."
             )
@@ -342,6 +350,115 @@ async def _exec_publish_static_page(
         f"Local path: {target}\n"
         f"Public URL: {public_url}\n"
         f"Body size: {len(html_body)} chars"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Tool 3: publish_comic
+# ══════════════════════════════════════════════════════════════════════
+
+PUBLISH_COMIC_TOOL = {
+    "name": "publish_comic",
+    "description": (
+        "Publish a 4-panel political comic to cyber-lenin.com under /p/{slug}. "
+        "You author the scene SVG for each panel; the composer renders the panel "
+        "frame and the speech balloon so those stay visually consistent. "
+        "Panel viewBox is 960×320 (landscape, 4 panels stack vertically). The speech "
+        "balloon occupies the rectangle (40, 28)–(420, 136) inside each panel — keep "
+        "your scene content clear of that area. "
+        "Visual vocabulary: reuse named-object templates from `assets/comic_icons/` "
+        "(tv_news, missile_alert, chart_up/down, vault, goldbar_stack, dollar_bill, "
+        "sanctions_stamp, torn_paper, speaker_head). Each icon is a 100×100 viewBox; "
+        "copy its inner children and wrap in `<g transform=\"translate(x,y) scale(s)\">`. "
+        "Recolor/relabel as needed. "
+        "Content rule: each panel contains ONLY imagery and one short speech line. No "
+        "captions, headings, subtext, transcripts, or analysis. Visual elements must be "
+        "recognizable named objects — abstract rectangles/triangles/dashed circles "
+        "without meaning are banned. A reader must parse each panel in ≤2 seconds. "
+        "scene_svg is sanitized server-side (<script>, <style>, <iframe>, "
+        "<foreignObject>, on* event handlers, javascript:/data: hrefs stripped); don't "
+        "rely on them. Overwrites existing pages with the same slug — useful for iteration."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "slug": {
+                "type": "string",
+                "description": "URL slug (lowercase a–z0–9 and dashes, 1–80 chars). Becomes /p/{slug}.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Comic title shown in the page <title>, meta tags, and list indices.",
+            },
+            "panels": {
+                "type": "array",
+                "description": "Exactly 4 panels, rendered top-to-bottom in a single column.",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "scene_svg": {
+                            "type": "string",
+                            "description": (
+                                "Raw SVG children for the panel interior (no outer <svg> tag). "
+                                "Typically a few `<g transform=\"translate(x, y) scale(s)\">…icon children…</g>` "
+                                "groups arranging named-object icons. Avoid the balloon area at top-left."
+                            ),
+                        },
+                        "speech": {
+                            "type": "string",
+                            "description": (
+                                "One short Korean line that appears inside the speech balloon. Wraps to at "
+                                "most 3 lines at ~22 chars per line — keep punchy. Empty string renders no balloon."
+                            ),
+                        },
+                    },
+                    "required": ["scene_svg", "speech"],
+                },
+            },
+            "summary": {
+                "type": "string",
+                "description": "Optional short description for meta tags and the /reports research-tab listing.",
+            },
+        },
+        "required": ["slug", "title", "panels"],
+    },
+}
+
+
+async def _exec_publish_comic(
+    slug: str,
+    title: str,
+    panels: list[dict],
+    summary: str | None = None,
+) -> str:
+    # Lazy import to avoid a circular dependency: comic_composer imports
+    # _exec_publish_static_page from this module for its own --publish CLI path.
+    from scripts.comic_composer import build_page_payload
+
+    slug = (slug or "").strip().lower()
+    title = (title or "").strip()
+    summary_in = (summary or "").strip() or title
+
+    try:
+        page = build_page_payload({
+            "slug": slug,
+            "title": title,
+            "summary": summary_in,
+            "panels": panels or [],
+        })
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.error("publish_comic build error: %s", e)
+        return f"Failed to build comic: {e}"
+
+    return await _exec_publish_static_page(
+        slug=page["slug"],
+        title=page["title"],
+        html_body=page["html_body"],
+        summary=page.get("summary") or summary_in,
     )
 
 
@@ -422,8 +539,13 @@ def get_static_page(slug: str) -> dict | None:
 # Registration (imported by telegram_tools.py)
 # ══════════════════════════════════════════════════════════════════════
 
-SITE_PUBLISHING_TOOLS = [PUBLISH_HUB_CURATION_TOOL, PUBLISH_STATIC_PAGE_TOOL]
+SITE_PUBLISHING_TOOLS = [
+    PUBLISH_HUB_CURATION_TOOL,
+    PUBLISH_STATIC_PAGE_TOOL,
+    PUBLISH_COMIC_TOOL,
+]
 SITE_PUBLISHING_TOOL_HANDLERS = {
     "publish_hub_curation": _exec_publish_hub_curation,
     "publish_static_page": _exec_publish_static_page,
+    "publish_comic": _exec_publish_comic,
 }
