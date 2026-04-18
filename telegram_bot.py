@@ -1500,6 +1500,9 @@ async def bot_main():
         BotCommand(command="modify", description="서버 파일 수정"),
         BotCommand(command="mission", description="미션 상태 / close"),
         BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),
+        BotCommand(command="projects", description="자율 프로젝트 목록"),
+        BotCommand(command="advise", description="자율 에이전트에 조언 (다음 tick 에 전달)"),
+        BotCommand(command="advisories", description="대기 중 / 소비된 조언 조회"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
 

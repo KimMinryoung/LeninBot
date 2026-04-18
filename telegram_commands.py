@@ -120,6 +120,11 @@ _HELP_TEXT = """\
 /schedules — 등록된 스케줄 목록
 /unschedule <id> — 스케줄 삭제
 
+*자율 프로젝트*
+/projects — 자율 프로젝트 목록
+/advise \\[id] <조언> — 다음 tick 에 전달할 조언 등록 (multi-line OK)
+/advisories \\[id] — 대기 중/소비된 조언 조회
+
 *시스템*
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
@@ -1715,6 +1720,162 @@ async def cb_config_close(callback: CallbackQuery):
 
 # ── Registration ───────────────────────────────────────────────────
 
+async def cmd_projects(message: Message):
+    """List autonomous projects (id, state, turn count, title)."""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    rows = await asyncio.to_thread(
+        _query,
+        "SELECT id, title, state, turn_count, last_run_at "
+        "FROM autonomous_projects ORDER BY "
+        "CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 "
+        "           WHEN 'paused' THEN 1 ELSE 2 END, id",
+    )
+    if not rows:
+        await message.answer("등록된 자율 프로젝트가 없습니다.")
+        return
+    lines = ["자율 프로젝트"]
+    for r in rows:
+        last = r["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if r["last_run_at"] else "never"
+        lines.append(f"#{r['id']} [{r['state']}] turn {r['turn_count']} last={last}")
+        lines.append(f"  {r['title']}")
+    lines.append("")
+    lines.append("조언: /advise <id> <내용>  |  조언 목록: /advisories <id>")
+    await message.answer("\n".join(lines))
+
+
+def _parse_advise_args(text: str) -> tuple[int | None, str]:
+    """Split '/advise [<id>] <content>' into (project_id_or_None, content).
+
+    Multi-line content is preserved (Telegram passes newlines through). The
+    first whitespace-delimited token is treated as a project_id only when it
+    parses as a positive integer.
+    """
+    after_cmd = (text or "").split(None, 1)
+    if len(after_cmd) < 2:
+        return None, ""
+    rest = after_cmd[1].strip()
+    if not rest:
+        return None, ""
+    head = rest.split(None, 1)
+    if head[0].isdigit():
+        pid = int(head[0])
+        content = head[1] if len(head) > 1 else ""
+        return pid, content.strip()
+    return None, rest
+
+
+async def _pick_single_active_project() -> int | None:
+    rows = await asyncio.to_thread(
+        _query,
+        "SELECT id FROM autonomous_projects WHERE state IN ('researching', 'planning') ORDER BY id",
+    )
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+async def cmd_advise(message: Message):
+    """Leave an operator advisory that the next autonomous-project tick reads.
+
+    Usage:
+      /advise <project_id> <content>   — explicit
+      /advise <content>                 — if exactly one active project
+
+    Multi-line content is OK — everything after the id (or after the command,
+    if id is omitted) is taken as the advisory body.
+    """
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    project_id, content = _parse_advise_args(message.text or "")
+    if not content:
+        await message.answer(
+            "사용법:\n"
+            "  /advise <project_id> <조언>\n"
+            "  /advise <조언>   (단일 active 프로젝트일 때)\n"
+            "Multi-line 도 OK — 명령 다음 줄부터 전체가 조언 본문"
+        )
+        return
+    if project_id is None:
+        project_id = await _pick_single_active_project()
+        if project_id is None:
+            await message.answer(
+                "활성 프로젝트가 0개이거나 2개 이상입니다. /projects 로 확인 후 id 명시."
+            )
+            return
+    proj = await asyncio.to_thread(
+        _query_one,
+        "SELECT title, state FROM autonomous_projects WHERE id = %s",
+        (project_id,),
+    )
+    if not proj:
+        await message.answer(f"프로젝트 #{project_id} 찾을 수 없음.")
+        return
+    row = await asyncio.to_thread(
+        _query_one,
+        "INSERT INTO autonomous_project_advisories(project_id, content) "
+        "VALUES (%s, %s) RETURNING id, created_at",
+        (project_id, content),
+    )
+    # Mirror the CLI path — log an event so the audit trail is uniform.
+    try:
+        from autonomous_project import _log_event
+        await asyncio.to_thread(
+            _log_event, project_id, "advisory_created",
+            f"advisory #{row['id']} created via Telegram ({len(content)} chars)",
+            {"advisory_id": row["id"], "via": "telegram"},
+        )
+    except Exception as e:
+        logger.warning("advisory event log failed: %s", e)
+    await message.answer(
+        f"조언 #{row['id']} 등록됨 → #{project_id} '{proj['title']}' ({proj['state']})\n"
+        f"({len(content)}자)  다음 tick 에서 agent 가 읽고 자동 소비."
+    )
+
+
+async def cmd_advisories(message: Message):
+    """List pending + recent consumed advisories for a project.
+
+    Usage:
+      /advisories <project_id>
+      /advisories            — single active project
+    """
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    project_id, _ = _parse_advise_args(message.text or "")
+    if project_id is None:
+        project_id = await _pick_single_active_project()
+        if project_id is None:
+            await message.answer("사용법: /advisories <project_id>   (/projects 로 id 확인)")
+            return
+    rows = await asyncio.to_thread(
+        _query,
+        "SELECT id, content, created_at, consumed_at FROM autonomous_project_advisories "
+        "WHERE project_id = %s ORDER BY created_at DESC LIMIT 10",
+        (project_id,),
+    )
+    if not rows:
+        await message.answer(f"프로젝트 #{project_id} 에 조언 없음.")
+        return
+    pending = [r for r in rows if r["consumed_at"] is None]
+    consumed = [r for r in rows if r["consumed_at"] is not None]
+    lines = [f"프로젝트 #{project_id} 조언"]
+    if pending:
+        lines.append(f"\n[대기 중] {len(pending)}건 — 다음 tick 이 읽음")
+        for r in pending:
+            ts = r["created_at"].astimezone(KST).strftime("%m/%d %H:%M")
+            snip = r["content"][:400] + ("…" if len(r["content"]) > 400 else "")
+            lines.append(f"#{r['id']} @ {ts}")
+            lines.append(snip)
+    if consumed:
+        lines.append(f"\n[소비됨] {min(3, len(consumed))}/{len(consumed)}건")
+        for r in consumed[:3]:
+            ts = r["created_at"].astimezone(KST).strftime("%m/%d %H:%M")
+            ts_c = r["consumed_at"].astimezone(KST).strftime("%m/%d %H:%M")
+            snip = r["content"][:250] + ("…" if len(r["content"]) > 250 else "")
+            lines.append(f"#{r['id']} 작성={ts} 소비={ts_c}")
+            lines.append(snip)
+    await message.answer("\n".join(lines))
+
+
 async def cmd_agents(message: Message):
     """Show registered agents and external worker process status."""
     if not _ctx["is_allowed"](message.from_user.id):
@@ -1772,6 +1933,9 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_modify, Command("modify"))
     router.message.register(cmd_config, Command("config"))
     router.message.register(cmd_agents, Command("agents"))
+    router.message.register(cmd_projects, Command("projects"))
+    router.message.register(cmd_advise, Command("advise"))
+    router.message.register(cmd_advisories, Command("advisories"))
 
     # Photo handler
     router.message.register(handle_photo, F.photo)
