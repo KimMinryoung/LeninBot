@@ -28,18 +28,38 @@ from decimal import Decimal
 from db import (
     query as db_query,
     execute_returning_rowcount as db_exec,
+    get_conn,
 )
 
 logger = logging.getLogger(__name__)
 
 _READ_KEYWORDS = ("select", "with", "show", "explain", "values", "table")
 
-# DROP cannot be undone inside a transaction boundary we control — once
-# committed the object is gone. Even with backups, recovery is hours of
-# downtime. Reserved for the operator (scripts/psql-supabase). The block
-# applies to the leading keyword only — ALTER ... DROP COLUMN is still
-# allowed (different threat level, and sometimes required for migrations).
-_BLOCKED_LEADING_KEYWORDS = frozenset({"drop"})
+# Leading keywords that are unconditionally blocked — bulk destructive ops
+# whose recovery cost massively outweighs their legitimate agent use case.
+# Reserved for the operator via scripts/psql-supabase.
+#   drop      — irreversible; once committed the schema object is gone
+#   truncate  — wipes all rows (and resets sequences); effectively
+#               indistinguishable from DROP+CREATE for a data user
+# Leading-keyword check only — ALTER ... DROP COLUMN is still allowed
+# (different threat level, and sometimes required mid-migration).
+_BLOCKED_LEADING_KEYWORDS = frozenset({"drop", "truncate"})
+
+# UPDATE/DELETE touching this many rows or more is treated as a bulk
+# maintenance job and bounced to the operator. Not a safety-critical
+# invariant (the data is still recoverable from the DB's own history),
+# but a clear "this isn't a task for the agent to do in one shot" line.
+# Enforced by running the statement in a transaction and rolling back if
+# the cursor's affected rowcount crosses the threshold.
+_MAX_BULK_MUTATION_ROWS = 10
+
+
+class _BulkMutationBlocked(Exception):
+    """Raised inside the transaction to trigger rollback when an UPDATE/
+    DELETE would affect too many rows. Caught by the tool handler."""
+    def __init__(self, affected: int):
+        super().__init__(affected)
+        self.affected = affected
 
 
 def _classify_sql(sql: str) -> str:
@@ -79,9 +99,9 @@ QUERY_DB_TOOL = {
         "affected row count. CREATE/ALTER → OK. Use `params` for "
         "parameterized queries (%s placeholders) — never interpolate user input "
         "into the SQL string. Each call runs in its own transaction; exceptions "
-        "roll back. **DROP is blocked at the tool level** (irreversible; "
-        "operator-only via scripts/psql-supabase). Other destructive ops "
-        "(TRUNCATE, UPDATE/DELETE without WHERE) run as issued — check twice."
+        "roll back. **Blocked at the tool level**: DROP, TRUNCATE (irreversible), "
+        "and any UPDATE/DELETE that would affect ≥10 rows (bulk maintenance — "
+        "operator job). Operator runs blocked ops via scripts/psql-supabase."
     ),
     "input_schema": {
         "type": "object",
@@ -122,7 +142,7 @@ async def _exec_query_db(
 
     if kind in _BLOCKED_LEADING_KEYWORDS:
         return (
-            f"Error: {kind.upper()} is blocked on query_db — irreversible. "
+            f"Error: {kind.upper()} is blocked on query_db — irreversible/bulk-destructive. "
             "Ask the operator to run this via scripts/psql-supabase after review."
         )
 
@@ -138,7 +158,30 @@ async def _exec_query_db(
             if len(body) > 20000:
                 body = body[:20000] + "\n…(response truncated at 20000 chars)"
             return f"{header}\n{body}"
+        elif kind in ("update", "delete"):
+            # Run in a transaction, count affected rows, rollback if over the
+            # bulk threshold. Postgres MVCC means no other transaction sees the
+            # pending change before commit, so the rollback path is clean.
+            def _run_bounded() -> int:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(sql, param_tuple)
+                        affected = cur.rowcount
+                        if affected >= _MAX_BULK_MUTATION_ROWS:
+                            # Raise → get_conn's except branch rolls back + re-raises.
+                            raise _BulkMutationBlocked(affected)
+                        return affected
+            try:
+                affected = await asyncio.to_thread(_run_bounded)
+            except _BulkMutationBlocked as e:
+                return (
+                    f"Error: blocked — {kind.upper()} would affect {e.affected} rows "
+                    f"(≥{_MAX_BULK_MUTATION_ROWS}). Transaction rolled back. "
+                    "Bulk maintenance jobs belong to the operator; run via scripts/psql-supabase."
+                )
+            return f"OK. {kind.upper()} executed; {affected} row(s) affected."
         else:
+            # INSERT / CREATE / ALTER / etc.
             affected = await asyncio.to_thread(db_exec, sql, param_tuple)
             verb = kind.upper() if kind else "STATEMENT"
             if affected is None or affected < 0:
