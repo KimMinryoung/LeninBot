@@ -16,16 +16,33 @@ logger = logging.getLogger(__name__)
 TOOLS = [
     {
         "name": "vector_search",
-        "description": "Search Marxist-Leninist document DB (pgvector). Returns excerpts with author/year/title.",
+        "description": (
+            "Search Marxist-Leninist document DB (pgvector). Returns excerpts with "
+            "author/year/title. MATCH YOUR QUERY LANGUAGE TO THE LAYER: "
+            "core_theory is English-language classics (Marx, Engels, Lenin, Mao, "
+            "Trotsky translations) → query in English. modern_analysis is Korean "
+            "analysis/commentary → query in Korean. Cross-language queries return "
+            "near-empty results due to embedding-space separation."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query (Korean or English)."},
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query. Use English for layer=core_theory, Korean for "
+                        "layer=modern_analysis. Mismatching language to layer degrades recall sharply."
+                    ),
+                },
                 "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
                 "layer": {
                     "type": "string",
                     "enum": ["core_theory", "modern_analysis"],
-                    "description": "Filter: core_theory (classical) or modern_analysis. Omit for all.",
+                    "description": (
+                        "core_theory: English-language Marxist-Leninist classics. "
+                        "modern_analysis: Korean-language contemporary analysis/commentary. "
+                        "Omit to search all layers (not recommended — mixes languages)."
+                    ),
                 },
             },
             "required": ["query"],

@@ -1405,19 +1405,36 @@ def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = 
 
     Returns list of LangChain Document objects with page_content + metadata.
     When rerank=True, re-scores results with a cross-encoder for better relevance.
+
+    Note on recall: when a layer filter is present, the default HNSW ef_search
+    is too small to find enough candidates that also satisfy the layer filter —
+    top-k by distance may all be on the wrong layer and get dropped, returning
+    an empty result even when the DB has plenty of matches. We bump ef_search
+    per-transaction to mitigate this (the SET clause on the SP itself is
+    forbidden to non-superusers on managed Postgres).
     """
     from langchain_core.documents import Document
-    from db import query as db_query
+    from psycopg2.extras import RealDictCursor
+    from db import get_conn
 
     emb = _get_exp_embeddings()
     vec = emb.embed_query(query)
     embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
     fetch_k = k * 3 if rerank else k
+    # Match SP's default threshold (0.4). Kept as a parameter pass-through so
+    # the behaviour is visible to the reader without reading the SP.
+    threshold = 0.4
     try:
-        rows = db_query(
-            "SELECT * FROM match_documents(%s::vector, 0.5, %s, %s)",
-            (embedding_str, fetch_k, layer),
-        )
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # SET LOCAL so the bump applies only within this transaction.
+                # Integer literal is safe; no user input flows through this SET.
+                cur.execute("SET LOCAL hnsw.ef_search = 200")
+                cur.execute(
+                    "SELECT * FROM match_documents(%s::vector, %s, %s, %s)",
+                    (embedding_str, threshold, fetch_k, layer),
+                )
+                rows = [dict(r) for r in cur.fetchall()]
     except Exception as e:
         error_msg = str(e)
         if "57014" in error_msg or "timeout" in error_msg.lower():

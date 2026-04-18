@@ -496,7 +496,9 @@ async def _run_one_tick(project: dict) -> dict:
             tool_handlers=agent_handlers,
             system_prompt=system_prompt,
             max_rounds=spec.max_rounds,
-            max_tokens=4096,
+            max_tokens=16384,  # was 4096 — too small for long-form drafts; agent hit
+                              # truncation mid-note and never reached the final
+                              # add_research_note call (silent tick-0-save failure)
             budget_usd=spec.budget_usd,
             budget_tracker=budget_tracker,
             agent_name="autonomous_project",
