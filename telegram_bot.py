@@ -639,6 +639,7 @@ _CLAUDE_DYNAMIC_TAIL = """
 <context>
 <current-time>{current_datetime}</current-time>
 {current_model}
+{autonomous_status}
 {system_alerts}
 </context>
 {skills_section}
@@ -648,9 +649,44 @@ _MARKDOWN_DYNAMIC_TAIL = """
 ## Context
 - **Current Time**: {current_datetime}
 {current_model}
+{autonomous_status}
 {system_alerts}
 {skills_section}
 """.strip()
+
+
+def _format_autonomous_status(provider: str = "claude") -> str:
+    """One-line-per-project summary of active autonomous projects.
+
+    Surfaces the existence of the self-running project loop to the orchestrator
+    so it can reference ongoing work without the user having to prompt for it.
+    Returns empty string if no active projects or on DB error (fail-safe —
+    chat must never break because this auxiliary block can't be built).
+    """
+    try:
+        from db import query as db_query
+        rows = db_query(
+            "SELECT id, title, state, turn_count, last_run_at FROM autonomous_projects "
+            "WHERE state IN ('researching', 'planning') ORDER BY id"
+        )
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        last = r["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M KST") if r.get("last_run_at") else "never"
+        title = str(r.get("title") or "").replace("\n", " ")[:80]
+        lines.append(f"- #{r['id']} \"{title}\" — {r['state']}, turn {r['turn_count']}, last ran {last}")
+    body = (
+        "Self-running long-term project loop (hourly tick, separate from your chat turn). "
+        "Active projects:\n"
+        + "\n".join(lines)
+        + "\nFor detail on any project call read_self(source=\"autonomous_project\", task_id=<id>)."
+    )
+    if provider == "claude":
+        return f"<autonomous-agent-status>\n{body}\n</autonomous-agent-status>"
+    return "### Autonomous Agent Status\n" + body
 
 
 def _build_orchestrator_system_prompt(provider: str) -> str:
@@ -1195,6 +1231,7 @@ async def _chat_with_tools(
             current_datetime=_current_datetime_str(),
             current_model=_format_current_model_context("chat", effective_provider),
             system_alerts=_format_system_alerts(effective_provider),
+            autonomous_status=_format_autonomous_status(effective_provider),
             skills_section=build_skills_prompt(),
         )
         if extra_system_context:

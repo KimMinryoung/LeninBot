@@ -49,7 +49,9 @@ SELF_TOOLS = [
         "description": (
             "Read internal data. source: diary (6h entries), chat_logs (telegram/web), "
             "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
-            "system_status (overview), server_logs (journald), recent_updates (changelog)."
+            "system_status (overview), server_logs (journald), recent_updates (changelog), "
+            "autonomous_project (self-running long-term project loop — list with no task_id, "
+            "detail with task_id=<project_id>)."
         ),
         "input_schema": {
             "type": "object",
@@ -58,7 +60,7 @@ SELF_TOOLS = [
                     "type": "string",
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
                              "kg_status", "system_status", "server_logs", "recent_updates",
-                             "file_registry"],
+                             "file_registry", "autonomous_project"],
                     "description": "Which internal store to read — see tool description for per-source semantics.",
                 },
                 "limit": {"type": "integer", "description": "Results count."},
@@ -73,7 +75,7 @@ SELF_TOOLS = [
                     "description": "For server_logs: filter text or list of texts.",
                 },
                 "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
-                "task_id": {"type": "integer", "description": "For task_reports: get full report for a specific task ID."},
+                "task_id": {"type": "integer", "description": "For task_reports: specific task ID. For autonomous_project: specific project ID."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
             "required": ["source"],
@@ -1358,7 +1360,133 @@ async def _exec_read_self(
         return await _exec_read_recent_updates(max_entries=limit or 3)
     if source == "file_registry":
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
+    if source == "autonomous_project":
+        return await _exec_read_autonomous_project(project_id=task_id, limit=limit or 10, keyword=keyword)
     return f"Unknown source: {source}"
+
+
+async def _exec_read_autonomous_project(
+    project_id: int | None = None, limit: int = 10, keyword: str | None = None,
+) -> str:
+    """Surface autonomous project state to the orchestrator.
+
+    Without project_id → list of active/archived projects with one-line summary.
+    With project_id    → full detail: preferences, plan, recent notes, recent events.
+    Keyword filter (if given) matches against title/topic on the list form, and
+    against note content on the detail form.
+    """
+    from db import query as db_query, query_one as db_query_one
+
+    # ── LIST MODE ─────────────────────────────────────────────
+    if not project_id:
+        clauses = []
+        params: list = []
+        if keyword:
+            clauses.append("(title ILIKE %s OR topic ILIKE %s)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(min(limit, 50))
+        try:
+            rows = await asyncio.to_thread(
+                db_query,
+                f"SELECT id, title, topic, state, turn_count, last_run_at, created_at "
+                f"FROM autonomous_projects {where} "
+                f"ORDER BY CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 "
+                f"                    WHEN 'paused' THEN 1 ELSE 2 END, id DESC LIMIT %s",
+                tuple(params),
+            )
+        except Exception as e:
+            return f"=== AUTONOMOUS PROJECTS ===\n(error: {e})"
+        if not rows:
+            return "=== AUTONOMOUS PROJECTS ===\n(none)"
+        lines = ["=== AUTONOMOUS PROJECTS ===",
+                 "Use read_self(source='autonomous_project', task_id=<id>) for full detail."]
+        for r in rows:
+            last = _to_kst(r.get("last_run_at")) if r.get("last_run_at") else "never"
+            topic = (r.get("topic") or "").replace("\n", " ")[:150]
+            lines.append(
+                f"#{r['id']} [{r['state']}] turns={r['turn_count']} last_run={last}\n"
+                f"  title: {r['title']}\n"
+                f"  topic: {topic}{'…' if len(r.get('topic') or '') > 150 else ''}"
+            )
+        return "\n".join(lines)
+
+    # ── DETAIL MODE ───────────────────────────────────────────
+    try:
+        proj = await asyncio.to_thread(
+            db_query_one,
+            "SELECT id, title, topic, preferences, state, plan, research_notes, "
+            "turn_count, last_run_at, created_at "
+            "FROM autonomous_projects WHERE id = %s",
+            (project_id,),
+        )
+    except Exception as e:
+        return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(error: {e})"
+    if not proj:
+        return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(not found)"
+
+    notes = proj.get("research_notes") or []
+    plan = proj.get("plan") or {}
+    if keyword:
+        notes = [n for n in notes if keyword.lower() in (n.get("text") or "").lower()]
+    recent_notes = notes[-min(limit, 5):]
+
+    # Recent events (last `limit` entries)
+    try:
+        events = await asyncio.to_thread(
+            db_query,
+            "SELECT created_at, event_type, content FROM autonomous_project_events "
+            "WHERE project_id = %s ORDER BY created_at DESC LIMIT %s",
+            (project_id, min(limit, 20)),
+        )
+    except Exception:
+        events = []
+
+    out = [f"=== AUTONOMOUS PROJECT #{proj['id']}: {proj['title']} ==="]
+    out.append(f"state: {proj['state']}   turns: {proj['turn_count']}   last_run: {_to_kst(proj.get('last_run_at')) if proj.get('last_run_at') else 'never'}")
+    out.append(f"topic: {proj.get('topic') or ''}")
+    out.append("")
+    out.append("-- preferences --")
+    out.append((proj.get("preferences") or "").strip())
+    out.append("")
+
+    out.append("-- plan --")
+    goals = plan.get("goals") or []
+    steps = plan.get("steps") or []
+    if not goals and not steps:
+        out.append("(empty)")
+    else:
+        if goals:
+            out.append("Goals:")
+            out.extend(f"  - {g}" for g in goals)
+        if steps:
+            out.append("Steps:")
+            out.extend(f"  {i+1}. {s}" for i, s in enumerate(steps))
+        if plan.get("rationale"):
+            out.append(f"(rationale: {plan['rationale']})")
+    out.append("")
+
+    out.append(f"-- recent notes ({len(recent_notes)} shown / {len(proj.get('research_notes') or [])} total) --")
+    if not recent_notes:
+        out.append("(no notes)")
+    else:
+        for n in recent_notes:
+            text = (n.get("text") or "")[:600]
+            sources = n.get("sources") or []
+            src = f"  [{', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}]" if sources else ""
+            out.append(f"[turn {n.get('turn', '?')}, {n.get('created_at', '?')}]")
+            out.append(f"  {text}{'…' if len(n.get('text') or '') > 600 else ''}{src}")
+    out.append("")
+
+    out.append(f"-- recent events ({len(events)}) --")
+    if not events:
+        out.append("(no events)")
+    else:
+        for e in events:
+            snippet = (e.get("content") or "").replace("\n", " ")[:160]
+            out.append(f"[{_to_kst(e.get('created_at'))}] {e['event_type']}: {snippet}")
+
+    return "\n".join(out)
 
 
 async def _exec_read_file_registry(limit: int = 20, keyword: str | None = None, category: str | None = None) -> str:
