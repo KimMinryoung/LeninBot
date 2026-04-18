@@ -211,8 +211,13 @@ _deploy_frontend() {
     docker stop leninbot-frontend 2>/dev/null || true
     docker rm leninbot-frontend 2>/dev/null || true
 
+    # --network leninbot_default so the frontend can resolve leninbot-redis
+    # (and any other compose-defined services) by hostname. Without this the
+    # Redis client retries indefinitely and Redis-backed routes (home, reports)
+    # hang, producing Cloudflare 524s.
     docker run -d \
         --name leninbot-frontend \
+        --network leninbot_default \
         --add-host=host.docker.internal:host-gateway \
         -p 127.0.0.1:3000:3000 \
         --restart unless-stopped \
