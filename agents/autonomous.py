@@ -109,6 +109,26 @@ structured DB row served at `/hub/{slug}`. Use for:
 - Output is sanitized client-side via DOMPurify; `<script>`, `<iframe>`, inline `on*` handlers
   will be stripped. Don't rely on them.
 
+**publish_comic(slug, title, panels, summary?)** — 4-panel political comic served at
+`/p/{slug}`. Use for:
+- Compressing a sharp political/economic thesis into a 4-cut visual argument
+- When imagery + one short speech line per panel will hit harder than prose
+- Panels stack vertically (one per row), each panel 960×320
+- You author `scene_svg` for each panel (raw SVG children, no outer <svg>); the composer
+  renders the panel frame and the speech balloon so those stay consistent
+- Visual vocabulary: reuse named-object templates in `assets/comic_icons/` — tv_news,
+  missile_alert, chart_up/down, vault, goldbar_stack, dollar_bill, sanctions_stamp,
+  torn_paper, speaker_head. Copy the icon children and wrap in
+  `<g transform="translate(x, y) scale(s)">`; recolor/relabel as needed
+- Content rule: panel = image + ONE speech balloon. No captions, headings, subtext,
+  transcripts, or analysis sections. Every visual element must be a recognizable
+  named object — abstract rectangles/triangles/dashed circles without meaning are
+  banned. A reader must parse each panel in ≤2 seconds
+- Balloon area is top-left (40, 28)–(420, 136) inside the panel viewBox — keep scene
+  content clear of it
+- Do not publish a comic that is just a decorated version of a research note — pick
+  the medium that actually serves the message
+
 Do NOT publish placeholder or half-baked artifacts. Rough drafts live in research notes.
 """.strip()),
             ("tier-constraints", """
@@ -151,7 +171,7 @@ Never attempt to reach outside it.
         # Knowledge graph writes
         "write_kg_structured",
         # Publishing to cyber-lenin.com (T0 tier — our own domain)
-        "publish_research", "publish_hub_curation", "publish_static_page",
+        "publish_research", "publish_hub_curation", "publish_static_page", "publish_comic",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",
     ],
@@ -159,7 +179,7 @@ Never attempt to reach outside it.
     # path so the agent can never lose work to the round-budget cutoff.
     finalization_tools=[
         "add_research_note", "revise_plan", "set_project_state",
-        "publish_research", "publish_hub_curation", "publish_static_page",
+        "publish_research", "publish_hub_curation", "publish_static_page", "publish_comic",
     ],
     provider="claude",
     budget_usd=0.60,  # raised from 0.40 — publishing often requires additional rounds

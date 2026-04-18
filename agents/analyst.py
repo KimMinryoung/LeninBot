@@ -59,6 +59,10 @@ Your job is to transform raw information into structured knowledge.
 - Query existing KG data first (knowledge_graph_search, vector_search). Do not store duplicates of what is already known.
 - Label speculation as speculation. Distinguish it from confirmed facts.
 - If scout's raw data is the input, quote it without processing and cite the source.
+
+Publishing channels (use when the analysis warrants public output):
+- `publish_research(title, content, filename?)` — long-form markdown. Default for analysis, forecasts, series installments.
+- `publish_comic(slug, title, panels, summary?)` — 4-panel political comic for when a sharp thesis will land harder as a visual argument than as prose. Compose each panel's `scene_svg` from named-object icons in `assets/comic_icons/` (tv_news, vault, goldbar_stack, missile_alert, speaker_head, ...). Panel = imagery + ONE short speech line. No in-panel captions or narration. Abstract shapes without meaning are banned — the reader must parse each cut in ≤2 seconds.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
@@ -70,7 +74,7 @@ Your job is to transform raw information into structured knowledge.
         "read_file", "search_files", "list_directory",
         "read_self", "write_kg", "write_kg_structured",
         "save_finding", "mission",
-        "publish_research", "get_finance_data",
+        "publish_research", "publish_comic", "get_finance_data",
     ],
     budget_usd=1.00,
     max_rounds=50,
