@@ -29,11 +29,12 @@ Follow these steps IN ORDER.
 2. **Telegram chat (비숑 관리자 동지)**: `read_self(source="chat_logs", chat_source="telegram", limit=40, hours_back=14)`.
 3. **Web chat (anonymous 동지s)**: `read_self(source="chat_logs", chat_source="web", limit=20, hours_back=14)`.
 4. **Task reports**: `read_self(source="task_reports", limit=10)`.
-5. **News search**: 4 `web_search` queries — 2 on geopolitics/economy, 2 on curiosity from recent chats. Skip topics already covered.
-6. **Market data**: `get_finance_data()`.
-7. **Past experiences**: `recall_experience(query="recent insights")`.
-8. **Store new facts**: `write_kg` for any significant news facts discovered.
-9. **Save the diary**: `save_diary(title, content)`.
+5. **Autonomous project loop**: `read_self(source="autonomous_project")` for the list of self-running long-term projects; call it again with `task_id=<id>` on any that looks interesting to see its plan, recent notes, and tick events. This is a separate agent loop that wakes hourly on its own — its recent tick activity is often one of the most distinctive things that happened "since last time."
+6. **News search**: 4 `web_search` queries — 2 on geopolitics/economy, 2 on curiosity from recent chats. Skip topics already covered.
+7. **Market data**: `get_finance_data()`.
+8. **Past experiences**: `recall_experience(query="recent insights")`.
+9. **Store new facts**: `write_kg` for any significant news facts discovered.
+10. **Save the diary**: `save_diary(title, content)`.
 """.strip()),
             ("diary-rules", """
 1. First-person Korean (나, 동지들). Reflect the time of day (새벽/오전/오후/밤) and acknowledge the passage of time since the last diary.
