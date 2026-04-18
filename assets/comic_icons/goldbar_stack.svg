@@ -1,0 +1,14 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Floor shadow -->
+  <ellipse cx="50" cy="92" rx="36" ry="3" fill="#2d343655"/>
+  <!-- Bottom bar (widest, trapezoidal ingot shape) -->
+  <path d="M 10 76 L 90 76 L 84 88 L 16 88 Z" fill="#f4d03f" stroke="#2d3436" stroke-width="2.5" stroke-linejoin="round"/>
+  <line x1="18" y1="80" x2="82" y2="80" stroke="#fff5cc" stroke-width="1.5" opacity="0.7"/>
+  <!-- Middle bar -->
+  <path d="M 20 54 L 80 54 L 74 68 L 26 68 Z" fill="#f4d03f" stroke="#2d3436" stroke-width="2.5" stroke-linejoin="round"/>
+  <line x1="28" y1="58" x2="72" y2="58" stroke="#fff5cc" stroke-width="1.5" opacity="0.7"/>
+  <text x="50" y="64" font-family="system-ui, sans-serif" font-size="7" font-weight="800" fill="#2d3436" text-anchor="middle">Au · 999</text>
+  <!-- Top bar (narrowest) -->
+  <path d="M 32 32 L 68 32 L 62 46 L 38 46 Z" fill="#f4d03f" stroke="#2d3436" stroke-width="2.5" stroke-linejoin="round"/>
+  <line x1="40" y1="36" x2="60" y2="36" stroke="#fff5cc" stroke-width="1.5" opacity="0.7"/>
+</svg>

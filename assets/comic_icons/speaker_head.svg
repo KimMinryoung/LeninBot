@@ -1,0 +1,19 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shoulders / body -->
+  <path d="M 18 96 Q 18 76 32 72 L 68 72 Q 82 76 82 96 Z" fill="#95a5a6" stroke="#2d3436" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Neck -->
+  <rect x="42" y="62" width="16" height="12" fill="#f8c291" stroke="#2d3436" stroke-width="2"/>
+  <!-- Head -->
+  <circle cx="50" cy="44" r="22" fill="#f8c291" stroke="#2d3436" stroke-width="2.5"/>
+  <!-- Hair -->
+  <path d="M 28 40 Q 30 22 50 20 Q 70 22 72 40 Q 68 32 50 30 Q 32 32 28 40 Z" fill="#2d3436"/>
+  <!-- Eyes -->
+  <circle cx="42" cy="44" r="2" fill="#2d3436"/>
+  <circle cx="58" cy="44" r="2" fill="#2d3436"/>
+  <!-- Open mouth (talking) -->
+  <ellipse cx="50" cy="54" rx="4" ry="3" fill="#2d3436"/>
+  <!-- Speech motion arcs on the right -->
+  <path d="M 76 50 Q 84 54 86 60" fill="none" stroke="#2d3436" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 76 42 Q 86 40 90 34" fill="none" stroke="#2d3436" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 74 56 Q 80 60 82 66" fill="none" stroke="#2d3436" stroke-width="2" stroke-linecap="round"/>
+</svg>
