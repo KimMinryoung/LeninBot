@@ -39,8 +39,6 @@ echo "=== 6. systemd 서비스 및 타이머 등록 ==="
 cp "$DEPLOY_DIR/systemd/leninbot-api.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-telegram.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-neo4j.service" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-diary.service" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-diary.timer" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-experience.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-experience.timer" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-dream.service" /etc/systemd/system/
@@ -51,7 +49,7 @@ cp "$DEPLOY_DIR/systemd/leninbot-riddle.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-riddle.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable leninbot-api leninbot-telegram leninbot-neo4j \
-    leninbot-diary.timer leninbot-experience.timer \
+    leninbot-experience.timer \
     leninbot-dream.timer leninbot-debate.timer leninbot-riddle.timer
 
 echo "=== 7. deploy.sh 실행 권한 ==="

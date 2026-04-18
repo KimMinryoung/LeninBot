@@ -19,7 +19,7 @@
 #       Show status of all services and timers.
 #
 # Services: neo4j embedding llama api telegram browser frontend
-# Timers:   diary experience razvedchik
+# Timers:   experience razvedchik
 # Special:  all
 
 set -euo pipefail
@@ -49,7 +49,7 @@ NC='\033[0m'
 
 # Ordered by dependency
 ALL_SERVICES=(neo4j embedding llama api telegram browser frontend)
-ALL_TIMERS=(diary experience razvedchik)
+ALL_TIMERS=(experience razvedchik)
 
 log()  { echo -e "${GREEN}[svc]${NC} $*"; }
 warn() { echo -e "${YELLOW}[svc]${NC} $*"; }
@@ -69,7 +69,7 @@ to_unit() {
     local name="$1"
     case "$name" in
         frontend) echo "docker:leninbot-frontend" ;;
-        diary|experience|razvedchik) echo "leninbot-${name}.timer" ;;
+        experience|razvedchik) echo "leninbot-${name}.timer" ;;
         *) echo "leninbot-${name}.service" ;;
     esac
 }
@@ -542,7 +542,7 @@ Commands:
       Show status of all services and timers.
 
 Services: neo4j embedding llama api telegram browser frontend
-Timers:   diary experience razvedchik
+Timers:   experience razvedchik
 Special:  all
 USAGE
         exit 1
