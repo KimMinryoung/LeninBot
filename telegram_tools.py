@@ -1586,6 +1586,12 @@ from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
+# ── Site publishing tools (hub curations + static pages for cyber-lenin.com) ──
+from site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
+
+TOOLS.extend(SITE_PUBLISHING_TOOLS)
+TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)
+
 # ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (
     WALLET_TOOL, WALLET_TOOL_HANDLER,

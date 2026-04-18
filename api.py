@@ -618,6 +618,79 @@ async def redirect_research_index():
     return RedirectResponse(url="/research", status_code=307)
 
 
+# ── Hub (curations) and Static Pages ────────────────────────────────
+#
+# Published by the autonomous project agent via publish_hub_curation /
+# publish_static_page. Frontend (BichonWebpage) calls these to render
+# /hub and /p/{slug} routes. Read-only for the public API.
+
+@app.get("/hub")
+async def list_hub(limit: int = Query(default=20, ge=1, le=100), offset: int = Query(default=0, ge=0)):
+    """List curation entries (newest first). Pagination via limit/offset."""
+    from site_publishing import list_hub_curations, count_hub_curations
+    items = list_hub_curations(limit=limit, offset=offset)
+    # Normalize for JSON: tags is already a list (jsonb), dates → iso strings
+    out = []
+    for r in items:
+        out.append({
+            "id": r["id"],
+            "slug": r["slug"],
+            "title": r["title"],
+            "source_url": r["source_url"],
+            "source_title": r.get("source_title"),
+            "source_author": r.get("source_author"),
+            "source_publication": r.get("source_publication"),
+            "source_published_at": r["source_published_at"].isoformat() if r.get("source_published_at") else None,
+            "selection_rationale": r["selection_rationale"],
+            "context": r["context"],
+            "tags": r.get("tags") or [],
+            "published_at": r["published_at"].isoformat() if r.get("published_at") else None,
+        })
+    return {"items": out, "total": count_hub_curations(), "limit": limit, "offset": offset}
+
+
+@app.get("/hub/{slug}")
+async def get_hub(slug: str):
+    """Fetch a single curation by slug."""
+    from fastapi.responses import JSONResponse
+    from site_publishing import get_hub_curation
+    r = get_hub_curation(slug)
+    if not r:
+        return JSONResponse(status_code=404, content={"detail": "Curation not found"})
+    return {
+        "id": r["id"],
+        "slug": r["slug"],
+        "title": r["title"],
+        "source_url": r["source_url"],
+        "source_title": r.get("source_title"),
+        "source_author": r.get("source_author"),
+        "source_publication": r.get("source_publication"),
+        "source_published_at": r["source_published_at"].isoformat() if r.get("source_published_at") else None,
+        "selection_rationale": r["selection_rationale"],
+        "context": r["context"],
+        "tags": r.get("tags") or [],
+        "published_at": r["published_at"].isoformat() if r.get("published_at") else None,
+    }
+
+
+@app.get("/pages")
+async def list_pages():
+    """List published static pages (filesystem sandbox under static_pages/)."""
+    from site_publishing import list_static_pages
+    return {"items": list_static_pages()}
+
+
+@app.get("/pages/{slug}")
+async def get_page(slug: str):
+    """Fetch the JSON payload of a static page (slug, title, html_body, summary)."""
+    from fastapi.responses import JSONResponse
+    from site_publishing import get_static_page
+    data = get_static_page(slug)
+    if not data:
+        return JSONResponse(status_code=404, content={"detail": "Page not found"})
+    return data
+
+
 @app.get("/reports/research/{filename}")
 async def redirect_research_file(filename: str):
     """Backward-compatible redirect from legacy guessed path to the actual public research file URL."""

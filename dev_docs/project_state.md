@@ -84,6 +84,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | 서비스 | 주기 | 역할 |
 |---|---|---|
 | `leninbot-experience` | 매일 15:30 UTC | 경험 메모리 정리/저장 |
+| `leninbot-autonomous` | 매시 :17 KST | 자율 프로젝트 루프 1 tick (bounded 3~6 라운드) — T0 pilot, 리서치·계획 전용 |
 
 > **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent, 0/6/12/18시 KST).
 
@@ -317,6 +318,8 @@ leninbot/
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
 ├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.4, local LLM 등)
 ├── experience_writer.py       # 경험 메모리 일일 정리
+├── autonomous_project.py      # 자율 프로젝트 루프 런타임 (T0, 매시 :17 systemd)
+├── site_publishing.py         # cyber-lenin.com 게시 도구 (publish_hub_curation, publish_static_page) + API 읽기 헬퍼
 ├── redis_state.py             # Redis live state: task progress, chain memory, board, active registry
 ├── db.py                      # PostgreSQL connection pool (psycopg2)
 ├── patch_file.py              # 토큰 효율적 파일 패치 (replace_block)
@@ -334,7 +337,8 @@ leninbot/
 │   ├── visualizer.py          # Rodchenko — 이미지 생성 (reference_image 지원)
 │   ├── scout.py               # 외부 플랫폼 정찰
 │   ├── kollontai.py           # Diplomat (Kollontai) — A2A 통신, 이메일 송수신
-│   └── diary.py               # 일기 작성 에이전트 (스케줄 기반, 0/6/12/18시 KST)
+│   ├── diary.py               # 일기 작성 에이전트 (스케줄 기반, 0/6/12/18시 KST)
+│   └── autonomous.py          # AUTONOMOUS_PROJECT — 자율 프로젝트 연구자 (T0, 매시 :17 KST)
 │
 ├── graph_memory/              # Graphiti 지식 그래프 모듈
 │   ├── service.py             # GraphMemoryService (Neo4j keepalive/liveness)
@@ -358,6 +362,55 @@ leninbot/
 ---
 
 ## Recent Changes
+
+### 2026-04-18 — 자율 프로젝트 Node 건설 재정의
+
+#### 프로젝트 목적 재정의 (project #1 archive → #2 시드)
+- 초기 파일럿 프로젝트 "한국 진보주의자 온라인 생태계"는 **조사 중심** (외부 지형 매핑)이었으나, 본래 의도는 **자율 건설** (cyber-lenin.com 노드 자체를 성장시킴)이었음
+- T0 경계를 "외부 송출 금지" → **"우리 도메인 내 게시 허용, 타 도메인 금지"** 로 재해석
+- 3 아티팩트 형식: 연재 시리즈 (research), 큐레이션 다이제스트 (hub), KG 레퍼런스 (static pages)
+
+#### 새 공개 섹션: /hub 와 /p
+- `https://cyber-lenin.com/hub` — 한국어 진보 글 큐레이션 (링크 + 선정이유 + 맥락)
+- `https://cyber-lenin.com/p/{slug}` — 샌드박스 HTML 정적 페이지 (위키 스타일 / 시각적 레이아웃)
+- 프론트엔드 (BichonWebpage, Docker): 새 라우트 + EJS 뷰 + 네비 "허브" 추가
+
+#### 새 에이전트 도구
+- `publish_hub_curation` — `hub_curations` 테이블 구조화 INSERT (title, source_url, rationale, context, tags)
+- `publish_static_page` — 슬러그 검증된 HTML 샌드박스 (`static_pages/{slug}.json`), DOMPurify 로 클라이언트 sanitize
+- raw `write_file` 은 **의도적으로 제외** — T0 에이전트가 임의 경로 덮어쓰기 못하도록
+- 모듈: `site_publishing.py` (테이블 스키마 + 도구 구현 + API 읽기 헬퍼)
+
+#### 새 API 엔드포인트 (api.py)
+- `GET /hub` (페이지네이션), `GET /hub/{slug}`, `GET /pages`, `GET /pages/{slug}`
+- 프론트엔드가 HTTP로 읽음 (직접 DB 접근 없음, 기존 패턴 유지)
+
+#### Agent spec 확장 (agents/autonomous.py)
+- 3개 publish 도구를 tools 화이트리스트에 추가
+- 프롬프트에 `building-modalities` 섹션 — 어떤 artifact 에 어떤 도구를 쓸지 명시
+- budget $0.40 → $0.60 (게시 라운드 여유)
+- `tier-constraints` 재작성: 금지는 외부 도메인 행동 + write_file/save_diary 로 한정
+
+### 2026-04-18 — 자율 프로젝트 루프 (T0 pilot)
+
+#### 새 서브시스템: Autonomous Project Loop
+- 매시 :17 KST 자동 tick, bounded 라운드 예산 안에서 한 **장기 프로젝트**를 전진시키는 자율 에이전트 레이어
+- 액션 티어 시스템: T0(리서치·계획), T1(가드레일 내 공개 송출, 미구현), T2(휴먼 승인 필요, 미구현). AgentSpec.tools가 경계 강제
+- 상태 기계: researching / planning / paused / archived. agent가 `set_project_state` 도구로 전환 가능 (rationale 필수)
+- 매 tick 종료 시 텔레그램 관리자에게 **본문** 요약 발송 (노트 내용, plan rationale, 자가비평 — 카운트 아님)
+- 프로젝트 #1 "한국 진보주의자 온라인 생태계" 시드, systemd timer enable 완료
+- 상세: `dev_docs/autonomous_project.md`
+
+#### 새 파일
+- `agents/autonomous.py` — AUTONOMOUS_PROJECT AgentSpec (max_rounds=6, budget $0.40, provider claude)
+- `autonomous_project.py` — 런타임, 테이블 부트스트랩, 프로젝트 스코프 도구, tick 실행, 텔레그램 알림
+- `scripts/autonomous_cli.py` — create/list/show/events/edit/pause/resume/archive/tick
+- `systemd/leninbot-autonomous.{service,timer}` — hourly oneshot
+- DB: `autonomous_projects`, `autonomous_project_events` (Supabase, `_ensure_tables()` 가 멱등 생성)
+
+#### 버그 수정 (공유 인프라)
+- `claude_loop.py:844-852` — tool_results 앞에 경고 텍스트 prepend → 뒤에 append. Claude API "tool_use id는 바로 다음 user turn의 tool_result 블록과 즉시 매칭" 규칙 위반으로 400 발생하던 문제. 모든 에이전트(diary, analyst, browser 등) 공통 수정
+- 핸들러 시그니처 권장 패턴 재확인: `async def handler(args: dict)` 는 `tool_loop_common._inspect_handler_kwargs` 가 드롭시킴. 기존 `_exec_*(explicit_kwarg=default)` 스타일 유지 필수
 
 ### 2026-04-15 — A2A v1.0 업그레이드
 

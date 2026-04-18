@@ -1,0 +1,565 @@
+"""autonomous_project.py — Runtime for Cyber-Lenin's autonomous project loop.
+
+Entry point: `run_tick()` — invoked hourly by `leninbot-autonomous.service`.
+Picks the oldest-due active project and runs one 3-round agent wake on it.
+
+This is the T0 pilot tier: research + planning only, no external output. See
+`agents/autonomous.py` for the agent spec that enforces the tier via its tool
+whitelist and prompt constraints.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+from db import execute as db_execute, query as db_query, query_one as db_query_one
+from shared import KST
+
+load_dotenv()
+
+logger = logging.getLogger("autonomous_project")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
+# ── State constants ─────────────────────────────────────────────────
+STATE_RESEARCHING = "researching"
+STATE_PLANNING = "planning"
+STATE_PAUSED = "paused"
+STATE_ARCHIVED = "archived"
+ACTIVE_STATES = (STATE_RESEARCHING, STATE_PLANNING)
+
+RECENT_NOTES_WINDOW = 8      # how many recent notes to surface in the prompt
+NOTE_SNIPPET_CHARS = 500     # char cap per note when surfaced in prompt
+
+
+# ── Schema bootstrap ────────────────────────────────────────────────
+_tables_ensured = False
+
+
+def _ensure_tables() -> None:
+    """Create autonomous_projects and autonomous_project_events if missing."""
+    global _tables_ensured
+    if _tables_ensured:
+        return
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS autonomous_projects (
+            id            SERIAL PRIMARY KEY,
+            title         TEXT NOT NULL,
+            topic         TEXT NOT NULL,
+            preferences   TEXT NOT NULL,
+            state         VARCHAR(20) NOT NULL DEFAULT 'researching',
+            plan          JSONB NOT NULL DEFAULT '{"goals": [], "steps": []}'::jsonb,
+            research_notes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            turn_count    INT NOT NULL DEFAULT 0,
+            last_run_at   TIMESTAMPTZ,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS autonomous_project_events (
+            id         SERIAL PRIMARY KEY,
+            project_id INT NOT NULL REFERENCES autonomous_projects(id) ON DELETE CASCADE,
+            event_type VARCHAR(40) NOT NULL,
+            content    TEXT,
+            meta       JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db_execute("""
+        CREATE INDEX IF NOT EXISTS autonomous_project_events_project_idx
+        ON autonomous_project_events(project_id, created_at DESC)
+    """)
+    _tables_ensured = True
+
+
+def _log_event(project_id: int, event_type: str, content: str = "", meta: dict | None = None) -> None:
+    try:
+        db_execute(
+            "INSERT INTO autonomous_project_events(project_id, event_type, content, meta) VALUES (%s, %s, %s, %s)",
+            (project_id, event_type, content[:4000], json.dumps(meta or {})),
+        )
+    except Exception as e:
+        logger.warning("Event log failed (project=%s, type=%s): %s", project_id, event_type, e)
+
+
+def _excerpt(text: str, limit: int = 500) -> str:
+    """Trim a block of text to `limit` chars, collapsing whitespace and appending …."""
+    if not text:
+        return ""
+    s = " ".join(text.split())
+    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+
+
+def _last_paragraph(text: str) -> str:
+    """Return the last non-empty paragraph of `text` (agent's self-critique lives here)."""
+    if not text:
+        return ""
+    paragraphs = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
+    return paragraphs[-1] if paragraphs else ""
+
+
+async def _notify_telegram(project: dict, result_text: str, actions: dict, runtime: dict) -> None:
+    """Send a substantive tick summary to the owner.
+
+    Shows WHAT the agent did — note excerpts, plan rationale, state transitions —
+    not just counts. Plain text, no markdown. Telegram caps messages at 4096 chars;
+    we leave headroom and truncate sections as needed.
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        logger.warning("Telegram env not set — skipping tick notification")
+        return
+
+    pid = project["id"]
+    turn = (project.get("turn_count") or 0) + 1  # this tick's turn number
+
+    parts: list[str] = [
+        f"🤖 자율 프로젝트 #{pid} tick {turn} 완료",
+        f"프로젝트: {project['title']}",
+        f"상태: {project['state']}  /  라운드: {runtime.get('rounds_used', '?')}  /  비용: ${runtime.get('cost_usd', 0.0):.3f}",
+    ]
+
+    notes: list[str] = actions.get("notes") or []
+    plan_rationale = actions.get("plan_rationale")
+    state_change = actions.get("state_change")
+
+    if not (notes or plan_rationale or state_change):
+        parts.append("")
+        parts.append("(도구 호출 없음 — agent가 저장 없이 종료)")
+    else:
+        # Show what was saved, not counts.
+        for i, note_text in enumerate(notes, 1):
+            prefix = f"[노트 {i}/{len(notes)}]" if len(notes) > 1 else "[노트]"
+            excerpt = _excerpt(note_text, limit=900)
+            parts.append("")
+            parts.append(f"{prefix} {excerpt}")
+
+        if plan_rationale:
+            parts.append("")
+            parts.append(f"[Plan 수정] {_excerpt(plan_rationale, limit=600)}")
+
+        if state_change:
+            frm, to, reason = state_change
+            parts.append("")
+            parts.append(f"[상태전환] {frm} → {to}  —  {_excerpt(reason, limit=400)}")
+
+    # Agent's final self-critique: last paragraph of the final response.
+    critique = _last_paragraph(result_text)
+    if critique:
+        parts.append("")
+        parts.append(f"[자가비평] {_excerpt(critique, limit=500)}")
+
+    message = "\n".join(parts)[:3900]
+    try:
+        from aiogram import Bot
+        bot = Bot(token=token)
+        try:
+            await bot.send_message(chat_id=chat_id, text=message[:3800])
+        finally:
+            await bot.session.close()
+        logger.info("Tick notification sent (project=%s, turn=%s)", pid, turn)
+    except Exception as e:
+        logger.warning("Telegram notify failed: %s", e)
+
+
+def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
+    """Read back events logged during this tick and extract the substantive content
+    (note text, plan rationale, state transition) so the Telegram summary can show
+    WHAT the agent did, not just how many times."""
+    rows = db_query(
+        """
+        SELECT event_type, content, meta
+          FROM autonomous_project_events
+         WHERE project_id = %s AND created_at >= %s::timestamptz
+         ORDER BY created_at ASC
+        """,
+        (project_id, since_iso_utc),
+    )
+    notes: list[str] = []
+    plan_rationale: str | None = None
+    state_change: tuple[str, str, str] | None = None  # (from, to, reason)
+    for r in rows:
+        t = r["event_type"]
+        c = r.get("content") or ""
+        m = r.get("meta") or {}
+        if t == "note_added":
+            notes.append(c)
+        elif t == "plan_revised":
+            plan_rationale = c
+        elif t == "state_transition":
+            state_change = (str(m.get("from")), str(m.get("to")), c)
+    return {"notes": notes, "plan_rationale": plan_rationale, "state_change": state_change}
+
+
+# ── Project selection ───────────────────────────────────────────────
+def _pick_next_project() -> dict | None:
+    """Return the active project with the oldest last_run_at (NULLS FIRST)."""
+    _ensure_tables()
+    return db_query_one(
+        """
+        SELECT id, title, topic, preferences, state, plan, research_notes, turn_count,
+               last_run_at, created_at
+          FROM autonomous_projects
+         WHERE state = ANY(%s)
+         ORDER BY last_run_at ASC NULLS FIRST, id ASC
+         LIMIT 1
+        """,
+        (list(ACTIVE_STATES),),
+    )
+
+
+# ── Custom tool definitions (project-scoped) ────────────────────────
+#
+# These tools close over the current project_id so the agent can't accidentally
+# mutate a different project. They are registered fresh on every tick.
+
+def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Return (tool_schemas, handlers) for add_research_note / revise_plan / set_project_state."""
+
+    async def _handle_add_note(text: str = "", sources: list | None = None) -> str:
+        text = (text or "").strip()
+        if not text:
+            return "error: text is required"
+        if sources is None:
+            sources = []
+        elif not isinstance(sources, list):
+            sources = [str(sources)]
+        note = {
+            "turn": _current_turn_counter(project_id),
+            "text": text[:6000],
+            "sources": [str(s)[:500] for s in sources][:20],
+            "created_at": datetime.now(KST).isoformat(timespec="seconds"),
+        }
+        db_execute(
+            """
+            UPDATE autonomous_projects
+               SET research_notes = research_notes || %s::jsonb,
+                   updated_at = NOW()
+             WHERE id = %s
+            """,
+            (json.dumps([note]), project_id),
+        )
+        _log_event(project_id, "note_added", text[:400], {"sources": note["sources"]})
+        return f"ok: note saved ({len(note['sources'])} sources)"
+
+    async def _handle_revise_plan(
+        rationale: str = "",
+        goals: list | None = None,
+        steps: list | None = None,
+    ) -> str:
+        rationale = (rationale or "").strip()
+        if not rationale:
+            return "error: rationale is required"
+        goals = goals or []
+        steps = steps or []
+        if not isinstance(goals, list) or not isinstance(steps, list):
+            return "error: goals and steps must be lists of strings"
+        new_plan = {
+            "goals": [str(g)[:500] for g in goals][:20],
+            "steps": [str(s)[:500] for s in steps][:40],
+            "revised_at": datetime.now(KST).isoformat(timespec="seconds"),
+            "rationale": rationale[:1000],
+        }
+        # Preserve old plan in the event log before overwriting.
+        old = db_query_one("SELECT plan FROM autonomous_projects WHERE id = %s", (project_id,))
+        db_execute(
+            "UPDATE autonomous_projects SET plan = %s, updated_at = NOW() WHERE id = %s",
+            (json.dumps(new_plan), project_id),
+        )
+        _log_event(
+            project_id, "plan_revised", rationale[:400],
+            {"previous_plan": (old or {}).get("plan"), "new_plan": new_plan},
+        )
+        return f"ok: plan revised ({len(new_plan['goals'])} goals, {len(new_plan['steps'])} steps)"
+
+    async def _handle_set_state(state: str = "", reason: str = "") -> str:
+        target = (state or "").strip().lower()
+        reason = (reason or "").strip()
+        allowed = {STATE_RESEARCHING, STATE_PLANNING, STATE_PAUSED, STATE_ARCHIVED}
+        if target not in allowed:
+            return f"error: state must be one of {sorted(allowed)}"
+        if not reason:
+            return "error: reason is required"
+        current = db_query_one("SELECT state FROM autonomous_projects WHERE id = %s", (project_id,))
+        if current and current["state"] == target:
+            return f"noop: already in state {target}"
+        db_execute(
+            "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
+            (target, project_id),
+        )
+        _log_event(
+            project_id, "state_transition", reason[:400],
+            {"from": (current or {}).get("state"), "to": target},
+        )
+        return f"ok: state → {target}"
+
+    schemas = [
+        {
+            "name": "add_research_note",
+            "description": (
+                "Persist a single research finding to the project's note log. Use this IMMEDIATELY after "
+                "a research step — chat memory does not persist across hourly ticks, only notes do."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The finding, in dense prose. Cite sources inline."},
+                    "sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "URLs, KG node ids, or vector-DB ids that back this finding. Unsourced notes are discouraged.",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+        {
+            "name": "revise_plan",
+            "description": (
+                "Overwrite the project's plan. The previous plan is preserved in the event log. "
+                "Use only when accumulated research genuinely justifies a change — not every tick."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "goals": {"type": "array", "items": {"type": "string"}, "description": "Top-level outcomes the project pursues."},
+                    "steps": {"type": "array", "items": {"type": "string"}, "description": "Ordered concrete steps to advance the goals."},
+                    "rationale": {"type": "string", "description": "Why the previous plan was insufficient. Required."},
+                },
+                "required": ["rationale"],
+            },
+        },
+        {
+            "name": "set_project_state",
+            "description": (
+                "Transition the project state. Allowed: researching | planning | paused | archived. "
+                "Do not flip state every tick; justify transitions in `reason`."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": ["researching", "planning", "paused", "archived"]},
+                    "reason": {"type": "string", "description": "Why this transition is warranted. Required."},
+                },
+                "required": ["state", "reason"],
+            },
+        },
+    ]
+    handlers = {
+        "add_research_note": _handle_add_note,
+        "revise_plan": _handle_revise_plan,
+        "set_project_state": _handle_set_state,
+    }
+    return schemas, handlers
+
+
+def _current_turn_counter(project_id: int) -> int:
+    row = db_query_one("SELECT turn_count FROM autonomous_projects WHERE id = %s", (project_id,))
+    return int(row["turn_count"]) if row else 0
+
+
+# ── Prompt context assembly ─────────────────────────────────────────
+def _recent_notes(project: dict) -> list[dict]:
+    notes = project.get("research_notes") or []
+    if isinstance(notes, str):
+        try:
+            notes = json.loads(notes)
+        except Exception:
+            notes = []
+    return notes[-RECENT_NOTES_WINDOW:]
+
+
+def _format_plan(plan) -> str:
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except Exception:
+            return "(plan parse error)"
+    if not plan:
+        return "(empty — no plan yet)"
+    goals = plan.get("goals") or []
+    steps = plan.get("steps") or []
+    if not goals and not steps:
+        return "(empty — no plan yet)"
+    out = []
+    if goals:
+        out.append("Goals:")
+        out.extend(f"  - {g}" for g in goals)
+    if steps:
+        out.append("Steps:")
+        out.extend(f"  {i+1}. {s}" for i, s in enumerate(steps))
+    revised = plan.get("revised_at")
+    if revised:
+        out.append(f"(Last revised: {revised})")
+    return "\n".join(out)
+
+
+def _format_notes(notes: list[dict]) -> str:
+    if not notes:
+        return "(no prior notes — this is an early tick)"
+    lines = []
+    for n in notes:
+        snippet = (n.get("text") or "")[:NOTE_SNIPPET_CHARS]
+        sources = n.get("sources") or []
+        src_str = f" [{', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}]" if sources else ""
+        lines.append(f"- (turn {n.get('turn', '?')}, {n.get('created_at', '?')}) {snippet}{src_str}")
+    return "\n".join(lines)
+
+
+def _build_task_prompt(project: dict, turn_budget: int) -> str:
+    plan_text = _format_plan(project.get("plan"))
+    notes_text = _format_notes(_recent_notes(project))
+    parts = [
+        f"<project>\nid: {project['id']}\ntitle: {project['title']}\ntopic: {project['topic']}\n</project>",
+        f"<preferences>\n{project['preferences']}\n</preferences>",
+        f"<state>{project['state']}</state>",
+        f"<plan>\n{plan_text}\n</plan>",
+        f"<recent-notes>\n{notes_text}\n</recent-notes>",
+        f"<turn-budget>{turn_budget} rounds this tick. Use them deliberately.</turn-budget>",
+        f"<tick-info>turn_count so far: {project.get('turn_count', 0)}; "
+        f"last_run_at: {project.get('last_run_at') or 'never'}</tick-info>",
+        "",
+        "Advance this project by exactly one concrete step. Save findings via add_research_note "
+        "BEFORE your final response. End with a one-paragraph self-critique: did this tick "
+        "advance the preferences? what is the next tick's focus?",
+    ]
+    return "\n\n".join(parts)
+
+
+# ── Tick execution ──────────────────────────────────────────────────
+async def _run_one_tick(project: dict) -> dict:
+    """Run a single agent wake on the given project. Returns a result dict."""
+    from agents import get_agent
+    from claude_loop import chat_with_tools, dedupe_tools_by_name
+    from bot_config import _claude, _get_model_by_alias, _config, _TIER_MAP
+    import telegram_tools as tt_module
+
+    spec = get_agent("autonomous_project")
+
+    # Compose tool set: spec-filtered base tools + project-scoped custom tools.
+    base_tools = tt_module.TOOLS
+    base_handlers = tt_module.TOOL_HANDLERS
+    agent_tools, agent_handlers = spec.filter_tools(base_tools, base_handlers)
+
+    project_tools, project_handlers = _build_project_tools(project["id"])
+    agent_tools.extend(project_tools)
+    agent_handlers.update(project_handlers)
+    agent_tools = dedupe_tools_by_name(agent_tools)
+
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+    system_prompt = spec.render_prompt(
+        provider="claude",
+        current_datetime=now_str,
+        system_alerts="",
+    )
+
+    user_content = _build_task_prompt(project, turn_budget=spec.max_rounds)
+
+    # Spec pins provider="claude" (same pattern as diary — research work needs
+    # Claude regardless of the config's chat provider toggle). Tier follows the
+    # runtime `task_model` config so `/config` can dial cost down (high=opus,
+    # medium=sonnet, low=haiku). This mirrors the `provider in ("claude",
+    # "openai")` branch in telegram_bot._chat_with_tools dispatch.
+    _task_tier = str(_config.get("task_model", "high"))
+    _claude_alias = _TIER_MAP.get("claude", {}).get(_task_tier, _task_tier)
+    model = await _get_model_by_alias(_claude_alias)
+    budget_tracker: dict = {}
+
+    # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously
+    # regardless of the DB session's timezone setting.
+    tick_started_at_utc = datetime.now(timezone.utc).isoformat()
+    _log_event(
+        project["id"], "tick_start",
+        f"turn #{(project.get('turn_count') or 0) + 1}, state={project['state']}",
+        {"model": model, "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
+    )
+
+    try:
+        result_text = await chat_with_tools(
+            messages=[{"role": "user", "content": user_content}],
+            client=_claude,
+            model=model,
+            tools=agent_tools,
+            tool_handlers=agent_handlers,
+            system_prompt=system_prompt,
+            max_rounds=spec.max_rounds,
+            max_tokens=4096,
+            budget_usd=spec.budget_usd,
+            budget_tracker=budget_tracker,
+            agent_name="autonomous_project",
+            finalization_tools=spec.finalization_tools,
+        )
+    except Exception as e:
+        logger.exception("Tick failed for project %s", project["id"])
+        _log_event(project["id"], "tick_error", str(e)[:2000])
+        raise
+
+    # Increment turn counter and last_run_at AFTER the agent loop completes.
+    db_execute(
+        "UPDATE autonomous_projects SET turn_count = turn_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
+        (project["id"],),
+    )
+    _log_event(
+        project["id"], "tick_end",
+        (result_text or "")[:3000],
+        {"cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
+         "rounds_used": budget_tracker.get("rounds_used", 0)},
+    )
+
+    # Telegram notification — runs after tick data is committed so a notify
+    # failure can never lose work. _notify_telegram swallows its own errors.
+    actions = _collect_tick_actions(project["id"], tick_started_at_utc)
+    runtime = {
+        "cost_usd": budget_tracker.get("total_cost", 0.0),
+        "rounds_used": budget_tracker.get("rounds_used", 0),
+    }
+    await _notify_telegram(project, result_text or "", actions, runtime)
+
+    return {
+        "project_id": project["id"],
+        "result_text": result_text or "",
+        "cost_usd": budget_tracker.get("total_cost", 0.0),
+        "rounds_used": budget_tracker.get("rounds_used", 0),
+    }
+
+
+def run_tick() -> dict | None:
+    """Synchronous entry point for systemd. Picks the next project and advances it."""
+    _ensure_tables()
+    project = _pick_next_project()
+    if not project:
+        logger.info("No active projects — nothing to do.")
+        return None
+    logger.info(
+        "Advancing project #%s %r (state=%s, turn=%s)",
+        project["id"], project["title"], project["state"], project.get("turn_count"),
+    )
+    result = asyncio.run(_run_one_tick(project))
+    logger.info(
+        "Tick complete: project=%s cost=$%.4f rounds=%s",
+        result["project_id"], result["cost_usd"], result["rounds_used"],
+    )
+    return result
+
+
+if __name__ == "__main__":
+    # Direct invocation for manual/systemd use: `python -m autonomous_project`
+    # or `python autonomous_project.py`.
+    try:
+        run_tick()
+    except Exception:
+        logger.exception("run_tick failed")
+        sys.exit(1)

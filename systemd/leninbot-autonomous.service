@@ -1,0 +1,11 @@
+[Unit]
+Description=LeninBot Autonomous Project Tick (one-shot, T0 pilot)
+After=network.target leninbot-neo4j.service leninbot-embedding.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python -m autonomous_project
+TimeoutStartSec=600

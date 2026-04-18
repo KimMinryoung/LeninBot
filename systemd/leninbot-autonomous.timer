@@ -1,0 +1,11 @@
+[Unit]
+Description=LeninBot Autonomous Project Timer (hourly, T0 pilot)
+
+[Timer]
+# Fires at :17 past every hour so it does not collide with diary (0/6/12/18)
+# or experience_writer (00:30 KST). Adjust freely — each fire is one tick.
+OnCalendar=*-*-* *:17:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

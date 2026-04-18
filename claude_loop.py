@@ -842,13 +842,15 @@ async def chat_with_tools(
         working_msgs.append({"role": "assistant", "content": assistant_content})
 
         if tool_results:
-            # Inject budget warning at 80% threshold
+            # Warnings must be appended AFTER tool_result blocks, not prepended.
+            # Claude requires tool_use ids to have tool_result blocks immediately
+            # after in the next user turn — a text block before them triggers
+            # "tool_use ids without tool_result blocks immediately after".
             if not budget_warning_sent and total_cost > budget_usd * 0.8:
                 budget_warning_sent = True
-                tool_results.insert(0, {"type": "text", "text": build_budget_warning(total_cost, budget_usd)})
-            # Inject round limit warning 2 rounds before max
+                tool_results.append({"type": "text", "text": build_budget_warning(total_cost, budget_usd)})
             if round_num == max_rounds - 2:
-                tool_results.insert(0, {"type": "text", "text": build_round_warning(round_num, max_rounds)})
+                tool_results.append({"type": "text", "text": build_round_warning(round_num, max_rounds)})
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
