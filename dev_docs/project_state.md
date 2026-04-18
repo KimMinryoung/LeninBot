@@ -96,7 +96,6 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | **leninbot-embedding** | - | - | - | self |
 | **leninbot-telegram** | O | O | O | O |
 | **leninbot-api** | O | O | - | O |
-| **leninbot-diary** | O | O | - | O |
 | **leninbot-experience** | O | - | - | O |
 
 ### Boot Order (systemd)
