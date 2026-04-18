@@ -503,6 +503,15 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 | `classify_untyped_entities.py` | Gemini 배치 분류 (8 타입, 더 정확) |
 | `ingest_reports_to_kg.py` | 텔레그램 태스크 리포트 → KG 수집 |
 | `kg_enricher.py` | 엔티티 요약 자동 생성 |
+| `backup_kg_to_r2.py` | `backup_kg.py` + tar.gz + R2 업로드 (자동화용) |
+
+### 자동 백업 (2026-04-18~)
+
+- **스케줄:** `leninbot-kg-backup.timer` — 매일 03:00 KST
+- **대상:** Cloudflare R2 버킷 `cyber-lenin-backups` (private), 객체 키 `kg-backup-YYYY-MM-DD.tar.gz`
+- **보관:** 롤링 2일 (오늘 + 어제). 새 백업 성공 후 2일 전 백업 삭제
+- **내용:** entities/edges/mentions JSON (임베딩 포함) 을 tar.gz로 묶음 (~79 MB 압축, 2026-04-18 기준)
+- **복구:** R2에서 tar.gz 다운로드 → 풀기 → `restore_kg.py` 등으로 import (복구 경로는 별도 문서화 필요)
 
 ---
 
