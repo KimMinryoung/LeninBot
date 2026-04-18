@@ -1371,7 +1371,7 @@ async def _exec_read_autonomous_project(
     """Surface autonomous project state to the orchestrator.
 
     Without project_id → list of active/archived projects with one-line summary.
-    With project_id    → full detail: preferences, plan, recent notes, recent events.
+    With project_id    → full detail: goal, plan, recent notes, recent events.
     Keyword filter (if given) matches against title/topic on the list form, and
     against note content on the detail form.
     """
@@ -1415,7 +1415,7 @@ async def _exec_read_autonomous_project(
     try:
         proj = await asyncio.to_thread(
             db_query_one,
-            "SELECT id, title, topic, preferences, state, plan, research_notes, "
+            "SELECT id, title, topic, goal, state, plan, research_notes, "
             "turn_count, last_run_at, created_at "
             "FROM autonomous_projects WHERE id = %s",
             (project_id,),
@@ -1446,8 +1446,8 @@ async def _exec_read_autonomous_project(
     out.append(f"state: {proj['state']}   turns: {proj['turn_count']}   last_run: {_to_kst(proj.get('last_run_at')) if proj.get('last_run_at') else 'never'}")
     out.append(f"topic: {proj.get('topic') or ''}")
     out.append("")
-    out.append("-- preferences --")
-    out.append((proj.get("preferences") or "").strip())
+    out.append("-- goal --")
+    out.append((proj.get("goal") or "").strip())
     out.append("")
 
     out.append("-- plan --")

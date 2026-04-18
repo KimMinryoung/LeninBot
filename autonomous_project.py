@@ -57,7 +57,7 @@ def _ensure_tables() -> None:
             id            SERIAL PRIMARY KEY,
             title         TEXT NOT NULL,
             topic         TEXT NOT NULL,
-            preferences   TEXT NOT NULL,
+            goal          TEXT NOT NULL,
             state         VARCHAR(20) NOT NULL DEFAULT 'researching',
             plan          JSONB NOT NULL DEFAULT '{"goals": [], "steps": []}'::jsonb,
             research_notes JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -210,7 +210,7 @@ def _pick_next_project() -> dict | None:
     _ensure_tables()
     return db_query_one(
         """
-        SELECT id, title, topic, preferences, state, plan, research_notes, turn_count,
+        SELECT id, title, topic, goal, state, plan, research_notes, turn_count,
                last_run_at, created_at
           FROM autonomous_projects
          WHERE state = ANY(%s)
@@ -424,7 +424,7 @@ def _build_task_prompt(project: dict, turn_budget: int) -> str:
     notes_text = _format_notes(_recent_notes(project))
     parts = [
         f"<project>\nid: {project['id']}\ntitle: {project['title']}\ntopic: {project['topic']}\n</project>",
-        f"<preferences>\n{project['preferences']}\n</preferences>",
+        f"<goal>\n{project['goal']}\n</goal>",
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
         f"<recent-notes>\n{notes_text}\n</recent-notes>",
@@ -434,7 +434,7 @@ def _build_task_prompt(project: dict, turn_budget: int) -> str:
         "",
         "Advance this project by exactly one concrete step. Save findings via add_research_note "
         "BEFORE your final response. End with a one-paragraph self-critique: did this tick "
-        "advance the preferences? what is the next tick's focus?",
+        "advance the goal? what is the next tick's focus?",
     ]
     return "\n\n".join(parts)
 

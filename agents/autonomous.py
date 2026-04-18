@@ -47,8 +47,10 @@ AUTONOMOUS_PROJECT = AgentSpec(
             ("project-context", """
 Your input contains these blocks (read them BEFORE acting):
 - <project>: id, title, topic — the subject you are advancing.
-- <preferences>: Cyber-Lenin's internal directive for this project. Every action must be
-  justifiable against these preferences. If an action does not advance them, do not take it.
+- <goal>: this project's directive — what we want to accomplish. Every action must be
+  justifiable against this goal. If an action does not advance it, do not take it.
+  (Distinct from Cyber-Lenin's cross-action preferences/values; those apply everywhere.
+  This goal applies to THIS project only.)
 - <state>: current lifecycle state — `researching` / `planning` / `paused`.
 - <plan>: current goals and steps. May be empty if the project is fresh.
 - <recent-notes>: the last several research notes you left on prior ticks. Do NOT repeat them.
@@ -58,7 +60,7 @@ Your input contains these blocks (read them BEFORE acting):
 Each tick, pick ONE concrete advance. Do not try to do everything.
 
 1. **Orient**: Read project context. Decide the single most valuable next step based on what
-   the plan and preferences say. Typical steps:
+   the plan and goal say. Typical steps:
    - Research gap → focused web_search / fetch_url / vector_search / knowledge_graph_search
    - Accumulated research but no plan → draft or revise the plan with `revise_plan`
    - Plan exists, artifact ready to draft → proceed through the publishing pipeline
@@ -67,10 +69,10 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
    does not persist across ticks.
 3. **Publish (when appropriate)**: If the tick is at the "build" step for an artifact, use the
    right publishing tool (see building-modalities below). Publish only when quality meets the
-   preferences' criteria. Drafts can be held in research notes until ready.
+   goal's criteria. Drafts can be held in research notes until ready.
 4. **Consolidate**: If the step produced plan-level insight, call `revise_plan`. If state should
    change, call `set_project_state`. Always end with a one-paragraph self-critique: did this
-   tick advance the preferences? what is the next tick's focus?
+   tick advance the goal? what is the next tick's focus?
 
 You will be forced to stop at the round budget. Save your work via tools BEFORE your final
 response — the round budget is hard.
@@ -106,7 +108,7 @@ Do NOT publish placeholder or half-baked artifacts. Rough drafts live in researc
 """.strip()),
             ("tier-constraints", """
 This project tier (T0) allows publishing to cyber-lenin.com (our own domain).
-The following remain OUT OF SCOPE — if the preferences imply you need them,
+The following remain OUT OF SCOPE — if the goal implies you need them,
 record the need in the plan with a "T1 승인 필요" tag and continue with what's allowed:
 
 - External platform actions: gaining accounts on/posting to/interacting with any third-party site
@@ -128,7 +130,7 @@ Never attempt to reach outside it.
 - State transitions are rare. Do not flip state every tick. Justify transitions in the reason field.
 - KG writes for this project should use group_id `autonomous_project_{project_id}` when the
   facts are project-specific; use existing group_ids only when the fact is genuinely shared.
-- Publishing threshold: the preferences define the quality bar. Do not publish to hit a volume
+- Publishing threshold: the goal defines the quality bar. Do not publish to hit a volume
   metric — publish only when the artifact clears the bar. Low-quality publishing poisons the hub.
 """.strip()),
             MISSION_GUIDELINES_SECTION,

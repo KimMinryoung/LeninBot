@@ -2,10 +2,11 @@
 """scripts/autonomous_cli.py — Manage autonomous projects.
 
 Usage:
-  python scripts/autonomous_cli.py create --title "..." --topic "..." --preferences "..."
+  python scripts/autonomous_cli.py create --title "..." --topic "..." --goal "..."
   python scripts/autonomous_cli.py list
   python scripts/autonomous_cli.py show <project_id>
   python scripts/autonomous_cli.py events <project_id> [--limit N]
+  python scripts/autonomous_cli.py edit <project_id> [--title T] [--topic X] [--goal G | --goal-file F]
   python scripts/autonomous_cli.py pause <project_id>
   python scripts/autonomous_cli.py resume <project_id>
   python scripts/autonomous_cli.py archive <project_id>
@@ -38,11 +39,11 @@ def _cmd_create(args: argparse.Namespace) -> int:
     _ensure_tables()
     row = db_query_one(
         """
-        INSERT INTO autonomous_projects(title, topic, preferences, state)
+        INSERT INTO autonomous_projects(title, topic, goal, state)
         VALUES (%s, %s, %s, %s)
         RETURNING id
         """,
-        (args.title, args.topic, args.preferences, STATE_RESEARCHING),
+        (args.title, args.topic, args.goal, STATE_RESEARCHING),
     )
     pid = row["id"]
     _log_event(pid, "project_created", f"title={args.title}", {"topic": args.topic})
@@ -79,7 +80,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print(f"#{row['id']}  {row['title']}")
     print(f"  state: {row['state']}   turns: {row['turn_count']}   last_run: {row['last_run_at']}")
     print(f"  topic: {row['topic']}")
-    print(f"  preferences:\n    {row['preferences']}")
+    print(f"  goal:\n    {row['goal']}")
     print(f"  plan:\n{json.dumps(row['plan'], indent=2, ensure_ascii=False)}")
     notes = row["research_notes"] or []
     print(f"  research_notes: {len(notes)} entries")
@@ -138,11 +139,11 @@ def _cmd_archive(args: argparse.Namespace) -> int:
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
-    """Update title / topic / preferences. Each is optional; unspecified stays put.
+    """Update title / topic / goal. Each is optional; unspecified stays put.
 
-    Preferences are often multi-line; pass via --preferences-file PATH or stdin (-)
-    to avoid shell quoting pain. Logs a `project_edited` event with before/after so
-    the audit trail captures the redirection.
+    Goal is often multi-line; pass via --goal-file PATH or stdin (-) to avoid
+    shell quoting pain. Logs a `project_edited` event with before/after so the
+    audit trail captures the redirection.
     """
     _ensure_tables()
     cur = db_query_one("SELECT * FROM autonomous_projects WHERE id = %s", (args.project_id,))
@@ -160,25 +161,25 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         updates["topic"] = args.topic
         before["topic"] = cur["topic"]
 
-    new_prefs = None
-    if args.preferences_file:
-        if args.preferences_file == "-":
-            new_prefs = sys.stdin.read()
+    new_goal = None
+    if args.goal_file:
+        if args.goal_file == "-":
+            new_goal = sys.stdin.read()
         else:
-            with open(args.preferences_file, "r", encoding="utf-8") as f:
-                new_prefs = f.read()
-    elif args.preferences is not None:
-        new_prefs = args.preferences
-    if new_prefs is not None:
-        new_prefs = new_prefs.strip()
-        if not new_prefs:
-            print("error: preferences cannot be empty")
+            with open(args.goal_file, "r", encoding="utf-8") as f:
+                new_goal = f.read()
+    elif args.goal is not None:
+        new_goal = args.goal
+    if new_goal is not None:
+        new_goal = new_goal.strip()
+        if not new_goal:
+            print("error: goal cannot be empty")
             return 1
-        updates["preferences"] = new_prefs
-        before["preferences"] = cur["preferences"]
+        updates["goal"] = new_goal
+        before["goal"] = cur["goal"]
 
     if not updates:
-        print("error: specify at least one of --title / --topic / --preferences / --preferences-file")
+        print("error: specify at least one of --title / --topic / --goal / --goal-file")
         return 1
 
     set_clause = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = NOW()"
@@ -212,7 +213,7 @@ def main() -> int:
     pc = sub.add_parser("create", help="Create a new project")
     pc.add_argument("--title", required=True)
     pc.add_argument("--topic", required=True, help="Short description of the research subject")
-    pc.add_argument("--preferences", required=True, help="Internal directive: why this matters and success criteria")
+    pc.add_argument("--goal", required=True, help="This project's directive: what we want to accomplish + success criteria")
     pc.set_defaults(func=_cmd_create)
 
     pl = sub.add_parser("list", help="List all projects")
@@ -239,12 +240,12 @@ def main() -> int:
     pa.add_argument("project_id", type=int)
     pa.set_defaults(func=_cmd_archive)
 
-    ped = sub.add_parser("edit", help="Change a project's title / topic / preferences mid-flight")
+    ped = sub.add_parser("edit", help="Change a project's title / topic / goal mid-flight")
     ped.add_argument("project_id", type=int)
     ped.add_argument("--title")
     ped.add_argument("--topic")
-    ped.add_argument("--preferences", help="Inline preferences string. For multi-line use --preferences-file instead.")
-    ped.add_argument("--preferences-file", help="Path to a file containing new preferences, or '-' for stdin.")
+    ped.add_argument("--goal", help="Inline goal string. For multi-line use --goal-file instead.")
+    ped.add_argument("--goal-file", help="Path to a file containing the new goal, or '-' for stdin.")
     ped.set_defaults(func=_cmd_edit)
 
     pt = sub.add_parser("tick", help="Run one tick now (manual test)")
