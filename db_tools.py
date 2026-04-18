@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 
 _READ_KEYWORDS = ("select", "with", "show", "explain", "values", "table")
 
+# DROP cannot be undone inside a transaction boundary we control — once
+# committed the object is gone. Even with backups, recovery is hours of
+# downtime. Reserved for the operator (scripts/psql-supabase). The block
+# applies to the leading keyword only — ALTER ... DROP COLUMN is still
+# allowed (different threat level, and sometimes required for migrations).
+_BLOCKED_LEADING_KEYWORDS = frozenset({"drop"})
+
 
 def _classify_sql(sql: str) -> str:
     """Return the first SQL keyword in lowercase (empty string if none)."""
@@ -69,11 +76,12 @@ QUERY_DB_TOOL = {
     "description": (
         "Run a single SQL statement against the project's Postgres (Supabase). "
         "SELECT/WITH/SHOW/EXPLAIN → row list as JSON. INSERT/UPDATE/DELETE → "
-        "affected row count. CREATE/ALTER/DROP → OK. Use `params` for "
+        "affected row count. CREATE/ALTER → OK. Use `params` for "
         "parameterized queries (%s placeholders) — never interpolate user input "
         "into the SQL string. Each call runs in its own transaction; exceptions "
-        "roll back. DESTRUCTIVE operations (DROP, TRUNCATE, UPDATE/DELETE "
-        "without WHERE) run as issued — check twice."
+        "roll back. **DROP is blocked at the tool level** (irreversible; "
+        "operator-only via scripts/psql-supabase). Other destructive ops "
+        "(TRUNCATE, UPDATE/DELETE without WHERE) run as issued — check twice."
     ),
     "input_schema": {
         "type": "object",
@@ -111,6 +119,12 @@ async def _exec_query_db(
         max_rows = 100
     param_tuple = tuple(params or [])
     kind = _classify_sql(sql)
+
+    if kind in _BLOCKED_LEADING_KEYWORDS:
+        return (
+            f"Error: {kind.upper()} is blocked on query_db — irreversible. "
+            "Ask the operator to run this via scripts/psql-supabase after review."
+        )
 
     try:
         if kind in _READ_KEYWORDS:
