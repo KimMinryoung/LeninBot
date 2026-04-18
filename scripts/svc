@@ -211,10 +211,12 @@ _deploy_frontend() {
     docker stop leninbot-frontend 2>/dev/null || true
     docker rm leninbot-frontend 2>/dev/null || true
 
-    # --network leninbot_default so the frontend can resolve leninbot-redis
-    # (and any other compose-defined services) by hostname. Without this the
-    # Redis client retries indefinitely and Redis-backed routes (home, reports)
-    # hang, producing Cloudflare 524s.
+    # The frontend needs BOTH networks:
+    #   leninbot_default — to resolve leninbot-redis / leninbot-neo4j by hostname
+    #                      (user-defined networks give containers DNS; bridge doesn't)
+    #   bridge           — so its source IP falls in 172.17.0.0/16, which is the
+    #                      only subnet ufw lets reach the host's :8000 backend
+    # `docker run` accepts only one --network; attach the second right after.
     docker run -d \
         --name leninbot-frontend \
         --network leninbot_default \
@@ -224,6 +226,7 @@ _deploy_frontend() {
         --env-file "$FRONTEND_DIR/.env" \
         -v "$FRONTEND_DIR/data:/app/data" \
         leninbot-frontend
+    docker network connect bridge leninbot-frontend
 
     docker image prune -f
     log "frontend: deployed"
