@@ -211,12 +211,12 @@ _deploy_frontend() {
     docker stop leninbot-frontend 2>/dev/null || true
     docker rm leninbot-frontend 2>/dev/null || true
 
-    # The frontend needs BOTH networks:
-    #   leninbot_default — to resolve leninbot-redis / leninbot-neo4j by hostname
-    #                      (user-defined networks give containers DNS; bridge doesn't)
-    #   bridge           — so its source IP falls in 172.17.0.0/16, which is the
-    #                      only subnet ufw lets reach the host's :8000 backend
-    # `docker run` accepts only one --network; attach the second right after.
+    # --network leninbot_default gives the container:
+    #   (a) hostname DNS to leninbot-redis / leninbot-neo4j (user-defined
+    #       networks have Docker's embedded DNS; the default bridge does not)
+    #   (b) a 172.18.x source IP which the host's ufw rule allows to reach
+    #       the :8000 backend (rule is 172.16.0.0/12, covering all Docker
+    #       private subnets)
     docker run -d \
         --name leninbot-frontend \
         --network leninbot_default \
@@ -226,7 +226,6 @@ _deploy_frontend() {
         --env-file "$FRONTEND_DIR/.env" \
         -v "$FRONTEND_DIR/data:/app/data" \
         leninbot-frontend
-    docker network connect bridge leninbot-frontend
 
     docker image prune -f
     log "frontend: deployed"
