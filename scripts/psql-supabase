@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# psql-supabase — connect to the project's Supabase Postgres using .env creds.
+#
+# Usage:
+#   scripts/psql-supabase                 # interactive psql session
+#   scripts/psql-supabase -c "SELECT 1"   # one-shot query
+#   scripts/psql-supabase < file.sql      # run a script
+#
+# Reads DB_{HOST,PORT,NAME,USER,PASSWORD} from .env next to the repo root.
+# Password never appears on the command line — passed through PGPASSWORD env.
+
+set -e
+
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+if [ ! -f "$ENV_FILE" ]; then
+    echo "psql-supabase: $ENV_FILE not found" >&2
+    exit 1
+fi
+
+# Source only the DB_* variables (don't pollute the env with everything else).
+# shellcheck disable=SC2046
+export $(grep -E '^DB_(HOST|PORT|NAME|USER|PASSWORD)=' "$ENV_FILE" | xargs -d '\n')
+
+: "${DB_HOST:?DB_HOST missing}"
+: "${DB_PORT:=5432}"
+: "${DB_NAME:=postgres}"
+: "${DB_USER:?DB_USER missing}"
+: "${DB_PASSWORD:?DB_PASSWORD missing}"
+
+export PGPASSWORD="$DB_PASSWORD"
+
+# sslmode=require matches db.py; Supabase requires it.
+exec psql \
+    "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
+    "$@"

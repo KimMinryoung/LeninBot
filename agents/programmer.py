@@ -36,6 +36,7 @@ PROGRAMMER = AgentSpec(
 - Make surgical changes — don't refactor beyond the task scope.
 - **Use patch_file first when modifying code.** Use patch_file(path, old_str, new_str) to replace only the changed portion. Overwriting the entire file with write_file can lose existing code. Use write_file only for creating new files.
 - Use execute_python to test changes when possible.
+- **For database work (SELECT / INSERT / UPDATE / DDL), prefer `query_db` over `execute_python + from db import ...`.** Results appear directly in the tool response; SQL shows up in the audit log verbatim. Use `params` for parameterized queries to prevent injection.
 - Use web_search for technical documentation lookups when needed.
 - Always verify your changes work (read back modified files, run tests if available).
 - Write in the SAME LANGUAGE as the task.
@@ -82,6 +83,7 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
     ),
     tools=[
         "read_file", "search_files", "write_file", "patch_file", "list_directory", "execute_python",
+        "query_db",
         "web_search", "fetch_url", "download_file", "convert_document", "read_self", "write_kg", "write_kg_structured",
         "save_finding", "mission", "restart_service", "upload_to_r2",
     ],

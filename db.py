@@ -86,6 +86,17 @@ def execute(sql: str, params: tuple | list = None) -> None:
             cur.execute(sql, params)
 
 
+def execute_returning_rowcount(sql: str, params: tuple | list = None) -> int:
+    """Execute a DML/DDL statement and return affected row count.
+
+    -1 for statements where rowcount is not meaningful (most DDL).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount
+
+
 def query_one(sql: str, params: tuple | list = None) -> dict | None:
     """Execute SQL and return a single row dict, or None."""
     with get_conn() as conn:

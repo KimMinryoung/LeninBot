@@ -1592,6 +1592,12 @@ from site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
 TOOLS.extend(SITE_PUBLISHING_TOOLS)
 TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)
 
+# ── Direct SQL tool (programmer only; analyst etc. keep read_self/kg_search) ──
+from db_tools import DB_TOOLS, DB_TOOL_HANDLERS
+
+TOOLS.extend(DB_TOOLS)
+TOOL_HANDLERS.update(DB_TOOL_HANDLERS)
+
 # ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (
     WALLET_TOOL, WALLET_TOOL_HANDLER,
