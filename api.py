@@ -79,10 +79,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 
-# ── Graffiti 라우터 등록 ───────────────────────────────────────────────
-from graffiti_api import router as graffiti_router
-app.include_router(graffiti_router)
-
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
 # Uses LRU-style eviction to prevent unbounded memory growth.

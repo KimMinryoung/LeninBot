@@ -41,16 +41,9 @@ cp "$DEPLOY_DIR/systemd/leninbot-telegram.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-neo4j.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-experience.service" /etc/systemd/system/
 cp "$DEPLOY_DIR/systemd/leninbot-experience.timer" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-dream.service" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-dream.timer" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-debate.service" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-debate.timer" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-riddle.service" /etc/systemd/system/
-cp "$DEPLOY_DIR/systemd/leninbot-riddle.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable leninbot-api leninbot-telegram leninbot-neo4j \
-    leninbot-experience.timer \
-    leninbot-dream.timer leninbot-debate.timer leninbot-riddle.timer
+    leninbot-experience.timer
 
 echo "=== 7. deploy.sh 실행 권한 ==="
 chmod +x "$DEPLOY_DIR/deploy.sh"

@@ -179,7 +179,7 @@ tick 중간에 발생하는 세 가지 영속화:
 
 ### 매 tick Telegram 알림
 
-`_notify_telegram` 이 tick 종료 직후 `TELEGRAM_CHAT_ID` (관리자 개인 채팅)로 발송. aiogram 단독 Bot 인스턴스 (dream_diary 패턴 재사용). 실패해도 tick 데이터는 이미 커밋된 뒤라 손실 없음.
+`_notify_telegram` 이 tick 종료 직후 `TELEGRAM_CHAT_ID` (관리자 개인 채팅)로 발송. aiogram 단독 Bot 인스턴스. 실패해도 tick 데이터는 이미 커밋된 뒤라 손실 없음.
 
 메시지 포맷 (plain text, no markdown):
 ```
