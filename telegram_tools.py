@@ -360,6 +360,7 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
 
     os.makedirs(research_dir, exist_ok=True)
     filepath = os.path.join(research_dir, fname)
+    is_overwrite = os.path.exists(filepath)
 
     # Build document with header
     author_line = f"**작성자:** Cyber-Lenin (사이버-레닌)"
@@ -372,9 +373,24 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
         logger.error("publish_research write error: %s", e)
         return f"Failed to write research document: {e}"
 
+    # Frontend caches research entries in Redis permanently (no TTL), so overwrites
+    # stay invisible until the key is evicted. Drop it here so the next request refetches.
+    cache_invalidated = False
+    if is_overwrite:
+        try:
+            from redis_state import get_redis
+            r = get_redis()
+            if r:
+                r.delete(f"research:{fname}")
+                cache_invalidated = True
+        except Exception as e:
+            logger.warning("publish_research cache invalidation failed for %s: %s", fname, e)
+
     public_url = f"https://cyber-lenin.com/reports/research/{fname}"
+    status = "Overwrote" if is_overwrite else "Published"
+    cache_note = " (frontend cache invalidated)" if cache_invalidated else ""
     return (
-        f"Published: {fname}\n"
+        f"{status}: {fname}{cache_note}\n"
         f"Local path: {filepath}\n"
         f"Public URL: {public_url}\n"
         f"Size: {len(full_doc)} chars"
