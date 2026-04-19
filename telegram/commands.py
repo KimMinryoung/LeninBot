@@ -31,7 +31,7 @@ from replicate_image_service import (
 
 logger = logging.getLogger(__name__)
 
-_SVC_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "svc")
+_SVC_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "svc")
 
 
 def _model_name_for_provider(provider: str) -> str:
@@ -1042,8 +1042,7 @@ async def cmd_deploy(message: Message):
     """Run svc deploy — git pull + restart services. Output sent back via Telegram."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    svc_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "svc")
-    if not os.path.isfile(svc_script):
+    if not os.path.isfile(_SVC_SCRIPT):
         await message.answer("scripts/svc를 찾을 수 없습니다.")
         return
 
@@ -1069,7 +1068,7 @@ async def cmd_deploy(message: Message):
     try:
         # Run svc deploy detached (setsid) so it survives bot restart
         proc = await asyncio.create_subprocess_exec(
-            "setsid", "bash", svc_script, "deploy", f"--{target}",
+            "setsid", "bash", _SVC_SCRIPT, "deploy", f"--{target}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
