@@ -617,6 +617,10 @@ async def _run_one_tick(project: dict) -> dict:
 
 def run_tick() -> dict | None:
     """Synchronous entry point for systemd. Picks the next project and advances it."""
+    from bot_config import is_autonomous_active
+    if not is_autonomous_active():
+        logger.info("Autonomous loop paused via config (autonomous_active=false) — skipping tick.")
+        return None
     _ensure_tables()
     project = _pick_next_project()
     if not project:

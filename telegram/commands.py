@@ -122,6 +122,7 @@ _HELP_TEXT = """\
 
 *자율 프로젝트*
 /projects — 자율 프로젝트 목록
+/autonomous \\[on|off|status] — 자율 에이전트 시간별 tick 중단/재개 (인자 없으면 상태)
 /advise \\[id] <조언> — 다음 tick 에 전달할 조언 등록 (multi-line OK)
 /advisories \\[id] — 대기 중/소비된 조언 조회
 
@@ -695,6 +696,35 @@ async def cmd_status_auto(message: Message):
         agent = r.get("agent_type") or "?"
         lines.append(f"{icon} [{r['id']}] [{agent}] {preview}\n   상태: {r['status']} | {ts}")
     await message.answer("\n\n".join(lines))
+
+
+async def cmd_autonomous(message: Message):
+    """Show or toggle the hourly autonomous project loop. Usage: /autonomous [on|off]."""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    from bot_config import is_autonomous_active, set_autonomous_active
+
+    parts = (message.text or "").strip().split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    if arg in {"on", "active", "resume", "start"}:
+        state = set_autonomous_active(True)
+        await message.answer("▶️ 자율 에이전트 *active* — 다음 시간 tick부터 정상 동작합니다.", parse_mode="Markdown")
+    elif arg in {"off", "inactive", "pause", "stop"}:
+        state = set_autonomous_active(False)
+        await message.answer("⏸ 자율 에이전트 *inactive* — hourly tick이 일시 중단됐습니다. (타이머는 계속 fire하지만 guard가 skip)", parse_mode="Markdown")
+    elif arg in {"", "status"}:
+        state = is_autonomous_active()
+        label = "▶️ active" if state else "⏸ inactive"
+        await message.answer(
+            f"자율 에이전트 상태: *{label}*\n\n사용법: `/autonomous on` | `/autonomous off` | `/autonomous status`",
+            parse_mode="Markdown",
+        )
+    else:
+        await message.answer(
+            "알 수 없는 인자입니다. 사용법: `/autonomous on` | `/autonomous off` | `/autonomous status`",
+            parse_mode="Markdown",
+        )
 
 
 async def cmd_email(message: Message):
@@ -1920,6 +1950,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_kg, Command("kg"))
     router.message.register(cmd_report, Command("report"))
     router.message.register(cmd_status_auto, Command("status_auto"))
+    router.message.register(cmd_autonomous, Command("autonomous"))
     router.message.register(cmd_email, Command("email"))
     router.message.register(cmd_schedule, Command("schedule"))
     router.message.register(cmd_schedules, Command("schedules"))
