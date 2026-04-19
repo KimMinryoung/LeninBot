@@ -91,7 +91,7 @@ def _init_tools(force_reload: bool = False):
     global _tools, _tool_handlers
     if _tools is not None and not force_reload:
         return _tools, _tool_handlers
-    import telegram_tools as telegram_tools_module
+    import telegram.tools as telegram_tools_module
     if force_reload:
         telegram_tools_module = importlib.reload(telegram_tools_module)
     _tools = telegram_tools_module.TOOLS
@@ -118,8 +118,8 @@ async def execute_browser_task(task: dict) -> dict:
     from agents.base import AgentSpec
     from claude_loop import chat_with_tools, dedupe_tools_by_name
     from self_tools import build_task_context_tools
-    from telegram_tools import MISSION_TOOL, build_mission_handler
-    from telegram_tasks import process_task, build_current_state
+    from telegram.tools import MISSION_TOOL, build_mission_handler
+    from telegram.tasks import process_task, build_current_state
     from shared import KST
     from db import query as db_query, execute as db_execute, query_one as db_query_one
 
@@ -131,7 +131,7 @@ async def execute_browser_task(task: dict) -> dict:
 
     # Set per-coroutine context so tools (upload_to_r2 etc.) can identify the task
     try:
-        from telegram_bot import current_task_ctx
+        from telegram.bot import current_task_ctx
         current_task_ctx.set({"task_id": task_id, "agent_type": agent_type})
     except Exception:
         pass

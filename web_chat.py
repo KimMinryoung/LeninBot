@@ -17,7 +17,7 @@ from bot_config import (
     _claude, _openai_client, _config,
     _CLAUDE_MAX_TOKENS, _get_model,
 )
-from telegram_tools import TOOLS, TOOL_HANDLERS
+from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
 from db import query as db_query, execute as db_execute
 

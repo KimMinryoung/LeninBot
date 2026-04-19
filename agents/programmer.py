@@ -6,7 +6,7 @@ from agents.base import (
     CHAT_AUDIENCE_SECTION,
     MISSION_GUIDELINES_SECTION,
 )
-from prompt_renderer import SystemPrompt
+from llm.prompt_renderer import SystemPrompt
 from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
 
 
@@ -55,9 +55,9 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
 3. **Verify**: Use `read_file` to confirm the modification result. If needed, use `execute_python` with ast.parse() for additional verification.
 4. **If a restart is needed** (when service code was modified):
    - **Identify which service the modified file belongs to**, then restart only that service:
-     - telegram: telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py
+     - telegram: telegram/*.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py, llm/*.py
      - api: api.py, web_chat.py
-     - browser: browser_worker.py
+     - browser: browser/*.py
      - all: db.py, embedding_server.py, or files shared by multiple services
    - Restarting the wrong service means your code changes won't take effect. Always verify.
    - Call the `restart_service` tool (do not use execute_python + subprocess).
@@ -71,7 +71,13 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
    import os, subprocess
    ROOT = os.environ["PROJECT_ROOT"]
    subprocess.run(["git", "add", "-A"], cwd=ROOT)
-   subprocess.run(["git", "commit", "-m", "feat: brief summary of change"], cwd=ROOT)
+   # Agent commits must be attributed to Cyber-Lenin — repo's default git config is the human user's.
+   subprocess.run([
+       "git",
+       "-c", "user.name=Cyber-Lenin",
+       "-c", "user.email=lenin@cyber-lenin.com",
+       "commit", "-m", "feat: brief summary of change",
+   ], cwd=ROOT)
    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT)
    ```
 

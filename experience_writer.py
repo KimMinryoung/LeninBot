@@ -341,6 +341,16 @@ def write_experiences():
     logger.info("🧠 [경험] 완료: %d건 추출, %d건 저장 (중복 %d건 스킵)",
                 len(entries), stored, len(entries) - stored)
 
+    # Process any hub curations that were published since the last run and still
+    # need their source body chunked + embedded into lenin_corpus. Runs under the
+    # same daily timer so we don't need a separate systemd unit. Failures don't
+    # propagate — experience-writing itself has already succeeded by this point.
+    try:
+        from scripts.ingest_pending_curations import run as _ingest_curations
+        _ingest_curations()
+    except Exception as e:
+        logger.warning("[경험] curation ingest step failed: %s", e)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

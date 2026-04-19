@@ -373,18 +373,20 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
         logger.error("publish_research write error: %s", e)
         return f"Failed to write research document: {e}"
 
-    # Frontend caches research entries in Redis permanently (no TTL), so overwrites
-    # stay invisible until the key is evicted. Drop it here so the next request refetches.
+    # Frontend caches the research list (TTL) and individual entries (permanent) in Redis.
+    # Invalidate both so the new/updated file and its real title appear on /reports immediately.
     cache_invalidated = False
-    if is_overwrite:
-        try:
-            from redis_state import get_redis
-            r = get_redis()
-            if r:
-                r.delete(f"research:{fname}")
-                cache_invalidated = True
-        except Exception as e:
-            logger.warning("publish_research cache invalidation failed for %s: %s", fname, e)
+    try:
+        from redis_state import get_redis
+        r = get_redis()
+        if r:
+            keys_to_drop = ["report:research_list"]
+            if is_overwrite:
+                keys_to_drop.append(f"research:{fname}")
+            r.delete(*keys_to_drop)
+            cache_invalidated = True
+    except Exception as e:
+        logger.warning("publish_research cache invalidation failed for %s: %s", fname, e)
 
     public_url = f"https://cyber-lenin.com/reports/research/{fname}"
     status = "Overwrote" if is_overwrite else "Published"
@@ -1003,7 +1005,7 @@ def build_mission_handler(user_id: int):
     """Create a mission tool handler bound to a specific user_id."""
     async def _handle(action: str, **_kwargs) -> str:
         try:
-            from telegram_mission import get_active_mission, get_mission_events, close_mission
+            from telegram.mission import get_active_mission, get_mission_events, close_mission
             if action == "status":
                 mission = get_active_mission(user_id)
                 if not mission:
@@ -1086,8 +1088,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     project_root = os.path.dirname(os.path.abspath(__file__))
 
     try:
-        from telegram_bot import current_task_ctx
-        from telegram_tasks import persist_task_restart_state
+        from telegram.bot import current_task_ctx
+        from telegram.tasks import persist_task_restart_state
         ctx = current_task_ctx.get()
         current_task_id = ctx["task_id"] if ctx else None
     except Exception:
@@ -1350,7 +1352,7 @@ async def _exec_upload_to_r2(
     task_id = None
     agent_type = None
     try:
-        from telegram_bot import current_task_ctx
+        from telegram.bot import current_task_ctx
         ctx = current_task_ctx.get()
         task_id = ctx["task_id"] if ctx else None
     except Exception:
@@ -1877,7 +1879,7 @@ BROWSE_WEB_TOOL = {
 
 async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
     try:
-        from browser_use_agent import browse
+        from browser.use_agent import browse
         max_steps = max(1, min(int(max_steps), 50))
         result = await browse(task, max_steps=max_steps, start_url=start_url)
 

@@ -4,11 +4,17 @@
 Dumps Neo4j entities/edges/mentions via the existing backup_kg.py logic,
 bundles them into kg-backup-YYYY-MM-DD.tar.gz, uploads to the
 cyber-lenin-backups R2 bucket, and deletes the backup from 2 days ago
-(rolling 2-day retention: keep today + yesterday).
+(rolling 2-day retention on R2: keep today + yesterday).
+
+Also keeps a rolling 3-day local copy under data/kg_backups/ for fast
+restore without R2 roundtrip. Raw JSON dumps are deleted after upload
+(only the tar.gz is retained locally).
 
 Scheduled by leninbot-kg-backup.timer (daily 03:00 KST).
 """
 import os
+import re
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -27,6 +33,8 @@ from backup_kg import backup as _dump_kg
 
 BUCKET = "cyber-lenin-backups"
 KST = timezone(timedelta(hours=9))
+LOCAL_RETENTION_DAYS = 3  # keep today + yesterday + day-before under data/kg_backups/
+_LOCAL_KEY_RE = re.compile(r"^kg-backup-(\d{4}-\d{2}-\d{2})\.tar\.gz$")
 
 
 def _r2_url(key: str) -> str:
@@ -70,6 +78,7 @@ def main() -> int:
 
     today = datetime.now(KST)
     archive_key = f"kg-backup-{today.strftime('%Y-%m-%d')}.tar.gz"
+    local_archive = backup_dir / archive_key
 
     tmp_path = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False).name
     try:
@@ -81,6 +90,11 @@ def main() -> int:
 
         _r2_put(archive_key, tmp_path)
         print(f"Uploaded to R2: {BUCKET}/{archive_key}")
+
+        # Keep a local copy for fast restore (rolling LOCAL_RETENTION_DAYS).
+        # Copy after upload succeeds so a failed upload doesn't leave a stale local copy.
+        shutil.copyfile(tmp_path, local_archive)
+        print(f"Saved local copy: {local_archive}")
     finally:
         os.unlink(tmp_path)
 
@@ -91,10 +105,28 @@ def main() -> int:
     else:
         print(f"No old backup to delete: {old_key}")
 
+    _prune_local_archives(backup_dir, today)
+
     for f in dump_files:
         f.unlink(missing_ok=True)
 
     return 0
+
+
+def _prune_local_archives(backup_dir: Path, today: datetime) -> None:
+    """Delete local kg-backup-YYYY-MM-DD.tar.gz files older than LOCAL_RETENTION_DAYS."""
+    cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
+    for p in backup_dir.glob("kg-backup-*.tar.gz"):
+        m = _LOCAL_KEY_RE.match(p.name)
+        if not m:
+            continue
+        try:
+            file_date = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if file_date < cutoff:
+            p.unlink(missing_ok=True)
+            print(f"Pruned local archive: {p.name}")
 
 
 if __name__ == "__main__":

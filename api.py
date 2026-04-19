@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     run_telegram_in_api = os.getenv("RUN_TELEGRAM_IN_API", "false").strip().lower() in {"1", "true", "yes", "on"}
     bot_task = None
     if run_telegram_in_api:
-        from telegram_bot import bot_main
+        from telegram.bot import bot_main
         bot_task = asyncio.create_task(bot_main())
     yield
     if bot_task is not None:
@@ -558,6 +558,28 @@ def _resolve_research_file(filename: str) -> Path | None:
     return None
 
 
+def _extract_md_title(path: Path) -> str | None:
+    """Return the first markdown H1 from the file, or None if absent. Cheap — reads only the head."""
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for _ in range(40):  # H1 is virtually always in the first few lines
+                line = fh.readline()
+                if not line:
+                    break
+                stripped = line.strip()
+                if stripped.startswith("# ") and not stripped.startswith("## "):
+                    return stripped[2:].strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _filename_fallback_title(filename: str) -> str:
+    """Prettify a .md filename into a display string (defense-in-depth fallback only)."""
+    stem = filename[:-3] if filename.endswith(".md") else filename
+    return stem.replace("_", " ")
+
+
 @app.get("/robots.txt")
 async def robots_txt():
     content = "\n".join([
@@ -634,7 +656,7 @@ async def atom_feed():
         updated = datetime.fromtimestamp(sorted_files[0].stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for p in sorted_files:
             modified = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            title = p.stem.replace("_", " ")
+            title = _extract_md_title(p) or _filename_fallback_title(p.name)
             url = _build_research_url(p.name)
             entries.append(
                 "<entry>"
@@ -662,7 +684,7 @@ async def atom_feed():
 
 @app.get("/research")
 async def list_research():
-    """List public .md files, preferring research/ and backfilling from legacy output/research/."""
+    """List public .md files with their extracted H1 title so the frontend doesn't need N+1 fetches."""
     files_by_name: dict[str, dict] = {}
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
@@ -671,6 +693,7 @@ async def list_research():
             stat = p.stat()
             files_by_name[p.name] = {
                 "filename": p.name,
+                "title": _extract_md_title(p) or _filename_fallback_title(p.name),
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "source_dir": p.parent.name,
@@ -691,23 +714,31 @@ async def get_research(filename: str, format: str = Query(default="json")):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     content = filepath.read_text(encoding="utf-8")
+    extracted_title = _extract_md_title(filepath) or _filename_fallback_title(filename)
     if format.lower() == "html":
-        title = f"{filepath.stem.replace('_', ' ')} | Cyber-Lenin Research"
+        page_title = f"{extracted_title} | Cyber-Lenin Research"
         description = content.splitlines()[0].lstrip("# ").strip() if content.strip() else SEO_DEFAULT_DESCRIPTION
         body_html = (
-            f"<main><article><h1>{_html_escape(title)}</h1>"
+            f"<main><article><h1>{_html_escape(extracted_title)}</h1>"
             f"<pre>{_html_escape(content)}</pre>"
             f"</article></main>"
         )
         html = _render_html_page(
-            title=title,
+            title=page_title,
             description=description[:300],
             canonical_url=_build_research_url(filename),
             body_html=body_html,
             og_type="article",
         )
         return Response(content=html, media_type="text/html; charset=utf-8")
-    return {"filename": filename, "content": content, "size": len(content), "source_dir": filepath.parent.name, "url": _build_research_url(filename)}
+    return {
+        "filename": filename,
+        "title": extracted_title,
+        "content": content,
+        "size": len(content),
+        "source_dir": filepath.parent.name,
+        "url": _build_research_url(filename),
+    }
 
 
 @app.get("/reports/research")

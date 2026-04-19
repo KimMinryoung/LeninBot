@@ -18,12 +18,12 @@ import uuid
 from datetime import datetime, timezone
 
 from shared import CORE_IDENTITY, KST
-from prompt_renderer import SystemPrompt, render as _render_prompt
+from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _config,
     _CLAUDE_MAX_TOKENS,
 )
-from telegram_tools import TOOLS, TOOL_HANDLERS
+from telegram.tools import TOOLS, TOOL_HANDLERS
 
 logger = logging.getLogger(__name__)
 

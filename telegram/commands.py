@@ -42,7 +42,7 @@ def _model_name_for_provider(provider: str) -> str:
     tier = _ctx["config"].get("chat_model", "high")
     alias = _TIER_MAP.get(provider, _TIER_MAP["claude"]).get(tier, tier)
     if provider == "local":
-        from llm_client import MOON_MODEL
+        from llm.client import MOON_MODEL
         return MOON_MODEL
     if provider == "openai":
         return _OPENAI_MODEL_MAP.get(alias, alias)
@@ -183,7 +183,7 @@ async def cmd_clear(message: Message):
     await asyncio.to_thread(_ctx["clear_chat_history"], message.from_user.id)
     # Close active mission on history clear
     try:
-        from telegram_mission import get_active_mission, close_mission
+        from telegram.mission import get_active_mission, close_mission
         mission = await asyncio.to_thread(get_active_mission, message.from_user.id)
         if mission:
             await asyncio.to_thread(close_mission, mission["id"])
@@ -206,7 +206,7 @@ async def cmd_mission(message: Message):
     arg_lower = raw_arg.lower()
 
     try:
-        from telegram_mission import get_active_mission, get_mission_events, close_mission, create_mission
+        from telegram.mission import get_active_mission, get_mission_events, close_mission, create_mission
         mission = await asyncio.to_thread(get_active_mission, uid)
 
         # --- CREATE ---
@@ -325,7 +325,7 @@ async def cmd_task(message: Message):
         # Resolve mission: use active or auto-create
         mission_id = None
         try:
-            from telegram_mission import get_active_mission, create_mission
+            from telegram.mission import get_active_mission, create_mission
             mission = await asyncio.to_thread(get_active_mission, uid)
             if mission:
                 mission_id = mission["id"]
@@ -343,7 +343,7 @@ async def cmd_task(message: Message):
         # Auto-create mission if none existed
         if task_id and mission_id is None:
             try:
-                from telegram_mission import create_mission
+                from telegram.mission import create_mission
                 mission = await asyncio.to_thread(create_mission, uid, content[:80], task_id)
                 mission_id = mission["id"]
                 msg += f"\n\n🎯 미션 #{mission_id} 자동 생성"
@@ -1249,11 +1249,11 @@ async def handle_message(message: Message):
     _provider = _ctx["config"].get("provider", "claude")
 
     # Mission context: inject active mission timeline
-    from telegram_mission import build_mission_context
+    from telegram.mission import build_mission_context
     mission_context = await asyncio.to_thread(build_mission_context, user_id, _provider)
 
     # Orchestrator context: structured state block (completed/in-progress/pending)
-    from telegram_tasks import build_current_state
+    from telegram.tasks import build_current_state
     state_context = await asyncio.to_thread(
         build_current_state, user_id, provider=_provider
     )
@@ -1263,7 +1263,7 @@ async def handle_message(message: Message):
     try:
         extra_context = (experience_context or "") + mission_context + state_context
         # Bind mission tool handler to this user
-        from telegram_tools import build_mission_handler
+        from telegram.tools import build_mission_handler
         mission_handler = build_mission_handler(user_id)
         progress_cb = _ctx["make_progress_callback"](message.chat.id)
         bt = {}
@@ -1300,7 +1300,7 @@ async def handle_message(message: Message):
     # Mission: log interrupted tool work to active mission
     if bt.get("was_interrupted") and bt.get("tool_work_details"):
         try:
-            from telegram_mission import get_active_mission, add_mission_event
+            from telegram.mission import get_active_mission, add_mission_event
             mission = await asyncio.to_thread(get_active_mission, user_id)
             if mission:
                 details = bt["tool_work_details"]
@@ -1338,7 +1338,7 @@ async def handle_message(message: Message):
         # Inherit active mission
         cont_mission_id = None
         try:
-            from telegram_mission import get_active_mission
+            from telegram.mission import get_active_mission
             m = await asyncio.to_thread(get_active_mission, user_id)
             if m:
                 cont_mission_id = m["id"]
@@ -1882,7 +1882,7 @@ async def cmd_agents(message: Message):
         return
 
     from agents import list_agents
-    from telegram_tasks import check_browser_worker_alive
+    from telegram.tasks import check_browser_worker_alive
 
     lines = ["*에이전트 현황*\n"]
 

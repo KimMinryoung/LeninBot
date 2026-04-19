@@ -229,13 +229,44 @@ async def _exec_publish_hub_curation(
             selection_rationale, context, json.dumps(tag_list),
         ),
     )
+    # Fetch the source article body and stash it on the row so the nightly ingest
+    # job can chunk + embed it into lenin_corpus.modern_analysis later. Fetch here
+    # (cheap, seconds) rather than embedding here (tens of seconds per long doc).
+    # Failures are non-blocking — the curation is already committed and the job
+    # will keep re-trying until source_content is populated.
+    fetch_note = ""
+    try:
+        content = await _wrap_external_fetch(source_url)
+        if content:
+            db_execute(
+                "UPDATE hub_curations SET source_content = %s WHERE id = %s",
+                (content, row["id"]),
+            )
+            fetch_note = f"\nQueued for corpus ingest ({len(content):,} chars, embeds nightly)"
+        else:
+            fetch_note = "\nSource fetch returned empty — can be retried later"
+    except Exception as e:
+        logger.warning("hub curation source fetch failed for %s: %s", slug, e)
+        fetch_note = f"\nSource fetch failed: {e} (can be retried later)"
+
     public_url = f"https://cyber-lenin.com/hub/{slug}"
     return (
         f"Published hub curation #{row['id']}\n"
         f"Slug: {slug}\n"
         f"Public URL: {public_url}\n"
         f"Published at: {row['published_at']}"
+        f"{fetch_note}"
     )
+
+
+async def _wrap_external_fetch(url: str) -> str | None:
+    """Fetch the full article body for later corpus ingest. Max 500k chars."""
+    from shared import fetch_url_content_async
+
+    content = await fetch_url_content_async(url, max_chars=500_000)
+    if not content or len(content.strip()) < 200:
+        return None
+    return content
 
 
 # ══════════════════════════════════════════════════════════════════════

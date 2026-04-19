@@ -7,7 +7,7 @@ Wants=leninbot-neo4j.service leninbot-embedding.service
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-ExecStart=/home/grass/leninbot/venv/bin/python telegram_bot.py
+ExecStart=/home/grass/leninbot/venv/bin/python -m telegram.bot
 Restart=always
 RestartSec=5
 

@@ -173,9 +173,11 @@ def step5_git_push():
     code, out, err = run_cmd("git add -A")
     log(f"  git add: code={code}")
     
-    # commit
+    # commit — agent author override (repo default is the human user; agent commits must be attributed to Cyber-Lenin)
     msg = f"autonomous: cleanup bak files, add work scripts [{datetime.now().strftime('%Y-%m-%d %H:%M')}]"
-    code, out, err = run_cmd(f'git commit -m "{msg}"')
+    code, out, err = run_cmd(
+        f'git -c user.name=Cyber-Lenin -c user.email=lenin@cyber-lenin.com commit -m "{msg}"'
+    )
     log(f"  git commit: code={code} | {out or err}")
     
     if code != 0:

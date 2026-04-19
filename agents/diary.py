@@ -4,7 +4,7 @@ from agents.base import (
     AgentSpec,
     CHAT_AUDIENCE_SECTION,
 )
-from prompt_renderer import SystemPrompt
+from llm.prompt_renderer import SystemPrompt
 from shared import CORE_IDENTITY
 
 

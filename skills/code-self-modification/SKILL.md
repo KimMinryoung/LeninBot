@@ -1,6 +1,6 @@
 ---
 name: code-self-modification
-description: Safely modifies leninbot's own Python source code. Handles patch validation, syntax checking, service restart, testing, and git commit/push. Use when asked to fix bugs, add features, or refactor code in telegram_bot.py, shared.py, chatbot.py, or other core files. Keywords: 코드 수정, 버그 수정, 기능 추가, self-modify, patch, code fix, 배포, deploy.
+description: Safely modifies leninbot's own Python source code. Handles patch validation, syntax checking, service restart, testing, and git commit/push. Use when asked to fix bugs, add features, or refactor code in telegram/bot.py, shared.py, api.py, or other core files. Keywords: 코드 수정, 버그 수정, 기능 추가, self-modify, patch, code fix, 배포, deploy.
 compatibility: Requires git, Python 3.10+, write access to project root, sudo systemctl access. Uses self_modification_core.py.
 metadata:
   author: cyber-Lenin

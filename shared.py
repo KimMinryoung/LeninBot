@@ -1332,7 +1332,7 @@ def set_shared_embeddings(emb):
 def _get_exp_embeddings():
     global _exp_embeddings
     if _exp_embeddings is None:
-        from embedding_client import get_embedding_client
+        from llm.embedding_client import get_embedding_client
         _exp_embeddings = get_embedding_client()
     return _exp_embeddings
 
@@ -1460,6 +1460,116 @@ def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = 
         docs = docs[:k]
 
     return docs
+
+
+# ── Corpus Ingestion (modern_analysis layer) ─────────────────────────
+# Chunking/embedding pipeline used by both hub-curation auto-ingest and the
+# manual literature-drop CLI. Keeps insert shape compatible with the existing
+# match_documents() SP and the historical chunk size (~760 char avg, 1000 max).
+
+_CORPUS_CHUNK_SIZE = 900
+_CORPUS_CHUNK_OVERLAP = 120
+
+
+def _chunk_text(text: str, size: int = _CORPUS_CHUNK_SIZE, overlap: int = _CORPUS_CHUNK_OVERLAP) -> list[str]:
+    """Simple sliding-window chunker tuned to match the existing corpus distribution."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    chunks: list[str] = []
+    start = 0
+    step = max(1, size - overlap)
+    while start < len(text):
+        end = min(start + size, len(text))
+        # Try to break on a newline or whitespace near the boundary for cleaner cuts.
+        if end < len(text):
+            window = text[max(start, end - 120):end]
+            cut_rel = max(window.rfind("\n"), window.rfind(". "), window.rfind(" "))
+            if cut_rel > 0:
+                end = (end - 120 if end - 120 > start else start) + cut_rel + 1
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = end - overlap if end - overlap > start else end
+    return chunks
+
+
+def ingest_to_corpus(
+    content: str,
+    source: str,
+    *,
+    layer: str = "modern_analysis",
+    author: str | None = None,
+    year: int | None = None,
+    extra_metadata: dict | None = None,
+) -> int:
+    """Chunk → embed → insert into lenin_corpus. Returns the number of chunks inserted.
+
+    Idempotency is not enforced here — callers that may re-ingest the same source should
+    delete existing rows first (see `delete_corpus_source`).
+    """
+    from db import get_conn
+
+    chunks = _chunk_text(content)
+    if not chunks:
+        return 0
+
+    emb = _get_exp_embeddings()
+    vectors = emb.embed_documents(chunks)
+    if len(vectors) != len(chunks):
+        raise RuntimeError(
+            f"embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
+        )
+
+    base_meta = {"layer": layer, "source": source}
+    if author:
+        base_meta["author"] = author
+    if year:
+        base_meta["year"] = int(year)
+    if extra_metadata:
+        base_meta.update(extra_metadata)
+
+    rows = []
+    for chunk, vec in zip(chunks, vectors):
+        emb_str = "[" + ",".join(str(v) for v in vec) + "]"
+        rows.append((chunk, json.dumps(base_meta, ensure_ascii=False), emb_str))
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO lenin_corpus(content, metadata, embedding) VALUES (%s, %s::jsonb, %s::vector)",
+                rows,
+            )
+        conn.commit()
+
+    return len(chunks)
+
+
+def delete_corpus_source(source: str, layer: str | None = None) -> int:
+    """Delete all chunks matching a given metadata.source (optionally filtered by layer).
+
+    Use before re-ingesting the same document to avoid duplicate chunks."""
+    from db import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if layer:
+                cur.execute(
+                    "DELETE FROM lenin_corpus WHERE metadata->>'source' = %s AND metadata->>'layer' = %s",
+                    (source, layer),
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM lenin_corpus WHERE metadata->>'source' = %s",
+                    (source,),
+                )
+            deleted = cur.rowcount
+        conn.commit()
+    return deleted
 
 
 # ── Knowledge Graph Search ────────────────────────────────────────────
