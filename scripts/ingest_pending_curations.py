@@ -92,6 +92,9 @@ def _ingest_row(row: dict, reingest: bool) -> int:
             "curation_slug": row.get("slug"),
             "curation_id": row.get("id"),
         },
+        # --reingest is an explicit "redo" signal: bypass the URL-dedup guard so
+        # the caller's delete_corpus_source above actually lands fresh chunks.
+        skip_if_source_url_exists=not reingest,
     )
     db_execute(
         "UPDATE hub_curations SET ingested_at = now() WHERE id = %s",

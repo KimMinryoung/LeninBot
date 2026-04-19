@@ -1506,13 +1506,31 @@ def ingest_to_corpus(
     author: str | None = None,
     year: int | None = None,
     extra_metadata: dict | None = None,
+    skip_if_source_url_exists: bool = True,
 ) -> int:
     """Chunk → embed → insert into lenin_corpus. Returns the number of chunks inserted.
 
-    Idempotency is not enforced here — callers that may re-ingest the same source should
-    delete existing rows first (see `delete_corpus_source`).
+    By default, skips ingest (returns 0) when extra_metadata['source_url'] already
+    exists anywhere in the corpus — prevents duplicate embedding when two curations
+    or drops point at the same article. Pass `skip_if_source_url_exists=False` to
+    force-insert (e.g. reingest flows that delete the prior rows themselves).
     """
     from db import get_conn
+
+    source_url = (extra_metadata or {}).get("source_url")
+    if skip_if_source_url_exists and source_url:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM lenin_corpus WHERE metadata->>'source_url' = %s LIMIT 1",
+                    (source_url,),
+                )
+                if cur.fetchone():
+                    logger.info(
+                        "[shared] ingest_to_corpus: skipping %r — source_url already in corpus",
+                        source_url[:80],
+                    )
+                    return 0
 
     chunks = _chunk_text(content)
     if not chunks:
