@@ -32,9 +32,9 @@ from bot_config import (
     get_current_model_selection,
     _extract_text,
 )
-from telegram_tools import TOOLS, TOOL_HANDLERS
+from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
-from telegram_tasks import (
+from telegram.tasks import (
     process_task, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
     recover_processing_tasks_on_startup,
@@ -542,7 +542,7 @@ def _build_env_context() -> str:
 # Claude gets XML tags; OpenAI/Qwen get Markdown headers — both deliberate,
 # matching the format each family is trained on.
 
-from prompt_renderer import SystemPrompt, render as _render_prompt
+from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 
 _CHAT_AUDIENCE_INNER = (
     CHAT_AUDIENCE_BLOCK
@@ -1301,7 +1301,7 @@ async def _chat_with_tools(
     # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm_client import (
+        from llm.client import (
             _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT,
             LOCAL_MAX_TOKENS, LOCAL_ENABLE_THINKING,
         )
@@ -1379,7 +1379,7 @@ async def _chat_with_tools(
 router = Router()
 
 # Register command handlers from extracted module
-from telegram_commands import register_handlers
+from telegram.commands import register_handlers
 register_handlers(router, ctx={
     "is_allowed": _is_allowed,
     "split_message": _split_message,
@@ -1597,12 +1597,12 @@ async def bot_main():
 
             # Load recent chat history for context
             history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
-            from telegram_commands import sanitize_messages
+            from telegram.commands import sanitize_messages
             history = sanitize_messages(history)
             history.append({"role": "user", "content": prompt})
 
             # Run orchestrator — budget enough for response + optional redelegate call
-            from telegram_tools import build_mission_handler
+            from telegram.tools import build_mission_handler
             reply = await _chat_with_tools(
                 history,
                 budget_usd=0.15,
@@ -1635,8 +1635,8 @@ async def bot_main():
         current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
 
         from self_tools import build_task_context_tools
-        from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
-        from telegram_tools import build_mission_handler
+        from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+        from telegram.tools import build_mission_handler
 
         # ── Agent-aware task execution ──────────────────────────────
         agent_type = task.get("agent_type") or "analyst"
@@ -1723,7 +1723,7 @@ async def bot_main():
         # ── Provider dispatch: Claude vs local LLM (OpenAI-compatible) ──
         if spec.provider == "moon":
             from openai_tool_loop import chat_with_tools as moon_chat_with_tools
-            from llm_client import MOON_BASE, MOON_MODEL, _health_ok
+            from llm.client import MOON_BASE, MOON_MODEL, _health_ok
 
             # Try MOON PC, then fall back to Claude
             if _health_ok(MOON_BASE):

@@ -554,7 +554,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         logger.info("Created post-restart verification child task #%s for task #%s", child_id, task_id)
 
         try:
-            from telegram_tools import _exec_restart_service
+            from telegram.tools import _exec_restart_service
             await _exec_restart_service(service="telegram")
         except Exception as e:
             logger.warning("telegram restart from verification failed: %s", e)
@@ -693,7 +693,7 @@ async def process_task(
     mission_ctx = ""
     if mission_id:
         try:
-            from telegram_mission import get_mission_events, add_mission_event
+            from telegram.mission import get_mission_events, add_mission_event
             # Look up mission title
             from db import query as _db_query
             mission_rows = _db_query("SELECT title FROM telegram_missions WHERE id = %s", (mission_id,))
@@ -890,7 +890,7 @@ async def process_task(
             # Record task completion to mission (generous summary for context chain)
             if mission_id:
                 try:
-                    from telegram_mission import add_mission_event
+                    from telegram.mission import add_mission_event
                     agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
                     summary = _extract_summary(report, 1500)
                     add_mission_event(
@@ -1013,7 +1013,7 @@ async def process_task(
             # Record failure to mission
             if mission_id:
                 try:
-                    from telegram_mission import add_mission_event
+                    from telegram.mission import add_mission_event
                     add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Failed: {str(e)[:500]}")
                 except Exception:
                     pass
@@ -1197,7 +1197,7 @@ async def recover_processing_tasks_on_startup(
             # Record handoff to mission timeline
             if task_mission_id:
                 try:
-                    from telegram_mission import add_mission_event
+                    from telegram.mission import add_mission_event
                     add_mission_event(
                         task_mission_id, "system", "decision",
                         f"Service restart already completed: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts}); child must only perform post-restart verification"
@@ -1290,7 +1290,7 @@ async def checkpoint_task_on_shutdown(task_id: int) -> bool:
             task_rows = _query("SELECT mission_id FROM telegram_tasks WHERE id = %s", (task_id,))
             task_mid = task_rows[0].get("mission_id") if task_rows else None
             if task_mid:
-                from telegram_mission import add_mission_event
+                from telegram.mission import add_mission_event
                 add_mission_event(
                     task_mid, f"task#{task_id}", "decision",
                     f"Service shutdown — task #{task_id} interrupted at {ts}"

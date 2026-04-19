@@ -9,7 +9,7 @@ import argparse
 import os
 from datetime import datetime
 from neo4j import GraphDatabase
-from llm_client import ask
+from llm.client import ask
 
 # 로컬 Docker Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")

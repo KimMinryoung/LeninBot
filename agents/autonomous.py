@@ -18,7 +18,7 @@ from agents.base import (
     AgentSpec,
     MISSION_GUIDELINES_SECTION,
 )
-from prompt_renderer import SystemPrompt
+from llm.prompt_renderer import SystemPrompt
 from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
 
 

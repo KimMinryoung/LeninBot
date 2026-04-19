@@ -283,7 +283,7 @@ class MoltbookClient:
         )
 
         try:
-            from llm_client import ask
+            from llm.client import ask
             raw = ask(_SOLVE_PROMPT, temperature=0.0).strip()
             logger.debug("[razvedchik] 챌린지 LLM raw: %s", raw[:200])
 
@@ -641,7 +641,7 @@ class Razvedchik:
             f"{context_line}\n"
             f"Write in English. Be substantive — engage with the ideas, not just react."
         )
-        from llm_client import ask_with_system
+        from llm.client import ask_with_system
 
         # 최대 2회 시도 — LLM이 빈 응답을 반환하는 경우 재시도
         for attempt in range(2):
@@ -757,7 +757,7 @@ class Razvedchik:
             f"Write in English."
         )
         try:
-            from llm_client import ask_with_system
+            from llm.client import ask_with_system
             result = ask_with_system(
                 user_prompt=prompt,
                 system_prompt=RAZVEDCHIK_POST_SYSTEM,
@@ -901,7 +901,7 @@ class Razvedchik:
                     f"Be conversational and substantive. Write in English."
                 )
                 try:
-                    from llm_client import ask_with_system
+                    from llm.client import ask_with_system
                     reply_text = ask_with_system(
                         user_prompt=reply_prompt,
                         system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,

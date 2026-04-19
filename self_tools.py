@@ -819,7 +819,7 @@ async def _exec_delegate(
                 task_mission_id = active[0]["id"]
             else:
                 # Auto-create mission from delegation context
-                from telegram_mission import create_mission
+                from telegram.mission import create_mission
                 mission_title = task[:80].replace("\n", " ").strip()
                 # user_id 0 = orchestrator-initiated, find the real user from recent tasks
                 user_id_for_mission = 0
@@ -874,7 +874,7 @@ async def _exec_delegate(
     # Record delegation event to mission timeline
     if task_mission_id:
         try:
-            from telegram_mission import add_mission_event
+            from telegram.mission import add_mission_event
             delegation_note = f"Delegated to [{agent}]: {task[:500]}"
             if context:
                 delegation_note += f"\nContext: {context[:500]}"
@@ -930,7 +930,7 @@ async def _exec_multi_delegate(
         if active:
             task_mission_id = active[0]["id"]
         else:
-            from telegram_mission import create_mission
+            from telegram.mission import create_mission
             mission_title = tasks[0]["task"][:80].replace("\n", " ").strip()
             user_id_for_mission = 0
             try:
@@ -1038,7 +1038,7 @@ async def _exec_multi_delegate(
     # Record to mission timeline
     if task_mission_id:
         try:
-            from telegram_mission import add_mission_event
+            from telegram.mission import add_mission_event
             await asyncio.to_thread(
                 add_mission_event, task_mission_id, "orchestrator", "decision",
                 f"Multi-delegate: {len(created_ids)} subtasks → synthesis #{synthesis_id}\n{subtask_summary}"
@@ -1068,7 +1068,7 @@ def build_run_agent_handler(chat_with_tools_fn):
 
         try:
             from agents import get_agent
-            from telegram_tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+            from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
 
             spec = get_agent(agent)
             agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
@@ -1240,7 +1240,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if not mission_id:
             return "No mission linked to this task — finding not saved."
         try:
-            from telegram_mission import add_mission_event
+            from telegram.mission import add_mission_event
             truncated = content[:2000]
             await asyncio.to_thread(
                 add_mission_event, mission_id, f"task#{task_id}", event_type, truncated
@@ -1293,7 +1293,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             from redis_state import post_to_board
             agent_type_str = ""
             try:
-                from telegram_bot import current_task_ctx
+                from telegram.bot import current_task_ctx
                 ctx = current_task_ctx.get()
                 agent_type_str = (ctx or {}).get("agent_type", "")
             except Exception:

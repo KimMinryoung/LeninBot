@@ -506,7 +506,7 @@ async def _run_one_tick(project: dict) -> dict:
     from agents import get_agent
     from claude_loop import chat_with_tools, dedupe_tools_by_name
     from bot_config import _claude, _get_model_by_alias, _config, _TIER_MAP
-    import telegram_tools as tt_module
+    import telegram.tools as tt_module
 
     spec = get_agent("autonomous_project")
 

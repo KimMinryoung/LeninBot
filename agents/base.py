@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 
 from shared import EXTERNAL_SOURCE_RULE  # re-exported for agent prompts
-from prompt_renderer import SystemPrompt, render as _render_prompt
+from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 
 # ── Reusable section bodies (IR form) ────────────────────────────────
 # Named without the surrounding XML tag so the renderer can wrap them in

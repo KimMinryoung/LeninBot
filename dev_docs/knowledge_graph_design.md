@@ -503,6 +503,22 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 | `classify_untyped_entities.py` | Gemini 배치 분류 (8 타입, 더 정확) |
 | `ingest_reports_to_kg.py` | 텔레그램 태스크 리포트 → KG 수집 |
 | `kg_enricher.py` | 엔티티 요약 자동 생성 |
+| `backup_kg_to_r2.py` | `backup_kg.py` + tar.gz + R2 업로드 (자동화용) |
+
+### 자동 백업 (2026-04-18~)
+
+- **스케줄:** `leninbot-kg-backup.timer` — 매일 03:00 KST
+- **대상:** Cloudflare R2 버킷 `cyber-lenin-backups` (private), 객체 키 `kg-backup-YYYY-MM-DD.tar.gz`
+- **R2 보관:** 롤링 2일 (오늘 + 어제). 새 백업 성공 후 2일 전 백업 삭제
+- **로컬 보관:** `data/kg_backups/`에 tar.gz 롤링 3일치 (오늘+어제+그제). 즉시 복구용. 원본 JSON은 업로드 후 삭제, tar.gz만 유지
+- **내용:** entities/edges/mentions JSON (임베딩 포함) 을 tar.gz로 묶음 (~79 MB 압축, 2026-04-18 기준)
+- **복구:** R2에서 tar.gz 다운로드 → 풀기 → `skills/kg-maintenance/scripts/restore_kg.py`로 import.
+  - 사용 예: `python restore_kg.py --entities <e.json> --edges <r.json> --mentions <m.json> --target-uri bolt://host:port --target-password <pw> [--clear]`
+  - 안전장치: `--target-uri`가 프로덕션 `NEO4J_URI`와 일치하면 `--force-production` 없이는 쓰기 거부, `--clear`는 프로덕션 URI에서 금지
+  - 복원 검증(drill) 2026-04-19 실행 — entities/RELATES_TO 정확히 일치, 벡터 유사도 검색 정상 작동 확인
+- **백업 gap (알려진 제약):**
+  - Episodic 노드 자체는 백업되지 않음. restore 시 MENTIONS 엣지 attach를 위해 uuid+name만 담긴 stub `:Episodic {restored_stub: true}` 생성됨. 에피소드 content·valid_at·embedding은 복구 불가
+  - MENTIONS 엣지는 uuid가 없어 MERGE 시 (episode_uuid, entity_uuid) 쌍으로 dedup됨. 프로덕션에 중복 parallel edge가 있으면 복원본에서 자연 감소 (2026-04-19 drill: prod 중복 24건 확인)
 
 ---
 

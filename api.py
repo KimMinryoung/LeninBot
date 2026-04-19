@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, RedirectResponse, Response
+from fastapi.responses import StreamingResponse, RedirectResponse, Response, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from db import query as db_query, query_one as db_query_one
@@ -69,7 +70,7 @@ async def lifespan(app: FastAPI):
     run_telegram_in_api = os.getenv("RUN_TELEGRAM_IN_API", "false").strip().lower() in {"1", "true", "yes", "on"}
     bot_task = None
     if run_telegram_in_api:
-        from telegram_bot import bot_main
+        from telegram.bot import bot_main
         bot_task = asyncio.create_task(bot_main())
     yield
     if bot_task is not None:
@@ -78,10 +79,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
-
-# ── Graffiti 라우터 등록 ───────────────────────────────────────────────
-from graffiti_api import router as graffiti_router
-app.include_router(graffiti_router)
 
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
@@ -445,6 +442,107 @@ def _render_html_page(*, title: str, description: str, canonical_url: str, body_
 """
 
 
+def _extract_primary_og_image(html_body: str) -> str | None:
+    svg_match = re.search(r'<svg\b[^>]*>.*?</svg>', html_body or "", flags=re.IGNORECASE | re.DOTALL)
+    if svg_match:
+        return None
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_body or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    src = (match.group(1) or "").strip()
+    if not src:
+        return None
+    if src.startswith(("http://", "https://")):
+        return src
+    if src.startswith("/"):
+        return f"{PUBLIC_BASE_URL}{src}"
+    return f"{PUBLIC_BASE_URL}/{src.lstrip('./')}"
+
+
+def _sanitize_static_page_html(html_body: str) -> str:
+    html_body = (html_body or "").strip()
+    if not html_body:
+        return ""
+
+    # Previous frontend path used DOMPurify with html profile only, which strips SVG.
+    # Server-side rendering must preserve inline SVG while still removing active content.
+    html_body = re.sub(r"<script\b[^>]*>.*?</script>", "", html_body, flags=re.IGNORECASE | re.DOTALL)
+    html_body = re.sub(r"<iframe\b[^>]*>.*?</iframe>", "", html_body, flags=re.IGNORECASE | re.DOTALL)
+    html_body = re.sub(r"<form\b[^>]*>.*?</form>", "", html_body, flags=re.IGNORECASE | re.DOTALL)
+    html_body = re.sub(r"<input\b[^>]*?/?>", "", html_body, flags=re.IGNORECASE | re.DOTALL)
+    html_body = re.sub(r"\s+on[a-zA-Z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", "", html_body, flags=re.IGNORECASE)
+    html_body = re.sub(r"\s+href\s*=\s*(\"javascript:[^\"]*\"|'javascript:[^']*'|javascript:[^\s>]+)", "", html_body, flags=re.IGNORECASE)
+    html_body = re.sub(r"\s+xlink:href\s*=\s*(\"javascript:[^\"]*\"|'javascript:[^']*'|javascript:[^\s>]+)", "", html_body, flags=re.IGNORECASE)
+    return html_body
+
+
+def _render_static_page_html(data: dict) -> str:
+    slug = data.get("slug") or ""
+    title = data.get("title") or SEO_DEFAULT_TITLE
+    summary = data.get("summary") or SEO_DEFAULT_DESCRIPTION
+    updated_at = data.get("updated_at") or ""
+    canonical_url = f"{PUBLIC_BASE_URL}/p/{slug}"
+    raw_html = data.get("html_body") or ""
+    safe_html = _sanitize_static_page_html(raw_html)
+    image_url = _extract_primary_og_image(raw_html) or SEO_DEFAULT_OG_IMAGE
+    body_html = f"""
+<div class=\"home-toolbar\">
+    <a href=\"/\" class=\"toolbar-logo\">Cyber-Lenin</a>
+    <div class=\"toolbar-right\">
+        <button type=\"button\" class=\"theme-toggle\" id=\"themeToggle\" title=\"Toggle theme\">&#x263E;</button>
+        <div class=\"lang-dropdown\">
+            <button type=\"button\" class=\"lang-btn\" id=\"langBtn\">&#x1F310;Korean</button>
+            <div class=\"lang-menu\" id=\"langMenu\">
+                <a href=\"#\" data-lang=\"ko\" class=\"active\">Korean</a>
+                <a href=\"#\" data-lang=\"en\" class=\"\">English</a>
+            </div>
+        </div>
+    </div>
+</div>
+<nav>
+    <div class=\"nav-content\">
+        <div class=\"nav-links\">
+            <a href=\"/chat\">채팅</a>
+            <a href=\"/posts\">비숑글</a>
+            <a href=\"/ai-diary\"><span class=\"nav-label-full\">사이버-레닌 일기장</span><span class=\"nav-label-short\">일기장</span></a>
+            <a href=\"/reports\"><span class=\"nav-label-full\">사이버-레닌 보고서</span><span class=\"nav-label-short\">보고서</span></a>
+            <a href=\"/hub\">큐레이션</a>
+        </div>
+    </div>
+</nav>
+<script src=\"/js/nav.js?v=1776509231472\"></script>
+<div class=\"container\">
+    <div class=\"report-body static-page-body comic-shell\" id=\"page-content\">{safe_html}</div>
+</div>
+<footer class=\"footer\">
+    <span class=\"footer-tagline\">&#x263E; written &amp; maintained by Bichon and friends</span>
+</footer>
+<script src=\"/js/common.js?v=1776509231473\"></script>
+"""
+    head = _build_meta_head(
+        title=f"{title} - Cyber-Lenin",
+        description=summary,
+        canonical_url=canonical_url,
+        og_type="article",
+        image_url=image_url,
+    )
+    return f"""<!DOCTYPE html>
+<html lang=\"ko\">
+<head>
+{head}
+<link rel=\"stylesheet\" href=\"/css/style.css?v=1776509221453\">
+<link rel=\"stylesheet\" href=\"/css/report.css?v=1776509221453\">
+<script>
+(function(){{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme:light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t)}})();
+</script>
+</head>
+<body>
+{body_html}
+</body>
+</html>
+"""
+
+
 def _build_research_url(filename: str) -> str:
     return f"{PUBLIC_BASE_URL}/research/{filename}"
 
@@ -458,6 +556,28 @@ def _resolve_research_file(filename: str) -> Path | None:
     if legacy.is_file():
         return legacy
     return None
+
+
+def _extract_md_title(path: Path) -> str | None:
+    """Return the first markdown H1 from the file, or None if absent. Cheap — reads only the head."""
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for _ in range(40):  # H1 is virtually always in the first few lines
+                line = fh.readline()
+                if not line:
+                    break
+                stripped = line.strip()
+                if stripped.startswith("# ") and not stripped.startswith("## "):
+                    return stripped[2:].strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _filename_fallback_title(filename: str) -> str:
+    """Prettify a .md filename into a display string (defense-in-depth fallback only)."""
+    stem = filename[:-3] if filename.endswith(".md") else filename
+    return stem.replace("_", " ")
 
 
 @app.get("/robots.txt")
@@ -536,7 +656,7 @@ async def atom_feed():
         updated = datetime.fromtimestamp(sorted_files[0].stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for p in sorted_files:
             modified = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            title = p.stem.replace("_", " ")
+            title = _extract_md_title(p) or _filename_fallback_title(p.name)
             url = _build_research_url(p.name)
             entries.append(
                 "<entry>"
@@ -564,7 +684,7 @@ async def atom_feed():
 
 @app.get("/research")
 async def list_research():
-    """List public .md files, preferring research/ and backfilling from legacy output/research/."""
+    """List public .md files with their extracted H1 title so the frontend doesn't need N+1 fetches."""
     files_by_name: dict[str, dict] = {}
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
@@ -573,6 +693,7 @@ async def list_research():
             stat = p.stat()
             files_by_name[p.name] = {
                 "filename": p.name,
+                "title": _extract_md_title(p) or _filename_fallback_title(p.name),
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "source_dir": p.parent.name,
@@ -593,23 +714,31 @@ async def get_research(filename: str, format: str = Query(default="json")):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     content = filepath.read_text(encoding="utf-8")
+    extracted_title = _extract_md_title(filepath) or _filename_fallback_title(filename)
     if format.lower() == "html":
-        title = f"{filepath.stem.replace('_', ' ')} | Cyber-Lenin Research"
+        page_title = f"{extracted_title} | Cyber-Lenin Research"
         description = content.splitlines()[0].lstrip("# ").strip() if content.strip() else SEO_DEFAULT_DESCRIPTION
         body_html = (
-            f"<main><article><h1>{_html_escape(title)}</h1>"
+            f"<main><article><h1>{_html_escape(extracted_title)}</h1>"
             f"<pre>{_html_escape(content)}</pre>"
             f"</article></main>"
         )
         html = _render_html_page(
-            title=title,
+            title=page_title,
             description=description[:300],
             canonical_url=_build_research_url(filename),
             body_html=body_html,
             og_type="article",
         )
         return Response(content=html, media_type="text/html; charset=utf-8")
-    return {"filename": filename, "content": content, "size": len(content), "source_dir": filepath.parent.name, "url": _build_research_url(filename)}
+    return {
+        "filename": filename,
+        "title": extracted_title,
+        "content": content,
+        "size": len(content),
+        "source_dir": filepath.parent.name,
+        "url": _build_research_url(filename),
+    }
 
 
 @app.get("/reports/research")
@@ -683,12 +812,22 @@ async def list_pages():
 @app.get("/pages/{slug}")
 async def get_page(slug: str):
     """Fetch the JSON payload of a static page (slug, title, html_body, summary)."""
-    from fastapi.responses import JSONResponse
     from site_publishing import get_static_page
     data = get_static_page(slug)
     if not data:
         return JSONResponse(status_code=404, content={"detail": "Page not found"})
     return data
+
+
+@app.get("/p/{slug}")
+async def render_static_page(slug: str):
+    """Server-render a published static page so inline SVG survives sanitization."""
+    from site_publishing import get_static_page
+    data = get_static_page(slug)
+    if not data:
+        return JSONResponse(status_code=404, content={"detail": "Page not found"})
+    html = _render_static_page_html(data)
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 @app.get("/reports/research/{filename}")

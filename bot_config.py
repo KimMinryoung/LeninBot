@@ -119,7 +119,7 @@ def _tier_to_display(tier: str) -> str:
     if provider == "openai":
         model_name = _OPENAI_MODEL_MAP.get(alias, alias)
     elif provider == "local":
-        from llm_client import MOON_MODEL
+        from llm.client import MOON_MODEL
         model_name = MOON_MODEL
     else:
         model_name = alias
@@ -173,7 +173,7 @@ def get_current_model_selection(kind: str = "chat") -> dict:
     tier = str(_config.get(tier_key, "high"))
     alias = _resolve_tier(tier)
     if provider == "local":
-        from llm_client import MOON_MODEL
+        from llm.client import MOON_MODEL
         model_id = MOON_MODEL
     elif provider == "openai" or alias in _OPENAI_MODEL_MAP:
         model_id = _resolve_openai_model(alias)
@@ -193,7 +193,7 @@ def get_current_model_selection(kind: str = "chat") -> dict:
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
     if _config.get("provider") == "local":
-        from llm_client import _resolve_backend
+        from llm.client import _resolve_backend
         return _resolve_backend()["model"]
     alias = _resolve_tier(_config["chat_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
@@ -204,7 +204,7 @@ async def _get_model() -> str:
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
     if _config.get("provider") == "local":
-        from llm_client import _resolve_backend
+        from llm.client import _resolve_backend
         return _resolve_backend()["model"]
     alias = _resolve_tier(_config["task_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
@@ -219,7 +219,7 @@ async def _get_model_light() -> str:
 
 async def _get_model_moon() -> str:
     """Get the Moon (local LLM) model name — async wrapper for await compatibility."""
-    from llm_client import MOON_MODEL
+    from llm.client import MOON_MODEL
     return MOON_MODEL
 
 

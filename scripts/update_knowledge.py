@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
 
 # 1. 초기화 (embedding_server via HTTP)
-from embedding_client import get_embedding_client
+from llm.embedding_client import get_embedding_client
 embeddings = get_embedding_client()
 print("[System] Using embedding server (HTTP client)")
 

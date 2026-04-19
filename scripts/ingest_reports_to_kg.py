@@ -19,7 +19,7 @@ load_dotenv()
 
 from db import query as db_query
 from shared import add_kg_episode
-from llm_client import ask as llm_ask
+from llm.client import ask as llm_ask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
