@@ -537,32 +537,47 @@ def _extract_response(sdk_mode, response_or_data):
     """Extract (finish_reason, content_text, tool_calls, message, usage) from response.
 
     Post-processing applied before returning:
-      1. Strip `<think>…</think>` blocks leaked into content (Qwen with older
-         llama-server builds where reasoning isn't split into its own field).
-      2. Rescue `<tool_call>…</tool_call>` blocks that llama-server forwarded
+      1. Capture reasoning from `reasoning_content` (llama-server split) or
+         from inline `<think>…</think>` (older servers / unsplit).
+      2. Strip inline `<think>…</think>` blocks from content.
+      3. Rescue `<tool_call>…</tool_call>` blocks that llama-server forwarded
          as text instead of parsing as a proper tool_calls field. When a
          rescue happens we also flip finish_reason to "tool_calls" so the
          surrounding loop dispatches the call instead of treating the turn
          as a plain text reply.
+      4. On final replies (no tool calls), prepend the reasoning so the user
+         can transparently follow Qwopus's <think> trace. Skipped on
+         tool-call rounds to avoid polluting conversation history.
     """
     if sdk_mode:
         choice = response_or_data.choices[0]
-        return (
-            choice.finish_reason or "stop",
-            choice.message.content or "",
-            choice.message.tool_calls,
-            choice.message,
-            response_or_data.usage,
+        msg = choice.message
+        finish_reason = choice.finish_reason or "stop"
+        content = msg.content or ""
+        tool_calls = msg.tool_calls
+        raw_reasoning = (
+            getattr(msg, "reasoning_content", None)
+            or getattr(msg, "reasoning", None)
+            or ""
         )
+        reasoning = raw_reasoning.strip() if isinstance(raw_reasoning, str) else ""
+        usage = response_or_data.usage
+    else:
+        choice = response_or_data["choices"][0]
+        msg = choice["message"]
+        finish_reason = choice.get("finish_reason", "stop")
+        content = msg.get("content", "") or ""
+        tool_calls = msg.get("tool_calls")
+        reasoning = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+        usage = None
 
-    choice = response_or_data["choices"][0]
-    msg = choice["message"]
-    finish_reason = choice.get("finish_reason", "stop")
-    content = msg.get("content", "") or ""
-    tool_calls = msg.get("tool_calls")
-
-    # Strip <think> tags if leaked into content
+    # Strip inline <think> tags; promote their contents to reasoning when the
+    # server didn't populate reasoning_content itself.
     if content and "<think>" in content:
+        if not reasoning:
+            inline = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+            if inline:
+                reasoning = inline.group(1).strip()
         stripped = _THINK_TAG_RE.sub("", content).strip()
         if stripped != content:
             logger.info("Stripped <think> tags from content (original %d → %d chars)",
@@ -583,7 +598,14 @@ def _extract_response(sdk_mode, response_or_data):
             tool_calls = rescued
             finish_reason = "tool_calls"
 
-    return finish_reason, content, tool_calls, msg, None
+    # Surface reasoning only on final replies. Intermediate tool-call rounds
+    # keep clean content so the conversation history we feed back to the
+    # model doesn't accumulate 💭-prefixed past turns.
+    is_final = finish_reason != "tool_calls" and not tool_calls
+    if reasoning and is_final:
+        content = f"💭 {reasoning}\n\n{content}" if content else f"💭 {reasoning}"
+
+    return finish_reason, content, tool_calls, msg, usage
 
 
 def _build_tc_list(sdk_mode, tool_calls) -> list[dict]:
