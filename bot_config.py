@@ -37,6 +37,7 @@ _CONFIG_DEFAULTS = {
     "max_rounds_task": 50,
     "provider": "claude",      # "claude" | "openai" | "local"
     "task_concurrency": 2,     # max parallel background tasks
+    "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -52,7 +53,10 @@ def _load_config() -> dict:
             if key in _CONFIG_DEFAULTS:
                 # Ensure type matches default
                 default_val = _CONFIG_DEFAULTS[key]
-                if isinstance(default_val, float):
+                # bool check must come before int — bool is a subclass of int.
+                if isinstance(default_val, bool):
+                    config[key] = bool(val)
+                elif isinstance(default_val, float):
                     config[key] = float(val)
                 elif isinstance(default_val, int):
                     config[key] = int(val)
@@ -87,6 +91,7 @@ _CONFIG_META = {
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
     "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai", "local"]},
     "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
+    "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
 }
 
 _MODEL_ALIAS_MAP = {
@@ -163,6 +168,22 @@ def _resolve_tier(tier: str) -> str:
     provider = _config.get("provider", "claude")
     tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
     return tier_map.get(tier, tier)  # passthrough if not a tier name
+
+
+def is_autonomous_active() -> bool:
+    """True when the hourly autonomous project loop should run.
+
+    Reads from disk each call so systemd-invoked one-shots (separate Python
+    process) see toggles made by the telegram bot without restarts.
+    """
+    return bool(_load_config().get("autonomous_active", True))
+
+
+def set_autonomous_active(active: bool) -> bool:
+    """Flip the autonomous toggle and persist. Returns the new state."""
+    _config["autonomous_active"] = bool(active)
+    _save_config()
+    return _config["autonomous_active"]
 
 
 def get_current_model_selection(kind: str = "chat") -> dict:
