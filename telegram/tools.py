@@ -264,7 +264,7 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
         if not text:
             return "❌ Conversion produced empty content."
 
-        project_root = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out_dir = Path(project_root) / "data" / "converted"
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -330,7 +330,7 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
     from datetime import datetime, timezone, timedelta
 
     KST = timezone(timedelta(hours=9))
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     research_dir = os.path.join(project_root, "research")
 
     if not title or not title.strip():
@@ -420,7 +420,7 @@ async def _exec_download_file(url: str, filename: str = "") -> str:
     from urllib.parse import urlparse, unquote
     from pathlib import Path
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir = Path(project_root) / "data" / "downloads"
     MAX_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -478,7 +478,7 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
     import mimetypes
     from pathlib import Path
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir = Path(project_root) / "data" / "reference_images"
 
     def _download():
@@ -538,7 +538,7 @@ async def _exec_read_file(
         or kwargs.get("lineend")
     )
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isabs(path):
         path = os.path.join(project_root, path)
     if not os.path.exists(path):
@@ -604,7 +604,7 @@ async def _exec_search_files(
     import subprocess
     import shlex
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     search_path = path or project_root
     if not os.path.isabs(search_path):
         search_path = os.path.join(project_root, search_path)
@@ -688,7 +688,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
     - Other files in allowed dirs → written directly
     - Files outside project root → blocked
     """
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isabs(path):
         path = os.path.join(project_root, path)
     abs_path = os.path.realpath(path)
@@ -779,7 +779,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
 
 async def _exec_patch_file(path: str, old_str: str, new_str: str) -> str:
     """Surgically modify a file by replacing a specific text block."""
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isabs(path):
         path = os.path.join(project_root, path)
     abs_path = os.path.realpath(path)
@@ -821,7 +821,7 @@ async def _exec_patch_file(path: str, old_str: str, new_str: str) -> str:
 async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bool = False) -> str:
     """List files and directories on the server."""
     import glob as _glob
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not path:
         path = project_root
     elif not os.path.isabs(path):
@@ -932,7 +932,7 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
     import tempfile
 
     timeout = max(5, min(timeout, 300))
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     # Safety check before execution
     safety_err = _check_code_safety(code)
@@ -1085,7 +1085,7 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     import ast
     import subprocess
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     try:
         from telegram.bot import current_task_ctx
@@ -1381,7 +1381,7 @@ TOOL_HANDLERS["upload_to_r2"] = _exec_upload_to_r2
 # ── Send Email Tool ──────────────────────────────────────────────────
 def _load_email_signature_config() -> dict:
     """Load email signature config from config/email_signature.json."""
-    sig_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "email_signature.json")
+    sig_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "email_signature.json")
     try:
         import json as _json
         with open(sig_path, "r", encoding="utf-8") as f:
