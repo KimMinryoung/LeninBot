@@ -81,96 +81,23 @@ def _resolve_backend(force_refresh: bool = False) -> dict:
 
 
 # ── OpenAI 호환 호출 (공통) ───────────────────────────────────────────────────
-import re as _re
-_THINK_RE = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL)
-# Qwen3.5 outputs "Thinking Process:" as plain text when --reasoning off
-_THINKING_PROCESS_RE = _re.compile(
-    r"^(Thinking Process:?|Thought Process:?)\s*\n",
-    _re.IGNORECASE,
-)
-# Markers that indicate the model's final draft within its thinking
-_DRAFT_MARKERS = _re.compile(
-    r"(?:^|\n)\s*(?:"
-    r"(?:Final|Revised|Refined|Polished|Selected)\s*(?:Check|Draft|Version|Answer|Response|Output|Polish)?:?"
-    r"|Let'?s?\s+finalize"
-    r"|(?:Drafting\s*-?\s*Attempt\s*\d+)"
-    r")\s*\n",
-    _re.IGNORECASE,
-)
-
 
 def _extract_answer(msg: dict) -> str:
-    """Extract the actual answer from an LLM response message.
+    """Return the model's response with <think> reasoning preserved.
 
-    Handles three cases:
-    1. Normal response — content has the answer directly.
-    2. <think> tags — llama-server splits into reasoning_content + content.
-       If content is empty (tokens exhausted on thinking), extract from reasoning.
-    3. Plain-text thinking — model outputs "Thinking Process:" as regular text
-       (qwen3.5 with --reasoning off). Parse out the final draft.
+    Qwopus3.5 is distilled from Claude Opus reasoning; per the model card, its
+    <think> blocks are meant to be visible ("transparently follow the AI's
+    internal logic"). When tokens run out mid-thinking, showing the reasoning
+    is better than returning empty — the user still sees the train of thought.
     """
     content = (msg.get("content") or "").strip()
-
-    # Strip <think> tags if leaked into content
-    if content:
-        stripped = _THINK_RE.sub("", content).strip()
-        if stripped:
-            content = stripped
-
-    # Strip plain-text thinking prefix
-    if content and _THINKING_PROCESS_RE.match(content):
-        content = _extract_from_thinking(content)
-
-    if content:
-        return content
-
-    # content is empty — try reasoning_content (llama-server separated it)
     reasoning = (msg.get("reasoning_content") or "").strip()
-    if not reasoning:
-        return ""
 
-    return _extract_from_thinking(reasoning)
-
-
-def _extract_from_thinking(text: str) -> str:
-    """Extract the final answer draft from a thinking/reasoning block."""
-    # Find the last draft marker and take text after it
-    markers = list(_DRAFT_MARKERS.finditer(text))
-    if markers:
-        last = markers[-1]
-        candidate = text[last.end():].strip()
-        # Clean up: take first paragraph (the draft), skip further analysis
-        lines = []
-        for line in candidate.splitlines():
-            line = line.strip()
-            if not line:
-                if lines:
-                    break
-                continue
-            # Stop if model starts analyzing again
-            if _re.match(r"^(Count|Char|Length|Check|Wait|Oops|Let'?s|Note:|\d+\.\s)", line, _re.I):
-                break
-            # Strip surrounding quotes
-            if len(line) > 2 and line[0] == '"' and line[-1] == '"':
-                line = line[1:-1]
-            lines.append(line)
-        result = " ".join(lines).strip()
-        if len(result) > 20:
-            return result
-
-    # Fallback: find quoted text that looks like a final answer
-    quotes = _re.findall(r'"([^"]{20,})"', text)
-    if quotes:
-        return quotes[-1].strip()
-
-    # Last resort: take last substantive line
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    for line in reversed(lines):
-        if not _re.match(r"^(\d+[\.\):]|\*\*|[-*•]|#{1,3}\s|Count|Char|Wait|Oops|Let)", line) and len(line) > 20:
-            if line.startswith('"') and line.endswith('"'):
-                line = line[1:-1]
-            return line
-    return ""
+    if reasoning and content:
+        return f"💭 {reasoning}\n\n{content}"
+    if reasoning:
+        return f"💭 {reasoning}"
+    return content
 
 
 def _call(base: str, model: str, messages: list[dict],
@@ -181,7 +108,7 @@ def _call(base: str, model: str, messages: list[dict],
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 8192,
+            "max_tokens": LOCAL_MAX_TOKENS,
             "stream": False,
         },
         timeout=timeout,
