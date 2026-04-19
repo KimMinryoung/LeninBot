@@ -94,7 +94,7 @@ EMAIL_BRIDGE_ENABLED = os.getenv("EMAIL_BRIDGE_ENABLED", "false").strip().lower(
 EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS", "120")))
 EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
 EMAIL_DEFAULT_APPROVER_USER_ID = int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0")
-EMAIL_LOG_DIR = Path(os.getenv("EMAIL_LOG_DIR", str(Path(__file__).resolve().parent / "logs" / "email_bridge")))
+EMAIL_LOG_DIR = Path(os.getenv("EMAIL_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs" / "email_bridge")))
 
 def _ensure_table():
     """Create telegram_tasks and telegram_chat_history tables if not exists."""
