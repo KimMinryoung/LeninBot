@@ -1287,8 +1287,24 @@ async def handle_message(message: Message):
     if state_context:
         state_context = "\n" + state_context
 
+    # System alerts: high-severity runtime notifications (deploy, task status,
+    # email bridge, etc.). Injected as per-turn runtime context, not system prompt.
+    alerts_context = _ctx["format_system_alerts"](_provider)
+
+    # Autonomous agent status: active self-running projects, surfaced so the
+    # orchestrator can reference ongoing background work in its replies.
+    autonomous_context = _ctx["format_autonomous_status"](_provider)
+    if autonomous_context:
+        autonomous_context = "\n" + autonomous_context
+
     try:
-        extra_context = (experience_context or "") + mission_context + state_context
+        extra_context = (
+            (experience_context or "")
+            + mission_context
+            + state_context
+            + alerts_context
+            + autonomous_context
+        )
         # Bind mission tool handler to this user
         from telegram.tools import build_mission_handler
         mission_handler = build_mission_handler(user_id)

@@ -1365,6 +1365,7 @@ register_handlers(router, ctx={
     "current_datetime_str": _current_datetime_str,
     "format_current_model_context": _format_current_model_context,
     "format_system_alerts": _format_system_alerts,
+    "format_autonomous_status": _format_autonomous_status,
     "add_system_alert": _add_system_alert,
     "clear_system_alert": _clear_system_alert,
     "claude_client": _claude,
