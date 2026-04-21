@@ -493,8 +493,13 @@ async def chat_with_tools(
         final_tool_names = [t["name"] for t in cached_tools if t.get("name") in set(finalization_tools)]
         if final_tool_names:
             final_tools = [dict(t) for t in cached_tools if t.get("name") in set(final_tool_names)]
-            # Preserve prompt caching semantics on the filtered list
-            final_tools[-1] = {**final_tools[-1], "cache_control": {"type": "ephemeral"}}
+            # Preserve prompt caching semantics on the filtered list. Must
+            # use the same 1h TTL as cached_system — Anthropic processes
+            # `tools` before `system`, and a longer TTL cannot follow a
+            # shorter one, so mixing 5m (default ephemeral) here with a 1h
+            # system block raises a 400 (the diary task forced-final path
+            # hit this).
+            final_tools[-1] = {**final_tools[-1], "cache_control": _CACHE_CONTROL_1H}
 
     _append_user_text_message(
         working_msgs,
