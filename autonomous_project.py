@@ -41,6 +41,7 @@ ACTIVE_STATES = (STATE_RESEARCHING, STATE_PLANNING)
 
 RECENT_NOTES_WINDOW = 8      # how many recent notes to surface in the prompt
 NOTE_SNIPPET_CHARS = 500     # char cap per note when surfaced in prompt
+TICK_LOG_TOOL_CAP_CHARS = 500   # char cap per tool result when persisting a tick's tool log
 
 
 # ── Schema bootstrap ────────────────────────────────────────────────
@@ -127,14 +128,69 @@ def _mark_advisories_consumed(project_id: int, advisory_ids: list[int]) -> None:
         logger.warning("Failed to mark advisories consumed (project=%s): %s", project_id, e)
 
 
-def _log_event(project_id: int, event_type: str, content: str = "", meta: dict | None = None) -> None:
+def _log_event(
+    project_id: int,
+    event_type: str,
+    content: str = "",
+    meta: dict | None = None,
+    *,
+    max_content_chars: int = 4000,
+) -> None:
     try:
         db_execute(
             "INSERT INTO autonomous_project_events(project_id, event_type, content, meta) VALUES (%s, %s, %s, %s)",
-            (project_id, event_type, content[:4000], json.dumps(meta or {})),
+            (project_id, event_type, content[:max_content_chars], json.dumps(meta or {})),
         )
     except Exception as e:
         logger.warning("Event log failed (project=%s, type=%s): %s", project_id, event_type, e)
+
+
+_TICK_TOOL_LOG_EVENT_TYPE = "tick_tool_log"
+
+
+def _format_tick_tool_log(
+    tool_work_details: list[str],
+    *,
+    per_tool_cap: int = TICK_LOG_TOOL_CAP_CHARS,
+) -> str:
+    """Render one tick's tool-call trace as a single bounded string.
+
+    Each entry in `tool_work_details` already has the shape
+    ``"  [round] tool_name(input_json) → full_result"``. Long tool results
+    (web_search, fetch_url, kg_query) blow out arbitrary context budgets, so
+    we hard-cap the trailing result portion at per_tool_cap chars. Leaves the
+    header + invocation payload intact so the agent can still see WHAT it
+    called and with WHAT arguments.
+    """
+    clipped: list[str] = []
+    for entry in tool_work_details:
+        s = str(entry)
+        arrow = " → "
+        idx = s.find(arrow)
+        if idx < 0:
+            clipped.append(s[: per_tool_cap * 3])  # no split; apply a coarse cap
+            continue
+        head = s[: idx + len(arrow)]
+        tail = s[idx + len(arrow):]
+        if len(tail) > per_tool_cap:
+            tail = tail[: per_tool_cap - 1].rstrip() + "…"
+        clipped.append(head + tail)
+    return "\n".join(clipped)
+
+
+def _fetch_last_tick_tool_log(project_id: int) -> dict | None:
+    """Return the most recent persisted tick tool log for this project, or None."""
+    try:
+        rows = db_query(
+            "SELECT content, meta, created_at FROM autonomous_project_events "
+            "WHERE project_id = %s AND event_type = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (project_id, _TICK_TOOL_LOG_EVENT_TYPE),
+        )
+    except Exception as e:
+        logger.debug("Fetch last tick tool log failed (project=%s): %s", project_id, e)
+        return None
+    return rows[0] if rows else None
 
 
 def _excerpt(text: str, limit: int = 500) -> str:
@@ -489,6 +545,31 @@ def _build_task_prompt(project: dict, turn_budget: int, advisories: list[dict] |
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
         f"<recent-notes>\n{notes_text}\n</recent-notes>",
+    ])
+
+    # Previous tick's full tool trace — what YOU called and what came back.
+    # research_notes capture curated findings; this captures raw execution so
+    # the agent can remember "I already ran web_search on X, got Y" without
+    # having to re-issue the call. Bounded by per-tool 500-char cap.
+    last_log = _fetch_last_tick_tool_log(project["id"])
+    if last_log and last_log.get("content"):
+        meta = last_log.get("meta") or {}
+        prior_turn = meta.get("turn", "?")
+        prior_cost = meta.get("cost_usd")
+        prior_rounds = meta.get("rounds_used", "?")
+        header_bits = [f"turn={prior_turn}", f"rounds={prior_rounds}"]
+        if prior_cost is not None:
+            header_bits.append(f"cost=${prior_cost:.3f}")
+        parts.append(
+            f"<last-tick-execution {' '.join(header_bits)}>\n"
+            f"Raw tool trace from your previous tick — call/arguments shown in full, "
+            f"results clipped at 500 chars each. Do NOT re-run these queries if they "
+            f"already yielded what you need; build on them instead.\n\n"
+            f"{last_log['content']}\n"
+            f"</last-tick-execution>"
+        )
+
+    parts.extend([
         f"<turn-budget>{turn_budget} rounds this tick. Use them deliberately.</turn-budget>",
         f"<tick-info>turn_count so far: {project.get('turn_count', 0)}; "
         f"last_run_at: {project.get('last_run_at') or 'never'}</tick-info>",
@@ -605,6 +686,25 @@ async def _run_one_tick(project: dict) -> dict:
         {"cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
          "rounds_used": budget_tracker.get("rounds_used", 0)},
     )
+
+    # Persist this tick's tool-call trace so the next tick can see WHAT this
+    # tick actually ran and WHAT came back. Curated research_notes only capture
+    # final findings; the raw tool log captures execution (retries, dead-end
+    # searches, confirmed-negative results) that would otherwise be lost.
+    _raw_tool_details = budget_tracker.get("tool_work_details") or []
+    if _raw_tool_details:
+        _tick_log_str = _format_tick_tool_log(_raw_tool_details)
+        _log_event(
+            project["id"], _TICK_TOOL_LOG_EVENT_TYPE,
+            _tick_log_str,
+            {"turn": (project.get("turn_count") or 0) + 1,
+             "cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
+             "rounds_used": budget_tracker.get("rounds_used", 0),
+             "tool_calls": len(_raw_tool_details)},
+            # Tool logs are the agent's working memory between ticks — don't
+            # clip at the 4KB default that's fine for human-readable events.
+            max_content_chars=40000,
+        )
 
     # Telegram notification — runs after tick data is committed so a notify
     # failure can never lose work. _notify_telegram swallows its own errors.
