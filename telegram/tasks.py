@@ -705,19 +705,10 @@ async def process_task(
                     lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
                 lines.append("</mission-context>")
                 mission_ctx = "\n".join(lines)
-            try:
-                from bot_config import get_current_model_selection
-                model_sel = get_current_model_selection("task")
-                mission_ctx = (
-                    mission_ctx + "\n" if mission_ctx else ""
-                ) + (
-                    f"<runtime-model-context>\n"
-                    f"  <current-model tier=\"{model_sel['tier']}\" "
-                    f"id=\"{model_sel['model_id']}\">{model_sel['display_name']}</current-model>\n"
-                    f"</runtime-model-context>"
-                )
-            except Exception as e:
-                logger.debug("Task runtime model context injection failed: %s", e)
+            # NOTE: Runtime model / time / alerts context is injected by
+            # _chat_with_tools (or by background-process callers) via the user
+            # message's runtime header — no need to bake it into the task content
+            # here too.
             add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
         except Exception as e:
             logger.debug("Mission context injection failed: %s", e)

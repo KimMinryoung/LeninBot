@@ -201,9 +201,15 @@ def _resolve_openai_model(alias: str) -> str:
     return _OPENAI_MODEL_MAP.get(alias, alias)
 
 
-def _resolve_tier(tier: str) -> str:
-    """Resolve a tier name (high/medium/low) to provider-specific model alias."""
-    provider = _config.get("provider", "claude")
+def _resolve_tier(tier: str, provider: str | None = None) -> str:
+    """Resolve a tier name (high/medium/low) to provider-specific model alias.
+
+    ``provider`` override lets callers (e.g. agents with a pinned provider)
+    resolve against a different tier map than the runtime config. Defaults
+    to whatever ``_config["provider"]`` currently says.
+    """
+    if provider is None:
+        provider = _config.get("provider", "claude")
     tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
     return tier_map.get(tier, tier)  # passthrough if not a tier name
 
@@ -224,13 +230,23 @@ def set_autonomous_active(active: bool) -> bool:
     return _config["autonomous_active"]
 
 
-def get_current_model_selection(kind: str = "chat") -> dict:
-    """Return runtime-selected provider/model metadata for chat or task path."""
+def get_current_model_selection(
+    kind: str = "chat",
+    provider_override: str | None = None,
+) -> dict:
+    """Return runtime-selected provider/model metadata for chat or task path.
+
+    ``provider_override`` lets callers that know they are running against a
+    specific provider (e.g. agents with spec.provider pinned to "claude" even
+    when config.provider="openai") resolve the tier against THAT provider's
+    model map, so the surfaced model_id/display_name match what actually runs.
+    Without the override, falls back to the runtime config's provider.
+    """
     kind = "task" if kind == "task" else "chat"
-    provider = _config.get("provider", "claude")
+    provider = provider_override or _config.get("provider", "claude")
     tier_key = "task_model" if kind == "task" else "chat_model"
     tier = str(_config.get(tier_key, "high"))
-    alias = _resolve_tier(tier)
+    alias = _resolve_tier(tier, provider=provider)
     if provider == "local":
         from llm.client import MOON_MODEL
         model_id = MOON_MODEL

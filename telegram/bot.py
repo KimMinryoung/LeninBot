@@ -418,10 +418,12 @@ def _format_current_model_context(kind: str = "chat", provider: str = "claude") 
 
     Leads with the human-readable product name ("Claude Opus 4.7", "GPT-5.4 Pro")
     so self-identification works cleanly; the raw API id and tier stay available
-    as secondary metadata. `provider` selects the surface form: "claude" → XML
-    tag, else → Markdown bullet.
+    as secondary metadata. `provider` controls BOTH the surface form (XML for
+    Claude, Markdown elsewhere) AND which tier map the model is resolved from —
+    so an agent pinned to Claude while config.provider="openai" still surfaces
+    the real Claude model it's running on, not the chat-side GPT.
     """
-    sel = get_current_model_selection(kind)
+    sel = get_current_model_selection(kind, provider_override=provider)
     name = sel["display_name"]
     model_id = sel["model_id"]
     tier = sel["tier"]
