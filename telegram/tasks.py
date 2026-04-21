@@ -712,7 +712,8 @@ async def process_task(
                     mission_ctx + "\n" if mission_ctx else ""
                 ) + (
                     f"<runtime-model-context>\n"
-                    f"  <current-model provider=\"{model_sel['provider']}\" tier=\"{model_sel['tier']}\" alias=\"{model_sel['alias']}\">{model_sel['model_id']}</current-model>\n"
+                    f"  <current-model tier=\"{model_sel['tier']}\" "
+                    f"id=\"{model_sel['model_id']}\">{model_sel['display_name']}</current-model>\n"
                     f"</runtime-model-context>"
                 )
             except Exception as e:

@@ -106,6 +106,44 @@ _OPENAI_MODEL_MAP = {
     "gpt54nano": "gpt-5.4-nano",
 }
 
+# Human-readable display names keyed by API model ID. Used when injecting
+# "current model" context into the orchestrator prompt so the model sees its
+# own official product name ("Claude Opus 4.7") rather than the internal API
+# slug ("claude-opus-4-7"). Match by prefix: pinned date suffixes (e.g.
+# "-20251001") share the display name of the base family.
+_MODEL_DISPLAY_NAMES = {
+    # Anthropic
+    "claude-opus-4-7":   "Claude Opus 4.7",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    "claude-haiku-4-5":  "Claude Haiku 4.5",
+    # OpenAI
+    "gpt-5.4":      "GPT-5.4 Pro",
+    "gpt-5.4-mini": "GPT-5.4 mini",
+    "gpt-5.4-nano": "GPT-5.4 nano",
+    # Local (Qwen family — common Ollama/llama.cpp tags)
+    "qwen3.5-9b":   "Qwen 3.5 9B",
+    "qwen3.6-9b":   "Qwen 3.6 9B",
+    "qwen3.5":      "Qwen 3.5",
+    "qwen3.6":      "Qwen 3.6",
+}
+
+
+def _display_name_for_model_id(model_id: str) -> str:
+    """Return the human-readable product name for an API model ID.
+
+    Resolves pinned-date variants ("claude-haiku-4-5-20251001") by prefix match
+    against the base family. Falls back to the raw ID if no entry is found so
+    new models gracefully surface their slug until a display name is registered.
+    """
+    if not model_id:
+        return ""
+    if model_id in _MODEL_DISPLAY_NAMES:
+        return _MODEL_DISPLAY_NAMES[model_id]
+    for base, name in _MODEL_DISPLAY_NAMES.items():
+        if model_id.startswith(base + "-") or model_id.startswith(base + "."):
+            return name
+    return model_id
+
 # Tier → provider-specific model mapping
 _TIER_MAP = {
     "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
@@ -207,6 +245,7 @@ def get_current_model_selection(kind: str = "chat") -> dict:
         "tier": tier,
         "alias": alias,
         "model_id": model_id,
+        "display_name": _display_name_for_model_id(model_id),
         "resolved": True if provider in ("openai", "local") else alias in _resolved_models,
     }
 

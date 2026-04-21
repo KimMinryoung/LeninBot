@@ -416,20 +416,20 @@ def _current_datetime_str() -> str:
 def _format_current_model_context(kind: str = "chat", provider: str = "claude") -> str:
     """Format runtime-selected model info for prompt/context injection.
 
-    `provider` selects the output structure: "claude" → XML tag (native
-    Anthropic format), anything else → Markdown bullet. Default "claude"
-    preserves legacy behavior for callers that don't yet pass provider.
+    Leads with the human-readable product name ("Claude Opus 4.7", "GPT-5.4 Pro")
+    so self-identification works cleanly; the raw API id and tier stay available
+    as secondary metadata. `provider` selects the surface form: "claude" → XML
+    tag, else → Markdown bullet.
     """
-    selection = get_current_model_selection(kind)
+    sel = get_current_model_selection(kind)
+    name = sel["display_name"]
+    model_id = sel["model_id"]
+    tier = sel["tier"]
     if provider == "claude":
         return (
-            f"<current-model provider=\"{selection['provider']}\" tier=\"{selection['tier']}\" "
-            f"alias=\"{selection['alias']}\">{selection['model_id']}</current-model>"
+            f"<current-model tier=\"{tier}\" id=\"{model_id}\">{name}</current-model>"
         )
-    return (
-        f"- **Current Model**: {selection['model_id']} "
-        f"(provider={selection['provider']}, tier={selection['tier']}, alias={selection['alias']})"
-    )
+    return f"- **Current Model**: {name} (id: `{model_id}`, tier: {tier})"
 
 
 def _build_runtime_prelude(provider: str = "claude", kind: str = "chat") -> str:
