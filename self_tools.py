@@ -346,26 +346,56 @@ async def _exec_read_chat_logs(
     if not rows:
         return "No chat logs found for the specified criteria."
 
+    def _clip(text: str, max_len: int = 300) -> str:
+        text = str(text or "")
+        return text[:max_len]
+
     results = []
-    for i, row in enumerate(rows, 1):
+    normalized_source = (source or "web").strip().lower()
+    for row in rows:
         ts = _to_kst(row.get("created_at"))
         role = str(row.get("role", "") or "").lower()
         content = str(row.get("content", "") or "")
-        if role in ("user", "assistant") and content:
-            label = "User" if role == "user" else "Bot"
-            text = content[:300]
-            results.append(f"[{i}] {ts}\n  {label}: {text}")
+
+        if normalized_source == "telegram":
+            header = f"[telegram] {ts}"
+            q = str(row.get("user_query", "") or "")
+            a = str(row.get("bot_answer", "") or "")
+            lines = [header]
+
+            if role in ("user", "assistant") and content:
+                speaker = "Admin" if role == "user" else "Lenin"
+                lines.append(f"{speaker}: {_clip(content)}")
+            else:
+                if q:
+                    lines.append(f"Admin: {_clip(q)}")
+                if a:
+                    lines.append(f"Lenin: {_clip(a)}")
+                if not q and not a and content:
+                    speaker = "Admin" if role == "user" else "Lenin"
+                    lines.append(f"{speaker}: {_clip(content)}")
+
+            results.append("\n".join(lines))
             continue
 
-        q = str(row.get("user_query", "") or "")[:200]
-        a = str(row.get("bot_answer", "") or "")[:300]
-        lines = [f"[{i}] {ts}"]
-        if q:
-            lines.append(f"  User: {q}")
-        if a:
-            lines.append(f"  Bot: {a}")
-        if not q and not a and content:
-            lines.append(f"  Msg: {content[:300]}")
+        session_id = str(row.get("session_id", "") or "").strip()
+        header = f"[web / session {session_id}] {ts}" if session_id else f"[web] {ts}"
+        q = str(row.get("user_query", "") or "")
+        a = str(row.get("bot_answer", "") or "")
+        lines = [header]
+
+        if role in ("user", "assistant") and content:
+            speaker = "Visitor" if role == "user" else "Lenin"
+            lines.append(f"{speaker}: {_clip(content)}")
+        else:
+            if q:
+                lines.append(f"Visitor: {_clip(q)}")
+            if a:
+                lines.append(f"Lenin: {_clip(a)}")
+            if not q and not a and content:
+                speaker = "Visitor" if role == "user" else "Lenin"
+                lines.append(f"{speaker}: {_clip(content)}")
+
         results.append("\n".join(lines))
 
     return f"Chat logs ({len(rows)} entries):\n\n" + "\n\n".join(results)

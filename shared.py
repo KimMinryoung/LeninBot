@@ -599,10 +599,10 @@ def fetch_chat_logs(
             return []
 
     # 기본: web (chat_logs 테이블)
-    cols = "user_query, bot_answer, created_at"
+    cols = "session_id, user_query, bot_answer, created_at"
     if include_logs:
         cols = (
-            "user_query, bot_answer, route, documents_count, "
+            "session_id, user_query, bot_answer, route, documents_count, "
             "web_search_used, strategy, processing_logs, created_at"
         )
     if keyword:

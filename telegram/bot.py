@@ -957,71 +957,30 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
         context.append({"role": "user", "content": preamble})
         context.append({"role": "assistant", "content": "Acknowledged. I have reviewed the prior conversation context. Proceeding."})
 
-    # Load system events that fall within the raw message time window.
-    # These are interleaved chronologically with raw messages as inline
-    # annotations — not as fake conversation pairs.
-    system_events = []
-    if raw_rows:
-        first_ts = raw_rows[0].get("created_at")
-        if first_ts:
-            try:
-                with _get_conn() as conn:
-                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                        cur.execute(
-                            "SELECT event_type, content, created_at FROM telegram_system_events "
-                            "WHERE user_id = %s AND created_at >= %s ORDER BY created_at ASC",
-                            (user_id, first_ts),
-                        )
-                        system_events = cur.fetchall()
-            except Exception:
-                pass  # table might not exist yet
-
-    # Build a queue of system events sorted by timestamp for interleaving
-    event_idx = 0
-
     # Append raw messages with exact timestamps on user messages.
-    # System events are interleaved chronologically.
+    #
+    # NOTE: System events (task_report done, startup, deploy complete, model
+    # switches, etc.) are intentionally NOT interleaved into the conversation
+    # history anymore. Mixing them with real dialogue contaminates the
+    # narrative plane — the model reads them as utterances, mis-attributes
+    # causation, and loses track of who actually said what.
+    #
+    # High-severity alerts still reach the model via the `<system-alerts>`
+    # block in the system prompt (see `_format_system_alerts`). All events
+    # remain queryable on demand through `read_self(source="task_reports" |
+    # "server_logs" | "system_status")`. The `telegram_system_events` table
+    # is still written to — only the injection into chat context is removed.
     for r in raw_rows:
         role = r["role"] if r["role"] in ("user", "assistant") else "user"
         text = _normalize_history_content(r["content"])
         ts = r.get("created_at")
 
         if ts and hasattr(ts, "strftime") and role == "user":
-            # Interleave system events that occurred before this message
-            event_notes = []
-            while event_idx < len(system_events):
-                evt = system_events[event_idx]
-                evt_ts = evt.get("created_at")
-                if evt_ts and evt_ts <= ts:
-                    evt_kst = evt_ts.astimezone(KST) if evt_ts.tzinfo else evt_ts
-                    evt_time = evt_kst.strftime("%H:%M")
-                    event_notes.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
-                    event_idx += 1
-                else:
-                    break
-            if event_notes:
-                context.append({"role": "assistant", "content": "\n".join(event_notes)})
-
             ts_kst = ts.astimezone(KST) if ts.tzinfo else ts
             time_str = ts_kst.strftime("%Y-%m-%d %H:%M")
             text = f"[{time_str}] {text}" if text else f"[{time_str}]"
 
         context.append({"role": role, "content": text or "(empty)"})
-
-    # Append any remaining system events after the last message
-    trailing_events = []
-    while event_idx < len(system_events):
-        evt = system_events[event_idx]
-        evt_ts = evt.get("created_at")
-        if evt_ts and hasattr(evt_ts, "strftime"):
-            evt_kst = evt_ts.astimezone(KST) if evt_ts.tzinfo else evt_ts
-            evt_time = evt_kst.strftime("%H:%M")
-        else:
-            evt_time = "?"
-        trailing_events.append(f"[{evt_time} SYSTEM/{evt.get('event_type', '?')}] {evt.get('content', '')}")
-        event_idx += 1
-    if trailing_events:
-        context.append({"role": "assistant", "content": "\n".join(trailing_events)})
 
     return context
 
