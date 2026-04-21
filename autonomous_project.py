@@ -520,12 +520,9 @@ async def _run_one_tick(project: dict) -> dict:
     agent_handlers.update(project_handlers)
     agent_tools = dedupe_tools_by_name(agent_tools)
 
-    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
-    system_prompt = spec.render_prompt(
-        provider="claude",
-        current_datetime=now_str,
-        system_alerts="",
-    )
+    # Fully static spec prompt — cacheable. Current time is injected as runtime
+    # context into the user message below so the system prompt never drifts.
+    system_prompt = spec.render_prompt(provider="claude")
 
     # Fetch pending operator advisories. Marked consumed AFTER the tick
     # succeeds — if the tick raises, advisories remain pending for the next
@@ -554,9 +551,20 @@ async def _run_one_tick(project: dict) -> dict:
         {"model": model, "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
     )
 
+    # Inject the runtime header (current time + active model) into the single
+    # user message so the static system prompt stays cacheable across ticks.
+    from telegram.bot import (
+        _build_runtime_prelude, _join_context_blocks,
+        _merge_runtime_context_into_last_user,
+    )
+    tick_messages = _merge_runtime_context_into_last_user(
+        [{"role": "user", "content": user_content}],
+        _join_context_blocks(_build_runtime_prelude("claude", kind="task")),
+    )
+
     try:
         result_text = await chat_with_tools(
-            messages=[{"role": "user", "content": user_content}],
+            messages=tick_messages,
             client=_claude,
             model=model,
             tools=agent_tools,

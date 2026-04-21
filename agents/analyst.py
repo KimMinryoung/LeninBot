@@ -66,7 +66,6 @@ Publishing channels (use when the analysis warrants public output):
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "knowledge_graph_search", "vector_search",

@@ -93,15 +93,6 @@ CHAT_AUDIENCE_BLOCK = (
     + "\n</chat-audience>"
 )
 
-# Common context footer (current time + alerts) — legacy XML form.
-CONTEXT_FOOTER = """
-<context>
-<current-time>{current_datetime}</current-time>
-{system_alerts}
-</context>
-""".strip()
-
-
 @dataclass
 class AgentSpec:
     """Declarative specification for a delegatable agent.
@@ -148,15 +139,19 @@ class AgentSpec:
         """Render system prompt in the structure native to ``provider``.
 
         If ``prompt_ir`` is set, it is compiled by the provider-appropriate
-        renderer; system_alerts is appended as a dynamic tail so its own
-        wrapping stays a sibling of the context block rather than nested.
-        If only ``system_prompt_template`` is set (legacy), provider is
-        ignored and the raw template is substituted.
+        renderer. If only ``system_prompt_template`` is set (legacy), provider
+        is ignored and the raw template is substituted.
 
-        Unknown placeholders are left intact (no KeyError).
+        Per-turn volatile state (current time, current model, system alerts)
+        is injected separately as user-message runtime context by the caller,
+        not into the system prompt — that keeps the system prompt byte-stable
+        across turns so prompt caching hits.
+
+        Any leftover ``{placeholder}`` kwargs are substituted via str.replace()
+        for legacy compatibility; unknown placeholders are left intact.
         """
         if self.prompt_ir is not None:
-            template = _render_prompt(self.prompt_ir, provider) + "\n{system_alerts}"
+            template = _render_prompt(self.prompt_ir, provider)
         else:
             template = self.system_prompt_template or ""
         for key, value in kwargs.items():

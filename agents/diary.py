@@ -55,7 +55,6 @@ Call `save_diary(title, content)`:
 You MUST call save_diary — do not output the diary as plain text.
 """.strip()),
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "read_self", "recall_experience",

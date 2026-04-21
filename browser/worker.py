@@ -120,7 +120,6 @@ async def execute_browser_task(task: dict) -> dict:
     from self_tools import build_task_context_tools
     from telegram.tools import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
-    from shared import KST
     from db import query as db_query, execute as db_execute, query_one as db_query_one
 
     task_id = task.get("id")
@@ -175,12 +174,9 @@ async def execute_browser_task(task: dict) -> dict:
 
     # Render system prompt. Browser worker always runs on Claude (XML format)
     # regardless of the orchestrator's global provider toggle — see the model-
-    # normalization and _get_model overrides below.
-    system_prompt = spec.render_prompt(
-        provider="claude",
-        current_datetime=datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
-        system_alerts="",
-    )
+    # normalization and _get_model overrides below. Prompt is fully static
+    # post-refactor; timestamp is injected into the task's user message below.
+    system_prompt = spec.render_prompt(provider="claude")
 
     client = _init_claude_client()
 
@@ -207,6 +203,19 @@ async def execute_browser_task(task: dict) -> dict:
         # Anthropic tool-calling loop and Anthropic client only. Guard here against
         # any caller accidentally passing OpenAI model IDs or generic tiers.
         resolved_model = _normalize_browser_model(model or BROWSER_MODEL)
+
+        # Inject the runtime header (current time + model) into the task's user
+        # message so the system prompt stays byte-stable across invocations and
+        # prompt caching hits. System alerts are a Telegram-chat concept and
+        # intentionally skipped for this background worker.
+        from telegram.bot import (
+            _build_runtime_prelude, _join_context_blocks,
+            _merge_runtime_context_into_last_user,
+        )
+        messages = _merge_runtime_context_into_last_user(
+            messages,
+            _join_context_blocks(_build_runtime_prelude("claude", kind="task")),
+        )
 
         return await chat_with_tools(
             messages,

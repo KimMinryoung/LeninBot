@@ -68,7 +68,6 @@ Do not omit trial-and-error details — they help the orchestrator make decision
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "browse_web",

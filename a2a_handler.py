@@ -17,7 +17,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from shared import CORE_IDENTITY, KST
+from shared import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _config,
@@ -103,7 +103,6 @@ def _general_prompt_ir() -> SystemPrompt:
         identity=CORE_IDENTITY.rstrip(),
         preamble=_A2A_PREAMBLE,
         sections=_base_sections() + [_GENERAL_TOOL_STRATEGY_SECTION],
-        context=[("current-time", "{current_datetime}")],
     )
 
 
@@ -134,7 +133,6 @@ def _geopolitical_prompt_ir() -> SystemPrompt:
                 ),
             ),
         ],
-        context=[("current-time", "{current_datetime}")],
     )
 
 
@@ -155,7 +153,6 @@ def _research_prompt_ir() -> SystemPrompt:
                 ),
             ),
         ],
-        context=[("current-time", "{current_datetime}")],
     )
 
 
@@ -261,9 +258,6 @@ async def handle_a2a_message(request_body: dict) -> dict:
         return _make_error(rpc_id, -32602, f"Unknown skill: {skill_id}. Available: {', '.join(_SKILLS.keys())}")
 
     # Build prompt and tools based on skill
-    now = datetime.now(KST)
-    dt_str = now.strftime("%Y-%m-%d %H:%M KST (%A)")
-
     effective_provider = _resolve_a2a_provider()
 
     if skill_cfg:
@@ -277,16 +271,20 @@ async def handle_a2a_message(request_body: dict) -> dict:
         max_rounds = 20
         budget = float(_config.get("chat_budget", 0.30)) or 0.30
 
-    # Render + substitute {current_datetime} via .replace() rather than
-    # str.format() — SKILL.md bodies may contain unrelated curly-brace
-    # templates (e.g. `research/{주제}-{YYYY-MM-DD}.md`) that would collide
-    # with format-string placeholder resolution.
-    system_prompt = _render_prompt(prompt_ir, effective_provider).replace(
-        "{current_datetime}", dt_str
-    )
+    # System prompt is fully static (no per-request placeholders) so prompt
+    # caching hits across A2A requests. Runtime header (current time + active
+    # model) is prepended to the user message below.
+    system_prompt = _render_prompt(prompt_ir, effective_provider)
 
     timeout_sec = 120
-    history = [{"role": "user", "content": user_text}]
+    from telegram.bot import (
+        _build_runtime_prelude, _join_context_blocks,
+        _merge_runtime_context_into_last_user,
+    )
+    history = _merge_runtime_context_into_last_user(
+        [{"role": "user", "content": user_text}],
+        _join_context_blocks(_build_runtime_prelude(effective_provider, kind="chat")),
+    )
 
     # Run LLM
     try:

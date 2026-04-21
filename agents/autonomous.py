@@ -160,7 +160,6 @@ Never attempt to reach outside it.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         # Research (read-only, external + internal)

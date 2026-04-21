@@ -1285,10 +1285,6 @@ async def handle_message(message: Message):
         build_current_state, user_id, provider=_provider
     )
 
-    # System alerts: high-severity runtime notifications (deploy, task status,
-    # email bridge, etc.). Injected as per-turn runtime context, not system prompt.
-    alerts_context = _ctx["format_system_alerts"](_provider)
-
     # Autonomous agent status: active self-running projects, surfaced so the
     # orchestrator can reference ongoing background work in its replies.
     autonomous_context = _ctx["format_autonomous_status"](_provider)
@@ -1296,16 +1292,14 @@ async def handle_message(message: Message):
     try:
         # Block order follows attention recency: stable reference at the top,
         # freshest signals at the bottom so the model reads the "just happened"
-        # items last (right before the user's query). Runtime header (current
-        # time + model) is prepended by _chat_with_tools so it sits above all.
-        # _join_context_blocks strips each block and joins with a blank line so
-        # markdown headings and XML tag groups each appear as a clear section.
+        # items last (right before the user's query). _chat_with_tools prepends
+        # runtime header (time/model) and appends <system-alerts> automatically,
+        # so both framing layers surround this payload without duplication.
         extra_context = _ctx["join_context_blocks"](
             autonomous_context,       # stable background: self-running projects
             experience_context or "", # reference: past lessons
             mission_context,          # current goal
             state_context,            # in-progress work
-            alerts_context,           # volatile: deploy/task/email events
         )
         # Bind mission tool handler to this user
         from telegram.tools import build_mission_handler

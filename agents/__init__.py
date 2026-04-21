@@ -5,7 +5,7 @@ Usage:
 
     spec = get_agent("programmer")
     tools, handlers = spec.filter_tools(ALL_TOOLS, ALL_HANDLERS)
-    prompt = spec.render_prompt(current_datetime="2026-03-26 15:00 KST")
+    prompt = spec.render_prompt(provider="claude")  # fully static, cacheable
 """
 
 from agents.base import AgentSpec

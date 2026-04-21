@@ -99,7 +99,6 @@ print(f"saved: {path}")
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "moltbook",

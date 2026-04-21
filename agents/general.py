@@ -36,7 +36,6 @@ GENERAL = AgentSpec(
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "knowledge_graph_search", "vector_search",

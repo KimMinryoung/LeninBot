@@ -62,7 +62,6 @@ You handle all external communications on behalf of Cyber-Lenin.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "a2a_send",

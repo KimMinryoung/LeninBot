@@ -85,7 +85,6 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
-        context=[("current-time", "{current_datetime}")],
     ),
     tools=[
         "read_file", "search_files", "write_file", "patch_file", "list_directory", "execute_python",

@@ -1107,11 +1107,9 @@ def build_run_agent_handler(chat_with_tools_fn):
             _agent_provider = spec.effective_provider(
                 _bot_config.get("provider", "claude")
             )
-            system_prompt = spec.render_prompt(
-                provider=_agent_provider,
-                current_datetime=datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST"),
-                system_alerts="",
-            )
+            # Fully static spec prompt; runtime context (time/model/alerts) is
+            # injected into the user message by the orchestrator's chat_with_tools.
+            system_prompt = spec.render_prompt(provider=_agent_provider)
 
             content_parts = []
             if context:

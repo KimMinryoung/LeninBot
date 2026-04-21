@@ -1235,24 +1235,30 @@ async def _chat_with_tools(
     # OpenAI/Qwen). provider_override wins over the stored config.
     effective_provider = provider_override or _config.get("provider", "claude")
 
+    # System prompt: orchestrator builds its own fully static prompt; agents
+    # pass their pre-rendered (also static, post-refactor) spec prompt.
     if system_prompt is None:
-        # Orchestrator: system prompt is fully static (skills catalog + rules).
-        # Volatile per-turn state is prepended to the trailing user message below,
-        # so the system prompt stays byte-identical across turns and prompt
-        # caching (Claude ephemeral / OpenAI automatic) hits every call.
         sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
             skills_section=build_skills_prompt(),
         )
-        # Prepend the runtime header (current time + current model) to the
-        # caller-supplied extra_system_context, joined with explicit blank-line
-        # separators so markdown headings / XML tags present clean boundaries.
-        runtime_prelude = _build_runtime_prelude(effective_provider, kind="chat")
-        full_runtime_context = _join_context_blocks(
-            runtime_prelude, extra_system_context or ""
-        )
-        messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
+        _runtime_kind = "chat"
     else:
         sys_prompt = system_prompt
+        _runtime_kind = "task"
+
+    # Runtime context injection (applies to orchestrator AND agents). Volatile
+    # data — current time, current model, caller-supplied extras (mission,
+    # experiences, state), and system alerts — rides on the trailing user
+    # message so the system prompt and history prefix stay byte-stable across
+    # turns for prompt caching. Order: runtime header at top (stable framing);
+    # caller extras in the middle (stable→volatile gradient); alerts at the
+    # bottom (freshest, closest to the user's query for recency attention).
+    full_runtime_context = _join_context_blocks(
+        _build_runtime_prelude(effective_provider, kind=_runtime_kind),
+        extra_system_context or "",
+        _format_system_alerts(effective_provider),
+    )
+    messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
     # Orchestrator tool whitelist: only tools the orchestrator should use directly.
     # Everything else is delegated to specialist agents.
     _ORCHESTRATOR_TOOLS = {
@@ -1722,13 +1728,11 @@ async def bot_main():
         # Render agent-specific system prompt in the format native to the
         # provider that will actually run this agent (local/openai → Markdown,
         # claude → XML). spec.effective_provider falls back to config when
-        # the agent has no pinned provider.
+        # the agent has no pinned provider. Prompt is fully static post-refactor
+        # — current time, current model, and alerts are injected as runtime
+        # context by _chat_with_tools, not baked into the system prompt.
         _agent_provider = spec.effective_provider(_config.get("provider", "claude"))
-        system_prompt = spec.render_prompt(
-            provider=_agent_provider,
-            current_datetime=_current_datetime_str(),
-            system_alerts=_format_system_alerts(_agent_provider),
-        )
+        system_prompt = spec.render_prompt(provider=_agent_provider)
 
         # Inject runtime environment info for programmer (needs venv, packages, services)
         if agent_type == "programmer":
