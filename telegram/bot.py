@@ -926,17 +926,23 @@ def _ensure_summary_table():
     _summary_table_ready = True
 
 
-_RAW_MSG_LIMIT = 30  # recent raw messages to include
+_RAW_MSG_HARD_CAP = 500  # safety ceiling; normally the summary cursor keeps
+                         # the raw tail far smaller (<= _SUMMARY_CHUNK_SIZE-ish)
 
 
 def _load_context_with_summaries(user_id: int) -> list[dict]:
-    """Load chat context: chunk summaries + recent raw messages.
+    """Load chat context: chunk summaries + raw messages after the last summary.
 
     Summaries are injected as a single context preamble (not fake conversation
     pairs) so the model sees a clear timeline:
-      [context preamble with summaries]  →  [recent raw messages in order]
-    Raw messages always include the most recent turns regardless of summary
-    coverage, preventing context loss when summaries are stale or missing.
+      [context preamble with all useful summaries]  →  [raw messages after]
+    Raw window is anchored at the last summary's ``chunk_end_id`` (or the
+    user's clear marker when there are none), NOT a sliding fixed-size window.
+    That makes the prompt prefix byte-stable across successive turns — only
+    the tail grows by the newly-appended turn — so Anthropic prompt caching
+    hits the full prefix. When enough raw messages accumulate, the background
+    summarizer collapses them into a new summary, which is the one moment
+    the prefix legitimately shifts.
     """
     _ensure_summary_table()
     min_id = _clear_after_id.get(user_id, 0)
@@ -970,27 +976,24 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
             )
             summaries = []
 
-    # Always load the most recent raw messages regardless of summary coverage.
-    # This ensures recent context is never lost even when summaries are stale.
+    # Anchor the raw-message window at the last summary's chunk_end_id so the
+    # resulting sequence is append-only between summarizer runs: new turns
+    # extend the tail; older turns never shift out of the window. HARD_CAP is
+    # a safety net for the edge case where summarization has lagged far behind.
+    raw_anchor_id = summaries[-1]["chunk_end_id"] if summaries else min_id
     with _get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, role, content, created_at FROM ("
-                "  SELECT id, role, content, created_at FROM telegram_chat_history"
-                "  WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT %s"
-                ") sub ORDER BY id ASC",
-                (user_id, min_id, _RAW_MSG_LIMIT),
+                "SELECT id, role, content, created_at FROM telegram_chat_history "
+                "WHERE user_id = %s AND id > %s "
+                "ORDER BY id ASC LIMIT %s",
+                (user_id, raw_anchor_id, _RAW_MSG_HARD_CAP),
             )
             raw_rows = cur.fetchall()
 
-    # Determine which summaries are still useful (cover messages not fully
-    # included in the raw window). Use <= to avoid gaps: a summary whose
-    # chunk_end_id equals raw_min_id may overlap by one message, but that's
-    # better than losing the older messages in that chunk entirely.
-    raw_min_id = raw_rows[0]["id"] if raw_rows else None
-    useful_summaries = []
-    if raw_min_id is not None:
-        useful_summaries = [s for s in summaries if s["chunk_end_id"] <= raw_min_id]
+    # With the raw anchor at the last summary's tail, every summary is useful
+    # (none overlaps with the raw window by construction).
+    useful_summaries = summaries
 
     # Build context: summary preamble + raw messages with timestamps
     context: list[dict] = []
