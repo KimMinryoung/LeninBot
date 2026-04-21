@@ -772,11 +772,24 @@ async def chat_with_tools(
             _extract_response(sdk_mode, response)
 
         # ── Cost tracking (SDK mode) ──
+        # OpenAI caching is automatic (no cache_control markers) — we just
+        # need a stable prefix. Log cached vs non-cached input at INFO so
+        # we can see in journald whether the prefix is actually hitting.
         if sdk_mode and usage:
             round_cost = _calculate_cost(usage, model)
             total_cost += round_cost
-            logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)",
-                         round_num, round_cost, total_cost, budget_usd)
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            cached_tokens = 0
+            details = getattr(usage, "prompt_tokens_details", None)
+            if details:
+                cached_tokens = getattr(details, "cached_tokens", 0) or 0
+            non_cached = prompt_tokens - cached_tokens
+            logger.info(
+                "Round %d usage: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
+                round_num, prompt_tokens, cached_tokens, non_cached,
+                completion_tokens, round_cost, total_cost, budget_usd,
+            )
             await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
             update_redis_state(task_id, round_num, total_cost)
 
