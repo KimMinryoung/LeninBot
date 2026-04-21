@@ -145,6 +145,48 @@ def _normalize_initial_messages(msgs: list[dict]) -> list[dict]:
     return clean
 
 
+def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
+    """Return a shallow copy of `msgs` with a cache_control breakpoint on the
+    last stable assistant turn.
+
+    Prompt caching on the Messages API requires an explicit breakpoint. Placing
+    it on the most recent assistant message makes the entire prefix up to that
+    point cacheable, so subsequent rounds in this call (and follow-up requests
+    while the cache is warm) only re-process what came after.
+
+    No-op when there is no assistant message yet (first turn). Leaves the input
+    list and its inner dicts untouched.
+    """
+    if not msgs:
+        return msgs
+    result = list(msgs)
+    for i in range(len(result) - 1, -1, -1):
+        if result[i].get("role") != "assistant":
+            continue
+        msg = dict(result[i])
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            msg["content"] = [
+                {"type": "text", "text": content or "(계속)",
+                 "cache_control": {"type": "ephemeral"}}
+            ]
+        elif isinstance(content, list) and content:
+            new_content = list(content)
+            last = new_content[-1]
+            last = dict(last) if isinstance(last, dict) else {"type": "text", "text": str(last)}
+            last["cache_control"] = {"type": "ephemeral"}
+            new_content[-1] = last
+            msg["content"] = new_content
+        else:
+            msg["content"] = [
+                {"type": "text", "text": "(계속)",
+                 "cache_control": {"type": "ephemeral"}}
+            ]
+        result[i] = msg
+        break
+    return result
+
+
 def _append_user_text_message(msgs: list[dict], text: str):
     """Append user text while preserving role alternation."""
     if msgs and msgs[-1].get("role") == "user":
@@ -240,7 +282,7 @@ async def chat_with_tools(
             max_tokens=max_tokens,
             system=cached_system,
             tools=cached_tools,
-            messages=working_msgs,
+            messages=_with_message_cache_breakpoint(working_msgs),
         )
 
         # Track cost
@@ -409,7 +451,7 @@ async def chat_with_tools(
         "model": model,
         "max_tokens": max_tokens,
         "system": cached_system,
-        "messages": working_msgs,
+        "messages": _with_message_cache_breakpoint(working_msgs),
     }
     if final_tools:
         create_kwargs["tools"] = final_tools
@@ -469,7 +511,7 @@ async def chat_with_tools(
             model=model,
             max_tokens=max_tokens,
             system=cached_system,
-            messages=working_msgs,  # no tools — force text
+            messages=_with_message_cache_breakpoint(working_msgs),  # no tools — force text
         )
         if hasattr(followup, "usage") and followup.usage:
             total_cost += _calculate_cost(followup.usage)

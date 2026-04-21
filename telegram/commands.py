@@ -1298,12 +1298,16 @@ async def handle_message(message: Message):
         autonomous_context = "\n" + autonomous_context
 
     try:
+        # Block order follows attention recency: stable reference at the top,
+        # freshest signals at the bottom so the model reads the "just happened"
+        # items last (right before the user's query). Runtime header (current
+        # time + model) is prepended by _chat_with_tools so it sits above all.
         extra_context = (
-            (experience_context or "")
-            + mission_context
-            + state_context
-            + alerts_context
-            + autonomous_context
+            autonomous_context       # stable background: self-running projects
+            + (experience_context or "")  # reference: past lessons
+            + mission_context        # current goal
+            + state_context          # in-progress work
+            + alerts_context         # volatile: deploy/task/email events
         )
         # Bind mission tool handler to this user
         from telegram.tools import build_mission_handler

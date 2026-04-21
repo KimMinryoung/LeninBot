@@ -135,18 +135,17 @@ async def handle_web_chat(
     ip_address: str,
 ):
     """Async generator yielding SSE events for a web chat request."""
-    # Load conversation history
+    # Load conversation history (pure user/assistant text from chat_logs).
     history = await asyncio.to_thread(_load_web_history, fingerprint, 20)
 
-    # Build static system prompt + per-turn runtime context separately
+    # Fold the runtime header directly into the current user turn so the
+    # history prefix stays byte-stable across requests (→ prompt caching).
     now = datetime.now(KST)
     runtime_context = _build_web_runtime_context(
         now.strftime("%Y-%m-%d %H:%M KST (%A)")
     )
-    history.append({"role": "user", "content": runtime_context})
-    history.append({"role": "user", "content": message})
+    history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = _WEB_SYSTEM_PROMPT
-    logger.debug("Web prompt layering: system_static=%d chars runtime_context=%d chars", len(system_prompt), len(runtime_context))
 
     # Progress callback → SSE queue
     queue: asyncio.Queue = asyncio.Queue()

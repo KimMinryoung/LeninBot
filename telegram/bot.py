@@ -432,6 +432,58 @@ def _format_current_model_context(kind: str = "chat", provider: str = "claude") 
     )
 
 
+def _build_runtime_prelude(provider: str = "claude", kind: str = "chat") -> str:
+    """Render the volatile runtime header (time + active model).
+
+    Goes at the top of `extra_system_context` so the system prompt itself stays
+    byte-identical across turns (prompt-cache friendly). Returns the preformatted
+    block with a leading newline so it composes cleanly with downstream blocks.
+    """
+    current_time = _current_datetime_str()
+    current_model = _format_current_model_context(kind, provider)
+    if provider == "claude":
+        return (
+            f"\n<runtime>\n<current-time>{current_time}</current-time>\n"
+            f"{current_model}\n</runtime>"
+        )
+    return (
+        f"\n### Runtime\n"
+        f"- **Current Time**: {current_time}\n"
+        f"{current_model}"
+    )
+
+
+def _merge_runtime_context_into_last_user(
+    messages: list[dict], runtime_context: str
+) -> list[dict]:
+    """Fold per-turn runtime context into the trailing user message content.
+
+    Placing volatile context (time, mission, alerts, …) immediately before the
+    current user query — rather than at the start of the message array — keeps
+    the history prefix byte-stable across turns so prompt caching (Claude
+    ephemeral / OpenAI automatic) keeps hitting. Returns a new list; the caller's
+    list and its inner dicts are left untouched.
+    """
+    if not runtime_context or not runtime_context.strip():
+        return list(messages)
+
+    ctx = runtime_context.strip()
+    result = list(messages)
+    if result and result[-1].get("role") == "user":
+        last = dict(result[-1])
+        existing = last.get("content", "")
+        if isinstance(existing, str):
+            last["content"] = f"{ctx}\n\n{existing}".strip() if existing else ctx
+        elif isinstance(existing, list):
+            last["content"] = [{"type": "text", "text": ctx}] + list(existing)
+        else:
+            last["content"] = f"{ctx}\n\n{existing}".strip()
+        result[-1] = last
+    else:
+        result.append({"role": "user", "content": ctx})
+    return result
+
+
 # ── System Alerts (injected into system prompt) ─────────────────────
 import time as _time
 
@@ -631,23 +683,12 @@ Infer elapsed time from the timestamps. Large gaps may indicate context switches
     ],
 )
 
-# Static system-layer tail. Only stable runtime metadata that frames the model
-# itself belongs here. Per-turn state (mission, memories, alerts, user message)
-# must stay in message/context injection, not the system prompt.
-_CLAUDE_STATIC_TAIL = """
-<context>
-<current-time>{current_datetime}</current-time>
-{current_model}
-</context>
-{skills_section}
-""".strip()
-
-_MARKDOWN_STATIC_TAIL = """
-## Context
-- **Current Time**: {current_datetime}
-{current_model}
-{skills_section}
-""".strip()
+# Fully static system-layer tail. Only content that does not change between
+# turns belongs here (skills catalog). Per-turn runtime state — current time,
+# current model, mission, memories, alerts — is injected via message content,
+# not the system prompt, so prompt caching stays effective.
+_CLAUDE_STATIC_TAIL = "{skills_section}"
+_MARKDOWN_STATIC_TAIL = "{skills_section}"
 
 
 def _format_autonomous_status(provider: str = "claude") -> str:
@@ -687,9 +728,10 @@ def _format_autonomous_status(provider: str = "claude") -> str:
 def _build_orchestrator_system_prompt(provider: str) -> str:
     """Render the orchestrator's static system prompt for `provider`.
 
-    Returned string keeps only stable placeholders that belong in the system
-    layer: ``{current_datetime}``, ``{current_model}``, ``{skills_section}``.
-    Per-turn operational state is injected separately as message/context.
+    Returned string keeps only the ``{skills_section}`` placeholder — the only
+    stable runtime data in the system layer. Per-turn state (time, model,
+    mission, memories, alerts) is injected as message content so the system
+    prompt stays byte-identical across turns and benefits from prompt caching.
     """
     body = _render_prompt(_ORCHESTRATOR_PROMPT_IR, provider)
     tail = _CLAUDE_STATIC_TAIL if provider == "claude" else _MARKDOWN_STATIC_TAIL
@@ -1181,16 +1223,19 @@ async def _chat_with_tools(
     effective_provider = provider_override or _config.get("provider", "claude")
 
     if system_prompt is None:
+        # Orchestrator: system prompt is fully static (skills catalog + rules).
+        # Volatile per-turn state is prepended to the trailing user message below,
+        # so the system prompt stays byte-identical across turns and prompt
+        # caching (Claude ephemeral / OpenAI automatic) hits every call.
         sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
-            current_datetime=_current_datetime_str(),
-            current_model=_format_current_model_context("chat", effective_provider),
             skills_section=build_skills_prompt(),
         )
-        # NOTE: extra_system_context is NOT appended to the system prompt here.
-        # For Claude, it is injected as the first user message in the messages array below.
-        # For OpenAI/local, it is appended to sys_prompt (GPT treats the first message differently).
-        if extra_system_context and effective_provider != "claude":
-            sys_prompt = sys_prompt + extra_system_context
+        # Prepend the runtime header (current time + current model) to the
+        # caller-supplied extra_system_context. Together they form the single
+        # "runtime layer" that rides in front of this turn's user query.
+        runtime_prelude = _build_runtime_prelude(effective_provider, kind="chat")
+        full_runtime_context = runtime_prelude + (extra_system_context or "")
+        messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
     else:
         sys_prompt = system_prompt
     # Orchestrator tool whitelist: only tools the orchestrator should use directly.
@@ -1310,18 +1355,11 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
         )
 
-    # Claude path: inject extra_system_context as the first user message (before the
-    # conversation history). This keeps the system prompt clean (static rules only)
-    # and lets Claude read the dynamic context (mission, state, experiences) as
-    # "background information at the start of this conversation" rather than
-    # "a directive I must always obey". Claude requires the first message to be role=user.
-    claude_messages = list(messages)
-    if extra_system_context and system_prompt is None:
-        context_msg = {"role": "user", "content": extra_system_context.strip()}
-        claude_messages = [context_msg] + claude_messages
-
+    # Claude path. `messages` has already had the runtime context merged into
+    # the trailing user turn by `_merge_runtime_context_into_last_user` above,
+    # so history remains byte-stable across turns and prefix caching works.
     return await chat_with_tools(
-        claude_messages,
+        messages,
         client=_claude,
         model=model or await _get_model(),
         tools=merged_tools,
