@@ -1,7 +1,13 @@
-"""claude_loop.py — Claude tool-use loop and message sanitization.
+"""claude_loop.py — Claude tool-use loop.
 
 Extracted from telegram_bot.py. Dependencies injected via function parameters
 to avoid circular imports.
+
+Strict-at-source policy: inputs are normalized once via `_normalize_initial_messages`
+(flattened to text-only alternating history) before the loop starts. Tool protocol
+blocks only ever originate from this loop's own response parsing, which guarantees
+id/name correctness, 1:1 tool_use↔tool_result pairing (safety-netted), and strict
+assistant→user alternation. No post-hoc sanitization is performed.
 """
 
 import asyncio
@@ -66,7 +72,7 @@ def _calculate_cost(usage) -> float:
     return cost
 
 
-# ── Message Sanitization ─────────────────────────────────────────────
+# ── Content helpers ──────────────────────────────────────────────────
 
 def _to_block_dict(block):
     """Best-effort conversion of SDK block objects to plain dict."""
@@ -112,406 +118,6 @@ def _coerce_text(value) -> str:
     return str(value)
 
 
-def _parse_json_string_maybe(text: str):
-    s = text.strip()
-    if not s or (not s.startswith("[") and not s.startswith("{")):
-        return text
-    try:
-        return json.loads(s)
-    except Exception:
-        return text
-
-
-def _normalize_content_for_role(role: str, content, handle_server_tools: bool):
-    """Normalize message content into Anthropic-compatible shape for this role."""
-    parsed = _parse_json_string_maybe(content) if isinstance(content, str) else content
-    items = parsed if isinstance(parsed, list) else [parsed]
-    blocks: list[dict] = []
-    loose_text: list[str] = []
-
-    for item in items:
-        block = _to_block_dict(item)
-        if block is None:
-            t = _coerce_text(item)
-            if t:
-                loose_text.append(t)
-            continue
-
-        btype = block.get("type")
-        if btype == "text":
-            text = _coerce_text(block.get("text", "")).strip()
-            if text:
-                blocks.append({"type": "text", "text": text})
-            continue
-
-        if role == "assistant" and btype == "tool_use":
-            tid = str(block.get("id", "")).strip()
-            name = str(block.get("name", "")).strip()
-            raw_input = block.get("input", {})
-            tool_input = raw_input if isinstance(raw_input, dict) else {}
-            if tid and name:
-                blocks.append({"type": "tool_use", "id": tid, "name": name, "input": tool_input})
-            else:
-                t = _coerce_text(block)
-                if t:
-                    loose_text.append(t)
-            continue
-
-        if role == "assistant" and handle_server_tools and btype == "server_tool_use":
-            tid = str(block.get("id", "")).strip()
-            name = str(block.get("name", "")).strip()
-            raw_input = block.get("input", {})
-            tool_input = raw_input if isinstance(raw_input, dict) else {}
-            if tid and name:
-                blocks.append({"type": "server_tool_use", "id": tid, "name": name, "input": tool_input})
-            continue
-
-        if role == "assistant" and handle_server_tools and btype == "web_search_tool_result":
-            tid = str(block.get("tool_use_id", "")).strip()
-            raw_content = block.get("content", [])
-            result_content = raw_content if isinstance(raw_content, list) else []
-            if tid:
-                blocks.append({"type": "web_search_tool_result", "tool_use_id": tid, "content": result_content})
-            continue
-
-        if role == "user" and btype == "tool_result":
-            tid = str(block.get("tool_use_id", "")).strip()
-            if tid:
-                tr = {
-                    "type": "tool_result",
-                    "tool_use_id": tid,
-                    "content": block.get("content", ""),
-                }
-                if bool(block.get("is_error", False)):
-                    tr["is_error"] = True
-                blocks.append(tr)
-            continue
-
-        # Unknown/incompatible blocks become text only.
-        t = _coerce_text(block)
-        if t:
-            loose_text.append(t)
-
-    if loose_text:
-        text = "\n".join(t for t in loose_text if t).strip()
-        if text:
-            if blocks:
-                blocks.insert(0, {"type": "text", "text": text})
-            else:
-                return text
-
-    if blocks:
-        return blocks
-    return _coerce_text(parsed) or "(empty)"
-
-
-def _canonicalize_messages(msgs: list[dict], handle_server_tools: bool = True):
-    """Canonicalize transcript and guarantee tool pair invariants."""
-    normalized: list[dict] = []
-    for raw in msgs:
-        if not isinstance(raw, dict):
-            raw = {"role": "user", "content": _coerce_text(raw)}
-        role = raw.get("role", "user")
-        if role not in ("user", "assistant"):
-            role = "assistant" if role in ("model", "bot") else "user"
-        content = _normalize_content_for_role(role, raw.get("content", ""), handle_server_tools)
-        normalized.append({"role": role, "content": content})
-
-    # Ensure alternating roles; insert lightweight fillers when broken.
-    aligned: list[dict] = []
-    inserted_fillers = 0
-    for msg in normalized:
-        if aligned and aligned[-1]["role"] == msg["role"]:
-            filler_role = "assistant" if msg["role"] == "user" else "user"
-            aligned.append({"role": filler_role, "content": "(계속)"})
-            inserted_fillers += 1
-        aligned.append(msg)
-
-    injected_results = 0
-    rewritten_orphans = 0
-    i = 0
-    while i < len(aligned):
-        msg = aligned[i]
-        if msg.get("role") != "assistant":
-            # Orphan tool_result blocks are converted to text to keep API-valid structure.
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                prev_tool_ids: set[str] = set()
-                if i > 0 and aligned[i - 1].get("role") == "assistant":
-                    prev_content = aligned[i - 1].get("content", [])
-                    if isinstance(prev_content, list):
-                        prev_tool_ids = {
-                            str(b.get("id", "")).strip()
-                            for b in prev_content
-                            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
-                        }
-
-                fixed = []
-                orphan_notes = []
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        tid = str(b.get("tool_use_id", "")).strip()
-                        if tid and tid in prev_tool_ids:
-                            fixed.append(b)
-                        else:
-                            orphan_notes.append(f"[orphan tool_result ignored: {tid or '?'}]")
-                            rewritten_orphans += 1
-                    else:
-                        fixed.append(b)
-
-                if orphan_notes:
-                    fixed.insert(0, {"type": "text", "text": "\n".join(orphan_notes)})
-                msg["content"] = fixed if fixed else "(empty)"
-            i += 1
-            continue
-
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            i += 1
-            continue
-
-        tool_ids = [
-            str(b.get("id", "")).strip()
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
-        ]
-
-        if handle_server_tools:
-            resolved_server = {
-                str(b.get("tool_use_id", "")).strip()
-                for b in content
-                if isinstance(b, dict) and b.get("type") == "web_search_tool_result" and b.get("tool_use_id")
-            }
-            pending_server = [
-                str(b.get("id", "")).strip()
-                for b in content
-                if isinstance(b, dict) and b.get("type") == "server_tool_use" and b.get("id")
-                and str(b.get("id", "")).strip() not in resolved_server
-            ]
-            for tid in pending_server:
-                content.append({"type": "web_search_tool_result", "tool_use_id": tid, "content": []})
-                injected_results += 1
-            msg["content"] = content
-
-        if not tool_ids:
-            i += 1
-            continue
-
-        next_idx = i + 1
-        if next_idx >= len(aligned) or aligned[next_idx].get("role") != "user":
-            aligned.insert(next_idx, {"role": "user", "content": []})
-            inserted_fillers += 1
-
-        next_msg = aligned[next_idx]
-        next_content = next_msg.get("content", [])
-        if not isinstance(next_content, list):
-            txt = _coerce_text(next_content)
-            next_content = [{"type": "text", "text": txt}] if txt else []
-
-        resolved_custom = {
-            str(b.get("tool_use_id", "")).strip()
-            for b in next_content
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id")
-        }
-
-        for tid in tool_ids:
-            if tid and tid not in resolved_custom:
-                next_content.insert(0, {
-                    "type": "tool_result",
-                    "tool_use_id": tid,
-                    "content": "[tool result unavailable — auto-injected]",
-                    "is_error": True,
-                })
-                injected_results += 1
-
-        next_msg["content"] = next_content
-        aligned[next_idx] = next_msg
-        i = next_idx + 1
-
-    stats = {
-        "injected_results": injected_results,
-        "inserted_fillers": inserted_fillers,
-        "rewritten_orphans": rewritten_orphans,
-    }
-    return aligned, stats
-
-
-def _find_unresolved_tool_uses(msgs: list[dict]) -> list[tuple[int, list[str]]]:
-    """Return unresolved custom tool_use IDs per assistant message index."""
-    unresolved: list[tuple[int, list[str]]] = []
-    for i, msg in enumerate(msgs):
-        if msg.get("role") != "assistant":
-            continue
-        content = msg.get("content", [])
-        if not isinstance(content, list):
-            continue
-        tool_ids = {
-            str(b.get("id", "")).strip()
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
-        }
-        if not tool_ids:
-            continue
-        resolved = set()
-        if i + 1 < len(msgs) and msgs[i + 1].get("role") == "user":
-            nc = msgs[i + 1].get("content", [])
-            if isinstance(nc, list):
-                resolved = {
-                    str(b.get("tool_use_id", "")).strip()
-                    for b in nc
-                    if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id")
-                }
-        missing = sorted(tid for tid in tool_ids if tid and tid not in resolved)
-        if missing:
-            unresolved.append((i, missing))
-    return unresolved
-
-
-def sanitize_messages(msgs: list[dict], handle_server_tools: bool = True) -> list[dict]:
-    """Robustly canonicalize message history and inject missing tool results."""
-    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=handle_server_tools)
-    if any(stats.values()):
-        logger.warning(
-            "sanitize_messages: injected=%d fillers=%d orphan_rewrites=%d",
-            stats["injected_results"], stats["inserted_fillers"], stats["rewritten_orphans"],
-        )
-    return cleaned
-
-
-def validate_tool_pairs(msgs: list[dict]) -> list[dict]:
-    """Strict pass: enforce immediate tool_use -> tool_result adjacency invariants."""
-    cleaned, stats = _canonicalize_messages(msgs, handle_server_tools=True)
-    unresolved = _find_unresolved_tool_uses(cleaned)
-    if unresolved:
-        logger.error("validate_tool_pairs: unresolved tool_use pairs after strict pass: %s", unresolved)
-    elif any(stats.values()):
-        logger.warning(
-            "validate_tool_pairs: fixed pairs (injected=%d, fillers=%d, orphan_rewrites=%d)",
-            stats["injected_results"], stats["inserted_fillers"], stats["rewritten_orphans"],
-        )
-    return cleaned
-
-
-def _dump_messages_for_debug(msgs: list[dict], round_num: int, error: Exception):
-    """Log detailed message structure when API call fails.
-
-    Produces a concise per-message summary showing role, content block types,
-    and tool_use/tool_result IDs — enough to pinpoint the mismatch.
-    """
-    lines = [f"=== API ERROR at round {round_num}: {error} ==="]
-    lines.append(f"Total messages: {len(msgs)}")
-
-    for idx, msg in enumerate(msgs):
-        role = msg.get("role", "?")
-        content = msg.get("content", "")
-
-        if isinstance(content, str):
-            lines.append(f"  [{idx}] {role}: text({len(content)} chars)")
-            continue
-
-        if not isinstance(content, list):
-            lines.append(f"  [{idx}] {role}: <{type(content).__name__}>")
-            continue
-
-        block_descs = []
-        for block in content:
-            if not isinstance(block, dict):
-                block_descs.append(f"<{type(block).__name__}>")
-                continue
-            btype = block.get("type", "?")
-            if btype == "tool_use":
-                block_descs.append(f"tool_use(id={block.get('id','?')}, name={block.get('name','?')})")
-            elif btype == "tool_result":
-                block_descs.append(f"tool_result(for={block.get('tool_use_id','?')})")
-            elif btype == "server_tool_use":
-                block_descs.append(f"server_tool_use(id={block.get('id','?')}, name={block.get('name','?')})")
-            elif btype == "web_search_tool_result":
-                block_descs.append(f"web_search_result(for={block.get('tool_use_id','?')})")
-            elif btype == "text":
-                text_preview = str(block.get("text", ""))[:60]
-                block_descs.append(f"text({text_preview!r})")
-            else:
-                block_descs.append(f"{btype}({list(block.keys())})")
-        lines.append(f"  [{idx}] {role}: [{', '.join(block_descs)}]")
-
-    full_dump = "\n".join(lines)
-    logger.error(full_dump)
-
-
-def _strip_tool_blocks(msgs: list[dict]) -> list[dict]:
-    """Nuclear recovery: convert all tool protocol blocks to plain text.
-
-    Preserves tool call/result CONTENT as readable text so the model retains
-    context from previous tool executions.  Only the protocol structure
-    (tool_use/tool_result types) is removed.
-    """
-    cleaned = []
-    for msg in msgs:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-
-        if isinstance(content, str):
-            cleaned.append({"role": role, "content": content})
-            continue
-
-        if not isinstance(content, list):
-            cleaned.append({"role": role, "content": str(content)})
-            continue
-
-        text_parts = []
-        for block in content:
-            if not isinstance(block, dict):
-                t = _coerce_text(block)
-                if t:
-                    text_parts.append(t)
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                text_parts.append(block.get("text", ""))
-            elif btype == "tool_use":
-                name = block.get("name", "?")
-                inp = _coerce_text(block.get("input", {}))[:500]
-                text_parts.append(f"[도구 호출: {name}({inp})]")
-            elif btype == "tool_result":
-                result_text = _coerce_text(block.get("content", ""))[:2000]
-                text_parts.append(f"[도구 결과: {result_text}]")
-            elif btype in ("server_tool_use", "web_search_tool_result"):
-                # Server tool blocks: extract any useful text
-                t = _coerce_text(block.get("content", "") or block.get("input", ""))
-                if t:
-                    text_parts.append(f"[검색 결과: {t[:2000]}]")
-            else:
-                t = _coerce_text(block)
-                if t:
-                    text_parts.append(t)
-
-        text = "\n".join(t for t in text_parts if t).strip()
-        if not text:
-            text = "(빈 메시지)"
-
-        cleaned.append({"role": role, "content": text})
-
-    # Merge consecutive same-role messages
-    merged = []
-    for msg in cleaned:
-        if merged and merged[-1]["role"] == msg["role"]:
-            merged[-1] = {**merged[-1], "content": merged[-1]["content"] + "\n" + msg["content"]}
-        else:
-            merged.append(msg)
-
-    # Ensure alternating user/assistant (API requirement)
-    final = []
-    for msg in merged:
-        if final and final[-1]["role"] == msg["role"]:
-            # Insert a filler of the opposite role
-            filler_role = "assistant" if msg["role"] == "user" else "user"
-            final.append({"role": filler_role, "content": "(계속)"})
-        final.append(msg)
-
-    logger.info("_strip_tool_blocks: %d msgs → %d msgs", len(msgs), len(final))
-    return final
-
-
 def _normalize_initial_messages(msgs: list[dict]) -> list[dict]:
     """Structural fix: normalize inbound history to text-only alternating chat.
 
@@ -530,19 +136,13 @@ def _normalize_initial_messages(msgs: list[dict]) -> list[dict]:
                 role = "assistant" if role in ("model", "bot") else "user"
             text = _coerce_text(raw.get("content", ""))
 
+        # Merge consecutive same-role into one message → strictly alternating.
         if clean and clean[-1]["role"] == role:
             clean[-1]["content"] = f"{clean[-1]['content']}\n{text}".strip()
         else:
             clean.append({"role": role, "content": text})
 
-    # API expects alternating roles
-    fixed: list[dict] = []
-    for m in clean:
-        if fixed and fixed[-1]["role"] == m["role"]:
-            filler_role = "assistant" if m["role"] == "user" else "user"
-            fixed.append({"role": filler_role, "content": "(계속)"})
-        fixed.append(m)
-    return fixed
+    return clean
 
 
 def _append_user_text_message(msgs: list[dict], text: str):
@@ -557,52 +157,6 @@ def _append_user_text_message(msgs: list[dict], text: str):
             msgs[-1]["content"] = f"{_coerce_text(prev)}\n{text}".strip()
     else:
         msgs.append({"role": "user", "content": text})
-
-
-def _prepare_messages_for_api(msgs: list[dict]) -> list[dict]:
-    """Build API-safe messages from working transcript.
-
-    Server tool blocks are converted to text at response-processing time,
-    so working_msgs should not contain them.  The strip here is a defensive
-    fallback.  Custom tool_use/tool_result blocks are preserved.
-    """
-    prepared = []
-    for m in msgs:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if not isinstance(content, list):
-            prepared.append({"role": role, "content": content})
-            continue
-
-        kept = []
-        for b in content:
-            if not isinstance(b, dict):
-                kept.append({"type": "text", "text": _coerce_text(b)})
-                continue
-            btype = b.get("type")
-            # Strip server tool protocol blocks entirely
-            if btype in ("server_tool_use", "web_search_tool_result"):
-                continue
-            kept.append(b)
-
-        if not kept:
-            prepared.append({"role": role, "content": "(계속)"})
-        else:
-            prepared.append({"role": role, "content": kept})
-
-    # Final strict pair validation on API-bound payload.
-    prepared = validate_tool_pairs(prepared)
-    return prepared
-
-
-def _build_api_payload(working_msgs: list[dict], round_num: int) -> list[dict]:
-    """Single path to produce API-safe payload from internal transcript."""
-    api_msgs = _prepare_messages_for_api(working_msgs)
-    unresolved_api = _find_unresolved_tool_uses(api_msgs)
-    if unresolved_api:
-        logger.error("Round %d API payload unresolved pairs: %s", round_num, unresolved_api)
-        api_msgs = _strip_tool_blocks(api_msgs)
-    return api_msgs
 
 
 # ── Token Estimation ─────────────────────────────────────────────────
@@ -681,55 +235,13 @@ async def chat_with_tools(
         # ── Cancel check ──
         check_cancelled(task_id)
 
-        unresolved = _find_unresolved_tool_uses(working_msgs)
-        if unresolved:
-            # Should not happen in normal flow; sanitize as a hard fail-safe.
-            logger.error("Invariant broken before API call (round %d): %s", round_num, unresolved)
-            working_msgs = validate_tool_pairs(working_msgs)
-            unresolved = _find_unresolved_tool_uses(working_msgs)
-            if unresolved:
-                working_msgs = _strip_tool_blocks(working_msgs)
-
-        try:
-            api_msgs = _build_api_payload(working_msgs, round_num)
-
-            response = await client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=cached_system,
-                tools=cached_tools,
-                messages=api_msgs,
-            )
-        except Exception as api_err:
-            err_str = str(api_err)
-            recovered = False
-            if ("tool_use" in err_str and "tool_result" in err_str) or "tool" in err_str.lower() or "400" in err_str:
-                # Auto-recovery: strict re-canonicalization first, then strip.
-                _dump_messages_for_debug(api_msgs, round_num, api_err)
-                logger.warning("Auto-recovery: retrying once with strict canonicalization")
-                strict_msgs = validate_tool_pairs(working_msgs)
-                unresolved = _find_unresolved_tool_uses(strict_msgs)
-                if unresolved:
-                    logger.warning("Strict retry still unresolved: %s", unresolved)
-                    strict_msgs = _strip_tool_blocks(strict_msgs)
-                try:
-                    strict_api_msgs = _build_api_payload(strict_msgs, round_num)
-                    response = await client.messages.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        system=cached_system,
-                        tools=cached_tools,
-                        messages=strict_api_msgs,
-                    )
-                    working_msgs = strict_msgs
-                    recovered = True
-                except Exception:
-                    logger.warning("Auto-recovery strict retry failed; stripping tool blocks and forcing final response")
-                    working_msgs = _strip_tool_blocks(working_msgs)
-                    response = None  # ensure forced-response path runs
-                    break
-            if not recovered:
-                raise
+        response = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=cached_system,
+            tools=cached_tools,
+            messages=working_msgs,
+        )
 
         # Track cost
         if hasattr(response, "usage") and response.usage:
@@ -893,42 +405,15 @@ async def chat_with_tools(
             finalization_tools=final_tool_names or None,
         ),
     )
-    # Final preflight
-    unresolved = _find_unresolved_tool_uses(working_msgs)
-    if unresolved:
-        logger.error("Forced-final preflight unresolved tool pairs: %s; stripping tool blocks", unresolved)
-        working_msgs = _strip_tool_blocks(working_msgs)
-    try:
-        final_api_msgs = _build_api_payload(working_msgs, round_num if response else 0)
-        create_kwargs = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "system": cached_system,
-            "messages": final_api_msgs,
-        }
-        if final_tools:
-            create_kwargs["tools"] = final_tools
-        final = await client.messages.create(**create_kwargs)
-    except Exception as api_err:
-        # Last resort: strip all tool blocks and retry with plain text
-        _dump_messages_for_debug(working_msgs, -1, api_err)
-        logger.warning("Forced response failed — retrying with stripped messages")
-        stripped = _strip_tool_blocks(working_msgs)
-        try:
-            final = await client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=cached_system,
-                messages=stripped,
-            )
-        except Exception as e2:
-            logger.error("Final stripped response also failed: %s", e2)
-            if log_event:
-                log_event("error", "final_response", f"Final response failed even after strip: {e2}")
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(
-                    total_cost, round_num if response else 0, was_still_working, tool_work_details))
-            return f"⚠️ {limit_reason} 후 응답 생성 실패: {api_err}"
+    create_kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": cached_system,
+        "messages": working_msgs,
+    }
+    if final_tools:
+        create_kwargs["tools"] = final_tools
+    final = await client.messages.create(**create_kwargs)
 
     if hasattr(final, "usage") and final.usage:
         total_cost += _calculate_cost(final.usage)
@@ -980,21 +465,16 @@ async def chat_with_tools(
         working_msgs.append({"role": "user", "content": final_tool_results})
 
         # Plain text follow-up to collect the final answer.
-        try:
-            followup_api_msgs = _build_api_payload(working_msgs, (round_num if response else 0) + 1)
-            followup = await client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=cached_system,
-                messages=followup_api_msgs,  # no tools — force text
-            )
-            if hasattr(followup, "usage") and followup.usage:
-                total_cost += _calculate_cost(followup.usage)
-            followup_text_parts = [b.text for b in followup.content if b.type == "text"]
-            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
-        except Exception as fe:
-            logger.error("Forced-final follow-up failed: %s", fe)
-            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"]
+        followup = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=cached_system,
+            messages=working_msgs,  # no tools — force text
+        )
+        if hasattr(followup, "usage") and followup.usage:
+            total_cost += _calculate_cost(followup.usage)
+        followup_text_parts = [b.text for b in followup.content if b.type == "text"]
+        text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
     else:
         text_parts = [b.text for b in final.content if b.type == "text"]
 

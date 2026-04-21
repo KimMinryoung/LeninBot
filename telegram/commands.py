@@ -19,7 +19,6 @@ from aiogram.types import (
 from aiogram.filters import Command
 
 from shared import KST
-from claude_loop import sanitize_messages
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
 from replicate_image_service import (
@@ -1268,7 +1267,6 @@ async def handle_message(message: Message):
     # Save user message to DB, load context (chunk summaries + raw messages)
     await asyncio.to_thread(_ctx["save_chat_message"], user_id, "user", user_text)
     history = await asyncio.to_thread(_ctx["load_context_with_summaries"], user_id)
-    history = sanitize_messages(history)
 
     # Resolve provider first so runtime context blocks match the target prompt
     # style (XML for Claude, Markdown for OpenAI/Qwen).

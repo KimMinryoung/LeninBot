@@ -1562,8 +1562,6 @@ async def bot_main():
 
             # Load recent chat history for context
             history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
-            from telegram.commands import sanitize_messages
-            history = sanitize_messages(history)
             history.append({"role": "user", "content": prompt})
 
             # Run orchestrator — budget enough for response + optional redelegate call
