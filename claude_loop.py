@@ -51,27 +51,37 @@ def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
     return deduped
 
 
+# ── Cache TTL ────────────────────────────────────────────────────────
+# Anthropic's default ephemeral cache lives 5 minutes. That's too short for a
+# Telegram conversation where the user may read, think, multitask between
+# turns. We use the 1-hour extended-TTL tier — the write premium goes from
+# 1.25× to 2.0× base input, but any turn within an hour of the prior one
+# hits cache_read (at 0.1× base) instead of paying full cache_creation again.
+# Break-even after 2 reads; almost always a win for chat usage.
+_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
+
+
 # ── Pricing Constants (USD per million tokens) ──────────────────────
-# Per-tier list prices. Cache-creation / cache-read shown for the 5-minute
-# ephemeral tier (what this loop uses). Prefix-match picks by base model name
-# so pinned-date variants share the same entry.
+# Per-tier list prices. Cache-creation shown for the **1-hour TTL** tier
+# (matches what this loop writes). cache_read is identical across TTL tiers.
+# Prefix-match picks by base model name so pinned-date variants reuse the row.
 PRICING_TABLE = {
     "claude-opus-4-7": {
         "input":          15.00 / 1_000_000,
         "output":         75.00 / 1_000_000,
-        "cache_creation": 18.75 / 1_000_000,
+        "cache_creation": 30.00 / 1_000_000,   # 2.0× input (1h TTL)
         "cache_read":      1.50 / 1_000_000,
     },
     "claude-sonnet-4-6": {
         "input":           3.00 / 1_000_000,
         "output":         15.00 / 1_000_000,
-        "cache_creation":  3.75 / 1_000_000,
+        "cache_creation":  6.00 / 1_000_000,   # 2.0× input (1h TTL)
         "cache_read":      0.30 / 1_000_000,
     },
     "claude-haiku-4-5": {
         "input":           1.00 / 1_000_000,
         "output":          5.00 / 1_000_000,
-        "cache_creation":  1.25 / 1_000_000,
+        "cache_creation":  2.00 / 1_000_000,   # 2.0× input (1h TTL)
         "cache_read":      0.10 / 1_000_000,
     },
 }
@@ -202,19 +212,19 @@ def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
         if isinstance(content, str):
             msg["content"] = [
                 {"type": "text", "text": content or "(계속)",
-                 "cache_control": {"type": "ephemeral"}}
+                 "cache_control": _CACHE_CONTROL_1H}
             ]
         elif isinstance(content, list) and content:
             new_content = list(content)
             last = new_content[-1]
             last = dict(last) if isinstance(last, dict) else {"type": "text", "text": str(last)}
-            last["cache_control"] = {"type": "ephemeral"}
+            last["cache_control"] = _CACHE_CONTROL_1H
             new_content[-1] = last
             msg["content"] = new_content
         else:
             msg["content"] = [
                 {"type": "text", "text": "(계속)",
-                 "cache_control": {"type": "ephemeral"}}
+                 "cache_control": _CACHE_CONTROL_1H}
             ]
         result[i] = msg
         break
@@ -296,13 +306,14 @@ async def chat_with_tools(
     total_cost = 0.0
     budget_warning_sent = False
 
-    # Prompt caching: mark system prompt and tools as cacheable
-    cached_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+    # Prompt caching: mark system prompt and tools as cacheable with the
+    # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above).
+    cached_system = [{"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}]
 
     # Mark last tool for prompt caching
     cached_tools = [dict(t) for t in tools]
     if cached_tools:
-        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+        cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
 
     response = None
     round_num = 0
