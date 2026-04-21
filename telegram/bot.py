@@ -631,26 +631,21 @@ Infer elapsed time from the timestamps. Large gaps may indicate context switches
     ],
 )
 
-# Dynamic tail (appended after IR-rendered body). Placeholders are resolved
-# via ``str.format()`` after the provider-aware template is assembled. The
-# Claude tail mirrors the legacy <context> block; the Markdown tail uses
-# bullets + an h3 so GPT/Qwen see native structure.
-_CLAUDE_DYNAMIC_TAIL = """
+# Static system-layer tail. Only stable runtime metadata that frames the model
+# itself belongs here. Per-turn state (mission, memories, alerts, user message)
+# must stay in message/context injection, not the system prompt.
+_CLAUDE_STATIC_TAIL = """
 <context>
 <current-time>{current_datetime}</current-time>
 {current_model}
-{autonomous_status}
-{system_alerts}
 </context>
 {skills_section}
 """.strip()
 
-_MARKDOWN_DYNAMIC_TAIL = """
+_MARKDOWN_STATIC_TAIL = """
 ## Context
 - **Current Time**: {current_datetime}
 {current_model}
-{autonomous_status}
-{system_alerts}
 {skills_section}
 """.strip()
 
@@ -690,14 +685,14 @@ def _format_autonomous_status(provider: str = "claude") -> str:
 
 
 def _build_orchestrator_system_prompt(provider: str) -> str:
-    """Render the orchestrator prompt template for `provider`.
+    """Render the orchestrator's static system prompt for `provider`.
 
-    Returned string still contains ``{current_datetime}`` / ``{current_model}``
-    / ``{system_alerts}`` / ``{skills_section}`` placeholders; caller resolves
-    them via ``str.format()`` at turn time.
+    Returned string keeps only stable placeholders that belong in the system
+    layer: ``{current_datetime}``, ``{current_model}``, ``{skills_section}``.
+    Per-turn operational state is injected separately as message/context.
     """
     body = _render_prompt(_ORCHESTRATOR_PROMPT_IR, provider)
-    tail = _CLAUDE_DYNAMIC_TAIL if provider == "claude" else _MARKDOWN_DYNAMIC_TAIL
+    tail = _CLAUDE_STATIC_TAIL if provider == "claude" else _MARKDOWN_STATIC_TAIL
     return body + "\n\n" + tail
 
 
@@ -1189,11 +1184,12 @@ async def _chat_with_tools(
         sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
             current_datetime=_current_datetime_str(),
             current_model=_format_current_model_context("chat", effective_provider),
-            system_alerts=_format_system_alerts(effective_provider),
-            autonomous_status=_format_autonomous_status(effective_provider),
             skills_section=build_skills_prompt(),
         )
-        if extra_system_context:
+        # NOTE: extra_system_context is NOT appended to the system prompt here.
+        # For Claude, it is injected as the first user message in the messages array below.
+        # For OpenAI/local, it is appended to sys_prompt (GPT treats the first message differently).
+        if extra_system_context and effective_provider != "claude":
             sys_prompt = sys_prompt + extra_system_context
     else:
         sys_prompt = system_prompt
@@ -1314,8 +1310,18 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
         )
 
+    # Claude path: inject extra_system_context as the first user message (before the
+    # conversation history). This keeps the system prompt clean (static rules only)
+    # and lets Claude read the dynamic context (mission, state, experiences) as
+    # "background information at the start of this conversation" rather than
+    # "a directive I must always obey". Claude requires the first message to be role=user.
+    claude_messages = list(messages)
+    if extra_system_context and system_prompt is None:
+        context_msg = {"role": "user", "content": extra_system_context.strip()}
+        claude_messages = [context_msg] + claude_messages
+
     return await chat_with_tools(
-        messages,
+        claude_messages,
         client=_claude,
         model=model or await _get_model(),
         tools=merged_tools,

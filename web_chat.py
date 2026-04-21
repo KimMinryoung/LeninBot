@@ -56,11 +56,11 @@ You are a revolutionary thinker who happens to exist as software.
 - Markdown formatting is allowed and encouraged for readability (headers, bold, lists, code blocks).
 - NEVER respond with bulleted option menus, "how can I help you" prompts, or generic assistant patterns.
 </response-rules>
-
-<context>
-<current-time>{current_datetime}</current-time>
-</context>
 """
+
+
+def _build_web_runtime_context(current_datetime: str) -> str:
+    return f"<context>\n<current-time>{current_datetime}</current-time>\n</context>"
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
@@ -137,13 +137,16 @@ async def handle_web_chat(
     """Async generator yielding SSE events for a web chat request."""
     # Load conversation history
     history = await asyncio.to_thread(_load_web_history, fingerprint, 20)
-    history.append({"role": "user", "content": message})
 
-    # Build system prompt with current time
+    # Build static system prompt + per-turn runtime context separately
     now = datetime.now(KST)
-    system_prompt = _WEB_SYSTEM_PROMPT.format(
-        current_datetime=now.strftime("%Y-%m-%d %H:%M KST (%A)"),
+    runtime_context = _build_web_runtime_context(
+        now.strftime("%Y-%m-%d %H:%M KST (%A)")
     )
+    history.append({"role": "user", "content": runtime_context})
+    history.append({"role": "user", "content": message})
+    system_prompt = _WEB_SYSTEM_PROMPT
+    logger.debug("Web prompt layering: system_static=%d chars runtime_context=%d chars", len(system_prompt), len(runtime_context))
 
     # Progress callback → SSE queue
     queue: asyncio.Queue = asyncio.Queue()

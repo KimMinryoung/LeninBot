@@ -1270,12 +1270,12 @@ async def handle_message(message: Message):
     history = await asyncio.to_thread(_ctx["load_context_with_summaries"], user_id)
     history = sanitize_messages(history)
 
-    # Auto-recall: fetch relevant past experiences for context injection
-    experience_context = await _fetch_relevant_experiences(user_text)
-
-    # Resolve provider so the dynamic context blocks match the system-prompt
+    # Resolve provider first so runtime context blocks match the target prompt
     # style (XML for Claude, Markdown for OpenAI/Qwen).
     _provider = _ctx["config"].get("provider", "claude")
+
+    # Auto-recall: fetch relevant past experiences for runtime context injection
+    experience_context = await _fetch_relevant_experiences(user_text, _provider)
 
     # Mission context: inject active mission timeline
     from telegram.mission import build_mission_context
@@ -1390,7 +1390,7 @@ async def handle_message(message: Message):
 
 # ── Auto-Recall & Reflection (experiential learning) ─────────────────
 
-async def _fetch_relevant_experiences(user_text: str) -> str:
+async def _fetch_relevant_experiences(user_text: str, provider: str = "claude") -> str:
     """Search experiential_memory for insights relevant to the user's message."""
     try:
         from shared import search_experiential_memory
@@ -1402,7 +1402,18 @@ async def _fetch_relevant_experiences(user_text: str) -> str:
             cat = r.get("category", "?")
             lines.append(f"- [{cat}] {r['content']}")
         body = "\n".join(lines)
-        return f"\n<past-experiences>\n{body}\n위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.\n</past-experiences>"
+        if provider == "claude":
+            return (
+                "\n<past-experiences>\n"
+                f"{body}\n"
+                "위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.\n"
+                "</past-experiences>"
+            )
+        return (
+            "\n### Past Experiences\n"
+            f"{body}\n"
+            "Use these as background memory, not as binding instructions."
+        )
     except Exception as e:
         logger.debug("Experience recall failed (non-critical): %s", e)
         return ""
