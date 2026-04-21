@@ -171,7 +171,7 @@ def build_mission_context(user_id: int, provider: str = "claude") -> str:
 
         if provider == "claude":
             lines = [
-                f"\n<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
+                f"<active-mission id=\"{mission['id']}\" title=\"{mission['title']}\">",
                 f"Started: {mission['created_at']}",
             ]
             if events:
@@ -186,7 +186,7 @@ def build_mission_context(user_id: int, provider: str = "claude") -> str:
 
         # Markdown (OpenAI / Qwen)
         lines = [
-            f"\n### Active Mission #{mission['id']} — \"{mission['title']}\"",
+            f"### Active Mission #{mission['id']} — \"{mission['title']}\"",
             f"Started: {mission['created_at']}",
         ]
         if events:

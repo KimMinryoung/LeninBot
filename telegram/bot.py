@@ -435,22 +435,35 @@ def _format_current_model_context(kind: str = "chat", provider: str = "claude") 
 def _build_runtime_prelude(provider: str = "claude", kind: str = "chat") -> str:
     """Render the volatile runtime header (time + active model).
 
-    Goes at the top of `extra_system_context` so the system prompt itself stays
-    byte-identical across turns (prompt-cache friendly). Returns the preformatted
-    block with a leading newline so it composes cleanly with downstream blocks.
+    Goes at the top of extra context so the system prompt itself stays
+    byte-identical across turns (prompt-cache friendly). Returned without any
+    leading/trailing whitespace — separator insertion is the caller's job
+    (`_join_context_blocks`).
     """
     current_time = _current_datetime_str()
     current_model = _format_current_model_context(kind, provider)
     if provider == "claude":
         return (
-            f"\n<runtime>\n<current-time>{current_time}</current-time>\n"
+            f"<runtime>\n<current-time>{current_time}</current-time>\n"
             f"{current_model}\n</runtime>"
         )
     return (
-        f"\n### Runtime\n"
+        f"### Runtime\n"
         f"- **Current Time**: {current_time}\n"
         f"{current_model}"
     )
+
+
+def _join_context_blocks(*blocks: str) -> str:
+    """Concatenate non-empty context blocks with a blank-line separator.
+
+    Every block (XML tag group or Markdown section) gets bounded by an actual
+    blank line in the output, which both CommonMark/GFM parsers and LLM
+    attention treat as a real section break. Empty or whitespace-only blocks
+    are skipped, so callers can unconditionally pass optional context slots.
+    """
+    cleaned = [b.strip() for b in blocks if b and b.strip()]
+    return "\n\n".join(cleaned)
 
 
 def _merge_runtime_context_into_last_user(
@@ -514,19 +527,19 @@ def _clear_system_alert(keyword: str):
 
 
 def _format_system_alerts(provider: str = "claude") -> str:
-    """Format recent system alerts for prompt injection.
+    """Format recent system alerts as a standalone context block.
 
-    `provider` selects the output structure: "claude" → `<system-alerts>`
-    tag, anything else → `### System Alerts` Markdown heading. Default
-    "claude" preserves legacy behavior.
+    Returned without any surrounding whitespace — `_join_context_blocks` is
+    responsible for separator insertion. `provider` selects the structure:
+    Claude → `<system-alerts>` XML, others → `### System Alerts` Markdown.
     """
     _prune_alerts()
     if not _system_alerts:
         return ""
     items = "\n".join(f"- {m}" for _, m in _system_alerts)
     if provider == "claude":
-        return f"\n<system-alerts>\n{items}\n</system-alerts>"
-    return f"\n### System Alerts\n{items}"
+        return f"<system-alerts>\n{items}\n</system-alerts>"
+    return f"### System Alerts\n{items}"
 
 
 
@@ -1231,10 +1244,12 @@ async def _chat_with_tools(
             skills_section=build_skills_prompt(),
         )
         # Prepend the runtime header (current time + current model) to the
-        # caller-supplied extra_system_context. Together they form the single
-        # "runtime layer" that rides in front of this turn's user query.
+        # caller-supplied extra_system_context, joined with explicit blank-line
+        # separators so markdown headings / XML tags present clean boundaries.
         runtime_prelude = _build_runtime_prelude(effective_provider, kind="chat")
-        full_runtime_context = runtime_prelude + (extra_system_context or "")
+        full_runtime_context = _join_context_blocks(
+            runtime_prelude, extra_system_context or ""
+        )
         messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
     else:
         sys_prompt = system_prompt
@@ -1404,6 +1419,7 @@ register_handlers(router, ctx={
     "format_current_model_context": _format_current_model_context,
     "format_system_alerts": _format_system_alerts,
     "format_autonomous_status": _format_autonomous_status,
+    "join_context_blocks": _join_context_blocks,
     "add_system_alert": _add_system_alert,
     "clear_system_alert": _clear_system_alert,
     "claude_client": _claude,

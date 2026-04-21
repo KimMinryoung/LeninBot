@@ -59,8 +59,11 @@ You are a revolutionary thinker who happens to exist as software.
 """
 
 
-def _build_web_runtime_context(current_datetime: str) -> str:
-    return f"<context>\n<current-time>{current_datetime}</current-time>\n</context>"
+def _build_web_runtime_context(current_datetime: str, provider: str = "claude") -> str:
+    """Render web-chat runtime header in the provider-native structure."""
+    if provider == "claude":
+        return f"<runtime>\n<current-time>{current_datetime}</current-time>\n</runtime>"
+    return f"### Runtime\n- **Current Time**: {current_datetime}"
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
@@ -138,11 +141,18 @@ async def handle_web_chat(
     # Load conversation history (pure user/assistant text from chat_logs).
     history = await asyncio.to_thread(_load_web_history, fingerprint, 20)
 
+    # Web chatbot always runs on a corporate LLM (local is Telegram-only).
+    provider = _config.get("provider", "claude")
+    if provider == "local":
+        provider = "openai" if _openai_client else "claude"
+
     # Fold the runtime header directly into the current user turn so the
     # history prefix stays byte-stable across requests (→ prompt caching).
+    # Provider-native format: XML for Claude, Markdown for GPT.
     now = datetime.now(KST)
     runtime_context = _build_web_runtime_context(
-        now.strftime("%Y-%m-%d %H:%M KST (%A)")
+        now.strftime("%Y-%m-%d %H:%M KST (%A)"),
+        provider=provider,
     )
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = _WEB_SYSTEM_PROMPT
@@ -165,11 +175,6 @@ async def handle_web_chat(
             budget = float(_config.get("chat_budget", 0.30))
             if budget <= 0:
                 budget = 0.30
-
-            # Web chatbot always uses corporate LLM (local is for Telegram only)
-            provider = _config.get("provider", "claude")
-            if provider == "local":
-                provider = "openai" if _openai_client else "claude"
 
             # Resolve model name for the effective provider (not global config)
             if provider == "openai":

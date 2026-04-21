@@ -1284,8 +1284,6 @@ async def handle_message(message: Message):
     state_context = await asyncio.to_thread(
         build_current_state, user_id, provider=_provider
     )
-    if state_context:
-        state_context = "\n" + state_context
 
     # System alerts: high-severity runtime notifications (deploy, task status,
     # email bridge, etc.). Injected as per-turn runtime context, not system prompt.
@@ -1294,20 +1292,20 @@ async def handle_message(message: Message):
     # Autonomous agent status: active self-running projects, surfaced so the
     # orchestrator can reference ongoing background work in its replies.
     autonomous_context = _ctx["format_autonomous_status"](_provider)
-    if autonomous_context:
-        autonomous_context = "\n" + autonomous_context
 
     try:
         # Block order follows attention recency: stable reference at the top,
         # freshest signals at the bottom so the model reads the "just happened"
         # items last (right before the user's query). Runtime header (current
         # time + model) is prepended by _chat_with_tools so it sits above all.
-        extra_context = (
-            autonomous_context       # stable background: self-running projects
-            + (experience_context or "")  # reference: past lessons
-            + mission_context        # current goal
-            + state_context          # in-progress work
-            + alerts_context         # volatile: deploy/task/email events
+        # _join_context_blocks strips each block and joins with a blank line so
+        # markdown headings and XML tag groups each appear as a clear section.
+        extra_context = _ctx["join_context_blocks"](
+            autonomous_context,       # stable background: self-running projects
+            experience_context or "", # reference: past lessons
+            mission_context,          # current goal
+            state_context,            # in-progress work
+            alerts_context,           # volatile: deploy/task/email events
         )
         # Bind mission tool handler to this user
         from telegram.tools import build_mission_handler
@@ -1409,7 +1407,11 @@ async def handle_message(message: Message):
 # ── Auto-Recall & Reflection (experiential learning) ─────────────────
 
 async def _fetch_relevant_experiences(user_text: str, provider: str = "claude") -> str:
-    """Search experiential_memory for insights relevant to the user's message."""
+    """Search experiential_memory for insights relevant to the user's message.
+
+    Returned as a standalone context block (no surrounding whitespace); the
+    caller joins blocks via _join_context_blocks for clean section boundaries.
+    """
     try:
         from shared import search_experiential_memory
         results = await asyncio.to_thread(search_experiential_memory, user_text, 3)
@@ -1422,13 +1424,13 @@ async def _fetch_relevant_experiences(user_text: str, provider: str = "claude") 
         body = "\n".join(lines)
         if provider == "claude":
             return (
-                "\n<past-experiences>\n"
+                "<past-experiences>\n"
                 f"{body}\n"
                 "위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.\n"
                 "</past-experiences>"
             )
         return (
-            "\n### Past Experiences\n"
+            "### Past Experiences\n"
             f"{body}\n"
             "Use these as background memory, not as binding instructions."
         )
