@@ -52,23 +52,57 @@ def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
 
 
 # ── Pricing Constants (USD per million tokens) ──────────────────────
-# Claude Sonnet 4.6 pricing — update when model pricing changes
-PRICING = {
-    "input": 3.00 / 1_000_000,
-    "output": 15.00 / 1_000_000,
-    "cache_creation": 3.75 / 1_000_000,
-    "cache_read": 0.30 / 1_000_000,
+# Per-tier list prices. Cache-creation / cache-read shown for the 5-minute
+# ephemeral tier (what this loop uses). Prefix-match picks by base model name
+# so pinned-date variants share the same entry.
+PRICING_TABLE = {
+    "claude-opus-4-7": {
+        "input":          15.00 / 1_000_000,
+        "output":         75.00 / 1_000_000,
+        "cache_creation": 18.75 / 1_000_000,
+        "cache_read":      1.50 / 1_000_000,
+    },
+    "claude-sonnet-4-6": {
+        "input":           3.00 / 1_000_000,
+        "output":         15.00 / 1_000_000,
+        "cache_creation":  3.75 / 1_000_000,
+        "cache_read":      0.30 / 1_000_000,
+    },
+    "claude-haiku-4-5": {
+        "input":           1.00 / 1_000_000,
+        "output":          5.00 / 1_000_000,
+        "cache_creation":  1.25 / 1_000_000,
+        "cache_read":      0.10 / 1_000_000,
+    },
 }
 
+# Fallback when the model string doesn't match any known family — use Sonnet
+# (middle tier) so we don't wildly under- or over-report on unknown variants.
+PRICING = PRICING_TABLE["claude-sonnet-4-6"]
 
-def _calculate_cost(usage) -> float:
-    """Calculate USD cost from a response.usage object."""
+
+def _pricing_for(model: str) -> dict:
+    """Pick the pricing row for a Claude model id. Matches by prefix so
+    pinned-date variants (``claude-haiku-4-5-20251001``) reuse the family."""
+    if not model:
+        return PRICING
+    if model in PRICING_TABLE:
+        return PRICING_TABLE[model]
+    for base, price in PRICING_TABLE.items():
+        if model.startswith(base + "-") or model.startswith(base + "."):
+            return price
+    return PRICING
+
+
+def _calculate_cost(usage, model: str | None = None) -> float:
+    """Calculate USD cost from a response.usage object for the given model."""
+    p = _pricing_for(model) if model else PRICING
     cost = 0.0
-    cost += getattr(usage, "input_tokens", 0) * PRICING["input"]
-    cost += getattr(usage, "output_tokens", 0) * PRICING["output"]
+    cost += getattr(usage, "input_tokens", 0) * p["input"]
+    cost += getattr(usage, "output_tokens", 0) * p["output"]
     # Cache tokens (may not always be present)
-    cost += getattr(usage, "cache_creation_input_tokens", 0) * PRICING["cache_creation"]
-    cost += getattr(usage, "cache_read_input_tokens", 0) * PRICING["cache_read"]
+    cost += getattr(usage, "cache_creation_input_tokens", 0) * p["cache_creation"]
+    cost += getattr(usage, "cache_read_input_tokens", 0) * p["cache_read"]
     return cost
 
 
@@ -285,11 +319,23 @@ async def chat_with_tools(
             messages=_with_message_cache_breakpoint(working_msgs),
         )
 
-        # Track cost
+        # Track cost. Log cache-token breakdown at INFO so prompt-caching
+        # effectiveness is visible in journald without a debug rebuild — if
+        # cache_read stays at 0 across rounds, something in the prefix is
+        # drifting and the ephemeral cache can't latch on.
         if hasattr(response, "usage") and response.usage:
-            round_cost = _calculate_cost(response.usage)
+            usage = response.usage
+            round_cost = _calculate_cost(usage, model)
             total_cost += round_cost
-            logger.debug("Round %d cost: $%.4f (total: $%.4f / $%.2f)", round_num, round_cost, total_cost, budget_usd)
+            logger.info(
+                "Round %d usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
+                round_num,
+                getattr(usage, "input_tokens", 0),
+                getattr(usage, "output_tokens", 0),
+                getattr(usage, "cache_creation_input_tokens", 0),
+                getattr(usage, "cache_read_input_tokens", 0),
+                round_cost, total_cost, budget_usd,
+            )
             await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
             update_redis_state(task_id, round_num, total_cost)
 
@@ -458,7 +504,7 @@ async def chat_with_tools(
     final = await client.messages.create(**create_kwargs)
 
     if hasattr(final, "usage") and final.usage:
-        total_cost += _calculate_cost(final.usage)
+        total_cost += _calculate_cost(final.usage, model)
     if final.stop_reason == "max_tokens":
         logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
 
@@ -514,7 +560,7 @@ async def chat_with_tools(
             messages=_with_message_cache_breakpoint(working_msgs),  # no tools — force text
         )
         if hasattr(followup, "usage") and followup.usage:
-            total_cost += _calculate_cost(followup.usage)
+            total_cost += _calculate_cost(followup.usage, model)
         followup_text_parts = [b.text for b in followup.content if b.type == "text"]
         text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
     else:
