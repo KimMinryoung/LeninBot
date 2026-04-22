@@ -660,6 +660,7 @@ async def chat_with_tools(
     agent_name: str = "agent",
     mission_id: int | None = None,
     finalization_tools: list[str] | None = None,
+    terminal_tools: list[str] | None = None,
     api_semaphore: asyncio.Semaphore | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
@@ -899,6 +900,24 @@ async def chat_with_tools(
                     "content": f"Tool execution skipped (internal error): "
                                f"no result for {tc_item['function']['name']}",
                 })
+
+        # Terminal-tool short-circuit (see claude_loop.py for rationale).
+        if terminal_tools and batch:
+            terminal_hit = next(
+                (
+                    (fname, result)
+                    for tc_id, fname, fargs, result, is_error in exec_results
+                    if fname in terminal_tools and not is_error
+                ),
+                None,
+            )
+            if terminal_hit:
+                _tname, _tresult = terminal_hit
+                if budget_tracker is not None:
+                    budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+                terminal_report = str(_tresult).strip() or f"{_tname} completed"
+                all_parts = accumulated_text_parts + [terminal_report]
+                return "\n".join(p for p in all_parts if p)
 
         # ── Budget break AFTER tool results are properly appended ──
         if budget_exceeded:

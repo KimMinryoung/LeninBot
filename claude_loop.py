@@ -272,6 +272,7 @@ async def chat_with_tools(
     agent_name: str = "agent",
     mission_id: int | None = None,
     finalization_tools: list[str] | None = None,
+    terminal_tools: list[str] | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -468,6 +469,27 @@ async def chat_with_tools(
         else:
             logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
             working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
+
+        # Terminal-tool short-circuit: if any spec-declared terminal tool
+        # succeeded in this round, end the loop without a trailing
+        # assistant text turn. The tool's return value (already in
+        # tool_work_details) becomes the report — no extra LLM call.
+        if terminal_tools and tool_uses_to_execute:
+            terminal_hit = next(
+                (
+                    (tname, result)
+                    for tid, tname, tinput, result, is_error in exec_results
+                    if tname in terminal_tools and not is_error
+                ),
+                None,
+            )
+            if terminal_hit:
+                _tname, _tresult = terminal_hit
+                if budget_tracker is not None:
+                    budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+                terminal_report = str(_tresult).strip() or f"{_tname} completed"
+                all_text = accumulated_text_parts + [terminal_report]
+                return "\n".join(p for p in all_text if p)
 
         # Budget break AFTER tool results are properly appended
         if budget_exceeded_this_round:

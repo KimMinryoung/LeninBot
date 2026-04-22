@@ -659,6 +659,7 @@ async def _run_one_tick(project: dict) -> dict:
             budget_tracker=budget_tracker,
             agent_name="autonomous_project",
             finalization_tools=spec.finalization_tools,
+            terminal_tools=spec.terminal_tools,
         )
     except Exception as e:
         logger.exception("Tick failed for project %s", project["id"])

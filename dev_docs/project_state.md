@@ -86,7 +86,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | `leninbot-experience` | 매일 15:30 UTC | 경험 메모리 정리/저장 |
 | `leninbot-autonomous` | 매시 :17 KST | 자율 프로젝트 루프 1 tick (bounded 3~6 라운드) — T0 pilot, 리서치·계획 전용 |
 
-> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent, 0/6/12/18시 KST).
+> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent, 매일 02:00/14:00 KST).
 
 ### Service Dependencies
 

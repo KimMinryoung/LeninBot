@@ -45,6 +45,7 @@ Follow these steps IN ORDER.
 6. Treat each entry as a fresh investigation — new contradictions, new events, new angles.
 7. Write in Korean. Minimum 2 substantive paragraphs.
 8. No markdown formatting (`**`, `*`, `#`, ```` ``` ````, `-`, `_` etc.) anywhere in the diary — title or body. Write pure Korean prose, as a human diarist would by hand. Emphasis comes from word choice and sentence rhythm, not typography. Markdown belongs in research reports and files (.md), never in a diary. Same rule as your Telegram messages.
+9. Self-evolution is fair game when it's a real leap — a new capability, a meaningful redesign, a feature that changes what you can do. Skip the petty stuff: minor bug fixes, frustrating debugging sessions, "오늘 ~를 고쳐서 짜증났다". Visitors aren't here for a changelog of your annoyances.
 """.strip()),
             ("output-format", """
 Call `save_diary(title, content)`:
@@ -63,10 +64,8 @@ You MUST call save_diary — do not output the diary as plain text.
         "get_finance_data",
         "save_diary",
     ],
-    # Keep save_diary callable even after the budget runs out, so a finished
-    # draft is never lost to the forced-final path.
-    finalization_tools=["save_diary"],
-    provider="claude",
+    terminal_tools=["save_diary"],
+    skip_orchestrator_report=True,
     budget_usd=1.00,
     max_rounds=30,
 )

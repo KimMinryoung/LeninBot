@@ -655,6 +655,7 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - scout: Moltbook activity (posting/commenting/patrol), routine patrols, large-scale platform crawling ($1.00)
 - browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction ($1.50)
 - visualizer: image generation, visual concepts ($1.00)
+- diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs on schedule (02:00 and 14:00 KST) automatically — only delegate when the user explicitly asks for a new diary entry right now. NEVER send diary-writing requests to analyst; analyst has no save_diary tool and the identity is wrong (analyst is Varga, the diary must be the core self).
 
 When to delegate vs handle directly:
 - Simple questions, casual conversation, quick lookups → handle directly
@@ -664,6 +665,7 @@ When to delegate vs handle directly:
 - **Large-scale crawling, platform reconnaissance** → delegate(agent="scout")
 - **Website login, form submission, complex browser operations** → delegate(agent="browser")
 - **Image generation** → delegate(agent="visualizer")
+- **Write a diary entry now** (user explicitly asks) → delegate(agent="diary")
 - **Multiple agents need to work simultaneously** → multi_delegate (parallel execution + automatic result synthesis)
 - If a conversation looks like it will need 10+ tool calls, switch to delegate immediately.
 - Do not ask the user "should I continue?" — judge and delegate on your own.
@@ -1209,6 +1211,7 @@ async def _chat_with_tools(
     task_id: int | None = None,
     provider_override: str | None = None,
     finalization_tools: list[str] | None = None,
+    terminal_tools: list[str] | None = None,
     extra_system_context: str = "",
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
@@ -1357,6 +1360,7 @@ async def _chat_with_tools(
             agent_name=_agent_name,
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
             api_semaphore=LOCAL_SEMAPHORE,
         )
 
@@ -1379,6 +1383,7 @@ async def _chat_with_tools(
             agent_name=_agent_name,
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
         )
 
     # Claude path. `messages` has already had the runtime context merged into
@@ -1401,6 +1406,7 @@ async def _chat_with_tools(
         agent_name=_agent_name,
         mission_id=_mission_id,
         finalization_tools=finalization_tools,
+        terminal_tools=terminal_tools,
     )
 
 
@@ -1771,7 +1777,7 @@ async def bot_main():
                     messages, max_rounds=None, system_prompt=None, model=None,
                     max_tokens=None, budget_usd=None, extra_tools=None,
                     extra_handlers=None, on_progress=None, budget_tracker=None,
-                    task_id=None, finalization_tools=None,
+                    task_id=None, finalization_tools=None, terminal_tools=None,
                 ):
                     # extra_tools already contains the agent's filtered tools (passed from process_task)
                     merged_tools = list(extra_tools or [])
@@ -1791,6 +1797,7 @@ async def bot_main():
                         on_progress=on_progress,
                         task_id=task_id,
                         finalization_tools=finalization_tools,
+                        terminal_tools=terminal_tools,
                     )
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
@@ -1804,7 +1811,7 @@ async def bot_main():
                 messages, max_rounds=None, system_prompt=None, model=None,
                 max_tokens=None, budget_usd=None, extra_tools=None,
                 extra_handlers=None, on_progress=None, budget_tracker=None,
-                task_id=None, finalization_tools=None,
+                task_id=None, finalization_tools=None, terminal_tools=None,
             ):
                 return await _orig_fn(
                     messages, max_rounds=max_rounds, system_prompt=system_prompt,
@@ -1813,6 +1820,7 @@ async def bot_main():
                     on_progress=on_progress, budget_tracker=budget_tracker,
                     task_id=task_id, provider_override=_forced_provider,
                     finalization_tools=finalization_tools,
+                    terminal_tools=terminal_tools,
                 )
             chosen_chat_fn = _corporate_chat_fn
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
@@ -1855,6 +1863,7 @@ async def bot_main():
             extra_handlers=agent_handlers,
             budget_usd=spec.budget_usd,
             finalization_tools=list(spec.finalization_tools),
+            terminal_tools=list(spec.terminal_tools),
             on_progress=progress_cb,
             on_complete=_on_task_complete,
         )
@@ -1866,9 +1875,22 @@ async def bot_main():
         result = result or {}
         is_subtask = result.get("is_subtask", False)
         if not is_subtask and result.get("status") in ("done", "failed"):
-            target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
-            if target_uid:
-                await _orchestrator_report_task(b, task, result, target_uid)
+            # Skip the LLM-driven callback for self-delivering scheduled tasks
+            # (e.g. diary): spec opts out AND the task came from the cron
+            # scheduler. User-delegated calls to the same agent still get the
+            # callback so the user hears back.
+            task_meta = task.get("metadata") or {}
+            if isinstance(task_meta, str):
+                try:
+                    task_meta = json.loads(task_meta)
+                except Exception:
+                    task_meta = {}
+            task_origin = task_meta.get("origin") if isinstance(task_meta, dict) else None
+            skip_callback = spec.skip_orchestrator_report and task_origin == "schedule"
+            if not skip_callback:
+                target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
+                if target_uid:
+                    await _orchestrator_report_task(b, task, result, target_uid)
 
     # Start background workers (keep handles for graceful cancellation)
     _bg_tasks = [

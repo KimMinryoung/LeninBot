@@ -111,6 +111,16 @@ class AgentSpec:
     # so the agent can persist its work on its way out (e.g. save_diary for the
     # diary agent). Forced-final response path will expose only these tools.
     finalization_tools: list[str] = field(default_factory=list)
+    # Tools that END the agent loop immediately on a successful call. The
+    # loop skips the trailing "summarize what you did" assistant turn; the
+    # tool's own return value becomes the task report. For self-delivering
+    # agents whose single terminal action (e.g. save_diary) already persists
+    # the real output.
+    terminal_tools: list[str] = field(default_factory=list)
+    # If True, the task worker does NOT invoke the orchestrator-report LLM
+    # callback when this agent's scheduled task finishes. Orchestrator-
+    # delegated invocations still get the callback so the user sees a reply.
+    skip_orchestrator_report: bool = False
     model: str | None = None
     provider: str | None = None  # None = follow orchestrator config; "claude"/"openai" = force corporate; "moon" = local LLM
     budget_usd: float = 1.00

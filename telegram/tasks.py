@@ -659,6 +659,7 @@ async def process_task(
     extra_handlers: dict | None = None,
     budget_usd: float = 1.00,
     finalization_tools: list[str] | None = None,
+    terminal_tools: list[str] | None = None,
     on_progress=None,
     on_complete=None,
 ):
@@ -843,6 +844,7 @@ async def process_task(
                 budget_tracker=bt,
                 task_id=task_id,
                 finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
             )
 
             # Save tool execution log for agent context isolation
@@ -917,15 +919,6 @@ async def process_task(
                 except Exception as e:
                     # Non-fatal: log but don't fail the task
                     logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
-
-            # Diary agent: if LLM returned empty fallback but save_diary succeeded, fix the report
-            if task.get("agent_type") == "diary" and "응답을 생성하지 못했습니다" in report:
-                tool_log_str = "\n".join(str(d) for d in bt.get("tool_work_details", []))
-                import re as _re
-                diary_match = _re.search(r'save_diary\(.*?"title":\s*"([^"]+)"', tool_log_str)
-                if diary_match or "Diary saved:" in tool_log_str:
-                    title = diary_match.group(1) if diary_match else "(title unknown)"
-                    report = f"Diary entry saved: {title}"
 
             restart_report_prefix = ""
             if restart_ctx["initiated"]:
@@ -1638,8 +1631,8 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                                 sched_agent = tag
                     await asyncio.to_thread(
                         _execute,
-                        "INSERT INTO telegram_tasks (user_id, content, agent_type) VALUES (%s, %s, %s)",
-                        (sched["user_id"], sched_content, sched_agent),
+                        "INSERT INTO telegram_tasks (user_id, content, agent_type, metadata) VALUES (%s, %s, %s, %s::jsonb)",
+                        (sched["user_id"], sched_content, sched_agent, json.dumps({"origin": "schedule", "schedule_id": sched["id"]})),
                     )
                     await asyncio.to_thread(
                         _execute,

@@ -201,7 +201,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat"],
+                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {
@@ -237,7 +237,7 @@ SELF_TOOLS = [
                         "properties": {
                             "agent": {
                                 "type": "string",
-                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat"],
+                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary"],
                             },
                             "task": {"type": "string", "description": "Task instructions for this agent."},
                             "context": {"type": "string", "description": "Why this subtask exists."},
