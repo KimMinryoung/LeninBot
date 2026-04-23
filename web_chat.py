@@ -204,6 +204,10 @@ async def handle_web_chat(
             await queue.put(_format_sse({"type": "log", "node": "tool", "content": detail}))
         elif event == "thinking":
             await queue.put(_format_sse({"type": "log", "node": "thinking", "content": detail}))
+        elif event == "text_delta":
+            # Live token stream from the LLM — the client appends to a growing
+            # answer bubble as each delta arrives, then finalizes on "answer".
+            await queue.put(_format_sse({"type": "chunk", "content": detail}))
 
     # Run LLM in background task, stream progress
     answer_holder: list[str] = []

@@ -449,8 +449,14 @@ async def _call_sdk(
     tools: list[dict] | None = None,
     max_tokens: int = 4096,
     parallel_tool_calls: bool = True,
+    on_progress=None,
 ):
-    """Single call via openai.AsyncOpenAI SDK."""
+    """Single call via openai.AsyncOpenAI SDK.
+
+    When on_progress is supplied, uses streaming mode and forwards each text
+    delta as on_progress("text_delta", chunk) so the client can render the
+    answer token-by-token. Returns an accumulated ChatCompletion either way.
+    """
     kwargs = {
         "model": model,
         "messages": messages,
@@ -461,17 +467,27 @@ async def _call_sdk(
         kwargs["tool_choice"] = "auto"
         kwargs["parallel_tool_calls"] = parallel_tool_calls
 
-    return await client.chat.completions.create(**kwargs)
+    if on_progress is None:
+        return await client.chat.completions.create(**kwargs)
+
+    async with client.chat.completions.stream(**kwargs) as stream:
+        async for event in stream:
+            if getattr(event, "type", None) == "content.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    await emit_progress(on_progress, "text_delta", delta)
+        return await stream.get_final_completion()
 
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
 
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
-                    parallel_tool_calls=True, enable_thinking=False):
+                    parallel_tool_calls=True, enable_thinking=False, on_progress=None):
     """Dispatch to SDK or httpx based on mode."""
     if sdk_mode:
         return await _call_sdk(client, model, messages, tools, max_tokens,
-                               parallel_tool_calls=parallel_tool_calls)
+                               parallel_tool_calls=parallel_tool_calls,
+                               on_progress=on_progress)
     else:
         return await _call_api(base_url, model, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
@@ -732,11 +748,16 @@ async def chat_with_tools(
                 working_msgs = _ensure_system_first(working_msgs, system_prompt)
 
         # ── API call with auto-recovery ──
+        # Streaming is enabled in SDK mode when the caller provides on_progress
+        # — text deltas are pushed through the callback so the UI can render
+        # the answer token-by-token. Non-SDK (httpx) path stays non-streaming.
+        stream_cb = on_progress if sdk_mode else None
         response = None
         try:
             response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, working_msgs,
                 openai_tools, max_tokens, enable_thinking=enable_thinking,
+                on_progress=stream_cb,
             )
         except Exception as api_err:
             err_str = str(api_err)
@@ -753,6 +774,7 @@ async def chat_with_tools(
                         sdk_mode, client, base_url, model, stripped,
                         openai_tools, max_tokens,
                         parallel_tool_calls=False, enable_thinking=enable_thinking,
+                        on_progress=stream_cb,
                     )
                     working_msgs = stripped
                     logger.info("Auto-recovery succeeded at round %d", round_num)
@@ -989,9 +1011,11 @@ async def chat_with_tools(
         })
 
     # ── Final API call: expose finalization tools if any, else plain text ──
+    stream_cb = on_progress if sdk_mode else None
     try:
         final_response = await _guarded_api_call(
             sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
+            on_progress=stream_cb,
         )
         _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
         if sdk_mode and final_usage:
@@ -1045,6 +1069,7 @@ async def chat_with_tools(
                 # Plain text follow-up to collect the final answer.
                 followup = await _guarded_api_call(
                     sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
+                    on_progress=stream_cb,
                 )
                 _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
                 if sdk_mode and followup_usage:
@@ -1064,6 +1089,7 @@ async def chat_with_tools(
         try:
             last_response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, stripped, None, max_tokens,
+                on_progress=stream_cb,
             )
             _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
             if sdk_mode and last_usage:
