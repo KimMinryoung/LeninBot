@@ -3,6 +3,7 @@
 
 # systemd-creds 마이그레이션 산출물 (scripts/migrate_secrets_to_credstore.py 가 생성)
 scripts/systemd-credentials.conf
+scripts/dropins/
 
 # 가상환경 폴더
 .venv/
