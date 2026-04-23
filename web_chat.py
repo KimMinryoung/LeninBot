@@ -79,19 +79,54 @@ _web_handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in _WEB_ALLOWED_TOO
 
 # ── Chat history from chat_logs table ────────────────────────────────
 
-def _load_web_history(fingerprint: str, limit: int = 20) -> list[dict]:
-    """Load recent conversation history from chat_logs for a fingerprint."""
-    if not fingerprint:
+def _load_web_history(
+    fingerprints: list[str],
+    session_id: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Load recent conversation history from chat_logs.
+
+    If `session_id` is provided AND that session has prior turns for any of the
+    given fingerprints, only that session's history is returned (= resume a
+    specific conversation). Otherwise, the most recent `limit` turns across all
+    the given fingerprints are returned (= continue the fingerprint-wide thread).
+    """
+    fps = [f for f in (fingerprints or []) if f]
+    if not fps:
         return []
-    rows = db_query(
-        """SELECT user_query, bot_answer FROM chat_logs
-           WHERE fingerprint = %s
-           ORDER BY created_at DESC LIMIT %s""",
-        (fingerprint, limit),
-    )
+
+    if session_id:
+        # Does this session actually belong to one of the provided fingerprints?
+        owned = db_query(
+            """SELECT 1 FROM chat_logs
+               WHERE session_id = %s AND fingerprint = ANY(%s)
+               LIMIT 1""",
+            (session_id, fps),
+        )
+        if owned:
+            rows = db_query(
+                """SELECT user_query, bot_answer FROM chat_logs
+                   WHERE session_id = %s AND fingerprint = ANY(%s)
+                   ORDER BY created_at DESC LIMIT %s""",
+                (session_id, fps, limit),
+            )
+        else:
+            rows = db_query(
+                """SELECT user_query, bot_answer FROM chat_logs
+                   WHERE fingerprint = ANY(%s)
+                   ORDER BY created_at DESC LIMIT %s""",
+                (fps, limit),
+            )
+    else:
+        rows = db_query(
+            """SELECT user_query, bot_answer FROM chat_logs
+               WHERE fingerprint = ANY(%s)
+               ORDER BY created_at DESC LIMIT %s""",
+            (fps, limit),
+        )
+
     if not rows:
         return []
-    # Reverse to chronological order, convert to message format
     messages = []
     for row in reversed(rows):
         if row.get("user_query"):
@@ -136,10 +171,14 @@ async def handle_web_chat(
     fingerprint: str,
     user_agent: str,
     ip_address: str,
+    user_fingerprints: list[str] | None = None,
 ):
     """Async generator yielding SSE events for a web chat request."""
-    # Load conversation history (pure user/assistant text from chat_logs).
-    history = await asyncio.to_thread(_load_web_history, fingerprint, 20)
+    # Authenticated users bring all their bound fingerprints; anonymous users
+    # have just the one from localStorage. Deduplicate.
+    fps = list({f for f in ([fingerprint] + (user_fingerprints or [])) if f})
+    # Load conversation history scoped to session_id if it resumes an existing one.
+    history = await asyncio.to_thread(_load_web_history, fps, session_id, 20)
 
     # Web chatbot always runs on a corporate LLM (local is Telegram-only).
     provider = _config.get("provider", "claude")

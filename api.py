@@ -239,6 +239,14 @@ def format_sse(data: dict):
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _parse_user_fingerprints(http_req: Request) -> list[str]:
+    """Read X-User-Fingerprints header (CSV) — injected by the frontend proxy
+    for logged-in users so their bound fingerprints (across devices) can be
+    queried as one. Empty when unauthenticated."""
+    raw = http_req.headers.get("x-user-fingerprints", "")
+    return [f.strip() for f in raw.split(",") if f.strip()]
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest, http_req: Request):
     """
@@ -250,6 +258,7 @@ async def chat(request: ChatRequest, http_req: Request):
     user_agent = http_req.headers.get("user-agent", "")
     forwarded = http_req.headers.get("x-forwarded-for", "")
     ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host if http_req.client else "")
+    user_fingerprints = _parse_user_fingerprints(http_req)
 
     lock = _get_session_lock(request.session_id)
 
@@ -269,6 +278,7 @@ async def chat(request: ChatRequest, http_req: Request):
                 fingerprint=request.fingerprint,
                 user_agent=user_agent,
                 ip_address=ip_address,
+                user_fingerprints=user_fingerprints,
             ):
                 yield sse_event
 
@@ -295,23 +305,89 @@ async def get_logs(
 
 @app.get("/history")
 async def get_history(
-    fingerprint: str = Query(..., description="Browser fingerprint stored in localStorage"),
+    http_req: Request,
+    fingerprint: str | None = Query(default=None, description="Browser fingerprint (anonymous visitors)"),
+    session_id: str | None = Query(default=None, description="Restrict to a single conversation session"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
-    Fetch conversation history for an end-user identified by browser fingerprint.
-    Returns only user_query, bot_answer, created_at — no processing logs or internal fields.
-    Persistent across server restarts (fingerprint is device-based, not session-based).
+    Fetch conversation history.
+    - Anonymous: ?fingerprint=X — only that device's turns.
+    - Logged-in: frontend proxy sets X-User-Fingerprints header — union of all bound devices.
+      If `session_id` is given, only that session is returned.
     """
-    rows = db_query(
-        """SELECT user_query, bot_answer, created_at
-           FROM chat_logs
-           WHERE fingerprint = %s
-           ORDER BY created_at ASC
-           LIMIT %s""",
-        (fingerprint, limit),
-    )
+    fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
+    if not fps:
+        return {"history": []}
+
+    if session_id:
+        rows = db_query(
+            """SELECT user_query, bot_answer, created_at
+               FROM chat_logs
+               WHERE session_id = %s AND fingerprint = ANY(%s)
+               ORDER BY created_at ASC
+               LIMIT %s""",
+            (session_id, fps, limit),
+        )
+    else:
+        rows = db_query(
+            """SELECT user_query, bot_answer, created_at
+               FROM chat_logs
+               WHERE fingerprint = ANY(%s)
+               ORDER BY created_at ASC
+               LIMIT %s""",
+            (fps, limit),
+        )
     return {"history": rows}
+
+
+@app.get("/sessions")
+async def list_sessions(
+    http_req: Request,
+    fingerprint: str | None = Query(default=None, description="Anonymous browser fingerprint"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """
+    List distinct chat sessions (session_id groups) visible to the caller, with a
+    preview of the first user message and timestamps. Ordered by most-recent activity.
+    """
+    fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
+    if not fps:
+        return {"sessions": []}
+
+    rows = db_query(
+        """WITH scoped AS (
+              SELECT id, session_id, fingerprint, user_query, created_at
+                FROM chat_logs
+               WHERE fingerprint = ANY(%s)
+            ),
+            agg AS (
+              SELECT session_id,
+                     MIN(created_at) AS first_at,
+                     MAX(created_at) AS last_at,
+                     COUNT(*)::int   AS message_count
+                FROM scoped
+               GROUP BY session_id
+            ),
+            first_msg AS (
+              SELECT DISTINCT ON (session_id)
+                     session_id, user_query AS first_query
+                FROM scoped
+               ORDER BY session_id, created_at ASC
+            )
+            SELECT agg.session_id, agg.first_at, agg.last_at, agg.message_count,
+                   first_msg.first_query
+              FROM agg
+              JOIN first_msg USING (session_id)
+             ORDER BY agg.last_at DESC
+             LIMIT %s""",
+        (fps, limit),
+    )
+    # Truncate previews for transport
+    for r in rows:
+        q = r.get("first_query") or ""
+        r["first_query"] = q[:120]
+    return {"sessions": rows}
 
 
 @app.get("/reports")
