@@ -18,8 +18,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from dotenv import load_dotenv
-load_dotenv()
+from secrets_loader import get_secret
 
 from langchain_tavily import TavilySearch
 from graphiti_core.llm_client.gemini_client import GeminiClient
@@ -37,7 +36,7 @@ def _get_llm_client() -> GeminiClient:
     """인물 추출 전용 경량 LLM 클라이언트."""
     return GeminiClient(
         config=LLMConfig(
-            api_key=os.getenv("GEMINI_API_KEY", ""),
+            api_key=get_secret("GEMINI_API_KEY", "") or "",
             model="gemini-3.1-flash-lite-preview",
             small_model="gemini-2.5-flash-lite",
         )

@@ -269,7 +269,8 @@ def _send_debrief_telegram(conversation: list[dict], debrief_path: Path) -> None
     if not os.getenv("RAZVEDCHIK_TELEGRAM_NOTIFY"):
         return
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    from secrets_loader import get_secret
+    token = get_secret("TELEGRAM_BOT_TOKEN")
     if not len(token or ""):
         return
 

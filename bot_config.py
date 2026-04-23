@@ -5,16 +5,15 @@ import json
 import asyncio
 import logging
 
-from dotenv import load_dotenv
 import anthropic
 
-load_dotenv()
+from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
 # ── API Keys ──────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", "") or ""
+OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "") or ""
 
 # ── LLM Clients ──────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)

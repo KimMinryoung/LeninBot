@@ -25,11 +25,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "skills" / "kg-maintenance" / "scripts"))
 
-from dotenv import load_dotenv
-load_dotenv(ROOT / ".env")
-
 import requests
 from backup_kg import backup as _dump_kg
+from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 KST = timezone(timedelta(hours=9))
@@ -43,7 +41,7 @@ def _r2_url(key: str) -> str:
 
 
 def _r2_headers() -> dict:
-    return {"Authorization": f"Bearer {os.environ['R2_CF_API_TOKEN']}"}
+    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
 
 
 def _r2_put(key: str, path: str) -> None:

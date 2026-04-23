@@ -216,7 +216,8 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
     not just counts. Plain text, no markdown. Telegram caps messages at 4096 chars;
     we leave headroom and truncate sections as needed.
     """
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    from secrets_loader import get_secret
+    token = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
         logger.warning("Telegram env not set — skipping tick notification")

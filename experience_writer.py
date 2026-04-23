@@ -9,15 +9,12 @@ lessons/mistakes/insights that make the agent smarter over time.
 """
 
 import json
-import os
 import logging
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
 from db import query as db_query, execute as db_execute
+from secrets_loader import get_secret
 from shared import extract_text_content, KST, MODEL_MAIN, MODEL_LIGHT
-
-load_dotenv()
 
 logger = logging.getLogger("experience_writer")
 
@@ -35,7 +32,7 @@ def _init():
     from langchain_google_genai import ChatGoogleGenerativeAI
     _llm = ChatGoogleGenerativeAI(
         model=MODEL_MAIN,
-        google_api_key=os.getenv("GEMINI_API_KEY"),
+        google_api_key=get_secret("GEMINI_API_KEY"),
         temperature=0.3,
         max_output_tokens=4096,
         streaming=False,

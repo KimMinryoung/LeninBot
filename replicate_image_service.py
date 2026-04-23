@@ -21,15 +21,14 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+from secrets_loader import get_secret
 
-PROJECT_ROOT = os.environ["PROJECT_ROOT"]
+PROJECT_ROOT = str(Path(__file__).resolve().parent)
 
 logger = logging.getLogger(__name__)
 
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
+REPLICATE_API_TOKEN = (get_secret("REPLICATE_API_TOKEN", "") or "").strip()
 REPLICATE_API_BASE = os.getenv("REPLICATE_API_BASE", "https://api.replicate.com/v1").rstrip("/")
 REPLICATE_DEFAULT_MODEL = os.getenv(
     "REPLICATE_DEFAULT_MODEL",

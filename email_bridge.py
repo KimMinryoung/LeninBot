@@ -27,11 +27,9 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Callable
 
-from dotenv import load_dotenv
-
 from db import execute as db_execute, query as db_query, query_one as db_query_one
+from secrets_loader import get_secret
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
 
@@ -99,12 +97,12 @@ def load_email_bridge_config() -> EmailBridgeConfig:
         imap_host=os.getenv("EMAIL_IMAP_HOST", "").strip(),
         imap_port=int(os.getenv("EMAIL_IMAP_PORT", "993") or "993"),
         imap_username=os.getenv("EMAIL_IMAP_USERNAME", "").strip(),
-        imap_password=os.getenv("EMAIL_IMAP_PASSWORD", "").strip(),
+        imap_password=(get_secret("EMAIL_IMAP_PASSWORD", "") or "").strip(),
         imap_mailbox=os.getenv("EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX",
         smtp_host=os.getenv("EMAIL_SMTP_HOST", "").strip(),
         smtp_port=int(os.getenv("EMAIL_SMTP_PORT", "465") or "465"),
         smtp_username=os.getenv("EMAIL_SMTP_USERNAME", "").strip(),
-        smtp_password=os.getenv("EMAIL_SMTP_PASSWORD", "").strip(),
+        smtp_password=(get_secret("EMAIL_SMTP_PASSWORD", "") or "").strip(),
         smtp_from_email=os.getenv("EMAIL_SMTP_FROM_EMAIL", "").strip(),
         smtp_from_name=os.getenv("EMAIL_SMTP_FROM_NAME", "Cyber-Lenin").strip() or "Cyber-Lenin",
         polling_enabled=_truthy(os.getenv("EMAIL_POLLING_ENABLED"), True),
@@ -116,7 +114,7 @@ def load_email_bridge_config() -> EmailBridgeConfig:
         log_dir=Path(os.getenv("EMAIL_LOG_DIR", str(root / "logs" / "email_bridge"))),
         default_approver_user_id=int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0"),
         approval_secret=os.getenv("EMAIL_APPROVAL_SECRET", "").strip(),
-        resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
+        resend_api_key=(get_secret("RESEND_API_KEY", "") or "").strip(),
     )
 
 

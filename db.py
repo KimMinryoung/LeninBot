@@ -11,9 +11,8 @@ from contextlib import contextmanager
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 
-load_dotenv()
+from secrets_loader import get_secret
 
 _pool: pool.ThreadedConnectionPool | None = None
 
@@ -28,7 +27,7 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             port=int(os.getenv("DB_PORT", "5432")),
             dbname=os.getenv("DB_NAME", "postgres"),
             user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
+            password=get_secret("DB_PASSWORD"),
             sslmode="require",
         )
     return _pool

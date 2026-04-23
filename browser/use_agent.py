@@ -36,12 +36,14 @@ def _build_llm(model: str | None = None):
     provider, default_model = _resolve_provider_and_model()
     model = model or default_model
 
+    from secrets_loader import get_secret
+
     if provider == "openai":
         from browser_use.llm.openai.chat import ChatOpenAI
 
         llm = ChatOpenAI(
             model=model,
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
+            api_key=get_secret("OPENAI_API_KEY", "") or "",
             timeout=120,
         )
         logger.info("browser-use LLM: OpenAI %s", model)
@@ -52,7 +54,7 @@ def _build_llm(model: str | None = None):
 
     llm = ChatAnthropic(
         model=model,
-        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        api_key=get_secret("ANTHROPIC_API_KEY", "") or "",
         max_tokens=8192,
         timeout=120,
     )

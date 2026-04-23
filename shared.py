@@ -14,19 +14,17 @@ from contextlib import contextmanager
 from datetime import timezone, timedelta, datetime
 import time
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
 
 def get_github_token() -> str:
-    """Return configured GitHub token from env.
+    """Return configured GitHub token.
 
     Preferred key: GITHUB_TOKEN. Legacy fallback: GH_TOKEN.
     """
-    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+    return (get_secret("GITHUB_TOKEN") or get_secret("GH_TOKEN") or "").strip()
 
 # ── Constants ─────────────────────────────────────────────────────────
 KST = timezone(timedelta(hours=9))
@@ -760,7 +758,7 @@ def _get_neo4j_sync_driver():
     if not uri:
         raise RuntimeError("NEO4J_URI not configured")
     user = os.getenv("NEO4J_USER", "neo4j")
-    password = os.getenv("NEO4J_PASSWORD", "")
+    password = get_secret("NEO4J_PASSWORD", "") or ""
     db = os.getenv("NEO4J_DATABASE", "neo4j")
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
@@ -1038,7 +1036,7 @@ def fetch_render_status(deploy_limit: int = 5) -> dict:
     Returns dict with 'deploys' and 'events' lists.
     Requires RENDER_API_KEY and RENDER_SERVICE_ID env vars.
     """
-    api_key = os.getenv("RENDER_API_KEY", "")
+    api_key = get_secret("RENDER_API_KEY", "") or ""
     service_id = os.getenv("RENDER_SERVICE_ID", "")
     if not api_key or not service_id:
         return {"error": "RENDER_API_KEY or RENDER_SERVICE_ID not set"}
@@ -1225,7 +1223,7 @@ def upload_to_r2(local_path: str, key: str | None = None, content_type: str | No
     import mimetypes
     import requests as _req
 
-    cf_token = os.getenv("R2_CF_API_TOKEN", "").strip()
+    cf_token = (get_secret("R2_CF_API_TOKEN", "") or "").strip()
     account_id = os.getenv("R2_CF_ACCOUNT_ID", "").strip()
     bucket = os.getenv("R2_BUCKET_NAME", "").strip()
     public_url = os.getenv("R2_PUBLIC_URL", "").strip().rstrip("/")
@@ -1275,7 +1273,7 @@ def fetch_render_logs(minutes_back: int = 10, limit: int = 50) -> list[dict]:
     """
     global _render_owner_id
 
-    api_key = os.getenv("RENDER_API_KEY", "")
+    api_key = get_secret("RENDER_API_KEY", "") or ""
     service_id = os.getenv("RENDER_SERVICE_ID", "")
     if not api_key or not service_id:
         return [{"error": "RENDER_API_KEY or RENDER_SERVICE_ID not set"}]
@@ -1847,7 +1845,7 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
 
     # 2) Tavily Extract (skip if API key missing or quota exhausted)
     best_fallback = None
-    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    tavily_key = get_secret("TAVILY_API_KEY", "") or ""
     if tavily_key:
         try:
             from langchain_tavily import TavilyExtract

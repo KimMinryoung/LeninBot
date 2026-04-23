@@ -10,6 +10,8 @@ import asyncio
 import logging
 from datetime import datetime
 
+from secrets_loader import get_secret
+
 logger = logging.getLogger(__name__)
 
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
@@ -1033,7 +1035,7 @@ def build_mission_handler(user_id: int):
 
 async def _exec_web_search(query: str, max_results: int = 5) -> str:
     """Search the web via Tavily API."""
-    api_key = os.environ.get("TAVILY_API_KEY", "")
+    api_key = get_secret("TAVILY_API_KEY", "") or ""
     if not api_key:
         return "Error: TAVILY_API_KEY not set."
     max_results = max(1, min(max_results, 10))
@@ -1974,7 +1976,7 @@ def _imap_connect():
     host = os.environ.get("EMAIL_IMAP_HOST", "")
     port = int(os.environ.get("EMAIL_IMAP_PORT", "993"))
     username = os.environ.get("EMAIL_IMAP_USERNAME", "")
-    password = os.environ.get("EMAIL_IMAP_PASSWORD", "")
+    password = get_secret("EMAIL_IMAP_PASSWORD", "") or ""
     if not all([host, username, password]):
         return None
     conn = imaplib.IMAP4_SSL(host, port)

@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse, Response, JSONResponse
@@ -28,10 +27,10 @@ from email_bridge import (
     send_outbound_email,
 )
 
-load_dotenv()
+from secrets_loader import get_secret
 
 # ── Admin API key authentication ──────────────────────────────────
-_ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+_ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
 _admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 
 

@@ -431,7 +431,8 @@ class Razvedchik:
     """
 
     def __init__(self):
-        self.api_key = os.getenv("MOLTBOOK_API_KEY", "")
+        from secrets_loader import get_secret
+        self.api_key = get_secret("MOLTBOOK_API_KEY", "") or ""
         if not self.api_key:
             logger.warning("[razvedchik] MOLTBOOK_API_KEY 미설정 — API 호출 불가")
 
@@ -1040,7 +1041,8 @@ class Razvedchik:
         if os.getenv("RAZVEDCHIK_TELEGRAM_NOTIFY", "") != "1":
             return
 
-        token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        from secrets_loader import get_secret
+        token   = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
         chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         if not token or not chat_id:
             logger.warning("[razvedchik] 텔레그램 환경변수 미설정 — 발송 건너뜀")

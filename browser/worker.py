@@ -77,7 +77,8 @@ def _init_claude_client():
     if _claude_client is not None:
         return _claude_client
     import anthropic
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    from secrets_loader import get_secret
+    api_key = get_secret("ANTHROPIC_API_KEY", "") or ""
     _claude_client = anthropic.AsyncAnthropic(api_key=api_key)
     return _claude_client
 

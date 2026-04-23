@@ -18,8 +18,9 @@ from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
 
-from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router
+
+from secrets_loader import get_secret
 
 # Extracted modules
 from bot_config import (
@@ -41,8 +42,6 @@ from telegram.tasks import (
     checkpoint_task_on_shutdown, persist_task_restart_state,
     _delegate_to_browser_worker, check_browser_worker_alive,
 )
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -82,7 +81,7 @@ class _ThrottleFilter(logging.Filter):
 logging.getLogger("neo4j").addFilter(_ThrottleFilter(60.0))
 
 # ── Config ───────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
 ALLOWED_USER_IDS: set[int] = {
     int(uid.strip())
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
