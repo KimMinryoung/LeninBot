@@ -316,6 +316,19 @@ async def chat_with_tools(
     if cached_tools:
         cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
 
+    # When on_progress is wired, route API calls through the streaming
+    # interface so text deltas flow to the caller as they're generated.
+    # Callers that don't care about text_delta (e.g. Telegram) simply drop
+    # the event — the final Message object is identical either way.
+    async def _claude_call(**kwargs):
+        if on_progress is None:
+            return await client.messages.create(**kwargs)
+        async with client.messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                if text:
+                    await emit_progress(on_progress, "text_delta", text)
+            return await stream.get_final_message()
+
     response = None
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
@@ -323,7 +336,7 @@ async def chat_with_tools(
         # ── Cancel check ──
         check_cancelled(task_id)
 
-        response = await client.messages.create(
+        response = await _claude_call(
             model=model,
             max_tokens=max_tokens,
             system=cached_system,
@@ -539,7 +552,7 @@ async def chat_with_tools(
     }
     if final_tools:
         create_kwargs["tools"] = final_tools
-    final = await client.messages.create(**create_kwargs)
+    final = await _claude_call(**create_kwargs)
 
     if hasattr(final, "usage") and final.usage:
         usage = final.usage
@@ -624,7 +637,7 @@ async def chat_with_tools(
             working_msgs.append({"role": "user", "content": final_tool_results})
             # Cap output at 2K — closing remarks after a finalization tool don't
             # need the orchestrator's full max_tokens (typically 16K).
-            followup = await client.messages.create(
+            followup = await _claude_call(
                 model=model,
                 max_tokens=min(max_tokens, 2048),
                 system=cached_system,
