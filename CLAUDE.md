@@ -11,6 +11,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/project_state.md` — Current project state, architecture, capabilities, and limitations snapshot
 - `dev_docs/knowledge_graph_design.md` — Knowledge graph 설계, 인프라, 제약사항, 변경이력
 - `dev_docs/autonomous_project.md` — 자율 프로젝트 루프 (T0 pilot) — 티어 시스템, 상태기계, 스키마, 운영 CLI, 설계 결정
+- `dev_docs/secret_management.md` — systemd-creds 기반 시크릿 관리 — 3-tier 분류, 서비스별 최소권한, 로테이션 플로우, 운영 CLI
 
 Update these documents as phases are completed.
 
