@@ -2,10 +2,13 @@
 """Manage systemd-creds encrypted secrets in /etc/credstore.encrypted/.
 
 Operations (all require root):
-  list                — show registered creds (name, age, size, services using it)
-  add <NAME>          — add a new credential; value read via hidden prompt or stdin
-  rotate <NAME>       — replace an existing credential value
-  delete <NAME>       — remove a credential (with confirmation)
+  list                        — show registered creds
+    [--stale N]               — only creds ≥ N days since last rotation
+    [--notify]                — send summary to Telegram if any rows
+  add <NAME>                  — add a new credential
+  rotate <NAME>               — replace an existing credential value
+    [-r/--restart]            — restart active services that mount it after write
+  delete <NAME>               — remove a credential (with confirmation)
 
 Values are never printed. Inputs come from an interactive hidden prompt
 (getpass) or piped stdin. After add/rotate/delete, restart services that
@@ -19,11 +22,13 @@ import getpass
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 CREDSTORE = Path("/etc/credstore.encrypted")
 SYSTEMD_SYSTEM = Path("/etc/systemd/system")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _require_root() -> None:
@@ -44,6 +49,10 @@ def _format_mtime(mtime: float) -> str:
     return datetime.fromtimestamp(mtime, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
+def _age_days(mtime: float) -> float:
+    return (time.time() - mtime) / 86400.0
+
+
 def _services_mounting(cred_name: str) -> list[str]:
     """Scan service drop-ins for `LoadCredentialEncrypted=<cred_name>:` lines."""
     needle = f"LoadCredentialEncrypted={cred_name.lower()}:"
@@ -56,6 +65,19 @@ def _services_mounting(cred_name: str) -> list[str]:
         if needle in text:
             users.add(drop_in.parent.name.removesuffix(".service.d"))
     return sorted(users)
+
+
+def _filter_active(services: list[str]) -> list[str]:
+    """Return only those services currently in `active` state."""
+    if not services:
+        return []
+    res = subprocess.run(
+        ["systemctl", "is-active", *services],
+        capture_output=True,
+        text=True,
+    )
+    states = res.stdout.strip().splitlines()
+    return [svc for svc, st in zip(services, states) if st.strip() == "active"]
 
 
 def _read_value(prompt: str) -> str:
@@ -94,6 +116,35 @@ def _encrypt_atomic(cred_name: str, value: str, out_path: Path) -> None:
         raise
 
 
+def _notify_telegram(message: str) -> bool:
+    """Send `message` to the configured Telegram chat. Returns True on success."""
+    sys.path.insert(0, str(PROJECT_ROOT))
+    try:
+        from secrets_loader import get_secret
+    except Exception as e:
+        print(f"WARNING: cannot import secrets_loader ({e}); skipping notify", file=sys.stderr)
+        return False
+    token = get_secret("TELEGRAM_BOT_TOKEN") or ""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        print("WARNING: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skipping notify", file=sys.stderr)
+        return False
+    import urllib.parse
+    import urllib.request
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=data,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        print(f"WARNING: telegram notify failed: {e}", file=sys.stderr)
+        return False
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     _require_root()
     if not CREDSTORE.exists():
@@ -103,21 +154,42 @@ def cmd_list(args: argparse.Namespace) -> int:
     if not creds:
         print("(no credentials registered)")
         return 0
+
     rows = []
     for p in creds:
-        name_lower = p.stem
         st = p.stat()
-        users = _services_mounting(name_lower)
-        rows.append((name_lower, st.st_size, st.st_mtime, users))
+        age = _age_days(st.st_mtime)
+        if args.stale is not None and age < args.stale:
+            continue
+        users = _services_mounting(p.stem)
+        rows.append((p.stem, st.st_size, st.st_mtime, age, users))
+
+    if not rows:
+        if args.stale is not None:
+            print(f"No credentials ≥ {args.stale} days old.")
+        return 0
 
     w_name = max(len("NAME"), max(len(r[0]) for r in rows))
-    print(f"{'NAME':<{w_name}}  {'SIZE':>8}  {'MODIFIED':<16}  USED BY")
-    print(f"{'-'*w_name}  {'-'*8}  {'-'*16}  {'-'*7}")
-    for name, size, mtime, users in rows:
+    print(f"{'NAME':<{w_name}}  {'SIZE':>8}  {'MODIFIED':<16}  {'AGE':>6}  USED BY")
+    print(f"{'-'*w_name}  {'-'*8}  {'-'*16}  {'-'*6}  {'-'*7}")
+    for name, size, mtime, age, users in rows:
         used = ", ".join(s.removeprefix("leninbot-") for s in users) or "(unmounted)"
-        print(f"{name:<{w_name}}  {_format_size(size):>8}  {_format_mtime(mtime):<16}  {used}")
+        print(f"{name:<{w_name}}  {_format_size(size):>8}  {_format_mtime(mtime):<16}  {int(age):>4}d  {used}")
     print()
-    print(f"total: {len(creds)}")
+    print(f"total: {len(rows)}" + (f" (stale ≥ {args.stale}d)" if args.stale is not None else ""))
+
+    if args.notify and args.stale is not None and rows:
+        summary_lines = [
+            f"⚠️ Cyber-Lenin: {len(rows)} secrets ≥ {args.stale} days old",
+        ]
+        for name, _, _, age, users in rows:
+            used = ", ".join(s.removeprefix("leninbot-") for s in users) or "(unmounted)"
+            summary_lines.append(f"• {name}: {int(age)}d  [{used}]")
+        summary_lines.append("")
+        summary_lines.append("Rotate: sudo manage_secrets.py rotate <NAME> --restart")
+        ok = _notify_telegram("\n".join(summary_lines))
+        print(f"telegram notification: {'sent' if ok else 'skipped/failed'}")
+
     return 0
 
 
@@ -142,12 +214,56 @@ def cmd_rotate(args: argparse.Namespace) -> int:
         return 1
     users = _services_mounting(args.name)
     value = _read_value(f"new value for {args.name.upper()}")
-    _encrypt_atomic(args.name.lower(), value, path)
-    print(f"= rotated {args.name.lower()}")
-    if users:
-        print(f"Restart services to load new value: systemctl restart {' '.join(users)}")
-    else:
-        print("(no services currently mount this credential)")
+
+    # Keep a one-step-undo backup of the previous cred, then encrypt in place.
+    backup = path.with_name(path.name + ".bak")
+    if backup.exists():
+        backup.unlink()
+    os.rename(path, backup)
+    try:
+        _encrypt_atomic(args.name.lower(), value, path)
+    except Exception:
+        os.rename(backup, path)  # restore original on encrypt failure
+        raise
+
+    print(f"= rotated {args.name.lower()}  (backup: {backup})")
+
+    if not args.restart or not users:
+        if users:
+            print(f"Restart services to load new value: systemctl restart {' '.join(users)}")
+        else:
+            print("(no services currently mount this credential)")
+        return 0
+
+    active = _filter_active(users)
+    inactive = [u for u in users if u not in active]
+
+    if active:
+        print(f"restarting active services: {', '.join(active)}")
+        try:
+            subprocess.run(["systemctl", "restart", *active], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: systemctl restart failed: {e}", file=sys.stderr)
+            print(f"Rollback: sudo mv {backup} {path} && sudo systemctl restart {' '.join(active)}")
+            return 1
+        time.sleep(2)
+        chk = subprocess.run(
+            ["systemctl", "is-active", *active], capture_output=True, text=True
+        )
+        states = chk.stdout.strip().splitlines()
+        failed = [s for s, st in zip(active, states) if st.strip() != "active"]
+        if failed:
+            print(f"WARNING: not active after restart: {', '.join(failed)}")
+            print(f"Rollback: sudo mv {backup} {path} && sudo systemctl restart {' '.join(active)}")
+            return 1
+        print(f"status: {' '.join(states)}")
+
+    if inactive:
+        print(f"(next firing of timer-driven services will use new value: {', '.join(inactive)})")
+
+    # All good — drop the backup.
+    backup.unlink()
+    print(f"(backup removed; rotation verified)")
     return 0
 
 
@@ -188,6 +304,17 @@ def main(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("list", help="show registered credentials")
+    sp.add_argument(
+        "--stale",
+        type=int,
+        metavar="DAYS",
+        help="only show credentials rotated ≥ DAYS days ago",
+    )
+    sp.add_argument(
+        "--notify",
+        action="store_true",
+        help="send summary to Telegram if any stale creds found (only with --stale)",
+    )
     sp.set_defaults(func=cmd_list)
 
     sp = sub.add_parser("add", help="add a new credential")
@@ -196,6 +323,12 @@ def main(argv: list[str]) -> int:
 
     sp = sub.add_parser("rotate", help="replace an existing credential's value")
     sp.add_argument("name", help="env-var-style name")
+    sp.add_argument(
+        "-r",
+        "--restart",
+        action="store_true",
+        help="restart active services that mount this cred after rotation",
+    )
     sp.set_defaults(func=cmd_rotate)
 
     sp = sub.add_parser("delete", help="remove a credential")
