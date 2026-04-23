@@ -161,6 +161,11 @@ def cmd_delete(args: argparse.Namespace) -> int:
     if users and not args.force:
         print(f"WARNING: {args.name.lower()} is still mounted by: {', '.join(users)}")
         print("Those services will FAIL TO START until their drop-ins are updated.")
+        print("To retire this credential cleanly:")
+        print(f"  1. Remove \"{args.name.upper()}\" from TIER_A / SERVICE_CREDS in")
+        print("     scripts/migrate_secrets_to_credstore.py")
+        print("  2. sudo scripts/apply_credentials_dropin.sh  (regenerates drop-ins + restart)")
+        print(f"  3. Re-run: sudo manage_secrets.py delete {args.name.upper()} -f")
     if not args.force:
         confirm = input(f"Delete {args.name.lower()}? [y/N] ")
         if confirm.strip().lower() != "y":

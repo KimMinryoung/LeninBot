@@ -14,10 +14,15 @@
 
 set -euo pipefail
 
-DROPIN_SRC_DIR=/home/grass/leninbot/scripts/dropins
+PROJECT_ROOT=/home/grass/leninbot
+DROPIN_SRC_DIR="${PROJECT_ROOT}/scripts/dropins"
+MIGRATE_SCRIPT="${PROJECT_ROOT}/scripts/migrate_secrets_to_credstore.py"
+
+echo "--- regenerating drop-ins ---"
+"${PROJECT_ROOT}/venv/bin/python" "$MIGRATE_SCRIPT" | sed 's/^/    /'
+
 if [[ ! -d "$DROPIN_SRC_DIR" ]]; then
   echo "ERROR: drop-in source dir not found at $DROPIN_SRC_DIR" >&2
-  echo "Run scripts/migrate_secrets_to_credstore.py first." >&2
   exit 1
 fi
 
