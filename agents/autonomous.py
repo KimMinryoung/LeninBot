@@ -181,6 +181,7 @@ Never attempt to reach outside it.
         "publish_research", "publish_hub_curation", "publish_static_page", "publish_comic",
     ],
     provider="claude",
+    model="sonnet",  # Sonnet 4.6 — Opus 4.7 was costing $2+/tick on long fetched articles
     budget_usd=0.60,  # raised from 0.40 — publishing often requires additional rounds
     # 6 rounds gives headroom for the tool loop's built-in round-limit warning
     # (injected at `max_rounds - 2`). Still a small bounded wake (vs analyst=50, diary=30).

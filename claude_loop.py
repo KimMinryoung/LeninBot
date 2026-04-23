@@ -542,7 +542,17 @@ async def chat_with_tools(
     final = await client.messages.create(**create_kwargs)
 
     if hasattr(final, "usage") and final.usage:
-        total_cost += _calculate_cost(final.usage, model)
+        usage = final.usage
+        call_cost = _calculate_cost(usage, model)
+        total_cost += call_cost
+        logger.info(
+            "Forced-final usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0),
+            getattr(usage, "cache_creation_input_tokens", 0),
+            getattr(usage, "cache_read_input_tokens", 0),
+            call_cost, total_cost, budget_usd,
+        )
     if final.stop_reason == "max_tokens":
         logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
 
@@ -587,20 +597,53 @@ async def chat_with_tools(
             tool_work_details.append(f"  [final] {tname}({input_summary}) → {result}")
             save_redis_progress(task_id, (round_num if response else 0) + 1, tname, input_summary, result, is_error)
 
-        working_msgs.append({"role": "assistant", "content": final_assistant_content})
-        working_msgs.append({"role": "user", "content": final_tool_results})
+        # Skip the followup roundtrip when the forced-final already produced
+        # substantive closing text. The finalization tool ran (durable
+        # persistence). The model's pre-tool text typically already contains
+        # the self-critique the agent was prompted for. Re-sending the entire
+        # conversation just to collect a "done" line at full input pricing is
+        # the dominant cost in autonomous_project ticks (cf. project #2 turn
+        # 50: $1.73 forced-final + followup combined).
+        pre_tool_text = "\n".join(
+            tp["text"] for tp in final_assistant_content if tp.get("type") == "text"
+        ).strip()
+        FOLLOWUP_SKIP_MIN_CHARS = 200
 
-        # Plain text follow-up to collect the final answer.
-        followup = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=cached_system,
-            messages=_with_message_cache_breakpoint(working_msgs),  # no tools — force text
-        )
-        if hasattr(followup, "usage") and followup.usage:
-            total_cost += _calculate_cost(followup.usage, model)
-        followup_text_parts = [b.text for b in followup.content if b.type == "text"]
-        text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
+        if len(pre_tool_text) >= FOLLOWUP_SKIP_MIN_CHARS:
+            tool_summary = ", ".join(
+                f"{tn}{'(error)' if is_err else ''}"
+                for (_tid, tn, _ti, _r, is_err) in exec_results
+            )
+            logger.info(
+                "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
+                len(pre_tool_text), tool_summary,
+            )
+            text_parts = [pre_tool_text]
+        else:
+            working_msgs.append({"role": "assistant", "content": final_assistant_content})
+            working_msgs.append({"role": "user", "content": final_tool_results})
+            # Cap output at 2K — closing remarks after a finalization tool don't
+            # need the orchestrator's full max_tokens (typically 16K).
+            followup = await client.messages.create(
+                model=model,
+                max_tokens=min(max_tokens, 2048),
+                system=cached_system,
+                messages=_with_message_cache_breakpoint(working_msgs),  # no tools — force text
+            )
+            if hasattr(followup, "usage") and followup.usage:
+                usage = followup.usage
+                call_cost = _calculate_cost(usage, model)
+                total_cost += call_cost
+                logger.info(
+                    "Forced-final followup usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
+                    getattr(usage, "input_tokens", 0),
+                    getattr(usage, "output_tokens", 0),
+                    getattr(usage, "cache_creation_input_tokens", 0),
+                    getattr(usage, "cache_read_input_tokens", 0),
+                    call_cost, total_cost, budget_usd,
+                )
+            followup_text_parts = [b.text for b in followup.content if b.type == "text"]
+            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
     else:
         text_parts = [b.text for b in final.content if b.type == "text"]
 

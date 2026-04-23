@@ -619,8 +619,13 @@ async def _run_one_tick(project: dict) -> dict:
     # runtime `task_model` config so `/config` can dial cost down (high=opus,
     # medium=sonnet, low=haiku). This mirrors the `provider in ("claude",
     # "openai")` branch in telegram_bot._chat_with_tools dispatch.
-    _task_tier = str(_config.get("task_model", "high"))
-    _claude_alias = _TIER_MAP.get("claude", {}).get(_task_tier, _task_tier)
+    # Spec-level `model` override wins when set — autonomous_project pins
+    # Sonnet because hourly research+publish on Opus 4.7 was costing $2+/tick.
+    if spec.model:
+        _claude_alias = spec.model
+    else:
+        _task_tier = str(_config.get("task_model", "high"))
+        _claude_alias = _TIER_MAP.get("claude", {}).get(_task_tier, _task_tier)
     model = await _get_model_by_alias(_claude_alias)
     budget_tracker: dict = {}
 
