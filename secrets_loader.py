@@ -40,13 +40,20 @@ def get_secret(name: str, default: str | None = None) -> str | None:
     Credential filename is the name lowercased (GEMINI_API_KEY → gemini_api_key).
     Cached for the lifetime of the process; restart the service to pick up
     rotated values.
+
+    When a value is read from the systemd credential mount, it is also
+    published to ``os.environ`` (via ``setdefault``) so third-party libraries
+    that read env vars directly (e.g. the openai / anthropic SDKs used inside
+    graphiti-core) still pick it up without knowing about credstore.
     """
     cred = _cred_dir()
     if cred is not None:
         path = cred / _cred_filename(name)
         if path.is_file():
             try:
-                return path.read_text(encoding="utf-8").rstrip("\n")
+                value = path.read_text(encoding="utf-8").rstrip("\n")
+                os.environ.setdefault(name, value)
+                return value
             except OSError:
                 pass
     val = os.environ.get(name)
