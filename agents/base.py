@@ -43,10 +43,7 @@ Instead, report back: what the task needs, why you can't do it, and which agent 
 
 _MISSION_GUIDELINES_BODY = """\
 - save_finding: Record important intermediate discoveries/decisions to the mission timeline.
-- KG storage — pick the right tool for the content shape:
-  • `write_kg_structured(facts=[...])`: **preferred for agent-asserted single facts.** YOU specify each (subject_name, subject_type, predicate, object_name, object_type, fact). Deterministic, no LLM extraction, exact entity reuse by name+type. Use this for analyst conclusions, OSINT confirmations, structured updates. Predicates: Affiliation/PersonalRelation/OrgRelation/Funding/AssetTransfer/ThreatAction/Involvement/Presence/PolicyEffect/Participation. Entity types: Person/Organization/Location/Asset/Incident/Policy/Campaign/Concept.
-  • `write_kg(content="- bullet1\\n- bullet2")`: for narrative content (news articles, long reports) where letting the LLM decompose many facts at once is more efficient.
-  Both write to the same graph. group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
+- KG storage — use `write_kg_structured(facts=[...])` for all new writes. YOU specify each (subject_name, subject_type, predicate, object_name, object_type, fact). Deterministic, no LLM extraction, exact entity reuse by name+type. Use for analyst conclusions, OSINT confirmations, news facts, structured updates. Predicates: Affiliation/PersonalRelation/OrgRelation/Funding/AssetTransfer/ThreatAction/Involvement/Presence/PolicyEffect/Participation/Statement/Causation. Entity types: Person/Organization/Location/Asset/Incident/Policy/Campaign/Concept/Role/Industry. See the tool description for the (subject → object) → predicate matrix. group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
 - The system will automatically terminate your work when budget/limits are reached. Don't worry — just do as much as you can.
   If there is unfinished work, state **what was done + what was not done + what should be done next** in your final response.
   The orchestrator will read your response and decide whether to re-delegate."""

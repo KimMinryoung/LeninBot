@@ -185,7 +185,7 @@ docker.service
 
 | 에이전트 | 페르소나 | 역할 | 주요 도구 |
 |---|---|---|---|
-| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg |
+| **analyst** (Varga) | 정보 분석가 | 조사, 분석, KG 저장 | vector_search, kg_search, web_search, write_kg_structured |
 | **programmer** (Kitov) | 코드 전문가 | 코드 수정, 디버깅 | patch_file, write_file, execute_python, restart_service, upload_to_r2 |
 | **diplomat** (Kollontai) | 외교관 | A2A 에이전트 통신, 이메일 송수신 | a2a_send, send_email, check_inbox, allowlist_sender |
 | **browser** | 브라우저 자동화 | 로그인, 폼 제출, 동적 사이트 | browse_web, check_inbox, allowlist_sender, fetch_url |
@@ -202,7 +202,7 @@ docker.service
 - **browse_web**: browser-use SDK (Playwright + LLM). AI가 스크린샷 보고 클릭/입력/탐색. 항상 Claude Sonnet 사용
 - **upload_to_r2**: Cloudflare R2에 파일 업로드 → 공개 URL 반환. file_registry DB 자동 등록
 - **save_finding**: 미션 타임라인에 중간 발견 기록
-- **write_kg**: 지식 그래프에 사실 저장 (KG 전용 루프에서 실행). 내부 시스템 상태 저장 금지
+- **write_kg_structured**: 지식 그래프에 typed-triple 사실 저장 (KG 전용 루프에서 실행). 내부 시스템 상태 저장 금지. (구식 `write_kg`는 deprecated — 신규 쓰기는 전부 이 도구 사용)
 - **mission**: 미션 상태 확인/종료 (delegate 시 자동 생성)
 - **delegate**: specialist 에이전트에 비동기 작업 위임
 - **multi_delegate**: 여러 에이전트에 병렬 위임 + 자동 synthesis
@@ -284,7 +284,7 @@ task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조
 - **group_ids**: geopolitics_conflict, economy, korea_domestic, diary_news, agent_knowledge
 - **KG 전용 이벤트 루프**: `run_kg_task()` / `submit_kg_task()` — cross-loop 오류 방지
 - **병렬 수집**: `submit_kg_task()` + `collect_kg_futures()` (diary 뉴스 수집에 사용)
-- **write_kg 제한**: 내부 시스템 상태(코드 구조, 설정, 버그, 태스크 로그) 저장 금지
+- **write_kg_structured 제한**: 내부 시스템 상태(코드 구조, 설정, 버그, 태스크 로그) 저장 금지
 
 ### Embedding Server (독립 서비스)
 - **모델**: BAAI/bge-m3 (CPU, ~831MB)
@@ -310,7 +310,7 @@ leninbot/
 ├── telegram_tasks.py          # 백그라운드 태스크 워커, 스케줄러, 모니터
 ├── telegram_mission.py        # 미션 컨텍스트 시스템
 ├── browser_worker.py           # 브라우저 에이전트 전용 워커 (Unix socket IPC, systemd)
-├── self_tools.py              # delegate, multi_delegate, run_agent, save_finding, write_kg
+├── self_tools.py              # delegate, multi_delegate, run_agent, save_finding, write_kg_structured
 ├── claude_loop.py             # Claude tool-use 루프
 ├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)

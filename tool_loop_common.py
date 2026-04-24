@@ -117,7 +117,7 @@ def save_redis_progress(
 def _record_tool_provenance(name: str, args: dict, result: str) -> None:
     """Record external-source tool calls and KG reads into the per-run buffer.
 
-    Used by write_kg to auto-attach provenance metadata and to detect
+    Used by write_kg_structured to auto-attach provenance metadata and to detect
     self-poisoning loops where the agent re-ingests text it just retrieved.
     Never raises — provenance bookkeeping must not break tool execution.
     """

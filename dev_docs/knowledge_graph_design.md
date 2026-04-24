@@ -304,7 +304,7 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 
 ### 위협 모델
 
-적이 웹페이지/PDF/이메일에 거짓 "사실"을 심는다 → analyst가 fetch_url/convert_document로 읽는다 → "중요한 fact를 KG에 저장하라"는 지시대로 `write_kg`를 호출 → 이후 모든 세션에서 LeninBot이 자기 KG를 신뢰할 만한 1차 출처처럼 인용 → **RAG self-poisoning loop**가 형성되고 매 사이클마다 거짓이 더 단단해진다. 일단 들어가면 출처 추적 수단이 없어 사후 청소가 거의 불가능.
+적이 웹페이지/PDF/이메일에 거짓 "사실"을 심는다 → analyst가 fetch_url/convert_document로 읽는다 → "중요한 fact를 KG에 저장하라"는 지시대로 `write_kg_structured`를 호출 → 이후 모든 세션에서 LeninBot이 자기 KG를 신뢰할 만한 1차 출처처럼 인용 → **RAG self-poisoning loop**가 형성되고 매 사이클마다 거짓이 더 단단해진다. 일단 들어가면 출처 추적 수단이 없어 사후 청소가 거의 불가능.
 
 ### 4가지 메커니즘 (모두 단일 패스로 wired)
 
@@ -330,7 +330,7 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 | `single` | 1 도메인 또는 local-file source |
 | `unverified` | external call 없음 |
 
-- `write_kg`는 자동으로 추론된 tier를 episode 이름에 인코딩: `[T:tier]name`. Graphiti가 sanitize해서 `T-tier-name`으로 저장됨 (round-trip survives).
+- `write_kg_structured`는 자동으로 추론된 tier를 episode 이름에 인코딩: `[T:tier]name`. Graphiti가 sanitize해서 `T-tier-name`으로 저장됨 (round-trip survives).
 - Read 시 `search_knowledge_graph`가 두 단계 Cypher pass로:
   1. `MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $euuids RETURN r.uuid, r.episodes` — Graphiti edge dict에는 `episodes`가 빠져있어서 직접 조회 필요
   2. `MATCH (e:Episodic) WHERE e.uuid IN $uuids RETURN e.uuid, e.name` — 이름에서 tier 파싱
@@ -341,7 +341,7 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 엔진 레벨 보장:
 - analyst/programmer/scout 화이트리스트에 `kg_delete_episode`, `kg_merge_entities`, `kg_query`, `kg_admin` **모두 부재**
 - 변경 가능한 KG 작업은 orchestrator의 self_tools 경로로만 도달 가능 — prompt injection에 노출된 sub-agent가 직접 못 만짐
-- 정정/철회는 `write_kg`의 신규 옵셔널 파라미터 `supersedes`로: 새 episode + footer에 `supersedes: <old_name>` 마커. 옛 fact는 절대 silent overwrite/delete 되지 않음 → 사후 롤백 항상 가능.
+- 정정/철회는 새 `write_kg_structured` fact로 기존을 뒤집고, KG는 append-only이므로 이전 episode는 남는다 → 사후 롤백 항상 가능. (레거시 write_kg가 사용하던 `supersedes` 마커는 더 이상 권장하지 않음.)
 
 #### (4) Self-poisoning loop break
 
@@ -353,7 +353,7 @@ Graphiti의 entity resolution이 짧은 이름(entropy < 1.5)에서 실패하는
 
 ### Provenance footer 형식
 
-`write_kg` 성공 시 episode body에 자동 첨부:
+`write_kg_structured` 성공 시 episode body에 자동 첨부:
 
 ```
 <원래 content>
@@ -388,9 +388,9 @@ Palantir 스타일 중 LeninBot 규모에서 과잉인 부분:
 
 | 시나리오 | 결과 |
 |----------|------|
-| 두 독립 도메인 fetch + write_kg | `[T:corroborated]` tier, 검색 시 인라인 표시 ✅ |
-| KG 검색 결과를 그대로 write_kg | "Refused: 100% overlaps..." ✅ |
-| External 호출 없이 write_kg | tier=unverified + 친절한 경고 메시지 ✅ |
+| 두 독립 도메인 fetch + write_kg_structured | `[T:corroborated]` tier, 검색 시 인라인 표시 ✅ |
+| KG 검색 결과를 그대로 write_kg_structured | "Refused: 100% overlaps..." ✅ |
+| External 호출 없이 write_kg_structured | tier=unverified + 친절한 경고 메시지 ✅ |
 | 옛 fact 검색 | `[T:?]` 표시 (이전 시스템 산물) ✅ |
 | Sub-agent KG 변경 시도 | 화이트리스트에 delete/merge 없음 — 호출 자체 불가 ✅ |
 
@@ -430,7 +430,7 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 | group_id | 에피소드 수 | 설명 |
 |----------|-----------|------|
 | `diary_news` | 1,053 | LeninBot 자동 수집 뉴스 (3시간 주기) |
-| `agent_knowledge` | 59 | 에이전트가 write_kg로 저장한 지식 |
+| `agent_knowledge` | 59 | 에이전트가 write_kg_structured로 저장한 지식 |
 | `geopolitics_conflict` | 53 | 전쟁/분쟁 뉴스 |
 | `korea_domestic` | 28 | 한국 국내 뉴스/인물 |
 | `economy` | 8 | 경제 뉴스 |

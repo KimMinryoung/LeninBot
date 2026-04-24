@@ -632,7 +632,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - URL in message → fetch_url to read the page, then analyze with context from other tools
 - Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
-- Store important facts → write_kg
+- Store important facts → write_kg_structured
 - Real-time market prices → get_finance_data
 - My crypto wallet address/balance → check_wallet (Base L2 primary, also ETH/TRX/SOL)
 - ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)

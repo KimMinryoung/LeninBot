@@ -37,7 +37,7 @@ _GENERAL_TOOLS = {
 
 _GEOPOLITICAL_TOOLS = {
     "knowledge_graph_search", "vector_search",
-    "web_search", "write_kg",
+    "web_search", "write_kg_structured",
 }
 
 _RESEARCH_TOOLS = {
@@ -129,7 +129,7 @@ def _geopolitical_prompt_ir() -> SystemPrompt:
                 "tool-strategy",
                 (
                     "Follow the 5-step process in the skill instructions exactly.\n"
-                    "Available tools: knowledge_graph_search, vector_search, web_search, write_kg."
+                    "Available tools: knowledge_graph_search, vector_search, web_search, write_kg_structured."
                 ),
             ),
         ],

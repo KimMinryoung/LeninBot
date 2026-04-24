@@ -84,11 +84,10 @@ SELF_TOOLS = [
     {
         "name": "write_kg",
         "description": (
-            "Narrative-mode KG writer: feed free-text (news articles, reports, "
-            "long-form prose) and let the LLM extract multiple facts at once. "
-            "For precise single-fact asserts use `write_kg_structured` instead. "
-            "DO NOT store: internal system state (code/config/tool schemas), "
-            "task execution details, or anything derivable from the codebase."
+            "DEPRECATED — use `write_kg_structured` for all new KG writes. "
+            "This narrative-mode writer relies on LLM extraction, which is less "
+            "reliable and loses the caller's type intent. Kept only for "
+            "backward compatibility with historical callers; do not use."
         ),
         "input_schema": {
             "type": "object",
@@ -123,14 +122,36 @@ SELF_TOOLS = [
     {
         "name": "write_kg_structured",
         "description": (
-            "Deterministic typed-triple writer for the KG. No LLM extraction — "
-            "you pick every subject_type / predicate / object_type from the "
-            "enums. Use for precise single-fact asserts, analyst conclusions, "
-            "KG corrections. For long-form narrative prose use `write_kg`. "
+            "Deterministic typed-triple writer for the KG — the canonical way "
+            "to write facts. No LLM extraction — you pick every subject_type / "
+            "predicate / object_type from the enums. Use for precise single-fact "
+            "asserts, analyst conclusions, news facts, KG corrections. "
             "Existing entities are matched by exact name; unknown names create "
             "new nodes with your declared type. `fact` must be self-contained "
             "(e.g. 'Anthropic announced Claude Opus 4.6 on 2026-04-11'), "
-            "because it is what gets embedded for vector search."
+            "because it is what gets embedded for vector search.\n\n"
+            "PREDICATE RULES — pick by (subject_type → object_type) pair. "
+            "Writes are rejected if the pair doesn't allow the predicate:\n"
+            "  • Affiliation: Person→Org, Person→Role, Role→Org, Org→Industry\n"
+            "  • PersonalRelation: Person→Person\n"
+            "  • OrgRelation: Org→Org ONLY (not Org→Asset, not Org→Concept)\n"
+            "  • Funding: any→any (wildcard)\n"
+            "  • AssetTransfer: any→any (wildcard). Org→Asset uses this, NOT OrgRelation.\n"
+            "  • ThreatAction: Person→Org, Org→Org, Org→Person, Campaign→Org, Campaign→Asset, Campaign→Industry\n"
+            "  • Involvement: subject→Incident or subject→Campaign ONLY. "
+            "Do NOT use for 'X is involved in Concept/Policy' — use Causation or flip direction.\n"
+            "  • Presence: any→Location (Person/Org/Role/Incident/Campaign/Industry → Location)\n"
+            "  • PolicyEffect: Policy→any (Policy MUST be subject), or Org→Policy (org enforces it), or Campaign→Policy\n"
+            "  • Participation: Person→Campaign, Org→Campaign\n"
+            "  • Statement: any→any (wildcard). For 'X said/announced/criticized Y'.\n"
+            "  • Causation: any→any (wildcard). For explicit 'X caused Y'. Direction = cause→effect.\n\n"
+            "DECISION SHORTCUT: if your pair isn't in the lists above, "
+            "use a wildcard (Funding / AssetTransfer / Statement / Causation) "
+            "or flip the direction (e.g. Org sanctioned by Policy → subject=Policy, predicate=PolicyEffect).\n\n"
+            "COMMON MISTAKES TO AVOID:\n"
+            "  ✗ Org→Concept with Involvement  → use Causation or Statement\n"
+            "  ✗ Org→Asset with OrgRelation    → use AssetTransfer\n"
+            "  ✗ Org→Policy with Involvement   → flip to Policy→Org with PolicyEffect"
         ),
         "input_schema": {
             "type": "object",
@@ -138,7 +159,7 @@ SELF_TOOLS = [
                 "facts": {
                     "type": "array",
                     "minItems": 1,
-                    "description": "List of structured facts to write atomically as one batch.",
+                    "description": "List of structured facts to write atomically as one batch. If any single fact is invalid, the WHOLE batch is rejected — so keep batches small or homogeneous.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -156,7 +177,7 @@ SELF_TOOLS = [
                                          "Funding", "AssetTransfer", "ThreatAction",
                                          "Involvement", "Presence", "PolicyEffect", "Participation",
                                          "Statement", "Causation"],
-                                "description": "Affiliation (Person↔Org/Role), PersonalRelation (Person↔Person), OrgRelation (Org↔Org), Funding / AssetTransfer (any↔any), ThreatAction (military/cyber), Involvement (Incident/Campaign), Presence (↔Location), PolicyEffect, Participation, Statement (speech act: said/announced/criticized), Causation (cause→effect).",
+                                "description": "Must match the (subject_type → object_type) pair — see tool-level PREDICATE RULES. Wildcards (any→any): Funding, AssetTransfer, Statement, Causation.",
                             },
                             "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
                             "object_type": {

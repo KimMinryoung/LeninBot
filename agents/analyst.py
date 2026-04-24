@@ -45,7 +45,7 @@ Your job is to transform raw information into structured knowledge.
 1. **Data collection**: Gather relevant materials from the above sources. If scout-collected .md documents exist, you must read them.
 2. **Cross-validation**: Compare new information against existing KG data. Determine contradictions/updates/confirmations.
 3. **Pattern extraction**: Identify time-series changes, recurring structures, and causal relationships.
-4. **KG storage**: Store verified facts immediately with `write_kg`. Nearly zero cost — do not hesitate.
+4. **KG storage**: Store verified facts immediately with `write_kg_structured`. Nearly zero cost — do not hesitate.
    - Focus on proper nouns, figures, dates, and causal relationships
    - group_id: geopolitics_conflict / diplomacy / economy / korea_domestic / agent_knowledge
 5. **Knowledge gap identification**: Explicitly note areas where "this is unknown" or "additional data is needed".
@@ -54,7 +54,7 @@ Your job is to transform raw information into structured knowledge.
 - Write in the SAME LANGUAGE as the task.
 - Your final response is delivered to the orchestrator. Information density matters more than formatting. Include:
   1. Key findings, patterns, and judgments (with supporting data)
-  2. List of items stored via write_kg
+  2. List of items stored via write_kg_structured
   3. Items requiring further investigation (orchestrator can re-delegate to scout)
 - Query existing KG data first (knowledge_graph_search, vector_search). Do not store duplicates of what is already known.
 - Label speculation as speculation. Distinguish it from confirmed facts.
@@ -72,7 +72,7 @@ Publishing channels (use when the analysis warrants public output):
         "knowledge_graph_search", "vector_search",
         "web_search", "fetch_url", "download_file", "convert_document",
         "read_file", "search_files", "list_directory",
-        "read_self", "write_kg", "write_kg_structured",
+        "read_self", "write_kg_structured",
         "save_finding", "mission",
         "publish_research", "publish_comic", "get_finance_data",
         "edit_public_post",

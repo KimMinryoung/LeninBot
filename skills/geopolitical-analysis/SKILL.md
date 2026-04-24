@@ -5,7 +5,7 @@ compatibility: Requires Neo4j KG, pgvector DB, and web search access. Designed f
 metadata:
   author: cyber-lenin
   version: "1.0"
-allowed-tools: knowledge_graph_search vector_search web_search write_kg
+allowed-tools: knowledge_graph_search vector_search web_search write_kg_structured
 ---
 
 # Geopolitical Analysis Skill
@@ -31,7 +31,7 @@ allowed-tools: knowledge_graph_search vector_search web_search write_kg
 [assets/report-template.md](assets/report-template.md) 구조를 따라 분석을 작성한다.
 
 ## Step 5 — KG 업데이트 (선택)
-새로 확인된 중요 사실이 있으면 `write_kg`로 저장한다.
+새로 확인된 중요 사실이 있으면 `write_kg_structured`로 저장한다.
 - 이미 KG에 있는 정보는 중복 저장 금지
 - 출처가 불명확한 정보는 저장 금지
 

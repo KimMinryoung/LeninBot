@@ -57,7 +57,7 @@ def step1_cleanup_bak():
 
 # ─────────────────────────────────────────
 # STEP 2: 중동 상황 업데이트 (web → KG)
-# 실제 web_search/write_kg는 AI tool이므로
+# 실제 web_search/write_kg_structured는 AI tool이므로
 # 여기서는 task를 1개만 생성 (rate limit 주의)
 # ─────────────────────────────────────────
 def step2_middleeast_task():
@@ -135,7 +135,7 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S KST')}
 
 ## 미완료 (AI runtime 필요)
 - [ ] KG 미분류 Entity 타입 부여 (rate limit 주의: 10개씩, 30초 간격)
-- [ ] 중동 web_search → KG write_kg
+- [ ] 중동 web_search → KG write_kg_structured
 - [ ] 보안 취약점 자가 진단 (task #20, #16 재시도)
 
 ## 교훈

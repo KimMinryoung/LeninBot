@@ -90,7 +90,7 @@ Read the parent's `<tool-log>` carefully to understand what was already done (fi
     tools=[
         "read_file", "search_files", "write_file", "patch_file", "list_directory", "execute_python",
         "query_db", "edit_public_post",
-        "web_search", "fetch_url", "download_file", "convert_document", "read_self", "write_kg", "write_kg_structured",
+        "web_search", "fetch_url", "download_file", "convert_document", "read_self", "write_kg_structured",
         "save_finding", "mission", "restart_service", "upload_to_r2",
     ],
     budget_usd=1.50,

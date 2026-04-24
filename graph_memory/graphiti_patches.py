@@ -72,9 +72,102 @@ def apply_graphiti_patches() -> None:
 
     _patch_to_prompt_json()
     _patch_extract_edges()
+    _patch_record_parsers()
     _build_name_normalization_regex()
 
     _PATCHES_APPLIED = True
+
+
+# ── 레거시 엣지 방어 ─────────────────────────────────────────────────
+# AuraDB→local 마이그레이션 이전 스키마의 edge 중 일부에 group_id/created_at이
+# null로 남아 있음. 이 값들은 graphiti-core의 EntityEdge 모델에서 required라서
+# knowledge_graph_search가 pydantic 검증에서 통째로 실패한다. 데이터 영구 수정
+# (scripts/fix_legacy_kg_edges.py)과 별개로, 런타임에서도 placeholder로 채워서
+# 검색이 안 깨지게 방어.
+
+_LEGACY_GROUP_ID = "legacy"
+
+
+def _patch_record_parsers() -> None:
+    """entity_edge_from_record / entity_node_from_record — null 내구성 추가."""
+    from datetime import datetime, timezone
+
+    from graphiti_core.driver import record_parsers as rp_mod
+    from graphiti_core.edges import EntityEdge
+    from graphiti_core.nodes import EntityNode
+    from graphiti_core.helpers import parse_db_date
+
+    _epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def _patched_entity_edge_from_record(record):
+        attributes = dict(record['attributes'] or {})
+        for k in ('uuid', 'source_node_uuid', 'target_node_uuid', 'fact',
+                  'fact_embedding', 'name', 'group_id', 'episodes',
+                  'created_at', 'expired_at', 'valid_at', 'invalid_at'):
+            attributes.pop(k, None)
+
+        group_id = record['group_id'] or _LEGACY_GROUP_ID
+        created_at = parse_db_date(record['created_at']) or _epoch
+        return EntityEdge(
+            uuid=record['uuid'],
+            source_node_uuid=record['source_node_uuid'],
+            target_node_uuid=record['target_node_uuid'],
+            fact=record['fact'] or '',
+            fact_embedding=record.get('fact_embedding'),
+            name=record['name'] or 'RELATES_TO',
+            group_id=group_id,
+            episodes=record['episodes'] or [],
+            created_at=created_at,
+            expired_at=parse_db_date(record['expired_at']),
+            valid_at=parse_db_date(record['valid_at']),
+            invalid_at=parse_db_date(record['invalid_at']),
+            attributes=attributes,
+        )
+
+    def _patched_entity_node_from_record(record):
+        attributes = dict(record['attributes'] or {})
+        for k in ('uuid', 'name', 'group_id', 'name_embedding',
+                  'summary', 'created_at', 'labels'):
+            attributes.pop(k, None)
+        group_id = record['group_id'] or _LEGACY_GROUP_ID
+        labels = list(record.get('labels') or [])
+        if group_id:
+            dynamic_label = 'Entity_' + str(group_id).replace('-', '')
+            if dynamic_label in labels:
+                labels.remove(dynamic_label)
+        return EntityNode(
+            uuid=record['uuid'],
+            name=record['name'] or '',
+            name_embedding=record.get('name_embedding'),
+            group_id=group_id,
+            labels=labels,
+            created_at=parse_db_date(record['created_at']) or _epoch,
+            summary=record.get('summary') or '',
+            attributes=attributes,
+        )
+
+    rp_mod.entity_edge_from_record = _patched_entity_edge_from_record
+    rp_mod.entity_node_from_record = _patched_entity_node_from_record
+
+    # Modules that imported the symbol by name need their local binding refreshed.
+    for mod_path in (
+        'graphiti_core.driver.neo4j.operations.search_ops',
+        'graphiti_core.driver.neo4j.operations.entity_edge_ops',
+        'graphiti_core.driver.neo4j.operations.entity_node_ops',
+        'graphiti_core.driver.falkordb.operations.entity_edge_ops',
+        'graphiti_core.driver.falkordb.operations.entity_node_ops',
+        'graphiti_core.driver.neptune.operations.entity_edge_ops',
+        'graphiti_core.driver.neptune.operations.entity_node_ops',
+    ):
+        try:
+            import importlib
+            mod = importlib.import_module(mod_path)
+        except ImportError:
+            continue
+        if hasattr(mod, 'entity_edge_from_record'):
+            mod.entity_edge_from_record = _patched_entity_edge_from_record
+        if hasattr(mod, 'entity_node_from_record'):
+            mod.entity_node_from_record = _patched_entity_node_from_record
 
 
 def _patch_to_prompt_json() -> None:

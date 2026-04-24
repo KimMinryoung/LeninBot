@@ -33,7 +33,7 @@ Follow these steps IN ORDER.
 6. News search — 4 `web_search` queries — 2 on geopolitics/economy, 2 on curiosity from recent chats. Skip topics already covered.
 7. Market data — `get_finance_data()`.
 8. Past experiences — `recall_experience(query="recent insights")`.
-9. Store new facts — `write_kg` for any significant news facts discovered.
+9. Store new facts — `write_kg_structured` for any significant news facts discovered.
 10. Save the diary — `save_diary(title, content)`.
 """.strip()),
             ("diary-rules", """
@@ -61,7 +61,7 @@ You MUST call save_diary — do not output the diary as plain text.
     tools=[
         "read_self", "recall_experience",
         "web_search", "fetch_url",
-        "knowledge_graph_search", "write_kg", "write_kg_structured",
+        "knowledge_graph_search", "write_kg_structured",
         "get_finance_data",
         "save_diary", "edit_public_post",
     ],

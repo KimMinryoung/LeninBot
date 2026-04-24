@@ -93,7 +93,7 @@ EXTERNAL_SOURCE_RULE = (
 # Per-agent-run buffer that records:
 #   1. Every external-source tool call (fetch_url, web_search, convert_document,
 #      check_inbox, network-sourced read_file/search_files) → used to auto-attach
-#      provenance + infer trust tier when write_kg is called.
+#      provenance + infer trust tier when write_kg_structured is called.
 #   2. Every knowledge_graph_search result → used to detect self-poisoning loops
 #      where the agent re-ingests text it just retrieved.
 #

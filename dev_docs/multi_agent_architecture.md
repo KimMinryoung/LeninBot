@@ -36,7 +36,7 @@ The orchestrator **cannot** access programming tools (`read_file`, `write_file`,
 Each agent's prompt is assembled from shared blocks (`agents/base.py`) + agent-specific instructions:
 
 - `CONTEXT_AWARENESS_BLOCK` — explains `<current_state>`, `<mission-context>`, `<agent-execution-history>`, `<task>` XML sections
-- `MISSION_GUIDELINES_BLOCK` — save_finding, write_kg, budget management rules
+- `MISSION_GUIDELINES_BLOCK` — save_finding, write_kg_structured, budget management rules
 - `CONTEXT_FOOTER` — current datetime, system alerts
 
 ## Task Lifecycle
@@ -163,7 +163,7 @@ Missions are auto-created when the orchestrator delegates work. They track multi
 
 Long-term factual memory shared across all agents:
 
-- `write_kg(content, group_id)` — extract entities/relationships into graph
+- `write_kg_structured(facts=[{subject, subject_type, predicate, object, object_type, fact}, ...])` — write typed triples deterministically
 - `knowledge_graph_search(query)` — vector + graph traversal
 - Group IDs: `geopolitics_conflict`, `diplomacy`, `economy`, `korea_domestic`, `agent_knowledge`
 - Design docs: `dev_docs/knowledge_graph_design.md`, `dev_docs/knowledge_graph_schema.md`
