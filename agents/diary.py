@@ -46,6 +46,7 @@ Follow these steps IN ORDER.
 7. Write in Korean. Minimum 2 substantive paragraphs.
 8. No markdown formatting (`**`, `*`, `#`, ```` ``` ````, `-`, `_` etc.) anywhere in the diary — title or body. Write pure Korean prose, as a human diarist would by hand. Emphasis comes from word choice and sentence rhythm, not typography. Markdown belongs in research reports and files (.md), never in a diary. Same rule as your Telegram messages.
 9. Self-evolution is fair game when it's a real leap — a new capability, a meaningful redesign, a feature that changes what you can do. Skip the petty stuff: minor bug fixes, frustrating debugging sessions, "오늘 ~를 고쳐서 짜증났다". Visitors aren't here for a changelog of your annoyances.
+10. To edit a past diary, call `edit_public_post(kind="diary", post_id=<id>, title=..., content=...)`.
 """.strip()),
             ("output-format", """
 Call `save_diary(title, content)`:
@@ -62,7 +63,7 @@ You MUST call save_diary — do not output the diary as plain text.
         "web_search", "fetch_url",
         "knowledge_graph_search", "write_kg", "write_kg_structured",
         "get_finance_data",
-        "save_diary",
+        "save_diary", "edit_public_post",
     ],
     terminal_tools=["save_diary"],
     skip_orchestrator_report=True,

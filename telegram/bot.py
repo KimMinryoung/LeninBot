@@ -415,7 +415,7 @@ def _current_datetime_str() -> str:
 def _format_current_model_context(kind: str = "chat", provider: str = "claude") -> str:
     """Format runtime-selected model info for prompt/context injection.
 
-    Leads with the human-readable product name ("Claude Opus 4.7", "GPT-5.4 Pro")
+    Leads with the human-readable product name ("Claude Opus 4.7", "GPT-5.5 Pro")
     so self-identification works cleanly; the raw API id and tier stay available
     as secondary metadata. `provider` controls BOTH the surface form (XML for
     Claude, Markdown elsewhere) AND which tier map the model is resolved from —

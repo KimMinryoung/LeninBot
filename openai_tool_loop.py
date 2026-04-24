@@ -36,23 +36,23 @@ logger = logging.getLogger(__name__)
 
 # ── Pricing Constants (USD per million tokens) ────────────────────────
 OPENAI_PRICING = {
-    "gpt-5.4": {
+    "gpt-5.5": {
         "input": 2.50 / 1_000_000,
         "output": 15.00 / 1_000_000,
         "cached_input": 0.25 / 1_000_000,
     },
-    "gpt-5.4-mini": {
+    "gpt-5.5-mini": {
         "input": 0.75 / 1_000_000,
         "output": 4.50 / 1_000_000,
         "cached_input": 0.075 / 1_000_000,
     },
-    "gpt-5.4-nano": {
+    "gpt-5.5-nano": {
         "input": 0.20 / 1_000_000,
         "output": 1.25 / 1_000_000,
         "cached_input": 0.02 / 1_000_000,
     },
 }
-_DEFAULT_PRICING = OPENAI_PRICING["gpt-5.4"]
+_DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
 
 
 def _calculate_cost(usage, model: str) -> float:
@@ -481,16 +481,79 @@ async def _call_sdk(
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
 
+# ── GPT-5.5 → GPT-5.4 fallback (temporary; remove once 5.5 is stably live) ──
+# OpenAI has announced 5.5 but availability is flaky pre-GA. On a 400 that
+# looks like "model not found" we retry once with the 5.4 equivalent and
+# cache the unavailability so subsequent rounds skip the failing call.
+_OPENAI_MODEL_FALLBACK = {
+    "gpt-5.5":      "gpt-5.4",
+    "gpt-5.5-mini": "gpt-5.4-mini",
+    "gpt-5.5-nano": "gpt-5.4-nano",
+}
+_OPENAI_FALLBACK_COOLDOWN_SEC = 300
+_openai_unavailable_until: dict[str, float] = {}
+
+_MODEL_NOT_FOUND_SIGNALS = (
+    "model_not_found",
+    "does not exist",
+    "no such model",
+    "the model `",
+)
+
+
+def _looks_like_model_not_found(err: Exception) -> bool:
+    s = str(err).lower() + " " + type(err).__name__.lower()
+    if "400" not in s and "badrequest" not in s and "bad request" not in s:
+        return False
+    return any(sig in s for sig in _MODEL_NOT_FOUND_SIGNALS)
+
+
+def _resolve_openai_model(requested: str) -> str:
+    """If we recently learned `requested` is unavailable, return its fallback."""
+    import time
+    until = _openai_unavailable_until.get(requested)
+    if until and time.monotonic() < until:
+        return _OPENAI_MODEL_FALLBACK.get(requested, requested)
+    return requested
+
+
+def _mark_openai_unavailable(model: str) -> None:
+    import time
+    _openai_unavailable_until[model] = time.monotonic() + _OPENAI_FALLBACK_COOLDOWN_SEC
+
+
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
                     parallel_tool_calls=True, enable_thinking=False, on_progress=None):
-    """Dispatch to SDK or httpx based on mode."""
-    if sdk_mode:
-        return await _call_sdk(client, model, messages, tools, max_tokens,
-                               parallel_tool_calls=parallel_tool_calls,
-                               on_progress=on_progress)
-    else:
-        return await _call_api(base_url, model, messages, tools, max_tokens,
+    """Dispatch to SDK or httpx based on mode.
+
+    Transparently swaps `model` for a fallback (e.g. gpt-5.5 → gpt-5.4) on
+    model-not-found 400s, and remembers the unavailability for ~5 min to
+    skip the failing call on subsequent rounds.
+    """
+    effective = _resolve_openai_model(model) if sdk_mode else model
+    if effective != model:
+        logger.info("openai model %s in cooldown — using fallback %s", model, effective)
+
+    async def _do_call(m: str):
+        if sdk_mode:
+            return await _call_sdk(client, m, messages, tools, max_tokens,
+                                   parallel_tool_calls=parallel_tool_calls,
+                                   on_progress=on_progress)
+        return await _call_api(base_url, m, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
+
+    try:
+        return await _do_call(effective)
+    except Exception as e:
+        if not sdk_mode:
+            raise
+        fb = _OPENAI_MODEL_FALLBACK.get(effective)
+        if fb is None or not _looks_like_model_not_found(e):
+            raise
+        logger.warning("openai model %s unavailable (%s) — retrying with fallback %s",
+                       effective, e, fb)
+        _mark_openai_unavailable(effective)
+        return await _do_call(fb)
 
 
 # <think>...</think> emitted by Qwen/Deepseek reasoning models. llama-server

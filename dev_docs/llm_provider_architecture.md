@@ -45,7 +45,7 @@ chat_with_tools(
     client=AsyncOpenAI(),  # SDK mode (OpenAI 공식 API)
     # 또는
     base_url="http://...",  # httpx mode (로컬 LLM)
-    model="gpt-5.4",
+    model="gpt-5.5",
     tools=tool_defs,        # Anthropic 포맷 → 내부 자동 변환
     ...
 )
@@ -65,18 +65,18 @@ provider에 따라 자동 매핑:
 
 | 티어 | Claude | OpenAI |
 |------|--------|--------|
-| high | opus (claude-opus-4-7) | gpt-5.4 |
-| medium | sonnet (claude-sonnet-4-6) | gpt-5.4-mini |
-| low | haiku (claude-haiku-4-5) | gpt-5.4-nano |
+| high | opus (claude-opus-4-7) | gpt-5.5 |
+| medium | sonnet (claude-sonnet-4-6) | gpt-5.5-mini |
+| low | haiku (claude-haiku-4-5) | gpt-5.5-nano |
 
-`/config` 패널에서는 `high (gpt-5.4)` 형태로 티어 + 실제 모델명 동시 표시.
+`/config` 패널에서는 `high (gpt-5.5)` 형태로 티어 + 실제 모델명 동시 표시.
 
 ## 런타임 모델 컨텍스트 주입
 
 텔레그램 대화 경로에서는 `telegram_bot.py`가 system prompt의 `<context>` 블록에 아래 형식으로 현재 모델 정보를 주입한다.
 
 ```xml
-<current-model provider="openai" tier="high" alias="gpt54">gpt-5.4</current-model>
+<current-model provider="openai" tier="high" alias="gpt54">gpt-5.5</current-model>
 ```
 
 - 값의 출처는 문서 상수나 하드코딩 문자열이 아니라 `config.json` → `bot_config.py`의 런타임 해석 결과다.
@@ -143,9 +143,9 @@ Claude API 키가 있는 한 provider 설정과 무관하게 동작.
 
 | 모델 | Input/1M | Output/1M | Cached Input/1M |
 |------|----------|-----------|-----------------|
-| gpt-5.4 | $2.50 | $15.00 | $0.25 |
-| gpt-5.4-mini | $0.75 | $4.50 | $0.075 |
-| gpt-5.4-nano | $0.20 | $1.25 | $0.02 |
+| gpt-5.5 | $2.50 | $15.00 | $0.25 |
+| gpt-5.5-mini | $0.75 | $4.50 | $0.075 |
+| gpt-5.5-nano | $0.20 | $1.25 | $0.02 |
 
 `claude_loop.py`의 `PRICING` (Sonnet 4.6 기준):
 - Input $3.00, Output $15.00, Cache creation $3.75, Cache read $0.30

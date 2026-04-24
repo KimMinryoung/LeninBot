@@ -37,6 +37,12 @@ _CONFIG_DEFAULTS = {
     "provider": "claude",      # "claude" | "openai" | "local"
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
+    # Web chat runs independently from Telegram's /config. These keys pin what
+    # cyber-lenin.com users get; the API service snapshots them at startup
+    # (bot_config is imported once, no live reload), so edits take effect on
+    # the next `systemctl restart leninbot-api`.
+    "webchat_provider": "claude",  # "claude" | "openai"  (no "local" — web uses corporate LLM)
+    "webchat_model":    "medium",  # tier: "high" | "medium" | "low"
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -100,9 +106,9 @@ _MODEL_ALIAS_MAP = {
 }
 
 _OPENAI_MODEL_MAP = {
-    "gpt54":     "gpt-5.4",
-    "gpt54mini": "gpt-5.4-mini",
-    "gpt54nano": "gpt-5.4-nano",
+    "gpt54":     "gpt-5.5",
+    "gpt54mini": "gpt-5.5-mini",
+    "gpt54nano": "gpt-5.5-nano",
 }
 
 # Human-readable display names keyed by API model ID. Used when injecting
@@ -116,9 +122,9 @@ _MODEL_DISPLAY_NAMES = {
     "claude-sonnet-4-6": "Claude Sonnet 4.6",
     "claude-haiku-4-5":  "Claude Haiku 4.5",
     # OpenAI
-    "gpt-5.4":      "GPT-5.4 Pro",
-    "gpt-5.4-mini": "GPT-5.4 mini",
-    "gpt-5.4-nano": "GPT-5.4 nano",
+    "gpt-5.5":      "GPT-5.5 Pro",
+    "gpt-5.5-mini": "GPT-5.5 mini",
+    "gpt-5.5-nano": "GPT-5.5 nano",
     # Local (Qwen family — common Ollama/llama.cpp tags)
     "qwen3.5-9b":   "Qwen 3.5 9B",
     "qwen3.6-9b":   "Qwen 3.6 9B",

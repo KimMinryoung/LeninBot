@@ -141,9 +141,9 @@ docker.service
 
 | Tier | Claude | OpenAI | Local |
 |------|--------|--------|-------|
-| high | Claude Opus 4.6 | GPT-5.4 | qwen3.5-9b |
-| medium | Claude Sonnet 4.6 | GPT-5.4-mini | qwen3.5-9b |
-| low | Claude Haiku 4.5 | GPT-5.4-nano | qwen3.5-9b |
+| high | Claude Opus 4.6 | GPT-5.5 | qwen3.5-9b |
+| medium | Claude Sonnet 4.6 | GPT-5.5-mini | qwen3.5-9b |
+| low | Claude Haiku 4.5 | GPT-5.5-nano | qwen3.5-9b |
 
 `bot_config.py`에서 관리. chat은 medium tier, task는 에이전트별 budget/tier 설정. `/fallback`으로 medium ↔ low 토글.
 
@@ -315,7 +315,7 @@ leninbot/
 ├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
-├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.4, local LLM 등)
+├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.5, local LLM 등)
 ├── experience_writer.py       # 경험 메모리 일일 정리
 ├── autonomous_project.py      # 자율 프로젝트 루프 런타임 (T0, 매시 :17 systemd)
 ├── site_publishing.py         # cyber-lenin.com 게시 도구 (publish_hub_curation, publish_static_page) + API 읽기 헬퍼

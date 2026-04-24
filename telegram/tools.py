@@ -1635,6 +1635,12 @@ from db_tools import DB_TOOLS, DB_TOOL_HANDLERS
 TOOLS.extend(DB_TOOLS)
 TOOL_HANDLERS.update(DB_TOOL_HANDLERS)
 
+# ── Public-post editor (UPDATE + Redis cache purge in one step) ──
+from post_edit_tools import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
+
+TOOLS.extend(POST_EDIT_TOOLS)
+TOOL_HANDLERS.update(POST_EDIT_TOOL_HANDLERS)
+
 # ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (
     WALLET_TOOL, WALLET_TOOL_HANDLER,

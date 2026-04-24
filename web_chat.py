@@ -180,8 +180,10 @@ async def handle_web_chat(
     # Load conversation history scoped to session_id if it resumes an existing one.
     history = await asyncio.to_thread(_load_web_history, fps, session_id, 20)
 
-    # Web chatbot always runs on a corporate LLM (local is Telegram-only).
-    provider = _config.get("provider", "claude")
+    # Web chat has its OWN provider/tier keys so Telegram's /config does not
+    # bleed into the public site. Corporate LLM only (no "local" — that path
+    # is Telegram-dev use). Changes take effect on leninbot-api restart.
+    provider = _config.get("webchat_provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
 
@@ -220,15 +222,14 @@ async def handle_web_chat(
                 budget = 0.30
 
             # Resolve model name for the effective provider (not global config)
+            tier = str(_config.get("webchat_model", "medium"))
             if provider == "openai":
                 from bot_config import _resolve_openai_model, _TIER_MAP, _OPENAI_MODEL_MAP
-                tier = str(_config.get("chat_model", "high"))
                 alias = _TIER_MAP.get("openai", {}).get(tier, tier)
                 model = _resolve_openai_model(alias)
             else:
                 # Claude: resolve via normal path (works even when global config is local)
                 from bot_config import _get_model_by_alias, _MODEL_ALIAS_MAP, _TIER_MAP
-                tier = str(_config.get("chat_model", "high"))
                 alias = _TIER_MAP.get("claude", {}).get(tier, tier)
                 model = await _get_model_by_alias(alias)
 
