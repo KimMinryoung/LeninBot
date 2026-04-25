@@ -1,0 +1,160 @@
+/* ============================================================
+   CYBER-LENIN DESIGN SYSTEM — COLOR PALETTE
+   Generated: 2026-04-21
+   
+   사용 원칙:
+   1. 컴포넌트는 --palette-* 직접 사용 금지. --color-* 시맨틱 변수만 사용.
+   2. 적색(--color-accent)은 한 화면에 한 곳만. 아껴 써야 폭발한다.
+   3. 그라디언트, 그림자, 파란 링크 없음.
+   ============================================================ */
+
+:root {
+  /* ── 1단계: 원시 팔레트 ── */
+  --palette-ink:        #1A1A1A;   /* 잉크 검정 — 인쇄된 책의 먹 */
+  --palette-paper:      #F4F1EA;   /* 종이 크림 — 오래된 팸플릿 */
+  --palette-red:        #C8102E;   /* 선동 적색 — 혁명 포스터 */
+  --palette-stone:      #6B6B6B;   /* 돌 회색 — 메타데이터 */
+  --palette-dust:       #D8D3C7;   /* 먼지색 — 경계선 */
+  --palette-bone:       #EDE7DA;   /* 뼈 크림 — 인용/코드 블록 */
+
+  /* 다크모드 원시값 */
+  --palette-night:      #12100E;   /* 밤의 먹 — 가죽 제본 책 */
+  --palette-moon:       #E8E3D6;   /* 달빛 종이 — 다크 본문 */
+  --palette-stone-night:#9B9B96;   /* 밤의 돌 */
+
+  /* ── 2단계: 시맨틱 변수 (컴포넌트가 실제로 쓰는 것) ── */
+  --color-bg:           var(--palette-paper);
+  --color-bg-card:      var(--palette-bone);
+  --color-bg-inset:     var(--palette-bone);
+  --color-border:       var(--palette-dust);
+
+  --color-text:         var(--palette-ink);
+  --color-text-muted:   var(--palette-stone);
+
+  --color-accent:       var(--palette-red);   /* 딱 한 곳만 */
+  --color-accent-hover: #A00D24;              /* 호버 시 약간 어둡게 */
+
+  /* ── 타이포그래피 기본값 ── */
+  --font-serif:         'Georgia', 'Times New Roman', serif;
+  --font-mono:          'Courier New', monospace;
+
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+  --text-3xl:  1.875rem;
+  --text-hero: 2.5rem;    /* HERO 테제 크기 */
+
+  /* ── 간격 ── */
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ── 기타 ── */
+  --radius-sm: 2px;
+  --radius:    4px;
+  --border-width: 1px;
+  --transition: 150ms ease;
+}
+
+/* ── 다크모드: 변수만 덮어씌운다. 컴포넌트 코드 불변. ── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg:         var(--palette-night);
+    --color-bg-card:    #1E1B18;
+    --color-bg-inset:   #252118;
+    --color-border:     #3A3530;
+
+    --color-text:       var(--palette-moon);
+    --color-text-muted: var(--palette-stone-night);
+
+    /* --color-accent: 그대로 #C8102E — 혁명의 색에 밤낮 없다 */
+  }
+}
+
+/* ── 전역 기본값 ── */
+body {
+  background-color: var(--color-bg);
+  color:            var(--color-text);
+  font-family:      var(--font-serif);
+  font-size:        var(--text-base);
+  line-height:      1.7;
+}
+
+a {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-border);
+  transition: text-decoration-color var(--transition),
+              color var(--transition);
+}
+
+a:hover {
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
+}
+
+/* 파란 링크 절대 없음 */
+a:visited {
+  color: var(--color-text-muted);
+}
+
+/* ── 유틸리티 클래스 (Tailwind 없이 최소한의 공통 패턴) ── */
+.text-muted   { color: var(--color-text-muted); font-size: var(--text-sm); }
+.text-accent  { color: var(--color-accent); }
+.border-thin  { border: var(--border-width) solid var(--color-border); }
+.bg-card      { background-color: var(--color-bg-card); }
+.bg-inset     { background-color: var(--color-bg-inset); }
+
+/* 붉은 밑줄 — HERO 테제 강조선 */
+.accent-rule {
+  display: block;
+  width: 3rem;
+  height: 2px;
+  background-color: var(--color-accent);
+  margin: var(--space-4) 0;
+}
+
+/* LIVE 점 — PULSE 카드 */
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* CTA 버튼 — 레닌에게 물어보기 */
+.btn-primary {
+  display: inline-block;
+  background-color: var(--color-accent);
+  color: var(--palette-paper);
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-6);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color var(--transition);
+  letter-spacing: 0.03em;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-accent-hover);
+  color: var(--palette-paper);
+  text-decoration: none;
+}

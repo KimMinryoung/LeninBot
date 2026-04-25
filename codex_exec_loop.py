@@ -145,9 +145,21 @@ async def chat_with_tools(
     )
     os.close(fd)
 
+    # Sandbox policy: match LeninBot's existing tool permission model where
+    # write_file/execute_python already run unsandboxed. Two flags together
+    # because in Codex 0.124 each one alone leaves a gap:
+    #   - `-s danger-full-access` turns off the workspace-write sandbox
+    #     (which would otherwise read-only-bind .git, blocking commits, and
+    #     cut network, blocking git push / R2 / Postgres on localhost).
+    #   - `--dangerously-bypass-approvals-and-sandbox` skips the per-command
+    #     approval prompt that exec mode would otherwise raise for any
+    #     command the model didn't pre-declare.
+    # `--full-auto` is intentionally NOT used — it's an alias for the
+    # locked-down workspace-write mode we're trying to escape.
     cmd = [
         CODEX_BIN, "exec",
-        "--full-auto",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-s", "danger-full-access",
         "-C", PROJECT_ROOT,
         "-m", chosen_model,
         "--ephemeral",
@@ -175,41 +187,85 @@ async def chat_with_tools(
     proc.stdin.close()
 
     rounds = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
 
     async def _pump_events():
-        nonlocal rounds
+        # Codex CLI v0.124 emits one JSON object per line with these shapes:
+        #   {"type":"thread.started","thread_id":"..."}
+        #   {"type":"turn.started"}
+        #   {"type":"item.started",  "item":{"type":"command_execution", "command":[...]}}
+        #   {"type":"item.completed","item":{"type":"agent_message", "text":"..."}}
+        #   {"type":"item.completed","item":{"type":"patch_apply", "path":"..."}}
+        #   {"type":"turn.completed","usage":{"input_tokens":N, "output_tokens":M, ...}}
+        # We surface command/patch starts as numbered "rounds" and final
+        # agent messages as thinking blurbs.
+        nonlocal rounds, total_input_tokens, total_output_tokens
         async for raw in proc.stdout:
             try:
                 event = json.loads(raw.decode().strip())
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
-            etype = str(event.get("type") or event.get("event") or "")
-            # Codex's JSONL event taxonomy varies across versions; match by
-            # suffix on the event-type string so we stay robust.
-            if etype.endswith("agent_message_delta"):
-                delta = event.get("delta") or event.get("text") or ""
-                if delta:
-                    await emit_progress(on_progress, "text_delta", delta)
-            elif etype.endswith("agent_message"):
-                msg = event.get("message") or event.get("text") or ""
-                if msg:
-                    await emit_progress(on_progress, "thinking", f"[codex] {str(msg)[:200]}")
-            elif etype.endswith("exec_command_begin"):
-                rounds += 1
-                cmd_field = event.get("command")
-                if isinstance(cmd_field, list):
-                    cmd_str = " ".join(str(x) for x in cmd_field)
-                else:
-                    cmd_str = str(cmd_field or "")
+            etype = str(event.get("type") or "")
+
+            # _on_progress (telegram/bot.py) parses "[N] ..." prefix and
+            # flushes the buffer when N increments — that's how every other
+            # agent gets streamed step-by-step. Without a numeric prefix,
+            # everything stays buffered until the post-run flush, which is
+            # exactly the "all-at-once at the end" symptom we hit. So every
+            # emit below uses "[{rounds}] codex ..." to plug into that flow.
+            if etype == "item.started":
+                item = event.get("item") or {}
+                itype = str(item.get("type") or "")
+                if itype == "command_execution":
+                    rounds += 1
+                    cmd_field = item.get("command") or item.get("text") or ""
+                    if isinstance(cmd_field, list):
+                        cmd_str = " ".join(str(x) for x in cmd_field)
+                    else:
+                        cmd_str = str(cmd_field)
+                    await emit_progress(
+                        on_progress, "thinking",
+                        f"[{rounds}] codex $ {cmd_str[:160]}",
+                    )
+                elif itype in ("patch_apply", "file_change"):
+                    rounds += 1
+                    path = item.get("path") or item.get("file") or "?"
+                    await emit_progress(
+                        on_progress, "thinking",
+                        f"[{rounds}] codex edit {path}",
+                    )
+                elif itype == "web_search":
+                    rounds += 1
+                    q = item.get("query") or item.get("text") or "?"
+                    await emit_progress(
+                        on_progress, "thinking",
+                        f"[{rounds}] codex web_search: {str(q)[:120]}",
+                    )
+
+            elif etype == "item.completed":
+                item = event.get("item") or {}
+                itype = str(item.get("type") or "")
+                if itype == "agent_message":
+                    text = item.get("text") or ""
+                    if text:
+                        # Reasoning text — group with the in-progress round so
+                        # the next command_execution flush sweeps it through.
+                        await emit_progress(
+                            on_progress, "thinking",
+                            f"[{max(rounds, 0)}] codex: {str(text)[:200]}",
+                        )
+
+            elif etype == "turn.completed":
+                usage = event.get("usage") or {}
+                in_tok = int(usage.get("input_tokens", 0) or 0)
+                out_tok = int(usage.get("output_tokens", 0) or 0)
+                cached = int(usage.get("cached_input_tokens", 0) or 0)
+                total_input_tokens += in_tok
+                total_output_tokens += out_tok
                 await emit_progress(
-                    on_progress, "thinking",
-                    f"[codex round {rounds}] $ {cmd_str[:160]}",
-                )
-            elif etype.endswith("patch_apply_begin"):
-                rounds += 1
-                await emit_progress(
-                    on_progress, "thinking",
-                    f"[codex round {rounds}] patch_apply",
+                    on_progress, "budget",
+                    f"[{max(rounds, 1)}] tokens in={in_tok} (cached={cached}) out={out_tok} · 구독제 ($0)",
                 )
 
     async def _drain_stderr() -> bytes:
@@ -263,14 +319,15 @@ async def chat_with_tools(
             log_event("error", "codex", f"codex exec failed (rc={rc}): {err_tail}")
         final_text = f"⚠️ Codex 실행 실패 (exit {rc}):\n{err_tail}"
 
-    # ChatGPT Plus/Pro subscription is flat-rate — actual USD cost is 0
-    # from our perspective. Round count reflects Codex's own tool actions.
+    # ChatGPT Plus/Pro subscription is flat-rate — USD cost is always 0
+    # from our perspective. Round count reflects Codex's own tool actions;
+    # token totals are surfaced for visibility but do not feed pricing.
     if budget_tracker is not None:
         budget_tracker.update(build_budget_tracker(0.0, max(rounds, 1), False, []))
 
     logger.info(
-        "[codex] agent=%s exit=%d rounds=%d output_len=%d",
-        agent_name, rc, rounds, len(final_text),
+        "[codex] agent=%s exit=%d rounds=%d in_tokens=%d out_tokens=%d output_len=%d",
+        agent_name, rc, rounds, total_input_tokens, total_output_tokens, len(final_text),
     )
 
     return final_text or "⚠️ Codex returned no output."

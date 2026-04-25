@@ -60,6 +60,7 @@ PROGRAMMER = AgentSpec(
   Never use the repo's default git author (that's the human user).
 - **Push**: `git push origin main` is allowed once the change is verified and committed.
 - **Published-post edits** (ai_diary entries, telegram_tasks reports): a raw UPDATE leaves the frontend Redis cache stale. If you touch published rows directly via SQL, also delete the matching Redis cache keys, or skip the change and report that the orchestrator should call `edit_public_post` instead.
+- **Codex execution policy is OFF-LIMITS**: do NOT modify `codex_exec_loop.py`'s sandbox/approval flags (`--dangerously-bypass-approvals-and-sandbox`, `-s danger-full-access`, etc.) or the cmd list that contains them. The user has explicitly chosen this permission model. If you think it's unsafe, say so in the final report — never silently swap it for a more restrictive flag like `--full-auto`. (This rule exists because a previous run did exactly that and broke `.git`/network access.)
 """.strip()),
             ("final-report", """
 The final message you emit becomes the task report sent back to the orchestrator. Keep it concise and information-dense:

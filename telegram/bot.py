@@ -1480,6 +1480,124 @@ async def _email_bridge_poll_loop(bot: Bot):
         await asyncio.sleep(EMAIL_POLL_INTERVAL_SECONDS)
 
 
+# ── Per-agent dispatch helpers ────────────────────────────────────────
+# These resolve which chat_with_tools implementation + which model an agent
+# spec runs against. Keeping them at module level (rather than as inline
+# closures inside bot_main) keeps the dispatch block in bot_main short and
+# makes the routing testable in isolation.
+
+async def _get_model_for_agent(spec):
+    """Resolve the LLM model an agent should run against.
+
+    Priority: spec.provider override (moon/codex/claude/openai) wins over
+    the global telegram /config provider. Returns the API model ID string.
+    """
+    if spec.provider == "moon":
+        return await _get_model_moon()
+    if spec.provider == "codex":
+        from codex_exec_loop import CODEX_DEFAULT_MODEL
+        return CODEX_DEFAULT_MODEL
+    if spec.provider in ("claude", "openai"):
+        from bot_config import _TIER_MAP, _get_model_by_alias, _resolve_openai_model
+        tier = str(_config.get("task_model", "high"))
+        alias = _TIER_MAP.get(spec.provider, {}).get(tier, tier)
+        if spec.provider == "openai":
+            return _resolve_openai_model(alias)
+        return await _get_model_by_alias(alias)
+    return await _get_model_task()
+
+
+def _make_moon_chat_fn(spec):
+    """Build a chat_fn that targets the local llama-server (MOON PC).
+
+    Falls back to the standard Claude/OpenAI chat fn if MOON is unhealthy
+    so the agent run still succeeds.
+    """
+    from openai_tool_loop import chat_with_tools as _moon_loop
+    from llm.client import MOON_BASE, MOON_MODEL, _health_ok
+    if not _health_ok(MOON_BASE):
+        logger.warning("MOON unavailable for agent %s; falling back to Claude", spec.name)
+        return _chat_with_tools
+
+    async def _moon_chat_fn(
+        messages, max_rounds=None, system_prompt=None, model=None,
+        max_tokens=None, budget_usd=None, extra_tools=None,
+        extra_handlers=None, on_progress=None, budget_tracker=None,
+        task_id=None, finalization_tools=None, terminal_tools=None,
+    ):
+        return await _moon_loop(
+            messages,
+            base_url=MOON_BASE,
+            model=model or MOON_MODEL,
+            tools=list(extra_tools or []),
+            tool_handlers=dict(extra_handlers or {}),
+            system_prompt=system_prompt,
+            max_rounds=max_rounds or spec.max_rounds,
+            max_tokens=max_tokens or 8192,
+            log_event=_log_event,
+            budget_usd=budget_usd or 0.0,
+            budget_tracker=budget_tracker,
+            on_progress=on_progress,
+            task_id=task_id,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+        )
+    return _moon_chat_fn
+
+
+def _make_codex_chat_fn(spec):
+    """Build a chat_fn that delegates the entire task to OpenAI Codex CLI."""
+    from codex_exec_loop import chat_with_tools as _codex_loop
+
+    async def _codex_chat_fn(
+        messages, max_rounds=None, system_prompt=None, model=None,
+        max_tokens=None, budget_usd=None, extra_tools=None,
+        extra_handlers=None, on_progress=None, budget_tracker=None,
+        task_id=None, finalization_tools=None, terminal_tools=None,
+    ):
+        return await _codex_loop(
+            messages,
+            model=model,
+            tools=extra_tools, tool_handlers=extra_handlers,
+            system_prompt=system_prompt,
+            max_rounds=max_rounds or spec.max_rounds,
+            max_tokens=max_tokens or 8192,
+            log_event=_log_event,
+            budget_usd=budget_usd or 0.0,
+            budget_tracker=budget_tracker,
+            on_progress=on_progress,
+            task_id=task_id,
+            agent_name=spec.name,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+        )
+    return _codex_chat_fn
+
+
+def _make_corporate_chat_fn(provider: str):
+    """Build a chat_fn that forces _chat_with_tools to use a specific provider.
+
+    Used when an agent spec pins provider="claude" or "openai" regardless of
+    the global config (e.g. diary writer needing Claude long-context).
+    """
+    async def _corporate_chat_fn(
+        messages, max_rounds=None, system_prompt=None, model=None,
+        max_tokens=None, budget_usd=None, extra_tools=None,
+        extra_handlers=None, on_progress=None, budget_tracker=None,
+        task_id=None, finalization_tools=None, terminal_tools=None,
+    ):
+        return await _chat_with_tools(
+            messages, max_rounds=max_rounds, system_prompt=system_prompt,
+            model=model, max_tokens=max_tokens, budget_usd=budget_usd,
+            extra_tools=extra_tools, extra_handlers=extra_handlers,
+            on_progress=on_progress, budget_tracker=budget_tracker,
+            task_id=task_id, provider_override=provider,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+        )
+    return _corporate_chat_fn
+
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
@@ -1752,142 +1870,32 @@ async def bot_main():
         target_chat_id = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
         progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
 
-        # ── Provider dispatch: Claude vs local LLM (OpenAI-compatible) ──
+        # ── Provider dispatch: chat_fn varies per provider; model_fn unified ──
+        # Helpers (_make_*_chat_fn, _get_model_for_agent) live at module level
+        # so this stays a thin routing block. provider=None falls through to
+        # the global telegram /config (handled inside _chat_with_tools).
         if spec.provider == "moon":
-            from openai_tool_loop import chat_with_tools as moon_chat_with_tools
-            from llm.client import MOON_BASE, MOON_MODEL, _health_ok
-
-            # Try MOON PC, then fall back to Claude
-            if _health_ok(MOON_BASE):
-                llm_base, llm_model = MOON_BASE, MOON_MODEL
-                logger.info("Agent %s: using MOON PC (%s)", spec.name, MOON_BASE)
-            else:
-                llm_base = None
-                logger.warning("MOON PC unavailable for agent %s; falling back to Claude", spec.name)
-
-            if llm_base is None:
-                chosen_chat_fn = _chat_with_tools
-                chosen_model_fn = _get_model_task
-                chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
-            else:
-                _llm_base, _llm_model = llm_base, llm_model  # capture for closure
-
-                async def _moon_chat_with_tools(
-                    messages, max_rounds=None, system_prompt=None, model=None,
-                    max_tokens=None, budget_usd=None, extra_tools=None,
-                    extra_handlers=None, on_progress=None, budget_tracker=None,
-                    task_id=None, finalization_tools=None, terminal_tools=None,
-                ):
-                    # extra_tools already contains the agent's filtered tools (passed from process_task)
-                    merged_tools = list(extra_tools or [])
-                    merged_handlers = dict(extra_handlers or {})
-                    return await moon_chat_with_tools(
-                        messages,
-                        base_url=_llm_base,
-                        model=model or _llm_model,
-                        tools=merged_tools,
-                        tool_handlers=merged_handlers,
-                        system_prompt=system_prompt,
-                        max_rounds=max_rounds or spec.max_rounds,
-                        max_tokens=max_tokens or 8192,
-                        log_event=_log_event,
-                        budget_usd=budget_usd or 0.0,
-                        budget_tracker=budget_tracker,
-                        on_progress=on_progress,
-                        task_id=task_id,
-                        finalization_tools=finalization_tools,
-                        terminal_tools=terminal_tools,
-                    )
-                chosen_chat_fn = _moon_chat_with_tools
-                chosen_model_fn = _get_model_moon
-                chosen_max_tokens = 8192
+            chosen_chat_fn = _make_moon_chat_fn(spec)
+            # MOON helper returns _chat_with_tools when MOON is unhealthy;
+            # in that fallback case we want the Claude-sized output budget.
+            chosen_max_tokens = (
+                8192 if chosen_chat_fn is not _chat_with_tools
+                else _CLAUDE_MAX_TOKENS_TASK
+            )
         elif spec.provider == "codex":
-            # Delegate the entire task to OpenAI Codex CLI.
-            # Codex runs autonomously with its own toolset inside a
-            # workspace-write sandbox; LeninBot's tool dispatch is bypassed.
-            # Auth via ChatGPT Plus/Pro subscription (~/.codex/auth.json).
-            from codex_exec_loop import chat_with_tools as codex_chat_with_tools
-
-            async def _codex_chat_fn(
-                messages, max_rounds=None, system_prompt=None, model=None,
-                max_tokens=None, budget_usd=None, extra_tools=None,
-                extra_handlers=None, on_progress=None, budget_tracker=None,
-                task_id=None, finalization_tools=None, terminal_tools=None,
-            ):
-                return await codex_chat_with_tools(
-                    messages,
-                    model=model,
-                    tools=extra_tools, tool_handlers=extra_handlers,
-                    system_prompt=system_prompt,
-                    max_rounds=max_rounds or spec.max_rounds,
-                    max_tokens=max_tokens or 8192,
-                    log_event=_log_event,
-                    budget_usd=budget_usd or 0.0,
-                    budget_tracker=budget_tracker,
-                    on_progress=on_progress,
-                    task_id=task_id,
-                    agent_name=spec.name,
-                    finalization_tools=finalization_tools,
-                    terminal_tools=terminal_tools,
-                )
-            chosen_chat_fn = _codex_chat_fn
-
-            async def _codex_model_fn():
-                # process_task awaits get_model_fn() (telegram/tasks.py:355),
-                # so this must return a coroutine — a sync lambda blows up
-                # with "object str can't be used in 'await' expression".
-                from codex_exec_loop import CODEX_DEFAULT_MODEL
-                return CODEX_DEFAULT_MODEL
-            chosen_model_fn = _codex_model_fn
+            chosen_chat_fn = _make_codex_chat_fn(spec)
             chosen_max_tokens = 8192
         elif spec.provider in ("claude", "openai"):
-            # Agent explicitly requests corporate LLM (e.g. diary writer)
-            _forced_provider = spec.provider
-            _orig_fn = _chat_with_tools
-
-            async def _corporate_chat_fn(
-                messages, max_rounds=None, system_prompt=None, model=None,
-                max_tokens=None, budget_usd=None, extra_tools=None,
-                extra_handlers=None, on_progress=None, budget_tracker=None,
-                task_id=None, finalization_tools=None, terminal_tools=None,
-            ):
-                return await _orig_fn(
-                    messages, max_rounds=max_rounds, system_prompt=system_prompt,
-                    model=model, max_tokens=max_tokens, budget_usd=budget_usd,
-                    extra_tools=extra_tools, extra_handlers=extra_handlers,
-                    on_progress=on_progress, budget_tracker=budget_tracker,
-                    task_id=task_id, provider_override=_forced_provider,
-                    finalization_tools=finalization_tools,
-                    terminal_tools=terminal_tools,
-                )
-            chosen_chat_fn = _corporate_chat_fn
+            chosen_chat_fn = _make_corporate_chat_fn(spec.provider)
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
-
-            # Resolve model name for the forced provider (not global config)
-            if _forced_provider == "openai":
-                from bot_config import _resolve_openai_model, _TIER_MAP
-                _fp_tier = str(_config.get("task_model", "high"))
-                _fp_alias = _TIER_MAP.get("openai", {}).get(_fp_tier, _fp_tier)
-                _fp_model = _resolve_openai_model(_fp_alias)
-
-                async def _get_openai_corporate_model():
-                    # process_task awaits get_model_fn() — must be a coroutine.
-                    return _fp_model
-                chosen_model_fn = _get_openai_corporate_model
-            else:
-                # Claude: resolve alias for claude tier map
-                from bot_config import _get_model_by_alias, _TIER_MAP
-                _fp_tier = str(_config.get("task_model", "high"))
-                _fp_alias = _TIER_MAP.get("claude", {}).get(_fp_tier, _fp_tier)
-
-                async def _get_corporate_model():
-                    return await _get_model_by_alias(_fp_alias)
-                chosen_model_fn = _get_corporate_model
         else:
-            # provider=None: follow orchestrator's global config
             chosen_chat_fn = _chat_with_tools
-            chosen_model_fn = _get_model_task
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+
+        async def chosen_model_fn():
+            if spec.provider == "moon" and chosen_chat_fn is _chat_with_tools:
+                return await _get_model_task()
+            return await _get_model_for_agent(spec)
 
         def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
             icon = "✅" if status == "done" else "❌"
