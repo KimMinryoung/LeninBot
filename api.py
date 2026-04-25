@@ -390,12 +390,12 @@ async def list_sessions(
     return {"sessions": rows}
 
 
-@app.get("/reports")
+@app.get("/reports", dependencies=[Depends(require_admin)])
 async def list_reports(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    """Completed task reports list (public, for BichonWebsite)."""
+    """Completed task reports list (admin-only)."""
     rows = db_query(
         """SELECT id, content, result, created_at, completed_at
            FROM telegram_tasks
@@ -412,9 +412,9 @@ async def list_reports(
     return {"reports": rows, "total": total}
 
 
-@app.get("/reports/{report_id}")
+@app.get("/reports/{report_id}", dependencies=[Depends(require_admin)])
 async def get_report(report_id: int):
-    """Single task report (full markdown)."""
+    """Single task report (admin-only, full markdown)."""
     rows = db_query(
         """SELECT id, content, result, created_at, completed_at
            FROM telegram_tasks
