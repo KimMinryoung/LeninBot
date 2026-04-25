@@ -655,6 +655,69 @@ def _filename_fallback_title(filename: str) -> str:
     return stem.replace("_", " ")
 
 
+_MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+_MD_ITALIC_RE = re.compile(r"\*([^*]+)\*")
+_MD_CODE_RE = re.compile(r"`([^`]+)`")
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_META_LINE_RE = re.compile(r"^\s*(?:\*\*)?(?:작성자|작성일|Author|Date)(?:\*\*)?\s*:.*$", re.IGNORECASE)
+_MD_HEADING_RE = re.compile(r"^#{1,6}\s+")
+_MD_LIST_RE = re.compile(r"^(?:[-*+]|\d+\.)\s+")
+
+
+def _extract_md_excerpt(path: Path, max_chars: int = 300) -> str | None:
+    """Return a plain-text excerpt of the first body content, ready for a 3-line preview.
+
+    Skips the H1, author/date metadata, the `---` separator, list markers, and inline
+    markdown so the homepage and /reports preview render the same readable opening
+    sentence regardless of whether a file uses the canonical research layout.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            lines: list[str] = []
+            for _ in range(80):  # 80 lines is plenty for a 300-char excerpt
+                line = fh.readline()
+                if not line:
+                    break
+                lines.append(line)
+    except Exception:
+        return None
+
+    parts: list[str] = []
+    for raw in lines:
+        line = raw.rstrip("\n").strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            continue  # title heading
+        if _MD_META_LINE_RE.match(line):
+            continue  # author/date metadata
+        if line.startswith(">"):
+            continue  # blockquote
+        if set(line) <= {"-", "="} and len(line) >= 3:
+            continue  # horizontal rule / setext underline
+        line = _MD_HEADING_RE.sub("", line)
+        line = _MD_LIST_RE.sub("", line)
+        line = _MD_IMAGE_RE.sub("", line)
+        line = _MD_LINK_RE.sub(r"\1", line)
+        line = _MD_BOLD_RE.sub(r"\1", line)
+        line = _MD_ITALIC_RE.sub(r"\1", line)
+        line = _MD_CODE_RE.sub(r"\1", line)
+        line = line.strip()
+        if not line:
+            continue
+        parts.append(line)
+        if sum(len(p) for p in parts) + len(parts) - 1 >= max_chars:
+            break
+
+    text = " ".join(parts).strip()
+    if not text:
+        return None
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "…"
+    return text
+
+
 @app.get("/robots.txt")
 async def robots_txt():
     content = "\n".join([
@@ -759,7 +822,8 @@ async def atom_feed():
 
 @app.get("/research")
 async def list_research():
-    """List public .md files with their extracted H1 title so the frontend doesn't need N+1 fetches."""
+    """List public .md files with extracted H1 title and a 3-line-ready excerpt
+    so the frontend doesn't need N+1 fetches to populate previews."""
     files_by_name: dict[str, dict] = {}
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
@@ -769,6 +833,7 @@ async def list_research():
             files_by_name[p.name] = {
                 "filename": p.name,
                 "title": _extract_md_title(p) or _filename_fallback_title(p.name),
+                "excerpt": _extract_md_excerpt(p),
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "source_dir": p.parent.name,
