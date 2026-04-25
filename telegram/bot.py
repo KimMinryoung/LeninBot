@@ -25,11 +25,12 @@ from secrets_loader import get_secret
 # Extracted modules
 from bot_config import (
     ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    _claude, _openai_client,
+    _claude, _openai_client, _deepseek_client,
     _CLAUDE_MAX_TOKENS, _CLAUDE_MAX_TOKENS_TASK,
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
+    _get_task_provider,
     get_current_model_selection,
     _extract_text,
 )
@@ -1365,10 +1366,15 @@ async def _chat_with_tools(
 
     if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
+        from bot_config import _resolve_tier, _resolve_openai_model
+        _tier_key = "task_model" if _runtime_kind == "task" else "chat_model"
+        _openai_model = model or _resolve_openai_model(
+            _resolve_tier(str(_config.get(_tier_key, "high")), provider="openai")
+        )
         return await openai_chat(
             messages,
             client=_openai_client,
-            model=model or await _get_model(),
+            model=_openai_model,
             tools=merged_tools,
             tool_handlers=merged_handlers,
             system_prompt=sys_prompt,
@@ -1384,6 +1390,42 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
         )
+
+    if effective_provider == "deepseek" and _deepseek_client:
+        from openai_tool_loop import chat_with_tools as openai_chat
+        from bot_config import _resolve_tier, _resolve_deepseek_model
+        _tier_key = "task_model" if _runtime_kind == "task" else "chat_model"
+        _deepseek_model = model or _resolve_deepseek_model(
+            _resolve_tier(str(_config.get(_tier_key, "high")), provider="deepseek")
+        )
+        return await openai_chat(
+            messages,
+            client=_deepseek_client,
+            model=_deepseek_model,
+            tools=merged_tools,
+            tool_handlers=merged_handlers,
+            system_prompt=sys_prompt,
+            max_rounds=resolved_max_rounds,
+            max_tokens=resolved_max_tokens,
+            log_event=_log_event,
+            budget_usd=resolved_budget,
+            on_progress=on_progress,
+            budget_tracker=budget_tracker,
+            task_id=task_id,
+            agent_name=_agent_name,
+            mission_id=_mission_id,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+            # DeepSeek V4 thinking mode requires preserving reasoning_content
+            # across tool sub-turns. This loop stores text-only history, so use
+            # non-thinking mode for reliable tool calling and lower task cost.
+            extra_body={"thinking": {"type": "disabled"}},
+            sdk_max_token_param="max_tokens",
+        )
+
+    if effective_provider in ("openai", "deepseek"):
+        missing = "OPENAI_API_KEY" if effective_provider == "openai" else "DEEPSEEK_API_KEY"
+        raise RuntimeError(f"{missing} is not configured for provider={effective_provider}")
 
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_merge_runtime_context_into_last_user` above,
@@ -1440,6 +1482,7 @@ register_handlers(router, ctx={
     "clear_system_alert": _clear_system_alert,
     "claude_client": _claude,
     "openai_client": _openai_client,
+    "deepseek_client": _deepseek_client,
     "extract_text": _extract_text,
     "local_llm_generate": _local_llm_generate,
     "get_model_light": _get_model_light,
@@ -1489,20 +1532,29 @@ async def _email_bridge_poll_loop(bot: Bot):
 async def _get_model_for_agent(spec):
     """Resolve the LLM model an agent should run against.
 
-    Priority: spec.provider override (moon/codex/claude/openai) wins over
-    the global telegram /config provider. Returns the API model ID string.
+    Priority: spec.provider override wins over task_provider, which can be
+    independent from the Telegram chat provider. Returns the API model ID.
     """
     if spec.provider == "moon":
         return await _get_model_moon()
     if spec.provider == "codex":
         from codex_exec_loop import CODEX_DEFAULT_MODEL
         return CODEX_DEFAULT_MODEL
-    if spec.provider in ("claude", "openai"):
-        from bot_config import _TIER_MAP, _get_model_by_alias, _resolve_openai_model
+    provider = spec.provider or _get_task_provider()
+    if provider == "local":
+        from llm.client import _resolve_backend
+        return _resolve_backend()["model"]
+    if provider in ("claude", "openai", "deepseek"):
+        from bot_config import (
+            _TIER_MAP, _get_model_by_alias, _resolve_openai_model,
+            _resolve_deepseek_model,
+        )
         tier = str(_config.get("task_model", "high"))
-        alias = _TIER_MAP.get(spec.provider, {}).get(tier, tier)
-        if spec.provider == "openai":
+        alias = _TIER_MAP.get(provider, {}).get(tier, tier)
+        if provider == "openai":
             return _resolve_openai_model(alias)
+        if provider == "deepseek":
+            return _resolve_deepseek_model(alias)
         return await _get_model_by_alias(alias)
     return await _get_model_task()
 
@@ -1574,13 +1626,13 @@ def _make_codex_chat_fn(spec):
     return _codex_chat_fn
 
 
-def _make_corporate_chat_fn(provider: str):
+def _make_provider_chat_fn(provider: str):
     """Build a chat_fn that forces _chat_with_tools to use a specific provider.
 
-    Used when an agent spec pins provider="claude" or "openai" regardless of
-    the global config (e.g. diary writer needing Claude long-context).
+    Used when an agent spec pins a provider or task_provider differs from the
+    Telegram chat provider.
     """
-    async def _corporate_chat_fn(
+    async def _provider_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
         max_tokens=None, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
@@ -1595,7 +1647,7 @@ def _make_corporate_chat_fn(provider: str):
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
         )
-    return _corporate_chat_fn
+    return _provider_chat_fn
 
 
 async def bot_main():
@@ -1859,7 +1911,8 @@ async def bot_main():
         # the agent has no pinned provider. Prompt is fully static post-refactor
         # — current time, current model, and alerts are injected as runtime
         # context by _chat_with_tools, not baked into the system prompt.
-        _agent_provider = spec.effective_provider(_config.get("provider", "claude"))
+        task_provider = _get_task_provider()
+        _agent_provider = spec.effective_provider(task_provider)
         system_prompt = spec.render_prompt(provider=_agent_provider)
 
         # Inject runtime environment info for programmer (needs venv, packages, services)
@@ -1872,8 +1925,8 @@ async def bot_main():
 
         # ── Provider dispatch: chat_fn varies per provider; model_fn unified ──
         # Helpers (_make_*_chat_fn, _get_model_for_agent) live at module level
-        # so this stays a thin routing block. provider=None falls through to
-        # the global telegram /config (handled inside _chat_with_tools).
+        # so this stays a thin routing block. provider=None follows
+        # task_provider, which may differ from the Telegram chat provider.
         if spec.provider == "moon":
             chosen_chat_fn = _make_moon_chat_fn(spec)
             # MOON helper returns _chat_with_tools when MOON is unhealthy;
@@ -1885,9 +1938,15 @@ async def bot_main():
         elif spec.provider == "codex":
             chosen_chat_fn = _make_codex_chat_fn(spec)
             chosen_max_tokens = 8192
-        elif spec.provider in ("claude", "openai"):
-            chosen_chat_fn = _make_corporate_chat_fn(spec.provider)
+        elif spec.provider in ("claude", "openai", "deepseek"):
+            chosen_chat_fn = _make_provider_chat_fn(spec.provider)
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+        elif task_provider in ("claude", "openai", "deepseek", "local"):
+            chosen_chat_fn = _make_provider_chat_fn(task_provider)
+            chosen_max_tokens = (
+                8192 if task_provider == "local"
+                else _CLAUDE_MAX_TOKENS_TASK
+            )
         else:
             chosen_chat_fn = _chat_with_tools
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK

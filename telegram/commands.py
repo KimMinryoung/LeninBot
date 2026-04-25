@@ -36,7 +36,8 @@ _SVC_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 def _model_name_for_provider(provider: str) -> str:
     """Resolve the current chat-tier model name for a given provider."""
     from bot_config import (
-        _TIER_MAP, _OPENAI_MODEL_MAP, _MODEL_ALIAS_MAP, _resolved_models,
+        _TIER_MAP, _OPENAI_MODEL_MAP, _DEEPSEEK_MODEL_MAP,
+        _MODEL_ALIAS_MAP, _resolved_models,
     )
     tier = _ctx["config"].get("chat_model", "high")
     alias = _TIER_MAP.get(provider, _TIER_MAP["claude"]).get(tier, tier)
@@ -45,6 +46,8 @@ def _model_name_for_provider(provider: str) -> str:
         return MOON_MODEL
     if provider == "openai":
         return _OPENAI_MODEL_MAP.get(alias, alias)
+    if provider == "deepseek":
+        return _DEEPSEEK_MODEL_MAP.get(alias, alias)
     model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
     return _resolved_models.get(alias, fallback)
 
@@ -131,7 +134,7 @@ _HELP_TEXT = """\
 /agents — 에이전트 현황 및 외부 프로세스 상태
 /config — 설정 패널 (모델, 예산, 라운드 수)
 /fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
-/provider — LLM 제공자 전환 (Claude ↔ OpenAI)
+/provider — 대화 제공자 전환 (Claude ↔ OpenAI ↔ DeepSeek, 키가 있는 것만)
 /restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
 /deploy \\[telegram|api|frontend|all] — 서버 배포 (git pull + restart, 기본: all)
 /modify <파일> | <이유> | <내용> — 서버 파일 수정
@@ -1122,25 +1125,33 @@ async def cmd_fallback(message: Message):
 
 
 async def cmd_provider(message: Message):
-    """Toggle LLM provider between Claude and OpenAI."""
+    """Cycle Telegram chat provider across configured remote providers."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    if not _ctx["openai_client"]:
-        await message.answer("❌ OPENAI_API_KEY가 설정되지 않아 전환할 수 없습니다.")
-        return
     config = _ctx["config"]
+    available = ["claude"]
+    if _ctx["openai_client"]:
+        available.append("openai")
+    if _ctx.get("deepseek_client"):
+        available.append("deepseek")
+    if len(available) == 1:
+        await message.answer("❌ 전환 가능한 추가 provider 키가 설정되어 있지 않습니다.")
+        return
     old_provider = config.get("provider", "claude")
-    if old_provider == "claude":
-        config["provider"] = "openai"
-    else:
-        config["provider"] = "claude"
+    try:
+        idx = available.index(old_provider)
+    except ValueError:
+        idx = -1
+    config["provider"] = available[(idx + 1) % len(available)]
+    if config["provider"] == "claude":
         _ctx["resolved_models"].clear()
     _notify_model_switch(old_provider, config["provider"])
     _ctx["save_config"]()
     await message.answer(
-        f"🔄 {config['provider']}로 전환\n"
-        f"대화: {_ctx['tier_to_display'](config['chat_model'])}\n"
-        f"태스크: {_ctx['tier_to_display'](config['task_model'])}"
+        f"🔄 대화 provider: {config['provider']}\n"
+        f"대화: {_ctx['tier_to_display'](config['chat_model'], config['provider'])}\n"
+        f"태스크 provider: {config.get('task_provider', 'default')}\n"
+        f"태스크: {_ctx['tier_to_display'](config['task_model'], _effective_task_provider())}"
     )
 
 
@@ -1185,9 +1196,9 @@ async def handle_photo(message: Message):
     # Vision API 호출 — provider에 따라 분기
     t_start = _time.monotonic()
     try:
-        model_id = await _ctx["get_model"]()
         config = _ctx["config"]
         if config.get("provider") == "openai" and _ctx["openai_client"]:
+            model_id = await _ctx["get_model"]()
             # OpenAI Vision: image_url with base64 data URI
             messages = context_msgs + [
                 {
@@ -1216,6 +1227,7 @@ async def handle_photo(message: Message):
             in_tok = getattr(usage, "prompt_tokens", "?") if usage else "?"
             out_tok = getattr(usage, "completion_tokens", "?") if usage else "?"
         else:
+            model_id = await _ctx["get_model"]() if config.get("provider") == "claude" else await _ctx["get_model_light"]()
             # Claude Vision: base64 image source
             messages = context_msgs + [
                 {
@@ -1623,12 +1635,23 @@ async def cb_modify_reject(callback: CallbackQuery):
 
 # ── Config Panel ────────────────────────────────────────────────────
 
+def _effective_task_provider() -> str:
+    provider = str(_ctx["config"].get("task_provider", "default") or "default")
+    if provider == "default":
+        return str(_ctx["config"].get("provider", "claude") or "claude")
+    return provider
+
+
 def _config_display_value(key: str, val) -> str:
     """Format a config value for display, with model tier → actual model mapping."""
     meta = _ctx["CONFIG_META"][key]
     unit = meta["unit"]
-    if key in ("chat_model", "task_model"):
-        return _ctx["tier_to_display"](val)
+    if key == "chat_model":
+        return _ctx["tier_to_display"](val, _ctx["config"].get("provider", "claude"))
+    if key == "task_model":
+        return _ctx["tier_to_display"](val, _effective_task_provider())
+    if key == "task_provider" and val == "default":
+        return f"default ({_effective_task_provider()})"
     return f"{unit}{val}" if unit == "$" else f"{val}{unit}"
 
 
@@ -1696,7 +1719,7 @@ async def cb_config_select(callback: CallbackQuery):
         return
     meta = _ctx["CONFIG_META"][key]
     await callback.message.edit_text(
-        f"*{meta['label']}* 변경\n현재: `{_ctx['config'][key]}`",
+        f"*{meta['label']}* 변경\n현재: `{_config_display_value(key, _ctx['config'][key])}`",
         parse_mode="Markdown",
         reply_markup=_config_options_keyboard(key),
     )
@@ -1727,6 +1750,14 @@ async def cb_config_set(callback: CallbackQuery):
     else:
         new_val = raw_val
 
+    if key in ("provider", "task_provider"):
+        if new_val == "openai" and not _ctx["openai_client"]:
+            await callback.answer("OPENAI_API_KEY가 없습니다.", show_alert=True)
+            return
+        if new_val == "deepseek" and not _ctx.get("deepseek_client"):
+            await callback.answer("DEEPSEEK_API_KEY가 없습니다.", show_alert=True)
+            return
+
     old_val = config[key]
     config[key] = new_val
 
@@ -1737,6 +1768,8 @@ async def cb_config_set(callback: CallbackQuery):
     # Provider switch: log with actual model names
     if key == "provider" and new_val != old_val:
         _notify_model_switch(str(old_val), str(new_val))
+    if key == "task_provider" and new_val != old_val:
+        _ctx["add_system_alert"](f"태스크 provider 전환: {old_val} → {new_val}")
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
     _ctx["save_config"]()

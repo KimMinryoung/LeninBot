@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from shared import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
-    _claude, _openai_client, _config,
+    _claude, _openai_client, _deepseek_client, _config,
     _CLAUDE_MAX_TOKENS,
 )
 from telegram.tools import TOOLS, TOOL_HANDLERS
@@ -187,6 +187,8 @@ def _resolve_a2a_provider() -> str:
     provider = _config.get("provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
+    if provider == "deepseek" and not _deepseek_client:
+        provider = "claude"
     return provider
 
 
@@ -352,6 +354,8 @@ async def _run_llm(
     provider = _config.get("provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
+    if provider == "deepseek" and not _deepseek_client:
+        provider = "claude"
 
     if provider == "openai" and _openai_client:
         from bot_config import _resolve_openai_model, _TIER_MAP
@@ -370,6 +374,26 @@ async def _run_llm(
             max_rounds=max_rounds,
             max_tokens=_CLAUDE_MAX_TOKENS,
             budget_usd=budget,
+        )
+    elif provider == "deepseek" and _deepseek_client:
+        from bot_config import _resolve_deepseek_model, _TIER_MAP
+        tier = str(_config.get("chat_model", "high"))
+        alias = _TIER_MAP.get("deepseek", {}).get(tier, tier)
+        model = _resolve_deepseek_model(alias)
+
+        from openai_tool_loop import chat_with_tools as openai_chat
+        return await openai_chat(
+            history,
+            client=_deepseek_client,
+            model=model,
+            tools=tools,
+            tool_handlers=handlers,
+            system_prompt=system_prompt,
+            max_rounds=max_rounds,
+            max_tokens=_CLAUDE_MAX_TOKENS,
+            budget_usd=budget,
+            extra_body={"thinking": {"type": "disabled"}},
+            sdk_max_token_param="max_tokens",
         )
     else:
         from bot_config import _get_model_by_alias, _TIER_MAP

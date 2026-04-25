@@ -30,6 +30,7 @@ TIER_A = [
     "ALIBABA_API_KEY",
     "ANTHROPIC_API_KEY",
     "DB_PASSWORD",
+    "DEEPSEEK_API_KEY",
     "EMAIL_IMAP_PASSWORD",
     "EMAIL_SMTP_PASSWORD",
     "GEMINI_API_KEY",
@@ -60,12 +61,13 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-telegram": _FULL,
 
     # Browser-use worker — LLM calls only (Anthropic, optional OpenAI).
-    "leninbot-browser": {"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+    "leninbot-browser": {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"},
 
     # T0 autonomous pilot — planning LLMs, KG/DB, telegram notify, razvedchik.
     "leninbot-autonomous": {
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
         "GEMINI_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
@@ -83,6 +85,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "DB_PASSWORD",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
     },
 
     # KG backup (daily 03:00) — R2 upload + Neo4j dump.

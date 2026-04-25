@@ -14,15 +14,21 @@ logger = logging.getLogger(__name__)
 # ── API Keys ──────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", "") or ""
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "") or ""
+DEEPSEEK_API_KEY = get_secret("DEEPSEEK_API_KEY", "") or ""
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 
 # ── LLM Clients ──────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
-# OpenAI client (lazy — only created if key exists)
+# OpenAI-compatible clients (lazy — only created if keys exist)
 _openai_client = None
-if OPENAI_API_KEY:
+_deepseek_client = None
+if OPENAI_API_KEY or DEEPSEEK_API_KEY:
     from openai import AsyncOpenAI
+if OPENAI_API_KEY:
     _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+if DEEPSEEK_API_KEY:
+    _deepseek_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 
@@ -34,7 +40,8 @@ _CONFIG_DEFAULTS = {
     "task_model": "high",      # "high" | "medium" | "low"
     "max_rounds_chat": 50,
     "max_rounds_task": 50,
-    "provider": "claude",      # "claude" | "openai" | "local"
+    "provider": "claude",      # Telegram chat: "claude" | "openai" | "deepseek" | "local"
+    "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
     # Web chat runs independently from Telegram's /config. These keys pin what
@@ -94,7 +101,8 @@ _CONFIG_META = {
     "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["high", "medium", "low"]},
     "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
     "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
-    "provider":         {"label": "LLM 제공자",   "unit": "",   "options": ["claude", "openai", "local"]},
+    "provider":         {"label": "대화 제공자",   "unit": "",   "options": ["claude", "openai", "deepseek", "local"]},
+    "task_provider":    {"label": "태스크 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
     "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
     "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
 }
@@ -111,6 +119,11 @@ _OPENAI_MODEL_MAP = {
     "gpt54nano": "gpt-5.5-nano",
 }
 
+_DEEPSEEK_MODEL_MAP = {
+    "deepseek_pro":   "deepseek-v4-pro",
+    "deepseek_flash": "deepseek-v4-flash",
+}
+
 # Human-readable display names keyed by API model ID. Used when injecting
 # "current model" context into the orchestrator prompt so the model sees its
 # own official product name ("Claude Opus 4.7") rather than the internal API
@@ -125,6 +138,9 @@ _MODEL_DISPLAY_NAMES = {
     "gpt-5.5":      "GPT-5.5 Pro",
     "gpt-5.5-mini": "GPT-5.5 mini",
     "gpt-5.5-nano": "GPT-5.5 nano",
+    # DeepSeek
+    "deepseek-v4-pro":   "DeepSeek V4 Pro",
+    "deepseek-v4-flash": "DeepSeek V4 Flash",
     # Local (Qwen family — common Ollama/llama.cpp tags)
     "qwen3.5-9b":   "Qwen 3.5 9B",
     "qwen3.6-9b":   "Qwen 3.6 9B",
@@ -153,19 +169,37 @@ def _display_name_for_model_id(model_id: str) -> str:
 _TIER_MAP = {
     "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
     "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
+    "deepseek": {"high": "deepseek_pro", "medium": "deepseek_flash", "low": "deepseek_flash"},
     "local":  {"high": "local",  "medium": "local",  "low": "local"},
 }
 
 # Local LLM model map (single model — all tiers resolve to the same)
 _LOCAL_MODEL_MAP = {"local": None}  # resolved at runtime via llm_client
 
-def _tier_to_display(tier: str) -> str:
+def _get_task_provider() -> str:
+    """Return the provider used by task workers.
+
+    ``default`` preserves the old behavior: background tasks inherit the
+    Telegram chat provider. Any explicit value lets tasks use a cheaper or
+    more specialized provider while web chat remains pinned separately.
+    """
+    provider = str(_config.get("task_provider", "default") or "default")
+    if provider == "default":
+        return str(_config.get("provider", "claude") or "claude")
+    return provider
+
+
+def _tier_to_display(tier: str, provider: str | None = None) -> str:
     """Return a display label showing tier + actual model for current provider."""
-    provider = _config.get("provider", "claude")
+    provider = provider or _config.get("provider", "claude")
+    if provider == "default":
+        provider = _config.get("provider", "claude")
     tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
     alias = tier_map.get(tier, tier)
     if provider == "openai":
         model_name = _OPENAI_MODEL_MAP.get(alias, alias)
+    elif provider == "deepseek":
+        model_name = _DEEPSEEK_MODEL_MAP.get(alias, alias)
     elif provider == "local":
         from llm.client import MOON_MODEL
         model_name = MOON_MODEL
@@ -206,6 +240,11 @@ def _resolve_openai_model(alias: str) -> str:
     return _OPENAI_MODEL_MAP.get(alias, alias)
 
 
+def _resolve_deepseek_model(alias: str) -> str:
+    """Resolve DeepSeek model alias to the current official API model ID."""
+    return _DEEPSEEK_MODEL_MAP.get(alias, alias)
+
+
 def _resolve_tier(tier: str, provider: str | None = None) -> str:
     """Resolve a tier name (high/medium/low) to provider-specific model alias.
 
@@ -214,6 +253,8 @@ def _resolve_tier(tier: str, provider: str | None = None) -> str:
     to whatever ``_config["provider"]`` currently says.
     """
     if provider is None:
+        provider = _config.get("provider", "claude")
+    if provider == "default":
         provider = _config.get("provider", "claude")
     tier_map = _TIER_MAP.get(provider, _TIER_MAP["claude"])
     return tier_map.get(tier, tier)  # passthrough if not a tier name
@@ -248,7 +289,7 @@ def get_current_model_selection(
     Without the override, falls back to the runtime config's provider.
     """
     kind = "task" if kind == "task" else "chat"
-    provider = provider_override or _config.get("provider", "claude")
+    provider = provider_override or (_get_task_provider() if kind == "task" else _config.get("provider", "claude"))
     tier_key = "task_model" if kind == "task" else "chat_model"
     tier = str(_config.get(tier_key, "high"))
     alias = _resolve_tier(tier, provider=provider)
@@ -257,6 +298,8 @@ def get_current_model_selection(
         model_id = MOON_MODEL
     elif provider == "openai" or alias in _OPENAI_MODEL_MAP:
         model_id = _resolve_openai_model(alias)
+    elif provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
+        model_id = _resolve_deepseek_model(alias)
     else:
         model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
         model_id = _resolved_models.get(alias, fallback)
@@ -267,7 +310,7 @@ def get_current_model_selection(
         "alias": alias,
         "model_id": model_id,
         "display_name": _display_name_for_model_id(model_id),
-        "resolved": True if provider in ("openai", "local") else alias in _resolved_models,
+        "resolved": True if provider in ("openai", "deepseek", "local") else alias in _resolved_models,
     }
 
 
@@ -279,17 +322,22 @@ async def _get_model() -> str:
     alias = _resolve_tier(_config["chat_model"])
     if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
+    if _config.get("provider") == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
+        return _resolve_deepseek_model(alias)
     return await _get_model_by_alias(alias)
 
 
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
-    if _config.get("provider") == "local":
+    provider = _get_task_provider()
+    if provider == "local":
         from llm.client import _resolve_backend
         return _resolve_backend()["model"]
-    alias = _resolve_tier(_config["task_model"])
-    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
+    alias = _resolve_tier(_config["task_model"], provider=provider)
+    if provider == "openai" or alias in _OPENAI_MODEL_MAP:
         return _resolve_openai_model(alias)
+    if provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
+        return _resolve_deepseek_model(alias)
     return await _get_model_by_alias(alias)
 
 

@@ -51,6 +51,17 @@ OPENAI_PRICING = {
         "output": 1.25 / 1_000_000,
         "cached_input": 0.02 / 1_000_000,
     },
+    # DeepSeek V4 official pricing, per 1M tokens.
+    "deepseek-v4-flash": {
+        "input": 0.14 / 1_000_000,
+        "output": 0.28 / 1_000_000,
+        "cached_input": 0.028 / 1_000_000,
+    },
+    "deepseek-v4-pro": {
+        "input": 1.74 / 1_000_000,
+        "output": 3.48 / 1_000_000,
+        "cached_input": 0.145 / 1_000_000,
+    },
 }
 _DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
 
@@ -62,6 +73,14 @@ def _calculate_cost(usage, model: str) -> float:
 
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+    cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+    miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+    if miss_tokens or cached_tokens:
+        cost += miss_tokens * pricing["input"]
+        cost += cached_tokens * pricing["cached_input"]
+        cost += completion_tokens * pricing["output"]
+        return cost
 
     cached_tokens = 0
     details = getattr(usage, "prompt_tokens_details", None)
@@ -450,6 +469,8 @@ async def _call_sdk(
     max_tokens: int = 4096,
     parallel_tool_calls: bool = True,
     on_progress=None,
+    extra_body: dict | None = None,
+    max_token_param: str = "max_completion_tokens",
 ):
     """Single call via openai.AsyncOpenAI SDK.
 
@@ -460,8 +481,13 @@ async def _call_sdk(
     kwargs = {
         "model": model,
         "messages": messages,
-        "max_completion_tokens": max_tokens,
     }
+    if max_token_param == "max_tokens":
+        kwargs["max_tokens"] = max_tokens
+    else:
+        kwargs["max_completion_tokens"] = max_tokens
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
@@ -523,7 +549,9 @@ def _mark_openai_unavailable(model: str) -> None:
 
 
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
-                    parallel_tool_calls=True, enable_thinking=False, on_progress=None):
+                    parallel_tool_calls=True, enable_thinking=False, on_progress=None,
+                    extra_body: dict | None = None,
+                    sdk_max_token_param: str = "max_completion_tokens"):
     """Dispatch to SDK or httpx based on mode.
 
     Transparently swaps `model` for a fallback (e.g. gpt-5.5 → gpt-5.4) on
@@ -538,7 +566,9 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
         if sdk_mode:
             return await _call_sdk(client, m, messages, tools, max_tokens,
                                    parallel_tool_calls=parallel_tool_calls,
-                                   on_progress=on_progress)
+                                   on_progress=on_progress,
+                                   extra_body=extra_body,
+                                   max_token_param=sdk_max_token_param)
         return await _call_api(base_url, m, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
 
@@ -741,6 +771,8 @@ async def chat_with_tools(
     finalization_tools: list[str] | None = None,
     terminal_tools: list[str] | None = None,
     api_semaphore: asyncio.Semaphore | None = None,
+    extra_body: dict | None = None,
+    sdk_max_token_param: str = "max_completion_tokens",
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -820,7 +852,8 @@ async def chat_with_tools(
             response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, working_msgs,
                 openai_tools, max_tokens, enable_thinking=enable_thinking,
-                on_progress=stream_cb,
+                on_progress=stream_cb, extra_body=extra_body,
+                sdk_max_token_param=sdk_max_token_param,
             )
         except Exception as api_err:
             err_str = str(api_err)
@@ -837,7 +870,8 @@ async def chat_with_tools(
                         sdk_mode, client, base_url, model, stripped,
                         openai_tools, max_tokens,
                         parallel_tool_calls=False, enable_thinking=enable_thinking,
-                        on_progress=stream_cb,
+                        on_progress=stream_cb, extra_body=extra_body,
+                        sdk_max_token_param=sdk_max_token_param,
                     )
                     working_msgs = stripped
                     logger.info("Auto-recovery succeeded at round %d", round_num)
@@ -866,11 +900,12 @@ async def chat_with_tools(
             total_cost += round_cost
             prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            cached_tokens = 0
+            cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+            miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
             details = getattr(usage, "prompt_tokens_details", None)
-            if details:
+            if details and not cached_tokens:
                 cached_tokens = getattr(details, "cached_tokens", 0) or 0
-            non_cached = prompt_tokens - cached_tokens
+            non_cached = miss_tokens or (prompt_tokens - cached_tokens)
             logger.info(
                 "Round %d usage: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
                 round_num, prompt_tokens, cached_tokens, non_cached,
@@ -1078,7 +1113,8 @@ async def chat_with_tools(
     try:
         final_response = await _guarded_api_call(
             sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
-            on_progress=stream_cb,
+            on_progress=stream_cb, extra_body=extra_body,
+            sdk_max_token_param=sdk_max_token_param,
         )
         _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
         if sdk_mode and final_usage:
@@ -1132,7 +1168,8 @@ async def chat_with_tools(
                 # Plain text follow-up to collect the final answer.
                 followup = await _guarded_api_call(
                     sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
-                    on_progress=stream_cb,
+                    on_progress=stream_cb, extra_body=extra_body,
+                    sdk_max_token_param=sdk_max_token_param,
                 )
                 _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
                 if sdk_mode and followup_usage:
@@ -1152,7 +1189,8 @@ async def chat_with_tools(
         try:
             last_response = await _guarded_api_call(
                 sdk_mode, client, base_url, model, stripped, None, max_tokens,
-                on_progress=stream_cb,
+                on_progress=stream_cb, extra_body=extra_body,
+                sdk_max_token_param=sdk_max_token_param,
             )
             _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
             if sdk_mode and last_usage:
