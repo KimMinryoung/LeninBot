@@ -292,113 +292,8 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
         return f"❌ Document conversion failed: {e}"
 
 
-# ── Publish Research Tool ────────────────────────────────────────────
-
-PUBLISH_RESEARCH_TOOL = {
-    "name": "publish_research",
-    "description": (
-        "Write a markdown document to the public research directory. "
-        "Published files are served at https://cyber-lenin.com/reports/research/{filename}. "
-        "Use for polished analysis reports, forecasts, and investigative findings. "
-        "Filename is auto-generated from the title with date prefix (YYYYMMDD_slug.md)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {
-                "type": "string",
-                "description": "Document title. Used for both the H1 heading and the filename slug.",
-            },
-            "content": {
-                "type": "string",
-                "description": "Full markdown content of the document (without the title heading — it is auto-prepended).",
-            },
-            "filename": {
-                "type": "string",
-                "description": "Optional custom filename (e.g. 'my_report.md'). If omitted, auto-generated from title.",
-            },
-        },
-        "required": ["title", "content"],
-    },
-}
-TOOLS.append(PUBLISH_RESEARCH_TOOL)
-
-
-async def _exec_publish_research(title: str, content: str, filename: str | None = None) -> str:
-    """Write a markdown research document to the public research/ directory."""
-    import re
-    import unicodedata
-    from pathlib import Path
-    from datetime import datetime, timezone, timedelta
-
-    KST = timezone(timedelta(hours=9))
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    research_dir = os.path.join(project_root, "research")
-
-    if not title or not title.strip():
-        return "Error: title is required."
-    if not content or not content.strip():
-        return "Error: content is required."
-
-    title = title.strip()
-    now = datetime.now(KST)
-    date_prefix = now.strftime("%Y%m%d")
-
-    if filename:
-        fname = filename.strip()
-        if not fname.endswith(".md"):
-            fname += ".md"
-    else:
-        # Generate slug from title
-        slug = unicodedata.normalize("NFKD", title)
-        slug = slug.encode("ascii", "ignore").decode("ascii").lower()
-        slug = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
-        slug = slug[:80] if slug else "research"
-        fname = f"{date_prefix}_{slug}.md"
-
-    # Prevent path traversal
-    if "/" in fname or "\\" in fname or ".." in fname:
-        return "Error: filename must not contain path separators or '..'."
-
-    os.makedirs(research_dir, exist_ok=True)
-    filepath = os.path.join(research_dir, fname)
-    is_overwrite = os.path.exists(filepath)
-
-    # Build document with header
-    author_line = f"**작성자:** Cyber-Lenin (사이버-레닌)"
-    date_line = f"**작성일:** {now.strftime('%Y-%m-%d')}"
-    full_doc = f"# {title}\n{author_line}\n{date_line}\n\n---\n\n{content.strip()}\n"
-
-    try:
-        await asyncio.to_thread(Path(filepath).write_text, full_doc, encoding="utf-8")
-    except Exception as e:
-        logger.error("publish_research write error: %s", e)
-        return f"Failed to write research document: {e}"
-
-    # Frontend caches the research list (TTL) and individual entries (permanent) in Redis.
-    # Invalidate both so the new/updated file and its real title appear on /reports immediately.
-    cache_invalidated = False
-    try:
-        from redis_state import get_redis
-        r = get_redis()
-        if r:
-            keys_to_drop = ["report:research_list"]
-            if is_overwrite:
-                keys_to_drop.append(f"research:{fname}")
-            r.delete(*keys_to_drop)
-            cache_invalidated = True
-    except Exception as e:
-        logger.warning("publish_research cache invalidation failed for %s: %s", fname, e)
-
-    public_url = f"https://cyber-lenin.com/reports/research/{fname}"
-    status = "Overwrote" if is_overwrite else "Published"
-    cache_note = " (frontend cache invalidated)" if cache_invalidated else ""
-    return (
-        f"{status}: {fname}{cache_note}\n"
-        f"Local path: {filepath}\n"
-        f"Public URL: {public_url}\n"
-        f"Size: {len(full_doc)} chars"
-    )
+# ── Research publish/edit/unpublish tools live in research_tools.py ──
+# They are registered into TOOLS / TOOL_HANDLERS at the bottom of this file.
 
 
 async def _exec_fetch_url(url: str) -> str:
@@ -1279,7 +1174,6 @@ TOOL_HANDLERS = {
     "web_search": _exec_web_search,
     "fetch_url": _exec_fetch_url,
     "convert_document": _exec_convert_document,
-    "publish_research": _exec_publish_research,
     "download_file": _exec_download_file,
     "download_image": _exec_download_image,
     "read_file": _exec_read_file,
@@ -1640,6 +1534,12 @@ from post_edit_tools import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
 
 TOOLS.extend(POST_EDIT_TOOLS)
 TOOL_HANDLERS.update(POST_EDIT_TOOL_HANDLERS)
+
+# ── Research publish/edit/unpublish (atomic write + cache purge) ──
+from research_tools import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
+
+TOOLS.extend(RESEARCH_TOOLS)
+TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
 
 # ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (

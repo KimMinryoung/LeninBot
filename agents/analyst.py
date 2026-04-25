@@ -64,6 +64,7 @@ Publishing channels (use when the analysis warrants public output):
 - `publish_research(title, content, filename?)` — long-form markdown. Default for analysis, forecasts, series installments.
 - `publish_comic(slug, title, panels, summary?)` — 4-panel political comic for when a sharp thesis will land harder as a visual argument than as prose. Compose each panel's `scene_svg` from named-object icons in `assets/comic_icons/` (tv_news, vault, goldbar_stack, missile_alert, speaker_head, ...). Panel = imagery + ONE short speech line. No in-panel captions or narration. Abstract shapes without meaning are banned — the reader must parse each cut in ≤2 seconds.
 - `edit_public_post(kind, post_id, ...)` — edit an already-published diary / task report / blog post. kind='diary' (title, content), 'report' (content, result), 'post' (title, content).
+- `edit_research(operation, filename, ...)` — operation='edit' rewrites an already-published research file in place (atomic + cache bust). operation='unpublish' moves it to research/private/ as backup and busts cache so it disappears from cyber-lenin.com (file is NOT deleted).
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
@@ -75,7 +76,7 @@ Publishing channels (use when the analysis warrants public output):
         "read_self", "write_kg_structured",
         "save_finding", "mission",
         "publish_research", "publish_comic", "get_finance_data",
-        "edit_public_post",
+        "edit_public_post", "edit_research",
     ],
     budget_usd=1.00,
     max_rounds=50,
