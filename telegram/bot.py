@@ -1801,6 +1801,45 @@ async def bot_main():
                 chosen_chat_fn = _moon_chat_with_tools
                 chosen_model_fn = _get_model_moon
                 chosen_max_tokens = 8192
+        elif spec.provider == "codex":
+            # Delegate the entire task to OpenAI Codex CLI.
+            # Codex runs autonomously with its own toolset inside a
+            # workspace-write sandbox; LeninBot's tool dispatch is bypassed.
+            # Auth via ChatGPT Plus/Pro subscription (~/.codex/auth.json).
+            from codex_exec_loop import chat_with_tools as codex_chat_with_tools
+
+            async def _codex_chat_fn(
+                messages, max_rounds=None, system_prompt=None, model=None,
+                max_tokens=None, budget_usd=None, extra_tools=None,
+                extra_handlers=None, on_progress=None, budget_tracker=None,
+                task_id=None, finalization_tools=None, terminal_tools=None,
+            ):
+                return await codex_chat_with_tools(
+                    messages,
+                    model=model,
+                    tools=extra_tools, tool_handlers=extra_handlers,
+                    system_prompt=system_prompt,
+                    max_rounds=max_rounds or spec.max_rounds,
+                    max_tokens=max_tokens or 8192,
+                    log_event=_log_event,
+                    budget_usd=budget_usd or 0.0,
+                    budget_tracker=budget_tracker,
+                    on_progress=on_progress,
+                    task_id=task_id,
+                    agent_name=spec.name,
+                    finalization_tools=finalization_tools,
+                    terminal_tools=terminal_tools,
+                )
+            chosen_chat_fn = _codex_chat_fn
+
+            async def _codex_model_fn():
+                # process_task awaits get_model_fn() (telegram/tasks.py:355),
+                # so this must return a coroutine — a sync lambda blows up
+                # with "object str can't be used in 'await' expression".
+                from codex_exec_loop import CODEX_DEFAULT_MODEL
+                return CODEX_DEFAULT_MODEL
+            chosen_model_fn = _codex_model_fn
+            chosen_max_tokens = 8192
         elif spec.provider in ("claude", "openai"):
             # Agent explicitly requests corporate LLM (e.g. diary writer)
             _forced_provider = spec.provider
@@ -1830,7 +1869,11 @@ async def bot_main():
                 _fp_tier = str(_config.get("task_model", "high"))
                 _fp_alias = _TIER_MAP.get("openai", {}).get(_fp_tier, _fp_tier)
                 _fp_model = _resolve_openai_model(_fp_alias)
-                chosen_model_fn = lambda: _fp_model  # noqa: E731
+
+                async def _get_openai_corporate_model():
+                    # process_task awaits get_model_fn() — must be a coroutine.
+                    return _fp_model
+                chosen_model_fn = _get_openai_corporate_model
             else:
                 # Claude: resolve alias for claude tier map
                 from bot_config import _get_model_by_alias, _TIER_MAP

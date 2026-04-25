@@ -132,11 +132,13 @@ class AgentSpec:
     def effective_provider(self, config_provider: str = "claude") -> str:
         """Resolve which provider format this agent's prompt should render as.
 
-        "moon" (local Qwen) maps to the Markdown renderer ("local"). Explicit
-        claude/openai agent provider overrides config. Otherwise follow the
-        orchestrator's configured provider.
+        "moon" (local Qwen) and "codex" (Codex CLI subprocess) both map to
+        the Markdown renderer ("local") since neither speaks a chat-style
+        XML protocol on the wire. Explicit claude/openai agent provider
+        overrides config. Otherwise follow the orchestrator's configured
+        provider.
         """
-        if self.provider == "moon":
+        if self.provider in ("moon", "codex"):
             return "local"
         if self.provider in ("claude", "openai"):
             return self.provider
