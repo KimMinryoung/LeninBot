@@ -668,9 +668,11 @@ _MD_LIST_RE = re.compile(r"^(?:[-*+]|\d+\.)\s+")
 def _extract_md_excerpt(path: Path, max_chars: int = 300) -> str | None:
     """Return a plain-text excerpt of the first body content, ready for a 3-line preview.
 
-    Skips the H1, author/date metadata, the `---` separator, list markers, and inline
-    markdown so the homepage and /reports preview render the same readable opening
-    sentence regardless of whether a file uses the canonical research layout.
+    If the file has a `---` divider in its first 15 lines (the canonical research
+    layout: H1 + bylines + `---` + body), the excerpt starts strictly after it —
+    so noisy legacy bylines like `**작성**:` / `**분류**:` / `**버전**:` are skipped
+    even though they aren't in the explicit metadata allowlist. Files without a
+    divider fall back to skipping just the H1 + known author/date metadata lines.
     """
     try:
         with path.open("r", encoding="utf-8") as fh:
@@ -679,19 +681,26 @@ def _extract_md_excerpt(path: Path, max_chars: int = 300) -> str | None:
                 line = fh.readline()
                 if not line:
                     break
-                lines.append(line)
+                lines.append(line.rstrip("\n"))
     except Exception:
         return None
 
+    body_start = 0
+    for i, raw in enumerate(lines[:15]):
+        stripped = raw.strip()
+        if stripped and all(c == "-" for c in stripped) and len(stripped) >= 3:
+            body_start = i + 1
+            break
+
     parts: list[str] = []
-    for raw in lines:
-        line = raw.rstrip("\n").strip()
+    for raw in lines[body_start:]:
+        line = raw.strip()
         if not line:
             continue
         if line.startswith("# "):
             continue  # title heading
         if _MD_META_LINE_RE.match(line):
-            continue  # author/date metadata
+            continue  # author/date metadata (fallback for files without `---`)
         if line.startswith(">"):
             continue  # blockquote
         if set(line) <= {"-", "="} and len(line) >= 3:
