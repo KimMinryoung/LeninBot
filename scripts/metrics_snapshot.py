@@ -225,6 +225,11 @@ def parse_disk_io_json(hours_back: int) -> list[tuple[datetime, float]]:
     return [(datetime.fromisoformat(s["ts"]), s["disk_tps"]) for s in snaps if "disk_tps" in s]
 
 
+def parse_disk_usage_json(hours_back: int) -> list[tuple[datetime, float]]:
+    snaps = _load_json_snapshots(hours_back)
+    return [(datetime.fromisoformat(s["ts"]), s["disk_pct"]) for s in snaps if "disk_pct" in s]
+
+
 # ─── 소스 통합 래퍼 ──────────────────────────────────────
 def parse_cpu(hours_back: int, source: str) -> list[tuple[datetime, float]]:
     return parse_cpu_json(hours_back) if source == "json" else parse_cpu_sar(hours_back)
@@ -234,6 +239,12 @@ def parse_memory(hours_back: int, source: str) -> list[tuple[datetime, float]]:
 
 def parse_disk_io(hours_back: int, source: str) -> list[tuple[datetime, float]]:
     return parse_disk_io_json(hours_back) if source == "json" else parse_disk_io_sar(hours_back)
+
+
+def parse_disk_usage(hours_back: int, source: str) -> list[tuple[datetime, float]]:
+    if source != "json":
+        return []
+    return parse_disk_usage_json(hours_back)
 
 
 # ─── ASCII 그래프 렌더러 ──────────────────────────────────
@@ -347,12 +358,28 @@ def main():
 
     if args.metric in ("disk", "all"):
         rows = parse_disk_io(args.hours, args.source)
-        print(render_chart(
-            title="디스크 I/O (tps 합산)",
-            unit=" tps",
-            rows=rows,
-            alert_threshold=None,
-        ))
+        if rows:
+            print(render_chart(
+                title="디스크 I/O (tps 합산)",
+                unit=" tps",
+                rows=rows,
+                alert_threshold=None,
+            ))
+        elif args.source == "json":
+            print(render_chart(
+                title="디스크 사용률",
+                unit="%",
+                rows=parse_disk_usage(args.hours, args.source),
+                max_scale=100.0,
+                alert_threshold=85.0,
+            ))
+        else:
+            print(render_chart(
+                title="디스크 I/O (tps 합산)",
+                unit=" tps",
+                rows=rows,
+                alert_threshold=None,
+            ))
 
     print()
 

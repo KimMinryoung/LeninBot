@@ -11,6 +11,7 @@ metrics_collector.py — psutil 기반 자원 스냅샷을 월별 JSON 파일에
 import json
 import sys
 import argparse
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -59,21 +60,43 @@ def _get_net_interface() -> str:
     return candidates[0] if candidates else "eth0"
 
 
+def collect_io_rates(iface: str, interval: float = 1.0) -> dict:
+    """Network and disk I/O rates measured over one shared interval."""
+    counters_before = psutil.net_io_counters(pernic=True).get(iface)
+    disk_before = psutil.disk_io_counters()
+    time.sleep(interval)
+    counters_after = psutil.net_io_counters(pernic=True).get(iface)
+    disk_after = psutil.disk_io_counters()
+
+    result = {"net_rx_kbs": 0.0, "net_tx_kbs": 0.0}
+    if counters_before is not None and counters_after is not None:
+        result.update({
+            "net_rx_kbs": round((counters_after.bytes_recv - counters_before.bytes_recv) / 1024 / interval, 2),
+            "net_tx_kbs": round((counters_after.bytes_sent - counters_before.bytes_sent) / 1024 / interval, 2),
+        })
+
+    result.update({"disk_tps": 0.0, "disk_read_kbs": 0.0, "disk_write_kbs": 0.0})
+    if disk_before is not None and disk_after is not None:
+        read_count = max(0, disk_after.read_count - disk_before.read_count)
+        write_count = max(0, disk_after.write_count - disk_before.write_count)
+        read_bytes = max(0, disk_after.read_bytes - disk_before.read_bytes)
+        write_bytes = max(0, disk_after.write_bytes - disk_before.write_bytes)
+        result.update({
+            "disk_tps": round((read_count + write_count) / interval, 2),
+            "disk_read_kbs": round(read_bytes / 1024 / interval, 2),
+            "disk_write_kbs": round(write_bytes / 1024 / interval, 2),
+        })
+
+    return result
+
+
 def collect_network(iface: str) -> dict:
     """지정 인터페이스의 rx/tx kB/s (1초 측정)."""
-    counters_before = psutil.net_io_counters(pernic=True).get(iface)
-    if counters_before is None:
-        return {"net_rx_kbs": 0.0, "net_tx_kbs": 0.0}
-
-    import time
-    time.sleep(1)
-    counters_after = psutil.net_io_counters(pernic=True).get(iface)
-    if counters_after is None:
-        return {"net_rx_kbs": 0.0, "net_tx_kbs": 0.0}
-
-    rx_kbs = round((counters_after.bytes_recv - counters_before.bytes_recv) / 1024, 2)
-    tx_kbs = round((counters_after.bytes_sent - counters_before.bytes_sent) / 1024, 2)
-    return {"net_rx_kbs": rx_kbs, "net_tx_kbs": tx_kbs}
+    rates = collect_io_rates(iface)
+    return {
+        "net_rx_kbs": rates["net_rx_kbs"],
+        "net_tx_kbs": rates["net_tx_kbs"],
+    }
 
 
 # ─── 스냅샷 수집 ───────────────────────────────────────────────
@@ -86,7 +109,7 @@ def collect_snapshot() -> dict:
     mem = collect_memory()
     disk = collect_disk()
     iface = _get_net_interface()
-    net = collect_network(iface)
+    rates = collect_io_rates(iface)
 
     return {
         "ts": ts,
@@ -97,8 +120,11 @@ def collect_snapshot() -> dict:
         "disk_used_gb": disk["disk_used_gb"],
         "disk_total_gb": disk["disk_total_gb"],
         "disk_pct": disk["disk_pct"],
-        "net_rx_kbs": net["net_rx_kbs"],
-        "net_tx_kbs": net["net_tx_kbs"],
+        "disk_tps": rates["disk_tps"],
+        "disk_read_kbs": rates["disk_read_kbs"],
+        "disk_write_kbs": rates["disk_write_kbs"],
+        "net_rx_kbs": rates["net_rx_kbs"],
+        "net_tx_kbs": rates["net_tx_kbs"],
         "net_iface": iface,
     }
 
