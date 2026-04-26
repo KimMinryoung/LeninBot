@@ -195,6 +195,7 @@ async def execute_browser_task(task: dict) -> dict:
         budget_tracker=None,
         task_id=None,
         finalization_tools=None,
+        terminal_tools=None,
     ):
         # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
@@ -233,6 +234,7 @@ async def execute_browser_task(task: dict) -> dict:
             budget_tracker=budget_tracker,
             task_id=task_id,
             finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
         )
 
     async def _get_model():

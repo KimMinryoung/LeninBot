@@ -21,8 +21,8 @@ from shared import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _deepseek_client, _config,
-    _CLAUDE_MAX_TOKENS,
 )
+from runtime_profile import resolve_runtime_profile
 from telegram.tools import TOOLS, TOOL_HANDLERS
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,8 @@ def _resolve_a2a_provider() -> str:
     provider = _config.get("provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
+    if provider == "openai" and not _openai_client:
+        provider = "claude"
     if provider == "deepseek" and not _deepseek_client:
         provider = "claude"
     return provider
@@ -273,10 +275,17 @@ async def handle_a2a_message(request_body: dict) -> dict:
         max_rounds = 20
         budget = float(_config.get("chat_budget", 0.30)) or 0.30
 
+    profile = await resolve_runtime_profile(
+        "chat",
+        provider_override=effective_provider,
+        max_rounds_override=max_rounds,
+        budget_override=budget,
+    )
+
     # System prompt is fully static (no per-request placeholders) so prompt
     # caching hits across A2A requests. Runtime header (current time + active
     # model) is prepended to the user message below.
-    system_prompt = _render_prompt(prompt_ir, effective_provider)
+    system_prompt = _render_prompt(prompt_ir, profile.provider)
 
     timeout_sec = 120
     from telegram.bot import (
@@ -285,13 +294,13 @@ async def handle_a2a_message(request_body: dict) -> dict:
     )
     history = _merge_runtime_context_into_last_user(
         [{"role": "user", "content": user_text}],
-        _join_context_blocks(_build_runtime_prelude(effective_provider, kind="chat")),
+        _join_context_blocks(_build_runtime_prelude(profile.provider, kind="chat")),
     )
 
     # Run LLM
     try:
         answer = await asyncio.wait_for(
-            _run_llm(history, system_prompt, tools, handlers, max_rounds, budget),
+            _run_llm(history, system_prompt, tools, handlers, profile),
             timeout=timeout_sec,
         )
     except asyncio.TimeoutError:
@@ -347,71 +356,50 @@ async def _run_llm(
     system_prompt: str,
     tools: list[dict],
     handlers: dict,
-    max_rounds: int,
-    budget: float,
+    profile,
 ) -> str:
     """Run the LLM pipeline with the given tool set."""
-    provider = _config.get("provider", "claude")
-    if provider == "local":
-        provider = "openai" if _openai_client else "claude"
-    if provider == "deepseek" and not _deepseek_client:
-        provider = "claude"
-
+    provider = profile.provider
     if provider == "openai" and _openai_client:
-        from bot_config import _resolve_openai_model, _TIER_MAP
-        tier = str(_config.get("chat_model", "high"))
-        alias = _TIER_MAP.get("openai", {}).get(tier, tier)
-        model = _resolve_openai_model(alias)
-
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             history,
             client=_openai_client,
-            model=model,
+            model=profile.model_id,
             tools=tools,
             tool_handlers=handlers,
             system_prompt=system_prompt,
-            max_rounds=max_rounds,
-            max_tokens=_CLAUDE_MAX_TOKENS,
-            budget_usd=budget,
+            max_rounds=profile.max_rounds,
+            max_tokens=profile.max_tokens,
+            budget_usd=profile.budget_usd,
             provider_label="openai:a2a",
         )
     elif provider == "deepseek" and _deepseek_client:
-        from bot_config import _resolve_deepseek_model, _TIER_MAP
-        tier = str(_config.get("chat_model", "high"))
-        alias = _TIER_MAP.get("deepseek", {}).get(tier, tier)
-        model = _resolve_deepseek_model(alias)
-
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             history,
             client=_deepseek_client,
-            model=model,
+            model=profile.model_id,
             tools=tools,
             tool_handlers=handlers,
             system_prompt=system_prompt,
-            max_rounds=max_rounds,
-            max_tokens=_CLAUDE_MAX_TOKENS,
-            budget_usd=budget,
+            max_rounds=profile.max_rounds,
+            max_tokens=profile.max_tokens,
+            budget_usd=profile.budget_usd,
             extra_body={"thinking": {"type": "disabled"}},
             sdk_max_token_param="max_tokens",
             provider_label="deepseek:a2a",
         )
     else:
-        from bot_config import _get_model_by_alias, _TIER_MAP
-        tier = str(_config.get("chat_model", "high"))
-        alias = _TIER_MAP.get("claude", {}).get(tier, tier)
-        model = await _get_model_by_alias(alias)
-
         from claude_loop import chat_with_tools
         return await chat_with_tools(
             history,
             client=_claude,
-            model=model,
+            model=profile.model_id,
             tools=tools,
             tool_handlers=handlers,
             system_prompt=system_prompt,
-            max_rounds=max_rounds,
-            max_tokens=_CLAUDE_MAX_TOKENS,
-            budget_usd=budget,
+            max_rounds=profile.max_rounds,
+            max_tokens=profile.max_tokens,
+            budget_usd=profile.budget_usd,
         )

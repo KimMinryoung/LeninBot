@@ -1665,6 +1665,81 @@ def _effective_autonomous_provider() -> str:
     return provider
 
 
+_CONFIG_APPLY_LABELS = {
+    "telegram-chat": "텔레그램 대화",
+    "telegram-task": "텔레그램 태스크",
+    "telegram-task-worker": "태스크 워커",
+    "webchat": "웹챗",
+    "autonomous-next-tick": "다음 자율 tick",
+}
+
+_CONFIG_RESTART_LABELS = {
+    "telegram": "leninbot-telegram",
+    "api": "leninbot-api",
+}
+
+
+def _config_meta_list(meta: dict, key: str) -> list[str]:
+    value = meta.get(key, [])
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value if v]
+    return []
+
+
+def _config_applies_to(meta: dict) -> list[str]:
+    return _config_meta_list(meta, "applies_to")
+
+
+def _config_restart_required(meta: dict) -> list[str]:
+    return _config_meta_list(meta, "restart_required")
+
+
+def _format_config_targets(targets: list[str]) -> str:
+    return ", ".join(_CONFIG_APPLY_LABELS.get(t, t) for t in targets)
+
+
+def _format_restart_services(services: list[str]) -> str:
+    return ", ".join(_CONFIG_RESTART_LABELS.get(s, s) for s in services)
+
+
+def _config_apply_badge(meta: dict) -> str:
+    restarts = _config_restart_required(meta)
+    if not restarts:
+        return "즉시"
+    applies_to = _config_applies_to(meta)
+    if any(t.startswith("telegram") for t in applies_to) and "api" in restarts and "telegram" not in restarts:
+        return "텔레그램 즉시 / API 재시작"
+    return f"{_format_restart_services(restarts)} 재시작"
+
+
+def _config_apply_note(key: str) -> str:
+    meta = _ctx["CONFIG_META"][key]
+    applies_to = _config_applies_to(meta)
+    restarts = _config_restart_required(meta)
+
+    if not applies_to:
+        return ""
+    if not restarts:
+        return f"적용: {_format_config_targets(applies_to)}부터 즉시 반영"
+
+    if any(t.startswith("telegram") for t in applies_to) and "api" in restarts and "telegram" not in restarts:
+        immediate = [t for t in applies_to if t.startswith("telegram")]
+        delayed = [t for t in applies_to if not t.startswith("telegram")]
+        parts = []
+        if immediate:
+            parts.append(f"{_format_config_targets(immediate)} 즉시")
+        if delayed:
+            parts.append(f"{_format_config_targets(delayed)}은 {_format_restart_services(restarts)} 재시작 후")
+        return "적용: " + "; ".join(parts)
+
+    return (
+        f"적용: {_format_config_targets(applies_to)}. "
+        f"{_format_restart_services(restarts)} 재시작 후 반영"
+    )
+
+
 def _config_display_value(key: str, val) -> str:
     """Format a config value for display, with model tier → actual model mapping."""
     meta = _ctx["CONFIG_META"][key]
@@ -1690,7 +1765,7 @@ def _config_summary() -> str:
     for key, meta in _ctx["CONFIG_META"].items():
         val = _ctx["config"][key]
         display = _config_display_value(key, val)
-        lines.append(f"  {meta['label']}: `{display}`")
+        lines.append(f"  {meta['label']}: `{display}` · {_config_apply_badge(meta)}")
     return "\n".join(lines)
 
 
@@ -1747,8 +1822,11 @@ async def cb_config_select(callback: CallbackQuery):
         await callback.answer("알 수 없는 설정", show_alert=True)
         return
     meta = _ctx["CONFIG_META"][key]
+    apply_note = _config_apply_note(key)
     await callback.message.edit_text(
-        f"*{meta['label']}* 변경\n현재: `{_config_display_value(key, _ctx['config'][key])}`",
+        f"*{meta['label']}* 변경\n"
+        f"현재: `{_config_display_value(key, _ctx['config'][key])}`\n"
+        f"{apply_note}",
         parse_mode="Markdown",
         reply_markup=_config_options_keyboard(key),
     )
@@ -1772,7 +1850,9 @@ async def cb_config_set(callback: CallbackQuery):
     # Convert value to the right type
     config = _ctx["config"]
     current = config[key]
-    if isinstance(current, float):
+    if isinstance(current, bool):
+        new_val = raw_val.lower() == "true"
+    elif isinstance(current, float):
         new_val = float(raw_val)
     elif isinstance(current, int):
         new_val = int(raw_val)
@@ -1801,9 +1881,11 @@ async def cb_config_set(callback: CallbackQuery):
         _ctx["add_system_alert"](f"태스크 provider 전환: {old_val} → {new_val}")
     if key == "autonomous_provider" and new_val != old_val:
         _ctx["add_system_alert"](f"자율 provider 전환: {old_val} → {new_val}")
-    if key in ("webchat_provider", "webchat_model") and new_val != old_val:
+    restarts = _config_restart_required(_ctx["CONFIG_META"][key])
+    if restarts and new_val != old_val:
         _ctx["add_system_alert"](
-            f"웹챗 설정 변경: {key} {old_val} → {new_val} (leninbot-api 재시작 필요)"
+            f"{_ctx['CONFIG_META'][key]['label']} 변경: {old_val} → {new_val} "
+            f"({_config_apply_note(key)})"
         )
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)

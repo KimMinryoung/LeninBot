@@ -15,7 +15,13 @@ from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
 
 from shared import KST
-from prompt_context import fenced_text, uses_xml, wrap_task_content
+from prompt_context import (
+    format_agent_execution_history,
+    format_mission_context,
+    format_subtask_results,
+    uses_xml,
+    wrap_task_content,
+)
 
 logger = logging.getLogger(__name__)
 _SCRATCHPAD_MAX_CHARS = 20_000
@@ -667,16 +673,12 @@ def _build_task_context_content(
             mission_title = mission_rows[0]["title"] if mission_rows else "?"
             events = get_mission_events(mission_id, limit=20)
             if events:
-                if uses_xml(context_provider):
-                    lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
-                    for e in events:
-                        lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
-                    lines.append("</mission-context>")
-                else:
-                    lines = [f"### Mission Context (#{mission_id}: {mission_title})"]
-                    for e in events:
-                        lines.append(f"- [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
-                mission_ctx = "\n".join(lines)
+                mission_ctx = format_mission_context(
+                    mission_id,
+                    mission_title,
+                    events,
+                    context_provider,
+                )
             add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
         except Exception as e:
             logger.debug("Mission context injection failed: %s", e)
@@ -692,33 +694,7 @@ def _build_task_context_content(
                 (plan_id,),
             )
             if sibling_results:
-                result_blocks = []
-                for sr in sibling_results:
-                    sr_agent = sr.get("agent_type") or "unknown"
-                    sr_result = str(sr.get("result") or "")[:5000]
-                    sr_task_brief = str(sr.get("content") or "")[:300]
-                    if uses_xml(context_provider):
-                        result_blocks.append(
-                            f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
-                            f"    <task-brief>{sr_task_brief}</task-brief>\n"
-                            f"    <result>\n{sr_result}\n    </result>\n"
-                            f"  </subtask>"
-                        )
-                    else:
-                        result_blocks.append(
-                            f"#### Subtask #{sr['id']} [{sr_agent}]\n"
-                            f"**Task brief:** {sr_task_brief}\n\n"
-                            f"**Result:**\n\n{sr_result}"
-                        )
-                if uses_xml(context_provider):
-                    content = (
-                        "<subtask-results>\n"
-                        + "\n".join(result_blocks)
-                        + "\n</subtask-results>\n\n"
-                        + content
-                    )
-                else:
-                    content = "### Subtask Results\n\n" + "\n\n".join(result_blocks) + "\n\n" + content
+                content = format_subtask_results(sibling_results, context_provider) + "\n\n" + content
         except Exception as e:
             logger.warning("Synthesis subtask result injection failed: %s", e)
 
@@ -743,27 +719,14 @@ def _build_task_context_content(
                 pt_completed = str(prev_task.get("completed_at") or "?")[:19]
                 pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
                 pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
-                if uses_xml(context_provider):
-                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
-                    block += f"    <summary>{pt_summary}</summary>\n"
-                    if pt_tool_log:
-                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
-                    block += f"  </prev-task>"
-                    history_ctx = (
-                        f"<agent-execution-history agent=\"{agent_type}\">\n"
-                        + block
-                        + "\n</agent-execution-history>"
-                    )
-                else:
-                    lines = [
-                        f"### Agent Execution History ({agent_type})",
-                        f"Previous task: #{pt_id} completed {pt_completed}",
-                        "",
-                        f"**Summary:** {pt_summary}",
-                    ]
-                    if pt_tool_log:
-                        lines.extend(["", "**Tool log:**", fenced_text(pt_tool_log)])
-                    history_ctx = "\n".join(lines)
+                history_ctx = format_agent_execution_history(
+                    agent_type=agent_type,
+                    previous_task_id=pt_id,
+                    completed_at=pt_completed,
+                    summary=pt_summary,
+                    tool_log=pt_tool_log,
+                    provider=context_provider,
+                )
         except Exception as e:
             logger.debug("Agent execution history load failed: %s", e)
 
@@ -786,6 +749,209 @@ def _build_task_context_content(
     if context_parts:
         return "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
     return content
+
+
+async def _run_task_llm(
+    *,
+    task_id: int,
+    content: str,
+    chat_with_tools_fn,
+    get_model_fn,
+    task_system_prompt: str,
+    max_tokens_task: int,
+    budget_usd: float,
+    extra_tools: list | None,
+    extra_handlers: dict | None,
+    finalization_tools: list[str] | None,
+    terminal_tools: list[str] | None,
+    on_progress=None,
+) -> tuple[str, dict]:
+    """Run the task LLM loop and return the report plus budget/tool tracker."""
+    budget_tracker = {}
+    report = await chat_with_tools_fn(
+        [{"role": "user", "content": content}],
+        system_prompt=task_system_prompt,
+        model=await get_model_fn(),
+        max_tokens=max_tokens_task,
+        budget_usd=budget_usd,
+        extra_tools=extra_tools,
+        extra_handlers=extra_handlers,
+        on_progress=on_progress,
+        budget_tracker=budget_tracker,
+        task_id=task_id,
+        finalization_tools=finalization_tools,
+        terminal_tools=terminal_tools,
+    )
+    return report, budget_tracker
+
+
+async def _persist_task_success(
+    *,
+    task: dict,
+    content: str,
+    report: str,
+    budget_tracker: dict,
+    mission_id,
+    restart_ctx: dict,
+) -> str:
+    """Persist successful task output, side-channel summaries, and mission events."""
+    task_id = task["id"]
+
+    # Save tool execution log for agent context isolation
+    tool_details = budget_tracker.get("tool_work_details", [])
+    tool_log_text = ""
+    if tool_details:
+        tool_log_text = "\n".join(str(d)[:500] for d in tool_details)[:20000]
+        try:
+            await asyncio.to_thread(
+                _execute,
+                "UPDATE telegram_tasks SET tool_log = %s WHERE id = %s",
+                (tool_log_text, task_id),
+            )
+        except Exception as e:
+            logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
+
+    # Clean up Redis live state (PG now has the record)
+    try:
+        from redis_state import unregister_active_task
+        unregister_active_task(task_id)
+    except Exception:
+        pass
+
+    # Save task summary to Redis for chain context (7-day TTL)
+    try:
+        from redis_state import save_task_summary
+        save_task_summary(
+            task_id,
+            parent_task_id=task.get("parent_task_id"),
+            agent_type=task.get("agent_type", ""),
+            content_excerpt=content[:500],
+            result_excerpt=report[:1000],
+            tool_log_excerpt=tool_log_text[:2000],
+        )
+    except Exception:
+        pass
+
+    # Record task completion to mission (generous summary for context chain)
+    if mission_id:
+        try:
+            from telegram.mission import add_mission_event
+            agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
+            summary = _extract_summary(report, 1500)
+            add_mission_event(
+                mission_id, f"task#{task_id}", "task_completed",
+                f"Done{agent_label}: {summary}",
+            )
+        except Exception:
+            pass
+
+    # Auto-save scout reports to Knowledge Graph
+    if task.get("agent_type") == "scout":
+        try:
+            from shared import process_scout_report_to_kg
+            kg_result = await asyncio.to_thread(
+                process_scout_report_to_kg,
+                report=report,
+                task_content=content,
+                agent_type="scout",
+            )
+            if kg_result.get("status") == "ok":
+                logger.info(
+                    "[SCOUT→KG] Task #%d saved to KG | group=%s | facts=%d",
+                    task_id,
+                    kg_result.get("group_id", "?"),
+                    kg_result.get("facts_count", 0),
+                )
+            else:
+                logger.debug(
+                    "[SCOUT→KG] Task #%d KG save skipped: %s",
+                    task_id, kg_result.get("message", "unknown reason")
+                )
+        except Exception as e:
+            # Non-fatal: log but don't fail the task
+            logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
+
+    restart_report_prefix = ""
+    if restart_ctx["initiated"]:
+        restart_report_prefix = (
+            "## Restart Resume\n"
+            f"- resumed_after_restart: true\n"
+            f"- restart_attempt_count: {restart_ctx['attempts']}\n"
+            f"- restart_target_service: {restart_ctx['target'] or '?'}\n"
+            f"- restart_reentry_blocked: {'true' if restart_ctx['should_skip_restart'] else 'false'}\n"
+            f"- restart_reentry_reason: {restart_ctx['resume_reason']}\n\n"
+        )
+    final_report = f"{restart_report_prefix}{report}" if restart_report_prefix else report
+
+    # Save full report to DB
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET status = 'done', result = %s, verification_status = 'pending', "
+        "completed_at = NOW() WHERE id = %s",
+        (final_report, task_id),
+    )
+    return final_report
+
+
+async def _handle_task_failure(
+    *,
+    task: dict,
+    content: str,
+    error: Exception,
+    mission_id,
+    is_subtask: bool,
+    log_event_fn,
+    on_complete=None,
+) -> dict:
+    """Persist final task failure state and notify the orchestrator callback."""
+    task_id = task["id"]
+
+    logger.error("Task %d failed: %s", task_id, error)
+    # Record failure to mission
+    if mission_id:
+        try:
+            from telegram.mission import add_mission_event
+            add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Failed: {str(error)[:500]}")
+        except Exception:
+            pass
+    await asyncio.to_thread(
+        log_event_fn, "error", "task",
+        f"Task {task_id} failed: {error}",
+        detail=content[:500], task_id=task_id,
+    )
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET status = 'failed', result = %s, verification_status = 'failed', verification_details = %s, "
+        "completed_at = NOW(), last_verification_at = NOW() WHERE id = %s",
+        (str(error), f"task execution failed before verification: {str(error)[:1000]}", task_id),
+    )
+    # Notify orchestrator of failure
+    if on_complete:
+        try:
+            cb_result = on_complete(
+                task_id,
+                "failed",
+                str(error)[:200],
+                verification_status="failed",
+                verification_summary=f"task execution failed before verification: {str(error)[:200]}",
+                retry_result=None,
+            )
+            if asyncio.iscoroutine(cb_result):
+                await cb_result
+        except Exception:
+            logger.debug("on_complete callback failed for task %d", task_id)
+    # Clean up Redis live state on failure
+    try:
+        from redis_state import unregister_active_task
+        unregister_active_task(task_id)
+    except Exception:
+        pass
+    return {
+        "status": "failed",
+        "task_id": task_id,
+        "error": str(error),
+        "is_subtask": is_subtask,
+    }
 
 
 async def process_task(
@@ -849,113 +1015,28 @@ async def process_task(
 
     for attempt in range(max_retries):
         try:
-            bt = {}
-            report = await chat_with_tools_fn(
-                [{"role": "user", "content": content}],
-                system_prompt=task_system_prompt,
-                model=await get_model_fn(),
-                max_tokens=max_tokens_task,
+            report, bt = await _run_task_llm(
+                task_id=task_id,
+                content=content,
+                chat_with_tools_fn=chat_with_tools_fn,
+                get_model_fn=get_model_fn,
+                task_system_prompt=task_system_prompt,
+                max_tokens_task=max_tokens_task,
                 budget_usd=budget_usd,
                 extra_tools=extra_tools,
                 extra_handlers=extra_handlers,
-                on_progress=on_progress,
-                budget_tracker=bt,
-                task_id=task_id,
                 finalization_tools=finalization_tools,
                 terminal_tools=terminal_tools,
+                on_progress=on_progress,
             )
 
-            # Save tool execution log for agent context isolation
-            tool_details = bt.get("tool_work_details", [])
-            if tool_details:
-                tool_log_text = "\n".join(str(d)[:500] for d in tool_details)[:20000]
-                try:
-                    await asyncio.to_thread(
-                        _execute,
-                        "UPDATE telegram_tasks SET tool_log = %s WHERE id = %s",
-                        (tool_log_text, task_id),
-                    )
-                except Exception as e:
-                    logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
-
-            # Clean up Redis live state (PG now has the record)
-            try:
-                from redis_state import unregister_active_task
-                unregister_active_task(task_id)
-            except Exception:
-                pass
-
-            # Save task summary to Redis for chain context (7-day TTL)
-            try:
-                from redis_state import save_task_summary
-                save_task_summary(
-                    task_id,
-                    parent_task_id=task.get("parent_task_id"),
-                    agent_type=task.get("agent_type", ""),
-                    content_excerpt=content[:500],
-                    result_excerpt=report[:1000],
-                    tool_log_excerpt=(tool_log_text if tool_details else "")[:2000],
-                )
-            except Exception:
-                pass
-
-            # Record task completion to mission (generous summary for context chain)
-            if mission_id:
-                try:
-                    from telegram.mission import add_mission_event
-                    agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
-                    summary = _extract_summary(report, 1500)
-                    add_mission_event(
-                        mission_id, f"task#{task_id}", "task_completed",
-                        f"Done{agent_label}: {summary}",
-                    )
-                except Exception:
-                    pass
-
-            # Auto-save scout reports to Knowledge Graph
-            if task.get("agent_type") == "scout":
-                try:
-                    from shared import process_scout_report_to_kg
-                    kg_result = await asyncio.to_thread(
-                        process_scout_report_to_kg,
-                        report=report,
-                        task_content=content,
-                        agent_type="scout",
-                    )
-                    if kg_result.get("status") == "ok":
-                        logger.info(
-                            "[SCOUT→KG] Task #%d saved to KG | group=%s | facts=%d",
-                            task_id,
-                            kg_result.get("group_id", "?"),
-                            kg_result.get("facts_count", 0),
-                        )
-                    else:
-                        logger.debug(
-                            "[SCOUT→KG] Task #%d KG save skipped: %s",
-                            task_id, kg_result.get("message", "unknown reason")
-                        )
-                except Exception as e:
-                    # Non-fatal: log but don't fail the task
-                    logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
-
-            restart_report_prefix = ""
-            if restart_ctx["initiated"]:
-                restart_report_prefix = (
-                    "## Restart Resume\n"
-                    f"- resumed_after_restart: true\n"
-                    f"- restart_attempt_count: {restart_ctx['attempts']}\n"
-                    f"- restart_target_service: {restart_ctx['target'] or '?'}\n"
-                    f"- restart_reentry_blocked: {'true' if restart_ctx['should_skip_restart'] else 'false'}\n"
-                    f"- restart_reentry_reason: {restart_ctx['resume_reason']}\n\n"
-                )
-            final_report = f"{restart_report_prefix}{report}" if restart_report_prefix else report
-
-            # Save full report to DB
-            await asyncio.to_thread(
-                _execute,
-                "UPDATE telegram_tasks SET status = 'done', result = %s, verification_status = 'pending', "
-                "completed_at = NOW() WHERE id = %s",
-                (final_report, task_id),
+            final_report = await _persist_task_success(
+                task=task,
+                content=content,
+                report=report,
+                budget_tracker=bt,
+                mission_id=mission_id,
+                restart_ctx=restart_ctx,
             )
 
             summary = _extract_summary(final_report)
@@ -1011,53 +1092,16 @@ async def process_task(
                 await asyncio.sleep(retry_delay)
                 continue
 
-            # Final failure or non-rate-limit error
-            logger.error("Task %d failed: %s", task_id, e)
-            # Record failure to mission
-            if mission_id:
-                try:
-                    from telegram.mission import add_mission_event
-                    add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Failed: {str(e)[:500]}")
-                except Exception:
-                    pass
-            await asyncio.to_thread(
-                log_event_fn, "error", "task",
-                f"Task {task_id} failed: {e}",
-                detail=content[:500], task_id=task_id,
+            return await _handle_task_failure(
+                task=task,
+                content=content,
+                error=e,
+                mission_id=mission_id,
+                is_subtask=is_subtask,
+                log_event_fn=log_event_fn,
+                on_complete=on_complete,
             )
-            await asyncio.to_thread(
-                _execute,
-                "UPDATE telegram_tasks SET status = 'failed', result = %s, verification_status = 'failed', verification_details = %s, "
-                "completed_at = NOW(), last_verification_at = NOW() WHERE id = %s",
-                (str(e), f"task execution failed before verification: {str(e)[:1000]}", task_id),
-            )
-            # Notify orchestrator of failure
-            if on_complete:
-                try:
-                    cb_result = on_complete(
-                        task_id,
-                        "failed",
-                        str(e)[:200],
-                        verification_status="failed",
-                        verification_summary=f"task execution failed before verification: {str(e)[:200]}",
-                        retry_result=None,
-                    )
-                    if asyncio.iscoroutine(cb_result):
-                        await cb_result
-                except Exception:
-                    logger.debug("on_complete callback failed for task %d", task_id)
-            # Clean up Redis live state on failure
-            try:
-                from redis_state import unregister_active_task
-                unregister_active_task(task_id)
-            except Exception:
-                pass
-            return {
-                "status": "failed",
-                "task_id": task_id,
-                "error": str(e),
-                "is_subtask": is_subtask,
-            }
+
 
 async def recover_processing_tasks_on_startup(
     stale_minutes: int = 60,

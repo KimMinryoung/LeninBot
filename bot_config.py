@@ -95,22 +95,48 @@ def _save_config():
 
 _config = _load_config()
 
-# Display metadata for config panel
+# Display/apply metadata for config panel
+def _config_meta(
+    label: str,
+    unit: str,
+    options: list,
+    applies_to: list[str],
+    restart_required: list[str] | None = None,
+) -> dict:
+    return {
+        "label": label,
+        "unit": unit,
+        "options": options,
+        "applies_to": applies_to,
+        "restart_required": restart_required or [],
+    }
+
+
 _CONFIG_META = {
-    "chat_budget":      {"label": "대화 예산",     "unit": "$",  "options": [0.10, 0.20, 0.30, 0.50, 1.00]},
-    "task_budget":      {"label": "태스크 예산",   "unit": "$",  "options": [0.50, 1.00, 2.00, 3.00, 5.00]},
-    "chat_model":       {"label": "대화 모델",     "unit": "",   "options": ["high", "medium", "low"]},
-    "task_model":       {"label": "태스크 모델",   "unit": "",   "options": ["high", "medium", "low"]},
-    "max_rounds_chat":  {"label": "대화 라운드",   "unit": "회", "options": [15, 30, 50, 80]},
-    "max_rounds_task":  {"label": "태스크 라운드", "unit": "회", "options": [15, 30, 50, 80]},
-    "provider":         {"label": "대화 제공자",   "unit": "",   "options": ["claude", "openai", "deepseek", "local"]},
-    "task_provider":    {"label": "태스크 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
-    "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
-    "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
-    "autonomous_provider":{"label": "자율 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
-    "autonomous_model": {"label": "자율 모델",   "unit": "",   "options": ["high", "medium", "low"]},
-    "webchat_provider":{"label": "웹챗 제공자",   "unit": "",   "options": ["claude", "openai", "deepseek"]},
-    "webchat_model":   {"label": "웹챗 모델",     "unit": "",   "options": ["high", "medium", "low"]},
+    "chat_budget": _config_meta("대화 예산", "$", [0.10, 0.20, 0.30, 0.50, 1.00], ["telegram-chat", "webchat"], ["api"]),
+    "task_budget": _config_meta("태스크 예산", "$", [0.50, 1.00, 2.00, 3.00, 5.00], ["telegram-task"]),
+    "chat_model": _config_meta("대화 모델", "", ["high", "medium", "low"], ["telegram-chat"]),
+    "task_model": _config_meta("태스크 모델", "", ["high", "medium", "low"], ["telegram-task"]),
+    "max_rounds_chat": _config_meta("대화 라운드", "회", [15, 30, 50, 80], ["telegram-chat"]),
+    "max_rounds_task": _config_meta("태스크 라운드", "회", [15, 30, 50, 80], ["telegram-task"]),
+    "provider": _config_meta("대화 제공자", "", ["claude", "openai", "deepseek", "local"], ["telegram-chat"]),
+    "task_provider": _config_meta(
+        "태스크 제공자",
+        "",
+        ["default", "claude", "openai", "deepseek", "local"],
+        ["telegram-task"],
+    ),
+    "task_concurrency": _config_meta("동시 태스크", "개", [1, 2, 3, 4], ["telegram-task-worker"], ["telegram"]),
+    "autonomous_active": _config_meta("자율 에이전트", "", [True, False], ["autonomous-next-tick"]),
+    "autonomous_provider": _config_meta(
+        "자율 제공자",
+        "",
+        ["default", "claude", "openai", "deepseek", "local"],
+        ["autonomous-next-tick"],
+    ),
+    "autonomous_model": _config_meta("자율 모델", "", ["high", "medium", "low"], ["autonomous-next-tick"]),
+    "webchat_provider": _config_meta("웹챗 제공자", "", ["claude", "openai", "deepseek"], ["webchat"], ["api"]),
+    "webchat_model": _config_meta("웹챗 모델", "", ["high", "medium", "low"], ["webchat"], ["api"]),
 }
 
 _MODEL_ALIAS_MAP = {
