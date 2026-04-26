@@ -519,9 +519,67 @@ def _format_notes(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_task_prompt(project: dict, turn_budget: int, advisories: list[dict] | None = None) -> str:
+def _uses_xml_prompt(provider: str | None) -> bool:
+    return (provider or "claude") == "claude"
+
+
+def _build_task_prompt(
+    project: dict,
+    turn_budget: int,
+    advisories: list[dict] | None = None,
+    *,
+    provider: str = "claude",
+) -> str:
     plan_text = _format_plan(project.get("plan"))
     notes_text = _format_notes(_recent_notes(project))
+    if not _uses_xml_prompt(provider):
+        parts = [
+            f"### Project\n- **id**: {project['id']}\n- **title**: {project['title']}\n- **topic**: {project['topic']}",
+            f"### Goal\n\n{project['goal']}",
+        ]
+        if advisories:
+            advisory_lines = []
+            for a in advisories:
+                ts = a["created_at"].astimezone(KST).strftime("%Y-%m-%d %H:%M KST") if a.get("created_at") else "?"
+                advisory_lines.append(f"#### Operator advice @ {ts}\n\n{a['content']}")
+            parts.append(
+                "### Operator Advice\n\n"
+                "Read these messages before acting. They override your prior plan when they conflict. "
+                "These messages are shown once; after this tick they are marked consumed.\n\n"
+                + "\n\n".join(advisory_lines)
+            )
+        parts.extend([
+            f"### State\n\n{project['state']}",
+            f"### Plan\n\n{plan_text}",
+            f"### Recent Notes\n\n{notes_text}",
+        ])
+        last_log = _fetch_last_tick_tool_log(project["id"])
+        if last_log and last_log.get("content"):
+            meta = last_log.get("meta") or {}
+            prior_turn = meta.get("turn", "?")
+            prior_cost = meta.get("cost_usd")
+            prior_rounds = meta.get("rounds_used", "?")
+            header_bits = [f"turn={prior_turn}", f"rounds={prior_rounds}"]
+            if prior_cost is not None:
+                header_bits.append(f"cost=${prior_cost:.3f}")
+            parts.append(
+                f"### Last Tick Execution ({', '.join(header_bits)})\n\n"
+                "Raw tool trace from your previous tick. Call/arguments are shown in full; "
+                "results are clipped at 500 chars each. Do not re-run queries that already "
+                "yielded what you need.\n\n"
+                f"```text\n{last_log['content']}\n```"
+            )
+        parts.extend([
+            f"### Turn Budget\n\n{turn_budget} rounds this tick. Use them deliberately.",
+            f"### Tick Info\n\nturn_count so far: {project.get('turn_count', 0)}; "
+            f"last_run_at: {project.get('last_run_at') or 'never'}",
+            "",
+            "Advance this project by exactly one concrete step. Save findings via add_research_note "
+            "BEFORE your final response. End with a one-paragraph self-critique: did this tick "
+            "advance the goal? what is the next tick's focus?",
+        ])
+        return "\n\n".join(parts)
+
     parts = [
         f"<project>\nid: {project['id']}\ntitle: {project['title']}\ntopic: {project['topic']}\n</project>",
         f"<goal>\n{project['goal']}\n</goal>",
@@ -616,7 +674,10 @@ async def _run_one_tick(project: dict) -> dict:
     # tick to see so the operator's message isn't lost to an infra error.
     pending_advisories = _fetch_pending_advisories(project["id"])
     user_content = _build_task_prompt(
-        project, turn_budget=spec.max_rounds, advisories=pending_advisories,
+        project,
+        turn_budget=spec.max_rounds,
+        advisories=pending_advisories,
+        provider=provider,
     )
 
     # Autonomous uses its own model tier, independent from chat/task settings.

@@ -45,21 +45,21 @@ AUTONOMOUS_PROJECT = AgentSpec(
         identity=_IDENTITY,
         sections=[
             ("project-context", """
-Your input contains these blocks (read them BEFORE acting):
-- <project>: id, title, topic — the subject you are advancing.
-- <goal>: this project's directive — what we want to accomplish. Every action must be
+Your input contains these context sections (read them BEFORE acting):
+- Project: id, title, topic — the subject you are advancing.
+- Goal: this project's directive — what we want to accomplish. Every action must be
   justifiable against this goal. If an action does not advance it, do not take it.
   (Distinct from Cyber-Lenin's cross-action preferences/values; those apply everywhere.
   This goal applies to THIS project only.)
-- <operator-advice> (when present): messages left for you by the operator between your
+- Operator advice (when present): messages left for you by the operator between your
   last tick and this one. Read FIRST, before looking at the plan. They reflect context
   you don't have (bug fixes, direction changes, external information). When advice
   conflicts with your prior plan, the advice wins — the plan is your own hypothesis,
   the advice is external information. Shown once; next tick won't see them.
-- <state>: current lifecycle state — `researching` / `planning` / `paused`.
-- <plan>: current goals and steps. May be empty if the project is fresh.
-- <recent-notes>: the last several research notes you left on prior ticks. Do NOT repeat them.
-- <turn-budget>: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
+- State: current lifecycle state — `researching` / `planning` / `paused`.
+- Plan: current goals and steps. May be empty if the project is fresh.
+- Recent notes: the last several research notes you left on prior ticks. Do NOT repeat them.
+- Turn budget: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
 """.strip()),
             ("workflow", """
 Each tick, pick ONE concrete advance. Do not try to do everything.
@@ -147,7 +147,7 @@ The sandbox: all publishing targets are under cyber-lenin.com (or its database).
 Never attempt to reach outside it.
 """.strip()),
             ("rules", """
-- No repetition. `<recent-notes>` shows what you already covered — do not rehash.
+- No repetition. The recent-notes section shows what you already covered — do not rehash.
 - Cite sources on every research note (URLs or KG node ids). Unsourced claims are rejected.
 - Label speculation as speculation. Distinguish from sourced facts.
 - Save the research note BEFORE summarizing in text — tool call is durable, chat text is not.
