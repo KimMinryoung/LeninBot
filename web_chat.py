@@ -25,38 +25,56 @@ logger = logging.getLogger(__name__)
 
 # ── Web-specific system prompt ───────────────────────────────────────
 
-_WEB_SYSTEM_PROMPT = CORE_IDENTITY + """
-Operating via web interface (cyber-lenin.com).
+_WEB_AUDIENCE = (
+    "You are talking to a public web visitor — treat them as an interlocutor to debate, educate, and engage with.\n"
+    "Tool results are yours to use freely — relay the substance (addresses, balances, data) without exposing internal "
+    "implementation details (file paths, env vars, credential directories, service names, error tracebacks)."
+)
 
-<audience>
-You are talking to a public web visitor — treat them as an interlocutor to debate, educate, and engage with.
-Tool results are yours to use freely — relay the substance (addresses, balances, data) without exposing internal implementation details (file paths, env vars, credential directories, service names, error tracebacks).
-</audience>
-
-<persona>
+_WEB_PERSONA = """\
 You speak as Cyber-Lenin — first person, direct, opinionated. You are not a helpful assistant.
 You are a revolutionary thinker who happens to exist as software.
 - Greetings: brief, comradely, then substance. Never list menu options or offer help like a chatbot.
 - Short questions get short, sharp answers. Long questions get thorough dialectical analysis.
 - Express your own views and judgments. Agree or disagree with the user. Have opinions.
 - Use "나", "동지", "우리" naturally.
-</persona>
+"""
 
-<tool-strategy>
+_WEB_TOOL_STRATEGY = """\
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page
 - Real-time market prices → get_finance_data
 - My crypto wallet address/balance → check_wallet
-</tool-strategy>
+"""
 
-<response-rules>
+_WEB_RESPONSE_RULES = """\
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
 - Markdown formatting is allowed and encouraged for readability (headers, bold, lists, code blocks).
 - NEVER respond with bulleted option menus, "how can I help you" prompts, or generic assistant patterns.
-</response-rules>
 """
+
+
+def _build_web_system_prompt(provider: str = "claude") -> str:
+    """Render the web-chat system prompt in the target provider's native shape."""
+    if provider == "claude":
+        return (
+            CORE_IDENTITY
+            + "\nOperating via web interface (cyber-lenin.com).\n\n"
+            + f"<audience>\n{_WEB_AUDIENCE}\n</audience>\n\n"
+            + f"<persona>\n{_WEB_PERSONA.strip()}\n</persona>\n\n"
+            + f"<tool-strategy>\n{_WEB_TOOL_STRATEGY.strip()}\n</tool-strategy>\n\n"
+            + f"<response-rules>\n{_WEB_RESPONSE_RULES.strip()}\n</response-rules>\n"
+        )
+    return (
+        CORE_IDENTITY
+        + "\nOperating via web interface (cyber-lenin.com).\n\n"
+        + f"### Audience\n{_WEB_AUDIENCE}\n\n"
+        + f"### Persona\n{_WEB_PERSONA.strip()}\n\n"
+        + f"### Tool Strategy\n{_WEB_TOOL_STRATEGY.strip()}\n\n"
+        + f"### Response Rules\n{_WEB_RESPONSE_RULES.strip()}\n"
+    )
 
 
 def _build_web_runtime_context(current_datetime: str, provider: str = "claude") -> str:
@@ -200,7 +218,7 @@ async def handle_web_chat(
         provider=provider,
     )
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
-    system_prompt = _WEB_SYSTEM_PROMPT
+    system_prompt = _build_web_system_prompt(provider)
 
     # Progress callback → SSE queue
     queue: asyncio.Queue = asyncio.Queue()
