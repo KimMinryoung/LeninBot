@@ -27,6 +27,16 @@ _RESTART_RESUME_MARKER = "[same-task resumed after self restart]"
 _RESTART_PHASE_KEY = "restart_state"
 
 
+def _uses_xml_context(provider: str | None) -> bool:
+    return (provider or "claude") == "claude"
+
+
+def _wrap_task_content(content: str, provider: str | None) -> str:
+    if _uses_xml_context(provider):
+        return f"<task>\n{content}\n</task>"
+    return f"### Task\n\n{content}"
+
+
 # ── Current State Builder (shared by orchestrator + task agents) ─────
 
 def build_current_state(
@@ -662,6 +672,7 @@ async def process_task(
     terminal_tools: list[str] | None = None,
     on_progress=None,
     on_complete=None,
+    context_provider: str = "claude",
 ):
     """Process a task: run tools, generate report, save to DB, send as file.
 
@@ -677,6 +688,7 @@ async def process_task(
         extra_tools: Additional tool definitions (e.g. task-context tools).
         extra_handlers: Additional tool handlers.
         budget_usd: USD budget for this task (default $1.00).
+        context_provider: Provider format for injected task context.
         on_progress: Optional async callback for live progress updates.
         on_complete: Optional callback(task_id, status, summary) called after
             task finishes. Used to notify the orchestrator of completion.
@@ -701,10 +713,15 @@ async def process_task(
             mission_title = mission_rows[0]["title"] if mission_rows else "?"
             events = get_mission_events(mission_id, limit=20)
             if events:
-                lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
-                for e in events:
-                    lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
-                lines.append("</mission-context>")
+                if _uses_xml_context(context_provider):
+                    lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
+                    for e in events:
+                        lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
+                    lines.append("</mission-context>")
+                else:
+                    lines = [f"### Mission Context (#{mission_id}: {mission_title})"]
+                    for e in events:
+                        lines.append(f"- [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
                 mission_ctx = "\n".join(lines)
             # NOTE: Runtime model / time / alerts context is injected by
             # _chat_with_tools (or by background-process callers) via the user
@@ -733,18 +750,28 @@ async def process_task(
                     sr_agent = sr.get("agent_type") or "unknown"
                     sr_result = str(sr.get("result") or "")[:5000]
                     sr_task_brief = str(sr.get("content") or "")[:300]
-                    result_blocks.append(
-                        f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
-                        f"    <task-brief>{sr_task_brief}</task-brief>\n"
-                        f"    <result>\n{sr_result}\n    </result>\n"
-                        f"  </subtask>"
+                    if _uses_xml_context(context_provider):
+                        result_blocks.append(
+                            f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
+                            f"    <task-brief>{sr_task_brief}</task-brief>\n"
+                            f"    <result>\n{sr_result}\n    </result>\n"
+                            f"  </subtask>"
+                        )
+                    else:
+                        result_blocks.append(
+                            f"#### Subtask #{sr['id']} [{sr_agent}]\n"
+                            f"**Task brief:** {sr_task_brief}\n\n"
+                            f"**Result:**\n\n{sr_result}"
+                        )
+                if _uses_xml_context(context_provider):
+                    content = (
+                        "<subtask-results>\n"
+                        + "\n".join(result_blocks)
+                        + "\n</subtask-results>\n\n"
+                        + content
                     )
-                content = (
-                    "<subtask-results>\n"
-                    + "\n".join(result_blocks)
-                    + "\n</subtask-results>\n\n"
-                    + content
-                )
+                else:
+                    content = "### Subtask Results\n\n" + "\n\n".join(result_blocks) + "\n\n" + content
         except Exception as e:
             logger.warning("Synthesis subtask result injection failed: %s", e)
 
@@ -760,7 +787,7 @@ async def process_task(
         # Child task: show parent chain (what ancestors did)
         try:
             from redis_state import format_task_chain_for_context
-            history_ctx = format_task_chain_for_context(parent_task_id)
+            history_ctx = format_task_chain_for_context(parent_task_id, provider=context_provider)
         except Exception as e:
             logger.debug("Task chain context load failed: %s", e)
     if not history_ctx and user_id and user_id != 0:
@@ -778,16 +805,27 @@ async def process_task(
                 pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
                 pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
 
-                block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
-                block += f"    <summary>{pt_summary}</summary>\n"
-                if pt_tool_log:
-                    block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
-                block += f"  </prev-task>"
-                history_ctx = (
-                    f"<agent-execution-history agent=\"{agent_type}\">\n"
-                    + block
-                    + "\n</agent-execution-history>"
-                )
+                if _uses_xml_context(context_provider):
+                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
+                    block += f"    <summary>{pt_summary}</summary>\n"
+                    if pt_tool_log:
+                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
+                    block += f"  </prev-task>"
+                    history_ctx = (
+                        f"<agent-execution-history agent=\"{agent_type}\">\n"
+                        + block
+                        + "\n</agent-execution-history>"
+                    )
+                else:
+                    lines = [
+                        f"### Agent Execution History ({agent_type})",
+                        f"Previous task: #{pt_id} completed {pt_completed}",
+                        "",
+                        f"**Summary:** {pt_summary}",
+                    ]
+                    if pt_tool_log:
+                        lines.extend(["", "**Tool log:**", f"```text\n{pt_tool_log}\n```"])
+                    history_ctx = "\n".join(lines)
         except Exception as e:
             logger.debug("Agent execution history load failed: %s", e)
 
@@ -795,7 +833,7 @@ async def process_task(
     state_ctx = ""
     if user_id and user_id != 0:
         try:
-            state_ctx = build_current_state(user_id)
+            state_ctx = build_current_state(user_id, provider=context_provider)
         except Exception as e:
             logger.debug("Current state build failed: %s", e)
 
@@ -804,7 +842,7 @@ async def process_task(
     if mission_id:
         try:
             from redis_state import format_board_for_context
-            board_ctx = format_board_for_context(mission_id)
+            board_ctx = format_board_for_context(mission_id, provider=context_provider)
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
 
@@ -820,7 +858,7 @@ async def process_task(
         context_parts.append(board_ctx)
 
     if context_parts:
-        content = "\n\n".join(context_parts) + f"\n\n<task>\n{content}\n</task>"
+        content = "\n\n".join(context_parts) + "\n\n" + _wrap_task_content(content, context_provider)
 
     restart_note = _format_restart_state_note(task)
     if restart_note and restart_note not in content:

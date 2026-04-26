@@ -2003,6 +2003,7 @@ async def bot_main():
             terminal_tools=list(spec.terminal_tools),
             on_progress=progress_cb,
             on_complete=_on_task_complete,
+            context_provider=_agent_provider,
         )
         # Flush remaining progress buffer
         if progress_cb and hasattr(progress_cb, "flush"):

@@ -313,7 +313,7 @@ def read_board(mission_id: int, since_ts: float = 0.0) -> list[dict]:
         return []
 
 
-def format_board_for_context(mission_id: int) -> str:
+def format_board_for_context(mission_id: int, *, provider: str = "claude") -> str:
     """Format board messages as an injectable context block."""
     messages = read_board(mission_id)
     if not messages:
@@ -325,6 +325,12 @@ def format_board_for_context(mission_id: int) -> str:
         ts = m.get("ts", 0)
         time_str = datetime.fromtimestamp(ts, tz=_KST).strftime("%H:%M") if ts else "?"
         lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
+    if provider != "claude":
+        return (
+            "### Agent Board\n"
+            "Messages left by other agents participating in the same mission.\n"
+            + "\n".join(f"-{line[1:]}" if line.startswith("  ") else f"- {line}" for line in lines)
+        )
     return (
         "<agent-board>\n"
         "Below are messages left by other agents participating in the same mission.\n"
@@ -425,11 +431,32 @@ def get_task_chain(task_id: int, max_depth: int = 5) -> list[dict]:
     return chain
 
 
-def format_task_chain_for_context(task_id: int) -> str:
+def format_task_chain_for_context(task_id: int, *, provider: str = "claude") -> str:
     """Format the parent task chain as an injectable context block."""
     chain = get_task_chain(task_id)
     if not chain:
         return ""
+    if provider != "claude":
+        parts = [
+            f"### Task Chain (depth {len(chain)})",
+            "Parent task chain. Understand prior work and avoid duplicate work.",
+        ]
+        for entry in chain:
+            tid = entry.get("task_id", "?")
+            agent = entry.get("agent_type", "?")
+            content = entry.get("content", "")
+            result = entry.get("result", "")
+            tool_log = entry.get("tool_log", "")
+            parts.append("")
+            parts.append(f"#### Ancestor #{tid} [{agent}]")
+            parts.append(f"**Task content:** {content}")
+            if result:
+                parts.append(f"**Result:** {result}")
+            if tool_log:
+                parts.append("**Tool log:**")
+                parts.append(f"```text\n{tool_log}\n```")
+        return "\n".join(parts)
+
     parts = []
     for entry in chain:
         tid = entry.get("task_id", "?")
