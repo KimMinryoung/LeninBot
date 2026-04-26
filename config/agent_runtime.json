@@ -47,8 +47,8 @@
     "max_rounds": 50
   },
   "scout": {
-    "provider": "moon",
-    "model": null,
+    "provider": "deepseek",
+    "model": "deepseek_flash",
     "budget_usd": 1.0,
     "max_rounds": 30
   },

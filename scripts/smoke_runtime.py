@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -183,7 +185,8 @@ def _assert_agent_runtime_config() -> None:
     assert programmer.budget_usd == 0.01
 
     scout = get_agent("scout")
-    assert scout.provider == "moon"
+    assert scout.provider == "deepseek"
+    assert scout.model == "deepseek_flash"
     assert scout.max_rounds == 30
 
     browser = get_agent("browser")
@@ -197,10 +200,81 @@ def _assert_agent_runtime_config() -> None:
     assert "publish_static_page" in autonomous.finalization_tools
 
 
+def _assert_agent_runtime_dynamic_reload() -> None:
+    from agents.base import AgentSpec
+    import agents.runtime_config as runtime_config
+
+    original_path = runtime_config._CONFIG_PATH
+    original_mtime = runtime_config._last_mtime_ns
+    original_base = dict(runtime_config._base_runtime)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "agent_runtime.json"
+        registry = {
+            "dummy": AgentSpec(
+                name="dummy",
+                description="dummy agent",
+                system_prompt_template="dummy",
+            )
+        }
+        try:
+            runtime_config._CONFIG_PATH = path
+            runtime_config._last_mtime_ns = None
+            runtime_config._base_runtime = {}
+
+            path.write_text(
+                json.dumps({
+                    "dummy": {
+                        "provider": "claude",
+                        "model": "sonnet",
+                        "budget_usd": 2.0,
+                        "max_rounds": 12,
+                    }
+                }),
+                encoding="utf-8",
+            )
+            runtime_config.apply_agent_runtime_config(registry)
+            assert registry["dummy"].provider == "claude"
+            assert registry["dummy"].model == "sonnet"
+            assert registry["dummy"].budget_usd == 2.0
+            assert registry["dummy"].max_rounds == 12
+
+            path.write_text(
+                json.dumps({
+                    "dummy": {
+                        "provider": "deepseek",
+                        "model": "deepseek_flash",
+                        "budget_usd": 3.0,
+                        "max_rounds": 8,
+                    }
+                }),
+                encoding="utf-8",
+            )
+            runtime_config._last_mtime_ns = -1
+            assert runtime_config.reload_agent_runtime_config_if_changed(registry)
+            assert registry["dummy"].provider == "deepseek"
+            assert registry["dummy"].model == "deepseek_flash"
+            assert registry["dummy"].budget_usd == 3.0
+            assert registry["dummy"].max_rounds == 8
+
+            path.write_text(json.dumps({"dummy": {}}), encoding="utf-8")
+            runtime_config._last_mtime_ns = -1
+            assert runtime_config.reload_agent_runtime_config_if_changed(registry)
+            assert registry["dummy"].provider is None
+            assert registry["dummy"].model is None
+            assert registry["dummy"].budget_usd == 1.0
+            assert registry["dummy"].max_rounds == 50
+        finally:
+            runtime_config._CONFIG_PATH = original_path
+            runtime_config._last_mtime_ns = original_mtime
+            runtime_config._base_runtime = original_base
+
+
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
     _assert_agent_runtime_config()
+    _assert_agent_runtime_dynamic_reload()
     print("runtime smoke ok")
 
 
