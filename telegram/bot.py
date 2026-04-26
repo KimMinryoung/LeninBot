@@ -18,7 +18,8 @@ from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import BaseMiddleware, Bot, Dispatcher, Router
+from aiogram.types import CallbackQuery, Message
 
 from secrets_loader import get_secret
 
@@ -96,6 +97,79 @@ EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS
 EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
 EMAIL_DEFAULT_APPROVER_USER_ID = int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0")
 EMAIL_LOG_DIR = Path(os.getenv("EMAIL_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs" / "email_bridge")))
+PUBLIC_ACCESS_NOTICE = (
+    "이 계정은 Cyber-Lenin 운영 인터페이스입니다.\n\n"
+    "공개 글은 https://cyber-lenin.com 에서 볼 수 있고, "
+    "텔레그램 채널은 https://t.me/cyber_lenin_kr 입니다."
+)
+PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS = max(
+    0,
+    int(os.getenv("PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS", "86400") or "0"),
+)
+_public_access_notice_last: dict[int, float] = {}
+
+
+def _telegram_user_id(event) -> int | None:
+    user = getattr(event, "from_user", None)
+    uid = getattr(user, "id", None)
+    return int(uid) if uid is not None else None
+
+
+def _telegram_username(event) -> str:
+    user = getattr(event, "from_user", None)
+    return str(getattr(user, "username", "") or "")
+
+
+async def _maybe_reply_public_access_notice(message: Message, user_id: int | None) -> None:
+    if user_id is None:
+        return
+    chat_type = str(getattr(message.chat, "type", "") or "")
+    if chat_type != "private":
+        return
+
+    import time
+
+    now = time.monotonic()
+    last = _public_access_notice_last.get(user_id, 0.0)
+    if PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS and now - last < PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS:
+        return
+    _public_access_notice_last[user_id] = now
+    await message.answer(PUBLIC_ACCESS_NOTICE, disable_web_page_preview=True)
+
+
+class OwnerOnlyMiddleware(BaseMiddleware):
+    """Stop non-owner Telegram events before command, LLM, or tool handlers run."""
+
+    async def __call__(self, handler, event, data):
+        user_id = _telegram_user_id(event)
+        if user_id is not None and _is_allowed(user_id):
+            return await handler(event, data)
+
+        if isinstance(event, Message):
+            await _maybe_reply_public_access_notice(event, user_id)
+            logger.info(
+                "blocked unauthorized Telegram message user_id=%s username=%s chat_id=%s chat_type=%s",
+                user_id,
+                _telegram_username(event),
+                getattr(event.chat, "id", None),
+                getattr(event.chat, "type", None),
+            )
+            return None
+
+        if isinstance(event, CallbackQuery):
+            logger.info(
+                "blocked unauthorized Telegram callback user_id=%s username=%s",
+                user_id,
+                _telegram_username(event),
+            )
+            try:
+                await event.answer()
+            except Exception:
+                pass
+            return None
+
+        logger.info("blocked unauthorized Telegram event type=%s user_id=%s", type(event).__name__, user_id)
+        return None
 
 def _ensure_table():
     """Create telegram_tasks and telegram_chat_history tables if not exists."""
@@ -1681,6 +1755,9 @@ async def bot_main():
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     _bot_instance = bot
     dp = Dispatcher()
+    access_middleware = OwnerOnlyMiddleware()
+    dp.message.middleware(access_middleware)
+    dp.callback_query.middleware(access_middleware)
     dp.include_router(router)
 
     email_bridge_task = None
