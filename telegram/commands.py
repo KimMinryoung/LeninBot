@@ -1651,7 +1651,7 @@ def _effective_task_provider() -> str:
 
 
 def _effective_autonomous_provider() -> str:
-    provider = str(_ctx["config"].get("autonomous_provider", "claude") or "claude")
+    provider = str(_ctx["config"].get("autonomous_provider", "openai") or "openai")
     if provider == "default":
         return _effective_task_provider()
     return provider
@@ -1667,6 +1667,8 @@ def _config_display_value(key: str, val) -> str:
         return _ctx["tier_to_display"](val, _effective_task_provider())
     if key == "autonomous_model":
         return _ctx["tier_to_display"](val, _effective_autonomous_provider())
+    if key == "webchat_model":
+        return _ctx["tier_to_display"](val, _ctx["config"].get("webchat_provider", "claude"))
     if key == "task_provider" and val == "default":
         return f"default ({_effective_task_provider()})"
     if key == "autonomous_provider" and val == "default":
@@ -1769,7 +1771,7 @@ async def cb_config_set(callback: CallbackQuery):
     else:
         new_val = raw_val
 
-    if key in ("provider", "task_provider", "autonomous_provider"):
+    if key in ("provider", "task_provider", "autonomous_provider", "webchat_provider"):
         if new_val == "openai" and not _ctx["openai_client"]:
             await callback.answer("OPENAI_API_KEY가 없습니다.", show_alert=True)
             return
@@ -1781,7 +1783,7 @@ async def cb_config_set(callback: CallbackQuery):
     config[key] = new_val
 
     # If model changed, clear resolved cache so it re-resolves on next use
-    if key in ("chat_model", "task_model", "autonomous_model") and new_val != old_val:
+    if key in ("chat_model", "task_model", "autonomous_model", "webchat_model") and new_val != old_val:
         _ctx["resolved_models"].pop(new_val, None)
 
     # Provider switch: log with actual model names
@@ -1791,6 +1793,10 @@ async def cb_config_set(callback: CallbackQuery):
         _ctx["add_system_alert"](f"태스크 provider 전환: {old_val} → {new_val}")
     if key == "autonomous_provider" and new_val != old_val:
         _ctx["add_system_alert"](f"자율 provider 전환: {old_val} → {new_val}")
+    if key in ("webchat_provider", "webchat_model") and new_val != old_val:
+        _ctx["add_system_alert"](
+            f"웹챗 설정 변경: {key} {old_val} → {new_val} (leninbot-api 재시작 필요)"
+        )
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
     _ctx["save_config"]()

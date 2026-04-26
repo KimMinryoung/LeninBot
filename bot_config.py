@@ -109,6 +109,8 @@ _CONFIG_META = {
     "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
     "autonomous_provider":{"label": "자율 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
     "autonomous_model": {"label": "자율 모델",   "unit": "",   "options": ["high", "medium", "low"]},
+    "webchat_provider":{"label": "웹챗 제공자",   "unit": "",   "options": ["claude", "openai", "deepseek"]},
+    "webchat_model":   {"label": "웹챗 모델",     "unit": "",   "options": ["high", "medium", "low"]},
 }
 
 _MODEL_ALIAS_MAP = {
