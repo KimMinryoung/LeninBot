@@ -1,10 +1,11 @@
 """research_tools.py — Publish, edit, and unpublish public research documents.
 
 Public research files live under research/ and are served at
-https://cyber-lenin.com/reports/research/{filename}. The frontend (Node.js, in
-Docker) caches both the file list (TTL) and per-file content (permanent) in
-Redis, so any change on disk MUST be paired with cache invalidation or readers
-will keep seeing the old version.
+https://cyber-lenin.com/reports/research/{slug}, where slug is the filename
+without its .md extension. The frontend (Node.js, in Docker) caches both the
+file list (TTL) and per-file content (permanent) in Redis, so any change on
+disk MUST be paired with cache invalidation or readers will keep seeing the old
+version.
 
 This module consolidates:
   * publish_research(title, content, filename?) — atomic write + cache bust
@@ -168,8 +169,12 @@ def _invalidate_cache_sync(filename: str) -> dict[str, Any]:
     return {"ok": True, "deleted": deleted}
 
 
+def _public_slug(filename: str) -> str:
+    return filename[:-3] if filename.endswith(".md") else filename
+
+
 def _public_url(filename: str) -> str:
-    return f"https://cyber-lenin.com/reports/research/{filename}"
+    return f"https://cyber-lenin.com/reports/research/{_public_slug(filename)}"
 
 
 def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str | None = None) -> str:
@@ -188,7 +193,8 @@ PUBLISH_RESEARCH_TOOL = {
     "name": "publish_research",
     "description": (
         "Write a markdown document to the public research directory. "
-        "Published files are served at https://cyber-lenin.com/reports/research/{filename}. "
+        "Published files are served at https://cyber-lenin.com/reports/research/{slug}, "
+        "where slug is the filename without the .md extension. "
         "Use for polished analysis, forecasts, and investigative findings. "
         "Filename is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) "
         "unless `filename` is passed explicitly. Writing the same filename overwrites; the "

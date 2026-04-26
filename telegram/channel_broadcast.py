@@ -256,17 +256,27 @@ def publication_intro(body: str, title: str = "") -> str:
     return _truncate_intro(text)
 
 
+def canonical_public_url(url: str) -> str:
+    """Use human-facing research URLs in channel posts."""
+    value = (url or "").strip()
+    return re.sub(
+        r"^((?:https://cyber-lenin\.com)?/(?:reports/)?research/[^?#\s]+)\.md(?=([?#]|$))",
+        r"\1",
+        value,
+    )
+
+
 def format_publication_broadcast(*, title: str, url: str, body: str = "") -> str:
     safe_title = html.escape((title or "새 글").strip())
     safe_intro = html.escape(publication_intro(body, title))
-    safe_url = html.escape((url or "").strip())
+    safe_url = html.escape(canonical_public_url(url))
     return f"<b>📢 {safe_title}</b>\n\n{safe_intro}\n\n🔗 전체 글 읽기: {safe_url}"
 
 
 def format_manual_broadcast(*, title: str, summary: str, url: str) -> str:
     safe_title = html.escape((title or "새 글").strip())
     safe_summary = html.escape(re.sub(r"\s+", " ", (summary or "").strip()))
-    safe_url = html.escape((url or "").strip())
+    safe_url = html.escape(canonical_public_url(url))
     return f"<b>📢 {safe_title}</b>\n\n{safe_summary}\n\n🔗 전체 글 읽기: {safe_url}"
 
 

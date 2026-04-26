@@ -618,18 +618,31 @@ def _render_static_page_html(data: dict) -> str:
 """
 
 
+def _research_public_slug(filename: str) -> str:
+    return filename[:-3] if filename.endswith(".md") else filename
+
+
+def _storage_research_filename(filename: str) -> str:
+    return filename if filename.endswith(".md") else f"{filename}.md"
+
+
 def _build_research_url(filename: str) -> str:
-    return f"{PUBLIC_BASE_URL}/research/{filename}"
+    return f"{PUBLIC_BASE_URL}/research/{_research_public_slug(filename)}"
 
 
 def _resolve_research_file(filename: str) -> Path | None:
     """Resolve a public research markdown file, preferring research/ over legacy output/research/."""
-    primary = RESEARCH_DIR / filename
-    if primary.is_file():
-        return primary
-    legacy = LEGACY_OUTPUT_RESEARCH_DIR / filename
-    if legacy.is_file():
-        return legacy
+    candidates = [filename]
+    storage_name = _storage_research_filename(filename)
+    if storage_name != filename:
+        candidates.append(storage_name)
+    for candidate in candidates:
+        primary = RESEARCH_DIR / candidate
+        if primary.is_file():
+            return primary
+        legacy = LEGACY_OUTPUT_RESEARCH_DIR / candidate
+        if legacy.is_file():
+            return legacy
     return None
 
 
@@ -858,12 +871,13 @@ async def get_research(filename: str, format: str = Query(default="json")):
     if "/" in filename or "\\" in filename or ".." in filename:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
+    storage_filename = _storage_research_filename(filename)
     filepath = _resolve_research_file(filename)
     if filepath is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     content = filepath.read_text(encoding="utf-8")
-    extracted_title = _extract_md_title(filepath) or _filename_fallback_title(filename)
+    extracted_title = _extract_md_title(filepath) or _filename_fallback_title(storage_filename)
     if format.lower() == "html":
         page_title = f"{extracted_title} | Cyber-Lenin Research"
         description = content.splitlines()[0].lstrip("# ").strip() if content.strip() else SEO_DEFAULT_DESCRIPTION
@@ -875,18 +889,18 @@ async def get_research(filename: str, format: str = Query(default="json")):
         html = _render_html_page(
             title=page_title,
             description=description[:300],
-            canonical_url=_build_research_url(filename),
+            canonical_url=_build_research_url(storage_filename),
             body_html=body_html,
             og_type="article",
         )
         return Response(content=html, media_type="text/html; charset=utf-8")
     return {
-        "filename": filename,
+        "filename": storage_filename,
         "title": extracted_title,
         "content": content,
         "size": len(content),
         "source_dir": filepath.parent.name,
-        "url": _build_research_url(filename),
+        "url": _build_research_url(storage_filename),
     }
 
 
@@ -982,7 +996,7 @@ async def render_static_page(slug: str):
 @app.get("/reports/research/{filename}")
 async def redirect_research_file(filename: str):
     """Backward-compatible redirect from legacy guessed path to the actual public research file URL."""
-    return RedirectResponse(url=f"/research/{filename}", status_code=307)
+    return RedirectResponse(url=f"/research/{_research_public_slug(filename)}", status_code=307)
 
 
 @app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])

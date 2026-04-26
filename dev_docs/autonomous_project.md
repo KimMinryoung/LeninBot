@@ -152,7 +152,7 @@ tick 중간에 발생하는 세 가지 영속화:
 - `write_kg_structured` — KG 구조화 fact 쓰기
 
 게시 — cyber-lenin.com 내 (T0 경계 안):
-- `publish_research(title, content, filename?)` — markdown 문서 → `/reports/research/{filename}`. 연재 시리즈·장문 에세이·정세 분석용
+- `publish_research(title, content, filename?)` — markdown 문서 → `/reports/research/{slug}` (`.md` 없는 공개 URL). 연재 시리즈·장문 에세이·정세 분석용
 - `publish_hub_curation(title, source_url, source_title, selection_rationale, context, …)` — 구조화 DB 레코드 → `/hub/{slug}`. 외부 한국어 글 큐레이션용. 각 필드가 분리되어 품질 일관성 확보
 - `publish_static_page(slug, title, html_body, summary?)` — 샌드박스된 HTML 페이지 → `/p/{slug}`. 위키 스타일 레퍼런스·시각적 레이아웃용. slug 정규식 검증(alphanumeric + dash), html_body 는 inner content 만(site 가 레이아웃 감쌈), DOMPurify 로 클라이언트 sanitize
 

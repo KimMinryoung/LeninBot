@@ -86,7 +86,7 @@ response — the round budget is hard.
 Three publishing tools, each for a distinct artifact type:
 
 **publish_research(title, content, filename?)** — markdown document served at
-`/reports/research/{filename}`. Use for:
+`/reports/research/{slug}` (without `.md` in the public URL). Use for:
 - Series installments (장편 연재) — one .md per installment, filename carries the series slug
 - Long-form essays, analysis, forecasts (정세 분석)
 - Anything where the format is primarily prose
