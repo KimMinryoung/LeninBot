@@ -31,6 +31,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ────────────────────────────────────────────────────────────
@@ -242,11 +244,26 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     status = "Overwrote" if is_overwrite else "Published"
+    public_url = _public_url(fname)
+    broadcast_note = ""
+    try:
+        br = await maybe_broadcast_autonomous_publication(
+            title=title,
+            url=public_url,
+            body=content,
+            source="cyber-lenin.com research",
+        )
+        if br.ok:
+            broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+    except Exception as e:
+        logger.warning("research channel broadcast failed for %s: %s", fname, e)
+        broadcast_note = f"\nTelegram channel broadcast failed: {e}"
     return (
         f"{status}: {fname}\n"
         f"Local path: {filepath}\n"
-        f"Public URL: {_public_url(fname)}\n"
+        f"Public URL: {public_url}\n"
         f"Size: {len(document)} chars; {_format_cache_note(cache, fname)}"
+        f"{broadcast_note}"
     )
 
 

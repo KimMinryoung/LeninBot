@@ -2181,7 +2181,15 @@ async def _exec_save_diary(title: str, content: str) -> str:
             "INSERT INTO ai_diary (title, content) VALUES (%s, %s)",
             (title, content),
         )
-        return f"Diary saved: {title}"
+        broadcast_note = ""
+        try:
+            from telegram.channel_broadcast import should_broadcast_diary, broadcast_with_token
+            if should_broadcast_diary():
+                result = await broadcast_with_token(f"[사이버-레닌 일기]\n{title}\n\n{content}")
+                broadcast_note = f" / Telegram channel: {'sent' if result.ok else result.message}"
+        except Exception as e:
+            broadcast_note = f" / Telegram channel failed: {e}"
+        return f"Diary saved: {title}{broadcast_note}"
     except Exception as e:
         return f"Failed to save diary: {e}"
 

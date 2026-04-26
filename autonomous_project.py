@@ -645,6 +645,7 @@ async def _run_one_tick(project: dict) -> dict:
     from bot_config import _get_autonomous_provider
     from runtime_profile import resolve_runtime_profile
     import telegram.tools as tt_module
+    from telegram.channel_broadcast import current_autonomous_project_id
 
     spec = get_agent("autonomous_project")
     configured_provider = _get_autonomous_provider()
@@ -698,6 +699,7 @@ async def _run_one_tick(project: dict) -> dict:
 
     tick_messages = [{"role": "user", "content": user_content}]
 
+    ctx_token = current_autonomous_project_id.set(int(project["id"]))
     try:
         from telegram.bot import _chat_with_tools
 
@@ -723,6 +725,8 @@ async def _run_one_tick(project: dict) -> dict:
         logger.exception("Tick failed for project %s", project["id"])
         _log_event(project["id"], "tick_error", str(e)[:2000])
         raise
+    finally:
+        current_autonomous_project_id.reset(ctx_token)
 
     # Increment turn counter and last_run_at AFTER the agent loop completes.
     db_execute(

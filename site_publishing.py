@@ -29,6 +29,7 @@ from pathlib import Path
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 from shared import KST
+from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
 
 logger = logging.getLogger(__name__)
 
@@ -250,12 +251,26 @@ async def _exec_publish_hub_curation(
         fetch_note = f"\nSource fetch failed: {e} (can be retried later)"
 
     public_url = f"https://cyber-lenin.com/hub/{slug}"
+    broadcast_note = ""
+    try:
+        br = await maybe_broadcast_autonomous_publication(
+            title=title,
+            url=public_url,
+            body=f"{selection_rationale}\n\n{context}",
+            source="cyber-lenin.com hub",
+        )
+        if br.ok:
+            broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+    except Exception as e:
+        logger.warning("hub curation channel broadcast failed for %s: %s", slug, e)
+        broadcast_note = f"\nTelegram channel broadcast failed: {e}"
     return (
         f"Published hub curation #{row['id']}\n"
         f"Slug: {slug}\n"
         f"Public URL: {public_url}\n"
         f"Published at: {row['published_at']}"
         f"{fetch_note}"
+        f"{broadcast_note}"
     )
 
 
@@ -376,11 +391,26 @@ async def _exec_publish_static_page(
         return f"Failed to write static page: {e}"
 
     public_url = f"https://cyber-lenin.com/p/{slug}"
+    broadcast_note = ""
+    try:
+        plain_excerpt = re.sub(r"<[^>]+>", " ", html_body)
+        br = await maybe_broadcast_autonomous_publication(
+            title=title,
+            url=public_url,
+            body=summary or plain_excerpt,
+            source="cyber-lenin.com page",
+        )
+        if br.ok:
+            broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+    except Exception as e:
+        logger.warning("static page channel broadcast failed for %s: %s", slug, e)
+        broadcast_note = f"\nTelegram channel broadcast failed: {e}"
     return (
         f"Published static page: {slug}\n"
         f"Local path: {target}\n"
         f"Public URL: {public_url}\n"
         f"Body size: {len(html_body)} chars"
+        f"{broadcast_note}"
     )
 
 

@@ -1711,6 +1711,11 @@ async def bot_main():
         BotCommand(command="projects", description="자율 프로젝트 목록"),
         BotCommand(command="advise", description="자율 에이전트에 조언 (다음 tick 에 전달)"),
         BotCommand(command="advisories", description="대기 중 / 소비된 조언 조회"),
+        BotCommand(command="channel_create", description="채널 생성 절차 안내"),
+        BotCommand(command="channel_set", description="브로드캐스트 채널 지정"),
+        BotCommand(command="channel_info", description="브로드캐스트 채널 확인"),
+        BotCommand(command="broadcast", description="채널 메시지 전송"),
+        BotCommand(command="broadcast_markdown", description="채널 Markdown 전송"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
 

@@ -27,6 +27,13 @@ from replicate_image_service import (
     build_soviet_prompt,
     ReplicateImageError,
 )
+from telegram.channel_broadcast import (
+    load_channel_config,
+    normalize_channel_ref,
+    save_channel_config,
+    validate_channel,
+    broadcast_to_configured_channel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +135,13 @@ _HELP_TEXT = """\
 /advise \\[id] <조언> — 다음 tick 에 전달할 조언 등록 (multi-line OK)
 /advisories \\[id] — 대기 중/소비된 조언 조회
 
+*채널 브로드캐스트*
+/channel_create <채널명> — 채널 수동 생성 절차 안내
+/channel_set <@채널핸들|-100...chat_id> — 브로드캐스트 대상 지정
+/channel_info — 현재 채널 설정/권한 확인
+/broadcast <메시지> — 지정 채널로 일반 메시지 전송
+/broadcast_markdown <마크다운> — 지정 채널로 Markdown 메시지 전송
+
 *시스템*
 /kg — 지식그래프 현황 조회
 /errors \\[n] \\[error|warning] — 에러/경고 로그
@@ -180,6 +194,12 @@ async def cmd_help(message: Message):
     await message.answer(_HELP_TEXT, parse_mode="Markdown")
 
 
+def _command_arg(message: Message) -> str:
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
 async def cmd_clear(message: Message):
     if not _ctx["is_allowed"](message.from_user.id):
         return
@@ -193,6 +213,126 @@ async def cmd_clear(message: Message):
     except Exception:
         pass
     await message.answer("대화 히스토리가 초기화되었습니다.")
+
+
+async def cmd_channel_create(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    title = _command_arg(message)
+    if not title:
+        await message.answer("사용법: /channel_create <채널명>")
+        return
+
+    cfg = load_channel_config()
+    cfg["requested_private_channel_name"] = title[:120]
+    save_channel_config(cfg)
+    await message.answer(
+        "Telegram Bot API는 봇이 채널을 직접 생성하는 것을 허용하지 않습니다.\n\n"
+        f"요청한 채널명: {title}\n\n"
+        "수동 절차:\n"
+        "1. Telegram 앱에서 비공개 채널을 생성\n"
+        "2. 이 봇을 채널 관리자로 추가\n"
+        "3. 관리자 권한에서 '메시지 게시' 활성화\n"
+        "4. 공개 채널이면 /channel_set @채널핸들 실행\n"
+        "5. 비공개 채널이면 채널의 -100... chat_id를 확인해 /channel_set -100... 실행\n\n"
+        "채널 생성은 수동 작업이고, 이후 브로드캐스트는 봇이 처리합니다."
+    )
+
+
+async def cmd_channel_set(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    channel_ref = normalize_channel_ref(_command_arg(message))
+    if not channel_ref:
+        await message.answer("사용법: /channel_set <@채널핸들 또는 -100...chat_id>")
+        return
+
+    ok, status, info = await validate_channel(message.bot, channel_ref)
+    if not ok:
+        await message.answer(
+            "채널 설정 실패.\n\n"
+            f"대상: {channel_ref}\n"
+            f"사유: {status}\n\n"
+            "확인: 봇이 해당 채널의 관리자이고 '메시지 게시' 권한이 있어야 합니다."
+        )
+        return
+
+    cfg = load_channel_config()
+    cfg.update({
+        "chat_id": info.get("username") or info.get("id") or channel_ref,
+        "title": info.get("title", ""),
+        "username": info.get("username", ""),
+        "enabled": True,
+        "last_error": "",
+    })
+    save_channel_config(cfg)
+    await message.answer(
+        "채널 설정 완료.\n"
+        f"제목: {cfg['title'] or '(제목 없음)'}\n"
+        f"대상: {cfg['username'] or cfg['chat_id']}\n"
+        "검증: 봇 관리자 + 메시지 게시 권한 확인됨."
+    )
+
+
+async def cmd_channel_info(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    cfg = load_channel_config()
+    chat_id = str(cfg.get("chat_id") or "").strip()
+    if not chat_id:
+        requested = cfg.get("requested_private_channel_name") or ""
+        suffix = f"\n최근 요청 채널명: {requested}" if requested else ""
+        await message.answer(
+            "브로드캐스트 대상 채널이 아직 설정되지 않았습니다.\n"
+            "먼저 채널을 수동 생성하고 봇을 관리자로 추가한 뒤 /channel_set 을 실행하십시오."
+            + suffix
+        )
+        return
+
+    ok, status, info = await validate_channel(message.bot, chat_id)
+    lines = [
+        "채널 설정",
+        f"저장 대상: {chat_id}",
+        f"저장 제목: {cfg.get('title') or '(없음)'}",
+        f"활성화: {bool(cfg.get('enabled', True))}",
+    ]
+    if info:
+        lines.extend([
+            f"현재 제목: {info.get('title') or '(없음)'}",
+            f"현재 핸들: {info.get('username') or '(비공개/없음)'}",
+            f"chat_id: {info.get('id') or '(unknown)'}",
+        ])
+    lines.append(f"권한 검증: {'정상' if ok else '실패'}")
+    if not ok:
+        lines.append(f"사유: {status}")
+    if cfg.get("last_error"):
+        lines.append(f"최근 오류: {cfg['last_error']}")
+    await message.answer("\n".join(lines))
+
+
+async def cmd_broadcast(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    text = _command_arg(message)
+    if not text:
+        await message.answer("사용법: /broadcast <메시지>")
+        return
+    result = await broadcast_to_configured_channel(message.bot, text)
+    await message.answer(result.message)
+
+
+async def cmd_broadcast_markdown(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    text = _command_arg(message)
+    if not text:
+        await message.answer("사용법: /broadcast_markdown <마크다운>")
+        return
+    result = await broadcast_to_configured_channel(message.bot, text, parse_mode="Markdown")
+    if not result.ok and "can't parse entities" in result.message.lower():
+        await message.answer(result.message + "\nMarkdown 문법을 수정하거나 /broadcast 로 일반 텍스트 전송하십시오.")
+        return
+    await message.answer(result.message)
 
 
 async def cmd_mission(message: Message):
@@ -2114,6 +2254,11 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_start, Command("start"))
     router.message.register(cmd_help, Command("help"))
     router.message.register(cmd_clear, Command("clear"))
+    router.message.register(cmd_channel_create, Command("channel_create"))
+    router.message.register(cmd_channel_set, Command("channel_set"))
+    router.message.register(cmd_channel_info, Command("channel_info"))
+    router.message.register(cmd_broadcast, Command("broadcast"))
+    router.message.register(cmd_broadcast_markdown, Command("broadcast_markdown"))
     router.message.register(cmd_mission, Command("mission"))
     router.message.register(cmd_errors, Command("errors"))
     router.message.register(cmd_chat, Command("chat"))
