@@ -374,6 +374,7 @@ async def _run_llm(
             max_rounds=max_rounds,
             max_tokens=_CLAUDE_MAX_TOKENS,
             budget_usd=budget,
+            provider_label="openai:a2a",
         )
     elif provider == "deepseek" and _deepseek_client:
         from bot_config import _resolve_deepseek_model, _TIER_MAP
@@ -394,6 +395,7 @@ async def _run_llm(
             budget_usd=budget,
             extra_body={"thinking": {"type": "disabled"}},
             sdk_max_token_param="max_tokens",
+            provider_label="deepseek:a2a",
         )
     else:
         from bot_config import _get_model_by_alias, _TIER_MAP

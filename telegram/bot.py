@@ -1362,6 +1362,7 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             api_semaphore=LOCAL_SEMAPHORE,
+            provider_label=f"local:{backend['base']}",
         )
 
     if effective_provider == "openai" and _openai_client:
@@ -1389,6 +1390,7 @@ async def _chat_with_tools(
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
+            provider_label="openai",
         )
 
     if effective_provider == "deepseek" and _deepseek_client:
@@ -1421,6 +1423,7 @@ async def _chat_with_tools(
             # non-thinking mode for reliable tool calling and lower task cost.
             extra_body={"thinking": {"type": "disabled"}},
             sdk_max_token_param="max_tokens",
+            provider_label="deepseek",
         )
 
     if effective_provider in ("openai", "deepseek"):

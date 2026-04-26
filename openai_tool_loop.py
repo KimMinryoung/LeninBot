@@ -21,6 +21,7 @@ import logging
 import re
 import uuid
 import httpx
+from datetime import datetime, timezone
 
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
@@ -65,10 +66,26 @@ OPENAI_PRICING = {
 }
 _DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
 
+_DEEPSEEK_V4_PRO_DISCOUNT_END_UTC = datetime(2026, 5, 5, 15, 59, tzinfo=timezone.utc)
+_DEEPSEEK_V4_PRO_DISCOUNT_PRICING = {
+    "input": 0.435 / 1_000_000,
+    "output": 0.87 / 1_000_000,
+    "cached_input": 0.03625 / 1_000_000,
+}
+
+
+def _pricing_for_model(model: str) -> dict[str, float]:
+    if (
+        model == "deepseek-v4-pro"
+        and datetime.now(timezone.utc) < _DEEPSEEK_V4_PRO_DISCOUNT_END_UTC
+    ):
+        return _DEEPSEEK_V4_PRO_DISCOUNT_PRICING
+    return OPENAI_PRICING.get(model, _DEFAULT_PRICING)
+
 
 def _calculate_cost(usage, model: str) -> float:
     """Calculate USD cost from an OpenAI usage object."""
-    pricing = OPENAI_PRICING.get(model, _DEFAULT_PRICING)
+    pricing = _pricing_for_model(model)
     cost = 0.0
 
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -787,6 +804,7 @@ async def chat_with_tools(
     api_semaphore: asyncio.Semaphore | None = None,
     extra_body: dict | None = None,
     sdk_max_token_param: str = "max_completion_tokens",
+    provider_label: str | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -798,6 +816,7 @@ async def chat_with_tools(
     single-slot backend.
     """
     sdk_mode = client is not None
+    usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
 
     # Wrap _api_call with per-call semaphore so the lock is held only during
     # the HTTP POST, not during tool execution between rounds.
@@ -830,6 +849,21 @@ async def chat_with_tools(
     budget_warning_sent = False
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
+
+    def _log_sdk_usage(label: str, usage, call_cost: float, current_total: float) -> None:
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+        miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details and not cached_tokens:
+            cached_tokens = getattr(details, "cached_tokens", 0) or 0
+        non_cached = miss_tokens or (prompt_tokens - cached_tokens)
+        logger.info(
+            "%s usage [%s model=%s]: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
+            label, usage_label, model, prompt_tokens, cached_tokens, non_cached,
+            completion_tokens, call_cost, current_total, budget_usd,
+        )
 
     for round_num in range(1, max_rounds + 1):
 
@@ -912,19 +946,7 @@ async def chat_with_tools(
         if sdk_mode and usage:
             round_cost = _calculate_cost(usage, model)
             total_cost += round_cost
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-            miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
-            details = getattr(usage, "prompt_tokens_details", None)
-            if details and not cached_tokens:
-                cached_tokens = getattr(details, "cached_tokens", 0) or 0
-            non_cached = miss_tokens or (prompt_tokens - cached_tokens)
-            logger.info(
-                "Round %d usage: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
-                round_num, prompt_tokens, cached_tokens, non_cached,
-                completion_tokens, round_cost, total_cost, budget_usd,
-            )
+            _log_sdk_usage(f"Round {round_num}", usage, round_cost, total_cost)
             await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
             update_redis_state(task_id, round_num, total_cost)
 
@@ -1132,7 +1154,9 @@ async def chat_with_tools(
         )
         _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
         if sdk_mode and final_usage:
-            total_cost += _calculate_cost(final_usage, model)
+            call_cost = _calculate_cost(final_usage, model)
+            total_cost += call_cost
+            _log_sdk_usage("Forced-final", final_usage, call_cost, total_cost)
 
         # If the agent called finalization tools, execute them and do a
         # text-only follow-up to collect the final answer.
@@ -1187,7 +1211,9 @@ async def chat_with_tools(
                 )
                 _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
                 if sdk_mode and followup_usage:
-                    total_cost += _calculate_cost(followup_usage, model)
+                    call_cost = _calculate_cost(followup_usage, model)
+                    total_cost += call_cost
+                    _log_sdk_usage("Forced-final followup", followup_usage, call_cost, total_cost)
                 text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
     except Exception as final_err:
         # ── Last resort: strip all tool protocol and retry ──
@@ -1208,7 +1234,9 @@ async def chat_with_tools(
             )
             _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
             if sdk_mode and last_usage:
-                total_cost += _calculate_cost(last_usage, model)
+                call_cost = _calculate_cost(last_usage, model)
+                total_cost += call_cost
+                _log_sdk_usage("Forced-final stripped", last_usage, call_cost, total_cost)
         except Exception as e2:
             logger.error("Final stripped response also failed: %s", e2)
             if log_event:

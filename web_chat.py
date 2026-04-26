@@ -246,6 +246,7 @@ async def handle_web_chat(
                     max_tokens=_CLAUDE_MAX_TOKENS,
                     budget_usd=budget,
                     on_progress=on_progress,
+                    provider_label="openai:web",
                 )
             else:
                 result = await chat_with_tools(
