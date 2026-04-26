@@ -1203,18 +1203,30 @@ async def chat_with_tools(
                         tool_work_details.append(f"  [final] {fname}({input_summary}) → {result}")
                         save_redis_progress(task_id, round_num + 1, fname, input_summary, result, is_error)
 
-                # Plain text follow-up to collect the final answer.
-                followup = await _guarded_api_call(
-                    sdk_mode, client, base_url, model, working_msgs, None, max_tokens,
-                    on_progress=stream_cb, extra_body=extra_body,
-                    sdk_max_token_param=sdk_max_token_param,
-                )
-                _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
-                if sdk_mode and followup_usage:
-                    call_cost = _calculate_cost(followup_usage, model)
-                    total_cost += call_cost
-                    _log_sdk_usage("Forced-final followup", followup_usage, call_cost, total_cost)
-                text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
+                # Skip the expensive follow-up when the forced-final already
+                # produced substantive text and the finalization tool has run.
+                # This mirrors claude_loop.py and prevents autonomous ticks
+                # from paying a second full-input call just to collect "done".
+                pre_tool_text = (text or "").strip()
+                if final_batch and len(pre_tool_text) >= 200:
+                    tool_summary = ", ".join(fname for (_tid, fname, _fargs) in final_batch)
+                    logger.info(
+                        "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
+                        len(pre_tool_text), tool_summary,
+                    )
+                else:
+                    # Plain text follow-up to collect the final answer.
+                    followup = await _guarded_api_call(
+                        sdk_mode, client, base_url, model, working_msgs, None, min(max_tokens, 2048),
+                        on_progress=stream_cb, extra_body=extra_body,
+                        sdk_max_token_param=sdk_max_token_param,
+                    )
+                    _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
+                    if sdk_mode and followup_usage:
+                        call_cost = _calculate_cost(followup_usage, model)
+                        total_cost += call_cost
+                        _log_sdk_usage("Forced-final followup", followup_usage, call_cost, total_cost)
+                    text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
     except Exception as final_err:
         # ── Last resort: strip all tool protocol and retry ──
         _dump_messages_for_debug(working_msgs, -1, final_err)
