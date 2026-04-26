@@ -1,0 +1,61 @@
+{
+  "analyst": {
+    "provider": null,
+    "model": null,
+    "budget_usd": 1.0,
+    "max_rounds": 50
+  },
+  "autonomous_project": {
+    "provider": null,
+    "model": null,
+    "budget_usd": 0.6,
+    "max_rounds": 6,
+    "finalization_tools": [
+      "add_research_note",
+      "revise_plan",
+      "set_project_state",
+      "publish_research",
+      "publish_hub_curation",
+      "publish_static_page",
+      "publish_comic"
+    ]
+  },
+  "browser": {
+    "provider": "claude",
+    "model": "sonnet",
+    "budget_usd": 1.5,
+    "max_rounds": 30
+  },
+  "diary": {
+    "provider": "claude",
+    "model": "sonnet",
+    "budget_usd": 1.0,
+    "max_rounds": 30,
+    "terminal_tools": ["save_diary"],
+    "skip_orchestrator_report": true
+  },
+  "diplomat": {
+    "provider": null,
+    "model": null,
+    "budget_usd": 1.0,
+    "max_rounds": 30
+  },
+  "programmer": {
+    "provider": "codex",
+    "model": null,
+    "budget_usd": 0.01,
+    "max_rounds": 50
+  },
+  "scout": {
+    "provider": "moon",
+    "model": null,
+    "budget_usd": 1.0,
+    "max_rounds": 30
+  },
+  "visualizer": {
+    "provider": null,
+    "model": null,
+    "budget_usd": 1.0,
+    "max_rounds": 40
+  }
+}

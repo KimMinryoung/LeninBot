@@ -44,6 +44,4 @@ GENERAL = AgentSpec(
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2", "get_finance_data",
     ],
-    budget_usd=1.00,
-    max_rounds=50,
 )

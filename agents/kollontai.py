@@ -70,6 +70,4 @@ You handle all external communications on behalf of Cyber-Lenin.
         "read_self",
         "save_finding", "mission",
     ],
-    budget_usd=1.00,
-    max_rounds=30,
 )

@@ -89,10 +89,18 @@ Services were restarted after the continuation work:
   - `mission-context`
   - `subtask-results`
   - `agent-execution-history`
+  - `agent-board`
+  - `task-chain`
 - Updated A2A path to use `resolve_runtime_profile()` for model/limit/budget
   resolution and fixed provider fallback when OpenAI is selected but unavailable.
 - Fixed browser worker task adapter to accept/pass `terminal_tools`, matching the
   `process_task()` chat-loop contract.
+- Moved per-agent runtime knobs from agent code into
+  `config/agent_runtime.json`, applied through `agents/runtime_config.py`:
+  - provider/model
+  - budget and max rounds
+  - finalization/terminal tools
+  - scheduled-report skip flag
 
 ## Verification Already Run
 
@@ -117,6 +125,8 @@ The following checks passed during the session:
   - `./venv/bin/python scripts/smoke_runtime.py`.
   - A2A provider fallback smoke.
   - `_persist_task_success()` smoke with Redis reachable.
+  - Agent runtime JSON overlay smoke.
+  - Browser runtime model smoke.
   - Restarted and confirmed active: telegram, API, browser.
 
 No dedicated test suite was found in the repo.
@@ -173,10 +183,9 @@ Candidates:
 - `agent-board`
 - `task-chain`
 
-Initial migration completed for mission context, subtask results, and execution
-history. Still consider moving Redis-rendered `agent-board` and `task-chain`
-helpers into `prompt_context.py`. Keep each migration small and backed by smoke
-checks for XML and Markdown output.
+Completed for mission context, subtask results, execution history, Redis
+`agent-board`, and Redis `task-chain`. Keep future prompt-context changes small
+and backed by smoke checks for XML and Markdown output.
 
 ### 4. Tests
 

@@ -13,8 +13,10 @@ if str(ROOT) not in sys.path:
 
 from prompt_context import (
     format_agent_execution_history,
+    format_agent_board,
     format_mission_context,
     format_subtask_results,
+    format_task_chain,
     prompt_format_for_provider,
     uses_xml,
     wrap_context_block,
@@ -89,6 +91,46 @@ def _assert_prompt_context() -> None:
         "```text\ntool log\n```"
     )
 
+    board = [{"ts": 0, "agent": "scout", "task_id": 12, "message": "lead found"}]
+    assert format_agent_board(board, "claude") == (
+        "<agent-board>\n"
+        "Below are messages left by other agents participating in the same mission.\n"
+        "  [?] [scout #12] lead found\n"
+        "</agent-board>"
+    )
+    assert format_agent_board(board, "openai") == (
+        "### Agent Board\n"
+        "Messages left by other agents participating in the same mission.\n"
+        "- [?] [scout #12] lead found"
+    )
+
+    chain = [{
+        "task_id": "3",
+        "agent_type": "analyst",
+        "content": "Analyze",
+        "result": "Done",
+        "tool_log": "search",
+    }]
+    assert format_task_chain(chain, "claude") == (
+        '<task-chain depth="1">\n'
+        "Below is the parent chain of the current task. Understand what prior tasks did and avoid duplicate work.\n"
+        '  <ancestor task_id="3" agent="analyst">\n'
+        "    <task-content>Analyze</task-content>\n"
+        "    <result>Done</result>\n"
+        "    <tool-log>search</tool-log>\n"
+        "  </ancestor>\n"
+        "</task-chain>"
+    )
+    assert format_task_chain(chain, "deepseek") == (
+        "### Task Chain (depth 1)\n"
+        "Parent task chain. Understand prior work and avoid duplicate work.\n\n"
+        "#### Ancestor #3 [analyst]\n"
+        "**Task content:** Analyze\n"
+        "**Result:** Done\n"
+        "**Tool log:**\n"
+        "```text\nsearch\n```"
+    )
+
 
 async def _assert_runtime_profiles() -> None:
     deepseek_chat = await resolve_runtime_profile("chat", provider_override="deepseek")
@@ -126,9 +168,39 @@ async def _assert_runtime_profiles() -> None:
     assert claude_webchat.model_id == "claude-test-model"
 
 
+def _assert_agent_runtime_config() -> None:
+    from agents import get_agent
+
+    diary = get_agent("diary")
+    assert diary.provider == "claude"
+    assert diary.model == "sonnet"
+    assert diary.terminal_tools == ["save_diary"]
+    assert diary.skip_orchestrator_report is True
+    assert diary.max_rounds == 30
+
+    programmer = get_agent("programmer")
+    assert programmer.provider == "codex"
+    assert programmer.budget_usd == 0.01
+
+    scout = get_agent("scout")
+    assert scout.provider == "moon"
+    assert scout.max_rounds == 30
+
+    browser = get_agent("browser")
+    assert browser.provider == "claude"
+    assert browser.model == "sonnet"
+    assert browser.budget_usd == 1.5
+
+    autonomous = get_agent("autonomous_project")
+    assert autonomous.budget_usd == 0.60
+    assert "add_research_note" in autonomous.finalization_tools
+    assert "publish_static_page" in autonomous.finalization_tools
+
+
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
+    _assert_agent_runtime_config()
     print("runtime smoke ok")
 
 

@@ -65,10 +65,4 @@ You MUST call save_diary — do not output the diary as plain text.
         "get_finance_data",
         "save_diary", "edit_public_post",
     ],
-    terminal_tools=["save_diary"],
-    skip_orchestrator_report=True,
-    provider="claude",
-    model="sonnet",
-    budget_usd=1.00,
-    max_rounds=30,
 )

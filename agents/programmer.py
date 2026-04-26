@@ -1,10 +1,10 @@
 """agents/programmer.py — Programming specialist agent (Codex CLI delegation).
 
-This agent delegates the entire coding task to OpenAI Codex CLI via
-provider="codex". Codex runs autonomously with its own read/write/exec
-toolset inside a workspace-write sandbox; LeninBot's per-tool dispatch
-loop is bypassed. Auth uses the ChatGPT Plus/Pro subscription via
-~/.codex/auth.json — no API key billing.
+This agent delegates the entire coding task to OpenAI Codex CLI when its
+runtime provider is configured as "codex" in config/agent_runtime.json. Codex
+runs autonomously with its own read/write/exec toolset inside a workspace-write
+sandbox; LeninBot's per-tool dispatch loop is bypassed. Auth uses the ChatGPT
+Plus/Pro subscription via ~/.codex/auth.json — no API key billing.
 
 The system prompt below is flattened into Codex's initial prompt by
 codex_exec_loop, so it acts as policy/context rather than as turn-by-turn
@@ -73,7 +73,4 @@ The final message you emit becomes the task report sent back to the orchestrator
         ],
     ),
     tools=[],  # Codex uses its own built-in toolset; LeninBot tool dispatch is bypassed.
-    provider="codex",
-    budget_usd=0.01,  # Subscription is flat-rate; non-zero for budget validator.
-    max_rounds=50,
 )

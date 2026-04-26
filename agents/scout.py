@@ -106,7 +106,4 @@ print(f"saved: {path}")
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2",
     ],
-    provider="moon",
-    budget_usd=1.0,
-    max_rounds=30,
 )

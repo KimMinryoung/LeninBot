@@ -78,6 +78,4 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
         "read_file", "write_file", "fetch_url", "download_image", "web_search", "read_self",
         "save_finding", "mission", "upload_to_r2",
     ],
-    budget_usd=1.00,
-    max_rounds=40,
 )

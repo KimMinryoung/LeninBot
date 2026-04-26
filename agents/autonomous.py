@@ -174,16 +174,4 @@ Never attempt to reach outside it.
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",
     ],
-    # Keep state-mutation and publishing tools callable even under the forced-final
-    # path so the agent can never lose work to the round-budget cutoff.
-    finalization_tools=[
-        "add_research_note", "revise_plan", "set_project_state",
-        "publish_research", "publish_hub_curation", "publish_static_page", "publish_comic",
-    ],
-    provider=None,
-    model=None,
-    budget_usd=0.60,  # raised from 0.40 — publishing often requires additional rounds
-    # 6 rounds gives headroom for the tool loop's built-in round-limit warning
-    # (injected at `max_rounds - 2`). Still a small bounded wake (vs analyst=50, diary=30).
-    max_rounds=6,
 )

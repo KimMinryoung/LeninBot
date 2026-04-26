@@ -77,6 +77,4 @@ Do not omit trial-and-error details — they help the orchestrator make decision
         "save_finding", "mission",
         "upload_to_r2",
     ],
-    budget_usd=1.50,
-    max_rounds=30,
 )

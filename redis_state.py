@@ -12,7 +12,7 @@ import logging
 import os
 import time
 
-from prompt_context import fenced_text, uses_xml
+from prompt_context import format_agent_board, format_task_chain
 
 logger = logging.getLogger(__name__)
 
@@ -317,28 +317,7 @@ def read_board(mission_id: int, since_ts: float = 0.0) -> list[dict]:
 
 def format_board_for_context(mission_id: int, *, provider: str = "claude") -> str:
     """Format board messages as an injectable context block."""
-    messages = read_board(mission_id)
-    if not messages:
-        return ""
-    lines = []
-    for m in messages:
-        from datetime import datetime, timezone, timedelta
-        _KST = timezone(timedelta(hours=9))
-        ts = m.get("ts", 0)
-        time_str = datetime.fromtimestamp(ts, tz=_KST).strftime("%H:%M") if ts else "?"
-        lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
-    if not uses_xml(provider):
-        return (
-            "### Agent Board\n"
-            "Messages left by other agents participating in the same mission.\n"
-            + "\n".join(f"-{line[1:]}" if line.startswith("  ") else f"- {line}" for line in lines)
-        )
-    return (
-        "<agent-board>\n"
-        "Below are messages left by other agents participating in the same mission.\n"
-        + "\n".join(lines)
-        + "\n</agent-board>"
-    )
+    return format_agent_board(read_board(mission_id), provider)
 
 
 # ── Task Chain Memory (parent chain context) ─────────────────────────
@@ -435,51 +414,7 @@ def get_task_chain(task_id: int, max_depth: int = 5) -> list[dict]:
 
 def format_task_chain_for_context(task_id: int, *, provider: str = "claude") -> str:
     """Format the parent task chain as an injectable context block."""
-    chain = get_task_chain(task_id)
-    if not chain:
-        return ""
-    if not uses_xml(provider):
-        parts = [
-            f"### Task Chain (depth {len(chain)})",
-            "Parent task chain. Understand prior work and avoid duplicate work.",
-        ]
-        for entry in chain:
-            tid = entry.get("task_id", "?")
-            agent = entry.get("agent_type", "?")
-            content = entry.get("content", "")
-            result = entry.get("result", "")
-            tool_log = entry.get("tool_log", "")
-            parts.append("")
-            parts.append(f"#### Ancestor #{tid} [{agent}]")
-            parts.append(f"**Task content:** {content}")
-            if result:
-                parts.append(f"**Result:** {result}")
-            if tool_log:
-                parts.append("**Tool log:**")
-                parts.append(fenced_text(tool_log))
-        return "\n".join(parts)
-
-    parts = []
-    for entry in chain:
-        tid = entry.get("task_id", "?")
-        agent = entry.get("agent_type", "?")
-        content = entry.get("content", "")
-        result = entry.get("result", "")
-        tool_log = entry.get("tool_log", "")
-        block = f"  <ancestor task_id=\"{tid}\" agent=\"{agent}\">\n"
-        block += f"    <task-content>{content}</task-content>\n"
-        if result:
-            block += f"    <result>{result}</result>\n"
-        if tool_log:
-            block += f"    <tool-log>{tool_log}</tool-log>\n"
-        block += f"  </ancestor>"
-        parts.append(block)
-    return (
-        f"<task-chain depth=\"{len(chain)}\">\n"
-        "Below is the parent chain of the current task. Understand what prior tasks did and avoid duplicate work.\n"
-        + "\n".join(parts)
-        + "\n</task-chain>"
-    )
+    return format_task_chain(get_task_chain(task_id), provider)
 
 
 # ── Mission-scoped Cleanup ────────────────────────────────────────────

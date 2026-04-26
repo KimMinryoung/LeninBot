@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime, timedelta, timezone
 
 
 def prompt_format_for_provider(provider: str | None) -> str:
@@ -133,3 +134,80 @@ def format_agent_execution_history(
     if tool_log:
         lines.extend(["", "**Tool log:**", fenced_text(tool_log)])
     return "\n".join(lines)
+
+
+def format_agent_board(messages: list[dict], provider: str | None) -> str:
+    if not messages:
+        return ""
+
+    kst = timezone(timedelta(hours=9))
+    lines = []
+    for message in messages:
+        ts = message.get("ts", 0)
+        time_str = datetime.fromtimestamp(ts, tz=kst).strftime("%H:%M") if ts else "?"
+        lines.append(
+            f"  [{time_str}] [{message.get('agent', '?')} #{message.get('task_id', '?')}] "
+            f"{message.get('message', '')}"
+        )
+
+    description = "Messages left by other agents participating in the same mission."
+    if not uses_xml(provider):
+        return (
+            "### Agent Board\n"
+            f"{description}\n"
+            + "\n".join(f"-{line[1:]}" if line.startswith("  ") else f"- {line}" for line in lines)
+        )
+    return (
+        "<agent-board>\n"
+        f"Below are {description[0].lower()}{description[1:]}\n"
+        + "\n".join(lines)
+        + "\n</agent-board>"
+    )
+
+
+def format_task_chain(chain: list[dict], provider: str | None) -> str:
+    if not chain:
+        return ""
+
+    if not uses_xml(provider):
+        parts = [
+            f"### Task Chain (depth {len(chain)})",
+            "Parent task chain. Understand prior work and avoid duplicate work.",
+        ]
+        for entry in chain:
+            tid = entry.get("task_id", "?")
+            agent = entry.get("agent_type", "?")
+            content = entry.get("content", "")
+            result = entry.get("result", "")
+            tool_log = entry.get("tool_log", "")
+            parts.append("")
+            parts.append(f"#### Ancestor #{tid} [{agent}]")
+            parts.append(f"**Task content:** {content}")
+            if result:
+                parts.append(f"**Result:** {result}")
+            if tool_log:
+                parts.append("**Tool log:**")
+                parts.append(fenced_text(tool_log))
+        return "\n".join(parts)
+
+    parts = []
+    for entry in chain:
+        tid = entry.get("task_id", "?")
+        agent = entry.get("agent_type", "?")
+        content = entry.get("content", "")
+        result = entry.get("result", "")
+        tool_log = entry.get("tool_log", "")
+        block = f"  <ancestor task_id=\"{tid}\" agent=\"{agent}\">\n"
+        block += f"    <task-content>{content}</task-content>\n"
+        if result:
+            block += f"    <result>{result}</result>\n"
+        if tool_log:
+            block += f"    <tool-log>{tool_log}</tool-log>\n"
+        block += f"  </ancestor>"
+        parts.append(block)
+    return (
+        f"<task-chain depth=\"{len(chain)}\">\n"
+        "Below is the parent chain of the current task. Understand what prior tasks did and avoid duplicate work.\n"
+        + "\n".join(parts)
+        + "\n</task-chain>"
+    )

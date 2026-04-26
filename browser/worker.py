@@ -18,8 +18,7 @@ from datetime import datetime
 from pathlib import Path
 import importlib
 
-BROWSER_PROVIDER = "claude"
-BROWSER_MODEL = os.getenv("BROWSER_MODEL", "claude-sonnet-4-6")
+BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
 
 
 def _normalize_browser_model(raw_model: str | None) -> str:
@@ -47,9 +46,9 @@ def _normalize_browser_model(raw_model: str | None) -> str:
     if lowered.startswith("gpt") or lowered.startswith("o"):
         # logger not yet initialized at module level; use print for early warning
         print(
-            f"[browser_worker] WARNING: non-Claude model override '{model}'; forcing {BROWSER_MODEL}"
+            f"[browser_worker] WARNING: non-Claude model override '{model}'; forcing Claude Sonnet"
         )
-        return BROWSER_MODEL
+        return "claude-sonnet-4-6"
 
     return model
 
@@ -136,18 +135,24 @@ async def execute_browser_task(task: dict) -> dict:
     except Exception:
         pass
 
-    logger.info(
-        "Processing browser task #%d for user %d (provider=%s, model=%s)",
-        task_id,
-        user_id,
-        BROWSER_PROVIDER,
-        BROWSER_MODEL,
-    )
-
     try:
         spec = get_agent(agent_type)
     except (ValueError, ImportError):
         spec = get_agent("browser")
+
+    provider = spec.effective_provider("claude")
+    if provider != "claude":
+        logger.warning("Browser worker requires Claude; forcing provider=claude from %s", provider)
+        provider = "claude"
+    browser_model = _normalize_browser_model(BROWSER_MODEL_OVERRIDE or spec.model)
+
+    logger.info(
+        "Processing browser task #%d for user %d (provider=%s, model=%s)",
+        task_id,
+        user_id,
+        provider,
+        browser_model,
+    )
 
     # Load and filter tools. Force module reload here because browser_worker is a
     # separate long-lived process; a telegram service restart does not refresh its
@@ -204,7 +209,7 @@ async def execute_browser_task(task: dict) -> dict:
         # switched to OpenAI for chat/task orchestration, but this worker uses the
         # Anthropic tool-calling loop and Anthropic client only. Guard here against
         # any caller accidentally passing OpenAI model IDs or generic tiers.
-        resolved_model = _normalize_browser_model(model or BROWSER_MODEL)
+        resolved_model = _normalize_browser_model(model or browser_model)
 
         # Inject the runtime header (current time + model) into the task's user
         # message so the system prompt stays byte-stable across invocations and
@@ -241,7 +246,7 @@ async def execute_browser_task(task: dict) -> dict:
         # Keep browser worker provider/model pinned to Claude regardless of global
         # runtime provider toggles. process_task() uses this for progress metadata
         # and any fallback model lookup.
-        return _normalize_browser_model(BROWSER_MODEL)
+        return browser_model
 
     # Create a dummy bot-like object that skips Telegram sends
     class _NullBot:

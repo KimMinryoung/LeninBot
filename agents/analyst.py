@@ -78,6 +78,4 @@ Publishing channels (use when the analysis warrants public output):
         "publish_research", "publish_comic", "get_finance_data",
         "edit_public_post", "edit_research",
     ],
-    budget_usd=1.00,
-    max_rounds=50,
 )

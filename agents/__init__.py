@@ -17,6 +17,7 @@ from agents.browser import BROWSER
 from agents.diary import DIARY
 from agents.kollontai import KOLLONTAI
 from agents.autonomous import AUTONOMOUS_PROJECT
+from agents.runtime_config import apply_agent_runtime_config
 
 _REGISTRY: dict[str, AgentSpec] = {
     "programmer": PROGRAMMER,
@@ -28,6 +29,8 @@ _REGISTRY: dict[str, AgentSpec] = {
     "diplomat": KOLLONTAI,
     "autonomous_project": AUTONOMOUS_PROJECT,
 }
+
+apply_agent_runtime_config(_REGISTRY)
 
 
 def get_agent(name: str) -> AgentSpec:
