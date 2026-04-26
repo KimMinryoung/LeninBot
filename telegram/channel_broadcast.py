@@ -61,17 +61,29 @@ def _default_config() -> dict[str, Any]:
 
 
 def load_channel_config() -> dict[str, Any]:
+    env_channel_ref = normalize_channel_ref(
+        get_secret("CHANNEL_ID", "")
+        or get_secret("CHANNEL_USERNAME", "")
+        or get_secret("TELEGRAM_CHANNEL_ID", "")
+        or get_secret("TELEGRAM_CHANNEL_USERNAME", "")
+        or ""
+    )
     if not CONFIG_PATH.exists():
-        return _default_config()
-    try:
-        with CONFIG_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.warning("channel config load failed: %s", e)
-        data = {}
-    cfg = _default_config()
-    if isinstance(data, dict):
-        cfg.update(data)
+        cfg = _default_config()
+    else:
+        try:
+            with CONFIG_PATH.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.warning("channel config load failed: %s", e)
+            data = {}
+        cfg = _default_config()
+        if isinstance(data, dict):
+            cfg.update(data)
+
+    if env_channel_ref:
+        cfg["chat_id"] = env_channel_ref
+        cfg["username"] = env_channel_ref if env_channel_ref.startswith("@") else ""
     return cfg
 
 
@@ -277,7 +289,7 @@ def broadcast_with_token_sync(
 
 
 def should_broadcast_diary() -> bool:
-    return os.getenv("TELEGRAM_BROADCAST_DIARY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("TELEGRAM_BROADCAST_DIARY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def should_broadcast_moltbook() -> bool:
@@ -287,13 +299,21 @@ def should_broadcast_moltbook() -> bool:
 def should_broadcast_autonomous_project(project_id: int | None) -> bool:
     if project_id is None:
         return False
-    raw = os.getenv("TELEGRAM_BROADCAST_AUTONOMOUS_PROJECT_IDS", "2").strip()
+    raw = os.getenv("TELEGRAM_BROADCAST_AUTONOMOUS_PROJECT_IDS", "all").strip()
     if raw.lower() in {"", "none", "off", "false", "0"}:
         return False
     if raw.lower() in {"all", "*"}:
         return True
     allowed = {p.strip() for p in raw.split(",") if p.strip()}
     return str(project_id) in allowed
+
+
+def should_broadcast_site_publication(project_id: int | None = None) -> bool:
+    if os.getenv("TELEGRAM_BROADCAST_SITE_ENABLED", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+        return False
+    if project_id is None:
+        return True
+    return should_broadcast_autonomous_project(project_id)
 
 
 async def maybe_broadcast_autonomous_publication(
@@ -304,8 +324,8 @@ async def maybe_broadcast_autonomous_publication(
     source: str = "cyber-lenin.com",
 ) -> BroadcastResult:
     project_id = current_autonomous_project_id.get()
-    if not should_broadcast_autonomous_project(project_id):
-        return BroadcastResult(False, "autonomous project broadcast disabled for this project")
+    if not should_broadcast_site_publication(project_id):
+        return BroadcastResult(False, "site publication broadcast disabled")
 
     excerpt = " ".join((body or "").split())
     if len(excerpt) > 2400:
