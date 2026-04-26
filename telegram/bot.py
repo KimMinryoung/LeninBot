@@ -1578,8 +1578,14 @@ def _make_moon_chat_fn(spec):
     from openai_tool_loop import chat_with_tools as _moon_loop
     from llm.client import MOON_BASE, MOON_MODEL, _health_ok
     if not _health_ok(MOON_BASE):
-        logger.warning("MOON unavailable for agent %s; falling back to Claude", spec.name)
-        return _chat_with_tools
+        fallback_provider = _get_task_provider()
+        logger.warning(
+            "MOON unavailable for agent %s; falling back to task provider %s",
+            spec.name, fallback_provider,
+        )
+        fallback = _make_provider_chat_fn(fallback_provider)
+        setattr(fallback, "_fallback_provider", fallback_provider)
+        return fallback
 
     async def _moon_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
@@ -1943,18 +1949,18 @@ async def bot_main():
         # task_provider, which may differ from the Telegram chat provider.
         if spec.provider == "moon":
             chosen_chat_fn = _make_moon_chat_fn(spec)
-            # MOON helper returns _chat_with_tools when MOON is unhealthy;
-            # in that fallback case we want the Claude-sized output budget.
+            fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
             chosen_max_tokens = (
-                8192 if chosen_chat_fn is not _chat_with_tools
-                else _CLAUDE_MAX_TOKENS_TASK
+                _CLAUDE_MAX_TOKENS_TASK
+                if fallback_provider and fallback_provider != "local"
+                else 8192
             )
         elif spec.provider == "codex":
             chosen_chat_fn = _make_codex_chat_fn(spec)
             chosen_max_tokens = 8192
-        elif spec.provider in ("claude", "openai", "deepseek"):
+        elif spec.provider in ("claude", "openai", "deepseek", "local"):
             chosen_chat_fn = _make_provider_chat_fn(spec.provider)
-            chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+            chosen_max_tokens = 8192 if spec.provider == "local" else _CLAUDE_MAX_TOKENS_TASK
         elif task_provider in ("claude", "openai", "deepseek", "local"):
             chosen_chat_fn = _make_provider_chat_fn(task_provider)
             chosen_max_tokens = (
@@ -1966,8 +1972,16 @@ async def bot_main():
             chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
 
         async def chosen_model_fn():
-            if spec.provider == "moon" and chosen_chat_fn is _chat_with_tools:
-                return await _get_model_task()
+            if spec.provider == "moon":
+                fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
+                if fallback_provider:
+                    if fallback_provider == "local":
+                        from llm.client import _resolve_backend
+                        return _resolve_backend()["model"]
+                    selected = get_current_model_selection("task", provider_override=fallback_provider)
+                    if fallback_provider == "claude":
+                        return await _get_model_by_alias(str(selected.get("alias") or "sonnet"))
+                    return str(selected["model_id"])
             return await _get_model_for_agent(spec)
 
         def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
