@@ -15,6 +15,7 @@ from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
 
 from shared import KST
+from prompt_context import fenced_text, uses_xml, wrap_task_content
 
 logger = logging.getLogger(__name__)
 _SCRATCHPAD_MAX_CHARS = 20_000
@@ -25,16 +26,6 @@ _SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
 _RESTART_COMPLETED_MARKER = "[restart already completed by parent task]"
 _RESTART_RESUME_MARKER = "[same-task resumed after self restart]"
 _RESTART_PHASE_KEY = "restart_state"
-
-
-def _uses_xml_context(provider: str | None) -> bool:
-    return (provider or "claude") == "claude"
-
-
-def _wrap_task_content(content: str, provider: str | None) -> str:
-    if _uses_xml_context(provider):
-        return f"<task>\n{content}\n</task>"
-    return f"### Task\n\n{content}"
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -111,7 +102,7 @@ def build_current_state(
             content_brief = (str(t.get("content") or "")[:100]).replace("\n", " ")
             return f"[{agent}] #{t['id']}: {content_brief}"
 
-        if provider == "claude":
+        if uses_xml(provider):
             lines = [f'<current_state timestamp="{now_ts}">']
             if mission_row:
                 lines.append(
@@ -713,7 +704,7 @@ async def process_task(
             mission_title = mission_rows[0]["title"] if mission_rows else "?"
             events = get_mission_events(mission_id, limit=20)
             if events:
-                if _uses_xml_context(context_provider):
+                if uses_xml(context_provider):
                     lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
                     for e in events:
                         lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
@@ -750,7 +741,7 @@ async def process_task(
                     sr_agent = sr.get("agent_type") or "unknown"
                     sr_result = str(sr.get("result") or "")[:5000]
                     sr_task_brief = str(sr.get("content") or "")[:300]
-                    if _uses_xml_context(context_provider):
+                    if uses_xml(context_provider):
                         result_blocks.append(
                             f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
                             f"    <task-brief>{sr_task_brief}</task-brief>\n"
@@ -763,7 +754,7 @@ async def process_task(
                             f"**Task brief:** {sr_task_brief}\n\n"
                             f"**Result:**\n\n{sr_result}"
                         )
-                if _uses_xml_context(context_provider):
+                if uses_xml(context_provider):
                     content = (
                         "<subtask-results>\n"
                         + "\n".join(result_blocks)
@@ -805,7 +796,7 @@ async def process_task(
                 pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
                 pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
 
-                if _uses_xml_context(context_provider):
+                if uses_xml(context_provider):
                     block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
                     block += f"    <summary>{pt_summary}</summary>\n"
                     if pt_tool_log:
@@ -824,7 +815,7 @@ async def process_task(
                         f"**Summary:** {pt_summary}",
                     ]
                     if pt_tool_log:
-                        lines.extend(["", "**Tool log:**", f"```text\n{pt_tool_log}\n```"])
+                        lines.extend(["", "**Tool log:**", fenced_text(pt_tool_log)])
                     history_ctx = "\n".join(lines)
         except Exception as e:
             logger.debug("Agent execution history load failed: %s", e)
@@ -858,7 +849,7 @@ async def process_task(
         context_parts.append(board_ctx)
 
     if context_parts:
-        content = "\n\n".join(context_parts) + "\n\n" + _wrap_task_content(content, context_provider)
+        content = "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
 
     restart_note = _format_restart_state_note(task)
     if restart_note and restart_note not in content:

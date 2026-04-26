@@ -12,6 +12,8 @@ import logging
 import os
 import time
 
+from prompt_context import fenced_text, uses_xml
+
 logger = logging.getLogger(__name__)
 
 _KEY_TTL = 604800  # 7 days — all ephemeral keys (progress, state, board)
@@ -325,7 +327,7 @@ def format_board_for_context(mission_id: int, *, provider: str = "claude") -> st
         ts = m.get("ts", 0)
         time_str = datetime.fromtimestamp(ts, tz=_KST).strftime("%H:%M") if ts else "?"
         lines.append(f"  [{time_str}] [{m.get('agent', '?')} #{m.get('task_id', '?')}] {m.get('message', '')}")
-    if provider != "claude":
+    if not uses_xml(provider):
         return (
             "### Agent Board\n"
             "Messages left by other agents participating in the same mission.\n"
@@ -436,7 +438,7 @@ def format_task_chain_for_context(task_id: int, *, provider: str = "claude") -> 
     chain = get_task_chain(task_id)
     if not chain:
         return ""
-    if provider != "claude":
+    if not uses_xml(provider):
         parts = [
             f"### Task Chain (depth {len(chain)})",
             "Parent task chain. Understand prior work and avoid duplicate work.",
@@ -454,7 +456,7 @@ def format_task_chain_for_context(task_id: int, *, provider: str = "claude") -> 
                 parts.append(f"**Result:** {result}")
             if tool_log:
                 parts.append("**Tool log:**")
-                parts.append(f"```text\n{tool_log}\n```")
+                parts.append(fenced_text(tool_log))
         return "\n".join(parts)
 
     parts = []

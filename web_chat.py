@@ -16,6 +16,7 @@ from shared import CORE_IDENTITY, KST
 from bot_config import (
     _claude, _openai_client, _deepseek_client,
 )
+from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
 from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
@@ -58,7 +59,7 @@ _WEB_RESPONSE_RULES = """\
 
 def _build_web_system_prompt(provider: str = "claude") -> str:
     """Render the web-chat system prompt in the target provider's native shape."""
-    if provider == "claude":
+    if uses_xml(provider):
         return (
             CORE_IDENTITY
             + "\nOperating via web interface (cyber-lenin.com).\n\n"
@@ -79,7 +80,7 @@ def _build_web_system_prompt(provider: str = "claude") -> str:
 
 def _build_web_runtime_context(current_datetime: str, provider: str = "claude") -> str:
     """Render web-chat runtime header in the provider-native structure."""
-    if provider == "claude":
+    if uses_xml(provider):
         return f"<runtime>\n<current-time>{current_datetime}</current-time>\n</runtime>"
     return f"### Runtime\n- **Current Time**: {current_datetime}"
 

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
+from prompt_context import fenced_text, uses_xml
 from shared import KST
 
 load_dotenv()
@@ -519,10 +520,6 @@ def _format_notes(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _uses_xml_prompt(provider: str | None) -> bool:
-    return (provider or "claude") == "claude"
-
-
 def _build_task_prompt(
     project: dict,
     turn_budget: int,
@@ -532,7 +529,7 @@ def _build_task_prompt(
 ) -> str:
     plan_text = _format_plan(project.get("plan"))
     notes_text = _format_notes(_recent_notes(project))
-    if not _uses_xml_prompt(provider):
+    if not uses_xml(provider):
         parts = [
             f"### Project\n- **id**: {project['id']}\n- **title**: {project['title']}\n- **topic**: {project['topic']}",
             f"### Goal\n\n{project['goal']}",
@@ -567,7 +564,7 @@ def _build_task_prompt(
                 "Raw tool trace from your previous tick. Call/arguments are shown in full; "
                 "results are clipped at 500 chars each. Do not re-run queries that already "
                 "yielded what you need.\n\n"
-                f"```text\n{last_log['content']}\n```"
+                + fenced_text(last_log["content"])
             )
         parts.extend([
             f"### Turn Budget\n\n{turn_budget} rounds this tick. Use them deliberately.",
