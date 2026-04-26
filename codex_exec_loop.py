@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_DEFAULT_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.5")
+_PROGRESS_EMIT_TIMEOUT = 10.0
 
 
 def _extract_text(content) -> str:
@@ -105,6 +106,26 @@ def _flatten_messages_to_prompt(messages: list[dict], system_prompt: str) -> str
     parts.append(_EXECUTION_POLICY)
 
     return "\n\n".join(parts)
+
+
+async def _iter_stream_lines(stream: asyncio.StreamReader):
+    """Yield newline-delimited records without StreamReader's readline limit."""
+    buf = b""
+    while True:
+        chunk = await stream.read(16384)
+        if not chunk:
+            break
+        buf += chunk
+        while True:
+            newline_at = buf.find(b"\n")
+            if newline_at < 0:
+                break
+            line = buf[:newline_at]
+            buf = buf[newline_at + 1:]
+            if line:
+                yield line
+    if buf:
+        yield buf
 
 
 async def chat_with_tools(
@@ -201,7 +222,19 @@ async def chat_with_tools(
         # We surface command/patch starts as numbered "rounds" and final
         # agent messages as thinking blurbs.
         nonlocal rounds, total_input_tokens, total_output_tokens
-        async for raw in proc.stdout:
+        async def _safe_emit(event: str, detail: str):
+            try:
+                await asyncio.wait_for(
+                    emit_progress(on_progress, event, detail),
+                    timeout=_PROGRESS_EMIT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[codex] progress emit timed out after %.1fs (event=%s)",
+                    _PROGRESS_EMIT_TIMEOUT, event,
+                )
+
+        async for raw in _iter_stream_lines(proc.stdout):
             try:
                 event = json.loads(raw.decode().strip())
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -224,22 +257,22 @@ async def chat_with_tools(
                         cmd_str = " ".join(str(x) for x in cmd_field)
                     else:
                         cmd_str = str(cmd_field)
-                    await emit_progress(
-                        on_progress, "thinking",
+                    await _safe_emit(
+                        "thinking",
                         f"[{rounds}] codex $ {cmd_str[:160]}",
                     )
                 elif itype in ("patch_apply", "file_change"):
                     rounds += 1
                     path = item.get("path") or item.get("file") or "?"
-                    await emit_progress(
-                        on_progress, "thinking",
+                    await _safe_emit(
+                        "thinking",
                         f"[{rounds}] codex edit {path}",
                     )
                 elif itype == "web_search":
                     rounds += 1
                     q = item.get("query") or item.get("text") or "?"
-                    await emit_progress(
-                        on_progress, "thinking",
+                    await _safe_emit(
+                        "thinking",
                         f"[{rounds}] codex web_search: {str(q)[:120]}",
                     )
 
@@ -251,8 +284,8 @@ async def chat_with_tools(
                     if text:
                         # Reasoning text — group with the in-progress round so
                         # the next command_execution flush sweeps it through.
-                        await emit_progress(
-                            on_progress, "thinking",
+                        await _safe_emit(
+                            "thinking",
                             f"[{max(rounds, 0)}] codex: {str(text)[:200]}",
                         )
 
@@ -263,8 +296,8 @@ async def chat_with_tools(
                 cached = int(usage.get("cached_input_tokens", 0) or 0)
                 total_input_tokens += in_tok
                 total_output_tokens += out_tok
-                await emit_progress(
-                    on_progress, "budget",
+                await _safe_emit(
+                    "budget",
                     f"[{max(rounds, 1)}] tokens in={in_tok} (cached={cached}) out={out_tok} · 구독제 ($0)",
                 )
 
