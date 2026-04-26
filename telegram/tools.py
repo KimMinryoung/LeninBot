@@ -2180,16 +2180,17 @@ SAVE_DIARY_TOOL = {
 
 
 async def _exec_save_diary(title: str, content: str) -> str:
-    from db import execute as db_execute
+    from db import query_one as db_query_one
     try:
-        await asyncio.to_thread(
-            db_execute,
-            "INSERT INTO ai_diary (title, content) VALUES (%s, %s)",
+        row = await asyncio.to_thread(
+            db_query_one,
+            "INSERT INTO ai_diary (title, content) VALUES (%s, %s) RETURNING id",
             (title, content),
         )
+        diary_id = row.get("id") if row else None
         broadcast_note = ""
         try:
-            from telegram.channel_broadcast import should_broadcast_diary, broadcast_with_token
+            from telegram.channel_broadcast import should_broadcast_diary, send_broadcast
             if should_broadcast_diary():
                 import re
 
@@ -2200,7 +2201,12 @@ async def _exec_save_diary(title: str, content: str) -> str:
                     if split_at < 250:
                         split_at = 500
                     preview = cut[:split_at].rstrip(" ,;:") + "..."
-                result = await broadcast_with_token(f"[사이버-레닌 일기]\n{title}\n\n{preview}")
+                public_url = f"https://cyber-lenin.com/ai-diary/{diary_id}" if diary_id else "https://cyber-lenin.com/ai-diary"
+                result = await send_broadcast(
+                    title=f"사이버-레닌 일기: {title}",
+                    summary=preview,
+                    url=public_url,
+                )
                 broadcast_note = f" / Telegram channel: {'sent' if result.ok else result.message}"
         except Exception as e:
             broadcast_note = f" / Telegram channel failed: {e}"
