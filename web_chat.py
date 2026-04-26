@@ -14,8 +14,8 @@ from datetime import datetime
 
 from shared import CORE_IDENTITY, KST
 from bot_config import (
-    _claude, _openai_client, _config,
-    _CLAUDE_MAX_TOKENS, _get_model,
+    _claude, _openai_client, _deepseek_client, _config,
+    _CLAUDE_MAX_TOKENS,
 )
 from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
@@ -140,7 +140,7 @@ def _load_web_history(
 
 def _log_chat(
     session_id: str, fingerprint: str, user_agent: str, ip_address: str,
-    user_query: str, bot_answer: str,
+    user_query: str, bot_answer: str, route: str = "web_chat",
 ):
     """Save web chat exchange to chat_logs table."""
     try:
@@ -151,7 +151,7 @@ def _log_chat(
                 web_search_used, strategy)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (session_id, fingerprint, user_agent, ip_address,
-             user_query, bot_answer, "claude_loop", 0, False, ""),
+             user_query, bot_answer, route, 0, False, ""),
         )
     except Exception as e:
         logger.error("Failed to log web chat: %s", e)
@@ -186,6 +186,10 @@ async def handle_web_chat(
     provider = _config.get("webchat_provider", "claude")
     if provider == "local":
         provider = "openai" if _openai_client else "claude"
+    if provider == "deepseek" and not _deepseek_client:
+        provider = "openai" if _openai_client else "claude"
+    if provider == "openai" and not _openai_client:
+        provider = "claude"
 
     # Fold the runtime header directly into the current user turn so the
     # history prefix stays byte-stable across requests (→ prompt caching).
@@ -224,20 +228,31 @@ async def handle_web_chat(
             # Resolve model name for the effective provider (not global config)
             tier = str(_config.get("webchat_model", "medium"))
             if provider == "openai":
-                from bot_config import _resolve_openai_model, _TIER_MAP, _OPENAI_MODEL_MAP
+                from bot_config import _resolve_openai_model, _TIER_MAP
                 alias = _TIER_MAP.get("openai", {}).get(tier, tier)
                 model = _resolve_openai_model(alias)
+            elif provider == "deepseek":
+                from bot_config import _resolve_deepseek_model, _TIER_MAP
+                alias = _TIER_MAP.get("deepseek", {}).get(tier, tier)
+                model = _resolve_deepseek_model(alias)
             else:
                 # Claude: resolve via normal path (works even when global config is local)
-                from bot_config import _get_model_by_alias, _MODEL_ALIAS_MAP, _TIER_MAP
+                from bot_config import _get_model_by_alias, _TIER_MAP
                 alias = _TIER_MAP.get("claude", {}).get(tier, tier)
                 model = await _get_model_by_alias(alias)
 
-            if provider == "openai" and _openai_client:
+            if provider in ("openai", "deepseek"):
                 from openai_tool_loop import chat_with_tools as openai_chat
+                client = _deepseek_client if provider == "deepseek" else _openai_client
+                extra_kwargs = {}
+                if provider == "deepseek":
+                    extra_kwargs = {
+                        "extra_body": {"thinking": {"type": "disabled"}},
+                        "sdk_max_token_param": "max_tokens",
+                    }
                 result = await openai_chat(
                     history,
-                    client=_openai_client,
+                    client=client,
                     model=model,
                     tools=_web_tools,
                     tool_handlers=_web_handlers,
@@ -246,7 +261,8 @@ async def handle_web_chat(
                     max_tokens=_CLAUDE_MAX_TOKENS,
                     budget_usd=budget,
                     on_progress=on_progress,
-                    provider_label="openai:web",
+                    provider_label=f"{provider}:web",
+                    **extra_kwargs,
                 )
             else:
                 result = await chat_with_tools(
@@ -286,7 +302,7 @@ async def handle_web_chat(
         # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
         await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
-            message, answer,
+            message, answer, f"{provider}_loop",
         )
         yield _format_sse({"type": "answer", "content": answer})
     else:

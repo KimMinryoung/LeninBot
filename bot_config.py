@@ -50,7 +50,7 @@ _CONFIG_DEFAULTS = {
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
     # the next `systemctl restart leninbot-api`.
-    "webchat_provider": "claude",  # "claude" | "openai"  (no "local" — web uses corporate LLM)
+    "webchat_provider": "claude",  # "claude" | "openai" | "deepseek" (no "local" on public web)
     "webchat_model":    "medium",  # tier: "high" | "medium" | "low"
 }
 
@@ -196,10 +196,10 @@ def _get_task_provider() -> str:
 def _get_autonomous_provider() -> str:
     """Return the provider used by the scheduled autonomous project loop.
 
-    Defaults to Claude to preserve the historical behavior. Selecting
-    ``default`` makes the autonomous loop follow the current task provider.
+    Defaults to OpenAI for deeper autonomous research. Selecting ``default``
+    makes the autonomous loop follow the current task provider.
     """
-    provider = str(_config.get("autonomous_provider", "claude") or "claude")
+    provider = str(_config.get("autonomous_provider", "openai") or "openai")
     if provider == "default":
         return _get_task_provider()
     return provider

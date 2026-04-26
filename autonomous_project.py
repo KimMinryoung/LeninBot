@@ -656,6 +656,7 @@ async def _run_one_tick(project: dict) -> dict:
             budget_tracker=budget_tracker,
             provider_override=provider,
             agent_name="autonomous_project",
+            runtime_kind="autonomous",
             finalization_tools=spec.finalization_tools,
             terminal_tools=spec.terminal_tools,
         )

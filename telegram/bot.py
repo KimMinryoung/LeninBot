@@ -30,6 +30,7 @@ from bot_config import (
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
+    _get_model_by_alias,
     _get_task_provider,
     get_current_model_selection,
     _extract_text,
@@ -1214,6 +1215,7 @@ async def _chat_with_tools(
     terminal_tools: list[str] | None = None,
     extra_system_context: str = "",
     agent_name: str | None = None,
+    runtime_kind: str | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
@@ -1250,9 +1252,12 @@ async def _chat_with_tools(
         sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
             skills_section=build_skills_prompt(),
         )
-        _runtime_kind = "chat"
+        _runtime_kind = runtime_kind or "chat"
     else:
         sys_prompt = system_prompt
+        _runtime_kind = runtime_kind or "task"
+    if _runtime_kind not in ("chat", "task", "autonomous"):
+        logger.warning("Unknown runtime_kind=%r; falling back to task", _runtime_kind)
         _runtime_kind = "task"
 
     # Runtime context injection (applies to orchestrator AND agents). Volatile
@@ -1368,11 +1373,9 @@ async def _chat_with_tools(
 
     if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        from bot_config import _resolve_tier, _resolve_openai_model
-        _tier_key = "task_model" if _runtime_kind == "task" else "chat_model"
-        _openai_model = model or _resolve_openai_model(
-            _resolve_tier(str(_config.get(_tier_key, "high")), provider="openai")
-        )
+        _openai_model = model or get_current_model_selection(
+            _runtime_kind, provider_override="openai"
+        )["model_id"]
         return await openai_chat(
             messages,
             client=_openai_client,
@@ -1396,11 +1399,9 @@ async def _chat_with_tools(
 
     if effective_provider == "deepseek" and _deepseek_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        from bot_config import _resolve_tier, _resolve_deepseek_model
-        _tier_key = "task_model" if _runtime_kind == "task" else "chat_model"
-        _deepseek_model = model or _resolve_deepseek_model(
-            _resolve_tier(str(_config.get(_tier_key, "high")), provider="deepseek")
-        )
+        _deepseek_model = model or get_current_model_selection(
+            _runtime_kind, provider_override="deepseek"
+        )["model_id"]
         return await openai_chat(
             messages,
             client=_deepseek_client,
@@ -1434,10 +1435,13 @@ async def _chat_with_tools(
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_merge_runtime_context_into_last_user` above,
     # so history remains byte-stable across turns and prefix caching works.
+    if model is None:
+        sel = get_current_model_selection(_runtime_kind, provider_override="claude")
+        model = await _get_model_by_alias(str(sel.get("alias") or "sonnet"))
     return await chat_with_tools(
         messages,
         client=_claude,
-        model=model or await _get_model(),
+        model=model,
         tools=merged_tools,
         tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
@@ -1644,6 +1648,7 @@ def _make_provider_chat_fn(provider: str):
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
         agent_name=None,
+        runtime_kind=None,
     ):
         return await _chat_with_tools(
             messages, max_rounds=max_rounds, system_prompt=system_prompt,
@@ -1654,6 +1659,7 @@ def _make_provider_chat_fn(provider: str):
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             agent_name=agent_name,
+            runtime_kind=runtime_kind,
         )
     return _provider_chat_fn
 
