@@ -721,7 +721,7 @@ async def cmd_autonomous(message: Message):
         provider = _get_autonomous_provider()
         from agents import get_agent
         spec = get_agent("autonomous_project")
-        model_key = spec.model if provider == "claude" and spec.model else _ctx["config"].get("task_model", "high")
+        model_key = spec.model if provider == "claude" and spec.model else _ctx["config"].get("autonomous_model", "high")
         model = _ctx["tier_to_display"](model_key, provider)
         await message.answer(
             f"자율 에이전트 상태: *{label}*\n"
@@ -1665,6 +1665,8 @@ def _config_display_value(key: str, val) -> str:
         return _ctx["tier_to_display"](val, _ctx["config"].get("provider", "claude"))
     if key == "task_model":
         return _ctx["tier_to_display"](val, _effective_task_provider())
+    if key == "autonomous_model":
+        return _ctx["tier_to_display"](val, _effective_autonomous_provider())
     if key == "task_provider" and val == "default":
         return f"default ({_effective_task_provider()})"
     if key == "autonomous_provider" and val == "default":
@@ -1779,7 +1781,7 @@ async def cb_config_set(callback: CallbackQuery):
     config[key] = new_val
 
     # If model changed, clear resolved cache so it re-resolves on next use
-    if key in ("chat_model", "task_model") and new_val != old_val:
+    if key in ("chat_model", "task_model", "autonomous_model") and new_val != old_val:
         _ctx["resolved_models"].pop(new_val, None)
 
     # Provider switch: log with actual model names

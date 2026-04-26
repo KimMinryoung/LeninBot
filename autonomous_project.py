@@ -619,14 +619,12 @@ async def _run_one_tick(project: dict) -> dict:
         project, turn_budget=spec.max_rounds, advisories=pending_advisories,
     )
 
-    # Claude keeps the spec's Sonnet pin to avoid expensive Opus ticks.
-    # OpenAI/DeepSeek/local leave model=None so telegram.bot._chat_with_tools
-    # resolves the provider-specific task_model tier.
-    model = None
-    if provider == "claude" and spec.model:
-        model = await _get_model_by_alias(spec.model)
-    selected = get_current_model_selection("task", provider_override=provider)
-    model_for_log = model or selected.get("model_id") or "unknown"
+    # Autonomous uses its own model tier, independent from chat/task settings.
+    selected = get_current_model_selection("autonomous", provider_override=provider)
+    model = selected.get("model_id") or None
+    if provider == "claude":
+        model = await _get_model_by_alias(str(selected.get("alias") or "sonnet"))
+    model_for_log = model or "unknown"
     budget_tracker: dict = {}
 
     # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously

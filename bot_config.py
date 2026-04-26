@@ -44,7 +44,8 @@ _CONFIG_DEFAULTS = {
     "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
-    "autonomous_provider": "claude", # scheduled autonomous project loop provider
+    "autonomous_provider": "openai", # scheduled autonomous loop provider
+    "autonomous_model": "high", # autonomous model tier; high=openai GPT-5.5
     # Web chat runs independently from Telegram's /config. These keys pin what
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
@@ -107,6 +108,7 @@ _CONFIG_META = {
     "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
     "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
     "autonomous_provider":{"label": "자율 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
+    "autonomous_model": {"label": "자율 모델",   "unit": "",   "options": ["high", "medium", "low"]},
 }
 
 _MODEL_ALIAS_MAP = {
@@ -302,9 +304,20 @@ def get_current_model_selection(
     model map, so the surfaced model_id/display_name match what actually runs.
     Without the override, falls back to the runtime config's provider.
     """
-    kind = "task" if kind == "task" else "chat"
-    provider = provider_override or (_get_task_provider() if kind == "task" else _config.get("provider", "claude"))
-    tier_key = "task_model" if kind == "task" else "chat_model"
+    kind = kind if kind in ("chat", "task", "autonomous") else "chat"
+    if provider_override:
+        provider = provider_override
+    elif kind == "autonomous":
+        provider = _get_autonomous_provider()
+    elif kind == "task":
+        provider = _get_task_provider()
+    else:
+        provider = _config.get("provider", "claude")
+    tier_key = {
+        "chat": "chat_model",
+        "task": "task_model",
+        "autonomous": "autonomous_model",
+    }[kind]
     tier = str(_config.get(tier_key, "high"))
     alias = _resolve_tier(tier, provider=provider)
     if provider == "local":
