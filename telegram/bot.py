@@ -19,7 +19,7 @@ from db import query as _query, execute as _execute, query_one as _query_one, ge
 from psycopg2.extras import RealDictCursor
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
 from secrets_loader import get_secret
 
@@ -107,6 +107,7 @@ PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS = max(
     int(os.getenv("PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS", "86400") or "0"),
 )
 _public_access_notice_last: dict[int, float] = {}
+_GROUP_CHAT_TYPES = {"group", "supergroup"}
 
 
 def _telegram_user_id(event) -> int | None:
@@ -118,6 +119,14 @@ def _telegram_user_id(event) -> int | None:
 def _telegram_username(event) -> str:
     user = getattr(event, "from_user", None)
     return str(getattr(user, "username", "") or "")
+
+
+def _telegram_chat(event):
+    chat = getattr(event, "chat", None)
+    if chat is not None:
+        return chat
+    message = getattr(event, "message", None)
+    return getattr(message, "chat", None)
 
 
 async def _maybe_reply_public_access_notice(message: Message, user_id: int | None) -> None:
@@ -137,6 +146,40 @@ async def _maybe_reply_public_access_notice(message: Message, user_id: int | Non
     await message.answer(PUBLIC_ACCESS_NOTICE, disable_web_page_preview=True)
 
 
+async def _maybe_leave_unauthorized_group(event, data: dict, user_id: int | None) -> bool:
+    chat = _telegram_chat(event)
+    chat_type = str(getattr(chat, "type", "") or "")
+    if chat_type not in _GROUP_CHAT_TYPES:
+        return False
+
+    bot = data.get("bot") or getattr(event, "bot", None)
+    if bot is None:
+        logger.warning(
+            "cannot leave unauthorized Telegram group without bot instance chat_id=%s user_id=%s",
+            getattr(chat, "id", None),
+            user_id,
+        )
+        return True
+
+    try:
+        await bot.leave_chat(getattr(chat, "id"))
+        logger.info(
+            "left unauthorized Telegram group chat_id=%s title=%s user_id=%s username=%s",
+            getattr(chat, "id", None),
+            getattr(chat, "title", ""),
+            user_id,
+            _telegram_username(event),
+        )
+    except Exception as e:
+        logger.warning(
+            "failed to leave unauthorized Telegram group chat_id=%s user_id=%s: %s",
+            getattr(chat, "id", None),
+            user_id,
+            e,
+        )
+    return True
+
+
 class OwnerOnlyMiddleware(BaseMiddleware):
     """Stop non-owner Telegram events before command, LLM, or tool handlers run."""
 
@@ -146,6 +189,8 @@ class OwnerOnlyMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if isinstance(event, Message):
+            if await _maybe_leave_unauthorized_group(event, data, user_id):
+                return None
             await _maybe_reply_public_access_notice(event, user_id)
             logger.info(
                 "blocked unauthorized Telegram message user_id=%s username=%s chat_id=%s chat_type=%s",
@@ -156,7 +201,21 @@ class OwnerOnlyMiddleware(BaseMiddleware):
             )
             return None
 
+        if isinstance(event, ChatMemberUpdated):
+            if await _maybe_leave_unauthorized_group(event, data, user_id):
+                return None
+            logger.info(
+                "blocked unauthorized Telegram chat member update user_id=%s username=%s chat_id=%s chat_type=%s",
+                user_id,
+                _telegram_username(event),
+                getattr(event.chat, "id", None),
+                getattr(event.chat, "type", None),
+            )
+            return None
+
         if isinstance(event, CallbackQuery):
+            if await _maybe_leave_unauthorized_group(event, data, user_id):
+                return None
             logger.info(
                 "blocked unauthorized Telegram callback user_id=%s username=%s",
                 user_id,
@@ -170,6 +229,11 @@ class OwnerOnlyMiddleware(BaseMiddleware):
 
         logger.info("blocked unauthorized Telegram event type=%s user_id=%s", type(event).__name__, user_id)
         return None
+
+
+async def _ignore_chat_member_update(event: ChatMemberUpdated):
+    return None
+
 
 def _ensure_table():
     """Create telegram_tasks and telegram_chat_history tables if not exists."""
@@ -1758,6 +1822,8 @@ async def bot_main():
     access_middleware = OwnerOnlyMiddleware()
     dp.message.middleware(access_middleware)
     dp.callback_query.middleware(access_middleware)
+    dp.my_chat_member.middleware(access_middleware)
+    dp.my_chat_member.register(_ignore_chat_member_update)
     dp.include_router(router)
 
     email_bridge_task = None
