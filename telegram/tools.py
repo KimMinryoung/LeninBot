@@ -1558,6 +1558,12 @@ TOOL_HANDLERS["transfer_usdc"] = TRANSFER_TOOL_HANDLER
 TOOLS.append(PAY_AND_FETCH_TOOL)
 TOOL_HANDLERS["pay_and_fetch"] = PAY_AND_FETCH_TOOL_HANDLER
 
+# ── Telegram channel broadcast tool ─────────────────────────────────
+from shared import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
+
+TOOLS.append(BROADCAST_TO_CHANNEL_TOOL)
+TOOL_HANDLERS["broadcast_to_channel"] = broadcast_to_channel
+
 # ── Image generation tool (Replicate) ─────────────────────────────────
 def _build_generate_image_description() -> str:
     """Short generate_image description. The full per-model parameter schemas
@@ -2185,7 +2191,16 @@ async def _exec_save_diary(title: str, content: str) -> str:
         try:
             from telegram.channel_broadcast import should_broadcast_diary, broadcast_with_token
             if should_broadcast_diary():
-                result = await broadcast_with_token(f"[사이버-레닌 일기]\n{title}\n\n{content}")
+                import re
+
+                preview = re.sub(r"\s+", " ", (content or "").strip())
+                if len(preview) > 500:
+                    cut = preview[:501]
+                    split_at = max(cut.rfind(" "), cut.rfind("."), cut.rfind("。"), cut.rfind("!"), cut.rfind("?"))
+                    if split_at < 250:
+                        split_at = 500
+                    preview = cut[:split_at].rstrip(" ,;:") + "..."
+                result = await broadcast_with_token(f"[사이버-레닌 일기]\n{title}\n\n{preview}")
                 broadcast_note = f" / Telegram channel: {'sent' if result.ok else result.message}"
         except Exception as e:
             broadcast_note = f" / Telegram channel failed: {e}"

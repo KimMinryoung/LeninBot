@@ -735,29 +735,8 @@ class Razvedchik:
             verified = self.client._verify_content(verification)
             logger.info("[razvedchik] 포스트 verification: %s", "✅" if verified else "❌")
 
-        try:
-            from telegram.channel_broadcast import (
-                broadcast_with_token_sync,
-                should_broadcast_moltbook,
-            )
-            if should_broadcast_moltbook():
-                post_data = resp.get("post", {}) if isinstance(resp, dict) else {}
-                post_id = ""
-                if isinstance(resp, dict):
-                    post_id = post_data.get("id") or post_data.get("post_id") or resp.get("id") or ""
-                url = (
-                    post_data.get("url")
-                    or post_data.get("permalink")
-                    or (f"https://www.moltbook.com/posts/{post_id}" if post_id else "https://www.moltbook.com")
-                )
-                br = broadcast_with_token_sync(
-                    f"[Moltbook 새 글]\n{topic}\n{url}\n\n{content}",
-                    disable_web_page_preview=False,
-                )
-                if not br.ok:
-                    logger.warning("[razvedchik] Telegram channel broadcast skipped/failed: %s", br.message)
-        except Exception as e:
-            logger.warning("[razvedchik] Telegram channel broadcast failed: %s", e)
+        # Moltbook channel auto-broadcast is intentionally disabled for now.
+        # Keep channel announcements focused on site publications and diary previews.
 
         return resp
 

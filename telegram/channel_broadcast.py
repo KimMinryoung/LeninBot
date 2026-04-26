@@ -8,12 +8,14 @@ store the target here.
 from __future__ import annotations
 
 import asyncio
+import argparse
 import contextvars
 import html
 import json
 import logging
 import os
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,11 +26,14 @@ from typing import Any
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
+PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent)))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent)))
 CONFIG_PATH = PROJECT_ROOT / "data" / "channel_config.json"
 MESSAGE_CHUNK_LIMIT = 3800
 PUBLICATION_INTRO_SENTENCES = 3
@@ -255,7 +260,24 @@ def format_publication_broadcast(*, title: str, url: str, body: str = "") -> str
     safe_title = html.escape((title or "새 글").strip())
     safe_intro = html.escape(publication_intro(body, title))
     safe_url = html.escape((url or "").strip())
-    return f"<b>📢 {safe_title}</b>\n\n{safe_intro}\n\n🔗 전체 글 읽기:\n{safe_url}"
+    return f"<b>📢 {safe_title}</b>\n\n{safe_intro}\n\n🔗 전체 글 읽기: {safe_url}"
+
+
+def format_manual_broadcast(*, title: str, summary: str, url: str) -> str:
+    safe_title = html.escape((title or "새 글").strip())
+    safe_summary = html.escape(re.sub(r"\s+", " ", (summary or "").strip()))
+    safe_url = html.escape((url or "").strip())
+    return f"<b>📢 {safe_title}</b>\n\n{safe_summary}\n\n🔗 전체 글 읽기: {safe_url}"
+
+
+async def send_broadcast(title: str, summary: str, url: str) -> BroadcastResult:
+    text = format_manual_broadcast(title=title, summary=summary, url=url)
+    return await broadcast_with_token(text, parse_mode="HTML")
+
+
+def send_broadcast_sync(title: str, summary: str, url: str) -> BroadcastResult:
+    text = format_manual_broadcast(title=title, summary=summary, url=url)
+    return broadcast_with_token_sync(text, parse_mode="HTML")
 
 
 async def broadcast_to_configured_channel(
@@ -270,7 +292,7 @@ async def broadcast_to_configured_channel(
         return BroadcastResult(False, "채널 브로드캐스트가 비활성화되어 있습니다.")
     chat_id = str(cfg.get("chat_id") or "").strip()
     if not chat_id:
-        return BroadcastResult(False, "브로드캐스트 대상 채널이 설정되지 않았습니다. `/channel_set <@채널핸들 또는 -100...chat_id>`를 먼저 실행하십시오.")
+        return BroadcastResult(False, "브로드캐스트 대상 채널이 설정되지 않았습니다. `/channel set <@채널핸들 또는 -100...chat_id>`를 먼저 실행하십시오.")
 
     parts = chunk_message(text)
     if not parts:
@@ -401,3 +423,26 @@ async def maybe_broadcast_autonomous_publication(
 
     text = format_publication_broadcast(title=title, url=url, body=body)
     return await broadcast_with_token(text, parse_mode="HTML")
+
+
+def _build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Send a formatted Telegram channel broadcast.")
+    parser.add_argument("--title", required=True, help="Broadcast title")
+    parser.add_argument("--summary", required=True, help="Two- or three-sentence preview summary")
+    parser.add_argument("--url", required=True, help="Plain public URL for the full post")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_cli_parser().parse_args(argv)
+    result = send_broadcast_sync(args.title, args.summary, args.url)
+    print(json.dumps({
+        "ok": result.ok,
+        "message": result.message,
+        "sent_count": result.sent_count,
+    }, ensure_ascii=False))
+    return 0 if result.ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

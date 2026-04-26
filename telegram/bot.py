@@ -640,6 +640,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)
 - USDC payment/transfer → transfer_usdc (Base L2, auto-limit $10)
 - x402 paid HTTP fetch → pay_and_fetch (Base L2 USDC micropayment, hard cap $0.05/call). Self-loop demo at http://localhost:8000/x402-demo/quote (my own API, 0.001 USDC, returns an aphorism). Use that URL when asked to demonstrate x402 without a specific external target.
+- Telegram channel announcement → broadcast_to_channel(title, summary, url). Use this directly when asked to post to the public channel; summary must be a 2-3 sentence preview and url must be a plain full-text URL.
 """.strip()),
         ("context-isolation", """
 **You are the orchestrator. You have no access to programming tools (read_file, write_file, patch_file, list_directory, execute_python).**
@@ -1281,6 +1282,7 @@ async def _chat_with_tools(
         "swap_eth_to_usdc",                 # ETH → USDC swap on Base
         "transfer_usdc",                    # USDC payment/transfer on Base
         "pay_and_fetch",                    # x402 paid HTTP fetch (USDC micropayment)
+        "broadcast_to_channel",             # public Telegram channel announcements
         "recall_experience",                # memory recall
         "read_self",                        # status/logs inspection
         "run_agent",                        # direct agent execution
@@ -1689,33 +1691,13 @@ async def bot_main():
     from aiogram.types import BotCommand
     await bot.set_my_commands([
         BotCommand(command="help", description="커맨드 목록"),
-        BotCommand(command="chat", description="CLAW 파이프라인 질의"),
         BotCommand(command="task", description="백그라운드 태스크 등록"),
         BotCommand(command="status", description="시스템 대시보드"),
-        BotCommand(command="stats", description="시스템 리소스 현황"),
-        BotCommand(command="status_auto", description="자율 생성 태스크 확인"),
         BotCommand(command="report", description="태스크 리포트 재전송"),
-        BotCommand(command="email", description="이메일 현황"),
-        BotCommand(command="schedule", description="정기 태스크 등록"),
-        BotCommand(command="schedules", description="등록된 스케줄 목록"),
-        BotCommand(command="unschedule", description="스케줄 삭제"),
-        BotCommand(command="kg", description="지식그래프 현황"),
         BotCommand(command="config", description="설정 패널"),
-        BotCommand(command="fallback", description="모델 토글 (sonnet↔haiku)"),
-        BotCommand(command="errors", description="에러/경고 로그"),
-        BotCommand(command="restart", description="서비스 재시작"),
-        BotCommand(command="deploy", description="서버 배포 (git pull)"),
-        BotCommand(command="modify", description="서버 파일 수정"),
-        BotCommand(command="mission", description="미션 상태 / close"),
         BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),
-        BotCommand(command="projects", description="자율 프로젝트 목록"),
-        BotCommand(command="advise", description="자율 에이전트에 조언 (다음 tick 에 전달)"),
-        BotCommand(command="advisories", description="대기 중 / 소비된 조언 조회"),
-        BotCommand(command="channel_create", description="채널 생성 절차 안내"),
-        BotCommand(command="channel_set", description="브로드캐스트 채널 지정"),
-        BotCommand(command="channel_info", description="브로드캐스트 채널 확인"),
-        BotCommand(command="broadcast", description="채널 메시지 전송"),
-        BotCommand(command="broadcast_markdown", description="채널 Markdown 전송"),
+        BotCommand(command="channel", description="브로드캐스트 채널 설정"),
+        BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
 

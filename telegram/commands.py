@@ -32,7 +32,6 @@ from telegram.channel_broadcast import (
     normalize_channel_ref,
     save_channel_config,
     validate_channel,
-    broadcast_to_configured_channel,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,46 +111,19 @@ _HELP_TEXT = """\
 /clear — 대화 히스토리 초기화
 
 *태스크*
-/task <내용> — 백그라운드 태스크 등록 (Sonnet, $1 예산)
-/status — 시스템 대시보드 (태스크·에러·KG)
-/status\\_auto — 자율 생성 태스크 확인
-/report <id> — 태스크 리포트 파일 재전송
+/task <내용> — 백그라운드 태스크 등록
+/status — 시스템 대시보드
+/report <id> — 태스크 리포트 재전송
 
-*이메일*
-/email — 이메일 현황 (폴링 + 최근 기록 + 본문 미리보기)
-
-*이미지*
-/image <프롬프트> — Replicate로 소련풍 게임/포스터 이미지 생성
-
-*스케줄*
-/schedule <cron> | <내용> — 정기 태스크 등록
-  예: `/schedule 0 9 * * * | 오늘의 뉴스 브리핑`
-/schedules — 등록된 스케줄 목록
-/unschedule <id> — 스케줄 삭제
-
-*자율 프로젝트*
-/projects — 자율 프로젝트 목록
-/autonomous \\[on|off|status] — 자율 에이전트 시간별 tick 중단/재개 (인자 없으면 상태)
-/advise \\[id] <조언> — 다음 tick 에 전달할 조언 등록 (multi-line OK)
-/advisories \\[id] — 대기 중/소비된 조언 조회
-
-*채널 브로드캐스트*
-/channel_create <채널명> — 채널 수동 생성 절차 안내
-/channel_set <@채널핸들|-100...chat_id> — 브로드캐스트 대상 지정
-/channel_info — 현재 채널 설정/권한 확인
-/broadcast <메시지> — 지정 채널로 일반 메시지 전송
-/broadcast_markdown <마크다운> — 지정 채널로 Markdown 메시지 전송
+*채널*
+/channel info — 브로드캐스트 대상/권한 확인
+/channel set <@채널핸들|-100...chat_id> — 대상 지정
+채널 글 발행은 명령어 대신 "확성기에 올려줘"처럼 자연어로 요청
 
 *시스템*
-/kg — 지식그래프 현황 조회
-/errors \\[n] \\[error|warning] — 에러/경고 로그
-/agents — 에이전트 현황 및 외부 프로세스 상태
-/config — 설정 패널 (모델, 예산, 라운드 수)
-/fallback — 모델 토글 (sonnet ↔ haiku, API 과부하 시)
-/provider — 대화 제공자 전환 (Claude ↔ OpenAI ↔ DeepSeek, 키가 있는 것만)
-/restart \\[telegram|api|all] — 서비스 재시작만 (기본: telegram)
-/deploy \\[telegram|api|frontend|all] — 서버 배포 (git pull + restart, 기본: all)
-/modify <파일> | <이유> | <내용> — 서버 파일 수정
+/agents — 에이전트 및 워커 상태
+/config — 설정 패널
+/restart \\[telegram|api|all] — 서비스 재시작
 
 /help — 이 도움말 표시
 """
@@ -200,27 +172,16 @@ def _command_arg(message: Message) -> str:
     return parts[1].strip() if len(parts) > 1 else ""
 
 
-async def cmd_clear(message: Message):
-    if not _ctx["is_allowed"](message.from_user.id):
-        return
-    await asyncio.to_thread(_ctx["clear_chat_history"], message.from_user.id)
-    # Close active mission on history clear
-    try:
-        from telegram.mission import get_active_mission, close_mission
-        mission = await asyncio.to_thread(get_active_mission, message.from_user.id)
-        if mission:
-            await asyncio.to_thread(close_mission, mission["id"])
-    except Exception:
-        pass
-    await message.answer("대화 히스토리가 초기화되었습니다.")
+def _split_subcommand(arg: str) -> tuple[str, str]:
+    parts = (arg or "").strip().split(maxsplit=1)
+    if not parts:
+        return "", ""
+    return parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
 
 
-async def cmd_channel_create(message: Message):
-    if not _ctx["is_allowed"](message.from_user.id):
-        return
-    title = _command_arg(message)
+async def _reply_channel_create(message: Message, title: str):
     if not title:
-        await message.answer("사용법: /channel_create <채널명>")
+        await message.answer("사용법: /channel create <채널명>")
         return
 
     cfg = load_channel_config()
@@ -233,18 +194,16 @@ async def cmd_channel_create(message: Message):
         "1. Telegram 앱에서 비공개 채널을 생성\n"
         "2. 이 봇을 채널 관리자로 추가\n"
         "3. 관리자 권한에서 '메시지 게시' 활성화\n"
-        "4. 공개 채널이면 /channel_set @채널핸들 실행\n"
-        "5. 비공개 채널이면 채널의 -100... chat_id를 확인해 /channel_set -100... 실행\n\n"
+        "4. 공개 채널이면 /channel set @채널핸들 실행\n"
+        "5. 비공개 채널이면 채널의 -100... chat_id를 확인해 /channel set -100... 실행\n\n"
         "채널 생성은 수동 작업이고, 이후 브로드캐스트는 봇이 처리합니다."
     )
 
 
-async def cmd_channel_set(message: Message):
-    if not _ctx["is_allowed"](message.from_user.id):
-        return
-    channel_ref = normalize_channel_ref(_command_arg(message))
+async def _reply_channel_set(message: Message, arg: str):
+    channel_ref = normalize_channel_ref(arg)
     if not channel_ref:
-        await message.answer("사용법: /channel_set <@채널핸들 또는 -100...chat_id>")
+        await message.answer("사용법: /channel set <@채널핸들 또는 -100...chat_id>")
         return
 
     ok, status, info = await validate_channel(message.bot, channel_ref)
@@ -274,9 +233,7 @@ async def cmd_channel_set(message: Message):
     )
 
 
-async def cmd_channel_info(message: Message):
-    if not _ctx["is_allowed"](message.from_user.id):
-        return
+async def _reply_channel_info(message: Message):
     cfg = load_channel_config()
     chat_id = str(cfg.get("chat_id") or "").strip()
     if not chat_id:
@@ -284,7 +241,7 @@ async def cmd_channel_info(message: Message):
         suffix = f"\n최근 요청 채널명: {requested}" if requested else ""
         await message.answer(
             "브로드캐스트 대상 채널이 아직 설정되지 않았습니다.\n"
-            "먼저 채널을 수동 생성하고 봇을 관리자로 추가한 뒤 /channel_set 을 실행하십시오."
+            "먼저 채널을 수동 생성하고 봇을 관리자로 추가한 뒤 /channel set 을 실행하십시오."
             + suffix
         )
         return
@@ -310,29 +267,59 @@ async def cmd_channel_info(message: Message):
     await message.answer("\n".join(lines))
 
 
-async def cmd_broadcast(message: Message):
+async def cmd_clear(message: Message):
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    text = _command_arg(message)
-    if not text:
-        await message.answer("사용법: /broadcast <메시지>")
-        return
-    result = await broadcast_to_configured_channel(message.bot, text)
-    await message.answer(result.message)
+    await asyncio.to_thread(_ctx["clear_chat_history"], message.from_user.id)
+    # Close active mission on history clear
+    try:
+        from telegram.mission import get_active_mission, close_mission
+        mission = await asyncio.to_thread(get_active_mission, message.from_user.id)
+        if mission:
+            await asyncio.to_thread(close_mission, mission["id"])
+    except Exception:
+        pass
+    await message.answer("대화 히스토리가 초기화되었습니다.")
 
 
-async def cmd_broadcast_markdown(message: Message):
+async def cmd_channel(message: Message):
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    text = _command_arg(message)
-    if not text:
-        await message.answer("사용법: /broadcast_markdown <마크다운>")
+    action, rest = _split_subcommand(_command_arg(message))
+    if action in {"", "info", "status"}:
+        await _reply_channel_info(message)
         return
-    result = await broadcast_to_configured_channel(message.bot, text, parse_mode="Markdown")
-    if not result.ok and "can't parse entities" in result.message.lower():
-        await message.answer(result.message + "\nMarkdown 문법을 수정하거나 /broadcast 로 일반 텍스트 전송하십시오.")
+    if action == "set":
+        await _reply_channel_set(message, rest)
         return
-    await message.answer(result.message)
+    if action == "create":
+        await _reply_channel_create(message, rest)
+        return
+    await message.answer(
+        "사용법:\n"
+        "/channel info\n"
+        "/channel set <@채널핸들 또는 -100...chat_id>\n"
+        "/channel create <채널명>\n\n"
+        "채널 글 발행은 명령어 대신 자연어로 요청하십시오."
+    )
+
+
+async def cmd_channel_create(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    await _reply_channel_create(message, _command_arg(message))
+
+
+async def cmd_channel_set(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    await _reply_channel_set(message, _command_arg(message))
+
+
+async def cmd_channel_info(message: Message):
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    await _reply_channel_info(message)
 
 
 async def cmd_mission(message: Message):
@@ -2254,11 +2241,11 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_start, Command("start"))
     router.message.register(cmd_help, Command("help"))
     router.message.register(cmd_clear, Command("clear"))
+    router.message.register(cmd_channel, Command("channel"))
+    # Backward-compatible aliases; hidden from / autocomplete and help.
     router.message.register(cmd_channel_create, Command("channel_create"))
     router.message.register(cmd_channel_set, Command("channel_set"))
     router.message.register(cmd_channel_info, Command("channel_info"))
-    router.message.register(cmd_broadcast, Command("broadcast"))
-    router.message.register(cmd_broadcast_markdown, Command("broadcast_markdown"))
     router.message.register(cmd_mission, Command("mission"))
     router.message.register(cmd_errors, Command("errors"))
     router.message.register(cmd_chat, Command("chat"))
