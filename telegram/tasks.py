@@ -646,6 +646,148 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
 
 # ── Process Task ─────────────────────────────────────────────────────
 
+def _build_task_context_content(
+    task: dict,
+    content: str,
+    *,
+    context_provider: str = "claude",
+) -> str:
+    """Inject mission, synthesis, history, state, and board context into a task."""
+    task_id = task["id"]
+    user_id = task["user_id"]
+    parent_task_id = task.get("parent_task_id")
+    mission_id = task.get("mission_id")
+
+    mission_ctx = ""
+    if mission_id:
+        try:
+            from telegram.mission import get_mission_events, add_mission_event
+            from db import query as _db_query
+            mission_rows = _db_query("SELECT title FROM telegram_missions WHERE id = %s", (mission_id,))
+            mission_title = mission_rows[0]["title"] if mission_rows else "?"
+            events = get_mission_events(mission_id, limit=20)
+            if events:
+                if uses_xml(context_provider):
+                    lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
+                    for e in events:
+                        lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
+                    lines.append("</mission-context>")
+                else:
+                    lines = [f"### Mission Context (#{mission_id}: {mission_title})"]
+                    for e in events:
+                        lines.append(f"- [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
+                mission_ctx = "\n".join(lines)
+            add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
+        except Exception as e:
+            logger.debug("Mission context injection failed: %s", e)
+
+    plan_role = task.get("plan_role")
+    plan_id = task.get("plan_id")
+    if plan_role == "synthesis" and plan_id:
+        try:
+            sibling_results = _query(
+                "SELECT id, agent_type, content, result FROM telegram_tasks "
+                "WHERE plan_id = %s AND plan_role = 'subtask' AND status = 'done' "
+                "ORDER BY id ASC",
+                (plan_id,),
+            )
+            if sibling_results:
+                result_blocks = []
+                for sr in sibling_results:
+                    sr_agent = sr.get("agent_type") or "unknown"
+                    sr_result = str(sr.get("result") or "")[:5000]
+                    sr_task_brief = str(sr.get("content") or "")[:300]
+                    if uses_xml(context_provider):
+                        result_blocks.append(
+                            f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
+                            f"    <task-brief>{sr_task_brief}</task-brief>\n"
+                            f"    <result>\n{sr_result}\n    </result>\n"
+                            f"  </subtask>"
+                        )
+                    else:
+                        result_blocks.append(
+                            f"#### Subtask #{sr['id']} [{sr_agent}]\n"
+                            f"**Task brief:** {sr_task_brief}\n\n"
+                            f"**Result:**\n\n{sr_result}"
+                        )
+                if uses_xml(context_provider):
+                    content = (
+                        "<subtask-results>\n"
+                        + "\n".join(result_blocks)
+                        + "\n</subtask-results>\n\n"
+                        + content
+                    )
+                else:
+                    content = "### Subtask Results\n\n" + "\n\n".join(result_blocks) + "\n\n" + content
+        except Exception as e:
+            logger.warning("Synthesis subtask result injection failed: %s", e)
+
+    agent_type = task.get("agent_type") or "analyst"
+    history_ctx = ""
+    if parent_task_id:
+        try:
+            from redis_state import format_task_chain_for_context
+            history_ctx = format_task_chain_for_context(parent_task_id, provider=context_provider)
+        except Exception as e:
+            logger.debug("Task chain context load failed: %s", e)
+    if not history_ctx and user_id and user_id != 0:
+        try:
+            prev_task = _query_one(
+                "SELECT id, content, result, tool_log, completed_at FROM telegram_tasks "
+                "WHERE user_id = %s AND agent_type = %s AND status IN ('done', 'handed_off') "
+                "AND id != %s ORDER BY completed_at DESC LIMIT 1",
+                (user_id, agent_type, task_id),
+            )
+            if prev_task:
+                pt_id = prev_task["id"]
+                pt_completed = str(prev_task.get("completed_at") or "?")[:19]
+                pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
+                pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
+                if uses_xml(context_provider):
+                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
+                    block += f"    <summary>{pt_summary}</summary>\n"
+                    if pt_tool_log:
+                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
+                    block += f"  </prev-task>"
+                    history_ctx = (
+                        f"<agent-execution-history agent=\"{agent_type}\">\n"
+                        + block
+                        + "\n</agent-execution-history>"
+                    )
+                else:
+                    lines = [
+                        f"### Agent Execution History ({agent_type})",
+                        f"Previous task: #{pt_id} completed {pt_completed}",
+                        "",
+                        f"**Summary:** {pt_summary}",
+                    ]
+                    if pt_tool_log:
+                        lines.extend(["", "**Tool log:**", fenced_text(pt_tool_log)])
+                    history_ctx = "\n".join(lines)
+        except Exception as e:
+            logger.debug("Agent execution history load failed: %s", e)
+
+    state_ctx = ""
+    if user_id and user_id != 0:
+        try:
+            state_ctx = build_current_state(user_id, provider=context_provider)
+        except Exception as e:
+            logger.debug("Current state build failed: %s", e)
+
+    board_ctx = ""
+    if mission_id:
+        try:
+            from redis_state import format_board_for_context
+            board_ctx = format_board_for_context(mission_id, provider=context_provider)
+        except Exception as e:
+            logger.debug("Board context load failed: %s", e)
+
+    context_parts = [part for part in (state_ctx, mission_ctx, history_ctx, board_ctx) if part]
+    if context_parts:
+        return "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
+    return content
+
+
 async def process_task(
     bot: Bot,
     task: dict,
@@ -688,168 +830,15 @@ async def process_task(
     user_id = task["user_id"]
     content = task["content"]
     restart_ctx = _restart_resume_context(task)
-    depth = task.get("depth") or 0
-    parent_task_id = task.get("parent_task_id")
     mission_id = task.get("mission_id")
     is_self_generated = (user_id == 0)
 
-    # Inject mission context using task's own mission_id
-    mission_ctx = ""
-    if mission_id:
-        try:
-            from telegram.mission import get_mission_events, add_mission_event
-            # Look up mission title
-            from db import query as _db_query
-            mission_rows = _db_query("SELECT title FROM telegram_missions WHERE id = %s", (mission_id,))
-            mission_title = mission_rows[0]["title"] if mission_rows else "?"
-            events = get_mission_events(mission_id, limit=20)
-            if events:
-                if uses_xml(context_provider):
-                    lines = [f"<mission-context id=\"{mission_id}\" title=\"{mission_title}\">"]
-                    for e in events:
-                        lines.append(f"  [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
-                    lines.append("</mission-context>")
-                else:
-                    lines = [f"### Mission Context (#{mission_id}: {mission_title})"]
-                    for e in events:
-                        lines.append(f"- [{e['created_at']}] ({e['source']}) {e['event_type']}: {str(e['content'] or '')[:500]}")
-                mission_ctx = "\n".join(lines)
-            # NOTE: Runtime model / time / alerts context is injected by
-            # _chat_with_tools (or by background-process callers) via the user
-            # message's runtime header — no need to bake it into the task content
-            # here too.
-            add_mission_event(mission_id, f"task#{task_id}", "task_created", f"Task started: {content[:200]}")
-        except Exception as e:
-            logger.debug("Mission context injection failed: %s", e)
-
-    # ── Synthesis: inject subtask results for synthesis tasks ────────
-    plan_role = task.get("plan_role")
-    plan_id = task.get("plan_id")
-    is_subtask = (plan_role == "subtask" and plan_id is not None)
-
-    if plan_role == "synthesis" and plan_id:
-        try:
-            sibling_results = _query(
-                "SELECT id, agent_type, content, result FROM telegram_tasks "
-                "WHERE plan_id = %s AND plan_role = 'subtask' AND status = 'done' "
-                "ORDER BY id ASC",
-                (plan_id,),
-            )
-            if sibling_results:
-                result_blocks = []
-                for sr in sibling_results:
-                    sr_agent = sr.get("agent_type") or "unknown"
-                    sr_result = str(sr.get("result") or "")[:5000]
-                    sr_task_brief = str(sr.get("content") or "")[:300]
-                    if uses_xml(context_provider):
-                        result_blocks.append(
-                            f"  <subtask id=\"{sr['id']}\" agent=\"{sr_agent}\">\n"
-                            f"    <task-brief>{sr_task_brief}</task-brief>\n"
-                            f"    <result>\n{sr_result}\n    </result>\n"
-                            f"  </subtask>"
-                        )
-                    else:
-                        result_blocks.append(
-                            f"#### Subtask #{sr['id']} [{sr_agent}]\n"
-                            f"**Task brief:** {sr_task_brief}\n\n"
-                            f"**Result:**\n\n{sr_result}"
-                        )
-                if uses_xml(context_provider):
-                    content = (
-                        "<subtask-results>\n"
-                        + "\n".join(result_blocks)
-                        + "\n</subtask-results>\n\n"
-                        + content
-                    )
-                else:
-                    content = "### Subtask Results\n\n" + "\n\n".join(result_blocks) + "\n\n" + content
-        except Exception as e:
-            logger.warning("Synthesis subtask result injection failed: %s", e)
-
-    # ── Context Isolation: build agent-appropriate context ──────────
-    agent_type = task.get("agent_type") or "analyst"
-
-    # (A) Task history context — one of two sources depending on task type:
-    #   - Child/retry tasks: <task-chain> from Redis (direct parent lineage)
-    #   - Standalone tasks: <agent-execution-history> (latest same-type task)
-    # Never both — they overlap and confuse the timeline.
-    history_ctx = ""
-    if parent_task_id:
-        # Child task: show parent chain (what ancestors did)
-        try:
-            from redis_state import format_task_chain_for_context
-            history_ctx = format_task_chain_for_context(parent_task_id, provider=context_provider)
-        except Exception as e:
-            logger.debug("Task chain context load failed: %s", e)
-    if not history_ctx and user_id and user_id != 0:
-        # Standalone or chain miss: show latest same-type task for awareness
-        try:
-            prev_task = _query_one(
-                "SELECT id, content, result, tool_log, completed_at FROM telegram_tasks "
-                "WHERE user_id = %s AND agent_type = %s AND status IN ('done', 'handed_off') "
-                "AND id != %s ORDER BY completed_at DESC LIMIT 1",
-                (user_id, agent_type, task_id),
-            )
-            if prev_task:
-                pt_id = prev_task["id"]
-                pt_completed = str(prev_task.get("completed_at") or "?")[:19]
-                pt_summary = _extract_summary(str(prev_task.get("result") or ""), 500)
-                pt_tool_log = str(prev_task.get("tool_log") or "")[:8000]
-
-                if uses_xml(context_provider):
-                    block = f"  <prev-task id=\"{pt_id}\" completed=\"{pt_completed}\">\n"
-                    block += f"    <summary>{pt_summary}</summary>\n"
-                    if pt_tool_log:
-                        block += f"    <tool-log>\n{pt_tool_log}\n    </tool-log>\n"
-                    block += f"  </prev-task>"
-                    history_ctx = (
-                        f"<agent-execution-history agent=\"{agent_type}\">\n"
-                        + block
-                        + "\n</agent-execution-history>"
-                    )
-                else:
-                    lines = [
-                        f"### Agent Execution History ({agent_type})",
-                        f"Previous task: #{pt_id} completed {pt_completed}",
-                        "",
-                        f"**Summary:** {pt_summary}",
-                    ]
-                    if pt_tool_log:
-                        lines.extend(["", "**Tool log:**", fenced_text(pt_tool_log)])
-                    history_ctx = "\n".join(lines)
-        except Exception as e:
-            logger.debug("Agent execution history load failed: %s", e)
-
-    # (B) Current state block (what's done, in-progress, pending)
-    state_ctx = ""
-    if user_id and user_id != 0:
-        try:
-            state_ctx = build_current_state(user_id, provider=context_provider)
-        except Exception as e:
-            logger.debug("Current state build failed: %s", e)
-
-    # (C) Mission bulletin board: messages from sibling agents
-    board_ctx = ""
-    if mission_id:
-        try:
-            from redis_state import format_board_for_context
-            board_ctx = format_board_for_context(mission_id, provider=context_provider)
-        except Exception as e:
-            logger.debug("Board context load failed: %s", e)
-
-    # Build full context: all parts combined
-    context_parts = []
-    if state_ctx:
-        context_parts.append(state_ctx)
-    if mission_ctx:
-        context_parts.append(mission_ctx)
-    if history_ctx:
-        context_parts.append(history_ctx)
-    if board_ctx:
-        context_parts.append(board_ctx)
-
-    if context_parts:
-        content = "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
+    is_subtask = (task.get("plan_role") == "subtask" and task.get("plan_id") is not None)
+    content = _build_task_context_content(
+        task,
+        content,
+        context_provider=context_provider,
+    )
 
     restart_note = _format_restart_state_note(task)
     if restart_note and restart_note not in content:
