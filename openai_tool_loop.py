@@ -474,9 +474,10 @@ async def _call_sdk(
 ):
     """Single call via openai.AsyncOpenAI SDK.
 
-    When on_progress is supplied, uses streaming mode and forwards each text
-    delta as on_progress("text_delta", chunk) so the client can render the
-    answer token-by-token. Returns an accumulated ChatCompletion either way.
+    When on_progress is supplied and the tool schemas are SDK-streaming-safe,
+    uses streaming mode and forwards text deltas as on_progress("text_delta",
+    chunk). Falls back to non-streaming create() for non-strict tool schemas.
+    Returns an accumulated ChatCompletion either way.
     """
     kwargs = {
         "model": model,
@@ -493,7 +494,20 @@ async def _call_sdk(
         kwargs["tool_choice"] = "auto"
         kwargs["parallel_tool_calls"] = parallel_tool_calls
 
-    if on_progress is None:
+    # The OpenAI SDK streaming helper auto-parses function tools. Current
+    # registered LeninBot tools intentionally include permissive / optional
+    # schemas, so most are not OpenAI "strict" tools. Streaming with those
+    # schemas fails locally before the request is sent:
+    #   `vector_search` is not strict. Only `strict` function tools can be auto-parsed
+    # Use the regular Chat Completions call for tool-capable turns; the loop
+    # still emits tool/thinking progress after the response is received.
+    has_non_strict_tools = any(
+        not ((t.get("function") or {}).get("strict") is True)
+        for t in (tools or [])
+    )
+    if on_progress is None or has_non_strict_tools:
+        if on_progress is not None and has_non_strict_tools:
+            logger.info("SDK streaming disabled for non-strict tool schemas")
         return await client.chat.completions.create(**kwargs)
 
     async with client.chat.completions.stream(**kwargs) as stream:

@@ -67,6 +67,8 @@ You MUST call save_diary — do not output the diary as plain text.
     ],
     terminal_tools=["save_diary"],
     skip_orchestrator_report=True,
+    provider="claude",
+    model="sonnet",
     budget_usd=1.00,
     max_rounds=30,
 )

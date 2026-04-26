@@ -1542,6 +1542,8 @@ async def _get_model_for_agent(spec):
         return CODEX_DEFAULT_MODEL
     provider = spec.provider or _get_task_provider()
     if provider == "local":
+        if spec.model:
+            return spec.model
         from llm.client import _resolve_backend
         return _resolve_backend()["model"]
     if provider in ("claude", "openai", "deepseek"):
@@ -1549,7 +1551,7 @@ async def _get_model_for_agent(spec):
             _TIER_MAP, _get_model_by_alias, _resolve_openai_model,
             _resolve_deepseek_model,
         )
-        tier = str(_config.get("task_model", "high"))
+        tier = str(spec.model or _config.get("task_model", "high"))
         alias = _TIER_MAP.get(provider, {}).get(tier, tier)
         if provider == "openai":
             return _resolve_openai_model(alias)
