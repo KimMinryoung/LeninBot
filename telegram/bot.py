@@ -1213,6 +1213,7 @@ async def _chat_with_tools(
     finalization_tools: list[str] | None = None,
     terminal_tools: list[str] | None = None,
     extra_system_context: str = "",
+    agent_name: str | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
@@ -1311,9 +1312,9 @@ async def _chat_with_tools(
         merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
 
     # Resolve agent name + mission for provenance tracking
-    _agent_name = "orchestrator" if is_orchestrator else "agent"
+    _agent_name = agent_name or ("orchestrator" if is_orchestrator else "agent")
     _mission_id: int | None = None
-    if not is_orchestrator and task_id is not None:
+    if agent_name is None and not is_orchestrator and task_id is not None:
         try:
             from db import query as _db_q
             row = _db_q(
@@ -1642,6 +1643,7 @@ def _make_provider_chat_fn(provider: str):
         max_tokens=None, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
+        agent_name=None,
     ):
         return await _chat_with_tools(
             messages, max_rounds=max_rounds, system_prompt=system_prompt,
@@ -1651,6 +1653,7 @@ def _make_provider_chat_fn(provider: str):
             task_id=task_id, provider_override=provider,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
+            agent_name=agent_name,
         )
     return _provider_chat_fn
 

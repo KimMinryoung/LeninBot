@@ -586,11 +586,16 @@ def _build_task_prompt(project: dict, turn_budget: int, advisories: list[dict] |
 async def _run_one_tick(project: dict) -> dict:
     """Run a single agent wake on the given project. Returns a result dict."""
     from agents import get_agent
-    from claude_loop import chat_with_tools, dedupe_tools_by_name
-    from bot_config import _claude, _get_model_by_alias, _config, _TIER_MAP
+    from claude_loop import dedupe_tools_by_name
+    from bot_config import (
+        _get_autonomous_provider, _get_model_by_alias,
+        get_current_model_selection,
+    )
     import telegram.tools as tt_module
 
     spec = get_agent("autonomous_project")
+    configured_provider = _get_autonomous_provider()
+    provider = spec.effective_provider(configured_provider)
 
     # Compose tool set: spec-filtered base tools + project-scoped custom tools.
     base_tools = tt_module.TOOLS
@@ -604,7 +609,7 @@ async def _run_one_tick(project: dict) -> dict:
 
     # Fully static spec prompt — cacheable. Current time is injected as runtime
     # context into the user message below so the system prompt never drifts.
-    system_prompt = spec.render_prompt(provider="claude")
+    system_prompt = spec.render_prompt(provider=provider)
 
     # Fetch pending operator advisories. Marked consumed AFTER the tick
     # succeeds — if the tick raises, advisories remain pending for the next
@@ -614,19 +619,14 @@ async def _run_one_tick(project: dict) -> dict:
         project, turn_budget=spec.max_rounds, advisories=pending_advisories,
     )
 
-    # Spec pins provider="claude" (same pattern as diary — research work needs
-    # Claude regardless of the config's chat provider toggle). Tier follows the
-    # runtime `task_model` config so `/config` can dial cost down (high=opus,
-    # medium=sonnet, low=haiku). This mirrors the `provider in ("claude",
-    # "openai")` branch in telegram_bot._chat_with_tools dispatch.
-    # Spec-level `model` override wins when set — autonomous_project pins
-    # Sonnet because hourly research+publish on Opus 4.7 was costing $2+/tick.
-    if spec.model:
-        _claude_alias = spec.model
-    else:
-        _task_tier = str(_config.get("task_model", "high"))
-        _claude_alias = _TIER_MAP.get("claude", {}).get(_task_tier, _task_tier)
-    model = await _get_model_by_alias(_claude_alias)
+    # Claude keeps the spec's Sonnet pin to avoid expensive Opus ticks.
+    # OpenAI/DeepSeek/local leave model=None so telegram.bot._chat_with_tools
+    # resolves the provider-specific task_model tier.
+    model = None
+    if provider == "claude" and spec.model:
+        model = await _get_model_by_alias(spec.model)
+    selected = get_current_model_selection("task", provider_override=provider)
+    model_for_log = model or selected.get("model_id") or "unknown"
     budget_tracker: dict = {}
 
     # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously
@@ -635,34 +635,28 @@ async def _run_one_tick(project: dict) -> dict:
     _log_event(
         project["id"], "tick_start",
         f"turn #{(project.get('turn_count') or 0) + 1}, state={project['state']}",
-        {"model": model, "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
+        {"provider": provider, "model": model_for_log,
+         "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
     )
 
-    # Inject the runtime header (current time + active model) into the single
-    # user message so the static system prompt stays cacheable across ticks.
-    from telegram.bot import (
-        _build_runtime_prelude, _join_context_blocks,
-        _merge_runtime_context_into_last_user,
-    )
-    tick_messages = _merge_runtime_context_into_last_user(
-        [{"role": "user", "content": user_content}],
-        _join_context_blocks(_build_runtime_prelude("claude", kind="task")),
-    )
+    tick_messages = [{"role": "user", "content": user_content}]
 
     try:
-        result_text = await chat_with_tools(
-            messages=tick_messages,
-            client=_claude,
+        from telegram.bot import _chat_with_tools
+
+        result_text = await _chat_with_tools(
+            tick_messages,
             model=model,
-            tools=agent_tools,
-            tool_handlers=agent_handlers,
             system_prompt=system_prompt,
             max_rounds=spec.max_rounds,
             max_tokens=16384,  # was 4096 — too small for long-form drafts; agent hit
                               # truncation mid-note and never reached the final
                               # add_research_note call (silent tick-0-save failure)
             budget_usd=spec.budget_usd,
+            extra_tools=agent_tools,
+            extra_handlers=agent_handlers,
             budget_tracker=budget_tracker,
+            provider_override=provider,
             agent_name="autonomous_project",
             finalization_tools=spec.finalization_tools,
             terminal_tools=spec.terminal_tools,

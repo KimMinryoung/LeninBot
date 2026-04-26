@@ -44,6 +44,7 @@ _CONFIG_DEFAULTS = {
     "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
+    "autonomous_provider": "claude", # scheduled autonomous project loop provider
     # Web chat runs independently from Telegram's /config. These keys pin what
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
@@ -105,6 +106,7 @@ _CONFIG_META = {
     "task_provider":    {"label": "태스크 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
     "task_concurrency": {"label": "동시 태스크",  "unit": "개", "options": [1, 2, 3, 4]},
     "autonomous_active":{"label": "자율 에이전트", "unit": "",   "options": [True, False]},
+    "autonomous_provider":{"label": "자율 제공자", "unit": "",   "options": ["default", "claude", "openai", "deepseek", "local"]},
 }
 
 _MODEL_ALIAS_MAP = {
@@ -186,6 +188,18 @@ def _get_task_provider() -> str:
     provider = str(_config.get("task_provider", "default") or "default")
     if provider == "default":
         return str(_config.get("provider", "claude") or "claude")
+    return provider
+
+
+def _get_autonomous_provider() -> str:
+    """Return the provider used by the scheduled autonomous project loop.
+
+    Defaults to Claude to preserve the historical behavior. Selecting
+    ``default`` makes the autonomous loop follow the current task provider.
+    """
+    provider = str(_config.get("autonomous_provider", "claude") or "claude")
+    if provider == "default":
+        return _get_task_provider()
     return provider
 
 

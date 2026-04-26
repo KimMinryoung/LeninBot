@@ -704,7 +704,7 @@ async def cmd_autonomous(message: Message):
     """Show or toggle the hourly autonomous project loop. Usage: /autonomous [on|off]."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    from bot_config import is_autonomous_active, set_autonomous_active
+    from bot_config import is_autonomous_active, set_autonomous_active, _get_autonomous_provider
 
     parts = (message.text or "").strip().split(maxsplit=1)
     arg = parts[1].strip().lower() if len(parts) > 1 else ""
@@ -718,8 +718,16 @@ async def cmd_autonomous(message: Message):
     elif arg in {"", "status"}:
         state = is_autonomous_active()
         label = "▶️ active" if state else "⏸ inactive"
+        provider = _get_autonomous_provider()
+        from agents import get_agent
+        spec = get_agent("autonomous_project")
+        model_key = spec.model if provider == "claude" and spec.model else _ctx["config"].get("task_model", "high")
+        model = _ctx["tier_to_display"](model_key, provider)
         await message.answer(
-            f"자율 에이전트 상태: *{label}*\n\n사용법: `/autonomous on` | `/autonomous off` | `/autonomous status`",
+            f"자율 에이전트 상태: *{label}*\n"
+            f"provider: `{provider}`\n"
+            f"model: `{model}`\n\n"
+            f"사용법: `/autonomous on` | `/autonomous off` | `/autonomous status`",
             parse_mode="Markdown",
         )
     else:
@@ -1642,6 +1650,13 @@ def _effective_task_provider() -> str:
     return provider
 
 
+def _effective_autonomous_provider() -> str:
+    provider = str(_ctx["config"].get("autonomous_provider", "claude") or "claude")
+    if provider == "default":
+        return _effective_task_provider()
+    return provider
+
+
 def _config_display_value(key: str, val) -> str:
     """Format a config value for display, with model tier → actual model mapping."""
     meta = _ctx["CONFIG_META"][key]
@@ -1652,6 +1667,8 @@ def _config_display_value(key: str, val) -> str:
         return _ctx["tier_to_display"](val, _effective_task_provider())
     if key == "task_provider" and val == "default":
         return f"default ({_effective_task_provider()})"
+    if key == "autonomous_provider" and val == "default":
+        return f"default ({_effective_autonomous_provider()})"
     return f"{unit}{val}" if unit == "$" else f"{val}{unit}"
 
 
@@ -1750,7 +1767,7 @@ async def cb_config_set(callback: CallbackQuery):
     else:
         new_val = raw_val
 
-    if key in ("provider", "task_provider"):
+    if key in ("provider", "task_provider", "autonomous_provider"):
         if new_val == "openai" and not _ctx["openai_client"]:
             await callback.answer("OPENAI_API_KEY가 없습니다.", show_alert=True)
             return
@@ -1770,6 +1787,8 @@ async def cb_config_set(callback: CallbackQuery):
         _notify_model_switch(str(old_val), str(new_val))
     if key == "task_provider" and new_val != old_val:
         _ctx["add_system_alert"](f"태스크 provider 전환: {old_val} → {new_val}")
+    if key == "autonomous_provider" and new_val != old_val:
+        _ctx["add_system_alert"](f"자율 provider 전환: {old_val} → {new_val}")
 
     logger.info("Config changed: %s = %s → %s", key, old_val, new_val)
     _ctx["save_config"]()
