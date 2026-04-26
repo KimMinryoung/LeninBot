@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import html
 import json
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +31,8 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent)))
 CONFIG_PATH = PROJECT_ROOT / "data" / "channel_config.json"
 MESSAGE_CHUNK_LIMIT = 3800
+PUBLICATION_INTRO_SENTENCES = 3
+PUBLICATION_INTRO_LIMIT = 700
 
 current_autonomous_project_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     "current_autonomous_project_id",
@@ -186,6 +190,74 @@ def chunk_message(text: str, limit: int = MESSAGE_CHUNK_LIMIT) -> list[str]:
     return chunks
 
 
+def _plain_publication_text(body: str, title: str = "") -> str:
+    text = body or ""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    lines: list[str] = []
+    for line in text.splitlines():
+        line = re.sub(r"^\s{0,3}#{1,6}\s+", "", line)
+        line = re.sub(r"^\s{0,3}>\s?", "", line)
+        line = re.sub(r"^\s*[-*+]\s+", "", line)
+        line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+        line = line.strip()
+        if line:
+            lines.append(line)
+    text = " ".join(lines)
+    text = re.sub(r"[*_~]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    title = re.sub(r"\s+", " ", title or "").strip()
+    if title and text.startswith(title):
+        text = text[len(title):].lstrip(" :-—-")
+    return text
+
+
+def _truncate_intro(text: str, limit: int = PUBLICATION_INTRO_LIMIT) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[: limit + 1]
+    split_at = max(cut.rfind(" "), cut.rfind("."), cut.rfind("。"), cut.rfind("!"), cut.rfind("?"))
+    if split_at < limit // 2:
+        split_at = limit
+    return cut[:split_at].rstrip(" ,;:") + "..."
+
+
+def publication_intro(body: str, title: str = "") -> str:
+    """Build a short, channel-safe preview from a published article body."""
+    text = _plain_publication_text(body, title)
+    if not text:
+        return "새 글이 공개됐다. 아래 링크에서 전문을 확인할 수 있다."
+
+    sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?。！？…])\s+", text)
+        if s.strip()
+    ]
+    if len(sentences) >= 2:
+        intro_parts: list[str] = []
+        for sentence in sentences:
+            if len(intro_parts) >= PUBLICATION_INTRO_SENTENCES:
+                break
+            candidate = " ".join([*intro_parts, sentence])
+            if intro_parts and len(candidate) > PUBLICATION_INTRO_LIMIT:
+                break
+            intro_parts.append(sentence)
+        return _truncate_intro(" ".join(intro_parts))
+
+    return _truncate_intro(text)
+
+
+def format_publication_broadcast(*, title: str, url: str, body: str = "") -> str:
+    safe_title = html.escape((title or "새 글").strip())
+    safe_intro = html.escape(publication_intro(body, title))
+    safe_url = html.escape((url or "").strip())
+    return f"<b>📢 {safe_title}</b>\n\n{safe_intro}\n\n🔗 전체 글 읽기:\n{safe_url}"
+
+
 async def broadcast_to_configured_channel(
     bot: Bot,
     text: str,
@@ -327,10 +399,5 @@ async def maybe_broadcast_autonomous_publication(
     if not should_broadcast_site_publication(project_id):
         return BroadcastResult(False, "site publication broadcast disabled")
 
-    excerpt = " ".join((body or "").split())
-    if len(excerpt) > 2400:
-        excerpt = excerpt[:2399].rstrip() + "…"
-    text = f"[사이버-레닌 새 글]\n{title.strip()}\n{source}\n{url.strip()}"
-    if excerpt:
-        text += f"\n\n{excerpt}"
-    return await broadcast_with_token(text)
+    text = format_publication_broadcast(title=title, url=url, body=body)
+    return await broadcast_with_token(text, parse_mode="HTML")
