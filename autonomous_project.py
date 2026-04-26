@@ -645,10 +645,8 @@ async def _run_one_tick(project: dict) -> dict:
     """Run a single agent wake on the given project. Returns a result dict."""
     from agents import get_agent
     from claude_loop import dedupe_tools_by_name
-    from bot_config import (
-        _get_autonomous_provider, _get_model_by_alias,
-        get_current_model_selection,
-    )
+    from bot_config import _get_autonomous_provider
+    from runtime_profile import resolve_runtime_profile
     import telegram.tools as tt_module
 
     spec = get_agent("autonomous_project")
@@ -681,11 +679,14 @@ async def _run_one_tick(project: dict) -> dict:
     )
 
     # Autonomous uses its own model tier, independent from chat/task settings.
-    selected = get_current_model_selection("autonomous", provider_override=provider)
-    model = selected.get("model_id") or None
-    if provider == "claude":
-        model = await _get_model_by_alias(str(selected.get("alias") or "sonnet"))
-    model_for_log = model or "unknown"
+    profile = await resolve_runtime_profile(
+        "autonomous",
+        provider_override=provider,
+        max_rounds_override=spec.max_rounds,
+        max_tokens_override=16384,
+        budget_override=spec.budget_usd,
+    )
+    model_for_log = profile.model_id or "unknown"
     budget_tracker: dict = {}
 
     # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously
@@ -705,13 +706,13 @@ async def _run_one_tick(project: dict) -> dict:
 
         result_text = await _chat_with_tools(
             tick_messages,
-            model=model,
+            model=profile.model_id,
             system_prompt=system_prompt,
-            max_rounds=spec.max_rounds,
-            max_tokens=16384,  # was 4096 — too small for long-form drafts; agent hit
+            max_rounds=profile.max_rounds,
+            max_tokens=profile.max_tokens,  # was 4096 — too small for long-form drafts; agent hit
                               # truncation mid-note and never reached the final
                               # add_research_note call (silent tick-0-save failure)
-            budget_usd=spec.budget_usd,
+            budget_usd=profile.budget_usd,
             extra_tools=agent_tools,
             extra_handlers=agent_handlers,
             budget_tracker=budget_tracker,

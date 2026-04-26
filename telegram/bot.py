@@ -30,11 +30,11 @@ from bot_config import (
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
-    _get_model_by_alias,
     _get_task_provider,
     get_current_model_selection,
     _extract_text,
 )
+from runtime_profile import resolve_runtime_profile
 from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram.tasks import (
@@ -1225,22 +1225,6 @@ async def _chat_with_tools(
     (active mission timeline, task state block, retrieved experiences, etc.).
     Ignored when `system_prompt` is passed directly.
     """
-    # Resolve runtime defaults strictly by None (not truthiness).
-    resolved_max_rounds = _config["max_rounds_chat"] if max_rounds is None else max_rounds
-    resolved_max_tokens = _CLAUDE_MAX_TOKENS if max_tokens is None else max_tokens
-    resolved_budget = _config["chat_budget"] if budget_usd is None else budget_usd
-
-    # Defensive coercion to keep downstream budget checks deterministic.
-    try:
-        resolved_budget = float(resolved_budget)
-    except (TypeError, ValueError):
-        logger.warning("Invalid budget_usd=%r; falling back to chat_budget=%s", budget_usd, _config["chat_budget"])
-        resolved_budget = float(_config["chat_budget"])
-
-    if resolved_budget <= 0:
-        logger.warning("Non-positive budget_usd=%s; clamping to 0.01", resolved_budget)
-        resolved_budget = 0.01
-
     # Resolve provider up-front so the system prompt can be rendered in the
     # format native to the target model family (XML for Claude, Markdown for
     # OpenAI/Qwen). provider_override wins over the stored config.
@@ -1259,6 +1243,18 @@ async def _chat_with_tools(
     if _runtime_kind not in ("chat", "task", "autonomous"):
         logger.warning("Unknown runtime_kind=%r; falling back to task", _runtime_kind)
         _runtime_kind = "task"
+    profile = await resolve_runtime_profile(
+        _runtime_kind,
+        provider_override=effective_provider,
+        model_override=model,
+        budget_override=budget_usd,
+        max_rounds_override=max_rounds,
+        max_tokens_override=max_tokens,
+    )
+    effective_provider = profile.provider
+    resolved_max_rounds = profile.max_rounds
+    resolved_max_tokens = profile.max_tokens
+    resolved_budget = profile.budget_usd
 
     # Runtime context injection (applies to orchestrator AND agents). Volatile
     # data — current time, current model, caller-supplied extras (mission,
@@ -1350,7 +1346,7 @@ async def _chat_with_tools(
             messages,
             client=None,
             base_url=backend["base"],
-            model=model or backend["model"],
+            model=profile.model_id or backend["model"],
             tools=merged_tools,
             tool_handlers=merged_handlers,
             system_prompt=sys_prompt,
@@ -1373,13 +1369,10 @@ async def _chat_with_tools(
 
     if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        _openai_model = model or get_current_model_selection(
-            _runtime_kind, provider_override="openai"
-        )["model_id"]
         return await openai_chat(
             messages,
             client=_openai_client,
-            model=_openai_model,
+            model=profile.model_id,
             tools=merged_tools,
             tool_handlers=merged_handlers,
             system_prompt=sys_prompt,
@@ -1399,13 +1392,10 @@ async def _chat_with_tools(
 
     if effective_provider == "deepseek" and _deepseek_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        _deepseek_model = model or get_current_model_selection(
-            _runtime_kind, provider_override="deepseek"
-        )["model_id"]
         return await openai_chat(
             messages,
             client=_deepseek_client,
-            model=_deepseek_model,
+            model=profile.model_id,
             tools=merged_tools,
             tool_handlers=merged_handlers,
             system_prompt=sys_prompt,
@@ -1435,13 +1425,10 @@ async def _chat_with_tools(
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_merge_runtime_context_into_last_user` above,
     # so history remains byte-stable across turns and prefix caching works.
-    if model is None:
-        sel = get_current_model_selection(_runtime_kind, provider_override="claude")
-        model = await _get_model_by_alias(str(sel.get("alias") or "sonnet"))
     return await chat_with_tools(
         messages,
         client=_claude,
-        model=model,
+        model=profile.model_id,
         tools=merged_tools,
         tool_handlers=merged_handlers,
         system_prompt=sys_prompt,
@@ -1555,17 +1542,12 @@ async def _get_model_for_agent(spec):
         from llm.client import _resolve_backend
         return _resolve_backend()["model"]
     if provider in ("claude", "openai", "deepseek"):
-        from bot_config import (
-            _TIER_MAP, _get_model_by_alias, _resolve_openai_model,
-            _resolve_deepseek_model,
+        profile = await resolve_runtime_profile(
+            "task",
+            provider_override=provider,
+            tier_override=spec.model,
         )
-        tier = str(spec.model or _config.get("task_model", "high"))
-        alias = _TIER_MAP.get(provider, {}).get(tier, tier)
-        if provider == "openai":
-            return _resolve_openai_model(alias)
-        if provider == "deepseek":
-            return _resolve_deepseek_model(alias)
-        return await _get_model_by_alias(alias)
+        return profile.model_id
     return await _get_model_task()
 
 
@@ -1978,10 +1960,8 @@ async def bot_main():
                     if fallback_provider == "local":
                         from llm.client import _resolve_backend
                         return _resolve_backend()["model"]
-                    selected = get_current_model_selection("task", provider_override=fallback_provider)
-                    if fallback_provider == "claude":
-                        return await _get_model_by_alias(str(selected.get("alias") or "sonnet"))
-                    return str(selected["model_id"])
+                    profile = await resolve_runtime_profile("task", provider_override=fallback_provider)
+                    return profile.model_id
             return await _get_model_for_agent(spec)
 
         def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
