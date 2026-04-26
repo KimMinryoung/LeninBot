@@ -190,13 +190,13 @@ def _normalize_initial_messages(msgs: list[dict]) -> list[dict]:
 
 
 def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
-    """Return a shallow copy of `msgs` with a cache_control breakpoint on the
-    last stable assistant turn.
+    """Return a shallow copy of `msgs` with cache breakpoints on stable turns.
 
-    Prompt caching on the Messages API requires an explicit breakpoint. Placing
-    it on the most recent assistant message makes the entire prefix up to that
-    point cacheable, so subsequent rounds in this call (and follow-up requests
-    while the cache is warm) only re-process what came after.
+    Prompt caching on the Messages API requires explicit breakpoints. The most
+    recent assistant turn caches the current stable prefix. For long web chats,
+    the recent-history window can slide; marking the first retained assistant as
+    well preserves a stable early anchor instead of reducing hits to only
+    system/tools.
 
     No-op when there is no assistant message yet (first turn). Leaves the input
     list and its inner dicts untouched.
@@ -204,9 +204,19 @@ def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
     if not msgs:
         return msgs
     result = list(msgs)
-    for i in range(len(result) - 1, -1, -1):
-        if result[i].get("role") != "assistant":
-            continue
+
+    assistant_indexes = [
+        i for i, msg in enumerate(result)
+        if isinstance(msg, dict) and msg.get("role") == "assistant"
+    ]
+    if not assistant_indexes:
+        return result
+
+    breakpoint_indexes = [assistant_indexes[-1]]
+    if len(assistant_indexes) > 1:
+        breakpoint_indexes.insert(0, assistant_indexes[0])
+
+    def _mark_message(i: int) -> None:
         msg = dict(result[i])
         content = msg.get("content", "")
         if isinstance(content, str):
@@ -227,7 +237,9 @@ def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
                  "cache_control": _CACHE_CONTROL_1H}
             ]
         result[i] = msg
-        break
+
+    for i in breakpoint_indexes:
+        _mark_message(i)
     return result
 
 

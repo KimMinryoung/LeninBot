@@ -56,12 +56,12 @@ OPENAI_PRICING = {
     "deepseek-v4-flash": {
         "input": 0.14 / 1_000_000,
         "output": 0.28 / 1_000_000,
-        "cached_input": 0.028 / 1_000_000,
+        "cached_input": 0.0028 / 1_000_000,
     },
     "deepseek-v4-pro": {
         "input": 1.74 / 1_000_000,
         "output": 3.48 / 1_000_000,
-        "cached_input": 0.145 / 1_000_000,
+        "cached_input": 0.0145 / 1_000_000,
     },
 }
 _DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
@@ -70,7 +70,7 @@ _DEEPSEEK_V4_PRO_DISCOUNT_END_UTC = datetime(2026, 5, 5, 15, 59, tzinfo=timezone
 _DEEPSEEK_V4_PRO_DISCOUNT_PRICING = {
     "input": 0.435 / 1_000_000,
     "output": 0.87 / 1_000_000,
-    "cached_input": 0.03625 / 1_000_000,
+    "cached_input": 0.003625 / 1_000_000,
 }
 
 

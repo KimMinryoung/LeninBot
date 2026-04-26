@@ -107,12 +107,23 @@ def _load_web_history(
 
     If `session_id` is provided AND that session has prior turns for any of the
     given fingerprints, only that session's history is returned (= resume a
-    specific conversation). Otherwise, the most recent `limit` turns across all
-    the given fingerprints are returned (= continue the fingerprint-wide thread).
+    specific conversation). For long sessions we keep a small stable anchor from
+    the beginning plus recent turns; this preserves continuity and improves
+    provider prompt-cache hits instead of letting a pure sliding window rewrite
+    the entire prefix after every turn.
     """
     fps = [f for f in (fingerprints or []) if f]
     if not fps:
         return []
+
+    def _rows_to_messages(rows: list[dict]) -> list[dict]:
+        messages = []
+        for row in rows:
+            if row.get("user_query"):
+                messages.append({"role": "user", "content": row["user_query"]})
+            if row.get("bot_answer"):
+                messages.append({"role": "assistant", "content": row["bot_answer"]})
+        return messages
 
     if session_id:
         # Does this session actually belong to one of the provided fingerprints?
@@ -123,22 +134,32 @@ def _load_web_history(
             (session_id, fps),
         )
         if owned:
-            rows = db_query(
-                """SELECT user_query, bot_answer FROM chat_logs
+            anchor_limit = min(4, max(0, limit // 4))
+            recent_limit = max(0, limit - anchor_limit)
+            anchor_rows = db_query(
+                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
+                   WHERE session_id = %s AND fingerprint = ANY(%s)
+                   ORDER BY created_at ASC LIMIT %s""",
+                (session_id, fps, anchor_limit),
+            )
+            recent_rows = db_query(
+                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
                    WHERE session_id = %s AND fingerprint = ANY(%s)
                    ORDER BY created_at DESC LIMIT %s""",
-                (session_id, fps, limit),
+                (session_id, fps, recent_limit),
             )
+            by_id = {row["id"]: row for row in anchor_rows + recent_rows}
+            rows = sorted(by_id.values(), key=lambda r: r["created_at"])
         else:
             rows = db_query(
-                """SELECT user_query, bot_answer FROM chat_logs
+                """SELECT user_query, bot_answer, created_at FROM chat_logs
                    WHERE fingerprint = ANY(%s)
                    ORDER BY created_at DESC LIMIT %s""",
                 (fps, limit),
             )
     else:
         rows = db_query(
-            """SELECT user_query, bot_answer FROM chat_logs
+            """SELECT user_query, bot_answer, created_at FROM chat_logs
                WHERE fingerprint = ANY(%s)
                ORDER BY created_at DESC LIMIT %s""",
             (fps, limit),
@@ -146,13 +167,9 @@ def _load_web_history(
 
     if not rows:
         return []
-    messages = []
-    for row in reversed(rows):
-        if row.get("user_query"):
-            messages.append({"role": "user", "content": row["user_query"]})
-        if row.get("bot_answer"):
-            messages.append({"role": "assistant", "content": row["bot_answer"]})
-    return messages
+    if rows and "created_at" in rows[0]:
+        rows = sorted(rows, key=lambda r: r["created_at"])
+    return _rows_to_messages(rows)
 
 
 # ── Logging ──────────────────────────────────────────────────────────
@@ -204,6 +221,12 @@ async def handle_web_chat(
     # is Telegram-dev use). Changes take effect on leninbot-api restart.
     profile = await resolve_runtime_profile("webchat")
     provider = profile.provider
+    history_chars = sum(len(str(m.get("content", ""))) for m in history)
+    logger.info(
+        "Web chat profile session=%s provider=%s model=%s tier=%s history_messages=%d history_chars=%d budget=$%.2f",
+        session_id, provider, profile.model_id, profile.tier,
+        len(history), history_chars, profile.budget_usd,
+    )
 
     # Fold the runtime header directly into the current user turn so the
     # history prefix stays byte-stable across requests (→ prompt caching).

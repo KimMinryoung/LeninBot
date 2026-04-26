@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 from collections import defaultdict
@@ -28,6 +29,14 @@ from email_bridge import (
 )
 
 from secrets_loader import get_secret
+
+_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
+logging.basicConfig(level=_LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logging.getLogger().setLevel(_LOG_LEVEL)
+logging.getLogger("neo4j").setLevel(logging.WARNING)
+logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
 # ── Admin API key authentication ──────────────────────────────────
 _ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
