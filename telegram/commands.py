@@ -1345,15 +1345,23 @@ async def handle_message(message: Message):
             try:
                 fresh_msgs = [{"role": "user", "content": user_text}]
                 progress_cb = _ctx["make_progress_callback"](message.chat.id)
-                reply = await _ctx["chat_with_tools"](fresh_msgs, on_progress=progress_cb)
+                retry_bt = {}
+                reply = await _ctx["chat_with_tools"](
+                    fresh_msgs,
+                    on_progress=progress_cb,
+                    budget_tracker=retry_bt,
+                    extra_handlers={"mission": mission_handler},
+                    extra_system_context=extra_context,
+                )
+                bt = retry_bt
                 if hasattr(progress_cb, "flush"):
                     await progress_cb.flush()
             except Exception as e2:
                 logger.error("Retry after tool pair recovery also failed: %s", e2)
                 reply = f"오류가 발생했습니다 (자동 복구 실패): {e2}"
         else:
-            logger.error("Claude API error: %s", e)
-            _ctx["log_event"]("error", "chat", f"Claude API error: {e}", detail=user_text[:500])
+            logger.error("Chat LLM error (%s): %s", _provider, e)
+            _ctx["log_event"]("error", "chat", f"Chat LLM error ({_provider}): {e}", detail=user_text[:500])
             reply = f"오류가 발생했습니다: {e}"
 
     # Mission: log interrupted tool work to active mission
