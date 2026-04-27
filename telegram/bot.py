@@ -1555,6 +1555,7 @@ async def _chat_with_tools(
             # non-thinking mode for reliable tool calling and lower task cost.
             extra_body={"thinking": {"type": "disabled"}},
             sdk_max_token_param="max_tokens",
+            include_parallel_tool_calls=False,
             provider_label="deepseek",
         )
 

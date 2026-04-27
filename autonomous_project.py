@@ -680,6 +680,7 @@ async def _run_one_tick(project: dict) -> dict:
     profile = await resolve_runtime_profile(
         "autonomous",
         provider_override=provider,
+        tier_override=spec.model,
         max_rounds_override=spec.max_rounds,
         max_tokens_override=16384,
         budget_override=spec.budget_usd,

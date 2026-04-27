@@ -6,8 +6,8 @@
     "max_rounds": 50
   },
   "autonomous_project": {
-    "provider": null,
-    "model": null,
+    "provider": "deepseek",
+    "model": "deepseek_pro",
     "budget_usd": 0.6,
     "max_rounds": 6,
     "finalization_tools": [
@@ -27,8 +27,8 @@
     "max_rounds": 30
   },
   "diary": {
-    "provider": "claude",
-    "model": "sonnet",
+    "provider": "deepseek",
+    "model": "deepseek_pro",
     "budget_usd": 1.0,
     "max_rounds": 30,
     "terminal_tools": ["save_diary"],

@@ -485,6 +485,7 @@ async def _call_sdk(
     tools: list[dict] | None = None,
     max_tokens: int = 4096,
     parallel_tool_calls: bool = True,
+    include_parallel_tool_calls: bool = True,
     on_progress=None,
     extra_body: dict | None = None,
     max_token_param: str = "max_completion_tokens",
@@ -509,7 +510,8 @@ async def _call_sdk(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
-        kwargs["parallel_tool_calls"] = parallel_tool_calls
+        if include_parallel_tool_calls:
+            kwargs["parallel_tool_calls"] = parallel_tool_calls
 
     # The OpenAI SDK streaming helper auto-parses function tools. Current
     # registered LeninBot tools intentionally include permissive / optional
@@ -582,7 +584,8 @@ def _mark_openai_unavailable(model: str) -> None:
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
                     parallel_tool_calls=True, enable_thinking=False, on_progress=None,
                     extra_body: dict | None = None,
-                    sdk_max_token_param: str = "max_completion_tokens"):
+                    sdk_max_token_param: str = "max_completion_tokens",
+                    include_parallel_tool_calls: bool = True):
     """Dispatch to SDK or httpx based on mode.
 
     Transparently swaps `model` for a fallback (e.g. gpt-5.5 → gpt-5.4) on
@@ -597,6 +600,7 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
         if sdk_mode:
             return await _call_sdk(client, m, messages, tools, max_tokens,
                                    parallel_tool_calls=parallel_tool_calls,
+                                   include_parallel_tool_calls=include_parallel_tool_calls,
                                    on_progress=on_progress,
                                    extra_body=extra_body,
                                    max_token_param=sdk_max_token_param)
@@ -804,6 +808,7 @@ async def chat_with_tools(
     api_semaphore: asyncio.Semaphore | None = None,
     extra_body: dict | None = None,
     sdk_max_token_param: str = "max_completion_tokens",
+    include_parallel_tool_calls: bool = True,
     provider_label: str | None = None,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
@@ -902,6 +907,7 @@ async def chat_with_tools(
                 openai_tools, max_tokens, enable_thinking=enable_thinking,
                 on_progress=stream_cb, extra_body=extra_body,
                 sdk_max_token_param=sdk_max_token_param,
+                include_parallel_tool_calls=include_parallel_tool_calls,
             )
         except Exception as api_err:
             err_str = str(api_err)
@@ -920,6 +926,7 @@ async def chat_with_tools(
                         parallel_tool_calls=False, enable_thinking=enable_thinking,
                         on_progress=stream_cb, extra_body=extra_body,
                         sdk_max_token_param=sdk_max_token_param,
+                        include_parallel_tool_calls=include_parallel_tool_calls,
                     )
                     working_msgs = stripped
                     logger.info("Auto-recovery succeeded at round %d", round_num)
@@ -1151,6 +1158,7 @@ async def chat_with_tools(
             sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
             on_progress=stream_cb, extra_body=extra_body,
             sdk_max_token_param=sdk_max_token_param,
+            include_parallel_tool_calls=include_parallel_tool_calls,
         )
         _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
         if sdk_mode and final_usage:
@@ -1220,6 +1228,7 @@ async def chat_with_tools(
                         sdk_mode, client, base_url, model, working_msgs, None, min(max_tokens, 2048),
                         on_progress=stream_cb, extra_body=extra_body,
                         sdk_max_token_param=sdk_max_token_param,
+                        include_parallel_tool_calls=include_parallel_tool_calls,
                     )
                     _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
                     if sdk_mode and followup_usage:
@@ -1243,6 +1252,7 @@ async def chat_with_tools(
                 sdk_mode, client, base_url, model, stripped, None, max_tokens,
                 on_progress=stream_cb, extra_body=extra_body,
                 sdk_max_token_param=sdk_max_token_param,
+                include_parallel_tool_calls=include_parallel_tool_calls,
             )
             _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
             if sdk_mode and last_usage:

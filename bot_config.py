@@ -44,8 +44,8 @@ _CONFIG_DEFAULTS = {
     "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
-    "autonomous_provider": "openai", # scheduled autonomous loop provider
-    "autonomous_model": "high", # autonomous model tier; high=openai GPT-5.5
+    "autonomous_provider": "deepseek", # scheduled autonomous loop provider
+    "autonomous_model": "high", # autonomous model tier; high=DeepSeek V4 Pro
     # Web chat runs independently from Telegram's /config. These keys pin what
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
@@ -224,10 +224,10 @@ def _get_task_provider() -> str:
 def _get_autonomous_provider() -> str:
     """Return the provider used by the scheduled autonomous project loop.
 
-    Defaults to OpenAI for deeper autonomous research. Selecting ``default``
+    Defaults to DeepSeek for lower-cost autonomous research. Selecting ``default``
     makes the autonomous loop follow the current task provider.
     """
-    provider = str(_config.get("autonomous_provider", "openai") or "openai")
+    provider = str(_config.get("autonomous_provider", "deepseek") or "deepseek")
     if provider == "default":
         return _get_task_provider()
     return provider
