@@ -322,10 +322,54 @@ PUBLISH_STATIC_PAGE_TOOL = {
                 "type": "string",
                 "description": "Optional short description for meta tags and the page-list index.",
             },
+            "title_en": {
+                "type": "string",
+                "description": "Optional English title. Used when the site language is English.",
+            },
+            "html_body_en": {
+                "type": "string",
+                "description": (
+                    "Optional English translation of html_body. Inner body only; same restrictions "
+                    "as html_body. If omitted, English readers fall back to the Korean body."
+                ),
+            },
+            "summary_en": {
+                "type": "string",
+                "description": "Optional English summary for meta tags and page lists.",
+            },
         },
         "required": ["slug", "title", "html_body"],
     },
 }
+
+
+def _validate_inner_html(html_body: str, field_name: str = "html_body") -> str | None:
+    lower = html_body.lower()
+    for forbidden_re, label in (
+        (r"<html(?:\s|>)", "<html"),
+        (r"<body(?:\s|>)", "<body"),
+        (r"<head(?:\s|>)", "<head"),
+        (r"</html\s*>", "</html"),
+        (r"</body\s*>", "</body"),
+        (r"</head\s*>", "</head"),
+    ):
+        if re.search(forbidden_re, lower):
+            return (
+                f"Error: {field_name} must be inner content only — found {label!r}. "
+                "Provide semantic body content (<article>, <section>, etc.); the site "
+                "wraps it with nav/layout/css."
+            )
+    return None
+
+
+def _load_static_page_payload(target: Path) -> dict:
+    if not target.is_file():
+        return {}
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 async def _exec_publish_static_page(
@@ -333,11 +377,17 @@ async def _exec_publish_static_page(
     title: str,
     html_body: str,
     summary: str | None = None,
+    title_en: str | None = None,
+    html_body_en: str | None = None,
+    summary_en: str | None = None,
 ) -> str:
     slug = (slug or "").strip().lower()
     title = (title or "").strip()
     html_body = (html_body or "").strip()
     summary = (summary or "").strip() or None
+    title_en = (title_en or "").strip() or None
+    html_body_en = (html_body_en or "").strip() or None
+    summary_en = (summary_en or "").strip() or None
 
     if not slug:
         return "Error: slug is required."
@@ -350,21 +400,13 @@ async def _exec_publish_static_page(
 
     # Forbid full-document HTML — the frontend provides the layout wrapper.
     # Use regex so semantic tags like <header> do not false-positive on '<head'.
-    lower = html_body.lower()
-    for forbidden_re, label in (
-        (r"<html(?:\s|>)", "<html"),
-        (r"<body(?:\s|>)", "<body"),
-        (r"<head(?:\s|>)", "<head"),
-        (r"</html\s*>", "</html"),
-        (r"</body\s*>", "</body"),
-        (r"</head\s*>", "</head"),
-    ):
-        if re.search(forbidden_re, lower):
-            return (
-                f"Error: html_body must be inner content only — found {label!r}. "
-                "Provide semantic body content (<article>, <section>, etc.); the site "
-                "wraps it with nav/layout/css."
-            )
+    validation_error = _validate_inner_html(html_body)
+    if validation_error:
+        return validation_error
+    if html_body_en:
+        validation_error = _validate_inner_html(html_body_en, "html_body_en")
+        if validation_error:
+            return validation_error
 
     STATIC_PAGES_DIR.mkdir(exist_ok=True)
     # Final safety: resolve the target inside the sandbox and verify containment.
@@ -373,6 +415,8 @@ async def _exec_publish_static_page(
     if sandbox not in target.parents:
         return "Error: refusing to write outside static_pages sandbox."
 
+    is_new_publication = not target.is_file()
+    existing = _load_static_page_payload(target)
     payload = {
         "slug": slug,
         "title": title,
@@ -380,6 +424,13 @@ async def _exec_publish_static_page(
         "html_body": html_body,
         "updated_at": datetime.now(KST).isoformat(timespec="seconds"),
     }
+    for key, value in (
+        ("title_en", title_en if title_en is not None else existing.get("title_en")),
+        ("summary_en", summary_en if summary_en is not None else existing.get("summary_en")),
+        ("html_body_en", html_body_en if html_body_en is not None else existing.get("html_body_en")),
+    ):
+        if value:
+            payload[key] = value
     try:
         await asyncio.to_thread(
             target.write_text,
@@ -392,25 +443,120 @@ async def _exec_publish_static_page(
 
     public_url = f"https://cyber-lenin.com/p/{slug}"
     broadcast_note = ""
-    try:
-        plain_excerpt = re.sub(r"<[^>]+>", " ", html_body)
-        br = await maybe_broadcast_autonomous_publication(
-            title=title,
-            url=public_url,
-            body=summary or plain_excerpt,
-            source="cyber-lenin.com page",
-        )
-        if br.ok:
-            broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
-    except Exception as e:
-        logger.warning("static page channel broadcast failed for %s: %s", slug, e)
-        broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+    if is_new_publication:
+        try:
+            plain_excerpt = re.sub(r"<[^>]+>", " ", html_body)
+            br = await maybe_broadcast_autonomous_publication(
+                title=title,
+                url=public_url,
+                body=summary or plain_excerpt,
+                source="cyber-lenin.com page",
+            )
+            if br.ok:
+                broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+        except Exception as e:
+            logger.warning("static page channel broadcast failed for %s: %s", slug, e)
+            broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+    else:
+        broadcast_note = "\nTelegram channel broadcast: skipped (existing page update)"
     return (
         f"Published static page: {slug}\n"
         f"Local path: {target}\n"
         f"Public URL: {public_url}\n"
         f"Body size: {len(html_body)} chars"
         f"{broadcast_note}"
+    )
+
+
+PUBLISH_STATIC_PAGE_TRANSLATION_TOOL = {
+    "name": "publish_static_page_translation",
+    "description": (
+        "Attach or update the English translation for an existing /p/{slug} static page. "
+        "This updates title_en/summary_en/html_body_en only and never sends a Telegram "
+        "channel broadcast. English readers fall back to the Korean page when no "
+        "translation exists."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "slug": {
+                "type": "string",
+                "description": "Existing page slug (lowercase a-z0-9 and dashes).",
+            },
+            "html_body_en": {
+                "type": "string",
+                "description": "English HTML inner body. Do not include <html>, <head>, or <body>.",
+            },
+            "title_en": {
+                "type": "string",
+                "description": "Optional English title.",
+            },
+            "summary_en": {
+                "type": "string",
+                "description": "Optional English summary.",
+            },
+        },
+        "required": ["slug", "html_body_en"],
+    },
+}
+
+
+async def _exec_publish_static_page_translation(
+    slug: str,
+    html_body_en: str,
+    title_en: str | None = None,
+    summary_en: str | None = None,
+) -> str:
+    slug = (slug or "").strip().lower()
+    html_body_en = (html_body_en or "").strip()
+    title_en = (title_en or "").strip() or None
+    summary_en = (summary_en or "").strip() or None
+
+    if not slug:
+        return "Error: slug is required."
+    if not _SLUG_RE.match(slug):
+        return "Error: slug must match ^[a-z0-9][a-z0-9-]{0,79}$ (lowercase alphanumeric + dashes only — ASCII)."
+    if not html_body_en:
+        return "Error: html_body_en is required."
+
+    validation_error = _validate_inner_html(html_body_en, "html_body_en")
+    if validation_error:
+        return validation_error
+
+    STATIC_PAGES_DIR.mkdir(exist_ok=True)
+    target = (STATIC_PAGES_DIR / f"{slug}.json").resolve()
+    sandbox = STATIC_PAGES_DIR.resolve()
+    if sandbox not in target.parents:
+        return "Error: refusing to write outside static_pages sandbox."
+    if not target.is_file():
+        return f"Error: static page does not exist: {slug}"
+
+    payload = _load_static_page_payload(target)
+    if not payload:
+        return f"Error: failed to load static page: {slug}"
+    payload["html_body_en"] = html_body_en
+    if title_en:
+        payload["title_en"] = title_en
+    if summary_en:
+        payload["summary_en"] = summary_en
+    payload["updated_at"] = datetime.now(KST).isoformat(timespec="seconds")
+
+    try:
+        await asyncio.to_thread(
+            target.write_text,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
+    except Exception as e:
+        logger.error("publish_static_page_translation write error: %s", e)
+        return f"Failed to write static page translation: {e}"
+
+    return (
+        f"Published English translation for static page: {slug}\n"
+        f"Local path: {target}\n"
+        f"Public URL: https://cyber-lenin.com/p/{slug}\n"
+        f"English body size: {len(html_body_en)} chars\n"
+        "Telegram channel broadcast: skipped (translation update)"
     )
 
 
@@ -565,17 +711,40 @@ def get_hub_curation(slug: str) -> dict | None:
     )
 
 
-def list_static_pages() -> list[dict]:
+def _normalize_static_page_lang(lang: str | None) -> str:
+    return "en" if (lang or "").strip().lower() == "en" else "ko"
+
+
+def localize_static_page(data: dict, lang: str | None = None) -> dict:
+    requested = _normalize_static_page_lang(lang)
+    out = dict(data)
+    has_translation = bool((data.get("html_body_en") or "").strip())
+    selected = "en" if requested == "en" and has_translation else "ko"
+    if selected == "en":
+        out["title"] = data.get("title_en") or data.get("title")
+        out["summary"] = data.get("summary_en") or data.get("summary")
+        out["html_body"] = data.get("html_body_en") or data.get("html_body")
+    out["requested_language"] = requested
+    out["language"] = selected
+    out["has_translation"] = has_translation
+    out["available_languages"] = ["ko", "en"] if has_translation else ["ko"]
+    return out
+
+
+def list_static_pages(lang: str | None = None) -> list[dict]:
     STATIC_PAGES_DIR.mkdir(exist_ok=True)
     out: list[dict] = []
     for p in sorted(STATIC_PAGES_DIR.glob("*.json")):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
+            view = localize_static_page(data, lang)
             out.append({
-                "slug": data.get("slug") or p.stem,
-                "title": data.get("title") or p.stem,
-                "summary": data.get("summary"),
-                "updated_at": data.get("updated_at"),
+                "slug": view.get("slug") or p.stem,
+                "title": view.get("title") or p.stem,
+                "summary": view.get("summary"),
+                "updated_at": view.get("updated_at"),
+                "language": view.get("language"),
+                "has_translation": view.get("has_translation", False),
             })
         except Exception:
             continue
@@ -603,10 +772,12 @@ def get_static_page(slug: str) -> dict | None:
 SITE_PUBLISHING_TOOLS = [
     PUBLISH_HUB_CURATION_TOOL,
     PUBLISH_STATIC_PAGE_TOOL,
+    PUBLISH_STATIC_PAGE_TRANSLATION_TOOL,
     PUBLISH_COMIC_TOOL,
 ]
 SITE_PUBLISHING_TOOL_HANDLERS = {
     "publish_hub_curation": _exec_publish_hub_curation,
     "publish_static_page": _exec_publish_static_page,
+    "publish_static_page_translation": _exec_publish_static_page_translation,
     "publish_comic": _exec_publish_comic,
 }

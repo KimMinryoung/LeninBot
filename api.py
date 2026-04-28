@@ -560,25 +560,51 @@ def _sanitize_static_page_html(html_body: str) -> str:
     return html_body
 
 
-def _render_static_page_html(data: dict) -> str:
-    slug = data.get("slug") or ""
-    title = data.get("title") or SEO_DEFAULT_TITLE
-    summary = data.get("summary") or SEO_DEFAULT_DESCRIPTION
+def _normalize_lang(lang: str | None) -> str:
+    return "en" if (lang or "").strip().lower() == "en" else "ko"
+
+
+def _request_lang(request: Request, lang: str | None = None) -> str:
+    return _normalize_lang(lang or request.cookies.get("lang"))
+
+
+def _render_static_page_html(data: dict, lang: str = "ko") -> str:
+    from site_publishing import localize_static_page
+
+    view = localize_static_page(data, lang)
+    selected_lang = view.get("language") or "ko"
+    slug = view.get("slug") or ""
+    title = view.get("title") or SEO_DEFAULT_TITLE
+    summary = view.get("summary") or SEO_DEFAULT_DESCRIPTION
     updated_at = data.get("updated_at") or ""
     canonical_url = f"{PUBLIC_BASE_URL}/p/{slug}"
-    raw_html = data.get("html_body") or ""
+    raw_html = view.get("html_body") or ""
     safe_html = _sanitize_static_page_html(raw_html)
     image_url = _extract_primary_og_image(raw_html) or SEO_DEFAULT_OG_IMAGE
+    lang_label = "English" if selected_lang == "en" else "Korean"
+    ko_active = "active" if selected_lang == "ko" else ""
+    en_active = "active" if selected_lang == "en" else ""
+    ko_url = f"/p/{slug}?lang=ko"
+    en_url = f"/p/{slug}?lang=en"
+    nav_labels = {
+        "chat": "Chat" if selected_lang == "en" else "채팅",
+        "posts": "Posts" if selected_lang == "en" else "비숑글",
+        "diary_full": "Cyber-Lenin Diary" if selected_lang == "en" else "사이버-레닌 일기장",
+        "diary_short": "Diary" if selected_lang == "en" else "일기장",
+        "reports_full": "Cyber-Lenin Reports" if selected_lang == "en" else "사이버-레닌 보고서",
+        "reports_short": "Reports" if selected_lang == "en" else "보고서",
+        "hub": "Curation" if selected_lang == "en" else "큐레이션",
+    }
     body_html = f"""
 <div class=\"home-toolbar\">
     <a href=\"/\" class=\"toolbar-logo\">Cyber-Lenin</a>
     <div class=\"toolbar-right\">
         <button type=\"button\" class=\"theme-toggle\" id=\"themeToggle\" title=\"Toggle theme\">&#x263E;</button>
         <div class=\"lang-dropdown\">
-            <button type=\"button\" class=\"lang-btn\" id=\"langBtn\">&#x1F310;Korean</button>
+            <button type=\"button\" class=\"lang-btn\" id=\"langBtn\">&#x1F310;{lang_label}</button>
             <div class=\"lang-menu\" id=\"langMenu\">
-                <a href=\"#\" data-lang=\"ko\" class=\"active\">Korean</a>
-                <a href=\"#\" data-lang=\"en\" class=\"\">English</a>
+                <a href=\"{ko_url}\" data-lang=\"ko\" class=\"{ko_active}\">Korean</a>
+                <a href=\"{en_url}\" data-lang=\"en\" class=\"{en_active}\">English</a>
             </div>
         </div>
     </div>
@@ -586,11 +612,11 @@ def _render_static_page_html(data: dict) -> str:
 <nav>
     <div class=\"nav-content\">
         <div class=\"nav-links\">
-            <a href=\"/chat\">채팅</a>
-            <a href=\"/posts\">비숑글</a>
-            <a href=\"/ai-diary\"><span class=\"nav-label-full\">사이버-레닌 일기장</span><span class=\"nav-label-short\">일기장</span></a>
-            <a href=\"/reports\"><span class=\"nav-label-full\">사이버-레닌 보고서</span><span class=\"nav-label-short\">보고서</span></a>
-            <a href=\"/hub\">큐레이션</a>
+            <a href=\"/chat\">{nav_labels["chat"]}</a>
+            <a href=\"/posts\">{nav_labels["posts"]}</a>
+            <a href=\"/ai-diary\"><span class=\"nav-label-full\">{nav_labels["diary_full"]}</span><span class=\"nav-label-short\">{nav_labels["diary_short"]}</span></a>
+            <a href=\"/reports\"><span class=\"nav-label-full\">{nav_labels["reports_full"]}</span><span class=\"nav-label-short\">{nav_labels["reports_short"]}</span></a>
+            <a href=\"/hub\">{nav_labels["hub"]}</a>
         </div>
     </div>
 </nav>
@@ -611,9 +637,12 @@ def _render_static_page_html(data: dict) -> str:
         image_url=image_url,
     )
     return f"""<!DOCTYPE html>
-<html lang=\"ko\">
+<html lang=\"{selected_lang}\">
 <head>
 {head}
+<link rel=\"alternate\" hreflang=\"ko\" href=\"{PUBLIC_BASE_URL}/p/{slug}?lang=ko\">
+<link rel=\"alternate\" hreflang=\"en\" href=\"{PUBLIC_BASE_URL}/p/{slug}?lang=en\">
+<link rel=\"alternate\" hreflang=\"x-default\" href=\"{PUBLIC_BASE_URL}/p/{slug}\">
 <link rel=\"stylesheet\" href=\"/css/style.css?v=1776509221453\">
 <link rel=\"stylesheet\" href=\"/css/report.css?v=1776509221453\">
 <script>
@@ -639,6 +668,9 @@ def _build_research_url(filename: str) -> str:
     return f"{PUBLIC_BASE_URL}/research/{_research_public_slug(filename)}"
 
 
+RESEARCH_TRANSLATIONS_DIR = RESEARCH_DIR / "en"
+
+
 def _resolve_research_file(filename: str) -> Path | None:
     """Resolve a public research markdown file, preferring research/ over legacy output/research/."""
     candidates = [filename]
@@ -653,6 +685,25 @@ def _resolve_research_file(filename: str) -> Path | None:
         if legacy.is_file():
             return legacy
     return None
+
+
+def _resolve_research_translation_file(filename: str, lang: str | None = None) -> Path | None:
+    if _normalize_lang(lang) != "en":
+        return None
+    storage_name = _storage_research_filename(filename)
+    target = (RESEARCH_TRANSLATIONS_DIR / storage_name).resolve()
+    sandbox = RESEARCH_TRANSLATIONS_DIR.resolve()
+    if sandbox not in target.parents or not target.is_file():
+        return None
+    return target
+
+
+def _resolve_localized_research_file(filename: str, lang: str | None = None) -> tuple[Path | None, str, bool]:
+    requested = _normalize_lang(lang)
+    translated = _resolve_research_translation_file(filename, requested)
+    if translated is not None:
+        return translated, "en", True
+    return _resolve_research_file(filename), "ko", translated is not None
 
 
 def _extract_md_title(path: Path) -> str | None:
@@ -852,7 +903,7 @@ async def atom_feed():
 
 
 @app.get("/research")
-async def list_research():
+async def list_research(request: Request, lang: str | None = Query(default=None)):
     """List public .md files with extracted H1 title and a 3-line-ready excerpt
     so the frontend doesn't need N+1 fetches to populate previews."""
     files_by_name: dict[str, dict] = {}
@@ -860,28 +911,31 @@ async def list_research():
         if not directory.is_dir():
             continue
         for p in directory.glob("*.md"):
+            view = _resolve_research_translation_file(p.name, _request_lang(request, lang)) or p
             stat = p.stat()
             files_by_name[p.name] = {
                 "filename": p.name,
-                "title": _extract_md_title(p) or _filename_fallback_title(p.name),
-                "excerpt": _extract_md_excerpt(p),
+                "title": _extract_md_title(view) or _filename_fallback_title(p.name),
+                "excerpt": _extract_md_excerpt(view),
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "source_dir": p.parent.name,
                 "url": _build_research_url(p.name),
+                "language": "en" if view != p else "ko",
+                "has_translation": _resolve_research_translation_file(p.name, "en") is not None,
             }
     files = [files_by_name[name] for name in sorted(files_by_name)]
     return {"files": files}
 
 
 @app.get("/research/{filename}")
-async def get_research(filename: str, format: str = Query(default="json")):
+async def get_research(filename: str, request: Request, format: str = Query(default="json"), lang: str | None = Query(default=None)):
     """Read a single public markdown file from research/ or legacy output/research/."""
     if "/" in filename or "\\" in filename or ".." in filename:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
     storage_filename = _storage_research_filename(filename)
-    filepath = _resolve_research_file(filename)
+    filepath, selected_lang, _ = _resolve_localized_research_file(filename, _request_lang(request, lang))
     if filepath is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "File not found"})
@@ -910,6 +964,10 @@ async def get_research(filename: str, format: str = Query(default="json")):
         "size": len(content),
         "source_dir": filepath.parent.name,
         "url": _build_research_url(storage_filename),
+        "requested_language": _request_lang(request, lang),
+        "language": selected_lang,
+        "has_translation": _resolve_research_translation_file(storage_filename, "en") is not None,
+        "available_languages": ["ko", "en"] if _resolve_research_translation_file(storage_filename, "en") else ["ko"],
     }
 
 
@@ -975,30 +1033,30 @@ async def get_hub(slug: str):
 
 
 @app.get("/pages")
-async def list_pages():
+async def list_pages(request: Request, lang: str | None = Query(default=None)):
     """List published static pages (filesystem sandbox under static_pages/)."""
     from site_publishing import list_static_pages
-    return {"items": list_static_pages()}
+    return {"items": list_static_pages(lang=_request_lang(request, lang))}
 
 
 @app.get("/pages/{slug}")
-async def get_page(slug: str):
+async def get_page(slug: str, request: Request, lang: str | None = Query(default=None)):
     """Fetch the JSON payload of a static page (slug, title, html_body, summary)."""
-    from site_publishing import get_static_page
+    from site_publishing import get_static_page, localize_static_page
     data = get_static_page(slug)
     if not data:
         return JSONResponse(status_code=404, content={"detail": "Page not found"})
-    return data
+    return localize_static_page(data, _request_lang(request, lang))
 
 
 @app.get("/p/{slug}")
-async def render_static_page(slug: str):
+async def render_static_page(slug: str, request: Request, lang: str | None = Query(default=None)):
     """Server-render a published static page so inline SVG survives sanitization."""
     from site_publishing import get_static_page
     data = get_static_page(slug)
     if not data:
         return JSONResponse(status_code=404, content={"detail": "Page not found"})
-    html = _render_static_page_html(data)
+    html = _render_static_page_html(data, _request_lang(request, lang))
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
