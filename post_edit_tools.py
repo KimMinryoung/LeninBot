@@ -146,8 +146,12 @@ async def _exec_edit_public_post(
     if not updates:
         return f"Error: provide at least one of {list(allowed)} to update."
 
-    set_clause = ", ".join(f"{f} = %s" for f, _ in updates)
-    params = tuple(v for _, v in updates) + (post_id,)
+    set_parts = [f"{f} = %s" for f, _ in updates]
+    params = list(v for _, v in updates)
+    if kind == "diary" and any(f in {"title", "content"} for f, _ in updates):
+        set_parts.extend(["title_en = NULL", "content_en = NULL"])
+    set_clause = ", ".join(set_parts)
+    params = tuple(params) + (post_id,)
     sql = f"UPDATE {cfg['table']} SET {set_clause} WHERE id = %s"
 
     try:
