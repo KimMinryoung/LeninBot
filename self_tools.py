@@ -49,7 +49,7 @@ SELF_TOOLS = [
         "description": (
             "Read internal data. source: diary (6h entries), chat_logs (telegram/web), "
             "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
-            "system_status (overview), server_logs (journald), recent_updates (changelog), "
+            "system_status (overview), server_logs (journald), "
             "autonomous_project (self-running long-term project loop — list with no task_id, "
             "detail with task_id=<project_id>)."
         ),
@@ -59,7 +59,7 @@ SELF_TOOLS = [
                 "source": {
                     "type": "string",
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
-                             "kg_status", "system_status", "server_logs", "recent_updates",
+                             "kg_status", "system_status", "server_logs",
                              "file_registry", "autonomous_project"],
                     "description": "Which internal store to read — see tool description for per-source semantics.",
                 },
@@ -664,10 +664,11 @@ async def _exec_read_server_logs(
 
 
 async def _exec_read_recent_updates(max_entries: int = 3) -> str:
-    from shared import fetch_recent_updates
-
-    result = await asyncio.to_thread(fetch_recent_updates, max_entries)
-    return f"=== RECENT SYSTEM UPDATES ===\n\n{result}"
+    return (
+        "=== RECENT SYSTEM UPDATES ===\n\n"
+        "Disabled: dev_docs/project_state.md is a stale human-maintained snapshot "
+        "and must not be injected into agent context."
+    )
 
 
 def _normalize_for_overlap(text: str) -> set[str]:

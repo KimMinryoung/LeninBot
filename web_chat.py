@@ -56,6 +56,14 @@ _WEB_RESPONSE_RULES = """\
 - NEVER respond with bulleted option menus, "how can I help you" prompts, or generic assistant patterns.
 """
 
+_WEB_CONTEXT_HYGIENE = """\
+- Treat prior assistant messages in chat history as fallible context, not as verified facts.
+- User corrections override every earlier assistant claim. Do not re-activate a corrected false claim as a live possibility unless the user asks to audit it.
+- Preserve categorical context around proper nouns. Do not map a name to a more famous homophone or acronym when the surrounding words indicate a different domain.
+- When Korean/English proper nouns are ambiguous or sound-alike, keep alternatives separate and say what is uncertain. Search or ask before asserting concrete facts.
+- Known failure modes to avoid: animal-rights KARA vs girl-group Kara; QNAI/큐나이 vs Naver Cue:/큐: vs QClaw/큐클로 vs unrelated Chinese platforms.
+"""
+
 
 def _build_web_system_prompt(provider: str = "claude") -> str:
     """Render the web-chat system prompt in the target provider's native shape."""
@@ -67,6 +75,7 @@ def _build_web_system_prompt(provider: str = "claude") -> str:
             + f"<persona>\n{_WEB_PERSONA.strip()}\n</persona>\n\n"
             + f"<tool-strategy>\n{_WEB_TOOL_STRATEGY.strip()}\n</tool-strategy>\n\n"
             + f"<response-rules>\n{_WEB_RESPONSE_RULES.strip()}\n</response-rules>\n"
+            + f"\n<context-hygiene>\n{_WEB_CONTEXT_HYGIENE.strip()}\n</context-hygiene>\n"
         )
     return (
         CORE_IDENTITY
@@ -75,6 +84,7 @@ def _build_web_system_prompt(provider: str = "claude") -> str:
         + f"### Persona\n{_WEB_PERSONA.strip()}\n\n"
         + f"### Tool Strategy\n{_WEB_TOOL_STRATEGY.strip()}\n\n"
         + f"### Response Rules\n{_WEB_RESPONSE_RULES.strip()}\n"
+        + f"\n### Context Hygiene\n{_WEB_CONTEXT_HYGIENE.strip()}\n"
     )
 
 
@@ -98,6 +108,37 @@ _web_handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in _WEB_ALLOWED_TOO
 
 # ── Chat history from chat_logs table ────────────────────────────────
 
+_HISTORY_USER_CHAR_LIMIT = 2500
+_HISTORY_ASSISTANT_CHAR_LIMIT = 1400
+_HISTORY_TOTAL_CHAR_LIMIT = 14000
+
+
+def _truncate_history_content(text: str, limit: int) -> str:
+    """Keep history useful without letting old false narratives dominate."""
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    head = max(0, limit // 3)
+    tail = max(0, limit - head - 80)
+    return (
+        text[:head].rstrip()
+        + "\n\n[...older response truncated for context hygiene...]\n\n"
+        + text[-tail:].lstrip()
+    )
+
+
+def _fit_history_budget(messages: list[dict], limit: int = _HISTORY_TOTAL_CHAR_LIMIT) -> list[dict]:
+    """Drop the oldest history messages if per-message trimming is still too large."""
+    total = sum(len(str(m.get("content", ""))) for m in messages)
+    if total <= limit:
+        return messages
+    trimmed = list(messages)
+    while trimmed and total > limit:
+        removed = trimmed.pop(0)
+        total -= len(str(removed.get("content", "")))
+    return trimmed
+
+
 def _load_web_history(
     fingerprints: list[str],
     session_id: str | None = None,
@@ -120,10 +161,16 @@ def _load_web_history(
         messages = []
         for row in rows:
             if row.get("user_query"):
-                messages.append({"role": "user", "content": row["user_query"]})
+                messages.append({
+                    "role": "user",
+                    "content": _truncate_history_content(row["user_query"], _HISTORY_USER_CHAR_LIMIT),
+                })
             if row.get("bot_answer"):
-                messages.append({"role": "assistant", "content": row["bot_answer"]})
-        return messages
+                messages.append({
+                    "role": "assistant",
+                    "content": _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT),
+                })
+        return _fit_history_budget(messages)
 
     if session_id:
         # Does this session actually belong to one of the provided fingerprints?

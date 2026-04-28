@@ -412,6 +412,26 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
 _READ_DEFAULT_LIMIT = 500
 _READ_MAX_LIMIT = 2000
 _READ_MAX_CHARS = 100_000
+_BLOCKED_CONTEXT_FILES = {
+    os.path.normpath("dev_docs/project_state.md"),
+}
+
+
+def _project_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _normalize_project_path(path: str, project_root: str | None = None) -> tuple[str, str]:
+    project_root = project_root or _project_root()
+    abs_path = path if os.path.isabs(path) else os.path.join(project_root, path)
+    abs_path = os.path.normpath(abs_path)
+    rel_path = os.path.relpath(abs_path, project_root) if abs_path.startswith(project_root) else abs_path
+    return abs_path, os.path.normpath(rel_path)
+
+
+def _is_blocked_context_file(path: str, project_root: str | None = None) -> bool:
+    _, rel_path = _normalize_project_path(path, project_root)
+    return rel_path in _BLOCKED_CONTEXT_FILES
 
 
 async def _exec_read_file(
@@ -435,9 +455,14 @@ async def _exec_read_file(
         or kwargs.get("lineend")
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if not os.path.isabs(path):
-        path = os.path.join(project_root, path)
+    project_root = _project_root()
+    path, rel_path = _normalize_project_path(path, project_root)
+    if rel_path in _BLOCKED_CONTEXT_FILES:
+        return (
+            "Error: dev_docs/project_state.md is blocked from agent context. "
+            "It is a stale human-maintained snapshot; use live tools, database state, "
+            "or targeted source files instead."
+        )
     if not os.path.exists(path):
         return f"Error: File not found: {path}"
     if os.path.isdir(path):
@@ -501,23 +526,36 @@ async def _exec_search_files(
     import subprocess
     import shlex
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = _project_root()
     search_path = path or project_root
-    if not os.path.isabs(search_path):
-        search_path = os.path.join(project_root, search_path)
+    search_path, rel_search_path = _normalize_project_path(search_path, project_root)
+    if rel_search_path in _BLOCKED_CONTEXT_FILES:
+        return (
+            "Error: dev_docs/project_state.md is blocked from agent context. "
+            "Use live tools, database state, or targeted source files instead."
+        )
     if not os.path.exists(search_path):
         return f"Error: path not found: {search_path}"
 
     if target == "files":
         # Glob-by-name file search using rg --files. pattern is a glob.
-        cmd = ["rg", "--files", "--hidden", "--glob", "!.git", "--glob", pattern, search_path]
+        cmd = [
+            "rg", "--files", "--hidden",
+            "--glob", "!.git",
+            "--glob", "!dev_docs/project_state.md",
+            "--glob", pattern,
+            search_path,
+        ]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
             return "Error: search timed out"
         if proc.returncode not in (0, 1):
             return f"Error: rg exited {proc.returncode}: {proc.stderr.strip()}"
-        files = [l for l in proc.stdout.splitlines() if l.strip()]
+        files = [
+            l for l in proc.stdout.splitlines()
+            if l.strip() and not _is_blocked_context_file(l, project_root)
+        ]
         # Sort by mtime desc
         try:
             files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
@@ -538,6 +576,7 @@ async def _exec_search_files(
         cmd.append("-i")
     if file_glob:
         cmd += ["-g", file_glob]
+    cmd += ["-g", "!dev_docs/project_state.md"]
     if output_mode == "files_only":
         cmd.append("-l")
     elif output_mode == "count":
