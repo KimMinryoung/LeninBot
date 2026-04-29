@@ -10,6 +10,7 @@ import os
 import json
 import asyncio
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from shared import KST, CORE_IDENTITY, EXTERNAL_SOURCE_RULE
@@ -1037,6 +1038,15 @@ def _clear_chat_history(user_id: int):
 _SUMMARY_CHUNK_SIZE = 10  # messages per summary chunk
 _MAX_SUMMARY_CHUNKS = 3   # max chunks to include in context
 _summary_table_ready = False
+_BAD_SUMMARY_PATTERNS = (
+    "실행하시겠습니까",
+    "죄송합니다",
+    "당신이 제시한",
+    "원하시면",
+    "해드릴까요",
+    "Would you like",
+    "Let me know if",
+)
 
 
 def _ensure_summary_table():
@@ -1070,6 +1080,41 @@ def _ensure_summary_table():
 
 _RAW_MSG_HARD_CAP = 500  # safety ceiling; normally the summary cursor keeps
                          # the raw tail far smaller (<= _SUMMARY_CHUNK_SIZE-ish)
+
+
+def _build_extractive_chat_summary(chunk: list[dict]) -> str:
+    """Fallback summary that cannot answer the user or invent next actions."""
+    users = [
+        _normalize_history_content(r.get("content", "")).replace("\n", " ").strip()
+        for r in chunk if r.get("role") == "user"
+    ]
+    assistants = [
+        _normalize_history_content(r.get("content", "")).replace("\n", " ").strip()
+        for r in chunk if r.get("role") == "assistant"
+    ]
+    first_user = users[0][:180] if users else "사용자 발화 없음"
+    last_user = users[-1][:180] if users else first_user
+    last_assistant = assistants[-1][:220] if assistants else "아직 assistant 응답 없음"
+    return (
+        f"사용자는 '{first_user}'로 대화를 시작했고, 최근에는 '{last_user}'라고 말했다. "
+        f"마지막 assistant 응답은 '{last_assistant}'였다. "
+        "이 요약은 원문 대화의 추출식 압축이며 사용자에게 보내는 답변이 아니다."
+    )[:900]
+
+
+def _summary_is_contaminated(summary: str) -> bool:
+    """Detect summaries that are actually a direct reply to the user."""
+    if not summary or not summary.strip():
+        return True
+    text = summary.strip()
+    if any(p in text for p in _BAD_SUMMARY_PATTERNS):
+        return True
+    if text.endswith("?") or text.endswith("습니까?"):
+        return True
+    # A valid summary should describe the conversation, not address "you".
+    if re.search(r"\b(you|your)\b", text, flags=re.IGNORECASE) and "user" not in text.lower():
+        return True
+    return False
 
 
 def _load_context_with_summaries(user_id: int) -> list[dict]:
@@ -1226,11 +1271,12 @@ async def _maybe_summarize_chunk(user_id: int):
             for r in chunk
         )
         summary_prompt = (
-            "Summarize the conversation below concisely, keeping only key information. "
-            "1) What topic/request did the user raise? "
-            "2) What conclusions/answers/results were reached? "
-            "3) Note any items still in progress or unresolved. "
-            "Preserve proper nouns, numbers, dates, and specific decisions. 500 characters max.\n\n"
+            "Summarize the conversation below for future context only. "
+            "Write in third person. Do NOT answer the user. Do NOT apologize. "
+            "Do NOT give advice, ask a question, or propose execution. "
+            "Keep only: 1) user topic/request, 2) assistant conclusions/results, "
+            "3) unresolved items. Preserve proper nouns, numbers, dates, and "
+            "specific decisions. Korean, 500 characters max.\n\n"
             + conversation_text
         )
 
@@ -1242,6 +1288,12 @@ async def _maybe_summarize_chunk(user_id: int):
                 messages=[{"role": "user", "content": summary_prompt}],
             )
             summary = _extract_text(resp)
+        if _summary_is_contaminated(summary):
+            logger.warning(
+                "Chunk summary contaminated; using extractive fallback user=%d msgs=#%d~#%d",
+                user_id, chunk_start_id, chunk_end_id,
+            )
+            summary = _build_extractive_chat_summary(chunk)
 
         await asyncio.to_thread(
             _execute,

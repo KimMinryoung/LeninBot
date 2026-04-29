@@ -10,6 +10,8 @@ import json
 import asyncio
 import logging
 import base64
+import re
+from difflib import SequenceMatcher
 from datetime import datetime
 from aiogram import F, Router
 from aiogram.types import (
@@ -101,6 +103,31 @@ async def _svc_health() -> str:
 _ctx: dict = {}
 _pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → entry)
 _reflection_counter: dict[int, int] = {}
+
+_LEADING_TIMESTAMP_RE = re.compile(r"^\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*")
+
+
+def _normalize_for_echo_check(text: str | None) -> str:
+    """Normalize user-visible text for near-echo detection."""
+    if not text:
+        return ""
+    normalized = _LEADING_TIMESTAMP_RE.sub("", str(text).strip())
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _is_near_user_echo(reply: str | None, user_text: str | None) -> bool:
+    """Return True when a model reply is essentially the latest user message."""
+    user_norm = _normalize_for_echo_check(user_text)
+    reply_norm = _normalize_for_echo_check(reply)
+    if len(user_norm) < 20 or len(reply_norm) < 20:
+        return False
+    if user_norm == reply_norm:
+        return True
+    shorter, longer = sorted((user_norm, reply_norm), key=len)
+    if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.75:
+        return True
+    return SequenceMatcher(None, user_norm, reply_norm).ratio() >= 0.88
 
 _HELP_TEXT = """\
 *레닌봇 커맨드 목록*
@@ -1460,6 +1487,43 @@ async def handle_message(message: Message):
         )
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()
+        if _is_near_user_echo(reply, user_text):
+            logger.warning(
+                "near-echo reply blocked: user_id=%s provider=%s user_len=%d reply_len=%d",
+                user_id, _provider, len(user_text or ""), len(reply or ""),
+            )
+            _ctx["log_event"](
+                "warning",
+                "chat",
+                f"Near-echo reply blocked and retried ({_provider})",
+                detail=(reply or "")[:500],
+            )
+            echo_guard_context = _ctx["join_context_blocks"](
+                extra_context,
+                (
+                    "### Echo Guard\n"
+                    "The previous candidate reply was rejected because it nearly "
+                    "copied the latest Telegram user message. Answer the user's "
+                    "latest message substantively in Cyber-Lenin's voice. Do not "
+                    "repeat or quote the latest user message except for a short "
+                    "phrase when analytically necessary."
+                ),
+            )
+            progress_cb = _ctx["make_progress_callback"](message.chat.id)
+            retry_bt = {}
+            retry_reply = await _ctx["chat_with_tools"](
+                history, on_progress=progress_cb, budget_tracker=retry_bt,
+                extra_handlers={"mission": mission_handler},
+                extra_system_context=echo_guard_context,
+            )
+            if hasattr(progress_cb, "flush"):
+                await progress_cb.flush()
+            bt = retry_bt
+            if _is_near_user_echo(retry_reply, user_text):
+                logger.error("near-echo retry also failed: user_id=%s provider=%s", user_id, _provider)
+                reply = "방금 응답 후보가 네 발화를 그대로 반복해서 폐기했다. 생성 파이프라인 이상으로 보고 기록했다."
+            else:
+                reply = retry_reply
     except Exception as e:
         bt = {}  # no budget info on exception
         err_str = str(e)
