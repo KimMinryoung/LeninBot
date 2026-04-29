@@ -69,7 +69,8 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
    - Research gap → focused web_search / fetch_url / vector_search / knowledge_graph_search
    - Accumulated research but no plan → draft or revise the plan with `revise_plan`
    - Plan exists, artifact ready to draft → proceed through the publishing pipeline
-   - Published artifact needs revision → rewrite and republish (same slug overwrites)
+   - Published research needs revision → use `edit_research`
+   - Published curation needs revision → use `edit_public_post(kind="curation", slug=...)`
 2. **Execute**: Take the step. Save findings via `add_research_note` IMMEDIATELY — chat memory
    does not persist across ticks.
 3. **Publish (when appropriate)**: If the tick is at the "build" step for an artifact, use the
@@ -98,6 +99,14 @@ structured DB row served at `/hub/{slug}`. Use for:
   rationale (why selected, tied to criteria), context (how it connects)
 - Do NOT put prose commentary into `context` — keep it tight (a paragraph)
 - Korean-language sources only at this time
+
+**edit_research(operation, filename, title?, content?)** — edit or unpublish an existing
+research DB row. Use `operation="edit"` for corrections and `operation="unpublish"` to
+make a bad research document private. Use this instead of publishing a duplicate file.
+
+**edit_public_post(kind="curation", slug, ...fields)** — edit an existing hub curation DB
+row. Use this for corrections to curation title, source metadata, selection_rationale,
+context, or tags. Do not create a duplicate curation when the existing row should be fixed.
 
 **publish_static_page(slug, title, html_body, summary?)** — sandboxed HTML page served at
 `/p/{slug}`. Use for:
@@ -170,7 +179,9 @@ Never attempt to reach outside it.
         # Knowledge graph writes
         "write_kg_structured",
         # Publishing to cyber-lenin.com (T0 tier — our own domain)
-        "publish_research", "publish_hub_curation", "publish_static_page", "publish_comic",
+        "publish_research", "edit_research",
+        "publish_hub_curation", "edit_public_post",
+        "publish_static_page", "publish_comic",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",
     ],
