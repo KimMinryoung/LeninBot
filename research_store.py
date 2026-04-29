@@ -179,6 +179,7 @@ def upsert_document(
     title_en: str | None = None,
     summary_en: str | None = None,
     published_at: datetime | None = None,
+    updated_at: datetime | None = None,
 ) -> tuple[dict, bool]:
     ensure_research_table()
     fname = storage_filename(filename)
@@ -191,7 +192,7 @@ def upsert_document(
           slug, filename, title, markdown, summary, status, source_task_id,
           markdown_en, title_en, summary_en, content_sha256, published_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()))
         ON CONFLICT (filename) DO UPDATE SET
           slug = EXCLUDED.slug,
           title = EXCLUDED.title,
@@ -203,12 +204,13 @@ def upsert_document(
           title_en = COALESCE(EXCLUDED.title_en, research_documents.title_en),
           summary_en = COALESCE(EXCLUDED.summary_en, research_documents.summary_en),
           content_sha256 = EXCLUDED.content_sha256,
-          updated_at = NOW()
+          published_at = EXCLUDED.published_at,
+          updated_at = EXCLUDED.updated_at
         RETURNING *
         """,
         (
             slug, fname, title, markdown, summary, status, source_task_id,
-            markdown_en, title_en, summary_en, content_hash, published_at,
+            markdown_en, title_en, summary_en, content_hash, published_at, updated_at,
         ),
     )
     return dict(row), existing is not None

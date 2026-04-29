@@ -10,7 +10,6 @@ Optional English translations are read from research/en/{filename}.
 
 from __future__ import annotations
 
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,17 +24,7 @@ RESEARCH_DIR = ROOT / "research"
 LEGACY_RESEARCH_DIR = ROOT / "output" / "research"
 TRANSLATIONS_DIR = RESEARCH_DIR / "en"
 
-_DATE_RE = re.compile(r"\*\*작성일:\*\*\s*(\d{4}-\d{2}-\d{2})")
-
-
-def _published_at(markdown: str, path: Path) -> datetime:
-    for line in markdown.splitlines()[:20]:
-        m = _DATE_RE.match(line.strip())
-        if m:
-            try:
-                return datetime.fromisoformat(m.group(1)).replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+def _file_timestamp(path: Path) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
@@ -67,6 +56,7 @@ def main() -> int:
                 title_en = research_store.extract_title(markdown_en, title)
                 summary_en = research_store.extract_excerpt(markdown_en)
 
+            file_ts = _file_timestamp(path)
             _row, existed = research_store.upsert_document(
                 filename=filename,
                 title=title,
@@ -76,7 +66,8 @@ def main() -> int:
                 title_en=title_en,
                 summary_en=summary_en,
                 status="public",
-                published_at=_published_at(markdown, path),
+                published_at=file_ts,
+                updated_at=file_ts,
             )
             if existed:
                 updated += 1

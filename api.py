@@ -1014,7 +1014,11 @@ async def list_research(request: Request, lang: str | None = Query(default=None)
                 "language": "en" if view != p else "ko",
                 "has_translation": _resolve_research_translation_file(p.name, "en") is not None,
             }
-    files = [files_by_name[name] for name in sorted(files_by_name)]
+    files = sorted(
+        files_by_name.values(),
+        key=lambda item: item.get("modified_at") or 0,
+        reverse=True,
+    )
     return {"files": files}
 
 
