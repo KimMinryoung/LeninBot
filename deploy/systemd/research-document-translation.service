@@ -1,5 +1,5 @@
 [Unit]
-Description=Translate untranslated LeninBot research documents into English
+Description=Translate untranslated Cyber-Lenin public content into English
 Wants=network-online.target
 After=network-online.target
 
@@ -10,4 +10,5 @@ WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
-ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_research_documents.py --limit 2 --max-chars 60000
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_research_documents.py --limit 0 --max-chars 0
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_db_content.py --kind all --limit 0

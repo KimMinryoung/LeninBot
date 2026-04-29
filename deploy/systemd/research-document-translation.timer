@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily untranslated research document English translation
+Description=Daily untranslated public content English translation
 
 [Timer]
 OnCalendar=*-*-* 04:20:00

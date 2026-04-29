@@ -59,12 +59,23 @@ def _ensure_hub_table() -> None:
             source_published_at  DATE,
             selection_rationale  TEXT NOT NULL,
             context              TEXT NOT NULL,
+            title_en             TEXT,
+            source_title_en      TEXT,
+            selection_rationale_en TEXT,
+            context_en           TEXT,
             tags                 JSONB NOT NULL DEFAULT '[]'::jsonb,
             published_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    for ddl in (
+        "ALTER TABLE hub_curations ADD COLUMN IF NOT EXISTS title_en TEXT",
+        "ALTER TABLE hub_curations ADD COLUMN IF NOT EXISTS source_title_en TEXT",
+        "ALTER TABLE hub_curations ADD COLUMN IF NOT EXISTS selection_rationale_en TEXT",
+        "ALTER TABLE hub_curations ADD COLUMN IF NOT EXISTS context_en TEXT",
+    ):
+        db_execute(ddl)
     db_execute("""
         CREATE INDEX IF NOT EXISTS hub_curations_published_at_idx
         ON hub_curations(published_at DESC)
