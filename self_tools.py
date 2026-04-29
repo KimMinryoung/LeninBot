@@ -50,6 +50,8 @@ SELF_TOOLS = [
             "Read internal data. source: diary (6h entries), chat_logs (telegram/web), "
             "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
             "system_status (overview), server_logs (journald), "
+            "research (public research_documents), curation (hub_curations), "
+            "static_pages (published /p pages), "
             "autonomous_project (self-running long-term project loop — list with no task_id, "
             "detail with task_id=<project_id>)."
         ),
@@ -60,7 +62,8 @@ SELF_TOOLS = [
                     "type": "string",
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
                              "kg_status", "system_status", "server_logs",
-                             "file_registry", "autonomous_project"],
+                             "file_registry", "research", "curation", "static_pages",
+                             "autonomous_project"],
                     "description": "Which internal store to read — see tool description for per-source semantics.",
                 },
                 "limit": {"type": "integer", "description": "Results count."},
@@ -76,6 +79,7 @@ SELF_TOOLS = [
                 },
                 "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
                 "task_id": {"type": "integer", "description": "For task_reports: specific task ID. For autonomous_project: specific project ID."},
+                "slug": {"type": "string", "description": "For research/curation/static_pages: specific slug or filename."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
             "required": ["source"],
@@ -514,6 +518,184 @@ async def _exec_read_task_reports(
         results.append(entry)
 
     return f"Task reports ({len(rows)} entries):\n\n" + "\n\n---\n\n".join(results)
+
+
+async def _exec_read_research(
+    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+) -> str:
+    from db import query as db_query, query_one as db_query_one
+
+    if slug:
+        raw = slug.strip()
+        filename = raw if raw.endswith(".md") else f"{raw}.md"
+        bare_slug = raw[:-3] if raw.endswith(".md") else raw
+        row = await asyncio.to_thread(
+            db_query_one,
+            """
+            SELECT id, filename, slug, title, summary, markdown, status,
+                   published_at, updated_at, title_en, summary_en,
+                   markdown_en IS NOT NULL AND length(trim(markdown_en)) > 0 AS has_translation
+              FROM research_documents
+             WHERE filename = %s OR slug = %s
+             LIMIT 1
+            """,
+            (filename, bare_slug),
+        )
+        if not row:
+            return f"No research document found for slug/filename: {slug}"
+        markdown = row.get("markdown") or ""
+        return (
+            f"=== RESEARCH DOCUMENT: {row['filename']} ===\n"
+            f"id={row['id']} status={row['status']} slug={row.get('slug') or bare_slug}\n"
+            f"title: {row.get('title') or ''}\n"
+            f"published={_to_kst(row.get('published_at'))} updated={_to_kst(row.get('updated_at'))}\n"
+            f"has_translation={row.get('has_translation')}\n"
+            f"summary: {(row.get('summary') or '')[:800]}\n\n"
+            f"-- markdown preview --\n{markdown[:4000]}{'…' if len(markdown) > 4000 else ''}"
+        )
+
+    clauses = ["status = 'public'"]
+    params: list = []
+    if keyword:
+        clauses.append("(title ILIKE %s OR summary ILIKE %s OR markdown ILIKE %s OR filename ILIKE %s)")
+        q = f"%{keyword}%"
+        params.extend([q, q, q, q])
+    params.append(min(max(int(limit or 10), 1), 50))
+    rows = await asyncio.to_thread(
+        db_query,
+        f"""
+        SELECT id, filename, slug, title, summary, published_at, updated_at,
+               markdown_en IS NOT NULL AND length(trim(markdown_en)) > 0 AS has_translation
+          FROM research_documents
+         WHERE {' AND '.join(clauses)}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT %s
+        """,
+        tuple(params),
+    )
+    if not rows:
+        return "No public research documents found."
+    lines = ["=== RESEARCH DOCUMENTS ===", "Use read_self(source='research', slug='<slug-or-filename>') for full detail."]
+    for r in rows:
+        slug_value = r.get("slug") or str(r["filename"]).removesuffix(".md")
+        summary = (r.get("summary") or "").replace("\n", " ")[:220]
+        lines.append(
+            f"- {r['filename']} | slug={slug_value} | updated={_to_kst(r.get('updated_at'))} | en={r.get('has_translation')}\n"
+            f"  title: {r.get('title') or ''}\n"
+            f"  summary: {summary}"
+        )
+    return "\n".join(lines)
+
+
+async def _exec_read_curation(
+    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+) -> str:
+    from db import query as db_query, query_one as db_query_one
+
+    if slug:
+        slug = slug.strip().lower()
+        row = await asyncio.to_thread(
+            db_query_one,
+            """
+            SELECT id, slug, title, source_url, source_title, source_author,
+                   source_publication, source_published_at,
+                   selection_rationale, context, tags, published_at, updated_at
+              FROM hub_curations
+             WHERE slug = %s
+             LIMIT 1
+            """,
+            (slug,),
+        )
+        if not row:
+            return f"No hub curation found for slug: {slug}"
+        return (
+            f"=== HUB CURATION: {row['slug']} ===\n"
+            f"id={row['id']} title: {row.get('title') or ''}\n"
+            f"source: {row.get('source_title') or row.get('source_url')} "
+            f"({row.get('source_publication') or '?'}, {row.get('source_author') or '?'})\n"
+            f"url: {row.get('source_url') or ''}\n"
+            f"published={_to_kst(row.get('published_at'))} updated={_to_kst(row.get('updated_at'))}\n"
+            f"tags: {row.get('tags') or []}\n\n"
+            f"-- selection rationale --\n{row.get('selection_rationale') or ''}\n\n"
+            f"-- context --\n{row.get('context') or ''}"
+        )
+
+    clauses = []
+    params: list = []
+    if keyword:
+        clauses.append(
+            "(title ILIKE %s OR source_title ILIKE %s OR source_publication ILIKE %s "
+            "OR selection_rationale ILIKE %s OR context ILIKE %s)"
+        )
+        q = f"%{keyword}%"
+        params.extend([q, q, q, q, q])
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    params.append(min(max(int(limit or 10), 1), 50))
+    rows = await asyncio.to_thread(
+        db_query,
+        f"""
+        SELECT id, slug, title, source_title, source_publication, source_author,
+               context, tags, published_at
+          FROM hub_curations
+          {where}
+         ORDER BY published_at DESC, id DESC
+         LIMIT %s
+        """,
+        tuple(params),
+    )
+    if not rows:
+        return "No hub curations found."
+    lines = ["=== HUB CURATIONS ===", "Use read_self(source='curation', slug='<slug>') for full detail."]
+    for r in rows:
+        context = (r.get("context") or "").replace("\n", " ")[:220]
+        lines.append(
+            f"- {r['slug']} | curated={_to_kst(r.get('published_at'))}\n"
+            f"  title: {r.get('title') or ''}\n"
+            f"  source: {r.get('source_title') or ''} ({r.get('source_publication') or '?'})\n"
+            f"  context: {context}"
+        )
+    return "\n".join(lines)
+
+
+async def _exec_read_static_pages(
+    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+) -> str:
+    import site_publishing
+
+    if slug:
+        data = await asyncio.to_thread(site_publishing.get_static_page, slug.strip().lower())
+        if not data:
+            return f"No static page found for slug: {slug}"
+        html = data.get("html_body") or ""
+        return (
+            f"=== STATIC PAGE: {data.get('slug') or slug} ===\n"
+            f"title: {data.get('title') or ''}\n"
+            f"summary: {data.get('summary') or ''}\n"
+            f"updated_at: {data.get('updated_at') or '?'}\n\n"
+            f"-- html_body preview --\n{html[:4000]}{'…' if len(html) > 4000 else ''}"
+        )
+
+    rows = await asyncio.to_thread(site_publishing.list_static_pages, "ko")
+    if keyword:
+        k = keyword.lower()
+        rows = [
+            r for r in rows
+            if k in str(r.get("slug") or "").lower()
+            or k in str(r.get("title") or "").lower()
+            or k in str(r.get("summary") or "").lower()
+        ]
+    rows = rows[:min(max(int(limit or 10), 1), 50)]
+    if not rows:
+        return "No static pages found."
+    lines = ["=== STATIC PAGES ===", "Use read_self(source='static_pages', slug='<slug>') for full detail."]
+    for r in rows:
+        summary = (r.get("summary") or "").replace("\n", " ")[:220]
+        lines.append(
+            f"- {r.get('slug')} | updated={r.get('updated_at') or '?'} | en={r.get('has_translation')}\n"
+            f"  title: {r.get('title') or ''}\n"
+            f"  summary: {summary}"
+        )
+    return "\n".join(lines)
 
 
 async def _exec_read_kg_status() -> str:
@@ -1389,7 +1571,7 @@ async def _exec_read_self(
     source: str, limit: int | None = None, keyword: str | None = None,
     hours_back: int | None = None, service: str = "telegram",
     grep: str | list[str] | tuple[str, ...] | None = "", status: str | None = None, task_id: int | None = None,
-    chat_source: str = "web",
+    chat_source: str = "web", slug: str | None = None,
 ) -> str:
     """Dispatcher for all read_self sources."""
     if source == "diary":
@@ -1410,6 +1592,12 @@ async def _exec_read_self(
         return await _exec_read_recent_updates(max_entries=limit or 3)
     if source == "file_registry":
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
+    if source == "research":
+        return await _exec_read_research(limit=limit or 10, keyword=keyword, slug=slug)
+    if source == "curation":
+        return await _exec_read_curation(limit=limit or 10, keyword=keyword, slug=slug)
+    if source == "static_pages":
+        return await _exec_read_static_pages(limit=limit or 10, keyword=keyword, slug=slug)
     if source == "autonomous_project":
         return await _exec_read_autonomous_project(project_id=task_id, limit=limit or 10, keyword=keyword)
     return f"Unknown source: {source}"
