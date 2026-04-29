@@ -34,6 +34,7 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
         "table": "ai_diary",
         "allowed_fields": ("title", "content"),
         "entry_key": "diary:{id}",
+        "localized_cache": True,
         "index_keys": ("diary:index", "diary:nav"),
     },
     "report": {
@@ -46,6 +47,7 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
         "table": "posts",
         "allowed_fields": ("title", "content"),
         "entry_key": "post:{id}",
+        "localized_cache": True,
         "index_keys": ("post:index", "post:nav"),
     },
     "curation": {
@@ -138,13 +140,20 @@ def _invalidate_cache_sync(kind: str, post_id: int) -> dict[str, Any]:
     try:
         entry_key = cfg.get("entry_key")
         if entry_key:
-            deleted += int(r.delete(entry_key.format(id=post_id)) or 0)
+            key = entry_key.format(id=post_id)
+            keys = [key]
+            if cfg.get("localized_cache"):
+                keys.extend([f"{key}:ko", f"{key}:en"])
+            deleted += int(r.delete(*keys) or 0)
         for pattern in cfg["index_keys"]:
             if "*" in pattern:
                 for k in r.scan_iter(match=pattern):
                     deleted += int(r.delete(k) or 0)
             else:
-                deleted += int(r.delete(pattern) or 0)
+                keys = [pattern]
+                if cfg.get("localized_cache") and pattern.endswith(":index"):
+                    keys.extend([f"{pattern}:ko", f"{pattern}:en"])
+                deleted += int(r.delete(*keys) or 0)
     except Exception as e:
         logger.warning("edit_public_post cache invalidation failed (%s:%s): %s", kind, post_id, e)
         return {"ok": False, "deleted": deleted, "reason": f"{type(e).__name__}: {e}"}
