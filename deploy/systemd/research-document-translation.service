@@ -8,6 +8,7 @@ Type=oneshot
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_research_documents.py --limit 0 --max-chars 0
