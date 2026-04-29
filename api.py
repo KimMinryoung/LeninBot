@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse, RedirectResponse, Response, JSO
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from db import query as db_query, query_one as db_query_one
+import research_store
 from email_bridge import (
     build_reply_prompt_input,
     deliver_inbound_email_to_internal_input,
@@ -800,6 +801,32 @@ def _extract_md_excerpt(path: Path, max_chars: int = 300) -> str | None:
     return text
 
 
+def _localized_research_row(row: dict, lang: str | None = None) -> dict:
+    requested = _normalize_lang(lang)
+    has_en = bool((row.get("markdown_en") or "").strip())
+    use_en = requested == "en" and has_en
+    markdown = row["markdown_en"] if use_en else row["markdown"]
+    title = (row.get("title_en") if use_en else row.get("title")) or research_store.extract_title(
+        markdown, _filename_fallback_title(row["filename"])
+    )
+    summary = (row.get("summary_en") if use_en else row.get("summary")) or research_store.extract_excerpt(markdown)
+    return {
+        "filename": row["filename"],
+        "title": title,
+        "content": markdown,
+        "summary": summary,
+        "excerpt": summary,
+        "size": len(markdown.encode("utf-8")),
+        "source_dir": "db",
+        "url": _build_research_url(row["filename"]),
+        "requested_language": requested,
+        "language": "en" if use_en else "ko",
+        "has_translation": has_en,
+        "available_languages": ["ko", "en"] if has_en else ["ko"],
+        "modified_at": research_store.timestamp_seconds(row.get("updated_at")),
+    }
+
+
 @app.get("/robots.txt")
 async def robots_txt():
     content = "\n".join([
@@ -829,11 +856,28 @@ async def sitemap_xml():
             "</url>"
         )
 
+    db_rows = {r["filename"]: r for r in research_store.list_documents()}
+    for name in sorted(db_rows):
+        row = db_rows[name]
+        lastmod = research_store.timestamp_seconds(row.get("updated_at"))
+        from datetime import datetime, timezone
+        lastmod_iso = datetime.fromtimestamp(lastmod, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entries.append(
+            "<url>"
+            f"<loc>{_xml_escape(_build_research_url(name))}</loc>"
+            f"<lastmod>{lastmod_iso}</lastmod>"
+            "<changefreq>weekly</changefreq>"
+            "<priority>0.7</priority>"
+            "</url>"
+        )
+
     files_by_name: dict[str, Path] = {}
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
             continue
         for p in directory.glob("*.md"):
+            if p.name in db_rows:
+                continue
             files_by_name[p.name] = p
 
     for name in sorted(files_by_name):
@@ -861,19 +905,48 @@ async def sitemap_xml():
 
 @app.get("/atom.xml")
 async def atom_feed():
+    updated = "1970-01-01T00:00:00Z"
+    entries: list[str] = []
+
+    db_rows = {r["filename"]: r for r in research_store.list_documents()}
+    sorted_db_rows = sorted(
+        db_rows.values(),
+        key=lambda r: research_store.timestamp_seconds(r.get("updated_at")),
+        reverse=True,
+    )[:20]
+    for row in sorted_db_rows:
+        updated_ts = research_store.timestamp_seconds(row.get("updated_at"))
+        if updated_ts:
+            from datetime import datetime, timezone
+            modified = datetime.fromtimestamp(updated_ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if updated == "1970-01-01T00:00:00Z" or modified > updated:
+                updated = modified
+            title = row.get("title") or _filename_fallback_title(row["filename"])
+            url = _build_research_url(row["filename"])
+            entries.append(
+                "<entry>"
+                f"<title>{_xml_escape(title)}</title>"
+                f"<link href=\"{_xml_escape(url)}\" />"
+                f"<id>{_xml_escape(url)}</id>"
+                f"<updated>{modified}</updated>"
+                "</entry>"
+            )
+
     files_by_name: dict[str, Path] = {}
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
             continue
         for p in directory.glob("*.md"):
+            if p.name in db_rows:
+                continue
             files_by_name[p.name] = p
 
     sorted_files = sorted(files_by_name.values(), key=lambda p: p.stat().st_mtime, reverse=True)[:20]
-    updated = "1970-01-01T00:00:00Z"
-    entries: list[str] = []
     if sorted_files:
         from datetime import datetime, timezone
-        updated = datetime.fromtimestamp(sorted_files[0].stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        file_updated = datetime.fromtimestamp(sorted_files[0].stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if updated == "1970-01-01T00:00:00Z" or file_updated > updated:
+            updated = file_updated
         for p in sorted_files:
             modified = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             title = _extract_md_title(p) or _filename_fallback_title(p.name)
@@ -906,12 +979,29 @@ async def atom_feed():
 async def list_research(request: Request, lang: str | None = Query(default=None)):
     """List public .md files with extracted H1 title and a 3-line-ready excerpt
     so the frontend doesn't need N+1 fetches to populate previews."""
+    requested_lang = _request_lang(request, lang)
     files_by_name: dict[str, dict] = {}
+    db_rows = {r["filename"]: r for r in research_store.list_documents()}
+    for name, row in db_rows.items():
+        view = _localized_research_row(row, requested_lang)
+        files_by_name[name] = {
+            "filename": view["filename"],
+            "title": view["title"],
+            "excerpt": view["excerpt"],
+            "size": view["size"],
+            "modified_at": view["modified_at"],
+            "source_dir": "db",
+            "url": view["url"],
+            "language": view["language"],
+            "has_translation": view["has_translation"],
+        }
     for directory in (LEGACY_OUTPUT_RESEARCH_DIR, RESEARCH_DIR):
         if not directory.is_dir():
             continue
         for p in directory.glob("*.md"):
-            view = _resolve_research_translation_file(p.name, _request_lang(request, lang)) or p
+            if p.name in db_rows:
+                continue
+            view = _resolve_research_translation_file(p.name, requested_lang) or p
             stat = p.stat()
             files_by_name[p.name] = {
                 "filename": p.name,
@@ -930,11 +1020,47 @@ async def list_research(request: Request, lang: str | None = Query(default=None)
 
 @app.get("/research/{filename}")
 async def get_research(filename: str, request: Request, format: str = Query(default="json"), lang: str | None = Query(default=None)):
-    """Read a single public markdown file from research/ or legacy output/research/."""
+    """Read a single public markdown document from DB, falling back to legacy files."""
     if "/" in filename or "\\" in filename or ".." in filename:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
     storage_filename = _storage_research_filename(filename)
+    requested_lang = _request_lang(request, lang)
+    row = research_store.get_document(storage_filename)
+    if row:
+        view = _localized_research_row(row, requested_lang)
+        content = view["content"]
+        if format.lower() == "html":
+            page_title = f"{view['title']} | Cyber-Lenin Research"
+            description = (view.get("summary") or view.get("excerpt") or SEO_DEFAULT_DESCRIPTION)[:300]
+            body_html = (
+                f"<main><article><h1>{_html_escape(view['title'])}</h1>"
+                f"<pre>{_html_escape(content)}</pre>"
+                f"</article></main>"
+            )
+            html = _render_html_page(
+                title=page_title,
+                description=description,
+                canonical_url=_build_research_url(storage_filename),
+                body_html=body_html,
+                og_type="article",
+            )
+            return Response(content=html, media_type="text/html; charset=utf-8")
+        return {
+            "filename": view["filename"],
+            "title": view["title"],
+            "content": content,
+            "summary": view["summary"],
+            "excerpt": view["excerpt"],
+            "size": view["size"],
+            "source_dir": "db",
+            "url": view["url"],
+            "requested_language": view["requested_language"],
+            "language": view["language"],
+            "has_translation": view["has_translation"],
+            "available_languages": view["available_languages"],
+        }
+
     filepath, selected_lang, _ = _resolve_localized_research_file(filename, _request_lang(request, lang))
     if filepath is None:
         from fastapi.responses import JSONResponse

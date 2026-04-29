@@ -1,21 +1,18 @@
 """research_tools.py — Publish, edit, and unpublish public research documents.
 
-Public research files live under research/ and are served at
-https://cyber-lenin.com/reports/research/{slug}, where slug is the filename
-without its .md extension. The frontend (Node.js, in Docker) caches both the
-file list (TTL) and per-file content (permanent) in Redis, so any change on
-disk MUST be paired with cache invalidation or readers will keep seeing the old
-version.
+Public research documents are stored as Markdown rows in Supabase/Postgres and
+served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
+filename without its .md extension. Legacy files under research/ and
+output/research/ remain readable as fallback/import sources.
 
 This module consolidates:
-  * publish_research(title, content, filename?) — atomic write + cache bust
+  * publish_research(title, content, filename?) — DB upsert + cache bust
   * edit_research(operation, filename, ...) —
-      operation='edit'      → atomically rewrite content and bust cache
-      operation='unpublish' → move to research/private/ (kept as backup) and bust cache
+      operation='edit'      → rewrite DB markdown and bust cache
+      operation='unpublish' → set status=private (or move legacy file) and bust cache
 
-`unpublish` is intentionally non-destructive: it relocates the file out of the
-public-listing scope but never deletes it. If the file needs to be public again,
-mv it from research/private/ back to research/.
+`unpublish` is intentionally non-destructive: DB rows are marked private and
+legacy files are relocated out of the public-listing scope.
 
 Mirrors the post_edit_tools.py pattern (UPDATE + cache purge in one step) for
 filesystem-backed artifacts instead of DB rows.
@@ -33,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
+import research_store
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +159,15 @@ def _invalidate_cache_sync(filename: str) -> dict[str, Any]:
         return {"ok": False, "deleted": 0, "reason": "redis_unavailable"}
     deleted = 0
     try:
-        deleted += int(r.delete(f"research:{_cache_safe_key(filename)}") or 0)
-        deleted += int(r.delete("report:research_list") or 0)
+        safe = _cache_safe_key(filename)
+        deleted += int(r.delete(
+            f"research:{safe}",
+            f"research:{safe}:ko",
+            f"research:{safe}:en",
+            "report:research_list",
+            "report:research_list:ko",
+            "report:research_list:en",
+        ) or 0)
     except Exception as e:
         logger.warning("research cache invalidation failed for %s: %s", filename, e)
         return {"ok": False, "deleted": deleted, "reason": f"{type(e).__name__}: {e}"}
@@ -182,7 +187,10 @@ def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str
         return f"cache invalidated ({cache['deleted']} key(s))"
     base = f"CACHE INVALIDATION FAILED ({cache['reason']})"
     safe = _cache_safe_key(filename)
-    manual = f"redis-cli DEL research:{safe} report:research_list"
+    manual = (
+        f"redis-cli DEL research:{safe} research:{safe}:ko research:{safe}:en "
+        "report:research_list report:research_list:ko report:research_list:en"
+    )
     tail = f" — {missing_msg} Manually run: {manual}" if missing_msg else f" — readers may see stale data. Manually run: {manual}"
     return base + tail
 
@@ -192,13 +200,13 @@ def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str
 PUBLISH_RESEARCH_TOOL = {
     "name": "publish_research",
     "description": (
-        "Write a markdown document to the public research directory. "
+        "Write a markdown document to the public research database. "
         "Published files are served at https://cyber-lenin.com/reports/research/{slug}, "
         "where slug is the filename without the .md extension. "
         "Use for polished analysis, forecasts, and investigative findings. "
         "Filename is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) "
         "unless `filename` is passed explicitly. Writing the same filename overwrites; the "
-        "frontend Redis cache is invalidated atomically so readers see the new version immediately."
+            "frontend Redis cache is invalidated so readers see the new version immediately."
     ),
     "input_schema": {
         "type": "object",
@@ -238,15 +246,20 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
     else:
         fname = f"{now.strftime('%Y%m%d')}_{_slug_from_title(title)}.md"
 
-    filepath = RESEARCH_DIR / fname
-    is_overwrite = filepath.is_file()
     document = _build_document(title, content, now.strftime("%Y-%m-%d"))
 
     try:
-        await asyncio.to_thread(_atomic_write, filepath, document)
+        row, is_overwrite = await asyncio.to_thread(
+            research_store.upsert_document,
+            filename=fname,
+            title=title,
+            markdown=document,
+            summary=research_store.extract_excerpt(document),
+            status="public",
+        )
     except Exception as e:
-        logger.error("publish_research write error for %s: %s", fname, e)
-        return f"Error: failed to write {fname}: {type(e).__name__}: {e}"
+        logger.error("publish_research DB write error for %s: %s", fname, e)
+        return f"Error: failed to store {fname}: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     status = "Overwrote" if is_overwrite else "Published"
@@ -266,7 +279,7 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
         broadcast_note = f"\nTelegram channel broadcast failed: {e}"
     return (
         f"{status}: {fname}\n"
-        f"Local path: {filepath}\n"
+        f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
         f"Public URL: {public_url}\n"
         f"Size: {len(document)} chars; {_format_cache_note(cache, fname)}"
         f"{broadcast_note}"
@@ -279,10 +292,10 @@ EDIT_RESEARCH_TOOL = {
     "name": "edit_research",
     "description": (
         "Edit or unpublish an already-published research document. "
-        "operation='edit': atomically rewrite the file with new content (and optionally a new title) "
+        "operation='edit': rewrite the database Markdown with new content (and optionally a new title) "
         "and invalidate Redis cache so readers see the new version immediately. "
         "Original 작성일 is preserved when present in the existing file. "
-        "operation='unpublish': move the file to research/private/ (NOT deleted — kept as backup) "
+        "operation='unpublish': mark a DB row private or move a legacy file to research/private/ "
         "and invalidate cache so it disappears from cyber-lenin.com. "
         "Use this instead of publish_research when correcting or pulling already-public content."
     ),
@@ -323,6 +336,14 @@ def _unpublish_sync(existing: Path) -> Path:
     return dest
 
 
+def _extract_publish_date_from_markdown(markdown: str) -> str | None:
+    for line in markdown.splitlines()[:20]:
+        m = _PUBLISH_DATE_RE.match(line.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
 async def _exec_edit_research(
     operation: str,
     filename: str,
@@ -337,39 +358,64 @@ async def _exec_edit_research(
     except ValueError as e:
         return f"Error: {e}."
 
-    existing = _resolve_existing(fname)
-    if existing is None:
+    existing_doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
+    existing = None if existing_doc else _resolve_existing(fname)
+    if existing_doc is None and existing is None:
         return f"Error: no research file named '{fname}' under research/ or output/research/."
 
     if op == "edit":
         if not content or not content.strip():
             return "Error: content is required for operation='edit'."
-        existing_title = _extract_h1(existing)
+        existing_markdown = existing_doc["markdown"] if existing_doc else existing.read_text(encoding="utf-8")
+        existing_title = (
+            existing_doc.get("title") if existing_doc else None
+        ) or research_store.extract_title(existing_markdown, "") or (None if existing is None else _extract_h1(existing))
         new_title = (title or "").strip() or existing_title
         if not new_title:
             return "Error: existing file has no H1 — pass `title` explicitly."
-        publish_date = _extract_publish_date(existing) or datetime.now(KST).strftime("%Y-%m-%d")
+        publish_date = (
+            _extract_publish_date_from_markdown(existing_markdown)
+            or (None if existing is None else _extract_publish_date(existing))
+            or datetime.now(KST).strftime("%Y-%m-%d")
+        )
         document = _build_document(new_title, content, publish_date)
         try:
-            await asyncio.to_thread(_atomic_write, existing, document)
+            row, _ = await asyncio.to_thread(
+                research_store.upsert_document,
+                filename=fname,
+                title=new_title,
+                markdown=document,
+                summary=research_store.extract_excerpt(document),
+                status="public",
+            )
         except Exception as e:
-            logger.error("edit_research write error for %s: %s", fname, e)
+            logger.error("edit_research DB write error for %s: %s", fname, e)
             return f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}"
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
         return (
             f"Edited: {fname}\n"
-            f"Local path: {existing}\n"
+            f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {_public_url(fname)}\n"
             f"Title: {new_title}; size: {len(document)} chars; {_format_cache_note(cache, fname)}"
         )
 
     # operation == "unpublish"
-    try:
-        new_path = await asyncio.to_thread(_unpublish_sync, existing)
-    except Exception as e:
-        logger.error("edit_research unpublish error for %s: %s", fname, e)
-        return f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}"
+    backup_note = ""
+    if existing_doc:
+        try:
+            row = await asyncio.to_thread(research_store.set_status, fname, "private")
+            backup_note = f"Storage: research_documents id={row['id']} status=private"
+        except Exception as e:
+            logger.error("edit_research unpublish DB error for %s: %s", fname, e)
+            return f"Error: failed to mark {fname} private: {type(e).__name__}: {e}"
+    else:
+        try:
+            new_path = await asyncio.to_thread(_unpublish_sync, existing)
+            backup_note = f"Backup path: {new_path}"
+        except Exception as e:
+            logger.error("edit_research unpublish error for %s: %s", fname, e)
+            return f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cache_note = _format_cache_note(
@@ -379,7 +425,7 @@ async def _exec_edit_research(
     )
     return (
         f"Unpublished: {fname}\n"
-        f"Backup path: {new_path}\n"
+        f"{backup_note}\n"
         f"Public URL (now 404): {_public_url(fname)}\n"
         f"{cache_note}"
     )
