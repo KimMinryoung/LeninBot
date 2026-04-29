@@ -15,7 +15,9 @@
       "revise_plan",
       "set_project_state",
       "publish_research",
+      "edit_research",
       "publish_hub_curation",
+      "edit_public_post",
       "publish_static_page",
       "publish_comic"
     ]
