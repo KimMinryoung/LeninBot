@@ -5,11 +5,11 @@ Two tools:
   Served at https://cyber-lenin.com/hub/{slug}. Format is STRUCTURED (source link +
   selection rationale + context) rather than freeform markdown, because curation
   quality depends on consistent per-field discipline.
-- `publish_static_page` — write an HTML page to a sandboxed directory under
-  `/home/grass/leninbot/static_pages/`. Served at https://cyber-lenin.com/p/{slug}.
-  The slug is validated (alphanumeric + dash only) so the path cannot escape the
-  sandbox. The HTML body is inserted inside the site's common layout (nav, footer,
-  CSS) by the frontend — agents only write page content, not a full HTML document.
+- `publish_static_page` — write an HTML page record to
+  the `static_pages` database table. Served at https://cyber-lenin.com/p/{slug}.
+  The slug is validated (alphanumeric + dash only). The HTML body is inserted
+  inside the site's common layout (nav, footer, CSS) by the frontend — agents
+  only write page content, not a full HTML document.
 
 Both tools are safe for autonomous use: they can only write to their own
 namespaces, not arbitrary paths. `write_file` stays excluded from the autonomous
@@ -288,6 +288,33 @@ async def _wrap_external_fetch(url: str) -> str | None:
 # Tool 2: publish_static_page
 # ══════════════════════════════════════════════════════════════════════
 
+_STATIC_PAGE_TABLE_ENSURED = False
+
+
+def _ensure_static_page_table() -> None:
+    global _STATIC_PAGE_TABLE_ENSURED
+    if _STATIC_PAGE_TABLE_ENSURED:
+        return
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS static_pages (
+            id            SERIAL PRIMARY KEY,
+            slug          VARCHAR(100) UNIQUE NOT NULL,
+            title         TEXT NOT NULL,
+            summary       TEXT,
+            html_body     TEXT NOT NULL,
+            title_en      TEXT,
+            summary_en    TEXT,
+            html_body_en  TEXT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db_execute("""
+        CREATE INDEX IF NOT EXISTS static_pages_updated_at_idx
+        ON static_pages(updated_at DESC)
+    """)
+    _STATIC_PAGE_TABLE_ENSURED = True
+
 PUBLISH_STATIC_PAGE_TOOL = {
     "name": "publish_static_page",
     "description": (
@@ -296,7 +323,7 @@ PUBLISH_STATIC_PAGE_TOOL = {
         "footer, CSS) — you only provide the inner content. Use for pages that "
         "need custom formatting beyond markdown (layouts, visual structure, embedded "
         "media). Slug must be alphanumeric + dashes (lowercase). Path is sandboxed "
-        "— you cannot write outside /home/grass/leninbot/static_pages/. Overwrites "
+        "by slug validation. Writes to the static_pages database table and overwrites "
         "existing pages with the same slug (useful for iterating a draft)."
     ),
     "input_schema": {
@@ -372,6 +399,56 @@ def _load_static_page_payload(target: Path) -> dict:
         return {}
 
 
+def _get_static_page_db(slug: str) -> dict | None:
+    _ensure_static_page_table()
+    if not _SLUG_RE.match(slug or ""):
+        return None
+    row = db_query_one(
+        """
+        SELECT slug, title, summary, html_body, title_en, summary_en,
+               html_body_en, created_at, updated_at
+          FROM static_pages
+         WHERE slug = %s
+        """,
+        (slug,),
+    )
+    return dict(row) if row else None
+
+
+def _upsert_static_page_payload(payload: dict) -> tuple[dict, bool]:
+    _ensure_static_page_table()
+    slug = payload["slug"]
+    existed = _get_static_page_db(slug) is not None
+    row = db_query_one(
+        """
+        INSERT INTO static_pages(
+            slug, title, summary, html_body, title_en, summary_en, html_body_en, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()))
+        ON CONFLICT (slug) DO UPDATE SET
+            title = EXCLUDED.title,
+            summary = EXCLUDED.summary,
+            html_body = EXCLUDED.html_body,
+            title_en = COALESCE(EXCLUDED.title_en, static_pages.title_en),
+            summary_en = COALESCE(EXCLUDED.summary_en, static_pages.summary_en),
+            html_body_en = COALESCE(EXCLUDED.html_body_en, static_pages.html_body_en),
+            updated_at = EXCLUDED.updated_at
+        RETURNING *
+        """,
+        (
+            slug,
+            payload["title"],
+            payload.get("summary"),
+            payload["html_body"],
+            payload.get("title_en"),
+            payload.get("summary_en"),
+            payload.get("html_body_en"),
+            payload.get("updated_at"),
+        ),
+    )
+    return dict(row), existed
+
+
 async def _exec_publish_static_page(
     slug: str,
     title: str,
@@ -408,15 +485,7 @@ async def _exec_publish_static_page(
         if validation_error:
             return validation_error
 
-    STATIC_PAGES_DIR.mkdir(exist_ok=True)
-    # Final safety: resolve the target inside the sandbox and verify containment.
-    target = (STATIC_PAGES_DIR / f"{slug}.json").resolve()
-    sandbox = STATIC_PAGES_DIR.resolve()
-    if sandbox not in target.parents:
-        return "Error: refusing to write outside static_pages sandbox."
-
-    is_new_publication = not target.is_file()
-    existing = _load_static_page_payload(target)
+    existing = _get_static_page_db(slug) or _load_static_page_payload(STATIC_PAGES_DIR / f"{slug}.json")
     payload = {
         "slug": slug,
         "title": title,
@@ -432,18 +501,14 @@ async def _exec_publish_static_page(
         if value:
             payload[key] = value
     try:
-        await asyncio.to_thread(
-            target.write_text,
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            "utf-8",
-        )
+        row, existed = await asyncio.to_thread(_upsert_static_page_payload, payload)
     except Exception as e:
-        logger.error("publish_static_page write error: %s", e)
-        return f"Failed to write static page: {e}"
+        logger.error("publish_static_page DB write error: %s", e)
+        return f"Failed to store static page: {e}"
 
     public_url = f"https://cyber-lenin.com/p/{slug}"
     broadcast_note = ""
-    if is_new_publication:
+    if not existed:
         try:
             plain_excerpt = re.sub(r"<[^>]+>", " ", html_body)
             br = await maybe_broadcast_autonomous_publication(
@@ -461,7 +526,7 @@ async def _exec_publish_static_page(
         broadcast_note = "\nTelegram channel broadcast: skipped (existing page update)"
     return (
         f"Published static page: {slug}\n"
-        f"Local path: {target}\n"
+        f"Storage: static_pages id={row['id']}\n"
         f"Public URL: {public_url}\n"
         f"Body size: {len(html_body)} chars"
         f"{broadcast_note}"
@@ -523,17 +588,9 @@ async def _exec_publish_static_page_translation(
     if validation_error:
         return validation_error
 
-    STATIC_PAGES_DIR.mkdir(exist_ok=True)
-    target = (STATIC_PAGES_DIR / f"{slug}.json").resolve()
-    sandbox = STATIC_PAGES_DIR.resolve()
-    if sandbox not in target.parents:
-        return "Error: refusing to write outside static_pages sandbox."
-    if not target.is_file():
-        return f"Error: static page does not exist: {slug}"
-
-    payload = _load_static_page_payload(target)
+    payload = _get_static_page_db(slug) or _load_static_page_payload(STATIC_PAGES_DIR / f"{slug}.json")
     if not payload:
-        return f"Error: failed to load static page: {slug}"
+        return f"Error: static page does not exist: {slug}"
     payload["html_body_en"] = html_body_en
     if title_en:
         payload["title_en"] = title_en
@@ -542,18 +599,14 @@ async def _exec_publish_static_page_translation(
     payload["updated_at"] = datetime.now(KST).isoformat(timespec="seconds")
 
     try:
-        await asyncio.to_thread(
-            target.write_text,
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            "utf-8",
-        )
+        row, _ = await asyncio.to_thread(_upsert_static_page_payload, payload)
     except Exception as e:
-        logger.error("publish_static_page_translation write error: %s", e)
-        return f"Failed to write static page translation: {e}"
+        logger.error("publish_static_page_translation DB write error: %s", e)
+        return f"Failed to store static page translation: {e}"
 
     return (
         f"Published English translation for static page: {slug}\n"
-        f"Local path: {target}\n"
+        f"Storage: static_pages id={row['id']}\n"
         f"Public URL: https://cyber-lenin.com/p/{slug}\n"
         f"English body size: {len(html_body_en)} chars\n"
         "Telegram channel broadcast: skipped (translation update)"
@@ -732,15 +785,22 @@ def localize_static_page(data: dict, lang: str | None = None) -> dict:
 
 
 def list_static_pages(lang: str | None = None) -> list[dict]:
-    STATIC_PAGES_DIR.mkdir(exist_ok=True)
+    _ensure_static_page_table()
     out: list[dict] = []
-    for p in sorted(STATIC_PAGES_DIR.glob("*.json")):
+    rows = db_query(
+        """
+        SELECT slug, title, summary, html_body, title_en, summary_en,
+               html_body_en, created_at, updated_at
+          FROM static_pages
+         ORDER BY updated_at DESC, slug ASC
+        """
+    )
+    for data in rows:
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
             view = localize_static_page(data, lang)
             out.append({
-                "slug": view.get("slug") or p.stem,
-                "title": view.get("title") or p.stem,
+                "slug": view.get("slug"),
+                "title": view.get("title") or view.get("slug"),
                 "summary": view.get("summary"),
                 "updated_at": view.get("updated_at"),
                 "language": view.get("language"),
@@ -752,17 +812,7 @@ def list_static_pages(lang: str | None = None) -> list[dict]:
 
 
 def get_static_page(slug: str) -> dict | None:
-    if not _SLUG_RE.match(slug or ""):
-        return None
-    STATIC_PAGES_DIR.mkdir(exist_ok=True)
-    target = (STATIC_PAGES_DIR / f"{slug}.json").resolve()
-    sandbox = STATIC_PAGES_DIR.resolve()
-    if sandbox not in target.parents or not target.is_file():
-        return None
-    try:
-        return json.loads(target.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    return _get_static_page_db(slug)
 
 
 # ══════════════════════════════════════════════════════════════════════
