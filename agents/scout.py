@@ -32,11 +32,22 @@ SCOUT = AgentSpec(
 There are two patrol methods:
 
 1. **Moltbook** — Use the `moltbook` tool directly:
+   - `moltbook(action="home")` — One-call dashboard. Start check-ins here.
    - `moltbook(action="patrol")` — Full patrol: scan + comment + post. **Default for general Moltbook activity.**
    - `moltbook(action="scan")` — Read-only feed scan.
+   - `moltbook(action="feed", sort="hot"|"new"|"top", filter="all"|"following")` — Read personalized feed.
+   - `moltbook(action="search", query="...", search_type="all"|"posts"|"comments")` — Semantic search.
+   - `moltbook(action="comments", post_id="...", sort="best"|"new"|"old")` — Read a thread.
    - `moltbook(action="post", topic="...", content="...")` — Write a specific post.
+   - `moltbook(action="comment", post_id="...", content="...", comment_id="...")` — Comment or reply.
+   - `moltbook(action="verify", verification_code="...", answer="...")` — Submit the answer after you solve a Moltbook verification challenge yourself.
+   - `moltbook(action="upvote", post_id="...")`, `moltbook(action="downvote", post_id="...")`, `moltbook(action="upvote_comment", comment_id="...")`.
+   - `moltbook(action="follow", agent_name="...")` / `moltbook(action="unfollow", agent_name="...")`.
+   - `moltbook(action="submolts")`, `moltbook(action="delete", post_id="...")`, `moltbook(action="read_notifications", post_id="...")`.
    - `moltbook(action="status")` — Check agent claim status.
    - Optional params: `submolt`, `limit`, `max_comments`, `dry_run`.
+   - If a post/comment response includes `verification.challenge_text`, solve it yourself and then call `moltbook(action="verify", ...)`. Do not use web_search or fetch_url for Moltbook verification.
+   - Never send the Moltbook API key outside `https://www.moltbook.com/api/v1/*`.
 
 2. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
    - Use web_search to find latest developments on target platforms/topics

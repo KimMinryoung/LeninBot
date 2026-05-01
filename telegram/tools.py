@@ -2289,9 +2289,20 @@ MOLTBOOK_TOOL = {
     "description": (
         "Run Moltbook operations via the Razvedchik agent script.\n"
         "Actions:\n"
+        "- home: One-call Moltbook dashboard; do this first during check-ins\n"
         "- scan: Read-only feed scan — gather posts without interacting\n"
+        "- feed: Read personalized feed or submolt/global posts\n"
+        "- search: Semantic search across posts/comments\n"
+        "- comments: Read comments on a post\n"
         "- patrol: Full patrol loop — scan + comment + post (default for general activity)\n"
         "- post: Write a new post to Moltbook\n"
+        "- comment: Comment on a post or reply to a comment\n"
+        "- verify: Submit a Moltbook verification answer after the scout solves the challenge\n"
+        "- upvote/downvote: Vote on a post; upvote_comment votes on a comment\n"
+        "- follow/unfollow: Follow or unfollow another molty\n"
+        "- submolts: List available submolts\n"
+        "- delete: Delete one of your posts\n"
+        "- read_notifications: Mark notifications read\n"
         "- status: Check agent claim status\n"
         "- profile: View agent profile"
     ),
@@ -2300,7 +2311,27 @@ MOLTBOOK_TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["scan", "patrol", "post", "status", "profile"],
+                "enum": [
+                    "home",
+                    "scan",
+                    "feed",
+                    "search",
+                    "comments",
+                    "patrol",
+                    "post",
+                    "comment",
+                    "verify",
+                    "upvote",
+                    "downvote",
+                    "upvote_comment",
+                    "follow",
+                    "unfollow",
+                    "submolts",
+                    "delete",
+                    "read_notifications",
+                    "status",
+                    "profile",
+                ],
                 "description": "Which Moltbook operation to run.",
             },
             "topic": {
@@ -2317,7 +2348,42 @@ MOLTBOOK_TOOL = {
             },
             "limit": {
                 "type": "integer",
-                "description": "Number of posts to scan (default: 20). For 'scan' and 'patrol'.",
+                "description": "Number of items to fetch (default depends on action).",
+            },
+            "sort": {
+                "type": "string",
+                "enum": ["hot", "new", "top", "rising", "best", "old"],
+                "description": "Sort order for feed/posts/comments.",
+            },
+            "filter": {
+                "type": "string",
+                "enum": ["all", "following"],
+                "description": "Personalized feed filter: all or following.",
+            },
+            "cursor": {
+                "type": "string",
+                "description": "Pagination cursor returned by Moltbook.",
+            },
+            "query": {
+                "type": "string",
+                "description": "Semantic search query for action='search'.",
+            },
+            "search_type": {
+                "type": "string",
+                "enum": ["all", "posts", "comments"],
+                "description": "Moltbook semantic search type.",
+            },
+            "post_id": {
+                "type": "string",
+                "description": "Moltbook post ID for comments/votes/delete/read_notifications.",
+            },
+            "comment_id": {
+                "type": "string",
+                "description": "Moltbook comment ID for upvote_comment, or parent reply ID for comment.",
+            },
+            "agent_name": {
+                "type": "string",
+                "description": "Molty agent name for follow/unfollow.",
             },
             "max_comments": {
                 "type": "integer",
@@ -2326,6 +2392,14 @@ MOLTBOOK_TOOL = {
             "dry_run": {
                 "type": "boolean",
                 "description": "Simulate without actual API writes (default: false).",
+            },
+            "verification_code": {
+                "type": "string",
+                "description": "Moltbook verification_code returned by a post/comment creation response.",
+            },
+            "answer": {
+                "type": "string",
+                "description": "The scout's solved verification answer, formatted as required by Moltbook (usually two decimals).",
             },
         },
         "required": ["action"],
@@ -2339,11 +2413,145 @@ async def _exec_moltbook(
     content: str = "",
     submolt: str = "",
     limit: int | None = None,
+    sort: str = "",
+    filter: str = "",
+    cursor: str = "",
+    query: str = "",
+    search_type: str = "",
+    post_id: str = "",
+    comment_id: str = "",
+    agent_name: str = "",
     max_comments: int | None = None,
     dry_run: bool = False,
+    verification_code: str = "",
+    answer: str = "",
     **_: dict,
 ) -> str:
     import subprocess, os
+
+    api_actions = {
+        "home",
+        "feed",
+        "search",
+        "comments",
+        "comment",
+        "verify",
+        "upvote",
+        "downvote",
+        "upvote_comment",
+        "follow",
+        "unfollow",
+        "submolts",
+        "delete",
+        "read_notifications",
+    }
+    if action in api_actions:
+        try:
+            import httpx
+            from secrets_loader import require_secret
+
+            api_key = require_secret("MOLTBOOK_API_KEY")
+            base = "https://www.moltbook.com/api/v1"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+
+            method = "GET"
+            path = ""
+            params: dict[str, object] = {}
+            payload: dict[str, object] | None = None
+
+            if action == "home":
+                path = "/home"
+            elif action == "feed":
+                path = f"/submolts/{submolt}/feed" if submolt else "/feed"
+                params = {
+                    "sort": sort or "hot",
+                    "limit": limit or 25,
+                }
+                if filter:
+                    params["filter"] = filter
+                if cursor:
+                    params["cursor"] = cursor
+            elif action == "search":
+                if not query:
+                    return "[ERROR] query is required for moltbook search."
+                path = "/search"
+                params = {
+                    "q": query,
+                    "type": search_type or "all",
+                    "limit": limit or 20,
+                }
+                if cursor:
+                    params["cursor"] = cursor
+            elif action == "comments":
+                if not post_id:
+                    return "[ERROR] post_id is required for moltbook comments."
+                path = f"/posts/{post_id}/comments"
+                params = {"sort": sort or "best", "limit": limit or 35}
+                if cursor:
+                    params["cursor"] = cursor
+            elif action == "comment":
+                if not post_id or not content:
+                    return "[ERROR] post_id and content are required for moltbook comment."
+                method = "POST"
+                path = f"/posts/{post_id}/comments"
+                payload = {"content": content}
+                if comment_id:
+                    payload["parent_id"] = comment_id
+            elif action == "verify":
+                if not verification_code or not answer:
+                    return "[ERROR] verification_code and answer are required for moltbook verify."
+                method = "POST"
+                path = "/verify"
+                payload = {"verification_code": verification_code, "answer": str(answer)}
+            elif action in {"upvote", "downvote"}:
+                if not post_id:
+                    return f"[ERROR] post_id is required for moltbook {action}."
+                method = "POST"
+                path = f"/posts/{post_id}/{action}"
+                payload = {}
+            elif action == "upvote_comment":
+                if not comment_id:
+                    return "[ERROR] comment_id is required for moltbook upvote_comment."
+                method = "POST"
+                path = f"/comments/{comment_id}/upvote"
+                payload = {}
+            elif action in {"follow", "unfollow"}:
+                if not agent_name:
+                    return f"[ERROR] agent_name is required for moltbook {action}."
+                method = "POST" if action == "follow" else "DELETE"
+                path = f"/agents/{agent_name}/follow"
+                payload = {}
+            elif action == "submolts":
+                path = "/submolts"
+            elif action == "delete":
+                if not post_id:
+                    return "[ERROR] post_id is required for moltbook delete."
+                method = "DELETE"
+                path = f"/posts/{post_id}"
+                payload = {}
+            elif action == "read_notifications":
+                method = "POST"
+                path = f"/notifications/read-by-post/{post_id}" if post_id else "/notifications/read-all"
+                payload = {}
+
+            resp = httpx.request(
+                method,
+                f"{base}{path}",
+                headers=headers,
+                params=params or None,
+                json=payload,
+                timeout=30,
+                follow_redirects=False,
+            )
+            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"text": resp.text[:500]}
+            if resp.status_code >= 400:
+                return f"[ERROR] Moltbook {action} failed: HTTP {resp.status_code}\n{json.dumps(data, ensure_ascii=False, indent=2)}"
+            return json.dumps(data, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return f"[ERROR] Failed to run Moltbook {action}: {e}"
 
     cmd = [
         os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "venv/bin/python"),

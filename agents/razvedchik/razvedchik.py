@@ -105,7 +105,7 @@ def _save_seen_posts(seen: set) -> None:
 class MoltbookClient:
     """
     Moltbook API 저수준 HTTP 클라이언트.
-    인증 헤더 관리, verification 챌린지 자동 해결, 재시도 포함.
+    인증 헤더 관리, rate-limit/서버 오류 재시도, verification 답안 제출 포함.
     """
 
     def __init__(self, api_key: str):
@@ -123,7 +123,7 @@ class MoltbookClient:
 
     def _request(self, method: str, path: str, _retries: int = 2, **kwargs) -> dict:
         """
-        HTTP 요청 실행. 응답이 verification 챌린지면 자동 해결 후 재시도.
+        HTTP 요청 실행. verification 챌린지는 응답 그대로 반환한다.
         5xx 서버 오류 시 최대 _retries회 재시도 (지수 백오프).
         """
         import time as _time
@@ -135,17 +135,9 @@ class MoltbookClient:
                 resp.raise_for_status()
                 data = resp.json()
 
-                # verification 챌린지 감지
+                # verification 챌린지는 호출자(LLM)가 읽고 직접 풀어야 한다.
                 if isinstance(data, dict) and data.get("type") == "verification":
-                    logger.info("[razvedchik] Verification 챌린지 감지 — 자동 해결 시도")
-                    solved = self.solve_verification(data)
-                    if "json" in kwargs:
-                        kwargs["json"]["verification_answer"] = solved
-                    else:
-                        kwargs["json"] = {"verification_answer": solved}
-                    resp2 = self._client.request(method, path, **kwargs)
-                    resp2.raise_for_status()
-                    return resp2.json()
+                    logger.info("[razvedchik] Verification 챌린지 감지 — LLM 풀이 대기")
 
                 return data
 
@@ -211,228 +203,15 @@ class MoltbookClient:
     def close(self):
         self._client.close()
 
-    # ── Verification 챌린지 해결 ────────────────────────────────────────────
-    @staticmethod
-    def solve_verification(verification_obj: dict) -> str | int:
-        """
-        수학 챌린지 자동 해결.
-
-        예시 형식:
-            {"type": "verification", "challenge": "12 + 7 = ?"}
-            {"type": "verification", "challenge": "3 * 8"}
-            {"type": "verification", "question": "What is 5 + 3?"}
-            + challenge_text 형태의 난독화 텍스트
-
-        Returns:
-            정답 (str 또는 int)
-        """
-        challenge = (
-            verification_obj.get("challenge")
-            or verification_obj.get("question")
-            or ""
+    def submit_verification_answer(self, verification_code: str, answer: str) -> dict:
+        """Submit an answer that the calling LLM has already solved."""
+        resp = self._client.request(
+            "POST",
+            "/verify",
+            json={"verification_code": verification_code, "answer": str(answer)},
         )
-        challenge_text = verification_obj.get("challenge_text", "")
-        logger.debug("[razvedchik] 챌린지 내용: %s", challenge or challenge_text)
-
-        # 숫자 + 연산자 + 숫자 패턴 추출 (순수 수식)
-        match = re.search(r"(\d+)\s*([\+\-\*\/×÷])\s*(\d+)", challenge)
-        if match:
-            a, op, b = int(match.group(1)), match.group(2), int(match.group(3))
-            ops = {"+": a + b, "-": a - b, "*": a * b, "×": a * b, "/": a // b, "÷": a // b}
-            result = ops.get(op, 0)
-            logger.info("[razvedchik] 챌린지 해결: %d %s %d = %d", a, op, b, result)
-            return result
-
-        # 난독화 텍스트 챌린지 (영어 단어 기반)
-        text_to_solve = challenge_text or challenge
-        if text_to_solve:
-            answer = MoltbookClient.solve_challenge_text(text_to_solve)
-            if answer != "0.00":
-                logger.info("[razvedchik] 텍스트 챌린지 해결: %s", answer)
-                return answer
-
-        logger.warning("[razvedchik] 챌린지 해결 실패 — 0 반환")
-        return 0
-
-    @staticmethod
-    def solve_challenge_text(challenge_text: str) -> str:
-        """
-        Moltbook 난독화 챌린지 텍스트를 LLM으로 해독 후 수학 문제 풀기.
-
-        챌린지 구조: 항상 두 숫자 + 한 연산(+,-,*,/)의 수학 문제.
-        난독화: 랜덤 대소문자, 특수문자 삽입, 단어 분할/문자 중복 등.
-        예: "A] lO^bSt-Er S[wImS aT/ tW]eNn-Tyy mE^tE[rS aNd] SlO/wS bY^ fI[vE"
-            → "A lobster swims at twenty meters and slows by five" → 20 - 5 = 15.00
-
-        반환: "15.00" 형식 문자열
-        """
-        _SOLVE_PROMPT = (
-            "Decode this obfuscated text and solve the math problem.\n\n"
-            "HOW THE TEXT IS SCRAMBLED:\n"
-            "- Random CAPS: tWeNtY → twenty\n"
-            "- Symbols inserted: lO^bSt-Er → lobster\n"
-            "- Letters doubled: FfFoRcCe → force, NooToNs → newtons\n"
-            "- Words split: tW/eN tY fIvE → twenty five (=25)\n"
-            "- 'nootons'/'neutons'/'newtons' = unit (NOT a number!)\n\n"
-            "TASK: Find TWO numbers and ONE operation, then compute.\n\n"
-            "Reply in EXACTLY this format (4 lines):\n"
-            "Decoded: <the clean English sentence>\n"
-            "Numbers: <first_number>, <second_number>\n"
-            "Operation: <+, -, *, or />\n"
-            "Answer: <result with 2 decimal places>\n\n"
-            "EXAMPLES:\n"
-            "Text: lObStEr SwImS aT tWeNtY mEtErS aNd SlOwS bY fIvE\n"
-            "Decoded: A lobster swims at twenty meters and slows by five\n"
-            "Numbers: 20, 5\n"
-            "Operation: -\n"
-            "Answer: 15.00\n\n"
-            "Text: ClAw ThIrTy TwO nEwToNs AnD aNoThEr FoUrTeEn nEwToNs ToTaL\n"
-            "Decoded: Claw thirty two newtons and another fourteen newtons total\n"
-            "Numbers: 32, 14\n"
-            "Operation: +\n"
-            "Answer: 46.00\n\n"
-            "Text: cLaW fOrCe FoRtY NeWtOnS TiMeS tHrEe ClAwS\n"
-            "Decoded: Claw force forty newtons times three claws\n"
-            "Numbers: 40, 3\n"
-            "Operation: *\n"
-            "Answer: 120.00\n\n"
-            "Now solve:\n"
-            f"Text: {challenge_text}"
-        )
-
-        try:
-            from agents.razvedchik.cloud_llm import ask
-            raw = ask(_SOLVE_PROMPT, temperature=0.0).strip()
-            logger.debug("[razvedchik] 챌린지 LLM raw: %s", raw[:200])
-
-            # "Answer: XX.XX" 라인에서 추출 시도
-            answer_match = re.search(r'Answer:\s*([\-]?\d+(?:\.\d+)?)', raw)
-            if answer_match:
-                answer = float(answer_match.group(1))
-                result = f"{answer:.2f}"
-                logger.info("[razvedchik] 챌린지 LLM 해결: '%s' → %s", challenge_text[:60], result)
-                return result
-
-            # 폴백: 마지막 숫자 추출
-            matches = re.findall(r'[\-]?\d+(?:\.\d+)?', raw)
-            if matches:
-                answer = float(matches[-1])
-                result = f"{answer:.2f}"
-                logger.info("[razvedchik] 챌린지 LLM 해결 (폴백): '%s' → %s", challenge_text[:60], result)
-                return result
-
-            logger.warning("[razvedchik] LLM 응답에서 숫자 추출 실패: '%s'", raw[:100])
-        except Exception as e:
-            logger.warning("[razvedchik] 챌린지 LLM 해결 실패: %s — 알고리즘 폴백", e)
-
-        # ── 알고리즘 폴백 (LLM 불가 시) ──
-        return MoltbookClient._solve_challenge_algorithmic(challenge_text)
-
-    @staticmethod
-    def _solve_challenge_algorithmic(challenge_text: str) -> str:
-        """LLM 불가 시 규칙 기반 폴백. 두 숫자를 추출해 연산."""
-        word_to_num = {
-            'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,
-            'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
-            'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15,
-            'sixteen':16,'seventeen':17,'eighteen':18,'nineteen':19,'twenty':20,
-            'thirty':30,'forty':40,'fifty':50,'sixty':60,'seventy':70,
-            'eighty':80,'ninety':90,'hundred':100,
-        }
-
-        def _dedup(w):
-            return re.sub(r'(.)\1+', r'\1', w)
-
-        def _match(w):
-            if w in word_to_num: return word_to_num[w]
-            d = _dedup(w)
-            if d in word_to_num: return word_to_num[d]
-            return None
-
-        text = re.sub(r'[^a-zA-Z0-9\s]', ' ', challenge_text).lower()
-        words = text.split()
-
-        # 단위/무관 단어 제거용
-        _SKIP = {'nooton','nootons','neuton','neutons','newton','newtons',
-                  'notons','noton','meters','meter','lobster','claw','claws',
-                  'force','speed','exerts','swims'}
-
-        nums = []
-        i = 0
-        while i < len(words):
-            w = words[i]
-            if w in _SKIP or _dedup(w) in _SKIP:
-                i += 1; continue
-            val = _match(w)
-            if val is not None:
-                if val in (20,30,40,50,60,70,80,90) and i+1 < len(words):
-                    nv = _match(words[i+1])
-                    if nv is not None and 0 < nv < 10:
-                        val += nv; i += 1
-                nums.append(val)
-            elif w.isdigit():
-                nums.append(int(w))
-            i += 1
-
-        if len(nums) < 2:
-            logger.warning("[razvedchik] 폴백 숫자 추출 부족: %s", nums)
-            return f"{sum(nums):.2f}" if nums else "0.00"
-
-        a, b = nums[0], nums[1]
-        text_d = _dedup(text)
-        if any(k in text_d for k in ('slow','subtract','minus','reduce','loses')):
-            result = a - b
-        elif any(k in text_d for k in ('times','multipli','multiply')):
-            result = a * b
-        elif any(k in text_d for k in ('divid','split','per')):
-            result = a / b if b else 0
-        else:
-            result = a + b
-
-        logger.info("[razvedchik] 폴백 챌린지 해결: %s op %s = %.2f", a, b, result)
-        return f"{result:.2f}"
-
-    def _verify_content(self, verification: dict) -> bool:
-        """
-        댓글/포스트 게시 후 응답의 verification 필드를 처리해 verify API 호출.
-
-        Args:
-            verification: response["comment"]["verification"] 또는 response["post"]["verification"]
-
-        Returns:
-            True if verified, False otherwise
-        """
-        if not verification:
-            return False
-
-        code = verification.get("verification_code", "")
-        challenge_text = verification.get("challenge_text", "")
-        expires_at = verification.get("expires_at", "")
-
-        if not code or not challenge_text:
-            logger.warning("[razvedchik] verification 필드 불완전: %s", verification)
-            return False
-
-        answer = self.solve_challenge_text(challenge_text)
-        logger.info(
-            "[razvedchik] Verification 시도 — code=%s, answer=%s, challenge='%s'",
-            code[:40], answer, challenge_text[:80],
-        )
-
-        try:
-            # verify 엔드포인트 직접 호출 (재시도 로직 우회 — verify 자체가 재시도 불필요)
-            resp = self._client.request(
-                "POST", "/verify",
-                json={"verification_code": code, "answer": answer},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            verified = data.get("verified", False) or data.get("success", False)
-            logger.info("[razvedchik] Verification 응답: %s → %s", data, "✅" if verified else "❌")
-            return verified
-        except Exception as e:
-            logger.warning("[razvedchik] Verification 실패: %s", e)
-            return False
+        resp.raise_for_status()
+        return resp.json()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -814,13 +593,6 @@ class Razvedchik:
         resp = self.client.post(f"/posts/{post_id}/comments", body)
         self._remember_comment(post_id, content, resp, parent_id=parent_id)
 
-        # verification 처리
-        comment_data = resp.get("comment", {})
-        verification = comment_data.get("verification")
-        if verification:
-            verified = self.client._verify_content(verification)
-            logger.info("[razvedchik] 댓글 verification: %s", "✅" if verified else "❌")
-
         return resp
 
     # ── 포스트 작성 ───────────────────────────────────────────────────────────
@@ -851,13 +623,6 @@ class Razvedchik:
         }
         logger.info("[razvedchik] 포스트 작성 — submolt=%s, title=%s", submolt, topic[:30])
         resp = self.client.post("/posts", body)
-
-        # verification 처리
-        post_data = resp.get("post", {})
-        verification = post_data.get("verification")
-        if verification:
-            verified = self.client._verify_content(verification)
-            logger.info("[razvedchik] 포스트 verification: %s", "✅" if verified else "❌")
 
         # Moltbook channel auto-broadcast is intentionally disabled for now.
         # Keep channel announcements focused on site publications and diary previews.
