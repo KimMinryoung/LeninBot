@@ -9,8 +9,8 @@ go through GraphMemoryService.ingest_episode().
 The flow per write_kg_structured() call is:
 
   1. Pre-validate every fact against the schema (entity types, predicates,
-     EDGE_TYPE_MAP). Reject the whole batch on any invalid fact — no partial
-     writes that would dirty the graph.
+     EDGE_TYPE_MAP). Invalid facts are rejected individually; valid facts
+     continue through the write path so agents can retry only failed items.
   2. For each fact, deterministically resolve the subject and object entities
      by exact (name, type) match against existing canonical nodes. If a node
      exists, reuse its uuid. If not, mint a new uuid + labels for it.
@@ -53,12 +53,24 @@ VALID_PREDICATES = set(EDGE_TYPES.keys())
 WILDCARD_ALLOWED = set(EDGE_TYPE_MAP.get(("Entity", "Entity"), []))
 
 
+def _reject_fact(idx: int, fact: dict, reason: str) -> dict:
+    """Build a retry-friendly rejected-fact record for tool callers."""
+    return {
+        "index": idx,
+        "reason": reason,
+        "fact": fact,
+    }
+
+
 def validate_fact(fact: dict, idx: int) -> str | None:
     """Return a violation message if `fact` is invalid, or None if it passes.
 
     Validates: required fields, type values, predicate value, and
     EDGE_TYPE_MAP conformance. Does not touch the database.
     """
+    if not isinstance(fact, dict):
+        return f"fact[{idx}] must be an object"
+
     required = ("subject_name", "subject_type", "predicate",
                 "object_name", "object_type", "fact")
     for field in required:
@@ -83,6 +95,12 @@ def validate_fact(fact: dict, idx: int) -> str | None:
             f"({s_type} -> {t_type}). Allowed for this pair: "
             f"{sorted(allowed_for_pair) or 'none'}; wildcard: {sorted(WILDCARD_ALLOWED)}"
         )
+
+    if fact.get("valid_at"):
+        try:
+            datetime.fromisoformat(str(fact["valid_at"]))
+        except (ValueError, TypeError):
+            return f"fact[{idx}] valid_at must be an ISO date or datetime"
 
     return None
 
@@ -208,9 +226,12 @@ async def write_structured_facts(
 
     Returns:
         {
-          "status": "ok"|"error",
+          "status": "ok"|"partial_success"|"error",
           "message": str,
           "facts_written": int,
+          "facts_rejected": int,
+          "written_fact_indices": list[int],
+          "rejected_facts": list[{"index": int, "reason": str, "fact": dict}],
           "episode_name": str,
           "violations": dict (from conformance gate, may be empty),
         }
@@ -218,11 +239,31 @@ async def write_structured_facts(
     if not facts:
         return {"status": "error", "message": "no facts provided"}
 
-    # ── 1. Pre-validate all facts ────────────────────────────────────────
+    # ── 1. Pre-validate facts independently ──────────────────────────────
+    valid_facts: list[dict] = []
+    written_fact_indices: list[int] = []
+    rejected_facts: list[dict] = []
     for i, f in enumerate(facts):
         msg = validate_fact(f, i)
         if msg:
-            return {"status": "error", "message": f"validation failed: {msg}"}
+            rejected_facts.append(_reject_fact(i, f, msg))
+        else:
+            valid_facts.append(f)
+            written_fact_indices.append(i)
+
+    if not valid_facts:
+        msg = (
+            f"validation failed for all {len(facts)} fact(s); "
+            "no facts written. Retry only the rejected_facts entries after fixing them."
+        )
+        return {
+            "status": "error",
+            "message": msg,
+            "facts_written": 0,
+            "facts_rejected": len(rejected_facts),
+            "written_fact_indices": [],
+            "rejected_facts": rejected_facts,
+        }
 
     driver_client = graphiti.driver.client
     database = os.getenv("NEO4J_DATABASE", "neo4j")
@@ -244,7 +285,7 @@ async def write_structured_facts(
         return new_uuid, True
 
     resolved = []  # list of (fact, src_uuid, src_is_new, tgt_uuid, tgt_is_new)
-    for f in facts:
+    for f in valid_facts:
         s_uuid, s_new = await get_or_assign(f["subject_name"], f["subject_type"])
         t_uuid, t_new = await get_or_assign(f["object_name"], f["object_type"])
         resolved.append((f, s_uuid, s_new, t_uuid, t_new))
@@ -252,7 +293,7 @@ async def write_structured_facts(
     # ── 3. Build synthetic episode + entity/edge/mentions objects ────────
     episode = _make_synthetic_episode(
         group_id=group_id, agent=agent, mission_id=mission_id,
-        facts_count=len(facts), provenance_footer=provenance_footer,
+        facts_count=len(valid_facts), provenance_footer=provenance_footer,
         trust_tier=trust_tier,
     )
 
@@ -321,7 +362,14 @@ async def write_structured_facts(
         )
     except Exception as exc:
         logger.error("[KG STRUCTURED] bulk save failed: %s", exc)
-        return {"status": "error", "message": f"bulk save failed: {exc}"}
+        return {
+            "status": "error",
+            "message": f"bulk save failed: {exc}",
+            "facts_written": 0,
+            "facts_rejected": len(rejected_facts),
+            "written_fact_indices": [],
+            "rejected_facts": rejected_facts,
+        }
 
     # ── 5. Conformance gate (defensive) ──────────────────────────────────
     # Build a result-like object the validator can read.
@@ -341,11 +389,17 @@ async def write_structured_facts(
 
     new_count = len(new_entity_nodes)
     reused_count = len(touched_uuids) - new_count
+    status = "partial_success" if rejected_facts else "ok"
     msg = (
         f"wrote {len(entity_edges)} fact(s) — "
         f"{new_count} new entity(ies), {reused_count} reused, "
         f"episode={episode.name}"
     )
+    if rejected_facts:
+        msg += (
+            f" | rejected {len(rejected_facts)} invalid fact(s); "
+            "retry only rejected_facts after fixing schema errors"
+        )
     if report and not report.is_clean():
         msg += f" | conformance: {report.summary_line()}"
     logger.info(
@@ -353,9 +407,12 @@ async def write_structured_facts(
         msg, agent, mission_id, trust_tier,
     )
     return {
-        "status": "ok",
+        "status": status,
         "message": msg,
         "facts_written": len(entity_edges),
+        "facts_rejected": len(rejected_facts),
+        "written_fact_indices": written_fact_indices,
+        "rejected_facts": rejected_facts,
         "new_entities": new_count,
         "reused_entities": reused_count,
         "episode_name": episode.name,

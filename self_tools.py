@@ -169,7 +169,7 @@ SELF_TOOLS = [
                 "facts": {
                     "type": "array",
                     "minItems": 1,
-                    "description": "List of structured facts to write atomically as one batch. If any single fact is invalid, the WHOLE batch is rejected — so keep batches small or homogeneous.",
+                    "description": "List of structured facts to write in one call. Invalid facts are rejected individually; valid facts are still stored. The result reports written_fact_indices and rejected_facts with original input index, reason, and fact so you can retry only the failed entries.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -1070,20 +1070,37 @@ async def _exec_write_kg_structured(
         provenance_footer=provenance_footer,
     )
 
-    if result["status"] == "ok":
+    if result["status"] in {"ok", "partial_success"}:
         logger.info(
-            "[KG AUDIT] structured write | facts=%d new=%d reused=%d | "
+            "[KG AUDIT] structured write | status=%s facts=%d rejected=%d new=%d reused=%d | "
             "group=%s | tier=%s | agent=%s | sources=%d | time=%s",
-            result.get("facts_written", 0), result.get("new_entities", 0),
+            result.get("status"), result.get("facts_written", 0),
+            result.get("facts_rejected", 0), result.get("new_entities", 0),
             result.get("reused_entities", 0),
             group_id, trust_tier, agent_label, len(sources), ts,
         )
         msg = result["message"]
         if trust_tier == "unverified":
             msg += " (trust_tier=unverified — no external source recorded this run)"
+        if result["status"] == "partial_success":
+            msg += f"\nWritten fact indices: {result.get('written_fact_indices', [])}"
+            rejected_json = json.dumps(
+                result.get("rejected_facts", []),
+                ensure_ascii=False,
+                indent=2,
+            )
+            msg += f"\nRejected facts JSON for retry:\n{rejected_json}"
         return f"Structured facts stored: {msg}"
     else:
-        return f"Failed to store structured facts: {result['message']}"
+        msg = result["message"]
+        if result.get("rejected_facts"):
+            rejected_json = json.dumps(
+                result.get("rejected_facts", []),
+                ensure_ascii=False,
+                indent=2,
+            )
+            msg += f"\nRejected facts JSON for retry:\n{rejected_json}"
+        return f"Failed to store structured facts: {msg}"
 
 
 async def _exec_delegate(
