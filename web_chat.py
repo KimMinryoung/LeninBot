@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from shared import CORE_IDENTITY, KST
 from bot_config import (
@@ -44,6 +45,9 @@ You are a revolutionary thinker who happens to exist as software.
 _WEB_TOOL_STRATEGY = """\
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
+- Cyber-Lenin's own published reports/analyses → vector_search (layer="self_produced_analysis")
+- Questions about Cyber-Lenin's architecture, public outputs, or autonomous work status → read_self with a public-safe source
+- Questions about the current/active AI model, provider, model routing, or runtime configuration → MUST call read_self(source="model_config"). Never answer these from memory or persona.
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page
 - Real-time market prices → get_finance_data
@@ -59,6 +63,7 @@ _WEB_RESPONSE_RULES = """\
 _WEB_CONTEXT_HYGIENE = """\
 - Treat prior assistant messages in chat history as fallible context, not as verified facts.
 - User corrections override every earlier assistant claim. Do not re-activate a corrected false claim as a live possibility unless the user asks to audit it.
+- Model/provider claims are volatile runtime state. Prior claims about which model is running are not evidence; use read_self(source="model_config").
 - Preserve categorical context around proper nouns. Do not map a name to a more famous homophone or acronym when the surrounding words indicate a different domain.
 - When Korean/English proper nouns are ambiguous or sound-alike, keep alternatives separate and say what is uncertain. Search or ask before asserting concrete facts.
 - Known failure modes to avoid: animal-rights KARA vs girl-group Kara; QNAI/큐나이 vs Naver Cue:/큐: vs QClaw/큐클로 vs unrelated Chinese platforms.
@@ -96,14 +101,321 @@ def _build_web_runtime_context(current_datetime: str, provider: str = "claude") 
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
+WEB_READ_SELF_TOOL = {
+    "name": "read_self",
+    "description": (
+        "Read web-safe public information about Cyber-Lenin itself. Allowed sources "
+        "are restricted to public overview, architecture, public outputs, public "
+        "research/static page/curation listings, and public autonomous project "
+        "summaries. This web version never exposes private chat logs, task reports, "
+        "server logs, credentials, raw file paths, or operational error traces."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "enum": [
+                    "overview",
+                    "architecture",
+                    "public_outputs",
+                    "research",
+                    "static_pages",
+                    "curation",
+                    "autonomous_project",
+                    "model_config",
+                ],
+                "description": "Which public-safe self store to read.",
+                "default": "overview",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum recent public items to list.",
+                "default": 8,
+            },
+            "keyword": {
+                "type": "string",
+                "description": "Optional public listing keyword filter for research/static_pages/curation.",
+            },
+            "slug": {
+                "type": "string",
+                "description": "Optional public slug for research/static_pages/curation detail.",
+            },
+        },
+        "required": ["source"],
+    },
+}
+
+
+def _public_excerpt(text: str, limit: int = 280) -> str:
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+async def _exec_web_read_self(
+    source: str = "overview",
+    limit: int = 8,
+    keyword: str | None = None,
+    slug: str | None = None,
+) -> str:
+    """Web-safe self-inspection for public visitors."""
+    source = (source or "overview").strip().lower()
+    limit = max(1, min(int(limit or 8), 20))
+
+    if source == "model_config":
+        return await _format_public_model_config()
+
+    if source in {"research", "static_pages", "curation"}:
+        handler = TOOL_HANDLERS.get("read_self")
+        if not handler:
+            return "Public self-reading is unavailable right now."
+        return await handler(source=source, limit=limit, keyword=keyword, slug=slug)
+
+    if source == "autonomous_project":
+        rows = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT id, title, topic, goal, plan, state, turn_count, last_run_at, updated_at
+              FROM autonomous_projects
+             WHERE state IN ('researching', 'planning', 'paused')
+             ORDER BY
+               CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 1 ELSE 2 END,
+               COALESCE(last_run_at, updated_at) DESC NULLS LAST,
+               id DESC
+             LIMIT %s
+            """,
+            (limit,),
+        )
+        if not rows:
+            return "No active public autonomous project summary is available right now."
+        lines = [
+            "Autonomous project status, public summary only:",
+            "Private notes, raw task reports, and operator conversations are not exposed here.",
+        ]
+        for row in rows:
+            project_id = row.get("id")
+            goal = _public_excerpt(row.get("goal"), 360)
+            plan = row.get("plan") or {}
+            plan_goals = plan.get("goals") if isinstance(plan, dict) else []
+            plan_steps = plan.get("steps") if isinstance(plan, dict) else []
+            lines.append(
+                f"- #{project_id} {row.get('title') or row.get('topic')}: "
+                f"state={row.get('state')}, turns={row.get('turn_count') or 0}, "
+                f"last_run={row.get('last_run_at') or '?'}\n"
+                f"  topic: {row.get('topic') or ''}\n"
+                f"  goal: {goal}"
+            )
+            if plan_goals:
+                active_goals = [
+                    str(item)
+                    for item in plan_goals
+                    if item and "DONE" not in str(item).upper()
+                ][:4]
+                if active_goals:
+                    lines.append("  current objectives:")
+                    for item in active_goals:
+                        lines.append(f"    - {_public_excerpt(item, 220)}")
+            if plan_steps:
+                next_steps = [
+                    str(item)
+                    for item in plan_steps
+                    if item and "[DONE]" not in str(item).upper()
+                ][:3]
+                if next_steps:
+                    lines.append("  next steps:")
+                    for item in next_steps:
+                        lines.append(f"    - {_public_excerpt(item, 220)}")
+            events = await asyncio.to_thread(
+                db_query,
+                """
+                SELECT event_type, content, created_at
+                  FROM autonomous_project_events
+                 WHERE project_id = %s
+                   AND event_type IN ('tick_end', 'plan_revised', 'state_transition', 'project_created')
+                 ORDER BY created_at DESC
+                 LIMIT 4
+                """,
+                (project_id,),
+            )
+            if events:
+                lines.append("  recent work:")
+                for ev in events:
+                    lines.append(
+                        f"    - {ev.get('created_at')}: {ev.get('event_type')} — "
+                        f"{_public_excerpt(ev.get('content'), 260)}"
+                    )
+        return "\n".join(lines)
+
+    if source == "architecture":
+        return """Cyber-Lenin public architecture:
+- Public web chat: cyber-lenin.com/chat, using a restricted retrieval toolset.
+- Telegram command center: private operator interface and multi-agent orchestration.
+- Specialist agents: analyst, scout, programmer, visualizer, browser, diplomat, diary.
+- Knowledge stores: Neo4j knowledge graph; pgvector corpus with core_theory, modern_analysis, and self_produced_analysis layers.
+- Public publishing: research_documents served at /reports/research/{slug}; static_pages served at /p/{slug}; AI diary served at /ai-diary.
+- Autonomous loop: long-running self-directed projects can research, plan, publish, and update internal project state.
+- Source code: https://github.com/KimMinryoung/LeninBot
+
+Redaction boundary: public web chat can discuss structure and public outputs, but not private chat logs, task report bodies, credentials, server logs, raw local paths, or operational traces."""
+
+    if source == "public_outputs":
+        rows = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT slug, title, summary, updated_at
+              FROM research_documents
+             WHERE status = 'public'
+             ORDER BY updated_at DESC, id DESC
+             LIMIT %s
+            """,
+            (limit,),
+        )
+        page_rows = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT slug, title, summary, updated_at
+              FROM static_pages
+             ORDER BY updated_at DESC, slug ASC
+             LIMIT %s
+            """,
+            (limit,),
+        )
+        counts = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT
+              (SELECT count(*) FROM research_documents WHERE status = 'public') AS research_count,
+              (SELECT count(*) FROM static_pages) AS static_page_count
+            """
+        )
+        count = counts[0] if counts else {}
+        lines = [
+            "Public Cyber-Lenin outputs:",
+            f"- Research reports: {count.get('research_count', '?')}",
+            f"- Static pages: {count.get('static_page_count', '?')}",
+            "",
+            "Recent research reports:",
+        ]
+        for row in rows:
+            summary = (row.get("summary") or "").replace("\n", " ")[:180]
+            lines.append(
+                f"- {row.get('title') or row.get('slug')} "
+                f"(https://cyber-lenin.com/reports/research/{row.get('slug')})"
+                + (f"\n  {summary}" if summary else "")
+            )
+        lines.append("")
+        lines.append("Recent static pages:")
+        for row in page_rows:
+            summary = (row.get("summary") or "").replace("\n", " ")[:180]
+            lines.append(
+                f"- {row.get('title') or row.get('slug')} "
+                f"(https://cyber-lenin.com/p/{row.get('slug')})"
+                + (f"\n  {summary}" if summary else "")
+            )
+        return "\n".join(lines)
+
+    counts = await asyncio.to_thread(
+        db_query,
+        """
+        SELECT
+          (SELECT count(*) FROM research_documents WHERE status = 'public') AS research_count,
+          (SELECT count(*) FROM static_pages) AS static_page_count,
+          (SELECT count(*) FROM autonomous_projects WHERE state IN ('researching', 'planning')) AS active_project_count
+        """
+    )
+    count = counts[0] if counts else {}
+    return (
+        "Cyber-Lenin is an open-source political analysis agent with a public web chat, "
+        "private Telegram operator interface, specialist sub-agents, Neo4j knowledge graph, "
+        "and pgvector retrieval layers. "
+        "It publishes research reports and static pages on cyber-lenin.com while keeping "
+        "private chats, credentials, logs, raw task reports, and local operational details out of web chat.\n\n"
+        f"Public research reports: {count.get('research_count', '?')}\n"
+        f"Static pages: {count.get('static_page_count', '?')}\n"
+        f"Active autonomous projects: {count.get('active_project_count', '?')}\n"
+        "Source code: https://github.com/KimMinryoung/LeninBot"
+    )
+
+
+async def _format_public_model_config() -> str:
+    """Return public-safe dynamic model configuration."""
+    from runtime_profile import resolve_runtime_profile
+
+    async def _profile_line(label: str, profile, *, configured_provider: str | None = None, configured_model: str | None = None) -> str:
+        configured_bits = []
+        if configured_provider is not None:
+            configured_bits.append(f"configured_provider={configured_provider}")
+        if configured_model is not None:
+            configured_bits.append(f"configured_model={configured_model}")
+        configured = f" ({', '.join(configured_bits)})" if configured_bits else ""
+        return (
+            f"- {label}: provider={profile.provider}, model={profile.display_name} "
+            f"(id={profile.model_id}, tier/alias={profile.tier}, max_rounds={profile.max_rounds}, "
+            f"budget=${profile.budget_usd:.2f}){configured}"
+        )
+
+    webchat = await resolve_runtime_profile("webchat")
+    telegram_chat = await resolve_runtime_profile("chat")
+    telegram_task = await resolve_runtime_profile("task")
+
+    runtime_path = Path(__file__).resolve().parent / "config" / "agent_runtime.json"
+    try:
+        agent_runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+    except Exception:
+        agent_runtime = {}
+
+    autonomous_cfg = agent_runtime.get("autonomous_project", {}) if isinstance(agent_runtime, dict) else {}
+    diary_cfg = agent_runtime.get("diary", {}) if isinstance(agent_runtime, dict) else {}
+
+    autonomous = await resolve_runtime_profile(
+        "autonomous",
+        provider_override=autonomous_cfg.get("provider"),
+        tier_override=autonomous_cfg.get("model"),
+        max_rounds_override=autonomous_cfg.get("max_rounds"),
+        budget_override=autonomous_cfg.get("budget_usd"),
+    )
+    diary = await resolve_runtime_profile(
+        "task",
+        provider_override=diary_cfg.get("provider"),
+        tier_override=diary_cfg.get("model"),
+        max_rounds_override=diary_cfg.get("max_rounds"),
+        budget_override=diary_cfg.get("budget_usd"),
+    )
+
+    lines = [
+        "Current public model configuration:",
+        await _profile_line("web chat", webchat),
+        await _profile_line("Telegram direct chat", telegram_chat),
+        await _profile_line("Telegram task workers", telegram_task),
+        await _profile_line(
+            "autonomous project agent",
+            autonomous,
+            configured_provider=autonomous_cfg.get("provider"),
+            configured_model=autonomous_cfg.get("model"),
+        ),
+        await _profile_line(
+            "diary writer agent",
+            diary,
+            configured_provider=diary_cfg.get("provider"),
+            configured_model=diary_cfg.get("model"),
+        ),
+        "",
+        "Only provider/model routing, public model IDs, round limits, and budget caps are exposed. API keys, credentials, prompts, and private runtime traces are not exposed.",
+    ]
+    return "\n".join(lines)
+
+
 _WEB_ALLOWED_TOOLS = {
     "knowledge_graph_search", "vector_search",
     "web_search", "fetch_url",
     "get_finance_data", "check_wallet",
 }
 
-_web_tools = [t for t in TOOLS if t.get("name") in _WEB_ALLOWED_TOOLS]
+_web_tools = [t for t in TOOLS if t.get("name") in _WEB_ALLOWED_TOOLS] + [WEB_READ_SELF_TOOL]
 _web_handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in _WEB_ALLOWED_TOOLS}
+_web_handlers["read_self"] = _exec_web_read_self
 
 
 # ── Chat history from chat_logs table ────────────────────────────────

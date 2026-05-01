@@ -220,7 +220,7 @@ TOOLS = [
 async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
     """Execute vector similarity search via chatbot module."""
     try:
-        from shared import similarity_search
+        from shared import fetch_corpus_source_context, similarity_search
         docs = await asyncio.to_thread(similarity_search, query, num_results, layer, rerank=True)
         if not docs:
             return "No documents found."
@@ -230,7 +230,28 @@ async def _exec_vector_search(query: str, num_results: int = 5, layer: str | Non
             header = f"[{i}] {meta.get('title', 'Untitled')} — {meta.get('author', 'Unknown')}"
             if meta.get("year"):
                 header += f" ({meta['year']})"
-            results.append(f"{header}\n{doc.page_content}")
+            if meta.get("public_url"):
+                header += f"\nURL: {meta['public_url']}"
+            if meta.get("chunk_count", 1) and int(meta.get("chunk_count", 1)) > 1:
+                idx = int(meta.get("chunk_index", 0)) + 1
+                header += f"\nChunk: {idx}/{meta.get('chunk_count')}"
+            body = doc.page_content
+            if (
+                meta.get("layer") == "self_produced_analysis"
+                and int(meta.get("chunk_count", 1)) > 1
+                and meta.get("source")
+            ):
+                expanded = await asyncio.to_thread(
+                    fetch_corpus_source_context,
+                    meta.get("source"),
+                    center_index=int(meta.get("chunk_index", 0)),
+                    window=1,
+                    max_chars=9000,
+                )
+                if expanded and len(expanded) > len(body):
+                    body = expanded
+                    header += "\nContext: expanded with adjacent chunks from the same public document"
+            results.append(f"{header}\n{body}")
         return "\n\n".join(results)
     except Exception as e:
         logger.error("vector_search error: %s", e)

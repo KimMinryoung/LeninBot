@@ -1420,6 +1420,8 @@ def ingest_to_corpus(
     year: int | None = None,
     extra_metadata: dict | None = None,
     skip_if_source_url_exists: bool = True,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
 ) -> int:
     """Chunk → embed → insert into lenin_corpus. Returns the number of chunks inserted.
 
@@ -1445,7 +1447,9 @@ def ingest_to_corpus(
                     )
                     return 0
 
-    chunks = _chunk_text(content)
+    size = int(chunk_size or _CORPUS_CHUNK_SIZE)
+    overlap = int(chunk_overlap if chunk_overlap is not None else _CORPUS_CHUNK_OVERLAP)
+    chunks = _chunk_text(content, size=size, overlap=overlap)
     if not chunks:
         return 0
 
@@ -1465,9 +1469,17 @@ def ingest_to_corpus(
         base_meta.update(extra_metadata)
 
     rows = []
-    for chunk, vec in zip(chunks, vectors):
+    chunk_count = len(chunks)
+    for idx, (chunk, vec) in enumerate(zip(chunks, vectors)):
         emb_str = "[" + ",".join(str(v) for v in vec) + "]"
-        rows.append((chunk, json.dumps(base_meta, ensure_ascii=False), emb_str))
+        chunk_meta = dict(base_meta)
+        chunk_meta.update({
+            "chunk_index": idx,
+            "chunk_count": chunk_count,
+            "chunk_size": size,
+            "chunk_overlap": overlap,
+        })
+        rows.append((chunk, json.dumps(chunk_meta, ensure_ascii=False), emb_str))
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1518,6 +1530,150 @@ def save_self_produced_analysis(
     except Exception as e:
         logger.warning("[shared] save_self_produced_analysis error: %s", e)
         return {"ok": False, "error": str(e)}
+
+
+def public_self_analysis_source(kind: str, slug: str) -> str:
+    """Stable lenin_corpus metadata.source for public Cyber-Lenin outputs."""
+    clean_kind = (kind or "public").strip().lower().replace(":", "_")
+    clean_slug = (slug or "").strip().lower()
+    return f"public_self_analysis:{clean_kind}:{clean_slug}"
+
+
+def index_public_self_analysis(
+    *,
+    kind: str,
+    slug: str,
+    title: str,
+    content: str,
+    public_url: str,
+    summary: str | None = None,
+    content_sha256: str | None = None,
+    extra_metadata: dict | None = None,
+    chunk_size: int = 3200,
+    chunk_overlap: int = 240,
+) -> dict:
+    """Index a public Cyber-Lenin output into self_produced_analysis.
+
+    The source is stable per public artifact, so publish/edit paths can delete
+    and reinsert the same document without creating duplicate chunks.
+    """
+    try:
+        slug = (slug or "").strip()
+        title = (title or "").strip()
+        content = (content or "").strip()
+        if not slug:
+            return {"ok": False, "error": "slug is required"}
+        if not title:
+            return {"ok": False, "error": "title is required"}
+        if not content:
+            return {"ok": False, "error": "content is required"}
+
+        source = public_self_analysis_source(kind, slug)
+        deleted = delete_corpus_source(source, layer="self_produced_analysis")
+        now = datetime.now(timezone.utc)
+        metadata = {
+            "title": title,
+            "slug": slug,
+            "kind": kind,
+            "public_url": public_url,
+        }
+        if content_sha256:
+            metadata["content_sha256"] = content_sha256
+        if extra_metadata:
+            metadata.update(extra_metadata)
+
+        indexed_content = f"# {title}\n\n"
+        if summary:
+            indexed_content += f"Summary: {summary.strip()}\n\n"
+        indexed_content += content
+        chunks = ingest_to_corpus(
+            indexed_content,
+            source=source,
+            layer="self_produced_analysis",
+            author="Cyber-Lenin",
+            year=now.year,
+            extra_metadata=metadata,
+            skip_if_source_url_exists=False,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        logger.info(
+            "[shared] indexed public self analysis: %s/%s (%d chunks, %d deleted)",
+            kind,
+            slug,
+            chunks,
+            deleted,
+        )
+        return {
+            "ok": True,
+            "source": source,
+            "layer": "self_produced_analysis",
+            "chunks": chunks,
+            "deleted": deleted,
+        }
+    except Exception as e:
+        logger.warning("[shared] index_public_self_analysis error: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+def delete_public_self_analysis_index(kind: str, slug: str) -> dict:
+    """Remove one public artifact from the self_produced_analysis vector layer."""
+    try:
+        source = public_self_analysis_source(kind, slug)
+        deleted = delete_corpus_source(source, layer="self_produced_analysis")
+        return {"ok": True, "source": source, "deleted": deleted}
+    except Exception as e:
+        logger.warning("[shared] delete_public_self_analysis_index error: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+def fetch_corpus_source_context(
+    source: str,
+    *,
+    center_index: int = 0,
+    window: int = 1,
+    max_chars: int = 9000,
+) -> str:
+    """Fetch neighboring chunks from one corpus source for parent-context expansion."""
+    from db import query as db_query
+
+    source = (source or "").strip()
+    if not source:
+        return ""
+    center_index = max(0, int(center_index or 0))
+    window = max(0, int(window or 0))
+    max_chars = max(1000, int(max_chars or 9000))
+    lo = max(0, center_index - window)
+    hi = center_index + window
+    try:
+        rows = db_query(
+            """
+            SELECT content, metadata
+              FROM lenin_corpus
+             WHERE metadata->>'source' = %s
+               AND COALESCE((metadata->>'chunk_index')::int, 0) BETWEEN %s AND %s
+             ORDER BY COALESCE((metadata->>'chunk_index')::int, 0)
+            """,
+            (source, lo, hi),
+        )
+    except Exception as e:
+        logger.warning("[shared] fetch_corpus_source_context error: %s", e)
+        return ""
+
+    parts: list[str] = []
+    total = 0
+    for row in rows:
+        text = str(row.get("content") or "").strip()
+        if not text:
+            continue
+        remaining = max_chars - total
+        if remaining <= 0:
+            break
+        if len(text) > remaining:
+            text = text[:remaining].rstrip() + "\n... (context truncated)"
+        parts.append(text)
+        total += len(text)
+    return "\n\n---\n\n".join(parts)
 
 
 def delete_corpus_source(source: str, layer: str | None = None) -> int:
