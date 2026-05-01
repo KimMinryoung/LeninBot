@@ -86,11 +86,15 @@ response — the round budget is hard.
             ("building-modalities", """
 Three publishing tools, each for a distinct artifact type:
 
-**publish_research(title, content, filename?)** — markdown document served at
+**publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)** — markdown document served at
 `/reports/research/{slug}` (without `.md` in the public URL). Use for:
 - Series installments (장편 연재) — one .md per installment, filename carries the series slug
 - Long-form essays, analysis, forecasts (정세 분석)
 - Anything where the format is primarily prose
+- This tool is a mandatory two-step gate: first call saves an exact draft backup and does
+  not publish. Before calling it again with `fact_check_passed=true`, independently verify
+  proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source
+  attributions. Put checked claims, URLs/KG/tool sources, and corrections in `fact_check_notes`.
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
 structured DB row served at `/hub/{slug}`. Use for:
@@ -117,26 +121,6 @@ context, or tags. Do not create a duplicate curation when the existing row shoul
   Do not include those tags. Use <article>, <section>, <h2>, <p>, <figure>, etc.
 - Output is sanitized client-side via DOMPurify; `<script>`, `<iframe>`, inline `on*` handlers
   will be stripped. Don't rely on them.
-
-**publish_comic(slug, title, panels, summary?)** — 4-panel political comic served at
-`/p/{slug}`. Use for:
-- Compressing a sharp political/economic thesis into a 4-cut visual argument
-- When imagery + one short speech line per panel will hit harder than prose
-- Panels stack vertically (one per row), each panel 960×320
-- You author `scene_svg` for each panel (raw SVG children, no outer <svg>); the composer
-  renders the panel frame and the speech balloon so those stay consistent
-- Visual vocabulary: reuse named-object templates in `assets/comic_icons/` — tv_news,
-  missile_alert, chart_up/down, vault, goldbar_stack, dollar_bill, sanctions_stamp,
-  torn_paper, speaker_head. Copy the icon children and wrap in
-  `<g transform="translate(x, y) scale(s)">`; recolor/relabel as needed
-- Content rule: panel = image + ONE speech balloon. No captions, headings, subtext,
-  transcripts, or analysis sections. Every visual element must be a recognizable
-  named object — abstract rectangles/triangles/dashed circles without meaning are
-  banned. A reader must parse each panel in ≤2 seconds
-- Balloon area is top-left (40, 28)–(420, 136) inside the panel viewBox — keep scene
-  content clear of it
-- Do not publish a comic that is just a decorated version of a research note — pick
-  the medium that actually serves the message
 
 Do NOT publish placeholder or half-baked artifacts. Rough drafts live in research notes.
 """.strip()),
@@ -181,7 +165,7 @@ Never attempt to reach outside it.
         # Publishing to cyber-lenin.com (T0 tier — our own domain)
         "publish_research", "edit_research",
         "publish_hub_curation", "edit_public_post",
-        "publish_static_page", "publish_comic",
+        "publish_static_page",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",
     ],

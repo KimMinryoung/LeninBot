@@ -21,6 +21,8 @@ filesystem-backed artifacts instead of DB rows.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import re
@@ -39,6 +41,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent
 RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
+PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
 
 KST = timezone(timedelta(hours=9))
 
@@ -145,6 +148,58 @@ def _build_document(title: str, content: str, publish_date: str) -> str:
     )
 
 
+def _save_publication_draft(
+    *,
+    filename: str,
+    title: str,
+    document: str,
+    fact_check_passed: bool,
+    fact_check_notes: str | None,
+) -> Path:
+    """Persist the exact pre-publication document for later audit/recovery."""
+    PUBLICATION_DRAFT_DIR.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = PUBLICATION_DRAFT_DIR / f"{Path(filename).stem}.{ts}.{digest[:12]}.json"
+    payload = {
+        "kind": "research",
+        "filename": filename,
+        "title": title,
+        "public_url": _public_url(filename),
+        "content_sha256": digest,
+        "fact_check_passed": bool(fact_check_passed),
+        "fact_check_notes": (fact_check_notes or "").strip() or None,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "document": document,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _validate_fact_check_notes(notes: str | None) -> str | None:
+    text = (notes or "").strip()
+    if len(text) < 120:
+        return (
+            "fact_check_notes must be at least 120 characters and summarize the "
+            "claims checked, sources consulted, and any corrections made"
+        )
+    source_markers = (
+        "http://",
+        "https://",
+        "KG:",
+        "knowledge_graph",
+        "vector_search",
+        "web_search",
+        "fetch_url",
+    )
+    if not any(marker in text for marker in source_markers):
+        return (
+            "fact_check_notes must cite at least one verifiable source marker "
+            "(URL, KG:, knowledge_graph, vector_search, web_search, or fetch_url)"
+        )
+    return None
+
+
 def _cache_safe_key(filename: str) -> str:
     """Mirror the frontend's safe-key transform: non-[A-Za-z0-9._-] → '_'."""
     return re.sub(r"[^A-Za-z0-9._-]", "_", filename)
@@ -200,7 +255,12 @@ def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str
 PUBLISH_RESEARCH_TOOL = {
     "name": "publish_research",
     "description": (
-        "Write a markdown document to the public research database. "
+        "Stage or publish a markdown document to the public research database. "
+        "First call WITHOUT fact_check_passed=true saves an exact draft backup under "
+        "data/publication_drafts/research/ and does NOT publish. Before the second call, "
+        "independently verify proper nouns, dates, figures, current officeholders, vote/seat "
+        "counts, and quoted claims. Call again with fact_check_passed=true and fact_check_notes "
+        "summarizing checked claims and sources to publish. "
         "Published files are served at https://cyber-lenin.com/reports/research/{slug}, "
         "where slug is the filename without the .md extension. "
         "Use for polished analysis, forecasts, and investigative findings. "
@@ -223,13 +283,30 @@ PUBLISH_RESEARCH_TOOL = {
                 "type": "string",
                 "description": "Optional. ASCII letters/digits with '.', '_', '-' only; '.md' appended if missing.",
             },
+            "fact_check_passed": {
+                "type": "boolean",
+                "description": "Set true only after independently verifying factual claims against current sources.",
+            },
+            "fact_check_notes": {
+                "type": "string",
+                "description": (
+                    "Required when fact_check_passed=true. Summarize checked claims, sources consulted "
+                    "(URLs or tool/source names), and corrections made before publication."
+                ),
+            },
         },
         "required": ["title", "content"],
     },
 }
 
 
-async def _exec_publish_research(title: str, content: str, filename: str | None = None) -> str:
+async def _exec_publish_research(
+    title: str,
+    content: str,
+    filename: str | None = None,
+    fact_check_passed: bool = False,
+    fact_check_notes: str | None = None,
+) -> str:
     if not title or not title.strip():
         return "Error: title is required."
     if not content or not content.strip():
@@ -247,6 +324,37 @@ async def _exec_publish_research(title: str, content: str, filename: str | None 
         fname = f"{now.strftime('%Y%m%d')}_{_slug_from_title(title)}.md"
 
     document = _build_document(title, content, now.strftime("%Y-%m-%d"))
+    try:
+        draft_path = await asyncio.to_thread(
+            _save_publication_draft,
+            filename=fname,
+            title=title,
+            document=document,
+            fact_check_passed=fact_check_passed is True,
+            fact_check_notes=fact_check_notes,
+        )
+    except Exception as e:
+        logger.error("publication draft backup failed for %s: %s", fname, e)
+        return f"Error: failed to back up draft before publication: {type(e).__name__}: {e}"
+
+    if fact_check_passed is not True:
+        return (
+            "Draft saved, not published.\n"
+            f"Draft backup: {draft_path}\n"
+            f"Candidate filename: {fname}\n"
+            f"Candidate public URL: {_public_url(fname)}\n"
+            "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
+            "current offices, quotations, and source attributions. Then call publish_research again "
+            "with fact_check_passed=true and fact_check_notes listing the checked claims and sources."
+        )
+
+    fact_check_error = _validate_fact_check_notes(fact_check_notes)
+    if fact_check_error:
+        return (
+            "Error: publication blocked after draft backup.\n"
+            f"Draft backup: {draft_path}\n"
+            f"{fact_check_error}."
+        )
 
     try:
         row, is_overwrite = await asyncio.to_thread(

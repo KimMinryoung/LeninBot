@@ -39,7 +39,7 @@ _CONFIG_DEFAULTS = {
     "chat_model": "high",      # "high" | "medium" | "low"
     "task_model": "high",      # "high" | "medium" | "low"
     "max_rounds_chat": 50,
-    "max_rounds_task": 50,
+    "max_rounds_task": 100,
     "provider": "claude",      # Telegram chat: "claude" | "openai" | "deepseek" | "local"
     "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
     "task_concurrency": 2,     # max parallel background tasks
@@ -118,7 +118,7 @@ _CONFIG_META = {
     "chat_model": _config_meta("대화 모델", "", ["high", "medium", "low"], ["telegram-chat"]),
     "task_model": _config_meta("태스크 모델", "", ["high", "medium", "low"], ["telegram-task"]),
     "max_rounds_chat": _config_meta("대화 라운드", "회", [15, 30, 50, 80], ["telegram-chat"]),
-    "max_rounds_task": _config_meta("태스크 라운드", "회", [15, 30, 50, 80], ["telegram-task"]),
+    "max_rounds_task": _config_meta("태스크 라운드", "회", [15, 30, 50, 80, 100], ["telegram-task"]),
     "provider": _config_meta("대화 제공자", "", ["claude", "openai", "deepseek", "local"], ["telegram-chat"]),
     "task_provider": _config_meta(
         "태스크 제공자",

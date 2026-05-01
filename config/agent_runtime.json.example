@@ -18,8 +18,7 @@
       "edit_research",
       "publish_hub_curation",
       "edit_public_post",
-      "publish_static_page",
-      "publish_comic"
+      "publish_static_page"
     ]
   },
   "browser": {

@@ -4,7 +4,7 @@
   "chat_model": "high",
   "task_model": "high",
   "max_rounds_chat": 50,
-  "max_rounds_task": 50,
+  "max_rounds_task": 100,
   "provider": "claude",
   "task_provider": "default",
   "task_concurrency": 2,
