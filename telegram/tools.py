@@ -23,8 +23,9 @@ TOOLS = [
             "author/year/title. MATCH YOUR QUERY LANGUAGE TO THE LAYER: "
             "core_theory is English-language classics (Marx, Engels, Lenin, Mao, "
             "Trotsky translations) → query in English. modern_analysis is Korean "
-            "analysis/commentary → query in Korean. Cross-language queries return "
-            "near-empty results due to embedding-space separation."
+            "analysis/commentary → query in Korean. self_produced_analysis is your "
+            "own high-quality saved analysis → query in the language used when saved. "
+            "Cross-language queries return near-empty results due to embedding-space separation."
         ),
         "input_schema": {
             "type": "object",
@@ -33,16 +34,19 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Search query. Use English for layer=core_theory, Korean for "
-                        "layer=modern_analysis. Mismatching language to layer degrades recall sharply."
+                        "layer=modern_analysis. For self_produced_analysis, use the "
+                        "same language as the saved analysis. Mismatching language "
+                        "to layer degrades recall sharply."
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
                 "layer": {
                     "type": "string",
-                    "enum": ["core_theory", "modern_analysis"],
+                    "enum": ["core_theory", "modern_analysis", "self_produced_analysis"],
                     "description": (
                         "core_theory: English-language Marxist-Leninist classics. "
                         "modern_analysis: Korean-language contemporary analysis/commentary. "
+                        "self_produced_analysis: your own actively saved analytical outputs. "
                         "Omit to search all layers (not recommended — mixes languages)."
                     ),
                 },

@@ -1,35 +1,66 @@
 #!/usr/bin/env bash
-# psql-supabase — connect to the project's Supabase Postgres using .env creds.
+# psql-supabase — connect to the project's Supabase Postgres.
 #
 # Usage:
 #   scripts/psql-supabase                 # interactive psql session
 #   scripts/psql-supabase -c "SELECT 1"   # one-shot query
 #   scripts/psql-supabase < file.sql      # run a script
 #
-# Reads DB_{HOST,PORT,NAME,USER,PASSWORD} from .env next to the repo root.
-# Password never appears on the command line — passed through PGPASSWORD env.
+# Reads DB_{HOST,PORT,NAME,USER} from .env next to the repo root. DB_PASSWORD
+# may come from .env, an active systemd CREDENTIALS_DIRECTORY, or the encrypted
+# credstore via a transient systemd-run scope. Password never appears on the
+# command line — passed through PGPASSWORD env.
 
 set -e
 
-ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="$ROOT/.env"
+DB_PASSWORD_CRED="/etc/credstore.encrypted/db_password.cred"
+
 if [ ! -f "$ENV_FILE" ]; then
     echo "psql-supabase: $ENV_FILE not found" >&2
     exit 1
 fi
 
 # Source only the DB_* variables (don't pollute the env with everything else).
-# shellcheck disable=SC2046
-export $(grep -E '^DB_(HOST|PORT|NAME|USER|PASSWORD)=' "$ENV_FILE" | xargs -d '\n')
+# shellcheck disable=SC1090
+set -a
+source <(grep -E '^DB_(HOST|PORT|NAME|USER|PASSWORD)=' "$ENV_FILE" || true)
+set +a
+
+if [ -z "${DB_PASSWORD:-}" ] && [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/db_password" ]; then
+    DB_PASSWORD="$(<"$CREDENTIALS_DIRECTORY/db_password")"
+fi
+
+if [ -z "${DB_PASSWORD:-}" ] && [ -z "${PSQL_SUPABASE_IN_SYSTEMD:-}" ] && [ -r "$DB_PASSWORD_CRED" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+        exec sudo systemd-run --pty --wait --collect \
+            -p User="$(id -un)" \
+            -p WorkingDirectory="$ROOT" \
+            -p EnvironmentFile="$ENV_FILE" \
+            -p LoadCredentialEncrypted=db_password:"$DB_PASSWORD_CRED" \
+            -p Environment=PSQL_SUPABASE_IN_SYSTEMD=1 \
+            "$0" "$@"
+    fi
+    exec sudo systemd-run --pipe --wait --collect \
+        -p User="$(id -un)" \
+        -p WorkingDirectory="$ROOT" \
+        -p EnvironmentFile="$ENV_FILE" \
+        -p LoadCredentialEncrypted=db_password:"$DB_PASSWORD_CRED" \
+        -p Environment=PSQL_SUPABASE_IN_SYSTEMD=1 \
+        "$0" "$@"
+fi
 
 : "${DB_HOST:?DB_HOST missing}"
 : "${DB_PORT:=5432}"
 : "${DB_NAME:=postgres}"
 : "${DB_USER:?DB_USER missing}"
 : "${DB_PASSWORD:?DB_PASSWORD missing}"
+: "${PSQL_APPLICATION_NAME:=psql-supabase}"
 
 export PGPASSWORD="$DB_PASSWORD"
 
 # sslmode=require matches db.py; Supabase requires it.
 exec psql \
-    "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
+    "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require application_name=$PSQL_APPLICATION_NAME" \
     "$@"

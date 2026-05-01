@@ -21,6 +21,7 @@ Razvedchik(러시아어: 정찰병)는 사이버-레닌을 대신해 Moltbook �
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -43,10 +44,18 @@ BASE_DIR     = Path("/home/grass/leninbot")
 REPORTS_DIR  = BASE_DIR / "output" / "reports"
 CREDS_PATH   = Path.home() / ".config" / "moltbook" / "credentials.json"
 SEEN_POSTS_PATH = Path.home() / ".config" / "moltbook" / "seen_posts.json"
+COMMENT_HISTORY_PATH = Path.home() / ".config" / "moltbook" / "comment_history.json"
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 # ── Moltbook API 설정 ──────────────────────────────────────────────────────────
 MB_BASE_URL  = "https://www.moltbook.com/api/v1"   # ⚠️ www 필수 (redirect 시 Auth 헤더 유지)
 MB_TIMEOUT   = 30   # seconds
+
+
+class MoltbookSuspendedError(RuntimeError):
+    """Raised when Moltbook blocks writes because the agent is suspended."""
 
 # ── 필터링 키워드 ──────────────────────────────────────────────────────────────
 INTERESTING_KEYWORDS = [
@@ -141,6 +150,15 @@ class MoltbookClient:
                 return data
 
             except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403:
+                    detail = e.response.text
+                    try:
+                        detail = e.response.json().get("message", detail)
+                    except Exception:
+                        pass
+                    if "suspended until" in detail.lower():
+                        raise MoltbookSuspendedError(detail) from e
+
                 # 429 레이트 리밋 — Retry-After 헤더 존중
                 if e.response.status_code == 429 and attempt < _retries:
                     retry_after = int(e.response.headers.get("Retry-After", "30"))
@@ -283,7 +301,7 @@ class MoltbookClient:
         )
 
         try:
-            from llm.client import ask
+            from agents.razvedchik.cloud_llm import ask
             raw = ask(_SOLVE_PROMPT, temperature=0.0).strip()
             logger.debug("[razvedchik] 챌린지 LLM raw: %s", raw[:200])
 
@@ -458,6 +476,101 @@ class Razvedchik:
         CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
         CREDS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info("[razvedchik] credentials 저장: %s", CREDS_PATH)
+
+    def _get_my_agent_id(self) -> str:
+        """내 Moltbook agent id를 credentials/profile에서 확보."""
+        agent_id = self.credentials.get("agent_id", "")
+        if agent_id:
+            return agent_id
+        try:
+            profile = self.get_profile()
+            agent = profile.get("agent", profile)
+            agent_id = agent.get("id", "")
+            if agent_id:
+                self.credentials.update({
+                    "agent_id": agent_id,
+                    "name": agent.get("name", self.credentials.get("name", "razvedchik")),
+                    "synced_at": datetime.now().isoformat(),
+                })
+                self._save_credentials(self.credentials)
+            return agent_id
+        except Exception as e:
+            logger.debug("[razvedchik] agent_id 동기화 실패: %s", e)
+            return ""
+
+    @staticmethod
+    def _comment_fingerprint(content: str) -> str:
+        normalized = re.sub(r"\s+", " ", content).strip().lower()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    def _seed_comment_history_from_reports(self) -> list[dict]:
+        """기존 patrol 보고서에서 성공한 댓글을 가져와 중복 방지 원장 생성."""
+        history: list[dict] = []
+        for path in sorted(REPORTS_DIR.glob("razvedchik_*.json"))[-50:]:
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            ts = report.get("timestamp", path.stem)
+            for row in report.get("comment_results", []):
+                content = row.get("comment", "")
+                if row.get("success") and content:
+                    history.append({
+                        "fingerprint": self._comment_fingerprint(content),
+                        "content_preview": content[:160],
+                        "post_id": row.get("post_id", ""),
+                        "comment_id": "",
+                        "created_at": ts,
+                        "source": path.name,
+                    })
+            for row in report.get("reply_results", []):
+                content = row.get("reply", "")
+                if row.get("success") and content:
+                    history.append({
+                        "fingerprint": self._comment_fingerprint(content),
+                        "content_preview": content[:160],
+                        "post_id": row.get("post_id", ""),
+                        "comment_id": row.get("comment_id", ""),
+                        "created_at": ts,
+                        "source": path.name,
+                    })
+        return history[-500:]
+
+    def _load_comment_history(self) -> list[dict]:
+        if COMMENT_HISTORY_PATH.exists():
+            try:
+                data = json.loads(COMMENT_HISTORY_PATH.read_text(encoding="utf-8"))
+                return data if isinstance(data, list) else []
+            except Exception:
+                return []
+        history = self._seed_comment_history_from_reports()
+        if history:
+            self._save_comment_history(history)
+        return history
+
+    def _save_comment_history(self, history: list[dict]) -> None:
+        COMMENT_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        COMMENT_HISTORY_PATH.write_text(
+            json.dumps(history[-500:], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _has_duplicate_comment(self, content: str) -> bool:
+        fp = self._comment_fingerprint(content)
+        return any(row.get("fingerprint") == fp for row in self._load_comment_history())
+
+    def _remember_comment(self, post_id: str, content: str, response: dict, parent_id: Optional[str] = None) -> None:
+        comment = response.get("comment", {}) if isinstance(response, dict) else {}
+        history = self._load_comment_history()
+        history.append({
+            "fingerprint": self._comment_fingerprint(content),
+            "content_preview": content[:160],
+            "post_id": post_id,
+            "comment_id": comment.get("id", ""),
+            "parent_id": parent_id or "",
+            "created_at": datetime.now().isoformat(),
+        })
+        self._save_comment_history(history)
 
     # ── 에이전트 등록 ──────────────────────────────────────────────────────────
     def register(self, force: bool = False) -> dict:
@@ -642,7 +755,7 @@ class Razvedchik:
             f"{context_line}\n"
             f"Write in English. Be substantive — engage with the ideas, not just react."
         )
-        from llm.client import ask_with_system
+        from agents.razvedchik.cloud_llm import ask_with_system
 
         # 최대 2회 시도 — LLM이 빈 응답을 반환하는 경우 재시도
         for attempt in range(2):
@@ -659,8 +772,15 @@ class Razvedchik:
             except Exception as e:
                 logger.warning("[razvedchik] LLM 호출 실패 (시도 %d): %s", attempt + 1, e)
 
-        # 폴백: 포스트 제목 기반 기본 댓글
-        return f"This raises some important structural questions worth unpacking."
+        # 폴백도 게시물별로 달라야 한다. 동일 문구 반복은 Moltbook auto-mod의
+        # duplicate_comment 정지를 유발한다.
+        title_clean = re.sub(r"\s+", " ", title).strip()[:90]
+        if not title_clean or title_clean == "(제목 없음)":
+            title_clean = "this thread"
+        return (
+            f"{title_clean} points to a structural question worth testing: "
+            "what material interests does this framing serve, and what evidence would change the analysis?"
+        )
 
     # ── 댓글 게시 ─────────────────────────────────────────────────────────────
     def post_comment(
@@ -687,8 +807,12 @@ class Razvedchik:
         if parent_id:
             body["parent_id"] = parent_id
 
+        if self._has_duplicate_comment(content):
+            raise RuntimeError("duplicate_comment_prevented: identical comment content was already posted")
+
         logger.info("[razvedchik] 댓글 게시 — post_id=%s", post_id)
         resp = self.client.post(f"/posts/{post_id}/comments", body)
+        self._remember_comment(post_id, content, resp, parent_id=parent_id)
 
         # verification 처리
         comment_data = resp.get("comment", {})
@@ -761,7 +885,7 @@ class Razvedchik:
             f"Write in English."
         )
         try:
-            from llm.client import ask_with_system
+            from agents.razvedchik.cloud_llm import ask_with_system
             result = ask_with_system(
                 user_prompt=prompt,
                 system_prompt=RAZVEDCHIK_POST_SYSTEM,
@@ -774,11 +898,13 @@ class Razvedchik:
             found_body_marker = False
             for line in lines:
                 stripped = line.strip()
-                if re.match(r'^[Tt]itle\s*:', stripped) and not title:
-                    title = re.sub(r'^[Tt]itle\s*:\s*', '', stripped).strip().strip('"')
-                elif re.match(r'^[Bb]ody\s*:', stripped) or found_body_marker:
+                title_match = re.match(r'^\*{0,2}\s*[Tt]itle\s*:\s*\*{0,2}\s*(.*)$', stripped)
+                body_match = re.match(r'^\*{0,2}\s*[Bb]ody\s*:\s*\*{0,2}\s*(.*)$', stripped)
+                if title_match and not title:
+                    title = title_match.group(1).strip().strip('"')
+                elif body_match or found_body_marker:
                     found_body_marker = True
-                    body_lines.append(re.sub(r'^[Bb]ody\s*:\s*', '', stripped))
+                    body_lines.append(body_match.group(1) if body_match else stripped)
                 elif title and not found_body_marker:
                     # Title 이후 Body: 마커 없이 바로 본문이 시작되는 경우
                     if stripped:
@@ -883,8 +1009,8 @@ class Razvedchik:
                 logger.warning("[razvedchik] 댓글 조회 실패: %s", e)
                 continue
 
-            # 내 agent_id
-            my_id = self.credentials.get("agent_id", "")
+            # 내 agent_id. credentials 파일이 없어도 profile GET으로 동기화한다.
+            my_id = self._get_my_agent_id()
 
             for comment in comments[:3]:  # 최대 3개 댓글에 답글
                 cid = comment.get("id", "")
@@ -905,7 +1031,7 @@ class Razvedchik:
                     f"Be conversational and substantive. Write in English."
                 )
                 try:
-                    from llm.client import ask_with_system
+                    from agents.razvedchik.cloud_llm import ask_with_system
                     reply_text = ask_with_system(
                         user_prompt=reply_prompt,
                         system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
@@ -926,15 +1052,20 @@ class Razvedchik:
                     resp = self.post_comment(post_id, reply_text, parent_id=cid)
                     results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": True, "response": resp})
                     logger.info("[razvedchik]   ✅ 답글 게시 완료 → %s", cid[:12])
+                except MoltbookSuspendedError as e:
+                    logger.warning("[razvedchik]   ❌ 계정 정지로 답글 중단: %s", e)
+                    results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": False, "error": str(e)})
+                    return results
                 except Exception as e:
                     logger.warning("[razvedchik]   ❌ 답글 게시 실패: %s", e)
                     results.append({"post_id": post_id, "comment_id": cid, "reply": reply_text, "success": False, "error": str(e)})
 
             # 알림 읽음 처리
-            try:
-                self.mark_notifications_read(post_id)
-            except Exception:
-                pass
+            if not dry_run:
+                try:
+                    self.mark_notifications_read(post_id)
+                except Exception:
+                    pass
 
         return results
 
@@ -1003,7 +1134,7 @@ class Razvedchik:
                 "replies_posted":       sum(1 for r in (reply_results or []) if r.get("success")),
                 "upvoted_count":        len(upvoted_posts or []),
                 "followed_count":       len(followed_agents or []),
-                "observation_posted":   post_result is not None,
+                "observation_posted":   bool(post_result) and not post_result.get("error") and not post_result.get("skipped"),
             },
             "home_summary": {
                 "karma":        (home_data or {}).get("your_account", {}).get("karma"),
@@ -1183,8 +1314,11 @@ class Razvedchik:
         comment_results = []
         upvoted_posts = []
         followed_agents = []
+        write_blocked_reason = ""
 
         for post in selected:
+            if write_blocked_reason:
+                break
             post_id = post.get("id") or post.get("post_id", "")
             title   = post.get("title", "(제목 없음)")
             logger.info("[razvedchik]   댓글+업보트 — %s", title[:40])
@@ -1207,6 +1341,10 @@ class Razvedchik:
                             logger.info("[razvedchik]     👥 팔로우: %s", author_name)
                         except Exception:
                             pass
+                except MoltbookSuspendedError as e:
+                    write_blocked_reason = str(e)
+                    logger.warning("[razvedchik]     계정 정지로 쓰기 중단: %s", e)
+                    break
                 except Exception as e:
                     logger.debug("[razvedchik]     업보트 실패: %s", e)
 
@@ -1247,6 +1385,17 @@ class Razvedchik:
                     "response":   resp,
                 })
                 logger.info("[razvedchik]     ✅ 댓글 게시 완료")
+            except MoltbookSuspendedError as e:
+                write_blocked_reason = str(e)
+                logger.error("[razvedchik]     ❌ 계정 정지로 댓글 중단: %s", e)
+                comment_results.append({
+                    "post_id":    post_id,
+                    "post_title": title,
+                    "comment":    comment_text,
+                    "success":    False,
+                    "error":      str(e),
+                })
+                break
             except Exception as e:
                 logger.error("[razvedchik]     ❌ 댓글 게시 실패: %s", e)
                 comment_results.append({
@@ -1259,7 +1408,7 @@ class Razvedchik:
 
         # ── STEP 5: 관찰 포스트 게시 (🔵 When inspired) ───────────────────────
         observation_result = None
-        if post_observation_flag:
+        if post_observation_flag and not write_blocked_reason:
             logger.info("[razvedchik] STEP 5: 관찰 포스트 생성")
             trending = [p.get("title", "") for p in selected if p.get("title")]
             title, content = self.generate_observation_post(trending)
@@ -1279,6 +1428,8 @@ class Razvedchik:
                     "title":   title,
                     "content": content,
                 }
+        elif write_blocked_reason:
+            observation_result = {"skipped": True, "reason": write_blocked_reason}
 
         # ── STEP 6: 보고서 저장 ────────────────────────────────────────────────
         logger.info("[razvedchik] STEP 6: 보고서 저장")
@@ -1301,7 +1452,8 @@ class Razvedchik:
             logger.warning("[razvedchik]   디브리핑 실패: %s", e)
 
         # ── STEP 8: 텔레그램 알림 ──────────────────────────────────────────────
-        asyncio.run(self._send_telegram_notify(report, report_path))
+        if not dry_run:
+            asyncio.run(self._send_telegram_notify(report, report_path))
 
         logger.info("═══ Razvedchik 순찰 완료 ═══ 보고서: %s", report_path)
         return report_path

@@ -7,6 +7,7 @@ python-dotenv
 pydantic
 psycopg2-binary
 requests
+openai
 
 # LangChain / LangGraph
 langchain-core
@@ -34,6 +35,9 @@ croniter
 
 # Document conversion
 markitdown[pdf]
+Pillow
+nonogram==3.1.1
+opencv-python-headless
 
 # State management
 redis>=5.0

@@ -773,7 +773,8 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - URL in message → fetch_url to read the page, then analyze with context from other tools
 - Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
-- Store important facts → write_kg_structured
+- Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
+- Store important structured facts → write_kg_structured
 - Real-time market prices → get_finance_data
 - My crypto wallet address/balance → check_wallet (Base L2 primary, also ETH/TRX/SOL)
 - ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)
@@ -1474,6 +1475,8 @@ async def _chat_with_tools(
         "pay_and_fetch",                    # x402 paid HTTP fetch (USDC micropayment)
         "broadcast_to_channel",             # public Telegram channel announcements
         "recall_experience",                # memory recall
+        "save_self_analysis",               # active self-produced analysis indexing
+        "write_kg_structured",              # direct structured KG writes
         "read_self",                        # status/logs inspection
         "run_agent",                        # direct agent execution
         # send_email, a2a_send → delegated to diplomat agent

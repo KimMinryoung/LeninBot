@@ -554,13 +554,25 @@ def start_kg_healthcheck(interval: int = 300) -> None:
 from datetime import datetime, timedelta
 
 
-def fetch_diaries(limit: int = 5, keyword: str | None = None) -> list[dict]:
+def fetch_diaries(
+    limit: int = 5,
+    keyword: str | None = None,
+    diary_id: int | None = None,
+) -> list[dict]:
     """Fetch diary entries directly from the database.
 
-    Returns list of dicts with keys: title, content, created_at.
+    Returns list of dicts with keys: id, title, content, created_at, updated_at.
     """
     from db import query as db_query
     try:
+        if diary_id is not None:
+            return db_query(
+                """SELECT id, title, content, created_at, updated_at
+                   FROM ai_diary
+                   WHERE id = %s
+                   LIMIT 1""",
+                (diary_id,),
+            )
         if keyword:
             kw = f"%{keyword}%"
             return db_query(
@@ -1466,6 +1478,46 @@ def ingest_to_corpus(
         conn.commit()
 
     return len(chunks)
+
+
+def save_self_produced_analysis(
+    *,
+    title: str,
+    content: str,
+    category: str = "insight",
+    source_context: str = "",
+) -> dict:
+    """Persist the agent's own reusable analysis in a dedicated vector layer."""
+    try:
+        title = (title or "").strip()
+        content = (content or "").strip()
+        if not title:
+            return {"ok": False, "error": "title is required"}
+        if not content:
+            return {"ok": False, "error": "content is required"}
+
+        now = datetime.now(timezone.utc)
+        source = f"self_analysis:{now.strftime('%Y%m%dT%H%M%SZ')}:{title[:80]}"
+        chunks = ingest_to_corpus(
+            content,
+            source=source,
+            layer="self_produced_analysis",
+            author="Cyber-Lenin Orchestrator",
+            year=now.year,
+            extra_metadata={
+                "title": title,
+                "category": category or "insight",
+                "source_context": source_context or "",
+                "created_at": now.isoformat(),
+                "source_type": "self_produced_analysis",
+            },
+            skip_if_source_url_exists=False,
+        )
+        logger.info("[shared] saved self_produced_analysis: %r (%d chunks)", title, chunks)
+        return {"ok": True, "chunks": chunks, "source": source, "layer": "self_produced_analysis"}
+    except Exception as e:
+        logger.warning("[shared] save_self_produced_analysis error: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 def delete_corpus_source(source: str, layer: str | None = None) -> int:

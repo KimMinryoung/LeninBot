@@ -17,18 +17,52 @@ from secrets_loader import get_secret
 _pool: pool.ThreadedConnectionPool | None = None
 
 
+def _application_name() -> str:
+    return os.getenv("DB_APPLICATION_NAME", "leninbot-api")
+
+
+def _pool_maxconn() -> int:
+    return int(os.getenv("DB_POOL_MAX", "10"))
+
+
+def _tag_conn(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT set_config(%s, %s, false)", ("application_name", _application_name()))
+
+
 def _get_pool() -> pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
+        host = os.getenv("DB_HOST")
+        port = int(os.getenv("DB_PORT", "5432"))
+        dbname = os.getenv("DB_NAME", "postgres")
+        user = os.getenv("DB_USER")
+        password = get_secret("DB_PASSWORD")
+        missing = [
+            name for name, value in (
+                ("DB_HOST", host),
+                ("DB_USER", user),
+                ("DB_PASSWORD", password),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                "Missing database configuration: "
+                + ", ".join(missing)
+                + ". For local psql use scripts/psql-supabase; production services "
+                "load DB_PASSWORD via systemd LoadCredentialEncrypted."
+            )
         _pool = pool.ThreadedConnectionPool(
             minconn=1,
-            maxconn=5,
-            host=os.getenv("DB_HOST"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            dbname=os.getenv("DB_NAME", "postgres"),
-            user=os.getenv("DB_USER"),
-            password=get_secret("DB_PASSWORD"),
+            maxconn=_pool_maxconn(),
+            host=host,
+            port=port,
+            dbname=dbname,
+            user=user,
+            password=password,
             sslmode="require",
+            application_name=_application_name(),
         )
     return _pool
 
@@ -47,17 +81,18 @@ def get_conn():
         if conn.closed:
             p.putconn(conn, close=True)
             conn = p.getconn()
+            _tag_conn(conn)
         else:
             try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                _tag_conn(conn)
+            except psycopg2.Error:
                 try:
                     conn.close()
                 except Exception:
                     pass
                 p.putconn(conn, close=True)
                 conn = p.getconn()
+                _tag_conn(conn)
         yield conn
         conn.commit()
     except Exception:

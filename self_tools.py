@@ -68,6 +68,12 @@ SELF_TOOLS = [
                 },
                 "limit": {"type": "integer", "description": "Results count."},
                 "keyword": {"type": "string", "description": "Filter keyword."},
+                "max_chars": {
+                    "anyOf": [{"type": "integer"}, {"type": "null"}],
+                    "description": "For diary: maximum body characters per entry. Default null returns the full body.",
+                },
+                "post_id": {"type": "integer", "description": "For diary: ai_diary.id / public /ai-diary/{id} id."},
+                "diary_id": {"type": "integer", "description": "For diary: alias of post_id."},
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
                 "service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "For server_logs."},
                 "grep": {
@@ -293,6 +299,40 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "save_self_analysis",
+        "description": (
+            "Actively index your own high-quality analysis into the "
+            "self_produced_analysis vector layer. Use when an insight, synthesis, "
+            "framework, or reusable argument is worth preserving beyond raw logs "
+            "and daily experiential summaries. Later retrieve it with "
+            "vector_search(layer=\"self_produced_analysis\")."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short descriptive title for this saved analysis.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Self-contained analytical text to preserve. Include enough context for future retrieval.",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": ["insight", "framework", "synthesis", "critique", "strategy", "method", "other"],
+                    "description": "What kind of analysis this is. Default: insight.",
+                    "default": "insight",
+                },
+                "source_context": {
+                    "type": "string",
+                    "description": "Optional short provenance note, e.g. task ID, conversation theme, or why it matters.",
+                },
+            },
+            "required": ["title", "content"],
+        },
+    },
+    {
         "name": "kg_admin",
         "description": "KG admin ops. action: query (Cypher), delete_episode, merge_entities.",
         "input_schema": {
@@ -341,22 +381,43 @@ SELF_TOOLS = [
 # 2. TOOL HANDLERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def _exec_read_diary(limit: int = 5, keyword: str | None = None) -> str:
+async def _exec_read_diary(
+    limit: int = 5,
+    keyword: str | None = None,
+    max_chars: int | None = None,
+    post_id: int | None = None,
+    diary_id: int | None = None,
+) -> str:
     from shared import fetch_diaries
 
-    diaries = await asyncio.to_thread(fetch_diaries, limit, keyword)
+    target_id = post_id if post_id is not None else diary_id
+    diaries = await asyncio.to_thread(fetch_diaries, limit, keyword, target_id)
     if not diaries:
-        msg = f"No diary entries matching '{keyword}'." if keyword else "No diary entries found."
+        if target_id is not None:
+            msg = f"No diary entry found with id={target_id}."
+        else:
+            msg = f"No diary entries matching '{keyword}'." if keyword else "No diary entries found."
         return msg
 
     results = []
     for i, d in enumerate(diaries, 1):
+        entry_id = d.get("id")
         ts = _to_kst(d.get("created_at"))
+        updated = _to_kst(d.get("updated_at"))
         title = d.get("title", "Untitled")
         content = d.get("content", "")
-        if len(content) > 800:
-            content = content[:800] + "\n... (truncated)"
-        results.append(f"[{i}] {ts}\nTitle: {title}\nContent:\n{content}")
+        if max_chars is not None:
+            try:
+                max_len = max(0, int(max_chars))
+            except (TypeError, ValueError):
+                max_len = 0
+            if max_len and len(content) > max_len:
+                content = content[:max_len] + "\n... (truncated)"
+        results.append(
+            f"[{i}] ID: {entry_id} | URL: https://cyber-lenin.com/ai-diary/{entry_id}\n"
+            f"Created: {ts} | Updated: {updated}\n"
+            f"Title: {title}\nContent:\n{content}"
+        )
 
     return f"Your diary entries ({len(diaries)} shown):\n\n" + "\n\n---\n\n".join(results)
 
@@ -1362,6 +1423,39 @@ async def _exec_recall_experience(query: str, limit: int = 5) -> str:
     return f"Found {len(rows)} experience(s):\n" + "\n\n".join(lines)
 
 
+async def _exec_save_self_analysis(
+    title: str,
+    content: str,
+    category: str = "insight",
+    source_context: str = "",
+) -> str:
+    from shared import save_self_produced_analysis
+
+    title = (title or "").strip()
+    content = (content or "").strip()
+    category = (category or "insight").strip()
+    source_context = (source_context or "").strip()
+    if not title:
+        return "Error: title is required."
+    if len(content) < 80:
+        return "Error: content is too short for self_produced_analysis. Save a self-contained analytical note."
+
+    result = await asyncio.to_thread(
+        save_self_produced_analysis,
+        title=title,
+        content=content,
+        category=category,
+        source_context=source_context,
+    )
+    if not result.get("ok"):
+        return f"self-analysis save failed: {result.get('error', 'unknown error')}"
+    return (
+        "Saved self-produced analysis "
+        f"({result['chunks']} chunk(s)) to vector layer self_produced_analysis. "
+        "Retrieve with vector_search(layer=\"self_produced_analysis\", query=\"...\")."
+    )
+
+
 async def _exec_kg_query(query: str, write: bool = False) -> str:
     from shared import kg_cypher
     result = await asyncio.to_thread(kg_cypher, query, write)
@@ -1569,13 +1663,20 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 
 async def _exec_read_self(
     source: str, limit: int | None = None, keyword: str | None = None,
+    max_chars: int | None = None, post_id: int | None = None, diary_id: int | None = None,
     hours_back: int | None = None, service: str = "telegram",
     grep: str | list[str] | tuple[str, ...] | None = "", status: str | None = None, task_id: int | None = None,
     chat_source: str = "web", slug: str | None = None,
 ) -> str:
     """Dispatcher for all read_self sources."""
     if source == "diary":
-        return await _exec_read_diary(limit=limit or 5, keyword=keyword)
+        return await _exec_read_diary(
+            limit=limit or 5,
+            keyword=keyword,
+            max_chars=max_chars,
+            post_id=post_id,
+            diary_id=diary_id,
+        )
     if source == "chat_logs":
         return await _exec_read_chat_logs(limit=limit or 20, hours_back=hours_back, keyword=keyword, source=chat_source)
     if source == "processing_logs":
@@ -1811,6 +1912,7 @@ async def _exec_kg_admin(
 SELF_TOOL_HANDLERS = {
     "read_self": _exec_read_self,
     "recall_experience": _exec_recall_experience,
+    "save_self_analysis": _exec_save_self_analysis,
     "write_kg": _exec_write_kg,
     "write_kg_structured": _exec_write_kg_structured,
     "delegate": _exec_delegate,

@@ -254,8 +254,15 @@ async def execute_tool(
     # Guard: ensure result is a non-None string
     if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
-    # Truncate oversized results to avoid context overflow
-    if len(result) > 50000:
+    # Truncate oversized results to avoid context overflow. Diary reads are
+    # exempt when the caller asked for full bodies; past diary-edit tasks lost
+    # data because this path hid the tail of a post.
+    allow_full_diary = (
+        name == "read_self"
+        and args.get("source") == "diary"
+        and args.get("max_chars") is None
+    )
+    if len(result) > 50000 and not allow_full_diary:
         result = result[:50000] + "\n... [truncated]"
 
     if not is_error:

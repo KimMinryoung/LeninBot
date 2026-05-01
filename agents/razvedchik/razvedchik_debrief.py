@@ -149,7 +149,7 @@ def run_debrief(report: dict) -> list[dict]:
     Returns:
         대화 메시지 리스트 [{"speaker": ..., "content": ...}, ...]
     """
-    from llm.client import ask_chat
+    from agents.razvedchik.cloud_llm import ask_chat
 
     report_summary = _summarize_report(report)
     prev_context = get_last_debrief_summary()

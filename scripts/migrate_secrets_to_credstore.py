@@ -78,6 +78,13 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "GITHUB_TOKEN",
     },
 
+    # Moltbook patrol timer — writes through the Razvedchik API client and can
+    # optionally send Telegram completion notices.
+    "leninbot-razvedchik": {
+        "MOLTBOOK_API_KEY",
+        "TELEGRAM_BOT_TOKEN",
+    },
+
     # Diary writer (daily 00:30) — Gemini for writing, DB/KG for reading activity.
     # Imports bot_config so ANTHROPIC/OPENAI present too.
     "leninbot-experience": {
