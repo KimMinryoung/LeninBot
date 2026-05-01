@@ -1,0 +1,16 @@
+{
+  "chat_budget": 0.3,
+  "task_budget": 1.0,
+  "chat_model": "high",
+  "task_model": "high",
+  "max_rounds_chat": 50,
+  "max_rounds_task": 50,
+  "provider": "claude",
+  "task_provider": "default",
+  "task_concurrency": 2,
+  "autonomous_active": true,
+  "autonomous_provider": "deepseek",
+  "autonomous_model": "high",
+  "webchat_provider": "claude",
+  "webchat_model": "medium"
+}

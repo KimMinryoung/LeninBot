@@ -27,6 +27,7 @@ diary_updates_consumed.json
 
 # 런타임 설정 (서버별 상태)
 config.json
+config/agent_runtime.json
 
 데이터 수집용 크롤러 코드
 crawler/

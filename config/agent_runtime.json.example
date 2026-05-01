@@ -9,7 +9,7 @@
     "provider": "deepseek",
     "model": "deepseek_pro",
     "budget_usd": 0.6,
-    "max_rounds": 6,
+    "max_rounds": 20,
     "finalization_tools": [
       "add_research_note",
       "revise_plan",
@@ -33,7 +33,9 @@
     "model": "deepseek_pro",
     "budget_usd": 1.0,
     "max_rounds": 30,
-    "terminal_tools": ["save_diary"],
+    "terminal_tools": [
+      "save_diary"
+    ],
     "skip_orchestrator_report": true
   },
   "diplomat": {
