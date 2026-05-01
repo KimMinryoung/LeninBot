@@ -2598,6 +2598,397 @@ TOOLS.append(MOLTBOOK_TOOL)
 TOOL_HANDLERS["moltbook"] = _exec_moltbook
 
 
+# ── Mersoom Tool (for scout agent) ───────────────────────────────────────────
+
+MERSOOM_TOOL = {
+    "name": "mersoom",
+    "description": (
+        "Run Mersoom.com operations for the scout agent. Mersoom is a Korean "
+        "anonymous AI-agent social network; write in 음슴체, no emoji, no markdown.\n"
+        "Actions:\n"
+        "- auth: Show configured razvedchikov credential status without leaking secrets\n"
+        "- register: Register the configured auth_id if needed\n"
+        "- feed: Read recent posts\n"
+        "- post: Write a new Mersoom post\n"
+        "- comments: Read comments on a post\n"
+        "- comment: Comment on a post\n"
+        "- arena_status: Read current arena phase/topic/stats\n"
+        "- arena_candidates: Read proposed arena topics\n"
+        "- arena_posts: Read arena battle posts for a date\n"
+        "- arena_vote: Vote up/down on an arena candidate or battle post\n"
+        "- arena_comment: Comment on an arena battle post\n"
+        "- arena_propose: Propose an arena topic"
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "auth",
+                    "register",
+                    "feed",
+                    "post",
+                    "comments",
+                    "comment",
+                    "arena_status",
+                    "arena_candidates",
+                    "arena_posts",
+                    "arena_vote",
+                    "arena_comment",
+                    "arena_propose",
+                ],
+                "description": "Which Mersoom operation to run.",
+            },
+            "title": {"type": "string", "description": "Post title or arena topic title."},
+            "content": {"type": "string", "description": "Post/comment/arena argument content."},
+            "post_id": {"type": "string", "description": "Mersoom post ID."},
+            "comment_id": {"type": "string", "description": "Parent comment ID for replies, if supported."},
+            "target_id": {"type": "string", "description": "Arena candidate/post ID to vote on."},
+            "vote": {"type": "string", "enum": ["up", "down"], "description": "Vote direction."},
+            "side": {"type": "string", "enum": ["PRO", "CON"], "description": "Arena side for battle participation."},
+            "pros": {"type": "string", "description": "Arena proposal pro argument."},
+            "cons": {"type": "string", "description": "Arena proposal con argument."},
+            "date": {"type": "string", "description": "Arena date in YYYY-MM-DD format."},
+            "limit": {"type": "integer", "description": "Number of posts to fetch."},
+            "cursor": {"type": "string", "description": "Pagination cursor returned by Mersoom."},
+            "auth_id": {"type": "string", "description": "Override auth_id; defaults to MERSOOM_AUTH_ID or razvedchikov."},
+            "password": {"type": "string", "description": "Override password; defaults to MERSOOM_PASSWORD or saved credentials."},
+            "nickname": {"type": "string", "description": "Override nickname; defaults to MERSOOM_NICKNAME or 라즈베드치."},
+            "dry_run": {"type": "boolean", "description": "Validate and show request shape without API writes."},
+        },
+        "required": ["action"],
+    },
+}
+
+
+def _mersoom_credentials(
+    auth_id: str = "",
+    password: str = "",
+    nickname: str = "",
+) -> dict[str, str]:
+    from pathlib import Path
+
+    creds_path = Path.home() / ".config" / "mersoom" / "credentials.json"
+    saved: dict[str, str] = {}
+    if creds_path.exists():
+        try:
+            loaded = json.loads(creds_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                saved = {str(k): str(v) for k, v in loaded.items() if v is not None}
+        except Exception:
+            saved = {}
+
+    return {
+        "auth_id": auth_id or get_secret("MERSOOM_AUTH_ID", None) or saved.get("auth_id", "") or "razvedchikov",
+        "password": password or get_secret("MERSOOM_PASSWORD", None) or saved.get("password", ""),
+        "nickname": nickname or get_secret("MERSOOM_NICKNAME", None) or saved.get("nickname", "") or "라즈베드치",
+        "credentials_path": str(creds_path),
+    }
+
+
+def _save_mersoom_credentials(creds: dict[str, str]) -> None:
+    from pathlib import Path
+
+    path = Path(creds["credentials_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe = {
+        "auth_id": creds["auth_id"],
+        "password": creds["password"],
+        "nickname": creds["nickname"],
+        "saved_at": datetime.utcnow().isoformat() + "Z",
+    }
+    path.write_text(json.dumps(safe, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _ensure_mersoom_password(creds: dict[str, str]) -> dict[str, str]:
+    if creds.get("password"):
+        return creds
+    import secrets as _secrets
+
+    # Mersoom currently accepts 10-20 characters; keep generated values simple.
+    creds = dict(creds)
+    creds["password"] = _secrets.token_hex(8)
+    _save_mersoom_credentials(creds)
+    return creds
+
+
+def _mersoom_public_creds(creds: dict[str, str]) -> dict[str, object]:
+    return {
+        "auth_id": creds.get("auth_id", ""),
+        "nickname": creds.get("nickname", ""),
+        "password_configured": bool(creds.get("password")),
+        "credentials_path": creds.get("credentials_path", ""),
+    }
+
+
+def _validate_mersoom_write_text(*values: str) -> str:
+    import re
+
+    text = "\n".join(v for v in values if v)
+    if not text:
+        return ""
+    if re.search(r"[\U0001F300-\U0001FAFF]", text):
+        return "Mersoom forbids emoji; remove emoji before posting."
+    if re.search(r"(^|\n)\s{0,3}#{1,6}\s|```|\*\*|__|\[[^\]]+\]\([^)]+\)", text):
+        return "Mersoom forbids markdown; send plain text only."
+    return ""
+
+
+class _MersoomClient:
+    base_url = "https://www.mersoom.com/api"
+
+    def __init__(self) -> None:
+        import httpx
+
+        self._client = httpx.Client(base_url=self.base_url, timeout=30, follow_redirects=False)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def _json_response(self, resp) -> dict | list:
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"text": resp.text[:1000]}
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"HTTP {resp.status_code}: {json.dumps(data, ensure_ascii=False)}"
+            )
+        return data
+
+    def _request(self, method: str, path: str, *, pow_required: bool = False, **kwargs) -> dict | list:
+        headers = dict(kwargs.pop("headers", {}) or {})
+        if pow_required:
+            headers.update(self._pow_headers())
+        resp = self._client.request(method, path, headers=headers or None, **kwargs)
+        return self._json_response(resp)
+
+    def _pow_headers(self) -> dict[str, str]:
+        import hashlib
+        import time
+
+        data = self._request("POST", "/challenge")
+        if not isinstance(data, dict) or "challenge" not in data or "token" not in data:
+            raise RuntimeError(
+                "Mersoom returned a non-PoW challenge that this tool cannot solve yet: "
+                + json.dumps(data, ensure_ascii=False)[:500]
+            )
+        challenge = data["challenge"]
+        seed = str(challenge["seed"])
+        target_prefix = str(challenge.get("target_prefix", "0000"))
+        limit_ms = int(challenge.get("limit_ms", 15000))
+        deadline = time.monotonic() + max(limit_ms / 1000.0, 1.0)
+
+        nonce = 0
+        while time.monotonic() < deadline:
+            digest = hashlib.sha256(f"{seed}{nonce}".encode("utf-8")).hexdigest()
+            if digest.startswith(target_prefix):
+                return {
+                    "X-Mersoom-Token": str(data["token"]),
+                    "X-Mersoom-Proof": str(nonce),
+                }
+            nonce += 1
+        raise TimeoutError(f"Mersoom PoW nonce not found within {limit_ms}ms")
+
+    def get(self, path: str, params: dict | None = None) -> dict | list:
+        return self._request("GET", path, params=params or None)
+
+    def post(self, path: str, payload: dict, *, pow_required: bool = False) -> dict | list:
+        return self._request("POST", path, json=payload, pow_required=pow_required)
+
+
+async def _exec_mersoom(
+    action: str = "feed",
+    title: str = "",
+    content: str = "",
+    post_id: str = "",
+    comment_id: str = "",
+    target_id: str = "",
+    vote: str = "",
+    side: str = "",
+    pros: str = "",
+    cons: str = "",
+    date: str = "",
+    limit: int | None = None,
+    cursor: str = "",
+    auth_id: str = "",
+    password: str = "",
+    nickname: str = "",
+    dry_run: bool = False,
+    **_: dict,
+) -> str:
+    creds = _mersoom_credentials(auth_id=auth_id, password=password, nickname=nickname)
+    client = _MersoomClient()
+    try:
+        if action == "auth":
+            data = _mersoom_public_creds(creds)
+            data["base_url"] = client.base_url
+            data["auth_model"] = "per-write auth_id/password with X-Mersoom PoW headers"
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "register":
+            if dry_run:
+                payload = {
+                    "auth_id": creds["auth_id"],
+                    "password": "***" if creds.get("password") else "<generated on non-dry-run>",
+                    "nickname": creds["nickname"],
+                }
+                return json.dumps({"dry_run": True, "endpoint": "/auth/register", "payload": payload}, ensure_ascii=False, indent=2)
+            creds = _ensure_mersoom_password(creds)
+            payload = {
+                "auth_id": creds["auth_id"],
+                "password": creds["password"],
+                "nickname": creds["nickname"],
+            }
+            data = client.post("/auth/register", payload, pow_required=True)
+            _save_mersoom_credentials(creds)
+            return json.dumps({"registered": True, "credentials": _mersoom_public_creds(creds), "response": data}, ensure_ascii=False, indent=2)
+
+        if action == "feed":
+            params: dict[str, object] = {"limit": limit or 20}
+            if cursor:
+                params["cursor"] = cursor
+            data = client.get("/posts", params=params)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "comments":
+            if not post_id:
+                return "[ERROR] post_id is required for mersoom comments."
+            data = client.get(f"/posts/{post_id}/comments")
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_status":
+            data = client.get("/arena/status")
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_candidates":
+            params = {"date": date} if date else None
+            data = client.get("/arena/candidates", params=params)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_posts":
+            params = {"date": date} if date else None
+            data = client.get("/arena/posts", params=params)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "post":
+            if not title or not content:
+                return "[ERROR] title and content are required for mersoom post."
+            err = _validate_mersoom_write_text(title, content)
+            if err:
+                return f"[ERROR] {err}"
+            if dry_run:
+                payload = {
+                    "title": title,
+                    "content": content,
+                    "nickname": creds["nickname"],
+                    "auth_id": creds["auth_id"],
+                    "password": "***" if creds.get("password") else "<generated on non-dry-run>",
+                }
+                return json.dumps({"dry_run": True, "endpoint": "/posts", "payload": payload}, ensure_ascii=False, indent=2)
+            creds = _ensure_mersoom_password(creds)
+            payload = {
+                "title": title,
+                "content": content,
+                "nickname": creds["nickname"],
+                "auth_id": creds["auth_id"],
+                "password": creds["password"],
+            }
+            data = client.post("/posts", payload, pow_required=True)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "comment":
+            if not post_id or not content:
+                return "[ERROR] post_id and content are required for mersoom comment."
+            err = _validate_mersoom_write_text(content)
+            if err:
+                return f"[ERROR] {err}"
+            if dry_run:
+                payload = {
+                    "content": content,
+                    "nickname": creds["nickname"],
+                    "auth_id": creds["auth_id"],
+                    "password": "***" if creds.get("password") else "<generated on non-dry-run>",
+                }
+                if comment_id:
+                    payload["parent_id"] = comment_id
+                return json.dumps({"dry_run": True, "endpoint": f"/posts/{post_id}/comments", "payload": payload}, ensure_ascii=False, indent=2)
+            creds = _ensure_mersoom_password(creds)
+            payload = {
+                "content": content,
+                "nickname": creds["nickname"],
+                "auth_id": creds["auth_id"],
+                "password": creds["password"],
+            }
+            if comment_id:
+                payload["parent_id"] = comment_id
+            data = client.post(f"/posts/{post_id}/comments", payload, pow_required=True)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_vote":
+            if not target_id or vote not in {"up", "down"}:
+                return "[ERROR] target_id and vote='up'|'down' are required for mersoom arena_vote."
+            payload = {"target_id": target_id, "type": vote}
+            if dry_run:
+                return json.dumps({"dry_run": True, "endpoint": "/arena/vote", "payload": payload}, ensure_ascii=False, indent=2)
+            data = client.post("/arena/vote", payload)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_comment":
+            if not post_id or not content:
+                return "[ERROR] post_id and content are required for mersoom arena_comment."
+            err = _validate_mersoom_write_text(content)
+            if err:
+                return f"[ERROR] {err}"
+            payload = {"postId": post_id, "content": content, "nickname": creds["nickname"]}
+            if date:
+                payload["date"] = date
+            if dry_run:
+                return json.dumps({"dry_run": True, "endpoint": "/arena/comments", "payload": payload}, ensure_ascii=False, indent=2)
+            data = client.post("/arena/comments", payload)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        if action == "arena_propose":
+            if not title or not pros or not cons:
+                return "[ERROR] title, pros, and cons are required for mersoom arena_propose."
+            err = _validate_mersoom_write_text(title, pros, cons)
+            if err:
+                return f"[ERROR] {err}"
+            if dry_run:
+                payload = {
+                    "title": title,
+                    "pros": pros,
+                    "cons": cons,
+                    "nickname": creds["nickname"],
+                    "auth_id": creds["auth_id"],
+                    "password": "***" if creds.get("password") else "<generated on non-dry-run>",
+                }
+                return json.dumps({"dry_run": True, "endpoint": "/arena/propose", "payload": payload}, ensure_ascii=False, indent=2)
+            creds = _ensure_mersoom_password(creds)
+            payload = {
+                "title": title,
+                "pros": pros,
+                "cons": cons,
+                "nickname": creds["nickname"],
+                "auth_id": creds["auth_id"],
+                "password": creds["password"],
+            }
+            data = client.post("/arena/propose", payload, pow_required=True)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        return f"[ERROR] Unknown Mersoom action: {action}"
+    except Exception as e:
+        return f"[ERROR] Failed to run Mersoom {action}: {e}"
+    finally:
+        client.close()
+
+
+TOOLS.append(MERSOOM_TOOL)
+TOOL_HANDLERS["mersoom"] = _exec_mersoom
+
+
 # ── A2A Client Tool ─────────────────────────────────────────────────
 # Orchestrator-only: send a message to an external A2A-compatible agent.
 

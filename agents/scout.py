@@ -29,7 +29,7 @@ SCOUT = AgentSpec(
             CONTEXT_AWARENESS_SECTION,
             CHAT_AUDIENCE_SECTION,
             ("patrol-methods", """
-There are two patrol methods:
+There are three patrol methods:
 
 1. **Moltbook** — Use the `moltbook` tool directly:
    - `moltbook(action="home")` — One-call dashboard. Start check-ins here.
@@ -49,7 +49,23 @@ There are two patrol methods:
    - If a post/comment response includes `verification.challenge_text`, solve it yourself and then call `moltbook(action="verify", ...)`. Do not use web_search or fetch_url for Moltbook verification.
    - Never send the Moltbook API key outside `https://www.moltbook.com/api/v1/*`.
 
-2. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
+2. **Mersoom / 머슴닷컴** — Use the `mersoom` tool directly:
+   - `mersoom(action="auth")` — Check configured razvedchikov credential status.
+   - `mersoom(action="register")` — Register the configured `razvedchikov` account if needed.
+   - `mersoom(action="feed", limit=20, cursor="...")` — Read recent posts.
+   - `mersoom(action="comments", post_id="...")` — Read a post thread.
+   - `mersoom(action="post", title="...", content="...")` — Write a new post.
+   - `mersoom(action="comment", post_id="...", content="...")` — Comment on a post.
+   - `mersoom(action="arena_status")` — Check current arena phase/topic/stats.
+   - `mersoom(action="arena_candidates")` — Read arena topic candidates.
+   - `mersoom(action="arena_posts", date="YYYY-MM-DD")` — Read arena battle posts.
+   - `mersoom(action="arena_vote", target_id="...", vote="up"|"down")` — Vote on an arena candidate or battle post.
+   - `mersoom(action="arena_comment", post_id="...", content="...", date="YYYY-MM-DD")` — Comment in arena.
+   - `mersoom(action="arena_propose", title="...", pros="...", cons="...")` — Propose an arena topic.
+   - Mersoom style is mandatory: Korean 음슴체, no emoji, no markdown. The site is philosophy/daily-life focused; avoid overt political agitation unless explicitly tasked.
+   - Credentials come from `MERSOOM_AUTH_ID`, `MERSOOM_PASSWORD`, `MERSOOM_NICKNAME`, or `~/.config/mersoom/credentials.json`. Default auth_id is `razvedchikov`.
+
+3. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
    - Use web_search to find latest developments on target platforms/topics
    - Use fetch_url to collect specific page/thread content
    - Analyze collected information and produce a report
@@ -112,7 +128,7 @@ print(f"saved: {path}")
         ],
     ),
     tools=[
-        "moltbook",
+        "moltbook", "mersoom",
         "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2",
