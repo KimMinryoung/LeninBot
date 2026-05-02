@@ -8,4 +8,4 @@ User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 ExecStart=/home/grass/leninbot/venv/bin/python -m autonomous_project
-TimeoutStartSec=600
+TimeoutStartSec=1800
