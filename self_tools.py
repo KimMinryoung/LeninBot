@@ -39,6 +39,26 @@ def _to_kst(ts) -> str:
     return str(ts)
 
 
+def _slice_text(text: str, max_chars: int | None = None, offset: int | None = None) -> tuple[str, int, int, bool]:
+    """Return a character slice plus pagination metadata."""
+    try:
+        start = max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        start = 0
+    start = min(start, len(text))
+
+    if max_chars is None:
+        end = len(text)
+    else:
+        try:
+            length = max(0, int(max_chars))
+        except (TypeError, ValueError):
+            length = 0
+        end = min(len(text), start + length)
+
+    return text[start:end], start, end, end < len(text)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1. TOOL DEFINITIONS (Anthropic API format)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -70,8 +90,9 @@ SELF_TOOLS = [
                 "keyword": {"type": "string", "description": "Filter keyword."},
                 "max_chars": {
                     "anyOf": [{"type": "integer"}, {"type": "null"}],
-                    "description": "For diary: maximum body characters per entry. Default null returns the full body.",
+                    "description": "Maximum body characters for detail reads. Default null returns the full body, subject to the tool-loop safety cap.",
                 },
+                "offset": {"type": "integer", "description": "Character offset for paginating long detail reads."},
                 "post_id": {"type": "integer", "description": "For diary: ai_diary.id / public /ai-diary/{id} id."},
                 "diary_id": {"type": "integer", "description": "For diary: alias of post_id."},
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
@@ -649,7 +670,11 @@ async def _exec_read_research(
 
 
 async def _exec_read_private_reports(
-    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+    limit: int = 10,
+    keyword: str | None = None,
+    slug: str | None = None,
+    max_chars: int | None = None,
+    offset: int | None = None,
 ) -> str:
     import private_report_tools
 
@@ -661,13 +686,20 @@ async def _exec_read_private_reports(
         if not row:
             return f"No private report found for slug: {slug}"
         markdown = row.get("markdown") or ""
+        body, start, end, truncated = _slice_text(markdown, max_chars=max_chars, offset=offset)
+        next_hint = (
+            f"\nnext: read_self(source='private_reports', slug='{row['slug']}', offset={end}, max_chars={max_chars})"
+            if truncated and max_chars is not None
+            else ""
+        )
         return (
             f"=== PRIVATE REPORT: {row['slug']} ===\n"
             f"id={row['id']} title: {row.get('title') or ''}\n"
             f"created={_to_kst(row.get('created_at'))} updated={_to_kst(row.get('updated_at'))}\n"
             f"published_research_id={row.get('published_research_id') or ''}\n"
+            f"body_chars={len(markdown)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
             f"summary: {(row.get('summary') or '')[:800]}\n\n"
-            f"-- markdown preview --\n{markdown[:4000]}{'…' if len(markdown) > 4000 else ''}"
+            f"-- markdown {start}:{end}/{len(markdown)} --\n{body}"
         )
 
     try:
@@ -1723,7 +1755,8 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 
 async def _exec_read_self(
     source: str, limit: int | None = None, keyword: str | None = None,
-    max_chars: int | None = None, post_id: int | None = None, diary_id: int | None = None,
+    max_chars: int | None = None, offset: int | None = None,
+    post_id: int | None = None, diary_id: int | None = None,
     hours_back: int | None = None, service: str = "telegram",
     grep: str | list[str] | tuple[str, ...] | None = "", status: str | None = None, task_id: int | None = None,
     chat_source: str = "web", slug: str | None = None,
@@ -1756,7 +1789,13 @@ async def _exec_read_self(
     if source == "research":
         return await _exec_read_research(limit=limit or 10, keyword=keyword, slug=slug)
     if source == "private_reports":
-        return await _exec_read_private_reports(limit=limit or 10, keyword=keyword, slug=slug)
+        return await _exec_read_private_reports(
+            limit=limit or 10,
+            keyword=keyword,
+            slug=slug,
+            max_chars=max_chars,
+            offset=offset,
+        )
     if source == "curation":
         return await _exec_read_curation(limit=limit or 10, keyword=keyword, slug=slug)
     if source == "static_pages":

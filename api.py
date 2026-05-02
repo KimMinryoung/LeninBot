@@ -265,6 +265,373 @@ def format_sse(data: dict):
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+_PRIVATE_REPORTS_ADMIN_HTML = r"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Cyber-Lenin Private Reports</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f4ef;
+      --panel: #ffffff;
+      --text: #171717;
+      --muted: #666257;
+      --line: #d9d3c7;
+      --accent: #9f2727;
+      --accent-dark: #741c1c;
+      --code: #111111;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .bar {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 14px 18px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+    h1 {
+      font-size: 18px;
+      line-height: 1.25;
+      margin: 0;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+    .auth {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: min(540px, 100%);
+    }
+    input, button {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      font-size: 14px;
+    }
+    input {
+      background: var(--panel);
+      color: var(--text);
+      padding: 0 10px;
+      width: 100%;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      padding: 0 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--accent-dark);
+      border-color: var(--accent-dark);
+    }
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 18px;
+      display: grid;
+      grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+      gap: 18px;
+    }
+    aside, section.viewer {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+    aside {
+      overflow: hidden;
+    }
+    .tools {
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .search {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    .status {
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .list {
+      max-height: calc(100vh - 142px);
+      overflow: auto;
+    }
+    .report-row {
+      width: 100%;
+      height: auto;
+      display: block;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 0;
+      padding: 12px;
+    }
+    .report-row:hover, .report-row.active {
+      background: #f1e9dd;
+    }
+    .row-title {
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1.35;
+      margin-bottom: 6px;
+      white-space: normal;
+    }
+    .row-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+    .viewer-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      gap: 6px;
+    }
+    .viewer-title {
+      font-size: 20px;
+      font-weight: 760;
+      line-height: 1.3;
+    }
+    .viewer-meta {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+    pre {
+      margin: 0;
+      padding: 18px;
+      color: var(--code);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 14px/1.62 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      min-height: calc(100vh - 180px);
+    }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    @media (max-width: 860px) {
+      .bar, main { grid-template-columns: 1fr; }
+      .auth { min-width: 0; }
+      main { padding: 12px; }
+      .list { max-height: 36vh; }
+      pre { min-height: 44vh; }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171615;
+        --panel: #211f1d;
+        --text: #f0eee9;
+        --muted: #aaa39a;
+        --line: #3a342e;
+        --accent: #b83a35;
+        --accent-dark: #e2716b;
+        --code: #f0eee9;
+      }
+      header { background: rgba(33,31,29,0.84); }
+      .report-row:hover, .report-row.active { background: #2b2621; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>Cyber-Lenin Private Reports</h1>
+      <div class="auth">
+        <input id="adminKey" type="password" autocomplete="off" placeholder="X-Admin-Key">
+        <button id="saveKey">저장</button>
+        <button id="clearKey" class="secondary">삭제</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="tools">
+        <div class="search">
+          <input id="keyword" type="search" placeholder="검색어">
+          <button id="reload">조회</button>
+        </div>
+        <div id="status" class="status">관리자 키를 입력하고 조회.</div>
+      </div>
+      <div id="list" class="list"></div>
+    </aside>
+    <section class="viewer">
+      <div class="viewer-head">
+        <div id="title" class="viewer-title">비공개 보고서</div>
+        <div id="meta" class="viewer-meta">목록에서 문서를 선택.</div>
+      </div>
+      <pre id="body"></pre>
+    </section>
+  </main>
+  <script>
+    const keyInput = document.getElementById('adminKey');
+    const keywordInput = document.getElementById('keyword');
+    const statusEl = document.getElementById('status');
+    const listEl = document.getElementById('list');
+    const titleEl = document.getElementById('title');
+    const metaEl = document.getElementById('meta');
+    const bodyEl = document.getElementById('body');
+    let activeSlug = '';
+
+    keyInput.value = localStorage.getItem('cyberLeninAdminKey') || '';
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function headers() {
+      const key = keyInput.value.trim();
+      return key ? { 'X-Admin-Key': key } : {};
+    }
+
+    function formatDate(value) {
+      if (!value) return '?';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString('ko-KR', { hour12: false });
+    }
+
+    async function api(path) {
+      const res = await fetch(path, { headers: headers() });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const data = await res.json();
+          detail = data.detail || detail;
+        } catch (_) {}
+        throw new Error(`${res.status} ${detail}`);
+      }
+      return res.json();
+    }
+
+    function renderList(reports) {
+      listEl.textContent = '';
+      if (!reports.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = '비공개 보고서가 없다.';
+        listEl.appendChild(empty);
+        return;
+      }
+      for (const report of reports) {
+        const row = document.createElement('button');
+        row.className = 'report-row';
+        row.dataset.slug = report.slug || '';
+        if (report.slug === activeSlug) row.classList.add('active');
+        const rowTitle = document.createElement('div');
+        rowTitle.className = 'row-title';
+        rowTitle.textContent = report.title || '(untitled)';
+        const meta = document.createElement('div');
+        meta.className = 'row-meta';
+        meta.textContent = `${report.slug} · ${formatDate(report.updated_at)}`;
+        row.append(rowTitle, meta);
+        row.addEventListener('click', () => loadDetail(report.slug));
+        listEl.appendChild(row);
+      }
+    }
+
+    async function loadList() {
+      const key = keyInput.value.trim();
+      if (!key) {
+        setStatus('관리자 키가 필요하다.');
+        return;
+      }
+      setStatus('조회 중...');
+      const keyword = keywordInput.value.trim();
+      const qs = new URLSearchParams({ limit: '100' });
+      if (keyword) qs.set('keyword', keyword);
+      try {
+        const data = await api(`/private-reports?${qs.toString()}`);
+        renderList(data.reports || []);
+        setStatus(`보고서 ${(data.reports || []).length}개`);
+      } catch (err) {
+        setStatus(`실패: ${err.message}`);
+      }
+    }
+
+    async function loadDetail(slug) {
+      activeSlug = slug;
+      setStatus('본문 조회 중...');
+      try {
+        const data = await api(`/private-reports/${encodeURIComponent(slug)}`);
+        const report = data.report || {};
+        titleEl.textContent = report.title || '(untitled)';
+        metaEl.textContent = `${report.slug || ''} · id=${report.id || ''} · updated=${formatDate(report.updated_at)} · sha256=${report.content_sha256 || ''}`;
+        bodyEl.textContent = report.markdown || '';
+        document.querySelectorAll('.report-row').forEach((el) => {
+          el.classList.toggle('active', el.dataset.slug === slug);
+        });
+        setStatus('본문 조회 완료.');
+      } catch (err) {
+        setStatus(`실패: ${err.message}`);
+      }
+    }
+
+    document.getElementById('saveKey').addEventListener('click', () => {
+      localStorage.setItem('cyberLeninAdminKey', keyInput.value.trim());
+      setStatus('관리자 키 저장됨.');
+      loadList();
+    });
+    document.getElementById('clearKey').addEventListener('click', () => {
+      localStorage.removeItem('cyberLeninAdminKey');
+      keyInput.value = '';
+      setStatus('관리자 키 삭제됨.');
+    });
+    document.getElementById('reload').addEventListener('click', loadList);
+    keywordInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') loadList();
+    });
+    if (keyInput.value.trim()) loadList();
+  </script>
+</body>
+</html>"""
+
+
+@app.get("/admin/private-reports")
+@app.get("/private")
+async def private_reports_admin_page():
+    return Response(
+        content=_PRIVATE_REPORTS_ADMIN_HTML,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
 def _parse_user_fingerprints(http_req: Request) -> list[str]:
     """Read X-User-Fingerprints header (CSV) — injected by the frontend proxy
     for logged-in users so their bound fingerprints (across devices) can be
