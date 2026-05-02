@@ -812,7 +812,8 @@ async def chat_with_tools(
     provider_label: str | None = None,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
-) -> str:
+    return_metadata: bool = False,
+) -> str | dict:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
     Interface mirrors claude_loop.chat_with_tools() for drop-in use.
@@ -857,6 +858,29 @@ async def chat_with_tools(
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
     length_continuations = 0
+
+    def _final_result(
+        text: str,
+        *,
+        finish_reason: str = "stop",
+        truncated: bool = False,
+        limit_reason: str | None = None,
+        was_still_working: bool = False,
+    ):
+        final_text = text if text else EMPTY_RESPONSE_FALLBACK
+        if not return_metadata:
+            return final_text
+        return {
+            "text": final_text,
+            "finish_reason": finish_reason,
+            "complete": not truncated,
+            "truncated": truncated,
+            "continuations_used": length_continuations,
+            "limit_reason": limit_reason,
+            "was_still_working": was_still_working,
+            "cost_usd": total_cost,
+            "rounds": round_num,
+        }
 
     def _log_sdk_usage(label: str, usage, call_cost: float, current_total: float) -> None:
         prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -970,7 +994,10 @@ async def chat_with_tools(
             logger.warning("Model refused request at round %d: %s", round_num, refusal)
             if budget_tracker is not None:
                 budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            return f"⚠️ 모델이 요청을 거부했습니다: {refusal}"
+            return _final_result(
+                f"⚠️ 모델이 요청을 거부했습니다: {refusal}",
+                finish_reason="refusal",
+            )
 
         # ── No tool calls → return text response ──
         if finish_reason != "tool_calls" or not tool_calls:
@@ -986,6 +1013,14 @@ async def chat_with_tools(
                     and content_text.strip()
                 ):
                     length_continuations += 1
+                    await emit_progress(
+                        on_progress,
+                        "warning",
+                        (
+                            f"응답이 {max_tokens} 토큰 한도에서 끊겨 이어서 생성합니다 "
+                            f"({length_continuations}/{max_length_continuations})."
+                        ),
+                    )
                     accumulated_text_parts.append(content_text.strip())
                     working_msgs.append({
                         "role": "assistant",
@@ -1006,7 +1041,18 @@ async def chat_with_tools(
             final_text = "\n".join(all_parts)
             if budget_tracker is not None:
                 budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            return final_text if final_text else EMPTY_RESPONSE_FALLBACK
+            truncated = finish_reason == "length"
+            if truncated:
+                await emit_progress(
+                    on_progress,
+                    "warning",
+                    "응답이 토큰 한도에서 멈췄고 continuation 한도를 모두 사용했습니다.",
+                )
+            return _final_result(
+                final_text,
+                finish_reason=finish_reason,
+                truncated=truncated,
+            )
 
         # ── Budget check (matches claude_loop.py) ──
         budget_exceeded = total_cost >= budget_usd
@@ -1022,7 +1068,10 @@ async def chat_with_tools(
             logger.warning("All tool_calls malformed at round %d — returning text", round_num)
             if budget_tracker is not None:
                 budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            return content_text.strip() if content_text.strip() else EMPTY_RESPONSE_FALLBACK
+            return _final_result(
+                content_text.strip(),
+                finish_reason="malformed_tool_calls",
+            )
 
         # Accumulate substantial text from tool_calls rounds for final result
         if content_text.strip() and len(content_text.strip()) > 20:
@@ -1102,7 +1151,10 @@ async def chat_with_tools(
                     budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
                 terminal_report = str(_tresult).strip() or f"{_tname} completed"
                 all_parts = accumulated_text_parts + [terminal_report]
-                return "\n".join(p for p in all_parts if p)
+                return _final_result(
+                    "\n".join(p for p in all_parts if p),
+                    finish_reason="terminal_tool",
+                )
 
         # ── Budget break AFTER tool results are properly appended ──
         if budget_exceeded:
@@ -1289,11 +1341,23 @@ async def chat_with_tools(
             if budget_tracker is not None:
                 budget_tracker.update(build_budget_tracker(
                     total_cost, round_num, was_still_working, tool_work_details))
-            return f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}"
+            return _final_result(
+                f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}",
+                finish_reason="final_response_failed",
+                truncated=True,
+                limit_reason=limit_reason,
+                was_still_working=was_still_working,
+            )
 
     all_parts = accumulated_text_parts + ([text.strip()] if text.strip() else [])
     final_text = "\n".join(all_parts)
     if budget_tracker is not None:
         budget_tracker.update(build_budget_tracker(
             total_cost, round_num, was_still_working, tool_work_details))
-    return final_text if final_text else EMPTY_RESPONSE_FALLBACK
+    return _final_result(
+        final_text,
+        finish_reason="forced_final" if was_still_working or budget_exhausted else "stop",
+        truncated=was_still_working,
+        limit_reason=limit_reason,
+        was_still_working=was_still_working,
+    )

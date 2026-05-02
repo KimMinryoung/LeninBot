@@ -1,5 +1,6 @@
 {
   "chat_budget": 0.3,
+  "webchat_budget": 0.3,
   "task_budget": 1.0,
   "chat_model": "high",
   "task_model": "high",

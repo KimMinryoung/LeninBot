@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from db import query as db_query, query_one as db_query_one
 from email_bridge import (
     build_reply_prompt_input,
@@ -236,9 +236,9 @@ app.add_middleware(
 
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: str = "default"
-    fingerprint: str = ""  # Browser fingerprint from localStorage (persistent across server restarts)
+    message: str = Field(..., min_length=1, max_length=8000)
+    session_id: str = Field(default="default", min_length=1, max_length=128)
+    fingerprint: str = Field(default="", max_length=256)  # Browser fingerprint from localStorage (persistent across server restarts)
 
 
 class EmailDraftRequest(BaseModel):

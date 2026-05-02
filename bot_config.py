@@ -36,6 +36,7 @@ _WEBCHAT_MAX_TOKENS = 4096
 # ── Runtime Config (mutable at runtime via /config) ──────────────────
 _CONFIG_DEFAULTS = {
     "chat_budget": 0.30,       # USD per chat turn
+    "webchat_budget": 0.30,    # USD per public web chat turn
     "task_budget": 1.00,       # USD per background task
     "chat_model": "high",      # "high" | "medium" | "low"
     "task_model": "high",      # "high" | "medium" | "low"
@@ -114,7 +115,8 @@ def _config_meta(
 
 
 _CONFIG_META = {
-    "chat_budget": _config_meta("대화 예산", "$", [0.10, 0.20, 0.30, 0.50, 1.00], ["telegram-chat", "webchat"], ["api"]),
+    "chat_budget": _config_meta("대화 예산", "$", [0.10, 0.20, 0.30, 0.50, 1.00], ["telegram-chat"], ["api"]),
+    "webchat_budget": _config_meta("웹챗 예산", "$", [0.05, 0.10, 0.20, 0.30, 0.50], ["webchat"], ["api"]),
     "task_budget": _config_meta("태스크 예산", "$", [0.50, 1.00, 2.00, 3.00, 5.00], ["telegram-task"]),
     "chat_model": _config_meta("대화 모델", "", ["high", "medium", "low"], ["telegram-chat"]),
     "task_model": _config_meta("태스크 모델", "", ["high", "medium", "low"], ["telegram-task"]),

@@ -620,6 +620,10 @@ async def handle_web_chat(
             await queue.put(_format_sse({"type": "log", "node": "tool", "content": detail}))
         elif event == "thinking":
             await queue.put(_format_sse({"type": "log", "node": "thinking", "content": detail}))
+        elif event == "warning":
+            await queue.put(_format_sse({"type": "warning", "content": detail}))
+        elif event == "status":
+            await queue.put(_format_sse({"type": "status", "content": detail}))
         elif event == "text_delta":
             # Live token stream from the LLM — the client appends to a growing
             # answer bubble as each delta arrives, then finalizes on "answer".
@@ -654,6 +658,7 @@ async def handle_web_chat(
                     provider_label=f"{provider}:web",
                     continue_on_length=True,
                     max_length_continuations=2,
+                    return_metadata=True,
                     **extra_kwargs,
                 )
             else:
@@ -692,12 +697,28 @@ async def handle_web_chat(
     if error_holder:
         yield _format_sse({"type": "error", "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."})
     elif answer_holder:
-        answer = answer_holder[0]
+        result = answer_holder[0]
+        metadata = result if isinstance(result, dict) else {}
+        answer = str((metadata.get("text") or "") if metadata else result)
+        if metadata.get("truncated"):
+            yield _format_sse({
+                "type": "warning",
+                "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
+            })
         # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
         await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
             message, answer, f"{provider}_loop",
         )
-        yield _format_sse({"type": "answer", "content": answer})
+        yield _format_sse({
+            "type": "answer",
+            "content": answer,
+            "complete": bool(metadata.get("complete", True)),
+            "truncated": bool(metadata.get("truncated", False)),
+            "finish_reason": metadata.get("finish_reason"),
+            "continuations_used": metadata.get("continuations_used", 0),
+            "rounds": metadata.get("rounds"),
+            "cost_usd": metadata.get("cost_usd"),
+        })
     else:
         yield _format_sse({"type": "error", "content": "응답을 생성하지 못했습니다."})

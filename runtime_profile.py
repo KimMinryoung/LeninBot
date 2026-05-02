@@ -125,7 +125,7 @@ async def resolve_runtime_profile(
         default_tokens = _CLAUDE_MAX_TOKENS
     elif kind == "webchat":
         default_rounds = 20
-        default_budget = float(_config.get("chat_budget", 0.30))
+        default_budget = float(_config.get("webchat_budget", _config.get("chat_budget", 0.30)))
         default_tokens = _coerce_positive_int(
             os.getenv("WEBCHAT_MAX_TOKENS"),
             _WEBCHAT_MAX_TOKENS,
