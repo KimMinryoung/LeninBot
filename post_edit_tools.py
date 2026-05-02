@@ -22,7 +22,7 @@ import logging
 import re
 from typing import Any
 
-from db import execute_returning_rowcount as db_exec
+from db import execute_returning_rowcount as db_exec, query_one as db_query_one
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,10 @@ EDIT_PUBLIC_POST_TOOL = {
         "kind='curation' (hub_curations, fields: title, source_url, source_title, "
         "source_author, source_publication, source_published_at, selection_rationale, "
         "context, tags). Provide post_id for diary/report/post, or slug for curation, "
-        "plus at least one field for the chosen kind."
+        "plus at least one field for the chosen kind. For a narrow correction, pass "
+        "`field`, `replace_old`, and `replace_new`; the tool reads the current field, "
+        "shows matching snippets with about 10 characters of surrounding context, and "
+        "updates only when the match is unambiguous unless `replace_all=true`."
     ),
     "input_schema": {
         "type": "object",
@@ -118,10 +121,57 @@ EDIT_PUBLIC_POST_TOOL = {
                 "items": {"type": "string"},
                 "description": "Replacement curation tag list. Valid for curation only.",
             },
+            "field": {
+                "type": "string",
+                "description": (
+                    "Surgical mode only. Editable text field to modify, e.g. content, result, "
+                    "title, context, selection_rationale."
+                ),
+            },
+            "replace_old": {
+                "type": "string",
+                "description": "Surgical mode only. Literal text to find in the current field value.",
+            },
+            "replace_new": {
+                "type": "string",
+                "description": "Surgical mode only. Replacement text for replace_old.",
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": (
+                    "Surgical mode only. Default false. If replace_old appears multiple times, "
+                    "false returns contextual match snippets without editing; true replaces every match."
+                ),
+            },
         },
         "required": ["kind"],
     },
 }
+
+
+def _literal_match_spans(text: str, needle: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        pos = text.find(needle, start)
+        if pos < 0:
+            return spans
+        end = pos + len(needle)
+        spans.append((pos, end))
+        start = end
+
+
+def _format_match_snippets(text: str, spans: list[tuple[int, int]], *, context_chars: int = 10, limit: int = 20) -> str:
+    lines = []
+    for idx, (start, end) in enumerate(spans[:limit], 1):
+        left = text[max(0, start - context_chars):start]
+        match = text[start:end]
+        right = text[end:end + context_chars]
+        snippet = f"{left}[[{match}]]{right}".replace("\n", "\\n")
+        lines.append(f"{idx}. pos {start}-{end}: {snippet}")
+    if len(spans) > limit:
+        lines.append(f"... {len(spans) - limit} more match(es) omitted")
+    return "\n".join(lines)
 
 
 def _invalidate_cache_sync(kind: str, post_id: int) -> dict[str, Any]:
@@ -175,6 +225,10 @@ async def _exec_edit_public_post(
     selection_rationale: str | None = None,
     context: str | None = None,
     tags: list | None = None,
+    field: str | None = None,
+    replace_old: str | None = None,
+    replace_new: str | None = None,
+    replace_all: bool = False,
 ) -> str:
     kind = (kind or "").strip().lower()
     if kind not in _KIND_CONFIG:
@@ -209,6 +263,67 @@ async def _exec_edit_public_post(
         "context": context,
         "tags": tags,
     }
+    surgical_requested = any(v is not None for v in (field, replace_old, replace_new)) or replace_all is True
+    direct_updates = [(f, v) for f, v in provided.items() if v is not None]
+
+    if surgical_requested:
+        if direct_updates:
+            return (
+                "Error: surgical mode cannot be combined with direct field replacement. "
+                "Use either field/replace_old/replace_new or normal editable fields, not both."
+            )
+        edit_field = (field or "").strip()
+        if not edit_field or replace_old is None or replace_new is None:
+            return "Error: surgical mode requires field, replace_old, and replace_new."
+        if edit_field not in allowed:
+            return (
+                f"Error: field={edit_field!r} is not editable on kind='{kind}'. "
+                f"Allowed: {list(allowed)}."
+            )
+        if edit_field == "tags":
+            return "Error: surgical mode is not supported for tags; replace the whole tags array instead."
+        if replace_old == "":
+            return "Error: replace_old must not be empty."
+
+        where_field = cfg.get("where_field", "id")
+        try:
+            row = await asyncio.to_thread(
+                db_query_one,
+                f"SELECT {edit_field} FROM {cfg['table']} WHERE {where_field} = %s",
+                (target,),
+            )
+        except Exception as e:
+            logger.warning("edit_public_post SELECT failed (%s %s=%s): %s", kind, where_field, target, e)
+            return f"Error: DB read failed: {type(e).__name__}: {e}"
+        if not row:
+            return f"Error: no {kind} row found with {where_field}={target!r} — nothing updated."
+
+        current_value = row.get(edit_field)
+        if current_value is None:
+            current_text = ""
+        elif isinstance(current_value, str):
+            current_text = current_value
+        else:
+            current_text = str(current_value)
+        spans = _literal_match_spans(current_text, replace_old)
+        if not spans:
+            return (
+                f"Error: replace_old not found in {kind} {where_field}={target!r} field={edit_field!r}; "
+                "nothing updated."
+            )
+        snippets = _format_match_snippets(current_text, spans)
+        if len(spans) > 1 and replace_all is not True:
+            return (
+                f"Multiple matches found in {kind} {where_field}={target!r} field={edit_field!r}; "
+                "nothing updated. Use a more specific replace_old or set replace_all=true to replace all matches.\n"
+                f"Matches:\n{snippets}"
+            )
+
+        new_text = current_text.replace(replace_old, replace_new) if replace_all else (
+            current_text[:spans[0][0]] + replace_new + current_text[spans[0][1]:]
+        )
+        provided[edit_field] = new_text
+
     rejected = [f for f, v in provided.items() if v is not None and f not in allowed]
     if rejected:
         return (
@@ -219,8 +334,8 @@ async def _exec_edit_public_post(
     updates = [(f, provided[f]) for f in allowed if provided[f] is not None]
     if not updates:
         return f"Error: provide at least one of {list(allowed)} to update."
-    if kind == "curation" and source_url is not None:
-        cleaned_url = source_url.strip()
+    if kind == "curation" and provided.get("source_url") is not None:
+        cleaned_url = str(provided["source_url"]).strip()
         if cleaned_url and not cleaned_url.startswith(("http://", "https://")):
             return "Error: source_url must be an http(s) URL."
 
@@ -261,6 +376,12 @@ async def _exec_edit_public_post(
         cache_note = (
             f"CACHE INVALIDATION FAILED ({cache['reason']}) — "
             f"run `redis-cli DEL {manual_key}` manually"
+        )
+    if surgical_requested:
+        return (
+            f"Updated {kind} {where_field}={target!r}: surgical replace in {field!r} "
+            f"({len(spans)} match(es)); {cache_note}.\n"
+            f"Matches replaced:\n{snippets}"
         )
     return f"Updated {kind} {where_field}={target!r}: [{fields_str}]; {cache_note}."
 

@@ -94,7 +94,11 @@ Three publishing tools, each for a distinct artifact type:
 - This tool is a mandatory two-step gate: first call saves an exact draft backup and does
   not publish. Before calling it again with `fact_check_passed=true`, independently verify
   proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source
-  attributions. Put checked claims, URLs/KG/tool sources, and corrections in `fact_check_notes`.
+  attributions. If you discover factual errors while doing that verification, revise your
+  own draft content first and call `publish_research` again with the corrected content and
+  the same `filename`; do not set `fact_check_passed=true` until the corrected draft has
+  been re-checked. Put checked claims, URLs/KG/tool sources, and corrections in
+  `fact_check_notes`.
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
 structured DB row served at `/hub/{slug}`. Use for:
@@ -111,6 +115,9 @@ make a bad research document private. Use this instead of publishing a duplicate
 **edit_public_post(kind="curation", slug, ...fields)** — edit an existing hub curation DB
 row. Use this for corrections to curation title, source metadata, selection_rationale,
 context, or tags. Do not create a duplicate curation when the existing row should be fixed.
+For narrow text corrections, use surgical mode with `field`, `replace_old`, and
+`replace_new`; if the tool reports multiple matches with surrounding snippets, retry with
+more specific `replace_old` unless every match should be changed via `replace_all=true`.
 
 **publish_static_page(slug, title, html_body, summary?)** — sandboxed HTML page served at
 `/p/{slug}`. Use for:

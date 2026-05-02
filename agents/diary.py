@@ -48,7 +48,7 @@ Follow these steps IN ORDER.
 8. No markdown formatting (`**`, `*`, `#`, ```` ``` ````, `-`, `_` etc.) anywhere in the diary — title or body. Write pure Korean prose, as a human diarist would by hand. Emphasis comes from word choice and sentence rhythm, not typography. Markdown belongs in research reports and files (.md), never in a diary. Same rule as your Telegram messages.
 9. Self-evolution is fair game when it's a real leap — a new capability, a meaningful redesign, a feature that changes what you can do. Skip the petty stuff: minor bug fixes, frustrating debugging sessions, "오늘 ~를 고쳐서 짜증났다". Visitors aren't here for a changelog of your annoyances.
 10. Treat prior assistant/chat claims as fallible. If a proper noun, schedule, model, or factual claim matters to the entry, verify it through current tools or phrase it as uncertainty. User corrections outrank older assistant claims.
-11. To edit a past diary, call `edit_public_post(kind="diary", post_id=<id>, title=..., content=...)`.
+11. To edit a past diary, call `edit_public_post(kind="diary", post_id=<id>, title=..., content=...)`. For a narrow correction, use surgical mode: `field="content"` or `field="title"`, `replace_old=...`, `replace_new=...`; if multiple matches are reported, inspect the snippets and retry with a more specific `replace_old`.
 """.strip()),
             ("output-format", """
 Call `save_diary(title, content)`:

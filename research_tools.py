@@ -200,6 +200,31 @@ def _validate_fact_check_notes(notes: str | None) -> str | None:
     return None
 
 
+def _format_draft_revision_guidance(*, filename: str, draft_path: Path, blocker: str | None = None) -> str:
+    lines = []
+    if blocker:
+        lines.extend([
+            "Publication metadata must be corrected before publication.",
+            f"Tool requirement: {blocker}",
+        ])
+    else:
+        lines.append("If your independent fact-check finds errors in this draft:")
+    lines.extend([
+        f"1. Review the saved draft backup if needed: {draft_path}",
+        "2. Revise the draft text yourself before publishing. Correct the `content` argument in "
+        "your next publish_research call and preserve the same "
+        f"`filename` (`{filename}`) so the revised draft replaces this publication candidate.",
+        "3. Re-check every affected proper noun, date, figure, current office, vote/seat count, "
+        "quotation, and source attribution after editing.",
+        "4. Publish only after the corrected draft passes verification: call publish_research again "
+        "with the revised `content`, the same `filename`, `fact_check_passed=true`, and "
+        "`fact_check_notes` that cites sources and explicitly names corrections made.",
+        "If the document is already public, use edit_research(operation=\"edit\", filename=..., "
+        "content=...) instead of creating a duplicate publication.",
+    ])
+    return "\n".join(lines)
+
+
 def _cache_safe_key(filename: str) -> str:
     """Mirror the frontend's safe-key transform: non-[A-Za-z0-9._-] → '_'."""
     return re.sub(r"[^A-Za-z0-9._-]", "_", filename)
@@ -260,7 +285,10 @@ PUBLISH_RESEARCH_TOOL = {
         "data/publication_drafts/research/ and does NOT publish. Before the second call, "
         "independently verify proper nouns, dates, figures, current officeholders, vote/seat "
         "counts, and quoted claims. Call again with fact_check_passed=true and fact_check_notes "
-        "summarizing checked claims and sources to publish. "
+        "summarizing checked claims, sources, and corrections to publish. If your independent "
+        "fact-check finds errors in the draft, revise the content yourself and call this tool "
+        "again with the same filename; do not set fact_check_passed=true until the revised draft "
+        "has been re-checked. "
         "Published files are served at https://cyber-lenin.com/reports/research/{slug}, "
         "where slug is the filename without the .md extension. "
         "Use for polished analysis, forecasts, and investigative findings. "
@@ -291,7 +319,8 @@ PUBLISH_RESEARCH_TOOL = {
                 "type": "string",
                 "description": (
                     "Required when fact_check_passed=true. Summarize checked claims, sources consulted "
-                    "(URLs or tool/source names), and corrections made before publication."
+                    "(URLs or tool/source names), and corrections made before publication. If prior "
+                    "verification found errors, mention each corrected issue."
                 ),
             },
         },
@@ -345,7 +374,9 @@ async def _exec_publish_research(
             f"Candidate public URL: {_public_url(fname)}\n"
             "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
             "current offices, quotations, and source attributions. Then call publish_research again "
-            "with fact_check_passed=true and fact_check_notes listing the checked claims and sources."
+            "with fact_check_passed=true and fact_check_notes listing the checked claims, sources, "
+            "and corrections made.\n\n"
+            f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path)}"
         )
 
     fact_check_error = _validate_fact_check_notes(fact_check_notes)
@@ -353,7 +384,7 @@ async def _exec_publish_research(
         return (
             "Error: publication blocked after draft backup.\n"
             f"Draft backup: {draft_path}\n"
-            f"{fact_check_error}."
+            f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path, blocker=fact_check_error)}"
         )
 
     try:
