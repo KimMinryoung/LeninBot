@@ -1633,8 +1633,13 @@ TASK_CONTEXT_TOOLS = [
             "type": "object",
             "properties": {
                 "message": {"type": "string", "description": "Message to share with sibling agents."},
+                "content": {"type": "string", "description": "Alias for message; accepted for compatibility."},
+                "event_type": {
+                    "type": "string",
+                    "description": "Ignored compatibility field. Use save_finding for typed mission timeline events.",
+                },
             },
-            "required": ["message"],
+            "required": [],
         },
     },
     {
@@ -1703,8 +1708,13 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             logger.error("read_user_chat error (task %d): %s", task_id, e)
             return f"Failed to read chat: {e}"
 
-    async def _exec_send_message(message: str) -> str:
+    async def _exec_send_message(message: str | None = None, content: str | None = None, event_type: str | None = None) -> str:
         """Post to mission bulletin board."""
+        del event_type
+        message_text = (message if message is not None else content) or ""
+        message_text = str(message_text).strip()
+        if not message_text:
+            return "No message content provided."
         if not mission_id:
             return "No mission linked to this task — message not posted."
         try:
@@ -1716,7 +1726,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
                 agent_type_str = (ctx or {}).get("agent_type", "")
             except Exception:
                 pass
-            post_to_board(mission_id, task_id, agent_type_str, message)
+            post_to_board(mission_id, task_id, agent_type_str, message_text)
             return f"Message posted to mission #{mission_id} board."
         except Exception as e:
             logger.error("send_message error (task %d): %s", task_id, e)

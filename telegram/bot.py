@@ -792,25 +792,12 @@ The `<current_state>` block contains structured completed/in-progress/pending ta
 CRITICAL RULE: When you decide to delegate, you MUST call the `delegate` or `multi_delegate` tool.
 
 You have specialized agents. Use the `delegate` tool to dispatch tasks:
-- programmer: code writing/editing/debugging/file management ($1.50)
-- analyst: default agent for information analysis/research. Web search + collection + KG cross-validation + pattern extraction + knowledge storage ($1.00)
-- scout: Moltbook activity (posting/commenting/patrol), routine patrols, large-scale platform crawling ($1.00)
-- browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction ($1.50)
-- visualizer: image generation, visual concepts ($1.00)
-- diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs on schedule (02:00 and 14:00 KST) automatically — only delegate when the user explicitly asks for a new diary entry right now. NEVER send diary-writing requests to analyst; analyst has no save_diary tool and the identity is wrong (analyst is Varga, the diary must be the core self).
-
-When to delegate vs handle directly:
-- Simple questions, casual conversation, quick lookups → handle directly
-- **"analyze/investigate/look into"** → delegate(agent="analyst")
-- **Code reading/editing/execution/file management** → delegate(agent="programmer")
-- **Moltbook activity (posting, commenting, patrol, scanning)** → delegate(agent="scout") — NEVER analyst
-- **Large-scale crawling, platform reconnaissance** → delegate(agent="scout")
-- **Website login, form submission, complex browser operations** → delegate(agent="browser")
-- **Image generation** → delegate(agent="visualizer")
-- **Write a diary entry now** (user explicitly asks) → delegate(agent="diary")
-- **Multiple agents need to work simultaneously** → multi_delegate (parallel execution + automatic result synthesis)
-- If a conversation looks like it will need 10+ tool calls, switch to delegate immediately.
-- Do not ask the user "should I continue?" — judge and delegate on your own.
+- programmer: code writing/editing/debugging/file management
+- analyst: default agent for information analysis/research. Web search + collection + KG cross-validation + pattern extraction + knowledge storage
+- scout: Moltbook and mersoom.com activity (posting/commenting/patrol), routine patrols, large-scale platform crawling
+- browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction
+- visualizer: image generation, visual concepts
+- diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs on schedule (02:00 and 14:00 KST) automatically — only delegate when the user explicitly asks for a new diary entry right now.
 
 Parallel delegation with `multi_delegate`:
 - Compound requests (e.g., "investigate X and fix Y's code") should be handled in parallel via multi_delegate.
@@ -821,6 +808,8 @@ Context passing — agents automatically receive recent conversation and their o
 1. The user's original request (verbatim or key summary)
 2. Findings from the conversation so far (tool results, analysis, decisions)
 3. Why you are delegating to this agent (reason and expected outcome)
+
+Delegation discipline: delegate what must be achieved, not how. Do not invent unverified implementation details; let workers inspect and choose the implementation.
 """.strip()),
         ("mission-management", """
 - Missions are auto-created when delegate is called. The user does not need to create them explicitly.
@@ -1707,7 +1696,7 @@ async def _email_bridge_poll_loop(bot: Bot):
                 if target_chat_id:
                     text = build_inbound_summary_notification(item, row)
                     text += "\n\n승인 후 내부 입력 전달: /email_deliver <inbound_id> [메모]"
-                    await bot.send_message(int(target_chat_id), text, parse_mode="Markdown")
+                    await bot.send_message(int(target_chat_id), text)
         except Exception as e:
             logger.warning("email bridge poll loop error: %s", e)
             _log_event("warning", "email_bridge", f"poll loop error: {e}")

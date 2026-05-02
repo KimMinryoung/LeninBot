@@ -1,9 +1,17 @@
 """agents/base.py — AgentSpec base class for subagent definitions."""
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from shared import EXTERNAL_SOURCE_RULE  # re-exported for agent prompts
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_POLITICAL_LINE_PATH = Path(
+    os.getenv("POLITICAL_LINE_PATH", str(_PROJECT_ROOT / "config" / "political_line.md"))
+)
 
 # ── Reusable section bodies (IR form) ────────────────────────────────
 # Named without the surrounding XML tag so the renderer can wrap them in
@@ -64,6 +72,27 @@ be exposed publicly; web chat is already public."""
 CONTEXT_AWARENESS_SECTION: tuple[str, str] = ("context-awareness", _CONTEXT_AWARENESS_BODY)
 MISSION_GUIDELINES_SECTION: tuple[str, str] = ("mission-guidelines", _MISSION_GUIDELINES_BODY)
 CHAT_AUDIENCE_SECTION: tuple[str, str] = ("chat-audience", _CHAT_AUDIENCE_BODY)
+
+
+def load_political_line_body() -> str | None:
+    """Load the current political line document."""
+    try:
+        body = _POLITICAL_LINE_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    if not body:
+        return None
+    return body
+
+
+def _load_political_line_section() -> tuple[str, str] | None:
+    """Load the current political line document for all delegated agents."""
+    body = load_political_line_body()
+    if body is None:
+        return None
+    return ("political-line", body)
 
 
 # ── Legacy XML block strings (kept for callers not yet on IR) ────────
@@ -159,7 +188,16 @@ class AgentSpec:
         for legacy compatibility; unknown placeholders are left intact.
         """
         if self.prompt_ir is not None:
-            template = _render_prompt(self.prompt_ir, provider)
+            political_line = _load_political_line_section()
+            prompt_ir = self.prompt_ir
+            if political_line:
+                prompt_ir = SystemPrompt(
+                    identity=self.prompt_ir.identity,
+                    preamble=self.prompt_ir.preamble,
+                    sections=[political_line, *self.prompt_ir.sections],
+                    context=self.prompt_ir.context,
+                )
+            template = _render_prompt(prompt_ir, provider)
         else:
             template = self.system_prompt_template or ""
         for key, value in kwargs.items():

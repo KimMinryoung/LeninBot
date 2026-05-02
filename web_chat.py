@@ -22,6 +22,7 @@ from runtime_profile import resolve_runtime_profile
 from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
 from db import query as db_query, execute as db_execute
+from agents.base import load_political_line_body
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +73,24 @@ _WEB_CONTEXT_HYGIENE = """\
 
 def _build_web_system_prompt(provider: str = "claude") -> str:
     """Render the web-chat system prompt in the target provider's native shape."""
+    political_line = load_political_line_body()
+    if uses_xml(provider):
+        political_line_block = (
+            f"<political-line>\n{political_line}\n</political-line>\n\n"
+            if political_line else ""
+        )
+    else:
+        political_line_block = (
+            f"### Political Line\n{political_line}\n\n"
+            if political_line else ""
+        )
     if uses_xml(provider):
         return (
             CORE_IDENTITY
             + "\nOperating via web interface (cyber-lenin.com).\n\n"
             + f"<audience>\n{_WEB_AUDIENCE}\n</audience>\n\n"
             + f"<persona>\n{_WEB_PERSONA.strip()}\n</persona>\n\n"
+            + political_line_block
             + f"<tool-strategy>\n{_WEB_TOOL_STRATEGY.strip()}\n</tool-strategy>\n\n"
             + f"<response-rules>\n{_WEB_RESPONSE_RULES.strip()}\n</response-rules>\n"
             + f"\n<context-hygiene>\n{_WEB_CONTEXT_HYGIENE.strip()}\n</context-hygiene>\n"
@@ -87,6 +100,7 @@ def _build_web_system_prompt(provider: str = "claude") -> str:
         + "\nOperating via web interface (cyber-lenin.com).\n\n"
         + f"### Audience\n{_WEB_AUDIENCE}\n\n"
         + f"### Persona\n{_WEB_PERSONA.strip()}\n\n"
+        + political_line_block
         + f"### Tool Strategy\n{_WEB_TOOL_STRATEGY.strip()}\n\n"
         + f"### Response Rules\n{_WEB_RESPONSE_RULES.strip()}\n"
         + f"\n### Context Hygiene\n{_WEB_CONTEXT_HYGIENE.strip()}\n"
@@ -638,6 +652,8 @@ async def handle_web_chat(
                     budget_usd=profile.budget_usd,
                     on_progress=on_progress,
                     provider_label=f"{provider}:web",
+                    continue_on_length=True,
+                    max_length_continuations=2,
                     **extra_kwargs,
                 )
             else:
@@ -652,6 +668,8 @@ async def handle_web_chat(
                     max_tokens=profile.max_tokens,
                     budget_usd=profile.budget_usd,
                     on_progress=on_progress,
+                    continue_on_length=True,
+                    max_length_continuations=2,
                 )
             answer_holder.append(result)
         except Exception as e:

@@ -7,6 +7,7 @@ format it should use.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -28,6 +29,14 @@ class RuntimeProfile:
 def _coerce_positive_float(value, fallback: float) -> float:
     try:
         result = float(value)
+    except (TypeError, ValueError):
+        result = fallback
+    return result if result > 0 else fallback
+
+
+def _coerce_positive_int(value, fallback: int) -> int:
+    try:
+        result = int(value)
     except (TypeError, ValueError):
         result = fallback
     return result if result > 0 else fallback
@@ -74,6 +83,7 @@ async def resolve_runtime_profile(
     from bot_config import (
         _CLAUDE_MAX_TOKENS,
         _CLAUDE_MAX_TOKENS_TASK,
+        _WEBCHAT_MAX_TOKENS,
         _TIER_MAP,
         _config,
         _display_name_for_model_id,
@@ -116,7 +126,10 @@ async def resolve_runtime_profile(
     elif kind == "webchat":
         default_rounds = 20
         default_budget = float(_config.get("chat_budget", 0.30))
-        default_tokens = _CLAUDE_MAX_TOKENS
+        default_tokens = _coerce_positive_int(
+            os.getenv("WEBCHAT_MAX_TOKENS"),
+            _WEBCHAT_MAX_TOKENS,
+        )
     else:
         default_rounds = int(_config.get("max_rounds_task", 50))
         default_budget = float(_config.get("task_budget", 1.00))

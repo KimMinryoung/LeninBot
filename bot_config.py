@@ -31,6 +31,7 @@ if DEEPSEEK_API_KEY:
     _deepseek_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
+_WEBCHAT_MAX_TOKENS = 4096
 
 # ── Runtime Config (mutable at runtime via /config) ──────────────────
 _CONFIG_DEFAULTS = {

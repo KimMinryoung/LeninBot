@@ -810,6 +810,8 @@ async def chat_with_tools(
     sdk_max_token_param: str = "max_completion_tokens",
     include_parallel_tool_calls: bool = True,
     provider_label: str | None = None,
+    continue_on_length: bool = False,
+    max_length_continuations: int = 1,
 ) -> str:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -854,6 +856,7 @@ async def chat_with_tools(
     budget_warning_sent = False
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
+    length_continuations = 0
 
     def _log_sdk_usage(label: str, usage, call_cost: float, current_total: float) -> None:
         prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -977,6 +980,25 @@ async def chat_with_tools(
                 if log_event:
                     log_event("warning", "chat",
                               f"Response truncated ({max_tokens} tokens) at round {round_num}")
+                if (
+                    continue_on_length
+                    and length_continuations < max(0, int(max_length_continuations or 0))
+                    and content_text.strip()
+                ):
+                    length_continuations += 1
+                    accumulated_text_parts.append(content_text.strip())
+                    working_msgs.append({
+                        "role": "assistant",
+                        "content": content_text.strip(),
+                    })
+                    working_msgs.append({
+                        "role": "user",
+                        "content": (
+                            "Continue exactly from where the previous answer stopped. "
+                            "Do not restart, summarize, or repeat earlier text."
+                        ),
+                    })
+                    continue
             elif finish_reason == "content_filter":
                 logger.warning("Response blocked by content filter at round %d", round_num)
             # Combine accumulated text from tool_calls rounds with final response

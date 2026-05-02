@@ -285,6 +285,8 @@ async def chat_with_tools(
     mission_id: int | None = None,
     finalization_tools: list[str] | None = None,
     terminal_tools: list[str] | None = None,
+    continue_on_length: bool = False,
+    max_length_continuations: int = 1,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -318,6 +320,7 @@ async def chat_with_tools(
     tool_work_details = []  # result snippets for scratchpad
     total_cost = 0.0
     budget_warning_sent = False
+    length_continuations = 0
 
     # Prompt caching: mark system prompt and tools as cacheable with the
     # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above).
@@ -378,11 +381,29 @@ async def chat_with_tools(
 
         # If no custom tool use, extract and return text (check BEFORE budget)
         if response.stop_reason not in ("tool_use", "pause_turn"):
+            text_parts = [b.text for b in response.content if b.type == "text"]
             if response.stop_reason == "max_tokens":
                 logger.warning("Response truncated by max_tokens (%d) at round %d/%d", max_tokens, round_num, max_rounds)
                 if log_event:
                     log_event("warning", "chat", f"Response truncated by max_tokens ({max_tokens}) at round {round_num}/{max_rounds}")
-            text_parts = [b.text for b in response.content if b.type == "text"]
+                partial_text = "\n".join(t.strip() for t in text_parts if t.strip()).strip()
+                if (
+                    continue_on_length
+                    and length_continuations < max(0, int(max_length_continuations or 0))
+                    and partial_text
+                ):
+                    length_continuations += 1
+                    accumulated_text_parts.append(partial_text)
+                    working_msgs.append({
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": partial_text}],
+                    })
+                    _append_user_text_message(
+                        working_msgs,
+                        "Continue exactly from where the previous answer stopped. "
+                        "Do not restart, summarize, or repeat earlier text.",
+                    )
+                    continue
             # Combine accumulated text from tool_use rounds with final response
             all_text = accumulated_text_parts + text_parts
             if budget_tracker is not None:

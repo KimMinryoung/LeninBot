@@ -1,9 +1,8 @@
 """private_report_tools.py — Admin-only private report storage.
 
 Private reports are Markdown documents intended for Cyber-Lenin and the
-Telegram/admin operator only. They are stored outside the public
-research_documents/static_pages publishing tables and are not exposed through
-the public web chat toolset.
+Telegram/admin operator only. They live in research_documents with
+status='private', so the public website and public web chat cannot see them.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from db import execute as db_execute, query as db_query, query_one as db_query_one
+from db import query as db_query, query_one as db_query_one
 import research_store
 
 logger = logging.getLogger(__name__)
@@ -46,38 +45,18 @@ def ensure_private_reports_table() -> None:
     global _ready
     if _ready:
         return
-    db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS private_reports (
-          id BIGSERIAL PRIMARY KEY,
-          slug TEXT NOT NULL UNIQUE,
-          title TEXT NOT NULL,
-          markdown TEXT NOT NULL,
-          summary TEXT,
-          content_sha256 TEXT NOT NULL,
-          source_task_id BIGINT,
-          published_research_id BIGINT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-    for ddl in (
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS summary TEXT",
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS source_task_id BIGINT",
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS published_research_id BIGINT",
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS content_sha256 TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        "ALTER TABLE private_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-    ):
-        db_execute(ddl)
-    db_execute(
-        """
-        CREATE INDEX IF NOT EXISTS private_reports_updated_at_idx
-        ON private_reports(updated_at DESC)
-        """
-    )
+    research_store.ensure_research_table()
     _ready = True
+
+
+def _private_row_to_compat(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    data = dict(row)
+    if "created_at" not in data:
+        data["created_at"] = data.get("published_at")
+    data["published_research_id"] = None
+    return data
 
 
 def save_private_report_sync(
@@ -96,42 +75,32 @@ def save_private_report_sync(
     if not markdown:
         raise ValueError("markdown_body is required")
 
-    row = db_query_one(
-        """
-        INSERT INTO private_reports (
-          slug, title, markdown, summary, content_sha256, source_task_id,
-          created_at, updated_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-        ON CONFLICT (slug) DO UPDATE SET
-          title = EXCLUDED.title,
-          markdown = EXCLUDED.markdown,
-          summary = EXCLUDED.summary,
-          content_sha256 = EXCLUDED.content_sha256,
-          source_task_id = COALESCE(EXCLUDED.source_task_id, private_reports.source_task_id),
-          updated_at = NOW()
-        RETURNING *
-        """,
-        (
-            clean_slug,
-            clean_title,
-            markdown,
-            _extract_summary(markdown),
-            _sha256_text(markdown),
-            source_task_id,
-        ),
+    row, _ = research_store.upsert_document(
+        filename=f"{clean_slug}.md",
+        title=clean_title,
+        markdown=markdown,
+        summary=_extract_summary(markdown),
+        status="private",
+        source_task_id=source_task_id,
+        updated_at=datetime.now(timezone.utc),
     )
-    return dict(row)
+    return _private_row_to_compat(row)
 
 
 def get_private_report_sync(report_id: int | None = None, slug: str | None = None) -> dict | None:
     ensure_private_reports_table()
     if report_id is not None:
-        row = db_query_one("SELECT * FROM private_reports WHERE id = %s LIMIT 1", (int(report_id),))
-        return dict(row) if row else None
+        row = db_query_one(
+            "SELECT * FROM research_documents WHERE id = %s AND status = 'private' LIMIT 1",
+            (int(report_id),),
+        )
+        return _private_row_to_compat(row)
     clean_slug = _validate_slug(slug or "")
-    row = db_query_one("SELECT * FROM private_reports WHERE slug = %s LIMIT 1", (clean_slug,))
-    return dict(row) if row else None
+    row = db_query_one(
+        "SELECT * FROM research_documents WHERE slug = %s AND status = 'private' LIMIT 1",
+        (clean_slug,),
+    )
+    return _private_row_to_compat(row)
 
 
 def list_private_reports_sync(limit: int = 20, keyword: str | None = None) -> list[dict]:
@@ -142,19 +111,22 @@ def list_private_reports_sync(limit: int = 20, keyword: str | None = None) -> li
         clauses.append("(title ILIKE %s OR slug ILIKE %s OR summary ILIKE %s OR markdown ILIKE %s)")
         q = f"%{keyword}%"
         params.extend([q, q, q, q])
-    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    where_parts = ["status = 'private'", *clauses]
+    where = "WHERE " + " AND ".join(where_parts)
     params.append(min(max(int(limit or 20), 1), 100))
-    return db_query(
+    rows = db_query(
         f"""
-        SELECT id, slug, title, summary, source_task_id, published_research_id,
-               content_sha256, created_at, updated_at
-          FROM private_reports
+        SELECT id, slug, title, summary, source_task_id,
+               NULL::BIGINT AS published_research_id,
+               content_sha256, published_at AS created_at, updated_at
+          FROM research_documents
           {where}
          ORDER BY updated_at DESC, id DESC
          LIMIT %s
         """,
         tuple(params),
     )
+    return [dict(row) for row in rows]
 
 
 def _public_url(slug: str) -> str:
@@ -192,16 +164,8 @@ def publish_private_report_sync(
         markdown=markdown,
         summary=research_store.extract_excerpt(markdown),
         status="public",
+        source_task_id=private.get("source_task_id"),
         updated_at=datetime.now(timezone.utc),
-    )
-    db_query_one(
-        """
-        UPDATE private_reports
-           SET published_research_id = %s, updated_at = NOW()
-         WHERE slug = %s
-         RETURNING id
-        """,
-        (row["id"], clean_slug),
     )
     return {
         "private_report": private,
