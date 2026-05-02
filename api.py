@@ -26,6 +26,12 @@ from email_bridge import (
     run_polling_cycle,
     send_outbound_email,
 )
+from private_report_tools import (
+    get_private_report_sync,
+    list_private_reports_sync,
+    publish_private_report_sync,
+    save_private_report_sync,
+)
 
 from secrets_loader import get_secret
 
@@ -48,6 +54,18 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
         raise HTTPException(status_code=503, detail="Admin API key not configured on server")
     if not api_key or api_key != _ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
+
+
+class PrivateReportRequest(BaseModel):
+    title: str
+    slug: str
+    markdown_body: str
+    source_task_id: int | None = None
+
+
+class PublishPrivateReportRequest(BaseModel):
+    body: str | None = None
+    title: str | None = None
 
 
 @asynccontextmanager
@@ -434,6 +452,64 @@ async def get_report(report_id: int):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"detail": "Report not found"})
     return {"report": rows[0]}
+
+
+@app.get("/private-reports", dependencies=[Depends(require_admin)])
+async def list_private_reports(
+    limit: int = Query(default=20, ge=1, le=100),
+    keyword: str | None = Query(default=None),
+):
+    """Admin-only private report list."""
+    rows = await asyncio.to_thread(list_private_reports_sync, limit=limit, keyword=keyword)
+    return {"reports": rows}
+
+
+@app.get("/private-reports/{report_ref}", dependencies=[Depends(require_admin)])
+async def get_private_report(report_ref: str):
+    """Admin-only private report detail by id or slug."""
+    if report_ref.isdigit():
+        row = await asyncio.to_thread(get_private_report_sync, report_id=int(report_ref))
+    else:
+        row = await asyncio.to_thread(get_private_report_sync, slug=report_ref)
+    if not row:
+        return JSONResponse(status_code=404, content={"detail": "Private report not found"})
+    return {"report": row}
+
+
+@app.post("/private-reports", dependencies=[Depends(require_admin)])
+async def save_private_report(request: PrivateReportRequest):
+    """Create or update an admin-only private report."""
+    try:
+        row = await asyncio.to_thread(
+            save_private_report_sync,
+            title=request.title,
+            slug=request.slug,
+            markdown_body=request.markdown_body,
+            source_task_id=request.source_task_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"report": row}
+
+
+@app.post("/private-reports/{slug}/publish", dependencies=[Depends(require_admin)])
+async def publish_private_report(slug: str, request: PublishPrivateReportRequest):
+    """Publish a private report into public research_documents."""
+    try:
+        result = await asyncio.to_thread(
+            publish_private_report_sync,
+            slug=slug,
+            body=request.body,
+            title=request.title,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "private_report_id": result["private_report"]["id"],
+        "research_document": result["research_document"],
+        "is_overwrite": result["is_overwrite"],
+        "public_url": result["public_url"],
+    }
 
 
 AGENT_CARD_DIR = Path(__file__).parent / "research"

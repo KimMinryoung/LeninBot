@@ -413,6 +413,21 @@ async def _exec_publish_research(
         )
         if br.ok:
             broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+            if getattr(br, "message_ids", None):
+                try:
+                    from publication_records import record_publication_broadcast_sync
+
+                    await asyncio.to_thread(
+                        record_publication_broadcast_sync,
+                        slug=row["slug"],
+                        public_url=public_url,
+                        channel_message_ids=br.message_ids,
+                        source="publish_research",
+                    )
+                    broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
+                except Exception as e:
+                    logger.warning("publication broadcast record failed for %s: %s", fname, e)
+                    broadcast_note += f"; message-id tracking failed ({e})"
     except Exception as e:
         logger.warning("research channel broadcast failed for %s: %s", fname, e)
         broadcast_note = f"\nTelegram channel broadcast failed: {e}"
@@ -562,11 +577,27 @@ async def _exec_edit_research(
         fname,
         missing_msg="file moved but the cached copy may still be served." if not cache["ok"] else None,
     )
+    delete_note = ""
+    try:
+        from publication_records import delete_broadcasts_for_slug
+
+        delete_result = await delete_broadcasts_for_slug(_public_slug(fname))
+        delete_note = (
+            "\nTelegram channel cleanup: "
+            f"attempted={delete_result.get('attempted', 0)} "
+            f"deleted={delete_result.get('deleted', 0)} "
+            f"failed={delete_result.get('failed', 0)} "
+            f"({delete_result.get('message')})"
+        )
+    except Exception as e:
+        logger.warning("research unpublish channel cleanup failed for %s: %s", fname, e)
+        delete_note = f"\nTelegram channel cleanup failed: {e}"
     return (
         f"Unpublished: {fname}\n"
         f"{backup_note}\n"
         f"Public URL (now 404): {_public_url(fname)}\n"
         f"{cache_note}"
+        f"{delete_note}"
     )
 
 

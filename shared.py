@@ -56,6 +56,10 @@ BROADCAST_TO_CHANNEL_TOOL = {
                 "type": "string",
                 "description": "Plain URL where the full article/report can be read.",
             },
+            "slug": {
+                "type": "string",
+                "description": "Optional public research slug for message-id tracking. Usually inferred from url.",
+            },
         },
         "required": ["title", "summary", "url"],
     },
@@ -72,10 +76,35 @@ async def broadcast_to_channel(title: str, summary: str, url: str, **_kw) -> str
         logger.error("broadcast_to_channel failed: %s", e)
         return f"채널 브로드캐스트 실패: {e}"
 
+    tracking_note = ""
+    if result.ok and getattr(result, "message_ids", None):
+        try:
+            import re as _re
+            from publication_records import record_publication_broadcast_sync
+
+            slug = str(_kw.get("slug") or "").strip()
+            if not slug:
+                m = _re.search(r"/(?:reports/)?research/([^/?#\s]+)", url or "")
+                if m:
+                    slug = m.group(1).removesuffix(".md")
+            if slug:
+                await asyncio.to_thread(
+                    record_publication_broadcast_sync,
+                    slug=slug,
+                    public_url=url,
+                    channel_message_ids=result.message_ids,
+                    source="broadcast_to_channel",
+                )
+                tracking_note = f"\n추적된 채널 message_id: {len(result.message_ids)}개"
+        except Exception as e:
+            logger.warning("broadcast_to_channel message-id tracking failed: %s", e)
+            tracking_note = f"\n채널 message_id 추적 실패: {e}"
+
     status = "성공" if result.ok else "실패"
     return (
         f"채널 브로드캐스트 {status}: {result.message}\n"
         f"전송 메시지 수: {result.sent_count}"
+        f"{tracking_note}"
     )
 
 

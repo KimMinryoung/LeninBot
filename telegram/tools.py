@@ -1605,6 +1605,12 @@ from research_tools import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
 TOOLS.extend(RESEARCH_TOOLS)
 TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
 
+# ── Admin-only private reports (not exposed to public web chat) ──
+from private_report_tools import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
+
+TOOLS.extend(PRIVATE_REPORT_TOOLS)
+TOOL_HANDLERS.update(PRIVATE_REPORT_TOOL_HANDLERS)
+
 # ── Crypto wallet tools (address + balance + swap + transfer + x402 pay) ───
 from crypto_wallet import (
     WALLET_TOOL, WALLET_TOOL_HANDLER,

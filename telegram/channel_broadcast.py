@@ -50,6 +50,7 @@ class BroadcastResult:
     ok: bool
     message: str
     sent_count: int = 0
+    message_ids: list[int] | None = None
 
 
 def _now_iso() -> str:
@@ -309,19 +310,23 @@ async def broadcast_to_configured_channel(
         return BroadcastResult(False, "전송할 메시지가 비어 있습니다.")
 
     sent = 0
+    message_ids: list[int] = []
     try:
         for part in parts:
-            await bot.send_message(
+            msg = await bot.send_message(
                 chat_id=chat_id,
                 text=part,
                 parse_mode=parse_mode,
                 disable_web_page_preview=disable_web_page_preview,
             )
             sent += 1
+            message_id = getattr(msg, "message_id", None)
+            if message_id:
+                message_ids.append(int(message_id))
         if cfg.get("last_error"):
             cfg["last_error"] = ""
             save_channel_config(cfg)
-        return BroadcastResult(True, f"채널 전송 완료 ({sent}개 메시지).", sent)
+        return BroadcastResult(True, f"채널 전송 완료 ({sent}개 메시지).", sent, message_ids)
     except TelegramForbiddenError:
         msg = "전송 실패: 봇이 채널 관리자에서 제거되었거나 게시 권한이 없습니다."
     except TelegramBadRequest as e:
@@ -332,7 +337,59 @@ async def broadcast_to_configured_channel(
     cfg["last_error"] = msg
     save_channel_config(cfg)
     logger.warning("channel broadcast failed: %s", msg)
-    return BroadcastResult(False, msg, sent)
+    return BroadcastResult(False, msg, sent, message_ids)
+
+
+async def delete_channel_messages(message_ids: list[int] | tuple[int, ...]) -> dict[str, Any]:
+    """Best-effort deletion of channel messages previously sent by the bot."""
+    ids: list[int] = []
+    for value in message_ids or []:
+        try:
+            msg_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if msg_id > 0 and msg_id not in ids:
+            ids.append(msg_id)
+
+    cfg = load_channel_config()
+    chat_id = str(cfg.get("chat_id") or "").strip()
+    if not chat_id:
+        return {"ok": False, "deleted": 0, "failed": len(ids), "message": "broadcast channel not configured"}
+    if not ids:
+        return {"ok": True, "deleted": 0, "failed": 0, "message": "no message ids"}
+
+    token = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
+    if not token:
+        return {"ok": False, "deleted": 0, "failed": len(ids), "message": "TELEGRAM_BOT_TOKEN not configured"}
+
+    bot = Bot(token=token)
+    deleted = 0
+    failed = 0
+    errors: list[str] = []
+    try:
+        for msg_id in ids:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                deleted += 1
+            except TelegramBadRequest as e:
+                failed += 1
+                errors.append(f"{msg_id}: {e.message}")
+            except TelegramForbiddenError:
+                failed += 1
+                errors.append(f"{msg_id}: forbidden")
+            except Exception as e:
+                failed += 1
+                errors.append(f"{msg_id}: {e}")
+    finally:
+        await bot.session.close()
+
+    return {
+        "ok": failed == 0,
+        "deleted": deleted,
+        "failed": failed,
+        "message": "ok" if failed == 0 else "; ".join(errors[:5]),
+        "errors": errors,
+    }
 
 
 async def broadcast_with_token(

@@ -51,7 +51,7 @@ SELF_TOOLS = [
             "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
             "system_status (overview), server_logs (journald), "
             "research (public research_documents), curation (hub_curations), "
-            "static_pages (published /p pages), "
+            "static_pages (published /p pages), private_reports (admin-only reports), "
             "autonomous_project (self-running long-term project loop — list with no task_id, "
             "detail with task_id=<project_id>)."
         ),
@@ -63,7 +63,7 @@ SELF_TOOLS = [
                     "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
                              "kg_status", "system_status", "server_logs",
                              "file_registry", "research", "curation", "static_pages",
-                             "autonomous_project"],
+                             "private_reports", "autonomous_project"],
                     "description": "Which internal store to read — see tool description for per-source semantics.",
                 },
                 "limit": {"type": "integer", "description": "Results count."},
@@ -85,7 +85,7 @@ SELF_TOOLS = [
                 },
                 "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
                 "task_id": {"type": "integer", "description": "For task_reports: specific task ID. For autonomous_project: specific project ID."},
-                "slug": {"type": "string", "description": "For research/curation/static_pages: specific slug or filename."},
+                "slug": {"type": "string", "description": "For research/curation/static_pages/private_reports: specific slug or filename."},
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
             "required": ["source"],
@@ -642,6 +642,49 @@ async def _exec_read_research(
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
         lines.append(
             f"- {r['filename']} | slug={slug_value} | updated={_to_kst(r.get('updated_at'))} | en={r.get('has_translation')}\n"
+            f"  title: {r.get('title') or ''}\n"
+            f"  summary: {summary}"
+        )
+    return "\n".join(lines)
+
+
+async def _exec_read_private_reports(
+    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+) -> str:
+    import private_report_tools
+
+    if slug:
+        try:
+            row = await asyncio.to_thread(private_report_tools.get_private_report_sync, slug=slug)
+        except Exception as e:
+            return f"Error reading private report: {type(e).__name__}: {e}"
+        if not row:
+            return f"No private report found for slug: {slug}"
+        markdown = row.get("markdown") or ""
+        return (
+            f"=== PRIVATE REPORT: {row['slug']} ===\n"
+            f"id={row['id']} title: {row.get('title') or ''}\n"
+            f"created={_to_kst(row.get('created_at'))} updated={_to_kst(row.get('updated_at'))}\n"
+            f"published_research_id={row.get('published_research_id') or ''}\n"
+            f"summary: {(row.get('summary') or '')[:800]}\n\n"
+            f"-- markdown preview --\n{markdown[:4000]}{'…' if len(markdown) > 4000 else ''}"
+        )
+
+    try:
+        rows = await asyncio.to_thread(
+            private_report_tools.list_private_reports_sync,
+            limit=limit or 10,
+            keyword=keyword,
+        )
+    except Exception as e:
+        return f"Error listing private reports: {type(e).__name__}: {e}"
+    if not rows:
+        return "No private reports found."
+    lines = ["=== PRIVATE REPORTS ===", "Use read_self(source='private_reports', slug='<slug>') for detail."]
+    for r in rows:
+        summary = (r.get("summary") or "").replace("\n", " ")[:220]
+        lines.append(
+            f"- id={r['id']} slug={r['slug']} updated={_to_kst(r.get('updated_at'))}\n"
             f"  title: {r.get('title') or ''}\n"
             f"  summary: {summary}"
         )
@@ -1712,6 +1755,8 @@ async def _exec_read_self(
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
     if source == "research":
         return await _exec_read_research(limit=limit or 10, keyword=keyword, slug=slug)
+    if source == "private_reports":
+        return await _exec_read_private_reports(limit=limit or 10, keyword=keyword, slug=slug)
     if source == "curation":
         return await _exec_read_curation(limit=limit or 10, keyword=keyword, slug=slug)
     if source == "static_pages":

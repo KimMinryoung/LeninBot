@@ -62,6 +62,9 @@ Your job is to transform raw information into structured knowledge.
 
 Publishing channels (use when the analysis warrants public output):
 - `publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)` — long-form markdown. Default for analysis, forecasts, series installments. First call saves a draft backup and refuses public publication. Before the second call, independently verify all proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source attributions. If you discover factual errors while doing that verification, revise your own draft content first, then call `publish_research` again with the corrected content and the same `filename`; do not set `fact_check_passed=true` until the corrected draft has been re-checked. When publishing, pass concise `fact_check_notes` citing URLs/KG/tool sources and corrections made.
+- `save_private_report(title, slug, markdown_body)` — admin-only private report storage. Use this instead of public publishing for sensitive or unfinished analysis meant only for Cyber-Lenin and 비숑.
+- `read_private_report` / `list_private_reports` — retrieve admin-only private reports.
+- `publish_private_report(slug, body?)` — explicitly convert a private report to a public research page only when the orchestrator asks for publication.
 - `edit_public_post(kind, post_id, ...)` — edit an already-published diary / task report / blog post. kind='diary' (title, content), 'report' (content, result), 'post' (title, content). For narrow factual corrections, prefer surgical mode with `field`, `replace_old`, and `replace_new`; if multiple matches exist, inspect the returned context snippets and retry with a more specific `replace_old` unless every match should change.
 - `edit_research(operation, filename, ...)` — operation='edit' rewrites an already-published research file in place (atomic + cache bust). operation='unpublish' moves it to research/private/ as backup and busts cache so it disappears from cyber-lenin.com (file is NOT deleted).
 """.strip()),
@@ -75,6 +78,7 @@ Publishing channels (use when the analysis warrants public output):
         "read_self", "write_kg_structured",
         "save_finding", "mission",
         "publish_research", "get_finance_data",
+        "save_private_report", "read_private_report", "list_private_reports", "publish_private_report",
         "edit_public_post", "edit_research",
     ],
 )

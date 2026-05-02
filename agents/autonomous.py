@@ -171,6 +171,7 @@ Never attempt to reach outside it.
         "write_kg_structured",
         # Publishing to cyber-lenin.com (T0 tier — our own domain)
         "publish_research", "edit_research",
+        "save_private_report", "read_private_report", "list_private_reports", "publish_private_report",
         "publish_hub_curation", "edit_public_post",
         "publish_static_page",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
