@@ -58,16 +58,17 @@
 
 | 서비스 | 마운트되는 cred 수 | 근거 |
 |---|---|---|
-| leninbot-api | 21 (전체 Tier A) | agent host, tool surface 광범위 |
-| leninbot-telegram | 21 (전체 Tier A) | agent host, tool surface 광범위 |
-| leninbot-browser | 2 (anthropic, openai) | browser-use 는 LLM 호출만 |
-| leninbot-autonomous | 9 | planning LLMs + KG/DB + telegram/razvedchik |
-| leninbot-experience | 5 | Gemini(writing) + KG/DB + bot_config imports |
+| leninbot-api | 22 (전체 Tier A) | agent host, tool surface 광범위 |
+| leninbot-telegram | 22 (전체 Tier A) | agent host, tool surface 광범위 |
+| leninbot-browser | 3 (anthropic, openai, deepseek) | browser-use 는 LLM 호출만 |
+| leninbot-autonomous | 10 | planning LLMs + KG/DB + telegram/razvedchik |
+| leninbot-razvedchik | 2 | Moltbook patrol writes + optional Telegram notification |
+| leninbot-experience | 6 | Gemini(writing) + KG/DB + bot_config imports |
 | leninbot-kg-backup | 2 (r2_cf_api_token, neo4j_password) | R2 업로드 + Neo4j 덤프만 |
 | leninbot-embedding | 0 | BGE-M3 로컬 모델, 외부 API 없음 |
 | leninbot-neo4j | 0 | Docker wrapper, compose env 별도 |
 
-**합산**: 60 credential mount (만약 전 서비스에 전부 attach 했으면 126 → -52%). 한 서비스가 뚫려도 다른 서비스용 시크릿은 노출 안 됨.
+**합산**: 67 credential mount (만약 전 서비스에 전부 attach 했으면 154 → -56%). 한 서비스가 뚫려도 다른 서비스용 시크릿은 노출 안 됨.
 
 ## 5. Runtime Resolution (`secrets_loader.py`)
 
