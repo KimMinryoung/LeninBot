@@ -14,7 +14,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from shared import KST, CORE_IDENTITY, EXTERNAL_SOURCE_RULE
-from agents.base import CHAT_AUDIENCE_BLOCK
+from agents.base import CHAT_AUDIENCE_BLOCK, load_political_line_body
 from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
@@ -887,7 +887,16 @@ def _build_orchestrator_system_prompt(provider: str) -> str:
     mission, memories, alerts) is injected as message content so the system
     prompt stays byte-identical across turns and benefits from prompt caching.
     """
-    body = _render_prompt(_ORCHESTRATOR_PROMPT_IR, provider)
+    prompt_ir = _ORCHESTRATOR_PROMPT_IR
+    political_line = load_political_line_body()
+    if political_line:
+        prompt_ir = SystemPrompt(
+            identity=_ORCHESTRATOR_PROMPT_IR.identity,
+            preamble=_ORCHESTRATOR_PROMPT_IR.preamble,
+            sections=[("political-line", political_line), *_ORCHESTRATOR_PROMPT_IR.sections],
+            context=_ORCHESTRATOR_PROMPT_IR.context,
+        )
+    body = _render_prompt(prompt_ir, provider)
     tail = _CLAUDE_STATIC_TAIL if provider == "claude" else _MARKDOWN_STATIC_TAIL
     return body + "\n\n" + tail
 
