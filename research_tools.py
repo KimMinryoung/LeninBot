@@ -10,6 +10,7 @@ This module consolidates:
   * edit_research(operation, filename, ...) —
       operation='edit'      → update the research_documents row and bust cache
       operation='unpublish' → set the research_documents row status=private and bust cache
+      operation='publish'   → set a private research_documents row status=public and bust cache
 
 `unpublish` is intentionally non-destructive: DB rows are marked private. If a
 document only exists as a legacy fallback file, that file is relocated out of
@@ -448,7 +449,7 @@ async def _exec_publish_research(
 EDIT_RESEARCH_TOOL = {
     "name": "edit_research",
     "description": (
-        "Edit or unpublish an already-published research document. "
+        "Edit, unpublish, or publish a research document. "
         "Research documents are stored in the research_documents DB table; filename is the stable "
         "public identifier used to derive /reports/research/{slug}. "
         "operation='edit': update the database Markdown with new content (and optionally a new title) "
@@ -456,15 +457,17 @@ EDIT_RESEARCH_TOOL = {
         "Original 작성일 is preserved when present in the existing DB markdown. "
         "operation='unpublish': mark the DB row private and invalidate cache so it disappears "
         "from cyber-lenin.com. Only legacy fallback files are moved to research/private/. "
-        "Use this instead of publish_research when correcting or pulling already-public content."
+        "operation='publish': mark an existing private DB row public and invalidate cache so it "
+        "appears on cyber-lenin.com again. Use this instead of publish_research when changing "
+        "the visibility of an existing document."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["edit", "unpublish"],
-                "description": "'edit' updates the DB row; 'unpublish' marks the DB row private.",
+                "enum": ["edit", "unpublish", "publish"],
+                "description": "'edit' updates the DB row; 'unpublish' marks the DB row private; 'publish' marks a private DB row public.",
             },
             "filename": {
                 "type": "string",
@@ -477,6 +480,11 @@ EDIT_RESEARCH_TOOL = {
             "content": {
                 "type": "string",
                 "description": "operation=edit only. Required body markdown (without the H1 heading).",
+            },
+            "broadcast": {
+                "type": "boolean",
+                "description": "operation=publish only. Whether to broadcast the newly public report to the Telegram channel. Default true.",
+                "default": True,
             },
         },
         "required": ["operation", "filename"],
@@ -508,10 +516,11 @@ async def _exec_edit_research(
     filename: str,
     title: str | None = None,
     content: str | None = None,
+    broadcast: bool = True,
 ) -> str:
     op = (operation or "").strip().lower()
-    if op not in {"edit", "unpublish"}:
-        return "Error: operation must be 'edit' or 'unpublish'."
+    if op not in {"edit", "unpublish", "publish"}:
+        return "Error: operation must be 'edit', 'unpublish', or 'publish'."
     try:
         fname = _validate_filename(filename)
     except ValueError as e:
@@ -557,6 +566,60 @@ async def _exec_edit_research(
             f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {_public_url(fname)}\n"
             f"Title: {new_title}; size: {len(document)} chars; {_format_cache_note(cache, fname)}"
+        )
+
+    if op == "publish":
+        if not existing_doc:
+            return f"Error: cannot publish legacy fallback file '{fname}' because no DB row exists. Import it into research_documents first."
+        if existing_doc.get("status") == "public":
+            return f"Already public: {fname}\nPublic URL: {_public_url(fname)}"
+        try:
+            row = await asyncio.to_thread(research_store.set_status, fname, "public")
+            if not row:
+                return f"Error: no private research document named '{fname}' in DB."
+        except Exception as e:
+            logger.error("edit_research publish DB error for %s: %s", fname, e)
+            return f"Error: failed to mark {fname} public: {type(e).__name__}: {e}"
+
+        cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
+        public_url = _public_url(fname)
+        broadcast_note = ""
+        if broadcast:
+            try:
+                br = await maybe_broadcast_autonomous_publication(
+                    title=row["title"],
+                    url=public_url,
+                    body=row.get("markdown") or "",
+                    source="cyber-lenin.com research visibility change",
+                )
+                if br.ok:
+                    broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+                    if getattr(br, "message_ids", None):
+                        try:
+                            from publication_records import record_publication_broadcast_sync
+
+                            await asyncio.to_thread(
+                                record_publication_broadcast_sync,
+                                slug=row["slug"],
+                                public_url=public_url,
+                                channel_message_ids=br.message_ids,
+                                source="edit_research_publish",
+                            )
+                            broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
+                        except Exception as e:
+                            logger.warning("publication broadcast record failed for %s: %s", fname, e)
+                            broadcast_note += f"; message-id tracking failed ({e})"
+                else:
+                    broadcast_note = f"\nTelegram channel broadcast skipped/failed: {br.message}"
+            except Exception as e:
+                logger.warning("research publish channel broadcast failed for %s: %s", fname, e)
+                broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+        return (
+            f"Published existing private research document: {fname}\n"
+            f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
+            f"Public URL: {public_url}\n"
+            f"{_format_cache_note(cache, fname)}"
+            f"{broadcast_note}"
         )
 
     # operation == "unpublish"

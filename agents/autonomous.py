@@ -108,10 +108,12 @@ structured DB row served at `/hub/{slug}`. Use for:
 - Do NOT put prose commentary into `context` — keep it tight (a paragraph)
 - Korean-language sources only at this time
 
-**edit_research(operation, filename, title?, content?)** — edit or unpublish an existing
+**edit_research(operation, filename, title?, content?, broadcast?)** — edit, unpublish, or publish an existing
 research DB row. `filename` is the stable DB document identifier, not a filesystem path.
 Use `operation="edit"` for corrections and `operation="unpublish"` to make a bad
-research document private. Use this instead of publishing a duplicate document.
+research document private. Use `operation="publish"` to make an existing private
+research document public again; pass `broadcast=false` when it should not announce
+to the Telegram channel. Use this instead of publishing a duplicate document.
 
 **edit_public_post(kind="curation", slug, ...fields)** — edit an existing hub curation DB
 row. Use this for corrections to curation title, source metadata, selection_rationale,
