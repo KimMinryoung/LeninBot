@@ -168,11 +168,12 @@ class Location(BaseModel):
     """
     지리적 장소 엔티티.
     시설, 거점, 군사기지, 초크포인트, 분쟁지역 등 활동의 공간적 맥락.
+    국가·정부·국가행위자·지정학적 블록은 이 프로젝트에서 Organization으로 분류한다.
     """
     location_type: Optional[str] = Field(
         None,
         description=(
-            "Type: facility / city / region / country / virtual / "
+            "Type: facility / city / province / region / virtual / "
             "military_base / chokepoint / economic_zone / border_region / conflict_zone"
         )
     )

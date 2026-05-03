@@ -221,6 +221,10 @@ CUSTOM_EXTRACTION_INSTRUCTIONS = """\
   EXCEPTION: Names where the acronym IS the official name (e.g., "NATO", "OPEC", "NVIDIA")
 - People: Use "FirstName LastName" (e.g., "Donald Trump" not "Trump", "Vladimir Putin" not "Putin")
 - Use "Russia" not "Russian Federation", "China" not "People's Republic of China"
+- Operator/admin pseudonym: when the source refers to "비숑", "비숑 동지", "Bichon", or "Bichon (비숑)",
+  use the single canonical entity name "관리자 비숑".
+- NEVER create or use "Bishou", "Bishong", "Bisou", or "Bisou (비숑)" as names for 관리자 비숑.
+  These are previous extraction errors, not aliases.
 
 ## ENTITY TYPE SELECTION (CRITICAL — common mistakes to avoid)
 
@@ -235,6 +239,8 @@ CUSTOM_EXTRACTION_INSTRUCTIONS = """\
   Use Affiliation edges to connect a Person to a Role they hold.
 
 - **Organization**: actual institutional bodies (companies, agencies, NGOs, political parties).
+  Countries, governments, states, state actors, and geopolitical blocs are Organizations in this project.
+  RIGHT: "United States", "China", "Russia", "South Korea", "European Union"
   WRONG: "South Korean financial market" (that's a market/system, not an org), "Manufacturing" (that's an industry)
   RIGHT: "Samsung Electronics", "Federal Reserve", "Democratic Party of Korea"
 
@@ -261,7 +267,8 @@ CUSTOM_EXTRACTION_INSTRUCTIONS = """\
   WRONG: "Task #210" (internal noise), "Trade war" (too generic if no specific framing)
   RIGHT: "Belt and Road Initiative", "MAGA movement", "Iran-Iraq War", "Operation Inherent Resolve"
 
-- **Location**: geographic places, facilities, regions.
+- **Location**: geographic places, facilities, cities, provinces, regions, military bases, chokepoints.
+  Do NOT use Location for countries, governments, states, state actors, or geopolitical blocs; use Organization.
 
 ## INTERNAL NOISE FILTER (CRITICAL — DO NOT EXTRACT)
 
@@ -300,6 +307,12 @@ Do NOT invent new types or use SCREAMING_SNAKE_CASE variants.
 # graphiti_patches.py의 _patch_normalize_entity_names()에서 사용.
 
 NAME_NORMALIZATION = {
+    # Operator pseudonym aliases. Do not include wrong LLM-generated names
+    # such as Bishou/Bishong/Bisou; those are blocked in extraction instructions.
+    "비숑": "관리자 비숑",
+    "비숑 동지": "관리자 비숑",
+    "bichon": "관리자 비숑",
+    "bichon (비숑)": "관리자 비숑",
     "us": "United States",
     "usa": "United States",
     "u.s.": "United States",

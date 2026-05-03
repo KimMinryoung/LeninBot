@@ -255,8 +255,9 @@ def _build_name_normalization_regex() -> None:
     # 긴 패턴 먼저 매칭 (e.g., "u.s.a." before "u.s.")
     sorted_keys = sorted(_NAME_NORM_MAP.keys(), key=len, reverse=True)
     escaped = [re.escape(k) for k in sorted_keys]
-    # \b 대신 (?<!\w)...(?!\w) 사용 — 마침표 포함 약어(U.S.)에서 \b 불안정
-    pattern_str = r"(?<!\w)(?:" + "|".join(escaped) + r")(?!\w)"
+    # \b 대신 ASCII word boundary 사용 — 마침표 포함 약어(U.S.)와
+    # 한국어 조사("비숑은", "비숑 동지와") 양쪽에서 안정적으로 동작.
+    pattern_str = r"(?<![A-Za-z0-9_])(?:" + "|".join(escaped) + r")(?![A-Za-z0-9_])"
     _NAME_NORM_PATTERN = re.compile(pattern_str, re.IGNORECASE)
 
 
