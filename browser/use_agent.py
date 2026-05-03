@@ -21,16 +21,17 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 
 # Default limits
 _DEFAULT_MAX_STEPS = 20
-_DEFAULT_BROWSER_USE_PROVIDER = "google"
-_DEFAULT_BROWSER_USE_MODEL = "gemini-2.5-flash"
+_DEFAULT_BROWSER_USE_PROVIDER = "claude"
+_DEFAULT_BROWSER_USE_MODEL = "claude-sonnet-4-6"
 
 
 def _resolve_provider_and_model() -> tuple[str, str]:
     """Resolve the multimodal LLM used inside browser-use.
 
-    The outer browser worker may still use Claude for LeninBot tool orchestration,
-    but browser-use's screen-reading/clicking loop should default to a cheaper
-    multimodal model. Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL.
+    The outer browser worker still uses Claude for LeninBot tool orchestration.
+    browser-use supports cheaper multimodal providers, but Gemini smoke tests
+    were less reliable on navigation/element-verification tasks than Claude.
+    Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL for controlled tests.
     """
     provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
     model = (os.getenv("BROWSER_USE_MODEL") or _DEFAULT_BROWSER_USE_MODEL).strip()
