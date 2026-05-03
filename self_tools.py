@@ -258,7 +258,12 @@ SELF_TOOLS = [
                 },
                 "task": {
                     "type": "string",
-                    "description": "Specific instructions for the agent. Include file paths, requirements, constraints, and expected outcome.",
+                    "description": (
+                        "Specific instructions for the agent. Include the user's goal, symptoms, "
+                        "requirements, constraints, expected outcome, and any user-provided public URL, "
+                        "slug, post_id, or DB document identifier. Do not invent or pass filesystem paths; "
+                        "agents that need code context can inspect the repository themselves."
+                    ),
                 },
                 "context": {
                     "type": "string",
@@ -291,7 +296,14 @@ SELF_TOOLS = [
                                 "type": "string",
                                 "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary"],
                             },
-                            "task": {"type": "string", "description": "Task instructions for this agent."},
+                            "task": {
+                                "type": "string",
+                                "description": (
+                                    "Task instructions for this agent. Include goals, symptoms, constraints, "
+                                    "and user-provided public URLs/slugs/post_ids/DB identifiers. Do not invent "
+                                    "or pass filesystem paths."
+                                ),
+                            },
                             "context": {"type": "string", "description": "Why this subtask exists."},
                         },
                         "required": ["agent", "task"],
@@ -305,6 +317,38 @@ SELF_TOOLS = [
                 },
             },
             "required": ["tasks"],
+        },
+    },
+    {
+        "name": "list_agent_tools",
+        "description": (
+            "Return the runtime-visible tool list for the orchestrator and/or specialist agents. "
+            "Use this before delegating when tool ownership is unclear."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "enum": [
+                        "all", "orchestrator", "analyst", "programmer", "scout",
+                        "visualizer", "browser", "diplomat", "diary", "autonomous_project",
+                        "web_chat",
+                    ],
+                    "description": "Which runtime to inspect. Default/all returns orchestrator plus all agents.",
+                    "default": "all",
+                },
+                "include_descriptions": {
+                    "type": "boolean",
+                    "description": "Whether to include short tool descriptions. Default true.",
+                    "default": True,
+                },
+                "include_schemas": {
+                    "type": "boolean",
+                    "description": "Whether to include input schemas. Default false to keep output compact.",
+                    "default": False,
+                },
+            },
         },
     },
     {
@@ -1178,6 +1222,179 @@ async def _exec_write_kg_structured(
         return f"Failed to store structured facts: {msg}"
 
 
+def _compact_tool(tool: dict, *, include_descriptions: bool, include_schemas: bool) -> dict:
+    item = {"name": tool.get("name", "")}
+    if include_descriptions:
+        desc = str(tool.get("description") or "")
+        item["description"] = desc[:500] + ("..." if len(desc) > 500 else "")
+    if include_schemas:
+        item["input_schema"] = tool.get("input_schema", {})
+    return item
+
+
+def _dedupe_tools(tools: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    result: list[dict] = []
+    for tool in tools:
+        name = tool.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        result.append(tool)
+    return result
+
+
+def get_agent_tool_manifest(
+    agent: str = "all",
+    *,
+    include_descriptions: bool = True,
+    include_schemas: bool = False,
+    orchestrator_tools: list[dict] | None = None,
+) -> dict:
+    """Return runtime tool visibility for orchestrator and specialist agents."""
+    from agents import get_agent, list_agents
+    from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+
+    requested = (agent or "all").strip().lower()
+    base_tools = _dedupe_tools(BASE_TOOLS)
+
+    def format_tools(tools: list[dict]) -> list[dict]:
+        return [
+            _compact_tool(t, include_descriptions=include_descriptions, include_schemas=include_schemas)
+            for t in _dedupe_tools(tools)
+        ]
+
+    def orchestrator_manifest() -> dict:
+        if orchestrator_tools is None:
+            return {
+                "runtime": "orchestrator",
+                "available": False,
+                "reason": "orchestrator tool list is only available from an active orchestrator tool context",
+                "tool_count": 0,
+                "tools": [],
+            }
+        tools = _dedupe_tools(orchestrator_tools)
+        return {
+            "runtime": "orchestrator",
+            "available": True,
+            "tool_count": len(tools),
+            "tools": format_tools(tools),
+        }
+
+    def agent_manifest(name: str) -> dict:
+        spec = get_agent(name)
+        tools, handlers = spec.filter_tools(base_tools, BASE_HANDLERS)
+        note = None
+        if name == "programmer" and spec.provider == "codex":
+            note = (
+                "programmer provider is codex; delegated programmer tasks bypass the "
+                "LeninBot tool loop and run Codex CLI. This allow-list applies to "
+                "in-process/non-Codex execution and routing introspection."
+            )
+        return {
+            "runtime": "agent",
+            "agent": name,
+            "provider": spec.provider,
+            "model": spec.model,
+            "budget_usd": spec.budget_usd,
+            "max_rounds": spec.max_rounds,
+            "tool_count": len(tools),
+            "handler_count": len(handlers),
+            "terminal_tools": list(spec.terminal_tools),
+            "finalization_tools": list(spec.finalization_tools),
+            "note": note,
+            "tools": format_tools(tools),
+        }
+
+    def web_chat_manifest() -> dict:
+        try:
+            from web_chat import _web_tools, _web_handlers
+            tools = _dedupe_tools(list(_web_tools))
+            return {
+                "runtime": "web_chat",
+                "available": True,
+                "provider": None,
+                "tool_count": len(tools),
+                "handler_count": len(_web_handlers),
+                "note": (
+                    "web chat is not an AgentSpec. It uses web_chat.py _WEB_ALLOWED_TOOLS "
+                    "plus a web-safe read_self override."
+                ),
+                "tools": format_tools(tools),
+            }
+        except Exception as e:
+            return {
+                "runtime": "web_chat",
+                "available": False,
+                "reason": f"{type(e).__name__}: {e}",
+                "tool_count": 0,
+                "tools": [],
+            }
+
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if requested in {"", "all", "*"}:
+        return {
+            "generated_at": generated_at,
+            "orchestrator": orchestrator_manifest(),
+            "web_chat": web_chat_manifest(),
+            "agents": {spec.name: agent_manifest(spec.name) for spec in list_agents()},
+        }
+    if requested == "orchestrator":
+        return {"generated_at": generated_at, "orchestrator": orchestrator_manifest()}
+    if requested == "web_chat":
+        return {"generated_at": generated_at, "web_chat": web_chat_manifest()}
+    return {"generated_at": generated_at, "agents": {requested: agent_manifest(requested)}}
+
+
+async def _exec_list_agent_tools(
+    agent: str = "all",
+    include_descriptions: bool = True,
+    include_schemas: bool = False,
+) -> str:
+    try:
+        manifest = await asyncio.to_thread(
+            get_agent_tool_manifest,
+            agent or "all",
+            include_descriptions=bool(include_descriptions),
+            include_schemas=bool(include_schemas),
+            orchestrator_tools=None,
+        )
+    except Exception as e:
+        return json.dumps(
+            {"status": "error", "error": f"{type(e).__name__}: {e}"},
+            ensure_ascii=False,
+            indent=2,
+        )
+    return json.dumps(manifest, ensure_ascii=False, indent=2)
+
+
+def build_list_agent_tools_handler(orchestrator_tools: list[dict]):
+    """Build list_agent_tools with the actual current orchestrator tool set."""
+
+    async def _exec_list_agent_tools_with_orchestrator(
+        agent: str = "all",
+        include_descriptions: bool = True,
+        include_schemas: bool = False,
+    ) -> str:
+        try:
+            manifest = await asyncio.to_thread(
+                get_agent_tool_manifest,
+                agent or "all",
+                include_descriptions=bool(include_descriptions),
+                include_schemas=bool(include_schemas),
+                orchestrator_tools=list(orchestrator_tools),
+            )
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "error": f"{type(e).__name__}: {e}"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        return json.dumps(manifest, ensure_ascii=False, indent=2)
+
+    return _exec_list_agent_tools_with_orchestrator
+
+
 async def _exec_delegate(
     agent: str,
     task: str,
@@ -2028,5 +2245,6 @@ SELF_TOOL_HANDLERS = {
     "write_kg_structured": _exec_write_kg_structured,
     "delegate": _exec_delegate,
     "multi_delegate": _exec_multi_delegate,
+    "list_agent_tools": _exec_list_agent_tools,
     "kg_admin": _exec_kg_admin,
 }

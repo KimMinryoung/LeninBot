@@ -3,19 +3,20 @@
 Public research documents are stored as Markdown rows in Supabase/Postgres and
 served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
 filename without its .md extension. Legacy files under research/ and
-output/research/ remain readable as fallback/import sources.
+output/research/ remain readable only as fallback/import sources.
 
 This module consolidates:
   * publish_research(title, content, filename?) — DB upsert + cache bust
   * edit_research(operation, filename, ...) —
-      operation='edit'      → rewrite DB markdown and bust cache
-      operation='unpublish' → set status=private (or move legacy file) and bust cache
+      operation='edit'      → update the research_documents row and bust cache
+      operation='unpublish' → set the research_documents row status=private and bust cache
 
-`unpublish` is intentionally non-destructive: DB rows are marked private and
-legacy files are relocated out of the public-listing scope.
+`unpublish` is intentionally non-destructive: DB rows are marked private. If a
+document only exists as a legacy fallback file, that file is relocated out of
+the public-listing scope.
 
 Mirrors the post_edit_tools.py pattern (UPDATE + cache purge in one step) for
-filesystem-backed artifacts instead of DB rows.
+DB-backed public content.
 """
 
 from __future__ import annotations
@@ -289,11 +290,13 @@ PUBLISH_RESEARCH_TOOL = {
         "fact-check finds errors in the draft, revise the content yourself and call this tool "
         "again with the same filename; do not set fact_check_passed=true until the revised draft "
         "has been re-checked. "
-        "Published files are served at https://cyber-lenin.com/reports/research/{slug}, "
-        "where slug is the filename without the .md extension. "
+        "Published documents are stored in the research_documents DB table and served at "
+        "https://cyber-lenin.com/reports/research/{slug}, where slug is derived from the "
+        "filename/identifier without the .md extension. "
         "Use for polished analysis, forecasts, and investigative findings. "
-        "Filename is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) "
-        "unless `filename` is passed explicitly. Writing the same filename overwrites; the "
+        "The filename parameter is a stable document identifier, not a filesystem path. "
+        "It is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) unless "
+        "`filename` is passed explicitly. Reusing the same filename updates the same DB row; the "
             "frontend Redis cache is invalidated so readers see the new version immediately."
     ),
     "input_schema": {
@@ -309,7 +312,7 @@ PUBLISH_RESEARCH_TOOL = {
             },
             "filename": {
                 "type": "string",
-                "description": "Optional. ASCII letters/digits with '.', '_', '-' only; '.md' appended if missing.",
+                "description": "Optional stable DB document identifier. ASCII letters/digits with '.', '_', '-' only; '.md' appended if missing. Not a filesystem path.",
             },
             "fact_check_passed": {
                 "type": "boolean",
@@ -446,11 +449,13 @@ EDIT_RESEARCH_TOOL = {
     "name": "edit_research",
     "description": (
         "Edit or unpublish an already-published research document. "
-        "operation='edit': rewrite the database Markdown with new content (and optionally a new title) "
+        "Research documents are stored in the research_documents DB table; filename is the stable "
+        "public identifier used to derive /reports/research/{slug}. "
+        "operation='edit': update the database Markdown with new content (and optionally a new title) "
         "and invalidate Redis cache so readers see the new version immediately. "
-        "Original 작성일 is preserved when present in the existing file. "
-        "operation='unpublish': mark a DB row private or move a legacy file to research/private/ "
-        "and invalidate cache so it disappears from cyber-lenin.com. "
+        "Original 작성일 is preserved when present in the existing DB markdown. "
+        "operation='unpublish': mark the DB row private and invalidate cache so it disappears "
+        "from cyber-lenin.com. Only legacy fallback files are moved to research/private/. "
         "Use this instead of publish_research when correcting or pulling already-public content."
     ),
     "input_schema": {
@@ -459,11 +464,11 @@ EDIT_RESEARCH_TOOL = {
             "operation": {
                 "type": "string",
                 "enum": ["edit", "unpublish"],
-                "description": "'edit' rewrites content; 'unpublish' archives to research/private/.",
+                "description": "'edit' updates the DB row; 'unpublish' marks the DB row private.",
             },
             "filename": {
                 "type": "string",
-                "description": "Existing research filename (e.g. '20260418_imperialism_intro.md').",
+                "description": "Existing research document identifier/filename (e.g. '20260418_imperialism_intro.md').",
             },
             "title": {
                 "type": "string",
@@ -515,7 +520,7 @@ async def _exec_edit_research(
     existing_doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
     existing = None if existing_doc else _resolve_existing(fname)
     if existing_doc is None and existing is None:
-        return f"Error: no research file named '{fname}' under research/ or output/research/."
+        return f"Error: no research document named '{fname}' in DB or legacy fallback files."
 
     if op == "edit":
         if not content or not content.strip():
@@ -526,7 +531,7 @@ async def _exec_edit_research(
         ) or research_store.extract_title(existing_markdown, "") or (None if existing is None else _extract_h1(existing))
         new_title = (title or "").strip() or existing_title
         if not new_title:
-            return "Error: existing file has no H1 — pass `title` explicitly."
+            return "Error: existing document has no title/H1 — pass `title` explicitly."
         publish_date = (
             _extract_publish_date_from_markdown(existing_markdown)
             or (None if existing is None else _extract_publish_date(existing))
@@ -575,7 +580,7 @@ async def _exec_edit_research(
     cache_note = _format_cache_note(
         cache,
         fname,
-        missing_msg="file moved but the cached copy may still be served." if not cache["ok"] else None,
+        missing_msg="document was unpublished but the cached copy may still be served." if not cache["ok"] else None,
     )
     delete_note = ""
     try:

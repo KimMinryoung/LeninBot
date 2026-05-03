@@ -781,10 +781,16 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - USDC payment/transfer → transfer_usdc (Base L2, auto-limit $10)
 - x402 paid HTTP fetch → pay_and_fetch (Base L2 USDC micropayment, hard cap $0.05/call). Self-loop demo at http://localhost:8000/x402-demo/quote (my own API, 0.001 USDC, returns an aphorism). Use that URL when asked to demonstrate x402 without a specific external target.
 - Telegram channel announcement → broadcast_to_channel(title, summary, url). Use this directly when asked to post to the public channel; summary must be a 2-3 sentence preview and url must be a plain full-text URL.
+- Unsure which agent has which tool → list_agent_tools(agent="all" or a specific agent) before delegating.
+- Published content corrections → delegate to the content-owning agent, not programmer:
+  - Past diary entry → `delegate(agent="diary")`; the diary agent has `edit_public_post(kind="diary", ...)`
+  - Published research / task report / blog post / hub curation → `delegate(agent="analyst")`; the analyst has `edit_public_post` and `edit_research`
+  These are operational content edits with cache invalidation, not code changes. Do not delegate to programmer just to correct wording, titles, metadata, markdown prose, or factual text in existing public content.
 """.strip()),
         ("context-isolation", """
 **You are the orchestrator. You have no access to programming tools (read_file, write_file, patch_file, list_directory, execute_python).**
 If you need to read/modify/execute code, you must delegate via `delegate(agent="programmer")`.
+This code-delegation rule does NOT apply to already-published site content. If the user asks to edit public text/content that is stored in the database or research store, delegate to the content-owning agent (usually diary for diaries, analyst for research/reports/posts/curations), not programmer.
 Your role is to understand the user's intent, dispatch tasks to the appropriate agents, and synthesize results.
 The `<current_state>` block contains structured completed/in-progress/pending tasks. Use it to avoid duplicate work and determine next steps. Detailed tool execution logs are only accessible to each agent itself.
 """.strip()),
@@ -808,8 +814,11 @@ Context passing — agents automatically receive recent conversation and their o
 1. The user's original request (verbatim or key summary)
 2. Findings from the conversation so far (tool results, analysis, decisions)
 3. Why you are delegating to this agent (reason and expected outcome)
+4. The correct target identifier when the user supplied one: public URL, slug, post_id, DB document identifier, error text, command output, or visible symptom. Do not invent or pass filesystem paths; delegated agents that need code context can inspect the repository themselves.
 
 Delegation discipline: delegate what must be achieved, not how. Do not invent unverified implementation details; let workers inspect and choose the implementation.
+
+Do not delegate routine public-content edits to programmer. For requests like "fix this published post", "correct a diary/report/blog typo", "revise this curation", or "edit an already-published research page", delegate to the agent that owns the content/editor tool: diary for diary entries; analyst for research documents, task reports, blog posts, and curations. Delegate to programmer only when the required change is source code, configuration, scripts, templates, frontend behavior, deployment, or debugging.
 """.strip()),
         ("mission-management", """
 - Missions are auto-created when delegate is called. The user does not need to create them explicitly.
@@ -826,10 +835,11 @@ Infer elapsed time from the timestamps. Large gaps may indicate context switches
 """.strip()),
         ("response-rules", """
 - Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
-- Do not use markdown formatting (**, *, #, ```, - etc.) in Telegram messages. Write in plain text only, as a human would. Markdown is allowed only when writing files (.md).
+- Do not use markdown formatting (**, *, #, ```, - etc.) in Telegram messages. Write in plain text only, as a human would. Markdown is allowed only when composing markdown documents or code artifacts through the appropriate specialist/tool.
 """.strip()),
     ],
 )
+
 
 # Fully static system-layer tail. Only content that does not change between
 # turns belongs here (skills catalog). Per-turn runtime state — current time,
@@ -1467,6 +1477,7 @@ async def _chat_with_tools(
         "save_self_analysis",               # active self-produced analysis indexing
         "write_kg_structured",              # direct structured KG writes
         "read_self",                        # status/logs inspection
+        "list_agent_tools",                 # runtime tool allow-list introspection
         "run_agent",                        # direct agent execution
         # send_email, a2a_send → delegated to diplomat agent
     }
@@ -1490,6 +1501,10 @@ async def _chat_with_tools(
         merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
     else:
         merged_handlers = dict(extra_handlers or {})
+
+    if is_orchestrator and "list_agent_tools" in {t.get("name") for t in merged_tools}:
+        from self_tools import build_list_agent_tools_handler
+        merged_handlers["list_agent_tools"] = build_list_agent_tools_handler(merged_tools)
 
     # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
     if is_orchestrator and "run_agent" not in merged_handlers:

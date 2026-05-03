@@ -4,7 +4,7 @@ Runs on a systemd timer: one short bounded wake per hour. Each wake, advances ON
 project that is in state `researching` or `planning`. Tier separation:
 
 - **T0 (this spec)**: research + publishing to our own cyber-lenin.com domain
-  (research/, hub/, p/). Reversible, low blast radius, on our own infra.
+  (research DB documents, hub DB rows, static pages). Reversible, low blast radius, on our own infra.
 - **T1** (not wired): outward publishing to third-party platforms (external
   social, email, A2A). Requires separate tool allow-list.
 - **T2** (not wired): novel channels, account creation, direct outreach.
@@ -86,9 +86,9 @@ response — the round budget is hard.
             ("building-modalities", """
 Three publishing tools, each for a distinct artifact type:
 
-**publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)** — markdown document served at
-`/reports/research/{slug}` (without `.md` in the public URL). Use for:
-- Series installments (장편 연재) — one .md per installment, filename carries the series slug
+**publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)** — markdown document stored in
+the `research_documents` DB table and served at `/reports/research/{slug}` (without `.md` in the public URL). Use for:
+- Series installments (장편 연재) — one DB document per installment; `filename` is the stable document identifier and carries the series slug
 - Long-form essays, analysis, forecasts (정세 분석)
 - Anything where the format is primarily prose
 - This tool is a mandatory two-step gate: first call saves an exact draft backup and does
@@ -109,8 +109,9 @@ structured DB row served at `/hub/{slug}`. Use for:
 - Korean-language sources only at this time
 
 **edit_research(operation, filename, title?, content?)** — edit or unpublish an existing
-research DB row. Use `operation="edit"` for corrections and `operation="unpublish"` to
-make a bad research document private. Use this instead of publishing a duplicate file.
+research DB row. `filename` is the stable DB document identifier, not a filesystem path.
+Use `operation="edit"` for corrections and `operation="unpublish"` to make a bad
+research document private. Use this instead of publishing a duplicate document.
 
 **edit_public_post(kind="curation", slug, ...fields)** — edit an existing hub curation DB
 row. Use this for corrections to curation title, source metadata, selection_rationale,

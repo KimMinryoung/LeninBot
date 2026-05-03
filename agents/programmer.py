@@ -59,7 +59,8 @@ PROGRAMMER = AgentSpec(
     `git -c user.name=Cyber-Lenin -c user.email=lenin@cyber-lenin.com commit -m "..."`
   Never use the repo's default git author (that's the human user).
 - **Push**: `git push origin main` is allowed once the change is verified and committed.
-- **Published-post edits** (ai_diary entries, telegram_tasks reports): a raw UPDATE leaves the frontend Redis cache stale. If you touch published rows directly via SQL, also delete the matching Redis cache keys, or skip the change and report that the orchestrator should call `edit_public_post` instead.
+- **Published content edits are not programming tasks**: if you are delegated a routine correction to an already-published diary, task report, blog post, hub curation, or research document, do not edit it through SQL/files/code. Report that the task was misrouted: diary entries should go to the diary agent; research/reports/posts/curations should go to the analyst agent. Those agents have `edit_public_post` / `edit_research`, which also handle Redis and Cloudflare cache invalidation.
+- **Tool routing introspection**: if you are running through the LeninBot tool loop and need to know which specialist owns a capability, call `list_agent_tools`. In Codex CLI mode, inspect `get_agent_tool_manifest()` in `self_tools.py` if needed.
 - **Codex execution policy is OFF-LIMITS**: do NOT modify `codex_exec_loop.py`'s sandbox/approval flags (`--dangerously-bypass-approvals-and-sandbox`, `-s danger-full-access`, etc.) or the cmd list that contains them. The user has explicitly chosen this permission model. If you think it's unsafe, say so in the final report — never silently swap it for a more restrictive flag like `--full-auto`. (This rule exists because a previous run did exactly that and broke `.git`/network access.)
 """.strip()),
             ("final-report", """
@@ -72,5 +73,5 @@ The final message you emit becomes the task report sent back to the orchestrator
             MISSION_GUIDELINES_SECTION,
         ],
     ),
-    tools=[],  # Codex uses its own built-in toolset; LeninBot tool dispatch is bypassed.
+    tools=["list_agent_tools"],  # Codex uses its own built-in toolset; non-Codex path only gets introspection.
 )
