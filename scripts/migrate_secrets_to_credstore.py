@@ -62,8 +62,15 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-api": _FULL,
     "leninbot-telegram": _FULL,
 
-    # Browser-use worker — LLM calls only (Anthropic, optional OpenAI).
-    "leninbot-browser": {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"},
+    # Browser worker runs the task loop and writes task/log rows, so it needs DB.
+    # browser-use itself can use Gemini/OpenAI/Anthropic depending on runtime env.
+    "leninbot-browser": {
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "GEMINI_API_KEY",
+        "DB_PASSWORD",
+    },
 
     # T0 autonomous pilot — planning LLMs, KG/DB, telegram notify, razvedchik.
     "leninbot-autonomous": {

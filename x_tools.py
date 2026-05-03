@@ -57,10 +57,7 @@ X_POST_TOOL = {
                 "default": False,
             },
         },
-        "anyOf": [
-            {"required": ["url_or_id"]},
-            {"required": ["user"]},
-        ],
+        "required": ["url_or_id"],
     },
 }
 

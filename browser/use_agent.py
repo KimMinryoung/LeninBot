@@ -21,11 +21,20 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 
 # Default limits
 _DEFAULT_MAX_STEPS = 20
+_DEFAULT_BROWSER_USE_PROVIDER = "google"
+_DEFAULT_BROWSER_USE_MODEL = "gemini-2.5-flash"
 
 
 def _resolve_provider_and_model() -> tuple[str, str]:
-    """browser-use always uses Anthropic (OpenAI models fail structured output parsing)."""
-    return "claude", "claude-sonnet-4-6"
+    """Resolve the multimodal LLM used inside browser-use.
+
+    The outer browser worker may still use Claude for LeninBot tool orchestration,
+    but browser-use's screen-reading/clicking loop should default to a cheaper
+    multimodal model. Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL.
+    """
+    provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
+    model = (os.getenv("BROWSER_USE_MODEL") or _DEFAULT_BROWSER_USE_MODEL).strip()
+    return provider, model
 
 
 def _build_llm(model: str | None = None):
@@ -38,6 +47,18 @@ def _build_llm(model: str | None = None):
 
     from secrets_loader import get_secret
 
+    if provider == "google":
+        from browser_use.llm.google.chat import ChatGoogle
+
+        llm = ChatGoogle(
+            model=model,
+            api_key=get_secret("GEMINI_API_KEY", "") or "",
+            thinking_budget=0,
+            max_output_tokens=4096,
+        )
+        logger.info("browser-use LLM: Google %s", model)
+        return llm
+
     if provider == "openai":
         from browser_use.llm.openai.chat import ChatOpenAI
 
@@ -45,8 +66,20 @@ def _build_llm(model: str | None = None):
             model=model,
             api_key=get_secret("OPENAI_API_KEY", "") or "",
             timeout=120,
+            max_completion_tokens=4096,
         )
         logger.info("browser-use LLM: OpenAI %s", model)
+        return llm
+
+    if provider == "deepseek":
+        from browser_use.llm.deepseek.chat import ChatDeepSeek
+
+        llm = ChatDeepSeek(
+            model=model,
+            api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
+            timeout=120,
+        )
+        logger.info("browser-use LLM: DeepSeek %s", model)
         return llm
 
     # Default: Anthropic
