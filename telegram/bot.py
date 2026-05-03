@@ -770,16 +770,12 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
-- URL in message → fetch_url to read the page; for x.com/twitter.com status URLs use fetch_x_post
+- URL in message → fetch_url to read the page; for x.com/twitter.com status/profile URLs use fetch_x_post
 - Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
 - Store important structured facts → write_kg_structured
 - Real-time market prices → get_finance_data
-- My crypto wallet address/balance → check_wallet (Base L2 primary, also ETH/TRX/SOL)
-- ETH → USDC conversion → swap_eth_to_usdc (Base L2, auto-limit $10)
-- USDC payment/transfer → transfer_usdc (Base L2, auto-limit $10)
-- x402 paid HTTP fetch → pay_and_fetch (Base L2 USDC micropayment, hard cap $0.05/call). Self-loop demo at http://localhost:8000/x402-demo/quote (my own API, 0.001 USDC, returns an aphorism). Use that URL when asked to demonstrate x402 without a specific external target.
 - Telegram channel announcement → broadcast_to_channel(title, summary, url). Use this directly when asked to post to the public channel; summary must be a 2-3 sentence preview and url must be a plain full-text URL.
 - Unsure which agent has which tool → list_agent_tools(agent="all" or a specific agent) before delegating.
 - Published content corrections → delegate to the content-owning agent, not programmer:
@@ -1468,10 +1464,6 @@ async def _chat_with_tools(
         "web_search", "fetch_url", "fetch_x_post",  # quick lookups (no delegation needed)
         "knowledge_graph_search", "vector_search",  # fast knowledge retrieval
         "get_finance_data",                 # inline finance data
-        "check_wallet",                     # crypto wallet address + balance
-        "swap_eth_to_usdc",                 # ETH → USDC swap on Base
-        "transfer_usdc",                    # USDC payment/transfer on Base
-        "pay_and_fetch",                    # x402 paid HTTP fetch (USDC micropayment)
         "broadcast_to_channel",             # public Telegram channel announcements
         "recall_experience",                # memory recall
         "save_self_analysis",               # active self-produced analysis indexing

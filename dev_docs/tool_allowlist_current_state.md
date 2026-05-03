@@ -48,7 +48,6 @@ _ORCHESTRATOR_TOOLS = {
     "web_search", "fetch_url", "fetch_x_post",
     "knowledge_graph_search", "vector_search",
     "get_finance_data",
-    "check_wallet", "swap_eth_to_usdc", "transfer_usdc", "pay_and_fetch",
     "broadcast_to_channel",
     "recall_experience", "save_self_analysis",
     "write_kg_structured",

@@ -44,7 +44,7 @@ BROWSER = AgentSpec(
 2. **web_search** — Quick web search for finding URLs or context before browsing.
 3. **fetch_url** — Fast, cheap page text extraction. Use when you don't need
    full browser interaction (static pages, APIs, simple articles).
-4. **fetch_x_post** — Read x.com/twitter.com status URLs through the X API.
+4. **fetch_x_post** — Read x.com/twitter.com status/profile URLs through the X API.
 5. **check_inbox** — Check the email inbox for recent messages and extract links.
    Use this to find confirmation/magic links from newsletter signups, then
    open those links with browse_web or fetch_url.
@@ -55,7 +55,7 @@ BROWSER = AgentSpec(
 ## Strategy
 
 - **browse_web is expensive and slow** (10-60 seconds per call, incurs LLM costs).
-  Try fetch_url first for simple page reads; for x.com/twitter.com status URLs, use fetch_x_post.
+  Try fetch_url first for simple page reads; for x.com/twitter.com status/profile URLs, use fetch_x_post.
 - Write **specific and clear instructions** in browse_web's `task` parameter:
   - Bad: "Find information on this site"
   - Good: "Log in at https://example.com/login with email=test@test.com, password=1234, then extract order number, date, and amount from the 'Recent Orders' table on /dashboard"
