@@ -284,6 +284,7 @@ async def execute_tool(
 # spawn agents, or perform financial transactions are intentionally excluded.
 PARALLEL_SAFE_TOOLS = frozenset({
     "fetch_url",
+    "fetch_x_post",
     "web_search",
     "vector_search",
     "knowledge_graph_search",

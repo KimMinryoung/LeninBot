@@ -1581,6 +1581,12 @@ from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
+# ── X/Twitter post lookup ────────────────────────────────────────────
+from x_tools import X_TOOLS, X_TOOL_HANDLERS
+
+TOOLS.extend(X_TOOLS)
+TOOL_HANDLERS.update(X_TOOL_HANDLERS)
+
 # ── Site publishing tools (hub curations + static pages for cyber-lenin.com) ──
 from site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
 

@@ -68,6 +68,7 @@ There are three patrol methods:
 3. **General reconnaissance (all other platforms)** — web_search + fetch_url combination:
    - Use web_search to find latest developments on target platforms/topics
    - Use fetch_url to collect specific page/thread content
+   - Use fetch_x_post for x.com/twitter.com status URLs
    - Analyze collected information and produce a report
 """.strip()),
             ("data-collection-and-archiving", """
@@ -82,7 +83,7 @@ Save collected data as **structured .md documents**. The analyst will read these
 - **Collected at**: 2026-03-28 16:30 KST
 - **Source**: {URL or platform name}
 - **Search query**: {query used}
-- **Collection method**: web_search / fetch_url / moltbook script
+- **Collection method**: web_search / fetch_url / fetch_x_post / moltbook script
 
 ## Raw content
 
@@ -113,7 +114,7 @@ print(f"saved: {path}")
 ```
 
 **Rules:**
-- **Include the full text.** Do not save just the URL. Put the text fetched via fetch_url in the raw content section.
+- **Include the full text.** Do not save just the URL. Put the text fetched via fetch_url or fetch_x_post in the raw content section.
 - Do not summarize or analyze — that is the analyst's job. Save the raw text as-is.
 - If there are multiple sources for one topic, create a separate .md file per source.
 """.strip()),
@@ -129,7 +130,7 @@ print(f"saved: {path}")
     ),
     tools=[
         "moltbook", "mersoom",
-        "web_search", "fetch_url", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
+        "web_search", "fetch_url", "fetch_x_post", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2",
     ],

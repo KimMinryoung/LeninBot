@@ -45,7 +45,7 @@ inside `telegram/bot.py::_chat_with_tools`:
 _ORCHESTRATOR_TOOLS = {
     "delegate", "multi_delegate",
     "mission",
-    "web_search", "fetch_url",
+    "web_search", "fetch_url", "fetch_x_post",
     "knowledge_graph_search", "vector_search",
     "get_finance_data",
     "check_wallet", "swap_eth_to_usdc", "transfer_usdc", "pay_and_fetch",
@@ -125,6 +125,10 @@ _web_tools = [t for t in TOOLS if t.get("name") in _WEB_ALLOWED_TOOLS] + [WEB_RE
 handler redacts private logs, credentials, raw local paths, operational traces,
 and private task report bodies.
 
+`fetch_x_post` is intentionally not enabled for public web chat yet. It consumes
+the server-side X API quota, so exposing it publicly should wait for explicit
+web rate limiting and abuse controls.
+
 This means web chat has a fourth allow-list path separate from both
 orchestrator and `AgentSpec`.
 
@@ -165,4 +169,3 @@ Future cleanup options:
   into a separate `web_read_self` tool.
 - Do not move web chat hastily: it has public-safety redaction requirements that
   are different from Telegram and specialist task execution.
-

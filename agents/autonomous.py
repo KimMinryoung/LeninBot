@@ -66,7 +66,7 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
 
 1. **Orient**: Read project context. Decide the single most valuable next step based on what
    the plan and goal say. Typical steps:
-   - Research gap → focused web_search / fetch_url / vector_search / knowledge_graph_search
+   - Research gap → focused web_search / fetch_url / fetch_x_post / vector_search / knowledge_graph_search
    - Accumulated research but no plan → draft or revise the plan with `revise_plan`
    - Plan exists, artifact ready to draft → proceed through the publishing pipeline
    - Published research needs revision → use `edit_research`
@@ -164,7 +164,7 @@ Never attempt to reach outside it.
     ),
     tools=[
         # Research (read-only, external + internal)
-        "web_search", "fetch_url",
+        "web_search", "fetch_url", "fetch_x_post",
         "vector_search", "knowledge_graph_search",
         "read_self", "recall_experience",
         "get_finance_data",

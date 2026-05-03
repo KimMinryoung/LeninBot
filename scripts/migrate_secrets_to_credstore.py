@@ -47,6 +47,7 @@ TIER_A = [
     "RESEND_API_KEY",
     "TAVILY_API_KEY",
     "TELEGRAM_BOT_TOKEN",
+    "X_BEARER_TOKEN",
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -76,6 +77,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "MOLTBOOK_API_KEY",
         "TAVILY_API_KEY",
         "GITHUB_TOKEN",
+        "X_BEARER_TOKEN",
     },
 
     # Moltbook patrol timer — writes through the Razvedchik API client and can

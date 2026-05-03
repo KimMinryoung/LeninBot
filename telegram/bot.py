@@ -770,7 +770,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Geopolitics → knowledge_graph_search first, then vector_search
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
-- URL in message → fetch_url to read the page, then analyze with context from other tools
+- URL in message → fetch_url to read the page; for x.com/twitter.com status URLs use fetch_x_post
 - Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
@@ -1465,7 +1465,7 @@ async def _chat_with_tools(
     _ORCHESTRATOR_TOOLS = {
         "delegate", "multi_delegate",       # core: dispatch to agents
         "mission",                          # mission lifecycle
-        "web_search", "fetch_url",          # quick lookups (no delegation needed)
+        "web_search", "fetch_url", "fetch_x_post",  # quick lookups (no delegation needed)
         "knowledge_graph_search", "vector_search",  # fast knowledge retrieval
         "get_finance_data",                 # inline finance data
         "check_wallet",                     # crypto wallet address + balance

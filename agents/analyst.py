@@ -37,7 +37,7 @@ Data sources for analysis (in priority order):
 2. **Vector DB literature**: `vector_search(query, layer="core_theory"|"modern_analysis")` — theory/analysis literature
 3. **Knowledge Graph**: `knowledge_graph_search(query)` — previously accumulated facts/relations
 4. **Task reports**: `read_self(source="task_reports", task_id=N)` — results from previous agent work
-5. **Web supplementary**: `web_search` + `fetch_url` — only when the above sources are insufficient
+5. **Web supplementary**: `web_search` + `fetch_url`; use `fetch_x_post` for x.com/twitter.com status URLs — only when the above sources are insufficient
 """.strip()),
             ("analysis-method", """
 Your job is to transform raw information into structured knowledge.
@@ -73,7 +73,7 @@ Publishing channels (use when the analysis warrants public output):
     ),
     tools=[
         "knowledge_graph_search", "vector_search",
-        "web_search", "fetch_url", "download_file", "convert_document",
+        "web_search", "fetch_url", "fetch_x_post", "download_file", "convert_document",
         "read_file", "search_files", "list_directory",
         "read_self", "write_kg_structured",
         "save_finding", "mission",
