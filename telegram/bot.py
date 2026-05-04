@@ -107,6 +107,7 @@ PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS = max(
     0,
     int(os.getenv("PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS", "86400") or "0"),
 )
+CHAT_PERSIST_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_CHAT_PERSIST_TIMEOUT_SECONDS", "15"))
 _public_access_notice_last: dict[int, float] = {}
 _GROUP_CHAT_TYPES = {"group", "supergroup"}
 
@@ -1315,6 +1316,30 @@ async def _maybe_summarize_chunk(user_id: int):
         logger.warning("Chunk summarization failed: %s", e)
 
 
+async def _persist_assistant_turn_after_send(user_id: int, reply: str) -> None:
+    """Persist a sent assistant turn without holding up Telegram delivery."""
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_save_chat_message, user_id, "assistant", reply),
+            timeout=CHAT_PERSIST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "assistant chat history persist timed out after %.1fs for user_id=%s",
+            CHAT_PERSIST_TIMEOUT_SECONDS,
+            user_id,
+        )
+        return
+    except Exception as e:
+        logger.warning("assistant chat history persist failed for user_id=%s: %s", user_id, e)
+        return
+
+    try:
+        await _maybe_summarize_chunk(user_id)
+    except Exception as e:
+        logger.warning("post-send chat summarization failed for user_id=%s: %s", user_id, e)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 def _split_message(text: str, max_len: int = 4096) -> list[str]:
     """Split text into chunks respecting Telegram's 4096 char limit."""
@@ -2007,12 +2032,10 @@ async def bot_main():
                 extra_handlers={"mission": build_mission_handler(chat_id)},
             )
 
-            # Save orchestrator reply to chat history (system event to separate table)
-            await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
-            await asyncio.to_thread(_save_chat_message, chat_id, "assistant", reply)
-
             for chunk in _split_message(reply):
                 await b.send_message(chat_id=chat_id, text=chunk)
+            asyncio.create_task(_persist_assistant_turn_after_send(chat_id, reply))
+            await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
 
         except Exception as e:
             logger.warning("Orchestrator callback failed for task #%d: %s", task_id, e)

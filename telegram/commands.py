@@ -105,6 +105,7 @@ _pending_approvals: dict = {}  # 자가수정 승인 대기 (approval_id → ent
 _reflection_counter: dict[int, int] = {}
 
 _LEADING_TIMESTAMP_RE = re.compile(r"^\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*")
+_CHAT_PERSIST_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_CHAT_PERSIST_TIMEOUT_SECONDS", "15"))
 
 
 def _normalize_for_echo_check(text: str | None) -> str:
@@ -128,6 +129,30 @@ def _is_near_user_echo(reply: str | None, user_text: str | None) -> bool:
     if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.75:
         return True
     return SequenceMatcher(None, user_norm, reply_norm).ratio() >= 0.88
+
+
+async def _persist_assistant_turn(user_id: int, reply: str) -> None:
+    """Persist a sent assistant turn without delaying Telegram delivery."""
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_ctx["save_chat_message"], user_id, "assistant", reply),
+            timeout=_CHAT_PERSIST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "assistant chat history persist timed out after %.1fs for user_id=%s",
+            _CHAT_PERSIST_TIMEOUT_SECONDS,
+            user_id,
+        )
+        return
+    except Exception as e:
+        logger.warning("assistant chat history persist failed for user_id=%s: %s", user_id, e)
+        return
+
+    try:
+        await _ctx["maybe_summarize_chunk"](user_id)
+    except Exception as e:
+        logger.warning("post-send chat summarization failed for user_id=%s: %s", user_id, e)
 
 _HELP_TEXT = """\
 *레닌봇 커맨드 목록*
@@ -1423,10 +1448,8 @@ async def handle_photo(message: Message):
         logger.info("photo vision done: user_id=%s elapsed=%.2fs in_tokens=%s out_tokens=%s",
                     user_id, elapsed, in_tok, out_tok)
 
-        # 채팅 히스토리 저장 — assistant 응답
-        await asyncio.to_thread(_ctx["save_chat_message"], user_id, "assistant", reply_text)
-
         await message.reply(reply_text)
+        asyncio.create_task(_persist_assistant_turn(user_id, reply_text))
     except Exception as e:
         logger.error("handle_photo error: %s", e)
         await message.reply(f"❌ 이미지 분석 중 오류: {e}")
@@ -1583,12 +1606,9 @@ async def handle_message(message: Message):
             # Remove the marker from the reply shown to user
             reply = reply[:match.start()].rstrip()
 
-    # Save assistant reply to DB, then try to create chunk summary in background
-    await asyncio.to_thread(_ctx["save_chat_message"], user_id, "assistant", reply)
-    asyncio.create_task(_ctx["maybe_summarize_chunk"](user_id))
-
     for chunk in _ctx["split_message"](reply):
         await message.answer(chunk)
+    asyncio.create_task(_persist_assistant_turn(user_id, reply))
 
     # Create background task for unfinished work
     if continuation_task:
