@@ -628,6 +628,8 @@ def fetch_chat_logs(
     keyword: str | None = None,
     include_logs: bool = False,
     source: str = "web",
+    group_web_contexts: bool = False,
+    per_context_limit: int = 10,
 ) -> list[dict]:
     """Fetch chat logs from PostgreSQL.
 
@@ -635,6 +637,10 @@ def fetch_chat_logs(
         include_logs: If True, also return processing_logs, route,
                       documents_count, web_search_used, strategy columns.
         source: "web" = chat_logs (웹 챗봇), "telegram" = telegram_chat_history.
+        group_web_contexts: For web logs, fetch recent fingerprint/session
+                            contexts, then several turns inside each context.
+        per_context_limit: Rows per fingerprint/session context when
+                           group_web_contexts=True.
     """
     from db import query as db_query
 
@@ -684,16 +690,52 @@ def fetch_chat_logs(
             return []
 
     # 기본: web (chat_logs 테이블)
-    cols = "session_id, user_query, bot_answer, created_at"
+    cols = "session_id, fingerprint, user_query, bot_answer, created_at"
     if include_logs:
         cols = (
-            "session_id, user_query, bot_answer, route, documents_count, "
+            "session_id, fingerprint, user_query, bot_answer, route, documents_count, "
             "web_search_used, strategy, processing_logs, created_at"
         )
     if keyword:
         conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
         params.extend([f"%{keyword}%", f"%{keyword}%"])
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    if group_web_contexts:
+        try:
+            context_limit = max(1, min(50, int(limit or 20)))
+        except (TypeError, ValueError):
+            context_limit = 20
+        try:
+            row_limit = max(1, min(20, int(per_context_limit or 10)))
+        except (TypeError, ValueError):
+            row_limit = 10
+        sql = (
+            "WITH filtered AS ("
+            f"  SELECT {cols},"
+            "         MAX(created_at) OVER (PARTITION BY fingerprint, session_id) AS context_latest,"
+            "         ROW_NUMBER() OVER (PARTITION BY fingerprint, session_id ORDER BY created_at DESC) AS context_rank "
+            f"  FROM chat_logs {where}"
+            "), contexts AS ("
+            "  SELECT fingerprint, session_id, MAX(created_at) AS latest "
+            "  FROM filtered "
+            "  GROUP BY fingerprint, session_id "
+            "  ORDER BY latest DESC "
+            "  LIMIT %s"
+            ") "
+            f"SELECT {', '.join('f.' + c.strip() for c in cols.split(','))}, c.latest AS context_latest "
+            "FROM filtered f "
+            "JOIN contexts c "
+            "  ON f.fingerprint IS NOT DISTINCT FROM c.fingerprint "
+            " AND f.session_id IS NOT DISTINCT FROM c.session_id "
+            "WHERE f.context_rank <= %s "
+            "ORDER BY c.latest DESC, f.fingerprint, f.session_id, f.created_at ASC"
+        )
+        try:
+            return db_query(sql, tuple(params) + (context_limit, row_limit))
+        except Exception as e:
+            logger.error("[shared] fetch_chat_logs grouped web error: %s", e)
+            return []
+
     sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
     params.append(limit)
     try:

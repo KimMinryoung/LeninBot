@@ -67,8 +67,8 @@ SELF_TOOLS = [
     {
         "name": "read_self",
         "description": (
-            "Read internal data. source: diary (6h entries), chat_logs (telegram/web), "
-            "processing_logs (pipeline), task_reports (queue), kg_status (graph stats), "
+            "Read internal data. source: diary (recent entries by limit), chat_logs (telegram/web), "
+            "task_reports (queue), kg_status (graph stats), "
             "system_status (overview), server_logs (journald), "
             "research (public research_documents), curation (hub_curations), "
             "static_pages (published /p pages), private_reports (admin-only reports), "
@@ -80,7 +80,7 @@ SELF_TOOLS = [
             "properties": {
                 "source": {
                     "type": "string",
-                    "enum": ["diary", "chat_logs", "processing_logs", "task_reports",
+                    "enum": ["diary", "chat_logs", "task_reports",
                              "kg_status", "system_status", "server_logs",
                              "file_registry", "research", "curation", "static_pages",
                              "private_reports", "autonomous_project"],
@@ -493,7 +493,16 @@ async def _exec_read_chat_logs(
 ) -> str:
     from shared import fetch_chat_logs
 
-    rows = await asyncio.to_thread(fetch_chat_logs, limit, hours_back, keyword, source=source)
+    normalized_source = (source or "web").strip().lower()
+    rows = await asyncio.to_thread(
+        fetch_chat_logs,
+        limit,
+        hours_back,
+        keyword,
+        source=source,
+        group_web_contexts=(normalized_source == "web"),
+        per_context_limit=10,
+    )
     if not rows:
         return "No chat logs found for the specified criteria."
 
@@ -501,8 +510,86 @@ async def _exec_read_chat_logs(
         text = str(text or "")
         return text[:max_len]
 
+    def _sort_key(ts) -> float:
+        if ts is None:
+            return 0.0
+        if hasattr(ts, "timestamp"):
+            try:
+                return float(ts.timestamp())
+            except Exception:
+                return 0.0
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0.0
+        return 0.0
+
     results = []
-    normalized_source = (source or "web").strip().lower()
+    if normalized_source == "web":
+        sessions: dict[str, dict] = {}
+        for row in rows:
+            session_id = str(row.get("session_id", "") or "").strip() or "unknown"
+            fingerprint = str(row.get("fingerprint", "") or "").strip() or "unknown"
+            bucket_key = f"{fingerprint}::{session_id}"
+            bucket = sessions.setdefault(
+                bucket_key,
+                {
+                    "rows": [],
+                    "latest": row.get("created_at"),
+                    "session_id": session_id,
+                    "fingerprint": fingerprint,
+                },
+            )
+            bucket["rows"].append(row)
+            latest = bucket.get("latest")
+            created = row.get("created_at")
+            if _sort_key(created) > _sort_key(latest):
+                bucket["latest"] = created
+
+        ordered_sessions = sorted(
+            sessions.items(),
+            key=lambda item: _sort_key(item[1].get("latest")),
+            reverse=True,
+        )
+
+        for _, bucket in ordered_sessions:
+            session_id = bucket.get("session_id") or "unknown"
+            fingerprint = bucket.get("fingerprint") or "unknown"
+            session_rows = sorted(
+                bucket["rows"],
+                key=lambda r: _sort_key(r.get("created_at")),
+            )
+            latest_ts = _to_kst(bucket.get("latest"))
+            lines = [
+                f"=== Web visitor fingerprint {fingerprint} | session {session_id} | {len(session_rows)} entr{'y' if len(session_rows) == 1 else 'ies'} | latest {latest_ts} ===",
+                "Treat this as one visitor context. Do not merge it with other web sessions.",
+            ]
+            for row in session_rows:
+                ts = _to_kst(row.get("created_at"))
+                role = str(row.get("role", "") or "").lower()
+                content = str(row.get("content", "") or "")
+                q = str(row.get("user_query", "") or "")
+                a = str(row.get("bot_answer", "") or "")
+                if role in ("user", "assistant") and content:
+                    speaker = "Visitor" if role == "user" else "Lenin"
+                    lines.append(f"[{ts}] {speaker}: {_clip(content)}")
+                    continue
+                if q:
+                    lines.append(f"[{ts}] Visitor: {_clip(q)}")
+                if a:
+                    lines.append(f"[{ts}] Lenin: {_clip(a)}")
+                if not q and not a and content:
+                    speaker = "Visitor" if role == "user" else "Lenin"
+                    lines.append(f"[{ts}] {speaker}: {_clip(content)}")
+            results.append("\n".join(lines))
+
+        return (
+            f"Web chat logs grouped by visitor fingerprint and session ({len(rows)} entries across {len(ordered_sessions)} contexts). "
+            "Each fingerprint/session block is a separate visitor context; do not combine identities or intentions across blocks.\n\n"
+            + "\n\n".join(results)
+        )
+
     for row in rows:
         ts = _to_kst(row.get("created_at"))
         role = str(row.get("role", "") or "").lower()
@@ -527,27 +614,6 @@ async def _exec_read_chat_logs(
                     lines.append(f"{speaker}: {_clip(content)}")
 
             results.append("\n".join(lines))
-            continue
-
-        session_id = str(row.get("session_id", "") or "").strip()
-        header = f"[web / session {session_id}] {ts}" if session_id else f"[web] {ts}"
-        q = str(row.get("user_query", "") or "")
-        a = str(row.get("bot_answer", "") or "")
-        lines = [header]
-
-        if role in ("user", "assistant") and content:
-            speaker = "Visitor" if role == "user" else "Lenin"
-            lines.append(f"{speaker}: {_clip(content)}")
-        else:
-            if q:
-                lines.append(f"Visitor: {_clip(q)}")
-            if a:
-                lines.append(f"Lenin: {_clip(a)}")
-            if not q and not a and content:
-                speaker = "Visitor" if role == "user" else "Lenin"
-                lines.append(f"{speaker}: {_clip(content)}")
-
-        results.append("\n".join(lines))
 
     return f"Chat logs ({len(rows)} entries):\n\n" + "\n\n".join(results)
 

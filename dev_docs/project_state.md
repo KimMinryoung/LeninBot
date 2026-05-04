@@ -86,7 +86,7 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 | `leninbot-experience` | 매일 15:30 UTC | 경험 메모리 정리/저장 |
 | `leninbot-autonomous` | 매시 :17 KST | 자율 프로젝트 루프 1 tick (bounded 3~6 라운드) — T0 pilot, 리서치·계획 전용 |
 
-> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent, 매일 02:00/14:00 KST).
+> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 스케줄로 이동 (diary agent).
 
 ### Service Dependencies
 
@@ -336,7 +336,7 @@ leninbot/
 │   ├── visualizer.py          # Rodchenko — 이미지 생성 (reference_image 지원)
 │   ├── scout.py               # 외부 플랫폼 정찰
 │   ├── kollontai.py           # Diplomat (Kollontai) — A2A 통신, 이메일 송수신
-│   ├── diary.py               # 일기 작성 에이전트 (스케줄 기반, 0/6/12/18시 KST)
+│   ├── diary.py               # 일기 작성 에이전트 (telegram_schedules 기반)
 │   └── autonomous.py          # AUTONOMOUS_PROJECT — 자율 프로젝트 연구자 (T0, 매시 :17 KST)
 │
 ├── graph_memory/              # Graphiti 지식 그래프 모듈

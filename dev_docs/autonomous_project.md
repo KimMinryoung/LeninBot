@@ -174,7 +174,7 @@ tick 중간에 발생하는 세 가지 영속화:
 ### 타이머
 
 - `leninbot-autonomous.timer`: `OnCalendar=*-*-* *:17:00 Asia/Seoul`
-- 매시 :17 선택 이유: diary(0/6/12/18) · experience_writer(00:30 UTC) · 기타 타이머와 충돌 회피
+- 매시 :17 선택 이유: 다른 백그라운드 타이머와 충돌 회피
 - `Persistent=true` — 서버가 꺼져 있던 시간 동안의 과거 tick은 부팅 후 재개되지 않음(권장 동작, 누적 tick 폭주 방지)
 
 ### 매 tick Telegram 알림

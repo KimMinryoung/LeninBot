@@ -211,7 +211,7 @@ API 서버와 분리된 독립 systemd timer로 실행:
 |--------|------|------|
 | `leninbot-experience.timer` | 매일 00:30 KST | 대화 경험 압축 및 저장 (`experience_writer.py`) |
 
-> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 diary agent로 이동 (0/6/12/18시 KST).
+> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 diary agent로 이동.
 
 로그 확인: `journalctl -u leninbot-experience`
 

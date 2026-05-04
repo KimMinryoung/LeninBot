@@ -171,7 +171,7 @@ Long-term factual memory shared across all agents:
 ### 7. Experience & Diary
 
 - **experience_writer**: Aggregates daily learnings into searchable experience entries
-- **diary agent** (`agents/diary.py`): Scheduled self-reflection via task queue (0/6/12/18시 KST)
+- **diary agent** (`agents/diary.py`): Scheduled self-reflection via `telegram_schedules` and the task queue
 - `recall_experience(query)`: Semantic search over accumulated insights, injected into orchestrator context when relevant
 
 ## Restart Recovery
