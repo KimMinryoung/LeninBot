@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse, Response, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from db import query as db_query, query_one as db_query_one
+from chat_history_sanitize import clean_chat_history_text
 from email_bridge import (
     build_reply_prompt_input,
     deliver_inbound_email_to_internal_input,
@@ -42,6 +43,16 @@ logging.getLogger().setLevel(_LOG_LEVEL)
 logging.getLogger("neo4j").setLevel(logging.WARNING)
 logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+def _clean_chat_history_rows(rows: list[dict]) -> list[dict]:
+    cleaned = []
+    for row in rows:
+        item = dict(row)
+        item["user_query"] = clean_chat_history_text(item.get("user_query", ""))
+        item["bot_answer"] = clean_chat_history_text(item.get("bot_answer", ""))
+        cleaned.append(item)
+    return cleaned
+
 
 # ── Admin API key authentication ──────────────────────────────────
 _ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
@@ -731,7 +742,7 @@ async def get_history(
                LIMIT %s""",
             (fps, limit),
         )
-    return {"history": rows}
+    return {"history": _clean_chat_history_rows(rows)}
 
 
 @app.get("/sessions")

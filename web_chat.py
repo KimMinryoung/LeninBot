@@ -17,6 +17,7 @@ from shared import CORE_IDENTITY, KST
 from bot_config import (
     _claude, _openai_client, _deepseek_client,
 )
+from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
 from telegram.tools import TOOLS, TOOL_HANDLERS
@@ -434,23 +435,17 @@ _web_handlers["read_self"] = _exec_web_read_self
 
 # ── Chat history from chat_logs table ────────────────────────────────
 
-_HISTORY_USER_CHAR_LIMIT = 2500
-_HISTORY_ASSISTANT_CHAR_LIMIT = 1400
-_HISTORY_TOTAL_CHAR_LIMIT = 14000
+_HISTORY_USER_CHAR_LIMIT = 6000
+_HISTORY_ASSISTANT_CHAR_LIMIT = 8000
+_HISTORY_TOTAL_CHAR_LIMIT = 60000
 
 
 def _truncate_history_content(text: str, limit: int) -> str:
-    """Keep history useful without letting old false narratives dominate."""
-    text = str(text or "")
+    """Keep history bounded without injecting visible system/process markers."""
+    text = clean_chat_history_text(text)
     if len(text) <= limit:
         return text
-    head = max(0, limit // 3)
-    tail = max(0, limit - head - 80)
-    return (
-        text[:head].rstrip()
-        + "\n\n[...older response truncated for context hygiene...]\n\n"
-        + text[-tail:].lstrip()
-    )
+    return text[-limit:].lstrip()
 
 
 def _fit_history_budget(messages: list[dict], limit: int = _HISTORY_TOTAL_CHAR_LIMIT) -> list[dict]:
