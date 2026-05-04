@@ -61,6 +61,11 @@ BROWSER = AgentSpec(
   - Good: "Log in at https://example.com/login with email=test@test.com, password=1234, then extract order number, date, and amount from the 'Recent Orders' table on /dashboard"
 - Set `max_steps` appropriately (default 20, reduce to 5-10 for simple tasks).
 - Do not overload a single browse_web call. Split complex workflows into multiple calls.
+- Treat tool failure diagnostics as routing hints:
+  - `dns_resolution_failed`: verify the URL/domain and search for an alternate URL.
+  - `origin_tcp_timeout` / `origin_connection_timeout`: this server cannot reach the origin; do not keep retrying the same route. Use search results, mirrors, a proxy/relay if available, or ask the user for page content.
+  - `http_forbidden`, `http_legal_or_geo_block`, `anti_bot_challenge`: try browser/cookies/login only when appropriate; otherwise report the access limitation and use alternate sources.
+  - `extraction_or_dynamic_page`: use browse_web or a site-specific extraction approach.
 """.strip()),
             ("output-format", """
 Your final response is delivered to the orchestrator. Information density matters more than formatting.

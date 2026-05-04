@@ -325,14 +325,19 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
 async def _exec_fetch_url(url: str) -> str:
     """Fetch and extract main body text from a URL."""
     try:
-        from shared import fetch_url_content_async, _wrap_external
+        from shared import diagnose_url_fetch_failure, fetch_url_content_async, _wrap_external
         content = await fetch_url_content_async(url)
         if not content:
-            return "Failed to extract content from this URL."
+            return "Failed to extract content from this URL.\n" + diagnose_url_fetch_failure(url)
         return _wrap_external(content, f"url:{url}")
     except Exception as e:
         logger.error("fetch_url error: %s", e)
-        return f"URL fetch failed: {e}"
+        try:
+            from shared import diagnose_url_fetch_failure
+            diagnosis = diagnose_url_fetch_failure(url, [str(e)])
+            return f"URL fetch failed: {e}\n{diagnosis}"
+        except Exception:
+            return f"URL fetch failed: {e}"
 
 
 async def _exec_download_file(url: str, filename: str = "") -> str:
@@ -1870,6 +1875,7 @@ BROWSE_WEB_TOOL = {
 
 async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
     try:
+        from shared import diagnose_url_fetch_failure, extract_urls
         from browser.use_agent import browse
         max_steps = max(1, min(int(max_steps), 50))
         result = await browse(task, max_steps=max_steps, start_url=start_url)
@@ -1902,9 +1908,21 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
             errs = [str(e) for e in result["errors"] if e]
             if errs:
                 parts.append(f"\nErrors: {'; '.join(errs[:3])}")
+                task_urls = extract_urls(task)
+                target_url = start_url or (task_urls[0] if task_urls else None)
+                if target_url:
+                    parts.append(diagnose_url_fetch_failure(target_url, errs))
 
         return "\n".join(parts)
     except Exception as e:
+        try:
+            from shared import diagnose_url_fetch_failure, extract_urls
+            task_urls = extract_urls(task)
+            target_url = start_url or (task_urls[0] if task_urls else None)
+            if target_url:
+                return f"browse_web error: {e}\n{diagnose_url_fetch_failure(target_url, [str(e)])}"
+        except Exception:
+            pass
         return f"browse_web error: {e}"
 
 
