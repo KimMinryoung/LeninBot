@@ -14,13 +14,15 @@ import tempfile
 FILESYSTEM_TOOLS = [
     {
         "name": "read_file",
-        "description": "Read a text file with line numbers. Format: 'LINE|CONTENT'. Use offset+limit for big files (default limit 500, max 2000). Reads >100K chars are rejected — paginate.",
+        "description": "Read a text file with line numbers. Format: 'LINE|CONTENT'. Use offset+limit for line pagination (default limit 500, max 2000). For converted PDFs or markdown with awkward line breaks, use char_offset+char_limit for character pagination. Reads >100K chars are rejected — paginate.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute or project-relative."},
                 "offset": {"type": "integer", "description": "Start line, 1-indexed. Default 1."},
                 "limit": {"type": "integer", "description": "Max lines. Default 500, max 2000."},
+                "char_offset": {"type": "integer", "description": "Optional 0-indexed character offset. Use for converted PDFs/markdown when line pagination is not useful."},
+                "char_limit": {"type": "integer", "description": "Optional max characters for char_offset mode. Default 20000, max 100000."},
             },
             "required": ["path"],
         },
@@ -144,6 +146,8 @@ async def _exec_read_file(
     path: str,
     offset: int | None = None,
     limit: int | None = None,
+    char_offset: int | None = None,
+    char_limit: int | None = None,
     **kwargs,
 ) -> str:
     """Read a text file with line numbers and pagination."""
@@ -152,6 +156,18 @@ async def _exec_read_file(
             kwargs.get("line_start")
             or kwargs.get("startline")
             or kwargs.get("start_line")
+        )
+    if char_offset is None:
+        char_offset = (
+            kwargs.get("offset_chars")
+            or kwargs.get("char_start")
+            or kwargs.get("start_char")
+        )
+    if char_limit is None:
+        char_limit = (
+            kwargs.get("max_chars")
+            or kwargs.get("limit_chars")
+            or kwargs.get("chars_limit")
         )
     line_end = (
         kwargs.get("line_end")
@@ -178,17 +194,65 @@ async def _exec_read_file(
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as file:
-            lines = file.readlines()
+            text = file.read()
     except Exception as exc:
         return f"Error reading file: {exc}"
 
+    lines = text.splitlines(keepends=True)
     total = len(lines)
-    start = max(1, offset or 1)
+    rel = os.path.relpath(path, project_root) if path.startswith(project_root) else path
+    is_external_file = rel.startswith("data/downloads/") or rel.startswith("data/converted/")
+
+    def _externalize(body: str) -> str:
+        if is_external_file:
+            from shared import _wrap_external
+
+            return _wrap_external(body, f"file:{rel}")
+        return body
+
+    if char_offset is not None:
+        try:
+            start_char = max(0, int(char_offset or 0))
+        except (TypeError, ValueError):
+            start_char = 0
+        try:
+            eff_char_limit = int(char_limit) if char_limit else 20_000
+        except (TypeError, ValueError):
+            eff_char_limit = 20_000
+        eff_char_limit = max(1, min(eff_char_limit, _READ_MAX_CHARS))
+        end_char = min(len(text), start_char + eff_char_limit)
+        if start_char >= len(text):
+            return (
+                f"[{path}] chars {start_char}-{start_char} of {len(text)}\n"
+                f"Error: char_offset is beyond end of file. Last valid char_offset is {max(len(text) - 1, 0)}."
+            )
+        body = text[start_char:end_char]
+        if len(body) > _READ_MAX_CHARS:
+            return (
+                f"Error: read range chars {start_char}-{end_char} is {len(body)} chars "
+                f"(>{_READ_MAX_CHARS}). Use a smaller char_limit."
+            )
+        header = f"[{path}] chars {start_char}-{end_char} of {len(text)}"
+        if end_char < len(text):
+            header += f"  (next: char_offset={end_char})"
+        return header + "\n" + _externalize(body)
+
+    try:
+        start = max(1, int(offset or 1))
+    except (TypeError, ValueError):
+        start = 1
+    if start > total:
+        return (
+            f"[{path}] lines {start}-{start} of {total}\n"
+            f"Error: offset is a 1-indexed line number and is beyond end of file. "
+            f"Last valid line offset is {max(total, 1)}. "
+            f"For character-based pagination, call read_file with char_offset and char_limit explicitly."
+        )
     if line_end is not None:
-        end = min(total, line_end)
+        end = min(total, int(line_end))
     else:
         eff_limit = limit if limit else _READ_DEFAULT_LIMIT
-        eff_limit = min(eff_limit, _READ_MAX_LIMIT)
+        eff_limit = min(int(eff_limit), _READ_MAX_LIMIT)
         end = min(total, start + eff_limit - 1)
 
     selected = lines[start - 1 : end]
@@ -205,13 +269,7 @@ async def _exec_read_file(
         header += f"  (next: offset={end + 1})"
     body = "\n".join(numbered)
 
-    rel = os.path.relpath(path, project_root) if path.startswith(project_root) else path
-    if rel.startswith("data/downloads/") or rel.startswith("data/converted/"):
-        from shared import _wrap_external
-
-        body = _wrap_external(body, f"file:{rel}")
-
-    return header + "\n" + body
+    return header + "\n" + _externalize(body)
 
 
 async def _exec_search_files(
