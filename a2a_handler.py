@@ -17,7 +17,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from shared import CORE_IDENTITY
+from identity.prompts import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _deepseek_client, _config,

@@ -310,7 +310,7 @@ async def chat_with_tools(
     budget_usd = validate_budget(budget_usd)
 
     # Per-agent-run provenance buffer for KG write/read trust tracking.
-    from shared import init_provenance_buffer
+    from provenance.runtime import init_provenance_buffer
     init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
     # Root-cause fix: start from text-only canonical history.

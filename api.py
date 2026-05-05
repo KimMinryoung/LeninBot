@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     # Initialize Neo4j connection immediately at startup (background thread)
     # so the first real request doesn't pay the cold-start penalty.
     def _eager_init_kg():
-        from shared import get_kg_service
+        from kg_runtime.service_runtime import get_kg_service
         svc = get_kg_service()
         if svc:
             import logging
@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_eager_init_kg, daemon=True, name="kg-eager-init").start()
 
     # ── KG Health Check (10 min interval) ────────────────────────────
-    from shared import start_kg_healthcheck
+    from kg_runtime.service_runtime import start_kg_healthcheck
     start_kg_healthcheck(interval=600)
 
     # Telegram bot should run in its dedicated systemd service by default.

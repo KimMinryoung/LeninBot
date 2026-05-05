@@ -287,7 +287,7 @@ async def _exec_publish_hub_curation(
 
 async def _wrap_external_fetch(url: str) -> str | None:
     """Fetch the full article body for later corpus ingest. Max 500k chars."""
-    from shared import fetch_url_content_async
+    from content_fetch.urls import fetch_url_content_async
 
     content = await fetch_url_content_async(url, max_chars=500_000)
     if not content or len(content.strip()) < 200:

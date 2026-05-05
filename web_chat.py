@@ -13,7 +13,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from shared import CORE_IDENTITY, KST
+from identity.prompts import CORE_IDENTITY
+from shared import KST
 from bot_config import (
     _claude, _openai_client, _deepseek_client,
 )

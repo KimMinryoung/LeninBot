@@ -231,7 +231,7 @@ async def _exec_generate_image(
 async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
     try:
         from browser.use_agent import browse
-        from shared import diagnose_url_fetch_failure, extract_urls
+        from content_fetch.urls import diagnose_url_fetch_failure, extract_urls
 
         max_steps = max(1, min(int(max_steps), 50))
         result = await browse(task, max_steps=max_steps, start_url=start_url)
@@ -272,7 +272,7 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
         return "\n".join(parts)
     except Exception as exc:
         try:
-            from shared import diagnose_url_fetch_failure, extract_urls
+            from content_fetch.urls import diagnose_url_fetch_failure, extract_urls
 
             task_urls = extract_urls(task)
             target_url = start_url or (task_urls[0] if task_urls else None)

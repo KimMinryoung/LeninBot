@@ -12,7 +12,7 @@ from agents.base import (
     MISSION_GUIDELINES_SECTION,
 )
 from llm.prompt_renderer import SystemPrompt
-from shared import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
+from identity.prompts import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
 
 
 _IDENTITY = AGENT_CONTEXT.rstrip() + "\n\n" + EXTERNAL_SOURCE_RULE

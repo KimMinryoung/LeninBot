@@ -35,7 +35,8 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
-from shared import convert_document, delete_corpus_source, ingest_to_corpus
+from content_fetch.documents import convert_document
+from shared import delete_corpus_source, ingest_to_corpus
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)

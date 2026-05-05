@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shared import EXTERNAL_SOURCE_RULE  # re-exported for agent prompts
+from identity.prompts import EXTERNAL_SOURCE_RULE
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 
 

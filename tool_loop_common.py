@@ -122,7 +122,7 @@ def _record_tool_provenance(name: str, args: dict, result: str) -> None:
     Never raises — provenance bookkeeping must not break tool execution.
     """
     try:
-        from shared import get_provenance_buffer
+        from provenance.runtime import get_provenance_buffer
         buf = get_provenance_buffer()
         if buf is None:
             return

@@ -945,7 +945,7 @@ async def _exec_read_static_pages(
 
 
 async def _exec_read_kg_status() -> str:
-    from shared import fetch_kg_stats
+    from kg_runtime.search import fetch_kg_stats
 
     stats = await asyncio.to_thread(fetch_kg_stats)
 
@@ -1135,7 +1135,8 @@ async def _exec_write_kg(
     group_id: str = "agent_knowledge",
     supersedes: str = "",
 ) -> str:
-    from shared import add_kg_episode_async, get_provenance_buffer
+    from provenance.runtime import get_provenance_buffer
+    from kg_runtime.writes import add_kg_episode_async
 
     if not content or not content.strip():
         return "Failed to store knowledge: content is empty"
@@ -1205,7 +1206,8 @@ async def _exec_write_kg_structured(
     group_id: str = "agent_knowledge",
 ) -> str:
     """Write structured (subject, predicate, object) facts to the KG."""
-    from shared import add_kg_structured_async, get_provenance_buffer
+    from provenance.runtime import get_provenance_buffer
+    from kg_runtime.writes import add_kg_structured_async
 
     if not facts or not isinstance(facts, list):
         return "Failed to store structured facts: 'facts' must be a non-empty list"
@@ -1837,7 +1839,7 @@ async def _exec_save_self_analysis(
 
 
 async def _exec_kg_query(query: str, write: bool = False) -> str:
-    from shared import kg_cypher
+    from kg_runtime.admin import kg_cypher
     result = await asyncio.to_thread(kg_cypher, query, write)
     if "error" in result:
         return f"KG query failed: {result['error']}"
@@ -1852,7 +1854,7 @@ async def _exec_kg_query(query: str, write: bool = False) -> str:
 
 
 async def _exec_kg_delete_episode(episode_name: str) -> str:
-    from shared import kg_delete_episode
+    from kg_runtime.admin import kg_delete_episode
     result = await asyncio.to_thread(kg_delete_episode, episode_name)
     if "error" in result:
         return f"Delete failed: {result['error']}"
@@ -1866,7 +1868,7 @@ async def _exec_kg_delete_episode(episode_name: str) -> str:
 
 
 async def _exec_kg_merge_entities(source_name: str, target_name: str) -> str:
-    from shared import kg_merge_entities
+    from kg_runtime.admin import kg_merge_entities
     result = await asyncio.to_thread(kg_merge_entities, source_name, target_name)
     if "error" in result:
         return f"Merge failed: {result['error']}"

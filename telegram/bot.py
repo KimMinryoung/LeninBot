@@ -13,7 +13,8 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from shared import KST, CORE_IDENTITY, EXTERNAL_SOURCE_RULE
+from identity.prompts import CORE_IDENTITY, EXTERNAL_SOURCE_RULE
+from shared import KST
 from agents.base import CHAT_AUDIENCE_BLOCK, load_political_line_body
 from skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn

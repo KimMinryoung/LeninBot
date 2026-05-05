@@ -74,7 +74,8 @@ def _project_root() -> str:
 async def _exec_fetch_url(url: str) -> str:
     """Fetch and extract main body text from a URL."""
     try:
-        from shared import diagnose_url_fetch_failure, fetch_url_content_async, _wrap_external
+        from content_fetch.urls import diagnose_url_fetch_failure, fetch_url_content_async
+        from provenance.runtime import _wrap_external
 
         content = await fetch_url_content_async(url)
         if not content:
@@ -83,7 +84,7 @@ async def _exec_fetch_url(url: str) -> str:
     except Exception as exc:
         logger.error("fetch_url error: %s", exc)
         try:
-            from shared import diagnose_url_fetch_failure
+            from content_fetch.urls import diagnose_url_fetch_failure
 
             diagnosis = diagnose_url_fetch_failure(url, [str(exc)])
             return f"URL fetch failed: {exc}\n{diagnosis}"
@@ -179,7 +180,8 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
 async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str:
     """Convert a document to markdown, save it, and return path plus preview."""
     try:
-        from shared import convert_document, _wrap_external
+        from content_fetch.documents import convert_document
+        from provenance.runtime import _wrap_external
 
         if not os.path.isfile(file_path):
             return f"❌ File not found: {file_path}"

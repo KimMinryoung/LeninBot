@@ -5,7 +5,7 @@ from agents.base import (
     CHAT_AUDIENCE_SECTION,
 )
 from llm.prompt_renderer import SystemPrompt
-from shared import CORE_IDENTITY
+from identity.prompts import CORE_IDENTITY
 
 
 _IDENTITY = (

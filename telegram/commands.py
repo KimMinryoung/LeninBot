@@ -760,7 +760,7 @@ async def cmd_status(message: Message):
 
     # 4. KG stats (quick, non-blocking)
     try:
-        from shared import fetch_kg_stats
+        from kg_runtime.search import fetch_kg_stats
         kg = await asyncio.to_thread(fetch_kg_stats)
         if "error" not in kg:
             entity_total = sum(v for v in kg.get("entity_types", {}).values())
@@ -793,7 +793,7 @@ async def cmd_kg(message: Message):
     """Directly show KG stats — no LLM involved."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    from shared import fetch_kg_stats
+    from kg_runtime.search import fetch_kg_stats
     await message.answer("KG 조회 중...")
     try:
         stats = await asyncio.to_thread(fetch_kg_stats)

@@ -131,7 +131,7 @@ async def _exec_vector_search(query: str, num_results: int = 5, layer: str | Non
 async def _exec_kg_search(query: str, num_results: int = 10) -> str:
     """Execute knowledge graph search via chatbot module."""
     try:
-        from shared import search_knowledge_graph
+        from kg_runtime.search import search_knowledge_graph
         result = await asyncio.to_thread(search_knowledge_graph, query, num_results)
         return result or "No knowledge graph results found."
     except Exception as e:
@@ -201,7 +201,7 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
     max_results = max(1, min(max_results, 10))
     try:
         from tavily import AsyncTavilyClient
-        from shared import _wrap_external
+        from provenance.runtime import _wrap_external
         client = AsyncTavilyClient(api_key=api_key)
         resp = await client.search(query, max_results=max_results)
         results = resp.get("results", [])
@@ -1068,7 +1068,7 @@ async def _exec_check_inbox(
     if not result:
         return "No matching emails found."
 
-    from shared import _wrap_external
+    from provenance.runtime import _wrap_external
     lines = []
     for i, em in enumerate(result, 1):
         tags = ""

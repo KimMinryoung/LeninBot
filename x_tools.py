@@ -569,7 +569,7 @@ async def _exec_fetch_x_post(
         )
 
     try:
-        from shared import _wrap_external
+        from provenance.runtime import _wrap_external
 
         if username:
             content = await asyncio.to_thread(_request_user_posts)

@@ -848,7 +848,7 @@ async def _persist_task_success(
     # Auto-save scout reports to Knowledge Graph
     if task.get("agent_type") == "scout":
         try:
-            from shared import process_scout_report_to_kg
+            from kg_runtime.scout_ingest import process_scout_report_to_kg
             kg_result = await asyncio.to_thread(
                 process_scout_report_to_kg,
                 report=report,
@@ -1381,7 +1381,7 @@ async def system_monitor(
     clear_alert_fn,
 ):
     """Background loop: monitor system events and notify the owner."""
-    from shared import get_kg_service
+    from kg_runtime.service_runtime import get_kg_service
 
     owner_id = next(iter(allowed_user_ids)) if len(allowed_user_ids) == 1 else 0
 

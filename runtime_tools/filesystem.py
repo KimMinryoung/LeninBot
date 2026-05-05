@@ -205,7 +205,7 @@ async def _exec_read_file(
 
     def _externalize(body: str) -> str:
         if is_external_file:
-            from shared import _wrap_external
+            from provenance.runtime import _wrap_external
 
             return _wrap_external(body, f"file:{rel}")
         return body
@@ -361,7 +361,7 @@ async def _exec_search_files(
 
     rel = os.path.relpath(search_path, project_root) if search_path.startswith(project_root) else search_path
     if rel.startswith("data/downloads/") or rel.startswith("data/converted/") or rel in ("data/downloads", "data/converted"):
-        from shared import _wrap_external
+        from provenance.runtime import _wrap_external
 
         body = _wrap_external(body, f"search:{rel}")
 
