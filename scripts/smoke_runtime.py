@@ -280,11 +280,40 @@ def _assert_agent_runtime_dynamic_reload() -> None:
             runtime_config._base_runtime = original_base
 
 
+def _assert_web_political_line_dynamic_reload() -> None:
+    import agents.base as agent_base
+    from web_chat import _build_web_system_prompt
+
+    original_path = agent_base._POLITICAL_LINE_PATH
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "political_line.md"
+        try:
+            agent_base._POLITICAL_LINE_PATH = path
+
+            path.write_text("first web political line", encoding="utf-8")
+            first_xml = _build_web_system_prompt("claude")
+            first_markdown = _build_web_system_prompt("openai")
+            assert "first web political line" in first_xml
+            assert "first web political line" in first_markdown
+
+            path.write_text("second web political line", encoding="utf-8")
+            second_xml = _build_web_system_prompt("claude")
+            second_markdown = _build_web_system_prompt("openai")
+            assert "second web political line" in second_xml
+            assert "second web political line" in second_markdown
+            assert "first web political line" not in second_xml
+            assert "first web political line" not in second_markdown
+        finally:
+            agent_base._POLITICAL_LINE_PATH = original_path
+
+
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
     _assert_agent_runtime_config()
     _assert_agent_runtime_dynamic_reload()
+    _assert_web_political_line_dynamic_reload()
     print("runtime smoke ok")
 
 
