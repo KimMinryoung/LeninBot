@@ -506,9 +506,54 @@ async def _exec_read_chat_logs(
     if not rows:
         return "No chat logs found for the specified criteria."
 
-    def _clip(text: str, max_len: int = 300) -> str:
-        text = str(text or "")
-        return text[:max_len]
+    output_budget = 45_000
+
+    def _within_budget(text: str) -> bool:
+        return len(text) <= output_budget
+
+    def _join_with_budget(prefix: str, chunks: list[str]) -> tuple[str, int]:
+        """Join complete chunks while keeping each chat turn intact."""
+        included: list[str] = []
+        omitted = 0
+        current = prefix
+        for chunk in chunks:
+            separator = "\n\n" if current else ""
+            if not included and not _within_budget(current + separator + chunk):
+                current = current + separator + chunk
+                included.append(chunk)
+                continue
+            candidate = current + separator + chunk
+            if _within_budget(candidate):
+                included.append(chunk)
+                current = candidate
+                continue
+            omitted += 1
+        if omitted:
+            note = f"\n\n... ({omitted} older complete turn/session block(s) omitted to keep output bounded)"
+            if _within_budget(current + note):
+                current += note
+        return current, omitted
+
+    def _join_recent_with_budget(prefix: str, chunks: list[str]) -> tuple[str, int]:
+        """Keep newest complete chunks, then render the retained set chronologically."""
+        selected: list[str] = []
+        omitted = 0
+        for chunk in reversed(chunks):
+            candidate_chunks = [chunk] + selected
+            candidate = prefix + ("\n\n" if candidate_chunks else "") + "\n\n".join(candidate_chunks)
+            if not selected and not _within_budget(candidate):
+                selected = [chunk]
+                continue
+            if _within_budget(candidate):
+                selected = candidate_chunks
+                continue
+            omitted += 1
+        current = prefix + ("\n\n" if selected else "") + "\n\n".join(selected)
+        if omitted:
+            note = f"\n\n... ({omitted} older complete turn(s) omitted to keep output bounded)"
+            if _within_budget(current + note):
+                current += note
+        return current, omitted
 
     def _sort_key(ts) -> float:
         if ts is None:
@@ -561,34 +606,52 @@ async def _exec_read_chat_logs(
                 key=lambda r: _sort_key(r.get("created_at")),
             )
             latest_ts = _to_kst(bucket.get("latest"))
-            lines = [
+            header_lines = [
                 f"=== Web visitor fingerprint {fingerprint} | session {session_id} | {len(session_rows)} entr{'y' if len(session_rows) == 1 else 'ies'} | latest {latest_ts} ===",
                 "Treat this as one visitor context. Do not merge it with other web sessions.",
             ]
+            turn_chunks = []
             for row in session_rows:
                 ts = _to_kst(row.get("created_at"))
                 role = str(row.get("role", "") or "").lower()
                 content = str(row.get("content", "") or "")
                 q = str(row.get("user_query", "") or "")
                 a = str(row.get("bot_answer", "") or "")
+                lines = []
                 if role in ("user", "assistant") and content:
                     speaker = "Visitor" if role == "user" else "Lenin"
-                    lines.append(f"[{ts}] {speaker}: {_clip(content)}")
+                    lines.append(f"[{ts}] {speaker}: {content}")
+                    turn_chunks.append("\n".join(lines))
                     continue
                 if q:
-                    lines.append(f"[{ts}] Visitor: {_clip(q)}")
+                    lines.append(f"[{ts}] Visitor: {q}")
                 if a:
-                    lines.append(f"[{ts}] Lenin: {_clip(a)}")
+                    lines.append(f"[{ts}] Lenin: {a}")
                 if not q and not a and content:
                     speaker = "Visitor" if role == "user" else "Lenin"
-                    lines.append(f"[{ts}] {speaker}: {_clip(content)}")
-            results.append("\n".join(lines))
+                    lines.append(f"[{ts}] {speaker}: {content}")
+                if lines:
+                    turn_chunks.append("\n".join(lines))
 
-        return (
+            session_prefix = "\n".join(header_lines)
+            session_text, omitted_turns = _join_recent_with_budget(
+                session_prefix,
+                turn_chunks,
+            )
+            if omitted_turns:
+                session_text = session_text.replace(
+                    f"{len(session_rows)} entr{'y' if len(session_rows) == 1 else 'ies'}",
+                    f"{len(turn_chunks) - omitted_turns}/{len(session_rows)} entries shown",
+                    1,
+                )
+            results.append(session_text)
+
+        prefix = (
             f"Web chat logs grouped by visitor fingerprint and session ({len(rows)} entries across {len(ordered_sessions)} contexts). "
             "Each fingerprint/session block is a separate visitor context; do not combine identities or intentions across blocks.\n\n"
-            + "\n\n".join(results)
         )
+        result, _ = _join_with_budget(prefix.rstrip(), results)
+        return result
 
     for row in rows:
         ts = _to_kst(row.get("created_at"))
@@ -603,19 +666,26 @@ async def _exec_read_chat_logs(
 
             if role in ("user", "assistant") and content:
                 speaker = "Admin" if role == "user" else "Lenin"
-                lines.append(f"{speaker}: {_clip(content)}")
+                lines.append(f"{speaker}: {content}")
             else:
                 if q:
-                    lines.append(f"Admin: {_clip(q)}")
+                    lines.append(f"Admin: {q}")
                 if a:
-                    lines.append(f"Lenin: {_clip(a)}")
+                    lines.append(f"Lenin: {a}")
                 if not q and not a and content:
                     speaker = "Admin" if role == "user" else "Lenin"
-                    lines.append(f"{speaker}: {_clip(content)}")
+                    lines.append(f"{speaker}: {content}")
 
             results.append("\n".join(lines))
 
-    return f"Chat logs ({len(rows)} entries):\n\n" + "\n\n".join(results)
+    result, omitted = _join_with_budget(f"Chat logs ({len(rows)} entries):", results)
+    if omitted:
+        result = result.replace(
+            f"Chat logs ({len(rows)} entries):",
+            f"Chat logs ({len(results) - omitted}/{len(rows)} entries shown):",
+            1,
+        )
+    return result
 
 
 async def _exec_read_processing_logs(

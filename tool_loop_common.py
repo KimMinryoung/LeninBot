@@ -262,7 +262,11 @@ async def execute_tool(
         and args.get("source") == "diary"
         and args.get("max_chars") is None
     )
-    if len(result) > 50000 and not allow_full_diary:
+    allow_complete_chat_turns = (
+        name == "read_self"
+        and args.get("source") == "chat_logs"
+    )
+    if len(result) > 50000 and not (allow_full_diary or allow_complete_chat_turns):
         result = result[:50000] + "\n... [truncated]"
 
     if not is_error:
