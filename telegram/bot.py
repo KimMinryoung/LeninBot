@@ -97,6 +97,7 @@ ALLOWED_USER_IDS: set[int] = {
 # Single-owner enforcement: all outbound messages go to this user only.
 OWNER_USER_ID: int = next(iter(ALLOWED_USER_IDS)) if len(ALLOWED_USER_IDS) == 1 else 0
 EMAIL_BRIDGE_ENABLED = os.getenv("EMAIL_BRIDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+EMAIL_POLLING_ENABLED = os.getenv("EMAIL_POLLING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS", "120")))
 EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
 EMAIL_DEFAULT_APPROVER_USER_ID = int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0")
@@ -1650,7 +1651,7 @@ async def bot_main():
     dp.include_router(router)
 
     email_bridge_task = None
-    if EMAIL_BRIDGE_ENABLED:
+    if EMAIL_BRIDGE_ENABLED and EMAIL_POLLING_ENABLED:
         email_bridge_task = asyncio.create_task(_email_bridge_poll_loop(bot), name="email-bridge-poll")
 
     # Register commands for Telegram "/" autocomplete menu
