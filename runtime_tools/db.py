@@ -1,4 +1,4 @@
-"""db_tools.py — Direct SQL tool for the programmer agent.
+"""runtime_tools.db — Direct SQL tool for the programmer agent.
 
 Gives programmer a first-class DB handle instead of routing every query through
 `execute_python + db.query(...)`. Benefits:

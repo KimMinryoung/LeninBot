@@ -331,7 +331,7 @@ async def _run_verification(
             "## Service Restart Criteria",
             "If code was modified but service logs still show old-version errors, a restart is needed.",
             "Determine which service to restart based on modified files:",
-            "- telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, self_tools.py, shared.py modified → restart_service(service='telegram')",
+            "- telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, self_runtime/tools.py, shared.py modified → restart_service(service='telegram')",
             "- api.py modified → restart_service(service='api')",
             "- Both modified → restart_service(service='all')",
             "- However, **restarting the telegram service will terminate this verification task.** "

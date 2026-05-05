@@ -117,7 +117,7 @@ async def execute_browser_task(task: dict) -> dict:
     from agents import get_agent
     from agents.base import AgentSpec
     from claude_loop import chat_with_tools, dedupe_tools_by_name
-    from self_tools import build_task_context_tools
+    from self_runtime.tools import build_task_context_tools
     from runtime_tools.registry import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
     from db import query as db_query, execute as db_execute, query_one as db_query_one

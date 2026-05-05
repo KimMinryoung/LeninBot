@@ -1,4 +1,4 @@
-"""post_edit_tools.py — Edit public-facing posts with cache invalidation.
+"""runtime_tools.post_edit — Edit public-facing posts with cache invalidation.
 
 The frontend (Node.js, runs in Docker) caches each published post permanently
 in Redis under `{kind}:{id}` and serves from cache before hitting the DB. A

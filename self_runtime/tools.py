@@ -1,10 +1,10 @@
-"""self_tools.py — Self-awareness tools for Cyber-Lenin.
+"""self_runtime.tools — Self-awareness tools for Cyber-Lenin.
 
 All tool handlers delegate to shared.py memory access functions,
 so the same data is accessible from any module (telegram, chatbot, diary).
 
 Integration in telegram_bot.py:
-    from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
+    from self_runtime.tools import SELF_TOOLS, SELF_TOOL_HANDLERS
     _TOOLS.extend(SELF_TOOLS)
     _TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
 """
@@ -786,11 +786,11 @@ async def _exec_read_private_reports(
     max_chars: int | None = None,
     offset: int | None = None,
 ) -> str:
-    import private_report_tools
+    from runtime_tools import private_reports
 
     if slug:
         try:
-            row = await asyncio.to_thread(private_report_tools.get_private_report_sync, slug=slug)
+            row = await asyncio.to_thread(private_reports.get_private_report_sync, slug=slug)
         except Exception as e:
             return f"Error reading private report: {type(e).__name__}: {e}"
         if not row:
@@ -814,7 +814,7 @@ async def _exec_read_private_reports(
 
     try:
         rows = await asyncio.to_thread(
-            private_report_tools.list_private_reports_sync,
+            private_reports.list_private_reports_sync,
             limit=limit or 10,
             keyword=keyword,
         )

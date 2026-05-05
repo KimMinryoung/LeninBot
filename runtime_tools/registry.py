@@ -139,7 +139,7 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
         return f"Knowledge graph search failed: {e}"
 
 
-# ── Research publish/edit/unpublish tools live in research_tools.py ──
+# ── Research publish/edit/unpublish tools live in runtime_tools.research ──
 # They are registered into TOOLS / TOOL_HANDLERS at the bottom of this file.
 
 
@@ -761,7 +761,7 @@ TOOLS.append(SEND_EMAIL_TOOL)
 TOOL_HANDLERS["send_email"] = _exec_send_email
 
 # ── Self-awareness tools (shared memory access) ─────────────────────
-from self_tools import SELF_TOOLS, SELF_TOOL_HANDLERS
+from self_runtime.tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 
 TOOLS.extend(SELF_TOOLS)
 TOOLS.append(MISSION_TOOL)
@@ -775,7 +775,7 @@ TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 
 # ── X/Twitter post lookup ────────────────────────────────────────────
-from x_tools import X_TOOLS, X_TOOL_HANDLERS
+from runtime_tools.x import X_TOOLS, X_TOOL_HANDLERS
 
 TOOLS.extend(X_TOOLS)
 TOOL_HANDLERS.update(X_TOOL_HANDLERS)
@@ -787,25 +787,25 @@ TOOLS.extend(SITE_PUBLISHING_TOOLS)
 TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)
 
 # ── Direct SQL tool (programmer only; analyst etc. keep read_self/kg_search) ──
-from db_tools import DB_TOOLS, DB_TOOL_HANDLERS
+from runtime_tools.db import DB_TOOLS, DB_TOOL_HANDLERS
 
 TOOLS.extend(DB_TOOLS)
 TOOL_HANDLERS.update(DB_TOOL_HANDLERS)
 
 # ── Public-post editor (UPDATE + Redis cache purge in one step) ──
-from post_edit_tools import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
+from runtime_tools.post_edit import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
 
 TOOLS.extend(POST_EDIT_TOOLS)
 TOOL_HANDLERS.update(POST_EDIT_TOOL_HANDLERS)
 
 # ── Research publish/edit/unpublish (atomic write + cache purge) ──
-from research_tools import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
+from runtime_tools.research import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
 
 TOOLS.extend(RESEARCH_TOOLS)
 TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
 
 # ── Admin-only private reports (not exposed to public web chat) ──
-from private_report_tools import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
+from runtime_tools.private_reports import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
 
 TOOLS.extend(PRIVATE_REPORT_TOOLS)
 TOOL_HANDLERS.update(PRIVATE_REPORT_TOOL_HANDLERS)

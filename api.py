@@ -28,7 +28,7 @@ from email_bridge import (
     run_polling_cycle,
     send_outbound_email,
 )
-from private_report_tools import (
+from runtime_tools.private_reports import (
     get_private_report_sync,
     list_private_reports_sync,
     publish_private_report_sync,

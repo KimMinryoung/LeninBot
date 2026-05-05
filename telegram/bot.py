@@ -1266,12 +1266,12 @@ async def _chat_with_tools(
         merged_handlers = dict(extra_handlers or {})
 
     if is_orchestrator and "list_agent_tools" in {t.get("name") for t in merged_tools}:
-        from self_tools import build_list_agent_tools_handler
+        from self_runtime.tools import build_list_agent_tools_handler
         merged_handlers["list_agent_tools"] = build_list_agent_tools_handler(merged_tools)
 
     # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
     if is_orchestrator and "run_agent" not in merged_handlers:
-        from self_tools import build_run_agent_handler
+        from self_runtime.tools import build_run_agent_handler
         merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
 
     # Resolve agent name + mission for provenance tracking
@@ -1791,7 +1791,7 @@ async def bot_main():
         # Set per-coroutine context so tools can identify the running task
         current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
 
-        from self_tools import build_task_context_tools
+        from self_runtime.tools import build_task_context_tools
         from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
         from runtime_tools.registry import build_mission_handler
 

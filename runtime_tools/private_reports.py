@@ -1,4 +1,4 @@
-"""private_report_tools.py — Admin-only private report storage.
+"""runtime_tools.private_reports — Admin-only private report storage.
 
 Private reports are Markdown documents intended for Cyber-Lenin and the
 Telegram/admin operator only. They live in research_documents with
@@ -327,7 +327,7 @@ async def _exec_publish_private_report(
     public_url = result["public_url"]
     cache_note = ""
     try:
-        from research_tools import _invalidate_cache_sync
+        from runtime_tools.research import _invalidate_cache_sync
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, row["filename"])
         cache_note = f"; cache invalidated ({cache.get('deleted', 0)} key(s))" if cache.get("ok") else f"; cache invalidation failed ({cache.get('reason')})"

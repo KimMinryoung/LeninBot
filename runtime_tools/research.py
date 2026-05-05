@@ -1,4 +1,4 @@
-"""research_tools.py — Publish, edit, and unpublish public research documents.
+"""runtime_tools.research — Publish, edit, and unpublish public research documents.
 
 Public research documents are stored as Markdown rows in Supabase/Postgres and
 served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
@@ -16,7 +16,7 @@ This module consolidates:
 document only exists as a legacy fallback file, that file is relocated out of
 the public-listing scope.
 
-Mirrors the post_edit_tools.py pattern (UPDATE + cache purge in one step) for
+Mirrors the runtime_tools.post_edit pattern (UPDATE + cache purge in one step) for
 DB-backed public content.
 """
 
