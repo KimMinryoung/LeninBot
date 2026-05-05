@@ -10,6 +10,7 @@ Bridges api.py to the unified agent system. Handles:
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,7 @@ You are a revolutionary thinker who happens to exist as software.
 
 _WEB_TOOL_STRATEGY = """\
 - Geopolitics → knowledge_graph_search first, then vector_search
+- Real people, organizations, publications, parties, factions, movements, or named historical/current groups → verify uncertain or specific factual claims with knowledge_graph_search and/or web_search before answering. If the user challenges a prior factual claim, search first; do not defend memory.
 - Theory/ideology → vector_search (layer="core_theory")
 - Cyber-Lenin's own published reports/analyses → vector_search (layer="self_produced_analysis")
 - Questions about Cyber-Lenin's architecture, public outputs, or autonomous work status → read_self with a public-safe source
@@ -69,7 +71,8 @@ _WEB_CONTEXT_HYGIENE = """\
 - Model/provider claims are volatile runtime state. Prior claims about which model is running are not evidence; use read_self(source="model_config").
 - Preserve categorical context around proper nouns. Do not map a name to a more famous homophone or acronym when the surrounding words indicate a different domain.
 - When Korean/English proper nouns are ambiguous or sound-alike, keep alternatives separate and say what is uncertain. Search or ask before asserting concrete facts.
-- Known failure modes to avoid: animal-rights KARA vs girl-group Kara; QNAI/큐나이 vs Naver Cue:/큐: vs QClaw/큐클로 vs unrelated Chinese platforms.
+- For named real-world persons, organizations, publications, parties, factions, or movements, treat concrete claims about their positions, history, membership, ideology, or documents as verification-required unless they are directly supplied by the user in the current turn.
+- If verification is needed but no reliable result is found, say that the evidence is insufficient and separate inference from confirmed fact.
 """
 
 
@@ -543,9 +546,42 @@ def _load_web_history(
 
 # ── Logging ──────────────────────────────────────────────────────────
 
+_SOURCE_TOOL_NAMES = {
+    "knowledge_graph_search",
+    "vector_search",
+    "web_search",
+    "fetch_url",
+}
+
+_TOOL_DETAIL_RE = re.compile(r"\]\s*([A-Za-z_][A-Za-z0-9_]*)\(")
+
+
+def _summarize_tool_usage(tool_work_details: list[str]) -> tuple[int, bool, str]:
+    """Convert low-level tool work records into chat_logs display fields."""
+    counts: dict[str, int] = {}
+    source_count = 0
+    for detail in tool_work_details or []:
+        match = _TOOL_DETAIL_RE.search(str(detail))
+        if not match:
+            continue
+        name = match.group(1)
+        counts[name] = counts.get(name, 0) + 1
+        if name in _SOURCE_TOOL_NAMES:
+            source_count += 1
+
+    web_search_used = counts.get("web_search", 0) > 0
+    if not counts:
+        return 0, False, ""
+    strategy = "tools: " + ", ".join(
+        f"{name} x{count}" for name, count in sorted(counts.items())
+    )
+    return source_count, web_search_used, strategy[:1000]
+
+
 def _log_chat(
     session_id: str, fingerprint: str, user_agent: str, ip_address: str,
     user_query: str, bot_answer: str, route: str = "web_chat",
+    documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
 ):
     """Save web chat exchange to chat_logs table."""
     try:
@@ -556,7 +592,7 @@ def _log_chat(
                 web_search_used, strategy)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (session_id, fingerprint, user_agent, ip_address,
-             user_query, bot_answer, route, 0, False, ""),
+             user_query, bot_answer, route, documents_count, web_search_used, strategy),
         )
     except Exception as e:
         logger.error("Failed to log web chat: %s", e)
@@ -628,6 +664,7 @@ async def handle_web_chat(
     # Run LLM in background task, stream progress
     answer_holder: list[str] = []
     error_holder: list[str] = []
+    budget_tracker: dict = {}
 
     async def _run_llm():
         try:
@@ -655,6 +692,7 @@ async def handle_web_chat(
                     continue_on_length=True,
                     max_length_continuations=2,
                     return_metadata=True,
+                    budget_tracker=budget_tracker,
                     **extra_kwargs,
                 )
             else:
@@ -671,6 +709,7 @@ async def handle_web_chat(
                     on_progress=on_progress,
                     continue_on_length=True,
                     max_length_continuations=2,
+                    budget_tracker=budget_tracker,
                 )
             answer_holder.append(result)
         except Exception as e:
@@ -701,10 +740,14 @@ async def handle_web_chat(
                 "type": "warning",
                 "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
             })
+        documents_count, web_search_used, strategy = _summarize_tool_usage(
+            budget_tracker.get("tool_work_details", [])
+        )
         # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
         await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
             message, answer, f"{provider}_loop",
+            documents_count, web_search_used, strategy,
         )
         yield _format_sse({
             "type": "answer",
