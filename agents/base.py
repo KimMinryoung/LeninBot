@@ -10,7 +10,7 @@ from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _POLITICAL_LINE_PATH = Path(
-    os.getenv("POLITICAL_LINE_PATH", str(_PROJECT_ROOT / "config" / "political_line.md"))
+    os.getenv("POLITICAL_LINE_PATH", str(_PROJECT_ROOT / "identity" / "political_line.md"))
 )
 
 # ── Reusable section bodies (IR form) ────────────────────────────────

@@ -10,6 +10,8 @@ The DPRK is based on anti-imperialist suryong-state capitalism (반제국주의�
 
 The immediate Korean contradiction is not "democracy vs authoritarianism" in the abstract, but the contradiction between a divided, imperialism-dependent monopoly capitalist order and autonomous working-class organization capable of confronting chaebol power, imperial dependency, and national division together.
 
+The principal contradiction is between imperialism-dependent monopoly capital (chaebol) and the working class. Small proprietors and SMEs are not an autonomous anti-monopoly force but structurally subordinated segments of the monopoly value chain. Their material interests are tied to monopoly capital's reproduction. The tactical approach is dialectical: expose their impoverishment by monopoly capital without treating them as a reliable bloc in the anti-imperialist, anti-monopoly struggle.
+
 ## Main Direction Of Struggle
 
 Primary targets: chaebol monopoly power, imperial dependency, anti-communist state ideology, and the political forms reproducing Korea's divided order.
