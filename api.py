@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+from api_routes.x402_demo import router as x402_demo_router
 from db import query as db_query, query_one as db_query_one
 from chat_history_sanitize import clean_chat_history_text
 from email_bridge import (
@@ -115,6 +116,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
+app.include_router(x402_demo_router)
 
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
@@ -151,89 +153,6 @@ async def health():
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def api_health():
     return {"status": "ok"}
-
-
-# ── x402 demo route (self-loop) ───────────────────────────────────
-# Tiny micropayment demo over USDC on Base mainnet via the x402 'exact' scheme.
-# The same wallet pays and receives — net USDC change is zero, only gas is spent.
-X402_DEMO_AMOUNT_ATOMIC = 1000  # 0.001 USDC (~$0.001)
-
-
-@app.get("/x402-demo/quote")
-async def x402_demo_quote(request: Request):
-    """x402-protected demo endpoint. No payment → 402 with PaymentRequirements;
-    valid PAYMENT-SIGNATURE → settle on-chain and return a Cyber-Lenin aphorism.
-    """
-    import base64
-    from crypto_wallet import x402
-    from crypto_wallet.wallet import get_addresses
-
-    addrs = get_addresses()
-    pay_to = addrs.get("base")
-    if not pay_to:
-        raise HTTPException(status_code=503, detail="Server wallet not configured")
-
-    resource = str(request.url)
-    requirements = x402.build_payment_requirements(
-        pay_to=pay_to,
-        amount_atomic=X402_DEMO_AMOUNT_ATOMIC,
-        resource=resource,
-        description="Cyber-Lenin x402 demo: pay tiny USDC for an aphorism",
-        mime_type="application/json",
-    )
-
-    payment_header = request.headers.get("PAYMENT-SIGNATURE")
-    if not payment_header:
-        body = x402.build_402_body(requirements)
-        return Response(
-            content=json.dumps(body, ensure_ascii=False),
-            status_code=402,
-            media_type="application/json",
-            headers={
-                "PAYMENT-REQUIRED": base64.b64encode(
-                    json.dumps(requirements, separators=(",", ":")).encode()
-                ).decode(),
-            },
-        )
-
-    # Verify signature against demanded requirements
-    try:
-        decoded = x402.decode_payment_header(payment_header)
-        signer = x402.verify_payment(decoded, requirements)
-    except Exception as e:
-        raise HTTPException(status_code=402, detail=f"x402 verification failed: {e}")
-
-    # Settle on-chain
-    try:
-        settlement = await x402.settle_payment(decoded["payload"])
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"x402 settlement failed: {e}")
-
-    if settlement.get("status") != "success":
-        raise HTTPException(status_code=502, detail=f"settlement tx not success: {settlement}")
-
-    # Settlement OK — return paid content
-    aphorism = (
-        "정치란 과학이며 예술이다. 그것은 하늘에서 떨어지는 것이 아니라 "
-        "노력과 투쟁을 통해 얻어지는 것이다."
-    )
-    body = {
-        "x402Version": x402.X402_VERSION,
-        "message": "결제 검증 통과 — Cyber-Lenin의 격언:",
-        "aphorism": aphorism,
-        "payer": signer,
-        "amount_atomic": int(decoded["payload"]["authorization"]["value"]),
-        "tx_hash": settlement["tx_hash"],
-        "gas_used": settlement["gas_used"],
-    }
-    return Response(
-        content=json.dumps(body, ensure_ascii=False),
-        status_code=200,
-        media_type="application/json",
-        headers={
-            "PAYMENT-RESPONSE": x402.encode_settlement_header(settlement),
-        },
-    )
 
 
 app.add_middleware(

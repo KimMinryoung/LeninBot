@@ -1332,17 +1332,22 @@ def get_agent_tool_manifest(
 
     def orchestrator_manifest() -> dict:
         if orchestrator_tools is None:
+            from telegram.tool_allowlists import select_orchestrator_tools
+
+            tools = _dedupe_tools(select_orchestrator_tools(base_tools))
             return {
                 "runtime": "orchestrator",
-                "available": False,
-                "reason": "orchestrator tool list is only available from an active orchestrator tool context",
-                "tool_count": 0,
-                "tools": [],
+                "available": True,
+                "source": "static_allowlist",
+                "reason": "reported from telegram.tool_allowlists outside an active orchestrator context",
+                "tool_count": len(tools),
+                "tools": format_tools(tools),
             }
         tools = _dedupe_tools(orchestrator_tools)
         return {
             "runtime": "orchestrator",
             "available": True,
+            "source": "active_context",
             "tool_count": len(tools),
             "tools": format_tools(tools),
         }

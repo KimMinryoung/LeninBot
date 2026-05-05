@@ -52,6 +52,16 @@ def _coerce_tool_list(value: Any, key: str, agent_name: str) -> list[str]:
     return list(value)
 
 
+def _validate_runtime_tools(spec: AgentSpec, key: str, tools: list[str]) -> None:
+    if not tools or not spec.tools:
+        return
+    unknown = sorted(set(tools) - set(spec.tools))
+    if unknown:
+        raise ValueError(
+            f"{spec.name}.{key} contains tools outside the agent allowlist: {unknown}"
+        )
+
+
 def _snapshot_runtime(spec: AgentSpec) -> dict[str, Any]:
     return {
         "provider": spec.provider,
@@ -85,20 +95,25 @@ def _apply_one(spec: AgentSpec, base: dict[str, Any], cfg: dict[str, Any]) -> No
     if max_rounds <= 0:
         raise ValueError(f"{spec.name}.max_rounds must be positive")
 
-    spec.provider = provider
-    spec.model = model
-    spec.budget_usd = budget
-    spec.max_rounds = max_rounds
-    spec.finalization_tools = _coerce_tool_list(
+    finalization_tools = _coerce_tool_list(
         cfg.get("finalization_tools", base["finalization_tools"]),
         "finalization_tools",
         spec.name,
     )
-    spec.terminal_tools = _coerce_tool_list(
+    terminal_tools = _coerce_tool_list(
         cfg.get("terminal_tools", base["terminal_tools"]),
         "terminal_tools",
         spec.name,
     )
+    _validate_runtime_tools(spec, "finalization_tools", finalization_tools)
+    _validate_runtime_tools(spec, "terminal_tools", terminal_tools)
+
+    spec.provider = provider
+    spec.model = model
+    spec.budget_usd = budget
+    spec.max_rounds = max_rounds
+    spec.finalization_tools = finalization_tools
+    spec.terminal_tools = terminal_tools
     spec.skip_orchestrator_report = bool(
         cfg.get("skip_orchestrator_report", base["skip_orchestrator_report"])
     )

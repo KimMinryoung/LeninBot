@@ -37,6 +37,8 @@ from bot_config import (
     _extract_text,
 )
 from runtime_profile import resolve_runtime_profile
+from telegram.schema import ensure_summary_tables, ensure_telegram_tables
+from telegram.tool_allowlists import select_orchestrator_tools
 from telegram.tools import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram.tasks import (
@@ -238,224 +240,8 @@ async def _ignore_chat_member_update(event: ChatMemberUpdated):
 
 
 def _ensure_table():
-    """Create telegram_tasks and telegram_chat_history tables if not exists."""
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_tasks (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            content     TEXT NOT NULL,
-            status      VARCHAR(20) DEFAULT 'pending',
-            result      TEXT,
-            created_at  TIMESTAMPTZ DEFAULT NOW(),
-            completed_at TIMESTAMPTZ
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_chat_history (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            role        VARCHAR(10) NOT NULL,
-            content     TEXT NOT NULL,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    # Index for fast user_id lookups
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_chat_history_user_id
-        ON telegram_chat_history (user_id, id DESC)
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_system_events (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            event_type  VARCHAR(50) NOT NULL,
-            content     TEXT NOT NULL,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_schedules (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            content     TEXT NOT NULL,
-            cron_expr   VARCHAR(100) NOT NULL,
-            enabled     BOOLEAN DEFAULT TRUE,
-            created_at  TIMESTAMPTZ DEFAULT NOW(),
-            last_run_at TIMESTAMPTZ,
-            agent_type  VARCHAR(50)
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_error_log (
-            id          SERIAL PRIMARY KEY,
-            level       VARCHAR(10) NOT NULL DEFAULT 'error',
-            source      VARCHAR(100) NOT NULL,
-            message     TEXT NOT NULL,
-            detail      TEXT,
-            task_id     INTEGER,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_error_log_created
-        ON telegram_error_log (created_at DESC)
-    """)
-    # Task chaining columns (additive — safe for existing rows)
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES telegram_tasks(id)")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT DEFAULT ''")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS metadata JSONB")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) DEFAULT 'pending'")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_initiated BOOLEAN DEFAULT FALSE")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_target_service VARCHAR(20)")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_completed BOOLEAN DEFAULT FALSE")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS post_restart_phase VARCHAR(50)")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_attempt_count INTEGER DEFAULT 0")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_requested_at TIMESTAMPTZ")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS resumed_after_restart BOOLEAN DEFAULT FALSE")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_reentry_block_reason TEXT")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_details TEXT")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_attempts INTEGER DEFAULT 0")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS last_verification_at TIMESTAMPTZ")
-    # Task group columns for parallel delegation + synthesis
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_id INTEGER")
-    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_role VARCHAR(20)")
-    _execute("ALTER TABLE telegram_schedules ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_tasks_parent
-        ON telegram_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_tasks_plan
-        ON telegram_tasks(plan_id) WHERE plan_id IS NOT NULL
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_tasks_agent_user
-        ON telegram_tasks(user_id, agent_type, status) WHERE status = 'done'
-    """)
-    # Mission context tables
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_missions (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            title       TEXT NOT NULL,
-            status      VARCHAR(20) DEFAULT 'active',
-            created_at  TIMESTAMPTZ DEFAULT NOW(),
-            closed_at   TIMESTAMPTZ
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS telegram_mission_events (
-            id          SERIAL PRIMARY KEY,
-            mission_id  INTEGER NOT NULL REFERENCES telegram_missions(id),
-            source      TEXT NOT NULL,
-            event_type  TEXT NOT NULL,
-            content     TEXT NOT NULL,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_mission_events_timeline
-        ON telegram_mission_events(mission_id, created_at)
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS email_threads (
-            id SERIAL PRIMARY KEY,
-            provider VARCHAR(50) NOT NULL DEFAULT 'imap_smtp',
-            external_thread_id VARCHAR(255),
-            subject TEXT,
-            participants JSONB NOT NULL DEFAULT '[]'::jsonb,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(provider, external_thread_id)
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS email_messages (
-            id SERIAL PRIMARY KEY,
-            thread_id INTEGER REFERENCES email_threads(id) ON DELETE SET NULL,
-            provider VARCHAR(50) NOT NULL DEFAULT 'imap_smtp',
-            direction VARCHAR(20) NOT NULL,
-            status VARCHAR(30) NOT NULL DEFAULT 'received',
-            mailbox VARCHAR(50),
-            external_message_id VARCHAR(255),
-            in_reply_to VARCHAR(255),
-            sender_email TEXT,
-            sender_name TEXT,
-            recipient_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
-            cc_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
-            bcc_emails JSONB NOT NULL DEFAULT '[]'::jsonb,
-            subject TEXT,
-            text_body TEXT,
-            html_body TEXT,
-            raw_headers JSONB NOT NULL DEFAULT '{}'::jsonb,
-            attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            received_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW(),
-            approved_by BIGINT,
-            approved_at TIMESTAMPTZ,
-            approval_note TEXT,
-            sent_at TIMESTAMPTZ,
-            draft_saved_at TIMESTAMPTZ,
-            audit_log JSONB NOT NULL DEFAULT '[]'::jsonb,
-            UNIQUE(provider, external_message_id)
-        )
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_email_messages_status_created
-        ON email_messages(status, created_at DESC)
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_email_messages_thread_created
-        ON email_messages(thread_id, created_at DESC)
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_email_messages_provider_imap_uid
-        ON email_messages(provider, ((metadata->>'imap_uid')))
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS email_bridge_events (
-            id SERIAL PRIMARY KEY,
-            message_id INTEGER REFERENCES email_messages(id) ON DELETE CASCADE,
-            event_type VARCHAR(50) NOT NULL,
-            detail TEXT,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS email_bridge_state (
-            provider VARCHAR(50) PRIMARY KEY,
-            state JSONB NOT NULL DEFAULT '{}'::jsonb,
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS file_registry (
-            id SERIAL PRIMARY KEY,
-            local_path TEXT NOT NULL,
-            public_url TEXT,
-            filename TEXT NOT NULL,
-            content_type VARCHAR(100),
-            description TEXT,
-            category VARCHAR(50) DEFAULT 'general',
-            file_size BIGINT,
-            created_by_task_id INTEGER,
-            created_by_agent VARCHAR(50),
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_file_registry_category
-        ON file_registry(category, created_at DESC)
-    """)
+    """Compatibility wrapper for Telegram-owned schema setup."""
+    ensure_telegram_tables()
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
@@ -1043,7 +829,6 @@ def _clear_chat_history(user_id: int):
 # ── Chunked History Summaries ─────────────────────────────────────────
 _SUMMARY_CHUNK_SIZE = 10  # messages per summary chunk
 _MAX_SUMMARY_CHUNKS = 3   # max chunks to include in context
-_summary_table_ready = False
 _BAD_SUMMARY_PATTERNS = (
     "실행하시겠습니까",
     "죄송합니다",
@@ -1056,32 +841,7 @@ _BAD_SUMMARY_PATTERNS = (
 
 
 def _ensure_summary_table():
-    global _summary_table_ready
-    if _summary_table_ready:
-        return
-    _execute(
-        "CREATE TABLE IF NOT EXISTS chat_clear_markers ("
-        "  user_id BIGINT PRIMARY KEY,"
-        "  clear_after_id BIGINT NOT NULL DEFAULT 0"
-        ")"
-    )
-    # Load persisted clear markers into memory
-    rows = _query("SELECT user_id, clear_after_id FROM chat_clear_markers")
-    for r in rows:
-        current = _clear_after_id.get(r["user_id"], 0)
-        _clear_after_id[r["user_id"]] = max(current, r["clear_after_id"])
-    _execute(
-        "CREATE TABLE IF NOT EXISTS chat_history_summaries ("
-        "  id SERIAL PRIMARY KEY,"
-        "  user_id BIGINT NOT NULL,"
-        "  chunk_start_id BIGINT NOT NULL,"
-        "  chunk_end_id BIGINT NOT NULL,"
-        "  summary TEXT NOT NULL,"
-        "  msg_count INTEGER DEFAULT 0,"
-        "  created_at TIMESTAMPTZ DEFAULT NOW()"
-        ")"
-    )
-    _summary_table_ready = True
+    ensure_summary_tables(_clear_after_id)
 
 
 _RAW_MSG_HARD_CAP = 500  # safety ceiling; normally the summary cursor keeps
@@ -1490,34 +1250,10 @@ async def _chat_with_tools(
         _format_system_alerts(effective_provider),
     )
     messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
-    # Orchestrator tool whitelist: only tools the orchestrator should use directly.
-    # Everything else is delegated to specialist agents.
-    _ORCHESTRATOR_TOOLS = {
-        "delegate", "multi_delegate",       # core: dispatch to agents
-        "mission",                          # mission lifecycle
-        "web_search", "fetch_url", "fetch_x_post",  # quick lookups (no delegation needed)
-        "knowledge_graph_search", "vector_search",  # fast knowledge retrieval
-        "get_finance_data",                 # inline finance data
-        "broadcast_to_channel",             # public Telegram channel announcements
-        "recall_experience",                # memory recall
-        "save_self_analysis",               # active self-produced analysis indexing
-        "write_kg_structured",              # direct structured KG writes
-        "read_self",                        # status/logs inspection
-        "list_agent_tools",                 # runtime tool allow-list introspection
-        "run_agent",                        # direct agent execution
-        # send_email, a2a_send → delegated to diplomat agent
-    }
     is_orchestrator = extra_tools is None
 
     if is_orchestrator:
-        # Orchestrator: whitelist only
-        seen_names: set[str] = set()
-        merged_tools: list[dict] = []
-        for t in TOOLS:
-            name = t.get("name", "")
-            if name in _ORCHESTRATOR_TOOLS and name not in seen_names:
-                seen_names.add(name)
-                merged_tools.append(t)
+        merged_tools = select_orchestrator_tools(TOOLS)
     else:
         # Task/agent: use ONLY extra_tools (already filtered by agent spec).
         # Do NOT merge full TOOLS — that would bypass agent tool restrictions.

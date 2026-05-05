@@ -174,8 +174,8 @@ def _assert_agent_runtime_config() -> None:
     from agents import get_agent
 
     diary = get_agent("diary")
-    assert diary.provider == "claude"
-    assert diary.model == "sonnet"
+    assert diary.provider == "deepseek"
+    assert diary.model == "deepseek_pro"
     assert diary.terminal_tools == ["save_diary"]
     assert diary.skip_orchestrator_report is True
     assert diary.max_rounds == 30
@@ -264,6 +264,16 @@ def _assert_agent_runtime_dynamic_reload() -> None:
             assert registry["dummy"].model is None
             assert registry["dummy"].budget_usd == 1.0
             assert registry["dummy"].max_rounds == 50
+
+            registry["dummy"].tools = ["allowed_tool"]
+            path.write_text(
+                json.dumps({"dummy": {"terminal_tools": ["missing_tool"]}}),
+                encoding="utf-8",
+            )
+            runtime_config._last_mtime_ns = -1
+            assert not runtime_config.reload_agent_runtime_config_if_changed(registry)
+            assert registry["dummy"].provider is None
+            assert registry["dummy"].terminal_tools == []
         finally:
             runtime_config._CONFIG_PATH = original_path
             runtime_config._last_mtime_ns = original_mtime
