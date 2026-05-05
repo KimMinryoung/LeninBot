@@ -11,7 +11,7 @@ LeninBot은 특정 벤더/모델에 고정된 봇이 아니다. 런타임 설정
 ## Provider 구조
 
 ```
-telegram_bot.py
+telegram/bot.py
   _chat_with_tools()  ← 단일 진입점 (대화 + 태스크)
        │
        ├─ provider == "claude"
@@ -33,7 +33,7 @@ telegram_bot.py
 |------|------|
 | `claude_loop.py` | Anthropic Messages API용 tool-use 루프. Claude provider 선택 시 사용. |
 | `openai_tool_loop.py` | OpenAI + 로컬 LLM 겸용 tool-use 루프. SDK mode / httpx mode 이중 지원. |
-| `telegram_bot.py` | provider dispatch, 모델 티어 해석, 시스템 프롬프트 `<current-model>` 주입, `/provider` `/fallback` `/config` 커맨드 |
+| `telegram/bot.py` | provider dispatch, 모델 티어 해석, 시스템 프롬프트 `<current-model>` 주입, `/provider` `/fallback` `/config` 커맨드 |
 | `bot_config.py` | `/config`가 바꾸는 런타임 설정 로딩/저장 + provider별 실제 모델 ID 해석 |
 | `config.json` | `provider`, `chat_model`, `task_model` 등 런타임 설정 영속화 |
 
@@ -73,7 +73,7 @@ provider에 따라 자동 매핑:
 
 ## 런타임 모델 컨텍스트 주입
 
-텔레그램 대화 경로에서는 `telegram_bot.py`가 system prompt의 `<context>` 블록에 아래 형식으로 현재 모델 정보를 주입한다.
+텔레그램 대화 경로에서는 `telegram/bot.py`가 system prompt의 `<context>` 블록에 아래 형식으로 현재 모델 정보를 주입한다.
 
 ```xml
 <current-model provider="openai" tier="high" alias="gpt54">gpt-5.5</current-model>
@@ -123,19 +123,19 @@ claude_loop.py의 견고한 복구 전략을 OpenAI 어댑터에 포팅:
 
 ## Vision (이미지 분석) provider 분기
 
-`telegram_bot.py`의 `handle_photo()`에서 provider별 분기:
+`telegram/commands.py`의 `handle_photo()`에서 provider별 분기:
 - **Claude**: `type: "image"`, `source.type: "base64"` (Anthropic Vision 포맷)
 - **OpenAI**: `type: "image_url"`, `url: "data:{media_type};base64,..."` (OpenAI Vision 포맷)
 
 ## 경량 보조 호출 (요약/압축/반성)
 
-`telegram_bot.py`의 3곳에서 `_claude.messages.create(model=haiku)`를 직접 호출:
-- 대화 청크 요약 (line ~793)
-- 히스토리 압축 (line ~853)
-- 경험 반성 (line ~2121)
+보조 LLM 호출은 provider 독립 경로와 일부 Claude fallback 경로로 나뉜다:
+- 대화 청크 요약: `telegram/bot.py`의 `_maybe_summarize_chunk()`
+- 이미지 분석: `telegram/commands.py`의 `handle_photo()`
+- 경험 반성: `telegram/commands.py`의 `_maybe_reflect_on_conversation()`
 
-이들은 provider 분기를 하지 않음. 로컬 LLM 우선 시도 후 Claude light(haiku) fallback.
-Claude API 키가 있는 한 provider 설정과 무관하게 동작.
+요약/반성 계열은 로컬 LLM 우선 시도 후 Claude light(haiku) fallback을 쓴다.
+이미지 분석은 위 Vision 섹션처럼 현재 provider에 맞는 이미지 포맷으로 분기한다.
 
 ## 가격 정보
 

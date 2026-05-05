@@ -40,7 +40,7 @@
 
 | Trigger | 위치 | 조건 |
 |---------|------|------|
-| `/task` 커맨드 | `telegram_bot.py` `cmd_task` | `get_active_mission(uid)` 이 None |
+| `/task` 커맨드 | `telegram/commands.py` `cmd_task` | `get_active_mission(uid)` 이 None |
 
 **부작용**:
 - 최근 채팅 5턴을 `context_capture` 이벤트로 캡처
@@ -53,10 +53,10 @@
 
 | Trigger | 위치 | 주체 |
 |---------|------|------|
-| `mission(action="close")` 도구 | `telegram_tools.py` `build_mission_handler` | **에이전트** (채팅/태스크 모두) |
-| `/mission close` 커맨드 | `telegram_bot.py` `cmd_mission` | **사용자** |
-| `/clear` 커맨드 | `telegram_bot.py` `cmd_clear` | **사용자** |
-| 24시간 이벤트 없음 | `telegram_mission.py` `get_active_mission` | **시스템** (접근 시 자동) |
+| `mission(action="close")` 도구 | `runtime_tools/registry.py` `build_mission_handler` | **에이전트** (채팅/태스크 모두) |
+| `/mission close` 커맨드 | `telegram/commands.py` `cmd_mission` | **사용자** |
+| `/clear` 커맨드 | `telegram/commands.py` `cmd_clear` | **사용자** |
+| 24시간 이벤트 없음 | `telegram/mission.py` `get_active_mission` | **시스템** (접근 시 자동) |
 
 ## 5. Events (Timeline)
 

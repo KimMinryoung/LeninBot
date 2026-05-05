@@ -7,7 +7,7 @@ Cyber-Lenin uses a hierarchical multi-agent system built on the orchestrator-wor
 ```
 User (Telegram)
     |
-Orchestrator (telegram_bot.py)
+Orchestrator (telegram/bot.py)
     |--- direct response (simple queries)
     |--- delegate() ---------> Agent (programmer/analyst/scout/browser/visualizer)
     |--- multi_delegate() ---> [Agent A, Agent B, ...] --> Synthesis Agent
@@ -50,7 +50,7 @@ pending ──> processing ──> done ──> (verification: passed/failed)
 blocked ──> pending (when subtask group completes)
 ```
 
-### Task Worker (`telegram_tasks.py:task_worker`)
+### Task Worker (`telegram/tasks.py:task_worker`)
 
 - Polls PostgreSQL for `status='pending'` tasks using `FOR UPDATE SKIP LOCKED`
 - Bounded concurrency via `asyncio.Semaphore` (default 2, max 8)
@@ -61,7 +61,7 @@ blocked ──> pending (when subtask group completes)
 
 1. User message arrives at orchestrator
 2. Orchestrator decides to delegate via `delegate(agent, task, context)` tool
-3. `_exec_delegate()` (`self_tools.py`) creates a DB row in `telegram_tasks` with `status='pending'`
+3. `_exec_delegate()` (`self_runtime/tools.py`) creates a DB row in `telegram_tasks` with `status='pending'`
 4. Resolves or auto-creates a mission to link the task to
 5. Injects recent conversation (last 6 messages) into delegation content
 6. Task worker picks up the task, runs `process_task()`
@@ -151,7 +151,7 @@ When an agent task executes, its context is assembled from:
 - Middle tasks: actions only, results masked
 - Oldest task: summary only, no tool log
 
-### 5. Mission System (`telegram_mission.py`)
+### 5. Mission System (`telegram/mission.py`)
 
 Missions are auto-created when the orchestrator delegates work. They track multi-step campaigns:
 
@@ -207,9 +207,9 @@ The programmer agent and `restart_service` tool include explicit mapping so the 
 
 | Service | Files |
 |---------|-------|
-| telegram | telegram_bot.py, telegram_commands.py, telegram_tasks.py, telegram_tools.py, telegram_mission.py, claude_loop.py, openai_tool_loop.py, self_tools.py, shared.py, agents/*.py, redis_state.py |
-| api | api.py, web_chat.py |
-| browser | browser_worker.py |
+| telegram | telegram/bot.py, telegram/commands.py, telegram/tasks.py, telegram/mission.py, runtime_tools/*.py, self_runtime/*.py, claude_loop.py, openai_tool_loop.py, shared.py, agents/*.py, redis_state.py |
+| api | api.py, web_chat.py, a2a_handler.py, runtime_tools/*.py |
+| browser | browser/worker.py, browser/use_agent.py, runtime_tools/*.py |
 | all | db.py, embedding_server.py, or files shared by multiple services |
 
 ## Browser Worker
@@ -219,7 +219,7 @@ The browser agent can run in a separate process communicating via Unix socket:
 - **Socket**: `/tmp/leninbot-browser.sock`
 - **Protocol**: JSON request/response (cmd: "task" or "ping")
 - **Timeout**: 180s per task
-- **Fallback**: If worker unreachable, executes in-process in the main telegram_bot
+- **Fallback**: If worker unreachable, executes in-process in the main Telegram bot process
 
 Separate systemd service (`leninbot-browser`) allows independent restarts without affecting the telegram service.
 

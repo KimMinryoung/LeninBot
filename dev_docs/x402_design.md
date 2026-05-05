@@ -42,7 +42,7 @@ crypto_wallet/
 ### 메시지 흐름 (self-loop 데모)
 
 ```
-[telegram_bot.py orchestrator]              [api.py /x402-demo/quote]
+[telegram/bot.py orchestrator]              [api.py /x402-demo/quote]
   pay_and_fetch tool 호출
   └─→ httpx.GET URL ────────────────────────→ 402
                                               {
@@ -167,7 +167,7 @@ USDC_DOMAIN = {
 | **검증 시 금액/recipient 재확인** | `verify_payment` | 서명한 값이 서버가 요구한 값과 일치하는지 강제 |
 | **유효기간 검증** | `verify_payment` | 현재 시각이 `[validAfter, validBefore]` 범위 안에 있어야 함 |
 | **개인키 메모리 노출 최소화** | `sign_payment` / `_load_privkey_hex` | 사용 직후 `del pk_hex` |
-| **오케스트레이터 화이트리스트** | `telegram_bot.py:_ORCHESTRATOR_TOOLS` | `pay_and_fetch`는 orchestrator 전용. delegated 서브에이전트 호출 불가 |
+| **오케스트레이터 화이트리스트** | `runtime_tools/allowlists.py:ORCHESTRATOR_TOOL_NAMES` | `pay_and_fetch`는 orchestrator 전용. delegated 서브에이전트 호출 불가 |
 
 ### systemd credential 분배
 
@@ -207,7 +207,7 @@ self-loop 특성상 USDC 순 변동량 = 0, 가스만 소모 (~$0.0001 per call)
 LLM이 데모 endpoint 존재를 모르면 외부 x402 서비스를 찾으러 가버리기 때문에 두 군데 명시:
 
 1. `crypto_wallet/x402.py:PAY_AND_FETCH_TOOL.description` 마지막 문단
-2. `telegram_bot.py:_SYSTEM_PROMPT_TEMPLATE`의 `<tool-strategy>` 블록 안
+2. `telegram/bot.py:_ORCHESTRATOR_PROMPT_IR`의 `<tool-strategy>` 블록 안
 
 ---
 

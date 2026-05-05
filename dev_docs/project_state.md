@@ -45,17 +45,17 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 │          │ Bolt             │ HTTP       │              │ HTTP          │
 │          │                  │            │              │               │
 │  ┌───────┴──────────────────┴────────────┴──────────────┴─────────┐    │
-│  │                     shared.py (공유 라이브러리)                    │    │
-│  │  CORE_IDENTITY (본체)   AGENT_CONTEXT (에이전트)                │    │
-│  │  similarity_search()    search_knowledge_graph()               │    │
-│  │  add_kg_episode()       upload_to_r2()                        │    │
-│  │  submit_kg_task()       fetch_server_logs()                   │    │
-│  │  embedding_client.py    (HTTP → embedding_server)              │    │
+│  │        runtime facade packages + runtime_tools/                 │    │
+│  │  identity.prompts     runtime_tools.registry                    │    │
+│  │  corpus.store         kg_runtime.search                         │    │
+│  │  kg_runtime.writes    content_fetch / runtime_tools             │    │
+│  │  kg_runtime.service   ops.logs / task_store                     │    │
+│  │  llm/embedding_client.py (HTTP → embedding_server)              │    │
 │  └───────┬───────────────────────┬────────────────────────────────┘    │
 │          │                       │                                     │
 │  ┌───────┴──────────┐    ┌───────┴──────────┐                         │
 │  │ leninbot-telegram │  │ leninbot-browser │  │ leninbot-api     │    │
-│  │ telegram_bot.py   │  │ browser_worker.py│  │ uvicorn :8000    │    │
+│  │ telegram/bot.py   │  │ browser/worker.py│  │ uvicorn :8000    │    │
 │  │                   │  │                  │  │                  │    │
 │  │ aiogram 3.x       │  │ browser-use SDK  │  │ web_chat.py      │    │
 │  │ Claude/GPT 교체가능 │  │ Unix socket IPC  │  │ (claude_loop)    │    │
@@ -74,8 +74,8 @@ Server: **Hetzner VPS** (Ubuntu 24.04, 16GB RAM). Frontend at `cyber-lenin.com` 
 |---|---|---|---|
 | `leninbot-neo4j` | Docker (neo4j:5-community + redis:7-alpine) | :7687, :7474, :6379 | 지식 그래프 + Redis 실시간 상태 |
 | `leninbot-embedding` | embedding_server.py | :8100 (내부) | BGE-M3 임베딩 서버 (831MB) |
-| `leninbot-telegram` | telegram_bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
-| `leninbot-browser` | browser_worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
+| `leninbot-telegram` | telegram/bot.py | Telegram polling | 텔레그램 봇 + 에이전트 시스템 |
+| `leninbot-browser` | browser/worker.py | Unix socket | 브라우저 에이전트 (Chromium, MemoryMax=2G) |
 | `leninbot-api` | uvicorn api:app | :8000 (외부 차단, Docker 브릿지만 허용) | 웹 챗봇 API (claude_loop) |
 | `leninbot-frontend` | Docker (node:20-alpine) | :3000 (127.0.0.1) | BichonWebpage (Express+EJS), Nginx 프록시 |
 
@@ -245,7 +245,7 @@ task_worker: asyncio.Semaphore 기반 동시 실행 (기본 2, /config으로 조
 - File-to-service mapping in restart_service tool + programmer prompt prevents wrong service restart
 
 ### Tool Isolation
-- Orchestrator: curated tool whitelist (`_ORCHESTRATOR_TOOLS`) — no programming tools, no direct email/A2A (delegated to diplomat)
+- Orchestrator: curated tool whitelist (`runtime_tools/allowlists.py:ORCHESTRATOR_TOOL_NAMES`) — no programming tools, no direct email/A2A (delegated to diplomat)
 - Specialist agents: `AgentSpec.filter_tools()` restricts to role-specific tools
 - `delegate` tool only accessible to orchestrator — no inter-agent re-delegation
 - External communication (email, A2A) isolated to diplomat agent — reduces prompt injection blast radius
@@ -300,19 +300,29 @@ leninbot/
 ├── api.py                     # FastAPI (SSE streaming, /chat, /logs, /session/*, /a2a)
 ├── a2a_handler.py             # A2A JSON-RPC 2.0 SendMessage 핸들러 (스킬 라우팅)
 ├── web_chat.py                # 웹 챗봇 핸들러 (claude_loop 기반, api.py에서 호출)
-├── shared.py                  # 공유 라이브러리: CORE_IDENTITY, AGENT_CONTEXT, KG/벡터검색/메모리/URL
+├── shared.py                  # compatibility facade: legacy imports only, new code uses domain modules
+├── runtime_tools/             # 전역 tool registry + fetch/filesystem/media/social/a2a/db/publish/broadcast tools
+├── self_runtime/
+│   └── tools.py               # delegate, multi_delegate, run_agent, read_self, KG write tools
+├── content_fetch/             # URL fetch, Playwright browser pool, document conversion
+├── kg_runtime/                # KG singleton/event loop, search/write/admin/scout facade
+├── corpus/                    # embeddings, pgvector corpus search/ingest, public index
+├── memory_store/              # DB memory queries + experiential memory
+├── ops/                       # server log query helpers
+├── task_store.py              # telegram_tasks insert helper
 ├── embedding_server.py        # BGE-M3 임베딩 서버 (독립 FastAPI, :8100)
-├── embedding_client.py        # 임베딩 HTTP 클라이언트 (fallback 내장)
+├── llm/embedding_client.py    # 임베딩 HTTP 클라이언트 (fallback 내장)
 ├── bot_config.py              # LLM 클라이언트, 런타임 설정, 모델 해석
-├── telegram_bot.py            # Telegram 봇 코어: 채팅, LLM 디스패치, 에이전트 실행
-├── telegram_commands.py       # 커맨드/메시지/콜백 핸들러 (/restart: 태스크 강제종료 + 재시작)
-├── telegram_tools.py          # 도구 정의 + 핸들러 (check_inbox, allowlist_sender, browse_web 등)
-├── telegram_tasks.py          # 백그라운드 태스크 워커, 스케줄러, 모니터
-├── telegram_mission.py        # 미션 컨텍스트 시스템
-├── browser_worker.py           # 브라우저 에이전트 전용 워커 (Unix socket IPC, systemd)
-├── self_tools.py              # delegate, multi_delegate, run_agent, save_finding, write_kg_structured
+├── telegram/
+│   ├── bot.py                 # Telegram 봇 코어: 채팅, LLM 디스패치, 에이전트 실행
+│   ├── commands.py            # 커맨드/메시지/콜백 핸들러
+│   ├── tasks.py               # 백그라운드 태스크 워커, 스케줄러, 모니터
+│   ├── mission.py             # 미션 컨텍스트 시스템
+│   └── channel_broadcast.py   # Telegram 채널 발행
+├── browser/
+│   ├── worker.py              # 브라우저 에이전트 전용 워커 (Unix socket IPC, systemd)
+│   └── use_agent.py           # browser-use SDK 래퍼
 ├── claude_loop.py             # Claude tool-use 루프
-├── browser_use_agent.py       # browser-use SDK 래퍼 (Playwright + LLM, 항상 Claude Sonnet)
 ├── replicate_image_service.py # Replicate FLUX 이미지 생성 (reference_image 지원)
 ├── finance_data.py            # 실시간 금융 데이터 (yfinance, 10분 캐시)
 ├── openai_tool_loop.py        # OpenAI tool-use 루프 (GPT-5.5, local LLM 등)
@@ -413,7 +423,7 @@ leninbot/
 
 ### 2026-04-15 — A2A v1.0 업그레이드
 
-#### A2A v1.0 스펙 준수 (`a2a_handler.py`, `api.py`, `telegram_tools.py`, `research/cyber_lenin_a2a_agent_card.json`)
+#### A2A v1.0 스펙 준수 (`a2a_handler.py`, `api.py`, `runtime_tools/a2a.py`, `research/cyber_lenin_a2a_agent_card.json`)
 - Agent Card: `supportedInterfaces` 배열, `securityRequirements`, `capabilities.extendedAgentCard` (레거시 `url`/`preferredTransport`/`additionalInterfaces`/`security` 제거)
 - 디스커버리: `GET /.well-known/agent-card.json` 정규 경로 추가 (레거시 `agent.json` 호환 유지)
 - 응답 포맷: `TASK_STATE_COMPLETED`, `ROLE_USER`/`ROLE_AGENT`, `messageId`/`artifactId` 필수 필드, `kind` 제거
@@ -429,7 +439,7 @@ leninbot/
 - Agent Card (`/.well-known/agent.json`) 서빙
 - web_chat.py LLM 파이프라인 재활용, SSE 없이 동기 응답
 
-#### Diplomat Agent — Kollontai (`agents/kollontai.py`, `telegram_tools.py`)
+#### Diplomat Agent — Kollontai (`agents/kollontai.py`, `runtime_tools/a2a.py`, `runtime_tools/registry.py`)
 - 새 에이전트 `diplomat` (페르소나: Alexandra Kollontai) — 외부 통신 전담
 - `a2a_send` 도구: 외부 A2A 에이전트 discover + SendMessage
 - `send_email`, `check_inbox`, `allowlist_sender`를 orchestrator에서 diplomat으로 이관
@@ -440,7 +450,7 @@ leninbot/
 
 ### 2026-04-07 — x402 마이크로페이먼트, Playwright async 리팩터, 병렬 도구 실행
 
-#### x402 Payment Protocol (`crypto_wallet/x402.py`, `api.py`, `telegram_tools.py`, `telegram_bot.py`)
+#### x402 Payment Protocol (`crypto_wallet/x402.py`, `api.py`, `runtime_tools/registry.py`, `telegram/bot.py`)
 - 새 모듈 `crypto_wallet/x402.py` — x402 v2 `exact` scheme on Base mainnet
 - ERC-3009 `transferWithAuthorization` EIP-712 서명 (USDC name="USD Coin", version="2")
 - USDC `DOMAIN_SEPARATOR`와 client-side hash 일치 검증 완료
@@ -453,7 +463,7 @@ leninbot/
 - 첫 self-loop 성공 (2026-04-07): TX `0xfad05f83e786...ddb7a`, 가스 75,656
 - 상세: `dev_docs/x402_design.md`
 
-#### Playwright Renderer Leak Fix (`shared.py`, `telegram_tools.py`, `claude_loop.py`, `openai_tool_loop.py`, `tool_loop_common.py`)
+#### Playwright Renderer Leak Fix (`content_fetch/browser_pool.py`, `runtime_tools/media.py`, `claude_loop.py`, `openai_tool_loop.py`, `tool_loop_common.py`)
 - **근본 원인**: Sync Playwright API가 thread-affinity가 있는데 `asyncio.to_thread`로 매번 다른 워커에서 호출 → `page.close()`가 silently 실패 → 22시간 동안 25개 zombie renderer 누적
 - **수정**: dedicated asyncio 이벤트 루프를 별도 daemon thread에 띄우고 모든 Playwright 호출을 그 루프 위에서 실행 (`_apw_loop` 싱글톤)
 - 동기 호출자(`_playwright_fetch`)는 `_pw_submit` 통해 future로 블록, 비동기 호출자(`fetch_url_content_async`)는 `asyncio.wrap_future`로 직접 await
@@ -466,7 +476,7 @@ leninbot/
 - claude_loop.py와 openai_tool_loop.py 둘 다 첫 패스(블록 분류) + 둘째 패스(batch 실행)로 재구조화
 - 검증: 6개 도구 batch (3 safe + 1 unsafe + 2 safe) 0.7s vs sequential 1.6s, 순서 보존 확인
 
-#### Latent `requests` Import Bug Fix (`shared.py`)
+#### Latent `requests` Import Bug Fix (`content_fetch/urls.py`)
 - `_fetch_url_fallbacks`의 bare `requests.get(...)`가 모듈 상단 import 없이 호출되어 NameError 잠복 (silently 잡혀서 fallback이 항상 None 반환하던 상태)
 - `import requests as _req` → `_req.get(...)`로 수정
 - 별개 이슈: venv의 certifi 2026.02.25 번들이 Cloudflare ECC 체인의 AAA Certificate Services 루트를 제거해서 SSL 검증 실패 → `.env`에 `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` 추가로 우회 (시스템 CA 사용)
@@ -488,7 +498,7 @@ leninbot/
 - `_truncate_to_context()`: context_limit 초과 시 오래된 메시지부터 삭제 (system 메시지 보존)
 - `chat_with_tools()`에 `context_limit` 파라미터 추가
 
-#### Per-Component Provider Routing (`telegram_bot.py`, `web_chat.py`, `agents/base.py`, `agents/diary.py`)
+#### Per-Component Provider Routing (`telegram/bot.py`, `web_chat.py`, `agents/base.py`, `agents/diary.py`)
 - `_chat_with_tools()`에 `provider_override` 파라미터 추가
 - `AgentSpec.provider` 기본값: `"claude"` → `None` (orchestrator config 따름)
 - Diary agent만 `provider="claude"` 명시 — 항상 Claude API 사용
@@ -564,7 +574,7 @@ leninbot/
 
 #### AI 일기 API 제거 → DB 직접 접근
 - 일기 작성: API 호출 → `db.py` 직접 SELECT/INSERT (현재 diary agent가 `save_diary` 도구 사용)
-- `shared.py`: `fetch_diaries()` API 호출 → DB 직접 쿼리 (ILIKE 키워드 검색)
+- `memory_store/queries.py`: `fetch_diaries()` API 호출 → DB 직접 쿼리 (ILIKE 키워드 검색)
 - Frontend: `/api/ai-diary` 엔드포인트, `requireApiKey` 미들웨어 삭제
 - `AI_DIARY_API_KEY` 환경변수 불필요
 
@@ -604,7 +614,7 @@ leninbot/
 - SIGTERM handler가 모든 active task에 checkpoint 수행
 
 #### Browser Worker 분리
-- `browser_worker.py`: 독립 systemd 서비스 (`leninbot-browser`)
+- `browser/worker.py`: 독립 systemd 서비스 (`leninbot-browser`)
 - Unix domain socket IPC (`/tmp/leninbot-browser.sock`)
 - Chromium 메모리 격리 (MemoryMax=2G), worker 불가 시 in-process fallback
 
@@ -653,9 +663,9 @@ leninbot/
 - 텔레그램 메시지: 마크다운 서식 금지 (plain text only)
 
 #### Browser Agent
-- `browser_use_agent.py`: browser-use 0.12.5 SDK 래퍼
+- `browser/use_agent.py`: browser-use 0.12.5 SDK 래퍼
 - `agents/browser.py`: specialist agent 정의 ($1.50 budget, 30 rounds)
-- delegate 도구에 browser 추가 (self_tools.py enum + 설명)
+- delegate 도구에 browser 추가 (`self_runtime/tools.py` enum + 설명)
 - 항상 Claude Sonnet 사용 (OpenAI structured output 호환성 문제)
 
 #### Email Tools
@@ -675,7 +685,7 @@ leninbot/
 - programmer 태스크 리포트를 API에서 제외 (내부 서버 정보 노출 방지)
 
 #### fetch_url 안정성
-- shared.py에 `load_dotenv()` 추가 — Tavily API 키 로드 보장
+- URL fetching now lives in `content_fetch/urls.py`; Tavily key loading is handled by runtime secret/config paths
 - Playwright: `networkidle` 대기 추가
 - Tavily Extract: API 키 명시 전달, 누락 시 스킵
 
@@ -744,7 +754,7 @@ leninbot/
 - `run_kg_async` → `run_kg_task`로 통일 (cross-loop 버그 방지)
 
 #### 의존 관계 정리
-- `similarity_search()`, `search_knowledge_graph()`를 shared.py로 통합
+- `similarity_search()`는 `corpus/store.py`, `search_knowledge_graph()`는 `kg_runtime/search.py` 소유. `shared.py`는 legacy re-export만 유지
 - 웹 챗봇: LangGraph 제거, claude_loop 기반 web_chat.py로 통합 (2026-04-04)
 
 #### Mission auto-creation SQL 수정
@@ -752,7 +762,7 @@ leninbot/
 - DISTINCT 제거로 해결. Mission #9 이후 모든 task가 mission_id=None이었던 문제 수정.
 
 #### write_kg NameError 수정
-- `self_tools.py`: `"default": false` → `"default": False` (JSON 스타일 → Python)
+- `self_runtime/tools.py`: `"default": false` → `"default": False` (JSON 스타일 → Python)
 - 이 오류로 서비스가 크래시 루프에 빠져 있었음
 
 #### razvedchik 타이머 비활성화
@@ -764,7 +774,7 @@ leninbot/
 - `<current_state>` XML 블록: 태스크 상태 구조화 주입 (환각 방지)
 - Observation Masking: tool_log recency 기반 점진 제거 (토큰 ~50% 절감)
 - Mission 자동화: delegate 시 미션 자동 생성, stale 규칙 개선
-- 모듈 분리: telegram_bot.py 2893줄 → 1134줄 (commands, config 분리)
+- 모듈 분리: Telegram bot monolith → `telegram/bot.py`, `telegram/commands.py`, `telegram/tasks.py`, `telegram/mission.py`
 - Visualizer: generate_image 도구 연결, reference_image 지원, flux_kontext_dev 라우팅
 
 ### 2026-03-27 — 에이전트 인프라, 프로젝트 구조

@@ -29,10 +29,10 @@ tool families now live in focused modules that export both tool definitions and
 handler maps:
 
 - base tools such as `web_search`, `fetch_url`, file tools, etc.
-- self tools from `self_tools.py`
-- DB/query/publishing tools
-- post/research/private-report tools
-- crypto and channel tools
+- self tools from `self_runtime/tools.py`
+- DB tools from `runtime_tools/db.py`
+- post/research/private-report tools from `runtime_tools/post_edit.py`, `runtime_tools/research.py`, and `runtime_tools/private_reports.py`
+- crypto and channel tools, including `runtime_tools/broadcast.py`
 - `runtime_tools/fetch.py`: URL/file/document fetch and conversion tools
 - `runtime_tools/filesystem.py`: programmer filesystem and Python execution tools
 - `runtime_tools/media.py`: image generation and browser automation tools
@@ -139,7 +139,7 @@ orchestrator and `AgentSpec`.
 
 ## Introspection
 
-`self_tools.py` now exposes:
+`self_runtime/tools.py` now exposes:
 
 - `get_agent_tool_manifest(...)`: Python function for runtime tool visibility
 - `list_agent_tools`: tool wrapper returning JSON

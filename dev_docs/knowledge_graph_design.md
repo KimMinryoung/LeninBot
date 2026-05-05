@@ -2,6 +2,9 @@
 
 > 지식 그래프 관련 작업 전에 반드시 이 문서를 확인하고, 작업 후에는 변경사항을 반영할 것.
 
+> KG runtime facade는 `kg_runtime/`으로 분리 완료됐다. 상세 이력은
+> `dev_docs/shared_py_refactor_plan.md`를 볼 것.
+
 ---
 
 ## 1. 개요
@@ -23,7 +26,7 @@ Cyber-Lenin의 **정보 에이전트** 기능을 위한 지식 그래프 모듈.
 
 **OpenAI 의존성 없음** — 전부 Gemini 기반.
 
-### chatbot.py 통합 완료 (2026-03-01)
+### web_chat.py / legacy chatbot pipeline 통합 완료 (2026-03-01)
 
 - Vectorstore 경로: `kg_retrieve` 별도 노드 (retrieve → kg_retrieve → grade_documents)
 - Plan 경로: step_executor 내부 per-step KG 검색 + `_merge_kg_contexts()` 중복 제거
@@ -474,7 +477,7 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 | 2026-02-28 | **런타임 패치**: `graphiti_patches.py` 신규 — .venv 수정 대신 몽키패치로 DateTime 직렬화/엣지 프롬프트 교체. Render 배포 호환. |
 | 2026-02-28 | **성능 최적화**: `SEMAPHORE_LIMIT` 1→20, `DEFAULT_DELAY_BETWEEN` 30→5초. `requirements.txt` 프로덕션 전용으로 정리. |
 | 2026-03-01 | **한국 국내 뉴스 + 인물 프로파일 수집** (TDD): `temp_dev/ingest_kr_news.py` — Tavily 뉴스 검색 → LLM 인물 추출 → Tavily 프로파일 검색 → KG 수집. 뉴스 3건 + 이재명 프로파일 수집. `group_id="korea_domestic"`. KG에 South Korea, Democratic Party of Korea, Lee Jae-myung, Seongnam, Gyeonggi Province 등 노드 15개, 엣지 15개 추가. |
-| 2026-03-01 | **chatbot.py KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `_kg_loop`). KG 장애 시 graceful degradation 검증 완료. |
+| 2026-03-01 | **web_chat.py / legacy chatbot KG 질의 통합**: vectorstore 경로에 `kg_retrieve` 노드, plan 경로에 step_executor 내부 per-step KG 검색 추가. `_merge_kg_contexts()`로 엔티티/팩트 중복 제거. `kg_context`를 strategize/generate 프롬프트에 주입. Neo4j event loop 충돌 해결 (persistent `kg_runtime.service_runtime` event loop). KG 장애 시 graceful degradation 검증 완료. |
 | 2026-03-19 | **v2.1 스키마: Concept 타입 신설** — 엔티티 7→8종. 추상 개념/이론/이데올로기/사회현상을 포괄하는 Concept 타입(5 필드) 추가. Gemini 배치 분류로 미분류 엔티티 131개 전량 타입 부여 (Concept 99, Asset 11, Organization 8, Incident 5, Person 5, Location 1, Campaign 1). `scripts/classify_untyped_entities.py` 재사용 가능. |
 | 2026-03-21 | **Neo4j AuraDB → Local Docker 이전**: `docker-compose.neo4j.yml` (Neo4j 5 Community + APOC), `systemd/leninbot-neo4j.service`, `scripts/migrate_neo4j.py`. 엔티티 2,116개, 관계 1,826개, 에피소드 761건 전량 이전 완료. AuraDB 연결 끊김 문제 해소. |
 | 2026-03-29 | **KG 데이터 품질 개선**: (1) 중복 엔티티 병합 스크립트 `merge_entities.py` — Gemini 배치 분류 + canonical 선택 + 엣지 이전 + duplicate 삭제. (2) 관계명 정규화 스크립트 `normalize_edge_names.py` — 비표준/NULL r.name을 10개 표준 타입으로 분류. (3) KG 백업 스크립트 `backup_kg.py`. (4) 추출 지시문 강화 — 국가/조직/인물 정식명 사용 규칙 추가, 약어 금지. (5) 이름 정규화 패치 — `graphiti_patches.py`에 `NAME_NORMALIZATION` 딕셔너리 + 텍스트 레벨 약어→정식명 치환 (Graphiti entity resolution 실패 방지). |
@@ -536,10 +539,10 @@ Envelope는 모델의 행동을, provenance는 KG의 진실성을 보호한다. 
 
 ### 중기 (chatbot 통합)
 
-- [x] chatbot.py KG 질의 통합 완료
+- [x] web_chat.py / legacy chatbot KG 질의 통합 완료
   - `kg_retrieve` 노드 (vectorstore 경로): retrieve → kg_retrieve → grade_documents
   - plan 경로: step_executor 내부에서 매 단계 KG 검색 (원자화 쿼리), `_merge_kg_contexts()`로 중복 제거
-  - KG lazy singleton (`_get_kg_service()`) + persistent event loop (`_kg_loop`)
+  - KG lazy singleton (`kg_runtime.service_runtime.get_kg_service()`) + persistent event loop
   - `kg_context`를 strategize/generate 프롬프트에 주입 (casual 제외)
   - KG 장애 시 graceful degradation (파이프라인 중단 없음)
 - [ ] generate_briefing()을 활용한 전략 브리핑 기능
