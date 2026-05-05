@@ -71,7 +71,8 @@ SELF_TOOLS = [
             "task_reports (queue), kg_status (graph stats), "
             "system_status (overview), server_logs (journald), "
             "research (public research_documents), curation (hub_curations), "
-            "static_pages (published /p pages), private_reports (admin-only reports), "
+            "static_pages (only published pages whose public URL is /p/{slug}; do not use for /posts, /ai-diary, /reports/research, /hub, or arbitrary website paths), "
+            "private_reports (admin-only reports), "
             "autonomous_project (self-running long-term project loop — list with no task_id, "
             "detail with task_id=<project_id>)."
         ),
@@ -106,7 +107,14 @@ SELF_TOOLS = [
                 },
                 "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
                 "task_id": {"type": "integer", "description": "For task_reports: specific task ID. For autonomous_project: specific project ID."},
-                "slug": {"type": "string", "description": "For research/curation/static_pages/private_reports: specific slug or filename."},
+                "slug": {
+                    "type": "string",
+                    "description": (
+                        "Specific public identifier. Use with source='static_pages' only when the identifier came from "
+                        "a cyber-lenin.com /p/{slug} URL or from a prior static_pages listing. For /reports/research/{slug} "
+                        "use source='research'; for /hub/{slug} use source='curation'; for /ai-diary or /posts use the relevant non-static source."
+                    ),
+                },
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
             "required": ["source"],
@@ -1003,7 +1011,10 @@ async def _exec_read_static_pages(
     rows = rows[:min(max(int(limit or 10), 1), 50)]
     if not rows:
         return "No static pages found."
-    lines = ["=== STATIC PAGES ===", "Use read_self(source='static_pages', slug='<slug>') for full detail."]
+    lines = [
+        "=== STATIC PAGES ===",
+        "Use read_self(source='static_pages', slug='<slug>') for full detail only for listed /p/{slug} pages.",
+    ]
     for r in rows:
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
         lines.append(

@@ -125,7 +125,7 @@ WEB_READ_SELF_TOOL = {
     "description": (
         "Read web-safe public information about Cyber-Lenin itself. Allowed sources "
         "are restricted to public overview, architecture, public outputs, public "
-        "research/static page/curation listings, and public autonomous project "
+        "diary entries, research, /p/{slug} static page, curation listings, and public autonomous project "
         "summaries. This web version never exposes private chat logs, task reports, "
         "server logs, credentials, raw file paths, or operational error traces."
     ),
@@ -138,6 +138,7 @@ WEB_READ_SELF_TOOL = {
                     "overview",
                     "architecture",
                     "public_outputs",
+                    "diary",
                     "research",
                     "static_pages",
                     "curation",
@@ -154,11 +155,19 @@ WEB_READ_SELF_TOOL = {
             },
             "keyword": {
                 "type": "string",
-                "description": "Optional public listing keyword filter for research/static_pages/curation.",
+                "description": "Optional public listing keyword filter for diary/research/static_pages/curation.",
+            },
+            "post_id": {
+                "type": "integer",
+                "description": "Optional public diary id for source='diary', matching /ai-diary/{id}.",
             },
             "slug": {
                 "type": "string",
-                "description": "Optional public slug for research/static_pages/curation detail.",
+                "description": (
+                    "Optional public slug for detail reads. Use source='static_pages' only for slugs from "
+                    "cyber-lenin.com/p/{slug} or a static_pages listing; /reports/research/{slug} is source='research', "
+                    "and /hub/{slug} is source='curation'."
+                ),
             },
         },
         "required": ["source"],
@@ -177,6 +186,7 @@ async def _exec_web_read_self(
     source: str = "overview",
     limit: int = 8,
     keyword: str | None = None,
+    post_id: int | None = None,
     slug: str | None = None,
 ) -> str:
     """Web-safe self-inspection for public visitors."""
@@ -186,11 +196,11 @@ async def _exec_web_read_self(
     if source == "model_config":
         return await _format_public_model_config()
 
-    if source in {"research", "static_pages", "curation"}:
+    if source in {"diary", "research", "static_pages", "curation"}:
         handler = TOOL_HANDLERS.get("read_self")
         if not handler:
             return "Public self-reading is unavailable right now."
-        return await handler(source=source, limit=limit, keyword=keyword, slug=slug)
+        return await handler(source=source, limit=limit, keyword=keyword, post_id=post_id, slug=slug)
 
     if source == "autonomous_project":
         rows = await asyncio.to_thread(
