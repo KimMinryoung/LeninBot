@@ -18,8 +18,8 @@
 #   svc status
 #       Show status of all services and timers.
 #
-# Services: neo4j embedding llama api telegram browser frontend
-# Timers:   experience razvedchik
+# Services: neo4j embedding api telegram browser frontend
+# Timers:   experience
 # Special:  all
 
 set -euo pipefail
@@ -48,8 +48,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Ordered by dependency
-ALL_SERVICES=(neo4j embedding llama api telegram browser frontend)
-ALL_TIMERS=(experience razvedchik)
+ALL_SERVICES=(neo4j embedding api telegram browser frontend)
+ALL_TIMERS=(experience)
 
 log()  { echo -e "${GREEN}[svc]${NC} $*"; }
 warn() { echo -e "${YELLOW}[svc]${NC} $*"; }
@@ -541,8 +541,8 @@ Commands:
   status
       Show status of all services and timers.
 
-Services: neo4j embedding llama api telegram browser frontend
-Timers:   experience razvedchik
+Services: neo4j embedding api telegram browser frontend
+Timers:   experience
 Special:  all
 USAGE
         exit 1
