@@ -1646,7 +1646,7 @@ async def _fetch_relevant_experiences(user_text: str, provider: str = "claude") 
     caller joins blocks via _join_context_blocks for clean section boundaries.
     """
     try:
-        from shared import search_experiential_memory
+        from memory_store.experiential import search_experiential_memory
         results = await asyncio.to_thread(search_experiential_memory, user_text, 3)
         if not results:
             return ""
@@ -1700,7 +1700,7 @@ async def _reflect_on_recent(user_id: int):
             return
 
         # Parse and save each insight
-        from shared import save_experiential_memory
+        from memory_store.experiential import save_experiential_memory
         valid_categories = {"lesson", "mistake", "pattern", "insight", "observation"}
         saved = 0
         for line in result.split("\n"):

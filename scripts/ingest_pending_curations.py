@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from db import query as db_query, execute as db_execute
-from shared import delete_corpus_source, ingest_to_corpus
+from corpus.store import delete_corpus_source, ingest_to_corpus
 
 logger = logging.getLogger(__name__)
 

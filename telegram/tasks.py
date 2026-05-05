@@ -538,7 +538,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         original_content = (row or {}).get("content") or task.get("content") or ""
         agent_type = (row or {}).get("agent_type") or task.get("agent_type")
 
-        from shared import create_task_in_db
+        from task_store import create_task_in_db
         child_content = (
             f"{_RESTART_COMPLETED_MARKER}\n"
             f"[POST-RESTART VERIFICATION ONLY]\n"
@@ -625,7 +625,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     parent_result = (row or {}).get("result") or ""
     parent_summary = _extract_summary(parent_result, 800) if parent_result else ""
 
-    from shared import create_task_in_db
+    from task_store import create_task_in_db
     retry_instruction = (
         f"[AUTO-RETRY after verification failure for task #{task_id}]\n"
         f"Original task:\n{original_content}\n\n"

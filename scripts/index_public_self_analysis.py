@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 import research_store
 from db import query as db_query
-from shared import index_public_self_analysis
+from corpus.public_index import index_public_self_analysis
 
 
 class _HTMLTextExtractor(HTMLParser):

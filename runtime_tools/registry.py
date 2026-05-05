@@ -90,7 +90,7 @@ TOOLS = [
 async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
     """Execute vector similarity search via chatbot module."""
     try:
-        from shared import fetch_corpus_source_context, similarity_search
+        from corpus.store import fetch_corpus_source_context, similarity_search
         docs = await asyncio.to_thread(similarity_search, query, num_results, layer, rerank=True)
         if not docs:
             return "No documents found."
@@ -828,7 +828,7 @@ TOOLS.append(PAY_AND_FETCH_TOOL)
 TOOL_HANDLERS["pay_and_fetch"] = PAY_AND_FETCH_TOOL_HANDLER
 
 # ── Telegram channel broadcast tool ─────────────────────────────────
-from shared import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
+from runtime_tools.broadcast import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
 
 TOOLS.append(BROADCAST_TO_CHANNEL_TOOL)
 TOOL_HANDLERS["broadcast_to_channel"] = broadcast_to_channel

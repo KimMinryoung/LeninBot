@@ -453,7 +453,7 @@ async def _exec_read_diary(
     post_id: int | None = None,
     diary_id: int | None = None,
 ) -> str:
-    from shared import fetch_diaries
+    from memory_store.queries import fetch_diaries
 
     target_id = post_id if post_id is not None else diary_id
     diaries = await asyncio.to_thread(fetch_diaries, limit, keyword, target_id)
@@ -491,7 +491,7 @@ async def _exec_read_chat_logs(
     limit: int = 20, hours_back: int | None = None, keyword: str | None = None,
     source: str = "web",
 ) -> str:
-    from shared import fetch_chat_logs
+    from memory_store.queries import fetch_chat_logs
 
     normalized_source = (source or "web").strip().lower()
     rows = await asyncio.to_thread(
@@ -621,7 +621,7 @@ async def _exec_read_chat_logs(
 async def _exec_read_processing_logs(
     limit: int = 5, hours_back: int | None = None, keyword: str | None = None,
 ) -> str:
-    from shared import fetch_chat_logs
+    from memory_store.queries import fetch_chat_logs
 
     rows = await asyncio.to_thread(
         fetch_chat_logs, limit, hours_back, keyword, include_logs=True,
@@ -685,7 +685,7 @@ async def _exec_read_task_reports(
         return header
 
     # List mode
-    from shared import fetch_task_reports
+    from memory_store.queries import fetch_task_reports
     rows = await asyncio.to_thread(fetch_task_reports, limit, status)
     if not rows:
         return "No task reports found."
@@ -1049,7 +1049,7 @@ async def _exec_read_server_logs(
     service: str = "telegram", minutes_back: int = 10, limit: int = 50, grep: str | list[str] | tuple[str, ...] | None = "",
 ) -> str:
     """Read journald logs for a systemd service."""
-    from shared import fetch_server_logs, _normalize_grep_terms, grep_matches_text
+    from ops.logs import fetch_server_logs, _normalize_grep_terms, grep_matches_text
 
     minutes_back = max(1, min(60, minutes_back))
     limit = max(1, min(200, limit))
@@ -1475,7 +1475,7 @@ async def _exec_delegate(
     priority: str = "normal",
     parent_task_id: int | None = None,
 ) -> str:
-    from shared import create_task_in_db
+    from task_store import create_task_in_db
 
     # Validate agent name
     try:
@@ -1527,7 +1527,7 @@ async def _exec_delegate(
 
     # Fetch recent chat history to give agent conversational backdrop
     try:
-        from shared import fetch_chat_logs
+        from memory_store.queries import fetch_chat_logs
         recent_chats = await asyncio.to_thread(
             fetch_chat_logs, 6, None, None, source="telegram"
         )
@@ -1583,7 +1583,7 @@ async def _exec_multi_delegate(
     priority: str = "normal",
 ) -> str:
     """Delegate multiple tasks in parallel with automatic synthesis."""
-    from shared import create_task_in_db
+    from task_store import create_task_in_db
     from db import execute as db_execute
 
     if len(tasks) < 2:
@@ -1628,7 +1628,7 @@ async def _exec_multi_delegate(
     # Fetch recent chat for context (shared across all subtasks)
     chat_block = ""
     try:
-        from shared import fetch_chat_logs
+        from memory_store.queries import fetch_chat_logs
         recent_chats = await asyncio.to_thread(
             fetch_chat_logs, 6, None, None, source="telegram"
         )
@@ -1789,7 +1789,7 @@ def build_run_agent_handler(chat_with_tools_fn):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def _exec_recall_experience(query: str, limit: int = 5) -> str:
-    from shared import search_experiential_memory
+    from memory_store.experiential import search_experiential_memory
 
     limit = max(1, min(10, limit))
     rows = await asyncio.to_thread(search_experiential_memory, query, limit)
@@ -1811,7 +1811,7 @@ async def _exec_save_self_analysis(
     category: str = "insight",
     source_context: str = "",
 ) -> str:
-    from shared import save_self_produced_analysis
+    from corpus.public_index import save_self_produced_analysis
 
     title = (title or "").strip()
     content = (content or "").strip()

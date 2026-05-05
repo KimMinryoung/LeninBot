@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from content_fetch.documents import convert_document
-from shared import delete_corpus_source, ingest_to_corpus
+from corpus.store import delete_corpus_source, ingest_to_corpus
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)

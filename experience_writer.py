@@ -43,7 +43,7 @@ def _init():
 def _get_embeddings():
     """Reuse the shared BGE-M3 instance (via embedding_server).
     Only one BGE-M3 (~2GB) instance must exist."""
-    from shared import _get_exp_embeddings
+    from corpus.embeddings import _get_exp_embeddings
     return _get_exp_embeddings()
 
 
