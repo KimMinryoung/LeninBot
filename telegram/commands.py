@@ -1499,7 +1499,7 @@ async def handle_message(message: Message):
             state_context,            # in-progress work
         )
         # Bind mission tool handler to this user
-        from telegram.tools import build_mission_handler
+        from runtime_tools.registry import build_mission_handler
         mission_handler = build_mission_handler(user_id)
         progress_cb = _ctx["make_progress_callback"](message.chat.id)
         bt = {}

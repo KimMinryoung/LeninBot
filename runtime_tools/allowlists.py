@@ -1,4 +1,4 @@
-"""Runtime tool allow-lists for Telegram-facing execution paths."""
+"""Runtime tool allow-lists for constrained execution paths."""
 
 from __future__ import annotations
 

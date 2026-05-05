@@ -23,7 +23,7 @@ from bot_config import (
     _claude, _openai_client, _deepseek_client, _config,
 )
 from runtime_profile import resolve_runtime_profile
-from telegram.tools import TOOLS, TOOL_HANDLERS
+from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ def _tool_names(tools: list[dict]) -> set[str]:
 
 
 def _assert_global_registry() -> tuple[set[str], set[str]]:
-    from telegram.tools import TOOLS, TOOL_HANDLERS
+    from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 
     tool_names = _tool_names(TOOLS)
     handler_names = set(TOOL_HANDLERS)
@@ -43,8 +43,8 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
 
 
 def _assert_orchestrator(tool_names: set[str]) -> None:
-    from telegram.tool_allowlists import ORCHESTRATOR_TOOL_NAMES, select_orchestrator_tools
-    from telegram.tools import TOOLS
+    from runtime_tools.allowlists import ORCHESTRATOR_TOOL_NAMES, select_orchestrator_tools
+    from runtime_tools.registry import TOOLS
 
     missing = sorted(set(ORCHESTRATOR_TOOL_NAMES) - tool_names)
     assert not missing, f"orchestrator allowlist references unknown tools: {missing}"

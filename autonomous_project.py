@@ -644,7 +644,7 @@ async def _run_one_tick(project: dict) -> dict:
     from claude_loop import dedupe_tools_by_name
     from bot_config import _get_autonomous_provider
     from runtime_profile import resolve_runtime_profile
-    import telegram.tools as tt_module
+    import runtime_tools.registry as tt_module
     from telegram.channel_broadcast import current_autonomous_project_id
 
     spec = get_agent("autonomous_project")

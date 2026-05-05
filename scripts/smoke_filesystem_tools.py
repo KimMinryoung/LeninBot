@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 
 async def _run() -> None:
-    from telegram.filesystem_tools import _exec_read_file
+    from runtime_tools.filesystem import _exec_read_file
 
     converted_dir = ROOT / "data" / "converted"
     converted_dir.mkdir(parents=True, exist_ok=True)

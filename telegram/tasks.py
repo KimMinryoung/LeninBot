@@ -561,7 +561,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
         logger.info("Created post-restart verification child task #%s for task #%s", child_id, task_id)
 
         try:
-            from telegram.tools import _exec_restart_service
+            from runtime_tools.registry import _exec_restart_service
             await _exec_restart_service(service="telegram")
         except Exception as e:
             logger.warning("telegram restart from verification failed: %s", e)

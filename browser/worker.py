@@ -91,11 +91,11 @@ def _init_tools(force_reload: bool = False):
     global _tools, _tool_handlers
     if _tools is not None and not force_reload:
         return _tools, _tool_handlers
-    import telegram.tools as telegram_tools_module
+    import runtime_tools.registry as runtime_tools_registry
     if force_reload:
-        telegram_tools_module = importlib.reload(telegram_tools_module)
-    _tools = telegram_tools_module.TOOLS
-    _tool_handlers = telegram_tools_module.TOOL_HANDLERS
+        runtime_tools_registry = importlib.reload(runtime_tools_registry)
+    _tools = runtime_tools_registry.TOOLS
+    _tool_handlers = runtime_tools_registry.TOOL_HANDLERS
     return _tools, _tool_handlers
 
 
@@ -118,7 +118,7 @@ async def execute_browser_task(task: dict) -> dict:
     from agents.base import AgentSpec
     from claude_loop import chat_with_tools, dedupe_tools_by_name
     from self_tools import build_task_context_tools
-    from telegram.tools import MISSION_TOOL, build_mission_handler
+    from runtime_tools.registry import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
     from db import query as db_query, execute as db_execute, query_one as db_query_one
 

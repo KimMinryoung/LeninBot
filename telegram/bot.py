@@ -38,8 +38,8 @@ from bot_config import (
 )
 from runtime_profile import resolve_runtime_profile
 from telegram.schema import ensure_summary_tables, ensure_telegram_tables
-from telegram.tool_allowlists import select_orchestrator_tools
-from telegram.tools import TOOLS, TOOL_HANDLERS
+from runtime_tools.allowlists import select_orchestrator_tools
+from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram.tasks import (
     process_task, system_monitor,
@@ -1760,7 +1760,7 @@ async def bot_main():
             history.append({"role": "user", "content": prompt})
 
             # Run orchestrator — budget enough for response + optional redelegate call
-            from telegram.tools import build_mission_handler
+            from runtime_tools.registry import build_mission_handler
             reply = await _chat_with_tools(
                 history,
                 budget_usd=0.15,
@@ -1791,8 +1791,8 @@ async def bot_main():
         current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
 
         from self_tools import build_task_context_tools
-        from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
-        from telegram.tools import build_mission_handler
+        from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+        from runtime_tools.registry import build_mission_handler
 
         # ── Agent-aware task execution ──────────────────────────────
         agent_type = task.get("agent_type") or "analyst"

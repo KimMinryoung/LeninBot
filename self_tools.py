@@ -1319,7 +1319,7 @@ def get_agent_tool_manifest(
 ) -> dict:
     """Return runtime tool visibility for orchestrator and specialist agents."""
     from agents import get_agent, list_agents
-    from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+    from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
 
     requested = (agent or "all").strip().lower()
     base_tools = _dedupe_tools(BASE_TOOLS)
@@ -1332,14 +1332,14 @@ def get_agent_tool_manifest(
 
     def orchestrator_manifest() -> dict:
         if orchestrator_tools is None:
-            from telegram.tool_allowlists import select_orchestrator_tools
+            from runtime_tools.allowlists import select_orchestrator_tools
 
             tools = _dedupe_tools(select_orchestrator_tools(base_tools))
             return {
                 "runtime": "orchestrator",
                 "available": True,
                 "source": "static_allowlist",
-                "reason": "reported from telegram.tool_allowlists outside an active orchestrator context",
+                "reason": "reported from runtime_tools.allowlists outside an active orchestrator context",
                 "tool_count": len(tools),
                 "tools": format_tools(tools),
             }
@@ -1743,7 +1743,7 @@ def build_run_agent_handler(chat_with_tools_fn):
 
         try:
             from agents import get_agent
-            from telegram.tools import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+            from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
 
             spec = get_agent(agent)
             agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)

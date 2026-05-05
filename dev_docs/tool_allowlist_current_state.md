@@ -11,9 +11,9 @@ not a full redesign.
 Tool allow-lists are not currently managed from one JSON document. They are
 split across four runtime paths:
 
-1. Global tool registry: `telegram/tools.py`
+1. Global tool registry: `runtime_tools/registry.py`
 2. Telegram orchestrator allow-list: `ORCHESTRATOR_TOOL_NAMES` in
-   `telegram/tool_allowlists.py`
+   `runtime_tools/allowlists.py`
 3. Specialist agent allow-lists: `AgentSpec.tools` in `agents/*.py`
 4. Public web chat allow-list: `_WEB_ALLOWED_TOOLS` plus `WEB_READ_SELF_TOOL`
    in `web_chat.py`
@@ -24,7 +24,7 @@ runtime settings onto registered `AgentSpec` objects.
 
 ## Global Registry
 
-`telegram/tools.py` builds the full set of possible tools and handlers. Some
+`runtime_tools/registry.py` builds the full set of possible tools and handlers. Some
 tool families now live in focused modules that export both tool definitions and
 handler maps:
 
@@ -33,11 +33,11 @@ handler maps:
 - DB/query/publishing tools
 - post/research/private-report tools
 - crypto and channel tools
-- `telegram/fetch_tools.py`: URL/file/document fetch and conversion tools
-- `telegram/filesystem_tools.py`: programmer filesystem and Python execution tools
-- `telegram/media_tools.py`: image generation and browser automation tools
-- `telegram/social_tools.py`: Moltbook and Mersoom tools
-- `telegram/a2a_tools.py`: A2A client tool
+- `runtime_tools/fetch.py`: URL/file/document fetch and conversion tools
+- `runtime_tools/filesystem.py`: programmer filesystem and Python execution tools
+- `runtime_tools/media.py`: image generation and browser automation tools
+- `runtime_tools/social.py`: Moltbook and Mersoom tools
+- `runtime_tools/a2a.py`: A2A client tool
 
 This registry is not an allow-list. It is the superset from which each runtime
 selects.
@@ -45,7 +45,7 @@ selects.
 ## Orchestrator
 
 The Telegram orchestrator does not use `AgentSpec`. It has a curated set in
-`telegram/tool_allowlists.py`:
+`runtime_tools/allowlists.py`:
 
 ```python
 ORCHESTRATOR_TOOL_NAMES = {
@@ -147,7 +147,7 @@ orchestrator and `AgentSpec`.
 Important detail: when called from an active orchestrator tool context, the tool
 wrapper reports the exact `merged_tools` closure. Outside that context,
 `get_agent_tool_manifest(agent="orchestrator")` reconstructs the static
-orchestrator view from `telegram.tool_allowlists.select_orchestrator_tools()`.
+orchestrator view from `runtime_tools.allowlists.select_orchestrator_tools()`.
 
 `scripts/smoke_tool_allowlists.py` verifies:
 
@@ -174,7 +174,7 @@ The remaining awkward case is:
 Future cleanup options:
 
 - Keep specialist allow-lists in `AgentSpec.tools`.
-- Keep the orchestrator allow-list in `telegram/tool_allowlists.py` unless a
+- Keep the orchestrator allow-list in `runtime_tools/allowlists.py` unless a
   future `ORCHESTRATOR` spec-like object can avoid making `_chat_with_tools`
   harder to reason about.
 - Consider a `WEB_CHAT` spec-like object later, but preserve the web-safe

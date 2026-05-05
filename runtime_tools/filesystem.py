@@ -1,4 +1,4 @@
-"""Filesystem and local Python execution tools for Telegram agents."""
+"""Filesystem and local Python execution runtime tools."""
 
 from __future__ import annotations
 

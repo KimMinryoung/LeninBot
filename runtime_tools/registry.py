@@ -1,7 +1,4 @@
-"""telegram_tools.py — Tool definitions and execution handlers for Telegram bot.
-
-Extracted from telegram_bot.py for modularity.
-"""
+"""Global runtime tool registry and execution handlers."""
 
 import os
 import sys
@@ -11,11 +8,11 @@ import logging
 import re
 
 from secrets_loader import get_secret
-from telegram.a2a_tools import A2A_TOOL_HANDLERS, A2A_TOOLS
-from telegram.fetch_tools import FETCH_TOOL_HANDLERS, FETCH_TOOLS
-from telegram.filesystem_tools import FILESYSTEM_TOOL_HANDLERS, FILESYSTEM_TOOLS
-from telegram.media_tools import MEDIA_TOOL_HANDLERS, MEDIA_TOOLS
-from telegram.social_tools import SOCIAL_TOOL_HANDLERS, SOCIAL_TOOLS
+from runtime_tools.a2a import A2A_TOOL_HANDLERS, A2A_TOOLS
+from runtime_tools.fetch import FETCH_TOOL_HANDLERS, FETCH_TOOLS
+from runtime_tools.filesystem import FILESYSTEM_TOOL_HANDLERS, FILESYSTEM_TOOLS
+from runtime_tools.media import MEDIA_TOOL_HANDLERS, MEDIA_TOOLS
+from runtime_tools.social import SOCIAL_TOOL_HANDLERS, SOCIAL_TOOLS
 
 logger = logging.getLogger(__name__)
 

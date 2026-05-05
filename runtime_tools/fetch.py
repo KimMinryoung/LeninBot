@@ -1,4 +1,4 @@
-"""Fetch, download, and document-conversion tools for Telegram agents."""
+"""Fetch, download, and document-conversion runtime tools."""
 
 from __future__ import annotations
 

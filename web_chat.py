@@ -20,7 +20,7 @@ from bot_config import (
 from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
-from telegram.tools import TOOLS, TOOL_HANDLERS
+from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
 from db import query as db_query, execute as db_execute
 from agents.base import load_political_line_body
