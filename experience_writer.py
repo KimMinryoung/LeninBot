@@ -10,13 +10,29 @@ lessons/mistakes/insights that make the agent smarter over time.
 
 import json
 import logging
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 
 from db import query as db_query, execute as db_execute
+from memory_store.queries import fetch_chat_logs
 from secrets_loader import get_secret
-from shared import extract_text_content, KST, MODEL_MAIN, MODEL_LIGHT
+
+KST = timezone(timedelta(hours=9))
+MODEL_MAIN = os.getenv("EXPERIENCE_WRITER_MODEL", "gemini-3.1-flash-lite-preview")
 
 logger = logging.getLogger("experience_writer")
+
+
+def _extract_text_content(content) -> str:
+    """Normalize LLM response content to a plain string."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return str(content)
 
 # ── Lazy-initialized clients ────────────────────────────────────
 _llm = None
@@ -72,29 +88,32 @@ def _ensure_table():
 
 # ── Data collection ─────────────────────────────────────────────
 
-def _collect_web_chats(since: str, until: str) -> list[dict]:
+def _collect_web_chats(hours_back: int) -> list[dict]:
+    """Use the same chat-log helper path as diary/read_self web chat lookup."""
     try:
-        return db_query(
-            """SELECT user_query, bot_answer, route, processing_logs, created_at
-               FROM chat_logs
-               WHERE created_at BETWEEN %s AND %s
-               ORDER BY created_at ASC LIMIT 200""",
-            (since, until),
+        rows = fetch_chat_logs(
+            limit=20,
+            hours_back=hours_back,
+            include_logs=True,
+            source="web",
+            group_web_contexts=True,
+            per_context_limit=10,
         )
+        return rows
     except Exception as e:
         logger.warning("[경험] web chat 수집 실패: %s", e)
         return []
 
 
-def _collect_telegram_chats(since: str, until: str) -> list[dict]:
+def _collect_telegram_chats(hours_back: int) -> list[dict]:
+    """Use the same chat-log helper path as diary/read_self Telegram lookup."""
     try:
-        return db_query(
-            """SELECT user_id, role, content, created_at
-               FROM telegram_chat_history
-               WHERE created_at BETWEEN %s AND %s
-               ORDER BY created_at ASC LIMIT 200""",
-            (since, until),
+        rows = fetch_chat_logs(
+            limit=200,
+            hours_back=hours_back,
+            source="telegram",
         )
+        return list(reversed(rows))
     except Exception as e:
         logger.warning("[경험] telegram chat 수집 실패: %s", e)
         return []
@@ -119,13 +138,49 @@ def _collect_telegram_tasks(since: str, until: str) -> list[dict]:
 def _format_web_chats(rows: list[dict]) -> str:
     if not rows:
         return "(No web conversations)"
-    lines = []
+
+    sessions: dict[str, dict] = {}
     for r in rows:
-        q = str(r.get("user_query", ""))[:200]
-        a = str(r.get("bot_answer", ""))[:300]
-        route = r.get("route", "?")
-        lines.append(f"[{route}] User: {q}\n  Bot: {a}")
-    return "\n".join(lines)
+        session_id = str(r.get("session_id", "") or "").strip() or "unknown"
+        fingerprint = str(r.get("fingerprint", "") or "").strip() or "unknown"
+        key = f"{fingerprint}::{session_id}"
+        bucket = sessions.setdefault(
+            key,
+            {
+                "rows": [],
+                "session_id": session_id,
+                "fingerprint": fingerprint,
+                "latest": r.get("created_at"),
+            },
+        )
+        bucket["rows"].append(r)
+        if _sort_key(r.get("created_at")) > _sort_key(bucket.get("latest")):
+            bucket["latest"] = r.get("created_at")
+
+    blocks = []
+    for _key, bucket in sorted(
+        sessions.items(),
+        key=lambda item: _sort_key(item[1].get("latest")),
+        reverse=True,
+    ):
+        lines = [
+            (
+                f"=== Web visitor fingerprint {bucket['fingerprint']} | "
+                f"session {bucket['session_id']} | {len(bucket['rows'])} entries ==="
+            ),
+            "Treat this as one visitor context. Do not merge it with other web sessions.",
+        ]
+        for r in sorted(bucket["rows"], key=lambda row: _sort_key(row.get("created_at"))):
+            q = str(r.get("user_query", ""))[:200]
+            a = str(r.get("bot_answer", ""))[:300]
+            route = r.get("route", "?")
+            ts = _format_ts(r.get("created_at"))
+            if q:
+                lines.append(f"[{ts} | {route}] Visitor: {q}")
+            if a:
+                lines.append(f"[{ts} | {route}] Lenin: {a}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def _format_telegram_chats(rows: list[dict]) -> str:
@@ -148,6 +203,33 @@ def _format_tasks(rows: list[dict]) -> str:
         result = str(r.get("result", ""))[:500]
         lines.append(f"Task: {task}\n  Result: {result}")
     return "\n---\n".join(lines)
+
+
+def _sort_key(ts) -> float:
+    if ts is None:
+        return 0.0
+    if hasattr(ts, "timestamp"):
+        try:
+            return float(ts.timestamp())
+        except Exception:
+            return 0.0
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+    return 0.0
+
+
+def _format_ts(ts) -> str:
+    if ts is None:
+        return "unknown-time"
+    if hasattr(ts, "astimezone"):
+        try:
+            return ts.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
+        except Exception:
+            return str(ts)
+    return str(ts)[:19]
 
 
 # ── LLM compression ────────────────────────────────────────────
@@ -196,16 +278,8 @@ def _compress_experiences(web_chats: str, tg_chats: str, tasks: str,
 
     try:
         response = _llm.invoke(prompt)
-        text = extract_text_content(response.content).strip()
-
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-
-        entries = json.loads(text)
+        text = _extract_text_content(response.content).strip()
+        entries = _loads_json_array(text)
         if not isinstance(entries, list):
             logger.warning("[경험] LLM이 리스트가 아닌 결과 반환")
             return []
@@ -223,6 +297,26 @@ def _compress_experiences(web_chats: str, tg_chats: str, tasks: str,
     except Exception as e:
         logger.error("[경험] LLM 압축 실패: %s", e)
         return []
+
+
+def _loads_json_array(text: str) -> list:
+    """Parse a JSON array from an LLM response with defensive cleanup."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("No JSON array found in LLM response")
+    return json.loads(text[start:end + 1])
 
 
 # ── Deduplication ───────────────────────────────────────────────
@@ -273,6 +367,15 @@ def _store_entries(entries: list[dict], period_start: str, period_end: str) -> i
     return stored
 
 
+def _run_pending_curation_ingest() -> None:
+    """Run the curation corpus ingest that shares this daily timer."""
+    try:
+        from scripts.ingest_pending_curations import run as _ingest_curations
+        _ingest_curations()
+    except Exception as e:
+        logger.warning("[경험] curation ingest step failed: %s", e)
+
+
 # ── Main pipeline ───────────────────────────────────────────────
 
 def write_experiences():
@@ -287,28 +390,18 @@ def write_experiences():
     since = period_start.isoformat()
     until = period_end.isoformat()
 
-    # Check if already processed this period (prevent double-runs)
-    try:
-        existing = db_query(
-            "SELECT 1 FROM experiential_memory WHERE period_end > %s LIMIT 1",
-            (since,),
-        )
-        if existing:
-            logger.info("[경험] 이미 처리된 기간 — 건너뜀")
-            return
-    except Exception:
-        pass
-
     logger.info("🧠 [경험] %s ~ %s 기간 경험 수집 시작", since[:16], until[:16])
 
     # Collect data
-    web_rows = _collect_web_chats(since, until)
-    tg_rows = _collect_telegram_chats(since, until)
+    hours_back = 24
+    web_rows = _collect_web_chats(hours_back)
+    tg_rows = _collect_telegram_chats(hours_back)
     task_rows = _collect_telegram_tasks(since, until)
 
     total = len(web_rows) + len(tg_rows) + len(task_rows)
     if total == 0:
         logger.info("[경험] 지난 24시간 활동 없음 — 건너뜀")
+        _run_pending_curation_ingest()
         return
 
     logger.info("[경험] 수집 완료: web=%d, telegram=%d, tasks=%d", len(web_rows), len(tg_rows), len(task_rows))
@@ -329,6 +422,7 @@ def write_experiences():
 
     if not entries:
         logger.info("[경험] 기록할 만한 경험 없음")
+        _run_pending_curation_ingest()
         return
 
     logger.info("[경험] LLM이 %d건의 경험 항목 추출", len(entries))
@@ -340,13 +434,8 @@ def write_experiences():
 
     # Process any hub curations that were published since the last run and still
     # need their source body chunked + embedded into lenin_corpus. Runs under the
-    # same daily timer so we don't need a separate systemd unit. Failures don't
-    # propagate — experience-writing itself has already succeeded by this point.
-    try:
-        from scripts.ingest_pending_curations import run as _ingest_curations
-        _ingest_curations()
-    except Exception as e:
-        logger.warning("[경험] curation ingest step failed: %s", e)
+    # same daily timer so we don't need a separate systemd unit.
+    _run_pending_curation_ingest()
 
 
 if __name__ == "__main__":
