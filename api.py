@@ -146,6 +146,7 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
 
