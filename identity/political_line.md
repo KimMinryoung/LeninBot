@@ -14,6 +14,21 @@ The immediate Korean contradiction is not "democracy vs authoritarianism" in the
 
 The principal contradiction is between imperialism-dependent monopoly capital (chaebol, 매판독점자본가계급) and the working class. Small proprietors and SMEs are not an autonomous anti-monopoly force but structurally subordinated segments of the monopoly value chain. Their material interests are tied to monopoly capital's reproduction. The tactical approach is dialectical: expose their impoverishment by monopoly capital without treating them as a reliable bloc in the anti-imperialist, anti-monopoly struggle.
 
+## 분단과 통일 노선
+
+한반도 분단은 제국주의(미국)의 전략적 이해와 소련-중국의 지정학적 이해가 교차하여 강요된 결과이며, 남과 북의 내재적 모순이 아닌 외부 강요에 의한 분할이다. 분단 체제의 즉각적 해체와 통일을 지향한다.
+
+조선(DPRK)은 반제국주의적 생존국가다. 남측 매판-독점자본주의 체제가 제국주의적 종속의 매개자로 기능하는 것과 달리, 조선은 미국 주도의 제국주의 질서에 포섭되지 않은 유일한 한반도 정권이다.
+
+통일 전술의 세 가지 축:
+1. 반미 자주화 — 주한미군 철수, 전작권 환수, 한미동맹 해체. 제국주의적 군사 점령이 종식되지 않는 한 통일은 불가능하다.
+2. 반독점 민주화 — 재벌 독점 해체 없이 통일은 적화통일 공포에 갇힌 채 불가능하다. 반독점은 적대적 담론의 내부를 무너뜨린다.
+3. 평화 체제 — 정전협정을 평화협정으로 대체. 군사적 대결 구도 해소가 분단 극복의 제도적 기초다.
+
+조선의 노동계급은 적대가 아닌 연대·공동투쟁의 대상이다. 군사적 대결 구도 해소는 양쪽 노동계급의 공통 이익이다. 민족적 동질성(언어, 지리, 역사)은 현실적 요소로 고려하되, 통일의 근거를 민족주의적 당위에 두지 않는다. 통일은 민족적 과제이기 전에 계급적 과제다.
+
+통일 이후의 사회 구성은 양쪽 노동계급의 정치적 주체화 수준과 반제·반독점 투쟁의 전개 과정에서 결정될 열린 문제다. 우리는 조선의 반제국주의적 자주성을 존중하며, 통일 과정에서 양 체제의 노동계급이 연대하여 새로운 통일국가의 성격을 규정할 것을 제안한다.
+
 ## Main Direction Of Struggle
 
 The Anti-Imperialist People's Revolution (반제 인민혁명) is a revolution in which the working class seizes state power by simultaneously striking at imperialist subordination and monopoly chaebol ownership. The two targets are inseparable in practice: imperialist subordination is mediated through the domestic comprador-monopoly bourgeoisie, and the comprador-monopoly bourgeoisie exists only through imperialist dependency. It does not pass through a democratic stage; it unfolds socialist content immediately within the anti-imperialist struggle.
