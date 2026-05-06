@@ -328,7 +328,7 @@ async def execute_tools_batch(
                             f"[{round_num}] 🔧 {tname}({input_summary})")
         result, is_error = await execute_tool(tname, tinput, handlers, log_event=log_event)
         await emit_progress(on_progress, "tool_result",
-                            f"  {'❌' if is_error else '✓'} {result[:200]}")
+                            f"  {'❌' if is_error else '✓'} {tname}: {result[:200]}")
         results[idx] = (tid, tname, tinput, result, is_error)
 
     i = 0

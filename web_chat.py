@@ -617,6 +617,44 @@ def _format_sse(data: dict) -> str:
 
 _SSE_HEARTBEAT_INTERVAL_SEC = 15.0
 
+_WEB_TOOL_LABELS = {
+    "knowledge_graph_search": "지식 그래프 검색",
+    "vector_search": "문서 검색",
+    "web_search": "웹 검색",
+    "fetch_url": "페이지 읽기",
+    "get_finance_data": "시장 데이터 조회",
+    "check_wallet": "지갑 정보 확인",
+    "read_self": "공개 자기 정보 조회",
+}
+
+_TOOL_PROGRESS_RE = re.compile(r"\]\s*(?:[^\w\s]+)?\s*([A-Za-z_][A-Za-z0-9_]*)\((.*)\)\s*$")
+_TOOL_RESULT_RE = re.compile(r"^\s*(?:\S+)\s+([A-Za-z_][A-Za-z0-9_]*):")
+
+
+def _tool_progress_payload(detail: str, *, done: bool = False) -> dict:
+    """Return a public-safe structured tool progress SSE payload."""
+    raw = str(detail or "")
+    match = _TOOL_RESULT_RE.search(raw) if done else _TOOL_PROGRESS_RE.search(raw)
+    tool_name = match.group(1) if match else ""
+    label = _WEB_TOOL_LABELS.get(tool_name, tool_name or "도구")
+    state = "완료" if done else "사용 중"
+    payload = {
+        "type": "tool_done" if done else "tool_start",
+        "node": "tool",
+        "tool_name": tool_name,
+        "label": label,
+        "content": f"{label} {state}",
+    }
+    if not done and tool_name == "web_search" and match:
+        try:
+            args = json.loads(match.group(2))
+            query = str(args.get("query") or "").strip()
+            if query:
+                payload["content"] = f"{label} 중: {query[:120]}"
+        except Exception:
+            pass
+    return payload
+
 
 # ── Main handler ─────────────────────────────────────────────────────
 
@@ -663,7 +701,10 @@ async def handle_web_chat(
 
     async def on_progress(event: str, detail: str):
         if event == "tool_call":
+            await queue.put(_format_sse(_tool_progress_payload(detail)))
             await queue.put(_format_sse({"type": "log", "node": "tool", "content": detail}))
+        elif event == "tool_result":
+            await queue.put(_format_sse(_tool_progress_payload(detail, done=True)))
         elif event == "thinking":
             await queue.put(_format_sse({"type": "log", "node": "thinking", "content": detail}))
         elif event == "warning":
