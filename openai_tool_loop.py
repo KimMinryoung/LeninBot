@@ -22,6 +22,7 @@ import re
 import uuid
 import httpx
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
@@ -478,6 +479,131 @@ async def _call_api(
         return resp.json()
 
 
+def _obj_get(obj, key: str, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _to_tool_call_namespace(tc: dict) -> SimpleNamespace:
+    fn = tc.get("function") or {}
+    return SimpleNamespace(
+        id=tc.get("id"),
+        type=tc.get("type") or "function",
+        function=SimpleNamespace(
+            name=fn.get("name"),
+            arguments=fn.get("arguments") or "",
+        ),
+    )
+
+
+async def _call_sdk_raw_stream(kwargs: dict, on_progress) -> SimpleNamespace:
+    """Stream Chat Completions chunks without the SDK auto-parse helper.
+
+    ``client.chat.completions.stream()`` rejects non-strict tools before the
+    request is sent. The lower-level ``create(stream=True)`` path yields raw
+    chunks and lets us accumulate text/tool deltas ourselves, so permissive
+    LeninBot tool schemas can still stream final answer text.
+    """
+    client = kwargs.pop("_client")
+    request = dict(kwargs)
+    request["stream"] = True
+    request.setdefault("stream_options", {"include_usage": True})
+
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    refusal_parts: list[str] = []
+    tool_parts: dict[int, dict] = {}
+    finish_reason = "stop"
+    usage = None
+    response_id = None
+    created = None
+    model = request.get("model")
+
+    try:
+        stream = await client.chat.completions.create(**request)
+    except Exception as e:
+        if "stream_options" not in request or "stream_options" not in str(e):
+            raise
+        logger.info("SDK raw streaming retrying without stream_options: %s", e)
+        request.pop("stream_options", None)
+        stream = await client.chat.completions.create(**request)
+
+    async for chunk in stream:
+        response_id = response_id or _obj_get(chunk, "id")
+        created = created or _obj_get(chunk, "created")
+        model = _obj_get(chunk, "model", model)
+        usage = _obj_get(chunk, "usage", usage) or usage
+        choices = _obj_get(chunk, "choices", []) or []
+        if not choices:
+            continue
+        choice = choices[0]
+        finish_reason = _obj_get(choice, "finish_reason", None) or finish_reason
+        delta = _obj_get(choice, "delta", None) or {}
+
+        text_delta = _obj_get(delta, "content", None) or ""
+        if text_delta:
+            content_parts.append(text_delta)
+            await emit_progress(on_progress, "text_delta", text_delta)
+
+        reasoning_delta = (
+            _obj_get(delta, "reasoning_content", None)
+            or _obj_get(delta, "reasoning", None)
+            or ""
+        )
+        if reasoning_delta:
+            reasoning_parts.append(reasoning_delta)
+
+        refusal_delta = _obj_get(delta, "refusal", None) or ""
+        if refusal_delta:
+            refusal_parts.append(refusal_delta)
+
+        for tc_delta in _obj_get(delta, "tool_calls", None) or []:
+            index = _obj_get(tc_delta, "index", None)
+            if index is None:
+                index = len(tool_parts)
+            tc = tool_parts.setdefault(
+                int(index),
+                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+            )
+            tc_id = _obj_get(tc_delta, "id", None)
+            if tc_id:
+                tc["id"] = tc_id
+            tc_type = _obj_get(tc_delta, "type", None)
+            if tc_type:
+                tc["type"] = tc_type
+            fn_delta = _obj_get(tc_delta, "function", None) or {}
+            fn_name = _obj_get(fn_delta, "name", None)
+            if fn_name:
+                tc["function"]["name"] += fn_name
+            fn_args = _obj_get(fn_delta, "arguments", None)
+            if fn_args:
+                tc["function"]["arguments"] += fn_args
+
+    tool_calls = [
+        _to_tool_call_namespace(tc)
+        for _, tc in sorted(tool_parts.items())
+        if tc.get("id") and (tc.get("function") or {}).get("name")
+    ] or None
+    message = SimpleNamespace(
+        content="".join(content_parts),
+        tool_calls=tool_calls,
+        reasoning_content="".join(reasoning_parts),
+        refusal="".join(refusal_parts) or None,
+    )
+    choice = SimpleNamespace(
+        finish_reason=finish_reason,
+        message=message,
+    )
+    return SimpleNamespace(
+        id=response_id,
+        created=created,
+        model=model,
+        choices=[choice],
+        usage=usage,
+    )
+
+
 async def _call_sdk(
     client,
     model: str,
@@ -513,29 +639,10 @@ async def _call_sdk(
         if include_parallel_tool_calls:
             kwargs["parallel_tool_calls"] = parallel_tool_calls
 
-    # The OpenAI SDK streaming helper auto-parses function tools. Current
-    # registered LeninBot tools intentionally include permissive / optional
-    # schemas, so most are not OpenAI "strict" tools. Streaming with those
-    # schemas fails locally before the request is sent:
-    #   `vector_search` is not strict. Only `strict` function tools can be auto-parsed
-    # Use the regular Chat Completions call for tool-capable turns; the loop
-    # still emits tool/thinking progress after the response is received.
-    has_non_strict_tools = any(
-        not ((t.get("function") or {}).get("strict") is True)
-        for t in (tools or [])
-    )
-    if on_progress is None or has_non_strict_tools:
-        if on_progress is not None and has_non_strict_tools:
-            logger.info("SDK streaming disabled for non-strict tool schemas")
+    if on_progress is None:
         return await client.chat.completions.create(**kwargs)
 
-    async with client.chat.completions.stream(**kwargs) as stream:
-        async for event in stream:
-            if getattr(event, "type", None) == "content.delta":
-                delta = getattr(event, "delta", "") or ""
-                if delta:
-                    await emit_progress(on_progress, "text_delta", delta)
-        return await stream.get_final_completion()
+    return await _call_sdk_raw_stream({"_client": client, **kwargs}, on_progress)
 
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
