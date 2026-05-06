@@ -8,6 +8,7 @@ Bridges api.py to the unified agent system. Handles:
 """
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import re
@@ -614,6 +615,9 @@ def _format_sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+_SSE_HEARTBEAT_INTERVAL_SEC = 15.0
+
+
 # ── Main handler ─────────────────────────────────────────────────────
 
 async def handle_web_chat(
@@ -730,14 +734,35 @@ async def handle_web_chat(
 
     llm_task = asyncio.create_task(_run_llm())
 
-    # Yield SSE events as they arrive
-    while True:
-        event = await queue.get()
-        if event is None:
-            break
-        yield event
+    # Yield SSE events as they arrive. Some provider/tool combinations do not
+    # emit token deltas, so send SSE comments periodically to keep proxies and
+    # browser clients from treating a long model call as a dead connection.
+    stream_finished = False
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=_SSE_HEARTBEAT_INTERVAL_SEC,
+                )
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if event is None:
+                break
+            yield event
 
-    await llm_task  # ensure completion
+        stream_finished = True
+        await llm_task  # ensure completion
+    except (asyncio.CancelledError, GeneratorExit):
+        logger.info("Web chat client disconnected; cancelling LLM task session=%s", session_id)
+        llm_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await llm_task
+        raise
+    finally:
+        if not stream_finished and not llm_task.done():
+            llm_task.cancel()
 
     if error_holder:
         yield _format_sse({"type": "error", "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."})
