@@ -1,0 +1,277 @@
+"""Autonomous publication controls.
+
+This module holds the policy that sits around public-bound autonomous output:
+publication pacing and Stasova publication-security review. Telegram channel
+broadcasts are intentionally not treated as an external-platform tier here; the
+channel is an owned Cyber-Lenin distribution surface.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+from datetime import datetime
+
+from db import execute as db_execute, query_one as db_query_one
+from telegram.channel_broadcast import current_autonomous_project_id
+
+logger = logging.getLogger(__name__)
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        logger.warning("invalid integer env %s=%r; using %s", name, os.getenv(name), default)
+        return default
+
+
+DEFAULT_MAX_PUBLICATIONS_PER_DAY = _env_int("AUTONOMOUS_MAX_PUBLICATIONS_PER_DAY", 3)
+DEFAULT_COOLDOWN_AFTER_PUBLISH_MINUTES = _env_int(
+    "AUTONOMOUS_COOLDOWN_AFTER_PUBLISH_MINUTES", 180
+)
+
+_AUDIT_TABLE_ENSURED = False
+
+
+def _project_id() -> int | None:
+    pid = current_autonomous_project_id.get()
+    return int(pid) if pid is not None else None
+
+
+def ensure_publication_audit_table() -> None:
+    global _AUDIT_TABLE_ENSURED
+    if _AUDIT_TABLE_ENSURED:
+        return
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS autonomous_publication_audits (
+            id SERIAL PRIMARY KEY,
+            project_id INTEGER,
+            publication_kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            public_url TEXT,
+            content TEXT NOT NULL,
+            review_report TEXT NOT NULL,
+            warning_detected BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db_execute("""
+        CREATE INDEX IF NOT EXISTS autonomous_publication_audits_project_created_idx
+        ON autonomous_publication_audits(project_id, created_at DESC)
+    """)
+    _AUDIT_TABLE_ENSURED = True
+
+
+def _log_autonomous_event(project_id: int, event_type: str, content: str, meta: dict | None = None) -> None:
+    try:
+        db_execute(
+            "INSERT INTO autonomous_project_events(project_id, event_type, content, meta) "
+            "VALUES (%s, %s, %s, %s)",
+            (project_id, event_type, content[:4000], json.dumps(meta or {})),
+        )
+    except Exception as exc:
+        logger.warning("autonomous publication event log failed: %s", exc)
+
+
+def check_autonomous_publication_allowed(publication_kind: str) -> tuple[bool, str]:
+    """Return whether the current autonomous project may publish now.
+
+    Non-autonomous callers are allowed; this control is scoped to scheduled
+    autonomous projects via current_autonomous_project_id.
+    """
+    project_id = _project_id()
+    if project_id is None:
+        return True, "not an autonomous project publication"
+
+    try:
+        row = db_query_one(
+            "SELECT max_publications_per_day, cooldown_after_publish_minutes "
+            "FROM autonomous_projects WHERE id = %s",
+            (project_id,),
+        ) or {}
+    except Exception as exc:
+        logger.warning("publication pacing config lookup failed: %s", exc)
+        row = {}
+
+    max_per_day = int(row.get("max_publications_per_day") or DEFAULT_MAX_PUBLICATIONS_PER_DAY)
+    cooldown_minutes = int(
+        row.get("cooldown_after_publish_minutes") or DEFAULT_COOLDOWN_AFTER_PUBLISH_MINUTES
+    )
+
+    count_row = db_query_one(
+        """
+        SELECT COUNT(*)::int AS n
+          FROM autonomous_project_events
+         WHERE project_id = %s
+           AND event_type = 'publication_created'
+           AND created_at >= NOW() - INTERVAL '24 hours'
+        """,
+        (project_id,),
+    ) or {"n": 0}
+    if max_per_day > 0 and int(count_row["n"]) >= max_per_day:
+        return (
+            False,
+            f"Autonomous publication blocked: project #{project_id} already published "
+            f"{count_row['n']}/{max_per_day} items in the last 24 hours.",
+        )
+
+    if cooldown_minutes > 0:
+        last_row = db_query_one(
+            """
+            SELECT created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'publication_created'
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        if last_row and last_row.get("created_at"):
+            elapsed = datetime.now(last_row["created_at"].tzinfo) - last_row["created_at"]
+            remaining = cooldown_minutes - int(elapsed.total_seconds() // 60)
+            if remaining > 0:
+                return (
+                    False,
+                    f"Autonomous publication blocked: cooldown_after_publish has "
+                    f"{remaining} minutes remaining for project #{project_id}.",
+                )
+
+    return True, "publication pacing check passed"
+
+
+async def run_stasova_publication_review(
+    *,
+    publication_kind: str,
+    title: str,
+    content: str,
+    public_url: str | None = None,
+) -> str:
+    from agents import get_agent
+    from bot_config import _get_task_provider
+    from runtime_tools.registry import TOOL_HANDLERS as BASE_HANDLERS
+    from runtime_tools.registry import TOOLS as BASE_TOOLS
+    from telegram.bot import _get_model_for_agent, _make_provider_chat_fn
+
+    spec = get_agent("stasova")
+    agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+    provider = spec.effective_provider(_get_task_provider())
+    chat_fn = _make_provider_chat_fn(provider)
+    project_id = _project_id()
+    report_path = (
+        f"temp_dev/stasova_reviews/autonomous_project_{project_id or 'manual'}_"
+        f"{publication_kind}.md"
+    )
+    review_task = (
+        "다음 공개 발행물을 출판 보안 관점에서 점검하라.\n"
+        "텔레그램 채널은 사이버-레닌이 공동 관리하는 공개 배포 채널이므로, "
+        "그 사실 자체를 외부 플랫폼 리스크로 취급하지 말라.\n"
+        "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 "
+        "위험 축과 정치노선 왜곡 위험만 적용하라.\n"
+        f"점검 보고서를 `{report_path}`에도 저장하라.\n\n"
+        f"발행 종류: {publication_kind}\n"
+        f"공개 URL: {public_url or '(not known yet)'}\n\n"
+        f"제목:\n{title}\n\n"
+        f"본문:\n{content}"
+    )
+    return await chat_fn(
+        [{"role": "user", "content": review_task}],
+        system_prompt=spec.render_prompt(provider=provider),
+        model=await _get_model_for_agent(spec),
+        max_rounds=spec.max_rounds,
+        max_tokens=4096,
+        budget_usd=spec.budget_usd,
+        extra_tools=agent_tools,
+        extra_handlers=agent_handlers,
+        task_id=None,
+        agent_name="stasova",
+        runtime_kind="autonomous",
+    )
+
+
+async def review_autonomous_publication(
+    *,
+    publication_kind: str,
+    title: str,
+    content: str,
+    public_url: str | None = None,
+) -> str:
+    """Run Stasova review for autonomous public-bound content and audit it.
+
+    The review is advisory, matching Stasova's charter. It does not veto
+    publication by itself; pacing controls are the hard gate.
+    """
+    project_id = _project_id()
+    if project_id is None:
+        return "Stasova review: skipped (not an autonomous project publication)"
+
+    try:
+        review_report = await run_stasova_publication_review(
+            publication_kind=publication_kind,
+            title=title,
+            content=content,
+            public_url=public_url,
+        )
+        from telegram.diary_publication import stasova_report_has_warning
+
+        warning_detected = stasova_report_has_warning(review_report)
+        ensure_publication_audit_table()
+        row = await asyncio.to_thread(
+            db_query_one,
+            """
+            INSERT INTO autonomous_publication_audits
+                (project_id, publication_kind, title, public_url, content, review_report, warning_detected)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                project_id,
+                publication_kind,
+                title,
+                public_url,
+                content[:120000],
+                review_report,
+                warning_detected,
+            ),
+        )
+        audit_id = int(row["id"]) if row else None
+        _log_autonomous_event(
+            project_id,
+            "publication_reviewed",
+            f"Stasova reviewed {publication_kind}: {title}",
+            {"audit_id": audit_id, "warning_detected": warning_detected, "public_url": public_url},
+        )
+        warning_note = "warning detected" if warning_detected else "no warning detected"
+        return f"Stasova review: audit #{audit_id} ({warning_note})"
+    except Exception as exc:
+        logger.error("Stasova autonomous publication review failed: %s", exc, exc_info=True)
+        _log_autonomous_event(
+            project_id,
+            "publication_review_error",
+            f"Stasova review failed for {publication_kind}: {exc}",
+            {"public_url": public_url, "title": title},
+        )
+        return f"Stasova review failed: {exc}"
+
+
+def record_autonomous_publication(
+    *,
+    publication_kind: str,
+    title: str,
+    public_url: str,
+    meta: dict | None = None,
+) -> None:
+    project_id = _project_id()
+    if project_id is None:
+        return
+    payload = {"kind": publication_kind, "title": title, "public_url": public_url}
+    if meta:
+        payload.update(meta)
+    _log_autonomous_event(
+        project_id,
+        "publication_created",
+        f"{publication_kind}: {title}\n{public_url}",
+        payload,
+    )

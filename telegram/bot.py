@@ -1795,6 +1795,8 @@ async def bot_main():
         BotCommand(command="report", description="태스크 리포트 재전송"),
         BotCommand(command="config", description="설정 패널"),
         BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),
+        BotCommand(command="projects", description="자율 프로젝트 목록"),
+        BotCommand(command="project", description="자율 프로젝트 상세/수정"),
         BotCommand(command="channel", description="브로드캐스트 채널 설정"),
         BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),

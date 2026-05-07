@@ -63,12 +63,16 @@ def _ensure_tables() -> None:
             state         VARCHAR(20) NOT NULL DEFAULT 'researching',
             plan          JSONB NOT NULL DEFAULT '{"goals": [], "steps": []}'::jsonb,
             research_notes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            max_publications_per_day INT NOT NULL DEFAULT 3,
+            cooldown_after_publish_minutes INT NOT NULL DEFAULT 180,
             turn_count    INT NOT NULL DEFAULT 0,
             last_run_at   TIMESTAMPTZ,
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    db_execute("ALTER TABLE autonomous_projects ADD COLUMN IF NOT EXISTS max_publications_per_day INT NOT NULL DEFAULT 3")
+    db_execute("ALTER TABLE autonomous_projects ADD COLUMN IF NOT EXISTS cooldown_after_publish_minutes INT NOT NULL DEFAULT 180")
     db_execute("""
         CREATE TABLE IF NOT EXISTS autonomous_project_events (
             id         SERIAL PRIMARY KEY,
@@ -100,6 +104,40 @@ def _ensure_tables() -> None:
         CREATE INDEX IF NOT EXISTS autonomous_project_advisories_pending_idx
         ON autonomous_project_advisories(project_id, created_at)
         WHERE consumed_at IS NULL
+    """)
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS autonomous_project_notes (
+            id          SERIAL PRIMARY KEY,
+            project_id  INT NOT NULL REFERENCES autonomous_projects(id) ON DELETE CASCADE,
+            turn        INT NOT NULL DEFAULT 0,
+            text        TEXT NOT NULL,
+            sources     JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db_execute("""
+        CREATE INDEX IF NOT EXISTS autonomous_project_notes_project_created_idx
+        ON autonomous_project_notes(project_id, created_at DESC)
+    """)
+    db_execute("""
+        INSERT INTO autonomous_project_notes(project_id, turn, text, sources, created_at)
+        SELECT
+            p.id,
+            CASE
+                WHEN (n.note->>'turn') ~ '^[0-9]+$' THEN (n.note->>'turn')::int
+                ELSE 0
+            END AS turn,
+            COALESCE(n.note->>'text', '') AS text,
+            COALESCE(n.note->'sources', '[]'::jsonb) AS sources,
+            p.created_at AS created_at
+          FROM autonomous_projects p
+          CROSS JOIN LATERAL jsonb_array_elements(p.research_notes) AS n(note)
+         WHERE jsonb_typeof(p.research_notes) = 'array'
+           AND COALESCE(n.note->>'text', '') <> ''
+           AND NOT EXISTS (
+               SELECT 1 FROM autonomous_project_notes existing
+                WHERE existing.project_id = p.id
+           )
     """)
     _tables_ensured = True
 
@@ -353,6 +391,13 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             """,
             (json.dumps([note]), project_id),
         )
+        db_execute(
+            """
+            INSERT INTO autonomous_project_notes(project_id, turn, text, sources)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (project_id, note["turn"], note["text"], json.dumps(note["sources"])),
+        )
         _log_event(project_id, "note_added", text[:400], {"sources": note["sources"]})
         return f"ok: note saved ({len(note['sources'])} sources)"
 
@@ -474,6 +519,32 @@ def _current_turn_counter(project_id: int) -> int:
 
 # ── Prompt context assembly ─────────────────────────────────────────
 def _recent_notes(project: dict) -> list[dict]:
+    project_id = project.get("id")
+    if project_id:
+        try:
+            rows = db_query(
+                """
+                SELECT turn, text, sources, created_at
+                  FROM autonomous_project_notes
+                 WHERE project_id = %s
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT %s
+                """,
+                (project_id, RECENT_NOTES_WINDOW),
+            )
+            if rows:
+                out = []
+                for row in reversed(rows):
+                    out.append({
+                        "turn": row.get("turn"),
+                        "text": row.get("text"),
+                        "sources": row.get("sources") or [],
+                        "created_at": row["created_at"].astimezone(KST).isoformat(timespec="seconds")
+                        if row.get("created_at") else "?",
+                    })
+                return out
+        except Exception as e:
+            logger.warning("autonomous_project_notes lookup failed; falling back to project JSONB notes: %s", e)
     notes = project.get("research_notes") or []
     if isinstance(notes, str):
         try:

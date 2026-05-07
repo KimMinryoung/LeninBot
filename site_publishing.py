@@ -29,6 +29,11 @@ from pathlib import Path
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 from shared import KST
+from autonomous_publication_controls import (
+    check_autonomous_publication_allowed,
+    record_autonomous_publication,
+    review_autonomous_publication,
+)
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
 
 logger = logging.getLogger(__name__)
@@ -222,6 +227,23 @@ async def _exec_publish_hub_curation(
             base = _slugify(source_title or "") or "curation"
         slug = base
     slug = _unique_slug(slug, "hub_curations")
+    public_url = f"https://cyber-lenin.com/hub/{slug}"
+
+    allowed, reason = check_autonomous_publication_allowed("hub_curation")
+    if not allowed:
+        return reason
+
+    review_note = await review_autonomous_publication(
+        publication_kind="hub_curation",
+        title=title,
+        content=(
+            f"Source URL: {source_url}\n"
+            f"Source title: {source_title or ''}\n\n"
+            f"Selection rationale:\n{selection_rationale}\n\n"
+            f"Context:\n{context}"
+        ),
+        public_url=public_url,
+    )
 
     tag_list = [str(t)[:50] for t in (tags or [])][:20]
 
@@ -261,7 +283,6 @@ async def _exec_publish_hub_curation(
         logger.warning("hub curation source fetch failed for %s: %s", slug, e)
         fetch_note = f"\nSource fetch failed: {e} (can be retried later)"
 
-    public_url = f"https://cyber-lenin.com/hub/{slug}"
     broadcast_note = ""
     try:
         br = await maybe_broadcast_autonomous_publication(
@@ -275,11 +296,18 @@ async def _exec_publish_hub_curation(
     except Exception as e:
         logger.warning("hub curation channel broadcast failed for %s: %s", slug, e)
         broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+    record_autonomous_publication(
+        publication_kind="hub_curation",
+        title=title,
+        public_url=public_url,
+        meta={"slug": slug, "hub_curation_id": row["id"]},
+    )
     return (
         f"Published hub curation #{row['id']}\n"
         f"Slug: {slug}\n"
         f"Public URL: {public_url}\n"
         f"Published at: {row['published_at']}"
+        f"\n{review_note}"
         f"{fetch_note}"
         f"{broadcast_note}"
     )
@@ -397,6 +425,23 @@ def _validate_inner_html(html_body: str, field_name: str = "html_body") -> str |
                 "Provide semantic body content (<article>, <section>, etc.); the site "
                 "wraps it with nav/layout/css."
             )
+    for forbidden_re, label in (
+        (r"<script(?:\s|>|/)", "<script"),
+        (r"<iframe(?:\s|>|/)", "<iframe"),
+        (r"<object(?:\s|>|/)", "<object"),
+        (r"<embed(?:\s|>|/)", "<embed"),
+        (r"<foreignobject(?:\s|>|/)", "<foreignObject"),
+        (r"<style(?:\s|>|/)", "<style"),
+        (r"\son[a-z0-9_-]+\s*=", "inline event handler"),
+        (r"(?:href|src|xlink:href)\s*=\s*['\"]?\s*javascript:", "javascript: URL"),
+        (r"(?:href|src|xlink:href)\s*=\s*['\"]?\s*data:", "data: URL"),
+    ):
+        if re.search(forbidden_re, lower, flags=re.IGNORECASE):
+            return (
+                f"Error: {field_name} contains unsafe HTML ({label}). "
+                "Use static semantic markup only; scripts, embedded frames, inline handlers, "
+                "and javascript:/data: URLs are not accepted by this publishing tool."
+            )
     return None
 
 
@@ -497,6 +542,17 @@ async def _exec_publish_static_page(
             return validation_error
 
     existing = _get_static_page_db(slug) or _load_static_page_payload(STATIC_PAGES_DIR / f"{slug}.json")
+    public_url = f"https://cyber-lenin.com/p/{slug}"
+    if not existing:
+        allowed, reason = check_autonomous_publication_allowed("static_page")
+        if not allowed:
+            return reason
+    review_note = await review_autonomous_publication(
+        publication_kind="static_page",
+        title=title,
+        content=f"Summary:\n{summary or ''}\n\nHTML body:\n{html_body}",
+        public_url=public_url,
+    )
     payload = {
         "slug": slug,
         "title": title,
@@ -517,7 +573,6 @@ async def _exec_publish_static_page(
         logger.error("publish_static_page DB write error: %s", e)
         return f"Failed to store static page: {e}"
 
-    public_url = f"https://cyber-lenin.com/p/{slug}"
     broadcast_note = ""
     if not existed:
         try:
@@ -535,10 +590,18 @@ async def _exec_publish_static_page(
             broadcast_note = f"\nTelegram channel broadcast failed: {e}"
     else:
         broadcast_note = "\nTelegram channel broadcast: skipped (existing page update)"
+    if not existed:
+        record_autonomous_publication(
+            publication_kind="static_page",
+            title=title,
+            public_url=public_url,
+            meta={"slug": slug, "static_page_id": row["id"]},
+        )
     return (
         f"Published static page: {slug}\n"
         f"Storage: static_pages id={row['id']}\n"
         f"Public URL: {public_url}\n"
+        f"{review_note}\n"
         f"Body size: {len(html_body)} chars"
         f"{broadcast_note}"
     )

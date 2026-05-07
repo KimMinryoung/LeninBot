@@ -34,6 +34,11 @@ from pathlib import Path
 from typing import Any
 
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
+from autonomous_publication_controls import (
+    check_autonomous_publication_allowed,
+    record_autonomous_publication,
+    review_autonomous_publication,
+)
 import research_store
 
 logger = logging.getLogger(__name__)
@@ -391,6 +396,21 @@ async def _exec_publish_research(
             f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path, blocker=fact_check_error)}"
         )
 
+    public_url = _public_url(fname)
+    allowed, reason = check_autonomous_publication_allowed("research")
+    if not allowed:
+        return (
+            "Publication blocked after draft backup.\n"
+            f"Draft backup: {draft_path}\n"
+            f"{reason}"
+        )
+    review_note = await review_autonomous_publication(
+        publication_kind="research",
+        title=title,
+        content=content,
+        public_url=public_url,
+    )
+
     try:
         row, is_overwrite = await asyncio.to_thread(
             research_store.upsert_document,
@@ -406,7 +426,6 @@ async def _exec_publish_research(
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     status = "Overwrote" if is_overwrite else "Published"
-    public_url = _public_url(fname)
     broadcast_note = ""
     try:
         br = await maybe_broadcast_autonomous_publication(
@@ -435,10 +454,18 @@ async def _exec_publish_research(
     except Exception as e:
         logger.warning("research channel broadcast failed for %s: %s", fname, e)
         broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+    if not is_overwrite:
+        record_autonomous_publication(
+            publication_kind="research",
+            title=title,
+            public_url=public_url,
+            meta={"filename": fname, "research_document_id": row["id"]},
+        )
     return (
         f"{status}: {fname}\n"
         f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
         f"Public URL: {public_url}\n"
+        f"{review_note}\n"
         f"Size: {len(document)} chars; {_format_cache_note(cache, fname)}"
         f"{broadcast_note}"
     )

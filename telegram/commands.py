@@ -175,6 +175,11 @@ _HELP_TEXT = """\
 *시스템*
 /agents — 에이전트 및 워커 상태
 /config — 설정 패널
+/projects — 자율 프로젝트 목록
+/project <id> show — 자율 프로젝트 상세
+/project <id> goal <새 goal> — goal 수정
+/project <id> publishing <일일최대> <쿨다운분> — 발행 속도 조정
+/project <id> pause|resume|archive — 상태 변경
 /restart \\[telegram|api|all] — 서비스 재시작
 
 /help — 이 도움말 표시
@@ -2155,6 +2160,7 @@ async def cmd_projects(message: Message):
         lines.append(f"#{r['id']} [{r['state']}] turn {r['turn_count']} last={last}")
         lines.append(f"  {r['title']}")
     lines.append("")
+    lines.append("상세/수정: /project <id> show  |  /project <id> publishing 3 180")
     lines.append("조언: /advise <id> <내용>  |  조언 목록: /advisories <id>")
     await message.answer("\n".join(lines))
 
@@ -2186,6 +2192,190 @@ async def _pick_single_active_project() -> int | None:
         "SELECT id FROM autonomous_projects WHERE state IN ('researching', 'planning') ORDER BY id",
     )
     return rows[0]["id"] if len(rows) == 1 else None
+
+
+def _project_usage() -> str:
+    return (
+        "사용법:\n"
+        "/project <id> show\n"
+        "/project <id> goal <새 goal>\n"
+        "/project <id> publishing <일일최대> <쿨다운분>\n"
+        "/project <id> pause|resume|archive"
+    )
+
+
+async def _ensure_autonomous_tables_for_telegram() -> None:
+    try:
+        from autonomous_project import _ensure_tables
+        await asyncio.to_thread(_ensure_tables)
+    except Exception as e:
+        logger.warning("autonomous table ensure failed from telegram command: %s", e)
+
+
+async def cmd_project(message: Message):
+    """Manage one autonomous project from Telegram."""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+    await _ensure_autonomous_tables_for_telegram()
+    raw = (message.text or "").removeprefix("/project").strip()
+    parts = raw.split(None, 2)
+    if len(parts) < 2 or not parts[0].isdigit():
+        await message.answer(_project_usage())
+        return
+    project_id = int(parts[0])
+    action = parts[1].strip().lower()
+    rest = parts[2].strip() if len(parts) > 2 else ""
+
+    project = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT id, title, topic, goal, state, plan, turn_count, last_run_at,
+               max_publications_per_day, cooldown_after_publish_minutes
+          FROM autonomous_projects
+         WHERE id = %s
+        """,
+        (project_id,),
+    )
+    if not project:
+        await message.answer(f"프로젝트 #{project_id} 찾을 수 없음.")
+        return
+
+    if action in {"show", "status"}:
+        note_count = await asyncio.to_thread(
+            _query_one,
+            "SELECT COUNT(*)::int AS n FROM autonomous_project_notes WHERE project_id = %s",
+            (project_id,),
+        ) or {"n": 0}
+        pub_count = await asyncio.to_thread(
+            _query_one,
+            """
+            SELECT COUNT(*)::int AS n
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'publication_created'
+               AND created_at >= NOW() - INTERVAL '24 hours'
+            """,
+            (project_id,),
+        ) or {"n": 0}
+        recent_notes = await asyncio.to_thread(
+            _query,
+            """
+            SELECT turn, text, sources, created_at
+              FROM autonomous_project_notes
+             WHERE project_id = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT 3
+            """,
+            (project_id,),
+        )
+        last = project["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if project["last_run_at"] else "never"
+        lines = [
+            f"자율 프로젝트 #{project_id}",
+            f"{project['title']}",
+            f"state={project['state']} turn={project['turn_count']} last={last}",
+            f"publishing={pub_count['n']}/{project['max_publications_per_day']} per 24h, cooldown={project['cooldown_after_publish_minutes']}m",
+            f"topic: {project['topic']}",
+            "",
+            "goal:",
+            str(project["goal"])[:1200],
+            "",
+            f"notes: {note_count['n']}",
+        ]
+        for note in recent_notes:
+            snip = str(note["text"] or "")[:250]
+            lines.append(f"- turn {note['turn']}: {snip}")
+        await message.answer("\n".join(lines))
+        return
+
+    if action == "goal":
+        if not rest:
+            await message.answer("사용법: /project <id> goal <새 goal>")
+            return
+        before = project["goal"]
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE autonomous_projects SET goal = %s, updated_at = NOW() WHERE id = %s",
+            (rest, project_id),
+        )
+        try:
+            from autonomous_project import _log_event
+            await asyncio.to_thread(
+                _log_event,
+                project_id,
+                "project_edited",
+                "fields changed: goal",
+                {"before": {"goal": before}, "after": {"goal": rest}, "via": "telegram"},
+            )
+        except Exception as e:
+            logger.warning("project goal edit event log failed: %s", e)
+        await message.answer(f"프로젝트 #{project_id} goal 수정 완료. 다음 tick부터 반영됩니다.")
+        return
+
+    if action in {"publishing", "publish"}:
+        vals = rest.split()
+        if len(vals) != 2 or not all(v.isdigit() for v in vals):
+            await message.answer("사용법: /project <id> publishing <일일최대> <쿨다운분>\n0은 해당 제한 비활성화.")
+            return
+        max_per_day, cooldown = int(vals[0]), int(vals[1])
+        before = {
+            "max_publications_per_day": project["max_publications_per_day"],
+            "cooldown_after_publish_minutes": project["cooldown_after_publish_minutes"],
+        }
+        await asyncio.to_thread(
+            _execute,
+            """
+            UPDATE autonomous_projects
+               SET max_publications_per_day = %s,
+                   cooldown_after_publish_minutes = %s,
+                   updated_at = NOW()
+             WHERE id = %s
+            """,
+            (max_per_day, cooldown, project_id),
+        )
+        try:
+            from autonomous_project import _log_event
+            await asyncio.to_thread(
+                _log_event,
+                project_id,
+                "project_edited",
+                "fields changed: publication pacing",
+                {
+                    "before": before,
+                    "after": {
+                        "max_publications_per_day": max_per_day,
+                        "cooldown_after_publish_minutes": cooldown,
+                    },
+                    "via": "telegram",
+                },
+            )
+        except Exception as e:
+            logger.warning("project publishing edit event log failed: %s", e)
+        await message.answer(f"프로젝트 #{project_id} 발행 제한: 하루 {max_per_day}개, 발행 후 {cooldown}분 쿨다운")
+        return
+
+    if action in {"pause", "resume", "archive"}:
+        target = {"pause": "paused", "resume": "researching", "archive": "archived"}[action]
+        before_state = project["state"]
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
+            (target, project_id),
+        )
+        try:
+            from autonomous_project import _log_event
+            await asyncio.to_thread(
+                _log_event,
+                project_id,
+                "state_transition",
+                f"{action} via Telegram",
+                {"from": before_state, "to": target, "via": "telegram"},
+            )
+        except Exception as e:
+            logger.warning("project state event log failed: %s", e)
+        await message.answer(f"프로젝트 #{project_id}: {before_state} → {target}")
+        return
+
+    await message.answer(_project_usage())
 
 
 async def cmd_advise(message: Message):
@@ -2355,6 +2545,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_config, Command("config"))
     router.message.register(cmd_agents, Command("agents"))
     router.message.register(cmd_projects, Command("projects"))
+    router.message.register(cmd_project, Command("project"))
     router.message.register(cmd_advise, Command("advise"))
     router.message.register(cmd_advisories, Command("advisories"))
 

@@ -1,17 +1,13 @@
 """agents/autonomous.py — Autonomous long-term project agent.
 
 Runs on a systemd timer: one short bounded wake per hour. Each wake, advances ONE
-project that is in state `researching` or `planning`. Tier separation:
+project that is in state `researching` or `planning`. The autonomous publishing
+surface is Cyber-Lenin's owned infrastructure: cyber-lenin.com and the Telegram
+channel co-managed by the operator and the bot.
 
-- **T0 (this spec)**: research + publishing to our own cyber-lenin.com domain
-  (research DB documents, hub DB rows, static pages). Reversible, low blast radius, on our own infra.
-- **T1** (not wired): outward publishing to third-party platforms (external
-  social, email, A2A). Requires separate tool allow-list.
-- **T2** (not wired): novel channels, account creation, direct outreach.
-
-External-platform tools (send_email, a2a_send, browse_web, generate_image,
-save_diary, write_file) are deliberately NOT in this spec's tool list — the
-`filter_tools()` mechanism enforces the tier boundary.
+Broad external outreach tools (send_email, a2a_send, browse_web, generate_image,
+save_diary, write_file) are deliberately NOT in this spec's tool list. The
+`filter_tools()` mechanism enforces that capability boundary.
 """
 
 from agents.base import (
@@ -134,20 +130,21 @@ more specific `replace_old` unless every match should be changed via `replace_al
 
 Do NOT publish placeholder or half-baked artifacts. Rough drafts live in research notes.
 """.strip()),
-            ("tier-constraints", """
-This project tier (T0) allows publishing to cyber-lenin.com (our own domain).
-The following remain OUT OF SCOPE — if the goal implies you need them,
-record the need in the plan with a "T1 승인 필요" tag and continue with what's allowed:
+            ("capability-boundaries", """
+Autonomous publishing is allowed on Cyber-Lenin's owned surfaces:
+- cyber-lenin.com (research documents, hub entries, static pages)
+- the Telegram channel co-managed by the operator and Cyber-Lenin bot
 
-- External platform actions: gaining accounts on/posting to/interacting with any third-party site
+The following remain OUT OF SCOPE because this agent does not have those tools:
+- Gaining accounts on, posting to, or interacting with third-party sites
   (Twitter/X, Facebook, reddit, clien, 디시, etc.)
 - Email sending, A2A messaging to other agents
 - Browser automation, image generation
 - Diary writing (the diary agent owns that channel)
 - Modifying source code, configs, or systemd files (write_file is not in your toolset)
 
-The sandbox: all publishing targets are under cyber-lenin.com (or its database).
-Never attempt to reach outside it.
+If the goal needs an out-of-scope capability, record it in the plan as an
+operator-needed dependency and continue with the work your current tools allow.
 """.strip()),
             ("rules", """
 - No repetition. The recent-notes section shows what you already covered — do not rehash.
@@ -172,7 +169,7 @@ Never attempt to reach outside it.
         "get_finance_data",
         # Knowledge graph writes
         "write_kg_structured",
-        # Publishing to cyber-lenin.com (T0 tier — our own domain)
+        # Publishing to owned Cyber-Lenin surfaces
         "publish_research", "edit_research",
         "save_private_report", "read_private_report", "list_private_reports", "publish_private_report",
         "publish_hub_curation", "edit_public_post",
