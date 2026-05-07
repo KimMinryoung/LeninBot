@@ -7,7 +7,8 @@
 #   scripts/psql-supabase < file.sql      # run a script
 #
 # Reads DB_{HOST,PORT,NAME,USER} from .env next to the repo root. DB_PASSWORD
-# may come from .env, an active systemd CREDENTIALS_DIRECTORY, or the encrypted
+# may come from .env, an active systemd CREDENTIALS_DIRECTORY, a readable
+# runtime credential mount from a running LeninBot service, or the encrypted
 # credstore via a transient systemd-run scope. Password never appears on the
 # command line — passed through PGPASSWORD env.
 
@@ -16,6 +17,30 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT/.env"
 DB_PASSWORD_CRED="/etc/credstore.encrypted/db_password.cred"
+
+load_runtime_db_password() {
+    if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/db_password" ]; then
+        DB_PASSWORD="$(<"$CREDENTIALS_DIRECTORY/db_password")"
+        return 0
+    fi
+
+    local service cred
+    for service in \
+        leninbot-telegram.service \
+        leninbot-api.service \
+        leninbot-browser.service \
+        leninbot-experience.service \
+        leninbot-autonomous.service
+    do
+        cred="/run/credentials/${service}/db_password"
+        if [ -r "$cred" ]; then
+            DB_PASSWORD="$(<"$cred")"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "psql-supabase: $ENV_FILE not found" >&2
@@ -28,8 +53,8 @@ set -a
 source <(grep -E '^DB_(HOST|PORT|NAME|USER|PASSWORD)=' "$ENV_FILE" || true)
 set +a
 
-if [ -z "${DB_PASSWORD:-}" ] && [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/db_password" ]; then
-    DB_PASSWORD="$(<"$CREDENTIALS_DIRECTORY/db_password")"
+if [ -z "${DB_PASSWORD:-}" ]; then
+    load_runtime_db_password || true
 fi
 
 if [ -z "${DB_PASSWORD:-}" ] && [ -z "${PSQL_SUPABASE_IN_SYSTEMD:-}" ] && [ -r "$DB_PASSWORD_CRED" ]; then

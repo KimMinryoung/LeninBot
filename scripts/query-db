@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# query-db — read-only PostgreSQL queries for local diagnostics.
+#
+# Usage:
+#   scripts/query-db "SELECT id, title FROM ai_diary ORDER BY id DESC LIMIT 3"
+#
+# This wraps scripts/psql-supabase so Codex/operator sessions can inspect state
+# without exposing DB_PASSWORD and without accidentally running write queries.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+    echo "Usage: scripts/query-db \"SELECT ...\"" >&2
+    exit 2
+}
+
+[ "$#" -gt 0 ] || usage
+
+SQL="$*"
+
+# Trim leading/trailing whitespace and one optional trailing semicolon.
+SQL="$(printf '%s' "$SQL" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*;[[:space:]]*$//')"
+[ -n "$SQL" ] || usage
+
+if printf '%s' "$SQL" | grep -q ';'; then
+    echo "query-db: multiple statements are not allowed" >&2
+    exit 2
+fi
+
+case "$(printf '%s' "$SQL" | awk '{print tolower($1)}')" in
+    select|with|show|explain)
+        ;;
+    *)
+        echo "query-db: only SELECT/WITH/SHOW/EXPLAIN diagnostics are allowed" >&2
+        exit 2
+        ;;
+esac
+
+cd "$ROOT"
+exec scripts/psql-supabase \
+    -X \
+    -q \
+    -v ON_ERROR_STOP=1 \
+    -A \
+    -F $'\t' \
+    -P pager=off \
+    --single-transaction \
+    -c "SET TRANSACTION READ ONLY" \
+    -c "$SQL"
