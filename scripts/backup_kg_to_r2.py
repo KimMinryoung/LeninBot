@@ -25,6 +25,25 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "skills" / "kg-maintenance" / "scripts"))
 
+
+def _promote_systemd_credentials() -> None:
+    """Expose LoadCredentialEncrypted secrets to legacy env-based helpers."""
+    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not cred_dir:
+        return
+    for cred_name, env_name in (
+        ("neo4j_password", "NEO4J_PASSWORD"),
+        ("r2_cf_api_token", "R2_CF_API_TOKEN"),
+    ):
+        if os.environ.get(env_name):
+            continue
+        path = Path(cred_dir) / cred_name
+        if path.is_file():
+            os.environ[env_name] = path.read_text().rstrip("\n")
+
+
+_promote_systemd_credentials()
+
 import requests
 from backup_kg import backup as _dump_kg
 from secrets_loader import require_secret
