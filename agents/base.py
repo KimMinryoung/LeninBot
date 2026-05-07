@@ -12,6 +12,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _POLITICAL_LINE_PATH = Path(
     os.getenv("POLITICAL_LINE_PATH", str(_PROJECT_ROOT / "identity" / "political_line.md"))
 )
+_AGENT_PROMPT_DIR = Path(
+    os.getenv("AGENT_PROMPT_DIR", str(_PROJECT_ROOT / "config" / "agent_prompts"))
+)
 
 # ── Reusable section bodies (IR form) ────────────────────────────────
 # Named without the surrounding XML tag so the renderer can wrap them in
@@ -93,6 +96,26 @@ def _load_political_line_section() -> tuple[str, str] | None:
     if body is None:
         return None
     return ("political-line", body)
+
+
+def _load_agent_prompt_overlay_section(agent_name: str) -> tuple[str, str] | None:
+    """Load hot-reloadable per-agent prompt guidance.
+
+    Python modules remain normal imported code, but operator-tuned prompt policy
+    can live in config/agent_prompts/<agent>.md and take effect on the next
+    render_prompt() call without a service restart.
+    """
+    safe_name = agent_name.replace("/", "_").replace("\\", "_")
+    path = _AGENT_PROMPT_DIR / f"{safe_name}.md"
+    try:
+        body = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    if not body:
+        return None
+    return ("runtime-prompt", body)
 
 
 # ── Legacy XML block strings (kept for callers not yet on IR) ────────
@@ -190,12 +213,16 @@ class AgentSpec:
         """
         if self.prompt_ir is not None:
             political_line = _load_political_line_section() if self.include_political_line else None
+            prompt_overlay = _load_agent_prompt_overlay_section(self.name)
             prompt_ir = self.prompt_ir
-            if political_line:
+            extra_sections = [
+                section for section in (political_line, prompt_overlay) if section is not None
+            ]
+            if extra_sections:
                 prompt_ir = SystemPrompt(
                     identity=self.prompt_ir.identity,
                     preamble=self.prompt_ir.preamble,
-                    sections=[political_line, *self.prompt_ir.sections],
+                    sections=[*extra_sections, *self.prompt_ir.sections],
                     context=self.prompt_ir.context,
                 )
             template = _render_prompt(prompt_ir, provider)
