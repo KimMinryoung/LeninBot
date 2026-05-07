@@ -22,8 +22,8 @@
     ]
   },
   "browser": {
-    "provider": "claude",
-    "model": "sonnet",
+    "provider": "deepseek",
+    "model": "deepseek_flash",
     "budget_usd": 1.5,
     "max_rounds": 30
   },

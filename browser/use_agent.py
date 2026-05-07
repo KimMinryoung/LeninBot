@@ -21,16 +21,15 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 
 # Default limits
 _DEFAULT_MAX_STEPS = 20
-_DEFAULT_BROWSER_USE_PROVIDER = "claude"
-_DEFAULT_BROWSER_USE_MODEL = "claude-sonnet-4-6"
+_DEFAULT_BROWSER_USE_PROVIDER = "deepseek"
+_DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
 
 
 def _resolve_provider_and_model() -> tuple[str, str]:
     """Resolve the multimodal LLM used inside browser-use.
 
-    The outer browser worker still uses Claude for LeninBot tool orchestration.
-    browser-use supports cheaper multimodal providers, but Gemini smoke tests
-    were less reliable on navigation/element-verification tasks than Claude.
+    browser-use supports multiple multimodal providers. Browser automation is
+    high-volume, so the default must not use Claude API.
     Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL for controlled tests.
     """
     provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
@@ -41,10 +40,13 @@ def _resolve_provider_and_model() -> tuple[str, str]:
 def _build_llm(model: str | None = None):
     """Build browser-use LLM based on current runtime provider config.
 
-    Supports both Anthropic (ChatAnthropic) and OpenAI (ChatOpenAI).
+    Browser automation must not use Claude API by default or fallback.
     """
     provider, default_model = _resolve_provider_and_model()
     model = model or default_model
+    if str(model).lower().startswith("claude") or str(model).lower() in {"opus", "sonnet", "haiku"}:
+        logger.warning("browser-use forbids Claude model override %r; using deepseek-v4-flash", model)
+        model = "deepseek-v4-flash"
 
     from secrets_loader import get_secret
 
@@ -83,16 +85,17 @@ def _build_llm(model: str | None = None):
         logger.info("browser-use LLM: DeepSeek %s", model)
         return llm
 
-    # Default: Anthropic
-    from browser_use.llm.anthropic.chat import ChatAnthropic
+    if provider == "claude" or provider == "anthropic":
+        logger.warning("browser-use forbids Claude provider; using DeepSeek instead")
 
-    llm = ChatAnthropic(
-        model=model,
-        api_key=get_secret("ANTHROPIC_API_KEY", "") or "",
-        max_tokens=8192,
+    from browser_use.llm.deepseek.chat import ChatDeepSeek
+
+    llm = ChatDeepSeek(
+        model="deepseek-v4-flash",
+        api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
         timeout=120,
     )
-    logger.info("browser-use LLM: Anthropic %s", model)
+    logger.info("browser-use LLM: DeepSeek deepseek-v4-flash")
     return llm
 
 
@@ -172,7 +175,7 @@ async def browse(
     Args:
         task: Natural language description of the task.
         max_steps: Maximum number of browser interaction steps.
-        model: LLM model override (default: claude-sonnet-4-6).
+        model: LLM model override (default: deepseek-v4-flash).
         start_url: Optional URL to open before starting the task.
 
     Returns:

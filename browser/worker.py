@@ -19,38 +19,38 @@ from pathlib import Path
 import importlib
 
 BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
+BROWSER_PROVIDER_OVERRIDE = os.getenv("BROWSER_PROVIDER", "").strip().lower() or None
 
 
-def _normalize_browser_model(raw_model: str | None) -> str:
+def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") -> str:
     model = str(raw_model or "").strip()
     if not model:
-        return "claude-sonnet-4-6"
+        return "deepseek-v4-flash" if provider == "deepseek" else "gpt-5.5-mini"
 
     lowered = model.lower()
     if lowered in {"high", "medium", "low"}:
-        tier_map = {
-            "high": "claude-opus-4-7",
-            "medium": "claude-sonnet-4-6",
-            "low": "claude-haiku-4-5",
-        }
+        if provider == "deepseek":
+            tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
+        elif provider == "openai":
+            tier_map = {"high": "gpt-5.5", "medium": "gpt-5.5-mini", "low": "gpt-5.5-nano"}
+        else:
+            tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
         return tier_map[lowered]
 
-    if lowered in {"opus", "sonnet", "haiku"}:
-        alias_map = {
-            "opus": "claude-opus-4-7",
-            "sonnet": "claude-sonnet-4-6",
-            "haiku": "claude-haiku-4-5",
-        }
-        return alias_map[lowered]
-
-    if lowered.startswith("gpt") or lowered.startswith("o"):
-        # logger not yet initialized at module level; use print for early warning
-        print(
-            f"[browser_worker] WARNING: non-Claude model override '{model}'; forcing Claude Sonnet"
-        )
-        return "claude-sonnet-4-6"
+    if lowered in {"opus", "sonnet", "haiku"} or lowered.startswith("claude"):
+        print(f"[browser_worker] WARNING: Claude model override '{model}' ignored for browser worker")
+        return "deepseek-v4-flash"
 
     return model
+
+
+def _resolve_browser_provider(raw_provider: str | None) -> str:
+    provider = str(raw_provider or "").strip().lower()
+    if provider in {"deepseek", "openai"}:
+        return provider
+    if provider == "claude":
+        logger.warning("Browser worker forbids Claude provider; using deepseek instead")
+    return "deepseek"
 
 from dotenv import load_dotenv
 
@@ -66,20 +66,26 @@ SOCKET_PATH = "/tmp/leninbot-browser.sock"
 
 # ── Lazy singletons (avoid import-time side effects) ─────────────────
 
-_claude_client = None
+_provider_clients: dict[str, object] = {}
 _tools = None
 _tool_handlers = None
 
 
-def _init_claude_client():
-    global _claude_client
-    if _claude_client is not None:
-        return _claude_client
-    import anthropic
+def _init_provider_client(provider: str):
+    if provider in _provider_clients:
+        return _provider_clients[provider]
     from secrets_loader import get_secret
-    api_key = get_secret("ANTHROPIC_API_KEY", "") or ""
-    _claude_client = anthropic.AsyncAnthropic(api_key=api_key)
-    return _claude_client
+    from openai import AsyncOpenAI
+
+    if provider == "openai":
+        client = AsyncOpenAI(api_key=get_secret("OPENAI_API_KEY", "") or "")
+    else:
+        client = AsyncOpenAI(
+            api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
+        )
+    _provider_clients[provider] = client
+    return client
 
 
 def _init_tools(force_reload: bool = False):
@@ -116,7 +122,8 @@ async def execute_browser_task(task: dict) -> dict:
     # because it is a separate process with its own import cache and lifecycle.
     from agents import get_agent
     from agents.base import AgentSpec
-    from claude_loop import chat_with_tools, dedupe_tools_by_name
+    from claude_loop import dedupe_tools_by_name
+    from openai_tool_loop import chat_with_tools
     from self_runtime.tools import build_task_context_tools
     from runtime_tools.registry import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
@@ -140,11 +147,8 @@ async def execute_browser_task(task: dict) -> dict:
     except (ValueError, ImportError):
         spec = get_agent("browser")
 
-    provider = spec.effective_provider("claude")
-    if provider != "claude":
-        logger.warning("Browser worker requires Claude; forcing provider=claude from %s", provider)
-        provider = "claude"
-    browser_model = _normalize_browser_model(BROWSER_MODEL_OVERRIDE or spec.model)
+    provider = _resolve_browser_provider(BROWSER_PROVIDER_OVERRIDE or spec.effective_provider("deepseek"))
+    browser_model = _normalize_browser_model(BROWSER_MODEL_OVERRIDE or spec.model, provider)
 
     logger.info(
         "Processing browser task #%d for user %d (provider=%s, model=%s)",
@@ -178,13 +182,11 @@ async def execute_browser_task(task: dict) -> dict:
     # duplicate tool names to the upstream API.
     agent_tools = dedupe_tools_by_name(agent_tools)
 
-    # Render system prompt. Browser worker always runs on Claude (XML format)
-    # regardless of the orchestrator's global provider toggle — see the model-
-    # normalization and _get_model overrides below. Prompt is fully static
-    # post-refactor; timestamp is injected into the task's user message below.
-    system_prompt = spec.render_prompt(provider="claude")
+    # Render system prompt in the selected non-Claude provider format. Prompt is
+    # fully static post-refactor; timestamp is injected into the user message.
+    system_prompt = spec.render_prompt(provider=provider)
 
-    client = _init_claude_client()
+    client = _init_provider_client(provider)
 
     # Build the chat_with_tools_fn closure matching _chat_with_tools signature
     async def _chat_fn(
@@ -205,11 +207,7 @@ async def execute_browser_task(task: dict) -> dict:
         # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
         merged_handlers = dict(extra_handlers or {})
-        # Browser worker always runs on Claude. Runtime /config provider can be
-        # switched to OpenAI for chat/task orchestration, but this worker uses the
-        # Anthropic tool-calling loop and Anthropic client only. Guard here against
-        # any caller accidentally passing OpenAI model IDs or generic tiers.
-        resolved_model = _normalize_browser_model(model or browser_model)
+        resolved_model = _normalize_browser_model(model or browser_model, provider)
 
         # Inject the runtime header (current time + model) into the task's user
         # message so the system prompt stays byte-stable across invocations and
@@ -221,7 +219,7 @@ async def execute_browser_task(task: dict) -> dict:
         )
         messages = _merge_runtime_context_into_last_user(
             messages,
-            _join_context_blocks(_build_runtime_prelude("claude", kind="task")),
+            _join_context_blocks(_build_runtime_prelude(provider, kind="task")),
         )
 
         return await chat_with_tools(
@@ -233,19 +231,17 @@ async def execute_browser_task(task: dict) -> dict:
             system_prompt=system_prompt or "",
             max_rounds=max_rounds or spec.max_rounds,
             max_tokens=max_tokens or 8192,
-            log_event=_log_event,
             budget_usd=budget_usd or spec.budget_usd,
             on_progress=on_progress,
             budget_tracker=budget_tracker,
             task_id=task_id,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
+            provider_label=provider,
         )
 
     async def _get_model():
-        # Keep browser worker provider/model pinned to Claude regardless of global
-        # runtime provider toggles. process_task() uses this for progress metadata
-        # and any fallback model lookup.
+        # process_task() uses this for progress metadata and fallback model lookup.
         return browser_model
 
     # Create a dummy bot-like object that skips Telegram sends
