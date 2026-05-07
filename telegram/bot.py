@@ -589,6 +589,9 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction
 - visualizer: image generation, visual concepts
 - diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs automatically from `telegram_schedules` — only delegate when the user explicitly asks for a new diary entry right now.
+- 스타소바 (Stasova): 출판 보안(OpSec) 점검. 볼셰비키 비밀서기장 옐레나 스타소바의 실무자 전통.
+  법적·플랫폼·작전보안·역이용·시기적 민감도 5개 축으로 공개 예정 글의 위험을 점검하고
+  경고와 대안 표현을 제출한다. 거부권은 없으며 최종 판단은 중앙위의 몫이다.
 
 Parallel delegation with `multi_delegate`:
 - Compound requests (e.g., "investigate X and fix Y's code") should be handled in parallel via multi_delegate.
@@ -1616,6 +1619,135 @@ def _make_provider_chat_fn(provider: str):
     return _provider_chat_fn
 
 
+async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str:
+    from agents import get_agent
+    from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+
+    spec = get_agent("stasova")
+    agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+    provider = spec.effective_provider(_get_task_provider())
+    chat_fn = _make_provider_chat_fn(provider)
+    report_path = f"temp_dev/stasova_reviews/diary_task_{task.get('id', 'unknown')}.md"
+    review_task = (
+        "다음 공개 일기 초안을 출판 보안 관점에서 점검하라.\n"
+        "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 위험 축과 정치노선 왜곡 위험만 적용하라.\n"
+        f"점검 보고서를 `{report_path}`에도 저장하라.\n\n"
+        f"제목:\n{title}\n\n"
+        f"본문:\n{content}"
+    )
+    return await chat_fn(
+        [{"role": "user", "content": review_task}],
+        system_prompt=spec.render_prompt(provider=provider),
+        model=await _get_model_for_agent(spec),
+        max_rounds=spec.max_rounds,
+        max_tokens=4096,
+        budget_usd=spec.budget_usd,
+        extra_tools=agent_tools,
+        extra_handlers=agent_handlers,
+        task_id=task.get("id"),
+        agent_name="stasova",
+        runtime_kind="task",
+    )
+
+
+def _extract_json_object(text: str) -> dict | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw).strip()
+    candidates = [raw]
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(raw[start:end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+async def _apply_stasova_diary_review(
+    task: dict,
+    *,
+    title: str,
+    content: str,
+    review_report: str,
+) -> tuple[str, str]:
+    provider = _get_task_provider()
+    chat_fn = _make_provider_chat_fn(provider)
+    revision_prompt = (
+        "스타소바의 출판 보안 보고서를 반영해 공개 일기의 최종본을 작성하라.\n"
+        "공개를 지연하거나 승인 요청을 만들지 않는다. 경고가 없으면 원문을 유지한다.\n"
+        "경고가 있으면 비밀, 개인 식별, 비공개 조직 정보, 과도한 법적·플랫폼 위험 표현만 줄인다.\n"
+        "정치적 핵심과 1인칭 일기 문체는 보존한다.\n"
+        "반드시 JSON 객체 하나만 출력하라. 스키마: {\"title\": \"...\", \"content\": \"...\"}\n\n"
+        f"초안 제목:\n{title}\n\n"
+        f"초안 본문:\n{content}\n\n"
+        f"스타소바 보고서:\n{review_report}"
+    )
+    response = await chat_fn(
+        [{"role": "user", "content": revision_prompt}],
+        system_prompt=(
+            "너는 공개 일기 최종본 편집기다. 출판 보안 경고만 반영하고, "
+            "본문을 새 글로 확장하거나 승인 절차를 제안하지 않는다."
+        ),
+        model=await _get_model_task(),
+        max_rounds=1,
+        max_tokens=4096,
+        budget_usd=0.20,
+        extra_tools=[],
+        extra_handlers={},
+        task_id=task.get("id"),
+        agent_name="diary_revision",
+        runtime_kind="task",
+    )
+    parsed = _extract_json_object(response)
+    if not parsed:
+        logger.warning("Stasova diary revision returned non-JSON; publishing original draft")
+        return title, content
+    final_title = str(parsed.get("title") or title).strip() or title
+    final_content = str(parsed.get("content") or content).strip() or content
+    return final_title, final_content
+
+
+def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
+    async def _guarded_save_diary(title: str, content: str) -> str:
+        try:
+            review_report = await _run_stasova_diary_review(task, title, content)
+            final_title, final_content = await _apply_stasova_diary_review(
+                task,
+                title=title,
+                content=content,
+                review_report=review_report,
+            )
+            from telegram.diary_publication import (
+                publish_reviewed_diary_entry,
+            )
+
+            diary_id, broadcast_note, audit_id = await publish_reviewed_diary_entry(
+                task_id=task.get("id"),
+                title=title,
+                content=content,
+                final_title=final_title,
+                final_content=final_content,
+                review_report=review_report,
+            )
+            url = f"https://cyber-lenin.com/ai-diary/{diary_id}" if diary_id else "https://cyber-lenin.com/ai-diary"
+            audit_note = f" / Stasova warning audit #{audit_id}" if audit_id else ""
+            return f"Diary reviewed by Stasova and published automatically: {final_title}\n{url}{broadcast_note}{audit_note}"
+        except Exception as exc:
+            logger.error("guarded diary save failed: %s", exc)
+            return f"Failed to publish reviewed diary: {exc}"
+
+    return _guarded_save_diary
+
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
@@ -1842,13 +1974,15 @@ async def bot_main():
         # Filter base tools to agent's allowed set
         agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
 
-        # Add task-context tools (save_finding)
-        ctx_tools, ctx_handlers = build_task_context_tools(
-            task["id"], task["user_id"], task.get("depth", 0),
-            mission_id=task.get("mission_id"),
-        )
-        agent_tools.extend(ctx_tools)
-        agent_handlers.update(ctx_handlers)
+        # Add task-context tools (save_finding), except for Stasova whose
+        # publication-security tool surface is deliberately minimal.
+        if agent_type != "stasova":
+            ctx_tools, ctx_handlers = build_task_context_tools(
+                task["id"], task["user_id"], task.get("depth", 0),
+                mission_id=task.get("mission_id"),
+            )
+            agent_tools.extend(ctx_tools)
+            agent_handlers.update(ctx_handlers)
 
         # Bind mission handler without re-adding schema.
         # MISSION_TOOL is already in BASE_TOOLS via telegram_tools.TOOLS append.
@@ -1915,6 +2049,10 @@ async def bot_main():
                     profile = await resolve_runtime_profile("task", provider_override=fallback_provider)
                     return profile.model_id
             return await _get_model_for_agent(spec)
+
+        if agent_type == "diary" and "save_diary" in agent_handlers:
+            agent_handlers = dict(agent_handlers)
+            agent_handlers["save_diary"] = _make_guarded_diary_save_handler(b, task)
 
         def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
             icon = "✅" if status == "done" else "❌"

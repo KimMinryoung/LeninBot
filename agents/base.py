@@ -151,6 +151,7 @@ class AgentSpec:
     provider: str | None = None  # None = follow task config; "claude"/"openai"/"deepseek"/"local" = force provider; "moon" = local LLM
     budget_usd: float = 1.00
     max_rounds: int = 50
+    include_political_line: bool = True
 
     def __post_init__(self):
         if self.prompt_ir is None and self.system_prompt_template is None:
@@ -188,7 +189,7 @@ class AgentSpec:
         for legacy compatibility; unknown placeholders are left intact.
         """
         if self.prompt_ir is not None:
-            political_line = _load_political_line_section()
+            political_line = _load_political_line_section() if self.include_political_line else None
             prompt_ir = self.prompt_ir
             if political_line:
                 prompt_ir = SystemPrompt(

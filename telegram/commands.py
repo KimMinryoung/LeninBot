@@ -987,7 +987,7 @@ async def cmd_schedule(message: Message):
             "  /schedule 0 8 * * 1 | 주간 지정학 정세 분석 | analyst\n"
             "  /schedule 0 9 * * * | 메일함 브리핑 | scout\n\n"
             "cron 형식: 분 시 일 월 요일 (KST 기준)\n"
-            "agent: programmer, scout, visualizer, analyst, browser, diary"
+            "agent: programmer, scout, visualizer, analyst, browser, diary, stasova"
         )
         return
     parts = arg.split("|")
@@ -1103,7 +1103,7 @@ async def cmd_schedule_agent(message: Message):
     if len(parts) < 2:
         await message.answer(
             "사용법: /schedule_agent <schedule_id> <agent>\n"
-            "agent: programmer, scout, visualizer, analyst, browser, diary\n"
+            "agent: programmer, scout, visualizer, analyst, browser, diary, stasova\n"
             "agent를 해제하려면: /schedule_agent <id> auto"
         )
         return

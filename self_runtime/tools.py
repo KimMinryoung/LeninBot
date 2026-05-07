@@ -261,7 +261,7 @@ SELF_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary"],
+                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary", "stasova"],
                     "description": "Which specialist agent to delegate to.",
                 },
                 "task": {
@@ -302,7 +302,7 @@ SELF_TOOLS = [
                         "properties": {
                             "agent": {
                                 "type": "string",
-                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary"],
+                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary", "stasova"],
                             },
                             "task": {
                                 "type": "string",
@@ -340,7 +340,7 @@ SELF_TOOLS = [
                     "type": "string",
                     "enum": [
                         "all", "orchestrator", "analyst", "programmer", "scout",
-                        "visualizer", "browser", "diplomat", "diary", "autonomous_project",
+                        "visualizer", "browser", "diplomat", "diary", "stasova", "autonomous_project",
                         "web_chat",
                     ],
                     "description": "Which runtime to inspect. Default/all returns orchestrator plus all agents.",

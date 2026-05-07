@@ -15,6 +15,7 @@ from agents.visualizer import VISUALIZER
 from agents.analyst import ANALYST
 from agents.browser import BROWSER
 from agents.diary import DIARY
+from agents.stasova import STASOVA
 from agents.kollontai import KOLLONTAI
 from agents.autonomous import AUTONOMOUS_PROJECT
 from agents.runtime_config import apply_agent_runtime_config, reload_agent_runtime_config_if_changed
@@ -26,6 +27,7 @@ _REGISTRY: dict[str, AgentSpec] = {
     "analyst": ANALYST,
     "browser": BROWSER,
     "diary": DIARY,
+    "stasova": STASOVA,
     "diplomat": KOLLONTAI,
     "autonomous_project": AUTONOMOUS_PROJECT,
 }

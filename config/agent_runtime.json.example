@@ -37,6 +37,12 @@
     ],
     "skip_orchestrator_report": true
   },
+  "stasova": {
+    "provider": "deepseek",
+    "model": "deepseek_flash",
+    "budget_usd": 0.25,
+    "max_rounds": 8
+  },
   "diplomat": {
     "provider": null,
     "model": null,
