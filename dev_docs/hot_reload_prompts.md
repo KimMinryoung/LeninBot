@@ -3,7 +3,7 @@
 `AgentSpec.render_prompt()` loads two classes of prompt text at render time:
 
 - `identity/political_line.md`
-- `config/agent_prompts/<agent_name>.md`
+- `identity/agent_prompts/<agent_name>.md`
 
 This means prompt policy edits are visible on the next LLM call without service
 restart. Python modules are still imported normally and remain cached in
@@ -14,7 +14,7 @@ Prompt order for IR-based agents:
 
 1. Built-in identity/persona from Python
 2. `identity/political_line.md`, if `include_political_line=True`
-3. `config/agent_prompts/<agent_name>.md`, if present
+3. `identity/agent_prompts/<agent_name>.md`, if present
 4. Built-in agent sections from Python
 5. Per-turn user message context, such as task, project topic, project goal,
    current plan, recent notes, and operator advice

@@ -13,7 +13,7 @@ _POLITICAL_LINE_PATH = Path(
     os.getenv("POLITICAL_LINE_PATH", str(_PROJECT_ROOT / "identity" / "political_line.md"))
 )
 _AGENT_PROMPT_DIR = Path(
-    os.getenv("AGENT_PROMPT_DIR", str(_PROJECT_ROOT / "config" / "agent_prompts"))
+    os.getenv("AGENT_PROMPT_DIR", str(_PROJECT_ROOT / "identity" / "agent_prompts"))
 )
 
 # ── Reusable section bodies (IR form) ────────────────────────────────
@@ -102,7 +102,7 @@ def _load_agent_prompt_overlay_section(agent_name: str) -> tuple[str, str] | Non
     """Load hot-reloadable per-agent prompt guidance.
 
     Python modules remain normal imported code, but operator-tuned prompt policy
-    can live in config/agent_prompts/<agent>.md and take effect on the next
+    can live in identity/agent_prompts/<agent>.md and take effect on the next
     render_prompt() call without a service restart.
     """
     safe_name = agent_name.replace("/", "_").replace("\\", "_")

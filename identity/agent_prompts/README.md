@@ -6,7 +6,7 @@ other long-running services.
 
 Convention:
 
-- `config/agent_prompts/<agent_name>.md`
+- `identity/agent_prompts/<agent_name>.md`
 - The file is inserted as a `runtime-prompt` section.
 - For agents that include `identity/political_line.md`, prompt order is:
   identity/persona, political line, runtime prompt, built-in agent sections,
