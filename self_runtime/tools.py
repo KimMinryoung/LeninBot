@@ -791,7 +791,11 @@ async def _exec_read_task_reports(
 
 
 async def _exec_read_research(
-    limit: int = 10, keyword: str | None = None, slug: str | None = None,
+    limit: int = 10,
+    keyword: str | None = None,
+    slug: str | None = None,
+    max_chars: int | None = None,
+    offset: int | None = None,
 ) -> str:
     from db import query as db_query, query_one as db_query_one
 
@@ -814,14 +818,21 @@ async def _exec_read_research(
         if not row:
             return f"No research document found for slug/filename: {slug}"
         markdown = row.get("markdown") or ""
+        body, start, end, truncated = _slice_text(markdown, max_chars=max_chars, offset=offset)
+        next_hint = (
+            f"\nnext: read_self(source='research', slug='{row.get('slug') or bare_slug}', offset={end}, max_chars={max_chars})"
+            if truncated and max_chars is not None
+            else ""
+        )
         return (
             f"=== RESEARCH DOCUMENT: {row['filename']} ===\n"
             f"id={row['id']} status={row['status']} slug={row.get('slug') or bare_slug}\n"
             f"title: {row.get('title') or ''}\n"
             f"published={_to_kst(row.get('published_at'))} updated={_to_kst(row.get('updated_at'))}\n"
             f"has_translation={row.get('has_translation')}\n"
+            f"body_chars={len(markdown)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
             f"summary: {(row.get('summary') or '')[:800]}\n\n"
-            f"-- markdown preview --\n{markdown[:4000]}{'…' if len(markdown) > 4000 else ''}"
+            f"-- markdown {start}:{end}/{len(markdown)} --\n{body}"
         )
 
     clauses = ["status = 'public'"]
@@ -2168,7 +2179,13 @@ async def _exec_read_self(
     if source == "file_registry":
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
     if source == "research":
-        return await _exec_read_research(limit=limit or 10, keyword=keyword, slug=slug)
+        return await _exec_read_research(
+            limit=limit or 10,
+            keyword=keyword,
+            slug=slug,
+            max_chars=max_chars,
+            offset=offset,
+        )
     if source == "private_reports":
         return await _exec_read_private_reports(
             limit=limit or 10,

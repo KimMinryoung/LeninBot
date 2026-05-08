@@ -6,11 +6,11 @@ filename without its .md extension. Legacy files under research/ and
 output/research/ remain readable only as fallback/import sources.
 
 This module consolidates:
-  * publish_research(title, content, filename?) — DB upsert + cache bust
+  * publish_research(title, content, filename?) — DB upsert + Redis/Cloudflare cache bust
   * edit_research(operation, filename, ...) —
-      operation='edit'      → update the research_documents row and bust cache
-      operation='unpublish' → set the research_documents row status=private and bust cache
-      operation='publish'   → set a private research_documents row status=public and bust cache
+      operation='edit'      → update the research_documents row and bust Redis/Cloudflare caches
+      operation='unpublish' → set the research_documents row status=private and bust Redis/Cloudflare caches
+      operation='publish'   → set a private research_documents row status=public and bust Redis/Cloudflare caches
 
 `unpublish` is intentionally non-destructive: DB rows are marked private. If a
 document only exists as a legacy fallback file, that file is relocated out of
@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -49,6 +50,11 @@ RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
 PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
+FRONTEND_DIR = os.getenv("FRONTEND_DIR", "/home/grass/frontend")
+CF_PURGE_SCRIPT = os.getenv(
+    "CF_PURGE_SCRIPT",
+    os.path.join(FRONTEND_DIR, "scripts", "cloudflare-purge.js"),
+)
 
 KST = timezone(timedelta(hours=9))
 
@@ -251,9 +257,13 @@ def _invalidate_cache_sync(filename: str) -> dict[str, Any]:
             f"research:{safe}",
             f"research:{safe}:ko",
             f"research:{safe}:en",
+            f"research:v3:{safe}:ko",
+            f"research:v3:{safe}:en",
             "report:research_list",
             "report:research_list:ko",
             "report:research_list:en",
+            "report:research_list:v3:ko",
+            "report:research_list:v3:en",
         ) or 0)
     except Exception as e:
         logger.warning("research cache invalidation failed for %s: %s", filename, e)
@@ -269,6 +279,58 @@ def _public_url(filename: str) -> str:
     return f"https://cyber-lenin.com/reports/research/{_public_slug(filename)}"
 
 
+def _cloudflare_purge_paths(filename: str) -> list[str]:
+    slug = _public_slug(filename)
+    return [
+        f"/reports/research/{slug}",
+        "/reports/research",
+        "/reports",
+        "/rss.xml",
+        "/atom.xml",
+        "/sitemap.xml",
+    ]
+
+
+def _purge_cloudflare_sync(filename: str) -> dict[str, Any]:
+    paths = list(dict.fromkeys(_cloudflare_purge_paths(filename)))
+    if not os.path.isfile(CF_PURGE_SCRIPT):
+        return {
+            "ok": False,
+            "purged": 0,
+            "urls": paths,
+            "reason": f"script_missing: {CF_PURGE_SCRIPT}",
+        }
+    try:
+        proc = subprocess.run(
+            ["node", CF_PURGE_SCRIPT, *paths],
+            cwd=FRONTEND_DIR,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+        )
+    except Exception as e:
+        logger.warning("research Cloudflare purge failed before execution for %s: %s", filename, e)
+        return {
+            "ok": False,
+            "purged": 0,
+            "urls": paths,
+            "reason": f"{type(e).__name__}: {e}",
+        }
+
+    output = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part.strip())
+    if proc.returncode != 0:
+        logger.warning("research Cloudflare purge failed for %s: %s", filename, output)
+        return {
+            "ok": False,
+            "purged": 0,
+            "urls": paths,
+            "reason": output or f"exit_{proc.returncode}",
+        }
+    return {"ok": True, "purged": len(paths), "urls": paths, "output": output}
+
+
 def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str | None = None) -> str:
     if cache["ok"]:
         return f"cache invalidated ({cache['deleted']} key(s))"
@@ -276,10 +338,31 @@ def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str
     safe = _cache_safe_key(filename)
     manual = (
         f"redis-cli DEL research:{safe} research:{safe}:ko research:{safe}:en "
-        "report:research_list report:research_list:ko report:research_list:en"
+        f"research:v3:{safe}:ko research:v3:{safe}:en "
+        "report:research_list report:research_list:ko report:research_list:en "
+        "report:research_list:v3:ko report:research_list:v3:en"
     )
     tail = f" — {missing_msg} Manually run: {manual}" if missing_msg else f" — readers may see stale data. Manually run: {manual}"
     return base + tail
+
+
+def _format_invalidation_note(
+    cache: dict[str, Any],
+    cloudflare: dict[str, Any],
+    filename: str,
+    *,
+    missing_msg: str | None = None,
+) -> str:
+    cache_note = _format_cache_note(cache, filename, missing_msg=missing_msg)
+    if cloudflare["ok"]:
+        cf_note = f"Cloudflare purged ({cloudflare['purged']} URL(s))"
+    else:
+        urls = " ".join(cloudflare.get("urls") or [])
+        cf_note = (
+            f"CLOUDFLARE PURGE FAILED ({cloudflare.get('reason', 'unknown')}) — "
+            f"run `cd {FRONTEND_DIR} && node scripts/cloudflare-purge.js {urls}` manually"
+        )
+    return f"{cache_note}; {cf_note}"
 
 
 # ── publish_research ─────────────────────────────────────────────────
@@ -425,6 +508,7 @@ async def _exec_publish_research(
         return f"Error: failed to store {fname}: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
+    cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
     status = "Overwrote" if is_overwrite else "Published"
     broadcast_note = ""
     try:
@@ -466,7 +550,7 @@ async def _exec_publish_research(
         f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
         f"Public URL: {public_url}\n"
         f"{review_note}\n"
-        f"Size: {len(document)} chars; {_format_cache_note(cache, fname)}"
+        f"Size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
         f"{broadcast_note}"
     )
 
@@ -480,11 +564,11 @@ EDIT_RESEARCH_TOOL = {
         "Research documents are stored in the research_documents DB table; filename is the stable "
         "public identifier used to derive /reports/research/{slug}. "
         "operation='edit': update the database Markdown with new content (and optionally a new title) "
-        "and invalidate Redis cache so readers see the new version immediately. "
+        "and invalidate Redis plus Cloudflare cache so readers see the new version immediately. "
         "Original 작성일 is preserved when present in the existing DB markdown. "
-        "operation='unpublish': mark the DB row private and invalidate cache so it disappears "
+        "operation='unpublish': mark the DB row private and invalidate Redis plus Cloudflare cache so it disappears "
         "from cyber-lenin.com. Only legacy fallback files are moved to research/private/. "
-        "operation='publish': mark an existing private DB row public and invalidate cache so it "
+        "operation='publish': mark an existing private DB row public and invalidate Redis plus Cloudflare cache so it "
         "appears on cyber-lenin.com again. Use this instead of publish_research when changing "
         "the visibility of an existing document."
     ),
@@ -588,11 +672,12 @@ async def _exec_edit_research(
             return f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}"
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
+        cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
         return (
             f"Edited: {fname}\n"
             f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {_public_url(fname)}\n"
-            f"Title: {new_title}; size: {len(document)} chars; {_format_cache_note(cache, fname)}"
+            f"Title: {new_title}; size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
         )
 
     if op == "publish":
@@ -609,6 +694,7 @@ async def _exec_edit_research(
             return f"Error: failed to mark {fname} public: {type(e).__name__}: {e}"
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
+        cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
         public_url = _public_url(fname)
         broadcast_note = ""
         if broadcast:
@@ -645,7 +731,7 @@ async def _exec_edit_research(
             f"Published existing private research document: {fname}\n"
             f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {public_url}\n"
-            f"{_format_cache_note(cache, fname)}"
+            f"{_format_invalidation_note(cache, cloudflare, fname)}"
             f"{broadcast_note}"
         )
 
@@ -667,8 +753,10 @@ async def _exec_edit_research(
             return f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
-    cache_note = _format_cache_note(
+    cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
+    cache_note = _format_invalidation_note(
         cache,
+        cloudflare,
         fname,
         missing_msg="document was unpublished but the cached copy may still be served." if not cache["ok"] else None,
     )
