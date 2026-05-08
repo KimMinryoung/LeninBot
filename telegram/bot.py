@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 _runtime_state: dict = {"active_task_ids": set()}
-DEEPSEEK_CONTEXT_LIMIT = int(os.getenv("DEEPSEEK_CONTEXT_LIMIT", "64000"))
+DEEPSEEK_CONTEXT_LIMIT = int(os.getenv("DEEPSEEK_CONTEXT_LIMIT", "1000000"))
 
 # Per-coroutine task context — allows concurrent tasks to know their own task_id
 import contextvars
