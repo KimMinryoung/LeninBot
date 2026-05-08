@@ -35,6 +35,46 @@ from tool_loop_common import (
 
 logger = logging.getLogger(__name__)
 
+_SIDE_EFFECT_TOOL_NAMES = {
+    "delegate",
+    "multi_delegate",
+    "mission",
+    "save_finding",
+    "send_message",
+    "write_kg_structured",
+    "edit_public_post",
+    "publish_research",
+    "edit_research",
+    "save_private_report",
+    "publish_private_report",
+    "broadcast_to_channel",
+}
+
+
+def _is_transient_transport_error(err: Exception) -> bool:
+    return isinstance(
+        err,
+        (
+            httpx.TimeoutException,
+            httpx.ReadError,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError,
+            httpx.PoolTimeout,
+            httpx.NetworkError,
+        ),
+    )
+
+
+def _side_effect_fallback_report(err: Exception, details: list[str]) -> str:
+    shown = "\n".join(details[-12:])
+    return (
+        "모델 API 연결 오류로 최종 자연어 보고서 생성은 실패했지만, "
+        "상태 변경 도구 호출은 이미 완료됐다.\n\n"
+        f"오류: {type(err).__name__}: {err}\n\n"
+        "완료된 상태 변경 도구:\n"
+        f"{shown}"
+    )
+
 
 # ── Pricing Constants (USD per million tokens) ────────────────────────
 OPENAI_PRICING = {
@@ -997,6 +1037,7 @@ async def chat_with_tools(
 
     tool_call_log = []
     tool_work_details = []
+    side_effect_work_details = []
     total_cost = 0.0
     budget_warning_sent = False
     round_num = 0
@@ -1112,6 +1153,40 @@ async def chat_with_tools(
                     # Force final response path with no tools
                     working_msgs = stripped
                     break
+            elif _is_transient_transport_error(api_err):
+                logger.warning(
+                    "Transient API transport error at round %d — retrying once with stripped tool protocol",
+                    round_num,
+                )
+                stripped = _strip_tool_protocol(working_msgs)
+                stripped = _ensure_system_first(stripped, system_prompt)
+                try:
+                    response = await _guarded_api_call(
+                        sdk_mode, client, base_url, model, stripped,
+                        openai_tools, max_tokens,
+                        parallel_tool_calls=False, enable_thinking=enable_thinking,
+                        on_progress=stream_cb, extra_body=extra_body,
+                        sdk_max_token_param=sdk_max_token_param,
+                        include_parallel_tool_calls=include_parallel_tool_calls,
+                    )
+                    working_msgs = stripped
+                    logger.info("Transient API recovery succeeded at round %d", round_num)
+                except Exception as retry_err:
+                    logger.error("Transient API retry also failed: %s", retry_err)
+                    if side_effect_work_details:
+                        if budget_tracker is not None:
+                            budget_tracker.update(build_budget_tracker(
+                                total_cost, round_num, True, tool_work_details))
+                        return _final_result(
+                            _side_effect_fallback_report(api_err, side_effect_work_details),
+                            finish_reason="api_transport_recovered_with_side_effects",
+                            truncated=True,
+                            limit_reason="API transport error",
+                            was_still_working=True,
+                        )
+                    if log_event:
+                        log_event("error", "openai_loop", f"API call failed: {api_err}")
+                    raise
             else:
                 if log_event:
                     log_event("error", "openai_loop", f"API call failed: {api_err}")
@@ -1271,6 +1346,8 @@ async def chat_with_tools(
                 executed_ids.add(tc_id)
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
                 tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
+                if func_name in _SIDE_EFFECT_TOOL_NAMES and not is_error:
+                    side_effect_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
                 save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
 
         # ── Safety net: ensure EVERY tool_call has a result ──

@@ -131,7 +131,67 @@ def _extract_h1(path: Path) -> str | None:
     return None
 
 
-_PUBLISH_DATE_RE = re.compile(r"\*\*작성일:\*\*\s*(\d{4}-\d{2}-\d{2})")
+_PUBLISH_DATE_RE = re.compile(
+    r"^\s*(?:\*\*)?작성일(?::)?(?:\*\*)?\s*:?\s*(\d{4}-\d{2}-\d{2})"
+)
+_H1_RE = re.compile(r"^\s*#\s+(.+?)\s*$")
+_LEADING_SCAFFOLD_META_RE = re.compile(
+    r"^\s*(?:\*\*)?(?:작성자|작성일|Author|Date)(?::)?(?:\*\*)?\s*:?.*$",
+    re.IGNORECASE,
+)
+_HR_RE = re.compile(r"^\s*[-*_]{3,}\s*$")
+
+
+def _extract_h1_from_markdown(markdown: str) -> str | None:
+    for line in (markdown or "").splitlines()[:80]:
+        m = _H1_RE.match(line)
+        if m:
+            title = m.group(1).strip()
+            if title:
+                return title
+    return None
+
+
+def _strip_leading_research_scaffold(markdown: str) -> str:
+    """Accept either body markdown or a complete research document.
+
+    edit_research's schema asks for body markdown, but agents often pass the
+    full document returned by read_self. Strip only the canonical leading H1
+    plus author/date/horizontal-rule scaffold so the tool does not duplicate
+    the public header on every edit.
+    """
+    lines = (markdown or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    idx = 0
+
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+
+    if idx < len(lines) and _H1_RE.match(lines[idx]):
+        idx += 1
+
+    while True:
+        start = idx
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+
+        meta_count = 0
+        while idx < len(lines) and _LEADING_SCAFFOLD_META_RE.match(lines[idx].strip()):
+            idx += 1
+            meta_count += 1
+            while idx < len(lines) and not lines[idx].strip():
+                idx += 1
+
+        if meta_count and idx < len(lines) and _HR_RE.match(lines[idx].strip()):
+            idx += 1
+            continue
+
+        if meta_count:
+            break
+
+        if idx == start:
+            break
+
+    return "\n".join(lines[idx:]).strip()
 
 
 def _extract_publish_date(path: Path) -> str | None:
@@ -649,15 +709,19 @@ async def _exec_edit_research(
         existing_title = (
             existing_doc.get("title") if existing_doc else None
         ) or research_store.extract_title(existing_markdown, "") or (None if existing is None else _extract_h1(existing))
-        new_title = (title or "").strip() or existing_title
+        content_title = _extract_h1_from_markdown(content)
+        new_title = (title or "").strip() or content_title or existing_title
         if not new_title:
             return "Error: existing document has no title/H1 — pass `title` explicitly."
+        body = _strip_leading_research_scaffold(content)
+        if not body:
+            return "Error: content has no body after removing the research-document header."
         publish_date = (
             _extract_publish_date_from_markdown(existing_markdown)
             or (None if existing is None else _extract_publish_date(existing))
             or datetime.now(KST).strftime("%Y-%m-%d")
         )
-        document = _build_document(new_title, content, publish_date)
+        document = _build_document(new_title, body, publish_date)
         try:
             row, _ = await asyncio.to_thread(
                 research_store.upsert_document,
