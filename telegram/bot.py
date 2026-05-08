@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 _runtime_state: dict = {"active_task_ids": set()}
+DEEPSEEK_CONTEXT_LIMIT = int(os.getenv("DEEPSEEK_CONTEXT_LIMIT", "64000"))
 
 # Per-coroutine task context — allows concurrent tasks to know their own task_id
 import contextvars
@@ -1379,6 +1380,7 @@ async def _chat_with_tools(
             # DeepSeek V4 thinking mode requires preserving reasoning_content
             # across tool sub-turns. This loop stores text-only history, so use
             # non-thinking mode for reliable tool calling and lower task cost.
+            context_limit=DEEPSEEK_CONTEXT_LIMIT,
             extra_body={"thinking": {"type": "disabled"}},
             sdk_max_token_param="max_tokens",
             include_parallel_tool_calls=False,

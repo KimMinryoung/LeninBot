@@ -338,17 +338,33 @@ def _ensure_system_first(msgs: list[dict], system_prompt: str) -> list[dict]:
 
 
 def _estimate_tokens(msgs: list[dict]) -> int:
-    """Rough token estimate: ~4 chars per token for mixed content."""
+    """Rough token estimate for context trimming.
+
+    The old flat ``len(text) // 4`` heuristic badly under-counted Korean-heavy
+    research/tool transcripts. DeepSeek then saw prompts near its limit while
+    our local estimator thought there was still plenty of room. Count CJK/Hangul
+    codepoints closer to one token each and keep the 4-char approximation for
+    ASCII-ish text.
+    """
+    cjk_re = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u3040-\u30ff\u3400-\u9fff]")
+
+    def _estimate_text(text: str) -> int:
+        if not text:
+            return 0
+        cjk = len(cjk_re.findall(text))
+        other = len(text) - cjk
+        return cjk + (other // 4)
+
     total = 0
     for m in msgs:
         content = m.get("content", "")
         if isinstance(content, str):
-            total += len(content) // 4
+            total += _estimate_text(content)
         elif isinstance(content, list):
-            total += sum(len(str(b)) for b in content) // 4
+            total += sum(_estimate_text(str(b)) for b in content)
         # tool_calls add overhead
         if m.get("tool_calls"):
-            total += sum(len(json.dumps(tc)) for tc in m["tool_calls"]) // 4
+            total += sum(_estimate_text(json.dumps(tc, ensure_ascii=False)) for tc in m["tool_calls"])
     return total
 
 
@@ -369,12 +385,24 @@ def _truncate_to_context(msgs: list[dict], context_limit: int, max_tokens: int) 
     if est <= budget:
         return msgs
 
-    # Keep system message + trim oldest non-system messages
-    system_msg = msgs[0] if msgs and msgs[0].get("role") == "system" else None
-    rest = msgs[1:] if system_msg else list(msgs)
+    # If truncation is needed after tool rounds, first convert tool protocol
+    # into ordinary text. Dropping individual messages out of a tool-call/result
+    # sequence can create invalid OpenAI chat payloads; plain text summaries are
+    # less fragile and still preserve the evidence the model has gathered.
+    trim_source = msgs
+    if any(m.get("role") == "tool" or m.get("tool_calls") for m in msgs):
+        trim_source = _strip_tool_protocol(msgs)
+        trim_source = _ensure_system_first(
+            trim_source,
+            msgs[0].get("content", "") if msgs and msgs[0].get("role") == "system" else "",
+        )
+
+    # Keep system message + trim oldest non-system messages.
+    system_msg = trim_source[0] if trim_source and trim_source[0].get("role") == "system" else None
+    rest = trim_source[1:] if system_msg else list(trim_source)
 
     # Remove oldest messages until we fit
-    while rest and _estimate_tokens(([system_msg] if system_msg else []) + rest) > budget:
+    while len(rest) > 1 and _estimate_tokens(([system_msg] if system_msg else []) + rest) > budget:
         rest.pop(0)
 
     result = ([system_msg] if system_msg else []) + rest
@@ -413,7 +441,16 @@ def _validate_tool_results(msgs: list[dict]) -> list[str]:
 
 def _dump_messages_for_debug(msgs: list[dict], round_num: int, error: Exception):
     """Log concise message structure when API call fails."""
-    lines = [f"=== API ERROR at round {round_num}: {error} ==="]
+    err_text = str(error) or repr(error)
+    response = getattr(error, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        body = getattr(response, "text", None)
+        if body:
+            err_text = f"{err_text} | HTTP {status}: {body[:1000]}"
+        elif status:
+            err_text = f"{err_text} | HTTP {status}"
+    lines = [f"=== API ERROR at round {round_num}: {type(error).__name__}: {err_text} ==="]
     lines.append(f"Total messages: {len(msgs)}")
 
     for idx, msg in enumerate(msgs):
@@ -1009,6 +1046,12 @@ async def chat_with_tools(
         # ── Cancel check ──
         check_cancelled(task_id)
 
+        # ── Context window management ──
+        # Tool-heavy research tasks can grow past provider context after many
+        # rounds. Re-check before every API call, not just at startup.
+        if context_limit > 0:
+            working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
+
         # ── Pre-API validation: check tool result completeness ──
         missing_ids = _validate_tool_results(working_msgs)
         if missing_ids:
@@ -1318,6 +1361,8 @@ async def chat_with_tools(
             finalization_tools=finalization_names or None,
         ),
     })
+    if context_limit > 0:
+        working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
 
     # ── Preflight: validate tool result completeness ──
     missing_ids = _validate_tool_results(working_msgs)
@@ -1405,6 +1450,8 @@ async def chat_with_tools(
                     )
                 else:
                     # Plain text follow-up to collect the final answer.
+                    if context_limit > 0:
+                        working_msgs = _truncate_to_context(working_msgs, context_limit, min(max_tokens, 2048))
                     followup = await _guarded_api_call(
                         sdk_mode, client, base_url, model, working_msgs, None, min(max_tokens, 2048),
                         on_progress=stream_cb, extra_body=extra_body,

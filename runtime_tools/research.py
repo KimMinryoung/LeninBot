@@ -45,7 +45,7 @@ import research_store
 logger = logging.getLogger(__name__)
 
 # ── Paths ────────────────────────────────────────────────────────────
-_PROJECT_ROOT = Path(__file__).resolve().parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
