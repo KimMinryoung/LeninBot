@@ -37,8 +37,10 @@ from typing import Any
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
 from autonomous_publication_controls import (
     check_autonomous_publication_allowed,
+    is_autonomous_publication_context,
     record_autonomous_publication,
     review_autonomous_publication,
+    validate_autonomous_research_publication,
 )
 import research_store
 
@@ -289,9 +291,12 @@ def _format_draft_revision_guidance(*, filename: str, draft_path: Path, blocker:
         f"`filename` (`{filename}`) so the revised draft replaces this publication candidate.",
         "3. Re-check every affected proper noun, date, figure, current office, vote/seat count, "
         "quotation, and source attribution after editing.",
+        "   For autonomous reports, also revise any stale or low-utility material so the report "
+        "is useful at the 2026 current moment.",
         "4. Publish only after the corrected draft passes verification: call publish_research again "
         "with the revised `content`, the same `filename`, `fact_check_passed=true`, and "
-        "`fact_check_notes` that cites sources and explicitly names corrections made.",
+        "`fact_check_notes` that cites sources, explicitly names corrections made, and states "
+        "what was updated or retained for current usefulness.",
         "If the document is already public, use edit_research(operation=\"edit\", filename=..., "
         "content=...) instead of creating a duplicate publication.",
     ])
@@ -437,8 +442,9 @@ PUBLISH_RESEARCH_TOOL = {
         "First call WITHOUT fact_check_passed=true saves an exact draft backup under "
         "data/publication_drafts/research/ and does NOT publish. Before the second call, "
         "independently verify proper nouns, dates, figures, current officeholders, vote/seat "
-        "counts, and quoted claims. Call again with fact_check_passed=true and fact_check_notes "
-        "summarizing checked claims, sources, and corrections to publish. If your independent "
+        "counts, quoted claims, and whether the framing remains useful at the 2026 current moment. "
+        "Call again with fact_check_passed=true and fact_check_notes "
+        "summarizing checked claims, sources, corrections, and current-usefulness revisions to publish. If your independent "
         "fact-check finds errors in the draft, revise the content yourself and call this tool "
         "again with the same filename; do not set fact_check_passed=true until the revised draft "
         "has been re-checked. "
@@ -472,7 +478,7 @@ PUBLISH_RESEARCH_TOOL = {
                 "description": (
                     "Required when fact_check_passed=true. Summarize checked claims, sources consulted "
                     "(URLs or tool/source names), and corrections made before publication. If prior "
-                    "verification found errors, mention each corrected issue."
+                    "verification found errors or stale/low-utility material, mention each corrected issue."
                 ),
             },
         },
@@ -525,9 +531,10 @@ async def _exec_publish_research(
             f"Candidate filename: {fname}\n"
             f"Candidate public URL: {_public_url(fname)}\n"
             "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
-            "current offices, quotations, and source attributions. Then call publish_research again "
+            "current offices, quotations, source attributions, and whether any claims or framing are "
+            "stale at the 2026 current moment. Then call publish_research again "
             "with fact_check_passed=true and fact_check_notes listing the checked claims, sources, "
-            "and corrections made.\n\n"
+            "corrections made, and current-usefulness revisions.\n\n"
             f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path)}"
         )
 
@@ -540,6 +547,21 @@ async def _exec_publish_research(
         )
 
     public_url = _public_url(fname)
+    if is_autonomous_publication_context():
+        gate_error = validate_autonomous_research_publication(
+            title=title,
+            content=content,
+            identifier=fname,
+            fact_check_notes=fact_check_notes,
+        )
+        if gate_error:
+            return (
+                "Publication blocked after draft backup.\n"
+                f"Draft backup: {draft_path}\n"
+                f"{gate_error}\n\n"
+                f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path, blocker=gate_error)}"
+            )
+
     allowed, reason = check_autonomous_publication_allowed("research")
     if not allowed:
         return (

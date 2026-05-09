@@ -12,7 +12,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime
+from urllib.parse import urlparse
 
 from db import execute as db_execute, query_one as db_query_one
 from telegram.channel_broadcast import current_autonomous_project_id
@@ -38,6 +40,177 @@ _AUDIT_TABLE_ENSURED = False
 def _project_id() -> int | None:
     pid = current_autonomous_project_id.get()
     return int(pid) if pid is not None else None
+
+
+def is_autonomous_publication_context() -> bool:
+    """Return true when a publication is being attempted by an autonomous project."""
+    return _project_id() is not None
+
+
+_PLACEHOLDER_RE = re.compile(
+    r"\b(?:todo|tbd|lorem ipsum|placeholder|coming soon|draft only)\b|"
+    r"(?:TODO|TBD|초안|임시|나중에\s*추가|추가\s*예정|작성\s*예정|검토\s*필요)",
+    re.IGNORECASE,
+)
+_CURRENT_UTILITY_RE = re.compile(
+    r"(?:2026|현재\s*기준|현\s*시점|최신|시의성|효용|실효성|낡은|구식|"
+    r"current|outdated|stale|usefulness|relevance)",
+    re.IGNORECASE,
+)
+_SOURCE_MARKER_RE = re.compile(
+    r"https?://|KG:|knowledge_graph|vector_search|web_search|fetch_url",
+    re.IGNORECASE,
+)
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,3}\s+\S+", re.MULTILINE)
+_HTML_SECTION_RE = re.compile(r"<(?:article|section|h[1-3])(?:\s|>)", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _looks_like_http_url(value: str) -> bool:
+    parsed = urlparse((value or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _plain_text_from_html(html: str) -> str:
+    return re.sub(r"\s+", " ", _TAG_RE.sub(" ", html or "")).strip()
+
+
+def _has_placeholder(text: str) -> bool:
+    return bool(_PLACEHOLDER_RE.search(text or ""))
+
+
+def _has_current_utility_review(text: str) -> bool:
+    return bool(_CURRENT_UTILITY_RE.search(text or ""))
+
+
+def _source_marker_count(text: str) -> int:
+    return len(_SOURCE_MARKER_RE.findall(text or ""))
+
+
+def _format_gate_errors(kind: str, errors: list[str]) -> str:
+    return (
+        f"Autonomous publication blocked: {kind} does not meet the public quality gate.\n"
+        + "\n".join(f"- {error}" for error in errors)
+    )
+
+
+def validate_autonomous_research_publication(
+    *,
+    title: str,
+    content: str,
+    identifier: str,
+    fact_check_notes: str | None,
+) -> str | None:
+    """Hard quality gate for autonomous long-form public research."""
+    text = (content or "").strip()
+    notes = (fact_check_notes or "").strip()
+    errors: list[str] = []
+
+    if len((title or "").strip()) < 6:
+        errors.append("title is too short for a public research document")
+    if not identifier or len(identifier.strip()) < 6:
+        errors.append("stable slug/filename is required")
+    if len(text) < 900:
+        errors.append("content must be a substantial report body (at least 900 characters)")
+    if len(_HEADING_RE.findall(text)) < 2:
+        errors.append("content must have at least two markdown section headings")
+    if _has_placeholder(f"{title}\n{text}\n{notes}"):
+        errors.append("remove TODO/placeholder/draft-only language before publishing")
+    if len(notes) < 200:
+        errors.append("fact_check_notes must be at least 200 characters for autonomous publication")
+    if _source_marker_count(notes) < 2:
+        errors.append("fact_check_notes must cite at least two source markers or URLs")
+    if not _has_current_utility_review(f"{text}\n{notes}"):
+        errors.append(
+            "explicitly review 2026 current usefulness: update or remove stale, low-utility parts"
+        )
+
+    if errors:
+        return _format_gate_errors("research", errors)
+    return None
+
+
+def validate_autonomous_hub_curation(
+    *,
+    title: str,
+    source_url: str,
+    source_title: str | None,
+    source_publication: str | None,
+    selection_rationale: str,
+    context: str,
+    slug: str,
+    tags: list | None = None,
+) -> str | None:
+    """Hard quality gate for autonomous hub curation entries."""
+    errors: list[str] = []
+    combined = "\n".join(
+        [
+            title or "",
+            source_title or "",
+            source_publication or "",
+            selection_rationale or "",
+            context or "",
+            slug or "",
+            " ".join(str(t) for t in (tags or [])),
+        ]
+    )
+
+    if len((title or "").strip()) < 8:
+        errors.append("curation title is too short")
+    if not _looks_like_http_url(source_url):
+        errors.append("source_url must be a valid http(s) URL")
+    if len((source_title or "").strip()) < 4:
+        errors.append("source_title is required for autonomous curation")
+    if len((source_publication or "").strip()) < 2:
+        errors.append("source_publication is required for autonomous curation")
+    if len((selection_rationale or "").strip()) < 100:
+        errors.append("selection_rationale must explain selection quality in at least 100 characters")
+    if len((context or "").strip()) < 80:
+        errors.append("context must provide reader-facing framing in at least 80 characters")
+    if not slug or len(slug.strip()) < 4:
+        errors.append("stable slug is required")
+    if _has_placeholder(combined):
+        errors.append("remove TODO/placeholder/draft-only language before publishing")
+    if not _has_current_utility_review(combined):
+        errors.append("explain why this remains useful at the 2026 current moment")
+
+    if errors:
+        return _format_gate_errors("hub_curation", errors)
+    return None
+
+
+def validate_autonomous_static_page(
+    *,
+    slug: str,
+    title: str,
+    html_body: str,
+    summary: str | None,
+) -> str | None:
+    """Hard quality gate for autonomous static pages."""
+    plain = _plain_text_from_html(html_body or "")
+    combined = "\n".join([slug or "", title or "", summary or "", plain])
+    errors: list[str] = []
+
+    if not slug or len(slug.strip()) < 4:
+        errors.append("stable slug is required")
+    if len((title or "").strip()) < 6:
+        errors.append("title is too short")
+    if len((html_body or "").strip()) < 800:
+        errors.append("html_body must be substantial inner HTML (at least 800 characters)")
+    if len(plain) < 500:
+        errors.append("page body must contain at least 500 characters of reader-visible text")
+    if len((summary or "").strip()) < 80:
+        errors.append("summary is required and must be at least 80 characters")
+    if not _HTML_SECTION_RE.search(html_body or ""):
+        errors.append("html_body must use semantic structure such as <article>, <section>, or <h2>")
+    if _has_placeholder(combined):
+        errors.append("remove TODO/placeholder/draft-only language before publishing")
+    if not _has_current_utility_review(combined):
+        errors.append("explain why this page is useful at the 2026 current moment")
+
+    if errors:
+        return _format_gate_errors("static_page", errors)
+    return None
 
 
 def ensure_publication_audit_table() -> None:

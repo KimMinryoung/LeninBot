@@ -31,8 +31,11 @@ from db import execute as db_execute, query as db_query, query_one as db_query_o
 from shared import KST
 from autonomous_publication_controls import (
     check_autonomous_publication_allowed,
+    is_autonomous_publication_context,
     record_autonomous_publication,
     review_autonomous_publication,
+    validate_autonomous_hub_curation,
+    validate_autonomous_static_page,
 )
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
 
@@ -203,6 +206,10 @@ async def _exec_publish_hub_curation(
     # ── Validation ──
     title = (title or "").strip()
     source_url = (source_url or "").strip()
+    source_title = (source_title or "").strip() or None
+    source_author = (source_author or "").strip() or None
+    source_publication = (source_publication or "").strip() or None
+    source_published_at = (source_published_at or "").strip() or None
     selection_rationale = (selection_rationale or "").strip()
     context = (context or "").strip()
     if not title:
@@ -228,6 +235,20 @@ async def _exec_publish_hub_curation(
         slug = base
     slug = _unique_slug(slug, "hub_curations")
     public_url = f"https://cyber-lenin.com/hub/{slug}"
+
+    if is_autonomous_publication_context():
+        gate_error = validate_autonomous_hub_curation(
+            title=title,
+            source_url=source_url,
+            source_title=source_title,
+            source_publication=source_publication,
+            selection_rationale=selection_rationale,
+            context=context,
+            slug=slug,
+            tags=tags,
+        )
+        if gate_error:
+            return gate_error
 
     allowed, reason = check_autonomous_publication_allowed("hub_curation")
     if not allowed:
@@ -544,6 +565,16 @@ async def _exec_publish_static_page(
 
     existing = _get_static_page_db(slug) or _load_static_page_payload(STATIC_PAGES_DIR / f"{slug}.json")
     public_url = f"https://cyber-lenin.com/p/{slug}"
+    if is_autonomous_publication_context():
+        gate_error = validate_autonomous_static_page(
+            slug=slug,
+            title=title,
+            html_body=html_body,
+            summary=summary,
+        )
+        if gate_error:
+            return gate_error
+
     if not existing:
         allowed, reason = check_autonomous_publication_allowed("static_page")
         if not allowed:

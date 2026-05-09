@@ -71,6 +71,13 @@ Current autonomous tools include:
 
 `research_document` is the long-form markdown path. Public publication is gated through staged drafts and fact-check notes. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing.
 
+For autonomous projects, `autonomous_publication_controls.py` also enforces a hard quality gate before public publication:
+
+- research reports must be substantial, sectioned markdown; `fact_check_notes` must cite at least two source markers/URLs; the notes or body must explicitly address 2026-current usefulness by updating or removing stale, low-utility framing.
+- hub curations must include source title and publication, a valid source URL, substantive rationale/context, and an explanation of why the external piece remains useful now.
+- static pages must have stable slugs, substantial semantic inner HTML, a reader-facing summary, and a current-usefulness explanation.
+- placeholder/TODO/draft-only text blocks autonomous publication across these surfaces.
+
 `publish_hub_curation` creates structured curation entries for Korean-language sources.
 
 `edit_content` edits existing hub curation rows or public content instead of creating duplicates.

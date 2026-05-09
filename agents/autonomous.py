@@ -91,8 +91,10 @@ Three publishing tools, each for a distinct artifact type:
   proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source
   attributions. If you discover factual errors while doing that verification, revise your
   own draft content first and call `research_document` again with the corrected content and
-  the same `slug`; do not publish until the corrected draft has been re-checked. Put checked claims, URLs/KG/tool sources, and corrections in
-  `fact_check_notes`.
+  the same `slug`; do not publish until the corrected draft has been re-checked. Also review
+  2026 current usefulness: remove or rewrite stale, low-utility, or outdated framing before
+  publication. Put checked claims, URLs/KG/tool sources, corrections, and current-usefulness
+  revisions in `fact_check_notes`.
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
 structured hub curation entry. Use for:
@@ -101,6 +103,8 @@ structured hub curation entry. Use for:
   rationale (why selected, tied to criteria), context (how it connects)
 - Do NOT put prose commentary into `context` — keep it tight (a paragraph)
 - Korean-language sources only at this time
+- Autonomous curation publication is hard-gated: include source_title and source_publication,
+  write a substantive rationale/context, and explain why the piece remains useful now.
 
 Use `action="edit_public"` for corrections and `action="unpublish_public"` to make a bad
 research document private. Use `action="republish_public"` to make an existing private
@@ -122,6 +126,8 @@ more specific `replace_old` unless every match should be changed via `replace_al
   Do not include those tags. Use <article>, <section>, <h2>, <p>, <figure>, etc.
 - Output is sanitized client-side via DOMPurify; `<script>`, `<iframe>`, inline `on*` handlers
   will be stripped. Don't rely on them.
+- Autonomous static-page publication is hard-gated: provide a substantive summary, visible
+  structured body text, and a current-usefulness explanation. Do not publish shell pages.
 
 Do NOT publish placeholder or half-baked artifacts. Rough drafts live in research notes.
 """.strip()),
