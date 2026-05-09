@@ -561,7 +561,6 @@ _PRIVATE_REPORTS_ADMIN_HTML = r"""<!doctype html>
 
 
 @app.get("/admin/private-reports")
-@app.get("/private")
 async def private_reports_admin_page():
     return Response(
         content=_PRIVATE_REPORTS_ADMIN_HTML,
@@ -902,12 +901,6 @@ async def _serve_agent_card():
 @app.get("/.well-known/agent-card.json")
 async def a2a_agent_card_v1():
     """v1.0 canonical discovery endpoint."""
-    return await _serve_agent_card()
-
-
-@app.get("/.well-known/agent.json")
-async def a2a_agent_card_legacy():
-    """Legacy discovery endpoint (v0.2 compat)."""
     return await _serve_agent_card()
 
 
