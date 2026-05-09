@@ -2,12 +2,94 @@
 
 import logging
 import os
+import re
 from contextlib import contextmanager
 
 from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_task
 from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
+
+
+def _format_kg_results(nodes: list[dict], edges: list[dict], edge_tier: dict[str, str] | None = None) -> str:
+    lines = []
+    if nodes:
+        lines.append("[Knowledge Graph: Entities]")
+        for n in nodes:
+            summary = (n.get("summary", "") or "")[:300]
+            if len(n.get("summary", "") or "") > 300:
+                summary += "..."
+            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
+    if edges:
+        lines.append("[Knowledge Graph: Facts/Relations]")
+        edge_tier = edge_tier or {}
+        for e in edges:
+            tier = edge_tier.get(e.get("uuid", ""), "?")
+            lines.append(f"- [T:{tier}] {e['fact']}")
+    return "\n".join(lines)
+
+
+def _direct_cypher_search(query: str, num_results: int = 10) -> str | None:
+    """Exact text fallback for when Graphiti semantic search fails.
+
+    This is intentionally simpler than Graphiti search. It exists so parser,
+    embedder, or LLM failures do not masquerade as "no KG data".
+    """
+    raw_terms = [query.strip()]
+    raw_terms.extend(re.findall(r"[0-9A-Za-z가-힣_-]{2,}", query))
+    terms = []
+    seen = set()
+    for term in raw_terms:
+        clean = term.strip().lower()
+        if len(clean) < 2 or clean in seen:
+            continue
+        seen.add(clean)
+        terms.append(clean)
+        if len(terms) >= 12:
+            break
+    if not terms:
+        return None
+
+    try:
+        with _get_neo4j_sync_driver() as (drv, db):
+            with drv.session(database=db) as s:
+                node_rows = list(s.run(
+                    "MATCH (n:Entity) "
+                    "WHERE any(term IN $terms WHERE "
+                    "  toLower(coalesce(n.name, '')) CONTAINS term OR "
+                    "  toLower(coalesce(n.summary, '')) CONTAINS term) "
+                    "RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, "
+                    "       coalesce(n.summary, '') AS summary "
+                    "LIMIT $limit",
+                    terms=terms,
+                    limit=num_results,
+                ))
+                edge_rows = list(s.run(
+                    "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
+                    "WHERE any(term IN $terms WHERE "
+                    "  toLower(coalesce(r.fact, '')) CONTAINS term OR "
+                    "  toLower(coalesce(a.name, '')) CONTAINS term OR "
+                    "  toLower(coalesce(b.name, '')) CONTAINS term) "
+                    "RETURN r.uuid AS uuid, coalesce(r.fact, '') AS fact, "
+                    "       a.name AS source, b.name AS target "
+                    "LIMIT $limit",
+                    terms=terms,
+                    limit=num_results,
+                ))
+    except Exception as e:
+        logger.warning("[KG] direct Cypher fallback failed (query=%s): %s", query[:50], e)
+        return None
+
+    nodes = [dict(r) for r in node_rows if r.get("name")]
+    edges = []
+    for r in edge_rows:
+        row = dict(r)
+        if not row.get("fact"):
+            row["fact"] = f"{row.get('source', '?')} RELATES_TO {row.get('target', '?')}"
+        edges.append(row)
+    if not nodes and not edges:
+        return None
+    return "[Knowledge Graph fallback: direct Cypher text match]\n" + _format_kg_results(nodes, edges)
 
 @contextmanager
 def _get_neo4j_sync_driver():
@@ -115,12 +197,23 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     Handles connection resets with retry + auto-reset.
     If query_en is provided, searches with both queries and merges results.
     """
-    svc = get_kg_service()
-    if not svc:
-        return None
-
     _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
     _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
+    search_errors: list[str] = []
+
+    svc = get_kg_service()
+    if not svc:
+        fallback = _direct_cypher_search(query, num_results)
+        if fallback:
+            return (
+                "Knowledge graph semantic search failed because the Graphiti service "
+                "is unavailable; using direct Cypher fallback.\n"
+                + fallback
+            )
+        return (
+            "Knowledge graph search failed; do not treat this as no KG data. "
+            "Graphiti service unavailable and direct Cypher fallback found no exact text matches."
+        )
 
     def _do_search(q):
         _svc_ref = [svc]
@@ -143,6 +236,7 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
                     logger.warning("[KG] retry failed. query=%s", q[:50])
                 else:
                     logger.warning("[KG] search error (query=%s): %s", q[:50], e)
+                search_errors.append(str(e))
                 if any(k in err_msg for k in _RESET_KEYWORDS):
                     reset_kg_service()
                 return None
@@ -163,6 +257,20 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
             if e.get("uuid") and e["uuid"] not in seen_edges:
                 seen_edges.add(e["uuid"])
                 all_edges.append(e)
+
+    if not all_nodes and not all_edges and search_errors:
+        fallback = _direct_cypher_search(query, num_results)
+        if fallback:
+            return (
+                "Knowledge graph semantic search failed; using direct Cypher fallback. "
+                f"Graphiti error: {search_errors[-1][:500]}\n"
+                + fallback
+            )
+        return (
+            "Knowledge graph search failed; do not treat this as no KG data. "
+            "Direct Cypher fallback found no exact text matches. "
+            f"Graphiti error: {search_errors[-1][:500]}"
+        )
 
     if not all_nodes and not all_edges:
         return None
@@ -220,19 +328,5 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     except Exception as _tier_err:
         logger.debug("[KG] tier lookup skipped: %s", _tier_err)
 
-    lines = []
-    if all_nodes:
-        lines.append("[Knowledge Graph: Entities]")
-        for n in all_nodes:
-            summary = (n.get("summary", "") or "")[:300]
-            if len(n.get("summary", "") or "") > 300:
-                summary += "..."
-            lines.append(f"- {n['name']} ({', '.join(n.get('labels', []))}): {summary}")
-    if all_edges:
-        lines.append("[Knowledge Graph: Facts/Relations]")
-        for e in all_edges:
-            tier = edge_tier.get(e.get("uuid", ""), "?")
-            lines.append(f"- [T:{tier}] {e['fact']}")
-    return "\n".join(lines)
-
+    return _format_kg_results(all_nodes, all_edges, edge_tier)
 

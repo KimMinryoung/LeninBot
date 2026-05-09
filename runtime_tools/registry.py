@@ -136,7 +136,7 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
         return result or "No knowledge graph results found."
     except Exception as e:
         logger.error("kg_search error: %s", e)
-        return f"Knowledge graph search failed: {e}"
+        return f"Knowledge graph search failed; do not treat this as no KG data: {e}"
 
 
 # ── Research publish/edit/unpublish tools live in runtime_tools.research ──

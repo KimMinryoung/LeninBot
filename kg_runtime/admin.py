@@ -2,6 +2,7 @@
 
 import logging
 
+from kg_runtime.integrity import check_kg_integrity
 from kg_runtime.search import _get_neo4j_sync_driver
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,10 @@ def kg_cypher(query: str, write: bool = False) -> dict:
                     result = session.execute_write(lambda tx: [dict(r) for r in tx.run(query)])
                 else:
                     result = session.execute_read(lambda tx: [dict(r) for r in tx.run(query)])
-            return {"rows": result, "count": len(result)}
+            response = {"rows": result, "count": len(result)}
+            if write:
+                response["integrity"] = check_kg_integrity()
+            return response
     except Exception as e:
         logger.error("[shared] kg_cypher error: %s", e)
         return {"error": str(e), "rows": [], "count": 0}
@@ -83,6 +87,7 @@ def kg_delete_episode(episode_name: str) -> dict:
 
             with sync_driver.session(database=neo4j_db) as session:
                 result = session.execute_write(_delete)
+            result["integrity"] = check_kg_integrity()
             return result
     except Exception as e:
         logger.error("[shared] kg_delete_episode error: %s", e)
@@ -112,10 +117,18 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
                 if not check:
                     return {"error": f"One or both entities not found: '{source_name}', '{target_name}'"}
 
-                # Transfer outgoing RELATES_TO from source to target
+                # Transfer outgoing RELATES_TO from source to target. Preserve
+                # all Graphiti-required properties so cleanup cannot create
+                # parser-breaking legacy edges.
                 r1 = list(tx.run(
                     "MATCH (s:Entity {name: $src})-[r:RELATES_TO]->(x:Entity) "
-                    "MERGE (t:Entity {name: $tgt})-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(x) "
+                    "MERGE (t:Entity {name: $tgt})-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(x) "
+                    "SET nr += properties(r), "
+                    "    nr.group_id = coalesce(r.group_id, 'legacy'), "
+                    "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
+                    "    nr.episodes = coalesce(r.episodes, []), "
+                    "    nr.fact = coalesce(r.fact, ''), "
+                    "    nr.name = coalesce(r.name, 'RELATES_TO') "
                     "DELETE r RETURN count(r) AS cnt",
                     src=source_name, tgt=target_name
                 ))
@@ -123,7 +136,13 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
                 # Transfer incoming RELATES_TO to source from target
                 r2 = list(tx.run(
                     "MATCH (x:Entity)-[r:RELATES_TO]->(s:Entity {name: $src}) "
-                    "MERGE (x)-[:RELATES_TO {fact: r.fact, episodes: r.episodes}]->(t:Entity {name: $tgt}) "
+                    "MERGE (x)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(t:Entity {name: $tgt}) "
+                    "SET nr += properties(r), "
+                    "    nr.group_id = coalesce(r.group_id, 'legacy'), "
+                    "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
+                    "    nr.episodes = coalesce(r.episodes, []), "
+                    "    nr.fact = coalesce(r.fact, ''), "
+                    "    nr.name = coalesce(r.name, 'RELATES_TO') "
                     "DELETE r RETURN count(r) AS cnt",
                     src=source_name, tgt=target_name
                 ))
@@ -149,9 +168,9 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
 
             with sync_driver.session(database=neo4j_db) as session:
                 result = session.execute_write(_merge)
+            if "error" not in result:
+                result["integrity"] = check_kg_integrity()
             return result
     except Exception as e:
         logger.error("[shared] kg_merge_entities error: %s", e)
         return {"error": str(e)}
-
-
