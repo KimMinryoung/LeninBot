@@ -1,227 +1,145 @@
 # API Reference
 
-> LeninBot FastAPI 서버 (`api.py`) — `https://leninbot.duckdns.org`
+최종 확인 기준: 2026-05-09 `api.py`.
 
----
+`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary.
 
-## 인증
+## Authentication
 
-관리자 전용 엔드포인트는 `X-Admin-Key` 헤더가 필요하다.
+Admin endpoints require:
 
 ```
-X-Admin-Key: <ADMIN_API_KEY 환경변수 값>
+X-Admin-Key: <ADMIN_API_KEY>
 ```
 
-키가 없거나 틀리면 `403 Forbidden`, 서버에 키가 미설정이면 `503 Service Unavailable`.
+Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admin endpoints return `503`.
 
----
+Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `api.py`.
 
-## 엔드포인트 목록
+## Public Endpoints
 
-### Health Check
+| Method | Path | Description |
+|---|---|---|
+| `GET`, `HEAD` | `/` | health check |
+| `GET`, `HEAD` | `/health` | health check |
+| `GET`, `HEAD` | `/api/health` | health check alias |
+| `POST` | `/chat` | public web chat SSE stream |
+| `GET` | `/history` | chat history visible to fingerprint/proxy identity |
+| `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
+| `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
+| `POST` | `/a2a` | A2A JSON-RPC endpoint |
+| `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| GET, HEAD | `/` | 없음 | 서버 상태 확인 |
-| GET, HEAD | `/api/health` | 없음 | 서버 상태 확인 (별칭) |
+### `POST /chat`
 
-**응답:**
-```json
-{"status": "ok"}
-```
+Request:
 
----
-
-### 채팅 (SSE 스트리밍)
-
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| POST | `/chat` | 없음 | claude_loop 기반 질문 처리 (web_chat.py), SSE로 실시간 스트리밍 |
-
-**요청 Body:**
 ```json
 {
-    "message": "질문 텍스트",
-    "session_id": "세션 ID (기본: default)",
-    "fingerprint": "브라우저 fingerprint (localStorage UUID)"
+  "message": "질문 텍스트",
+  "session_id": "browser-session-id",
+  "fingerprint": "browser-fingerprint"
 }
 ```
 
-**SSE 이벤트 형식:**
+Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars.
+
+Response is `text/event-stream`. Event payloads are JSON:
+
+```text
+data: {"type":"log","node":"...","content":"..."}
+data: {"type":"answer","content":"..."}
+data: {"type":"error","content":"..."}
 ```
-data: {"type": "log", "node": "노드명", "content": "로그 메시지"}
-data: {"type": "answer", "content": "최종 답변"}
-data: {"type": "error", "content": "에러 메시지"}
-```
 
-**동시 요청 제한:** 같은 `session_id`로 동시 요청 시 후속 요청은 에러 반환.
+Concurrency and rate controls:
 
-**호출자:** BichonWebsite (`public/js/chat.js`)
+- one active request per `session_id`
+- per-client sliding window from `WEBCHAT_RATE_LIMIT` and `WEBCHAT_RATE_WINDOW_SECONDS`
+- global active request cap from `WEBCHAT_GLOBAL_ACTIVE_LIMIT`
 
----
+### `GET /history`
 
-### 대화 기록 조회
+Query:
 
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| GET | `/history` | 없음 | 특정 사용자의 대화 기록 조회 |
+| Param | Required | Notes |
+|---|---|---|
+| `fingerprint` | conditional | anonymous browser identity |
+| `session_id` | no | restrict to one session |
+| `limit` | no | 1-200, default 50 |
 
-**Query Parameters:**
+Returns `{"history": [...]}` with sanitized `user_query`, `bot_answer`, and `created_at`.
 
-| 파라미터 | 필수 | 기본값 | 설명 |
-|----------|------|--------|------|
-| `fingerprint` | O | — | 브라우저 fingerprint (UUID) |
-| `limit` | X | 50 | 최대 반환 수 (1-200) |
+### `GET /sessions`
 
-**응답:**
+Query:
+
+| Param | Required | Notes |
+|---|---|---|
+| `fingerprint` | conditional | anonymous browser identity |
+| `limit` | no | 1-200, default 50 |
+
+Returns session IDs, first/last timestamps, message count, and a first-message preview.
+
+## Admin Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/logs` | raw chat log admin list |
+| `GET` | `/reports` | completed non-programmer task reports |
+| `GET` | `/reports/{report_id}` | one completed task report |
+| `GET` | `/private-reports` | private report list |
+| `GET` | `/private-reports/{report_ref}` | private report detail by ID or slug |
+| `POST` | `/private-reports` | create/update private report |
+| `POST` | `/private-reports/{slug}/publish` | publish private report into public research documents |
+| `DELETE` | `/session/{session_id}` | delete chat logs for a session |
+| `POST` | `/email/poll` | run one email polling cycle |
+| `GET` | `/email/inbound` | list inbound email records |
+| `GET` | `/email/pending` | list outbound approvals pending |
+| `GET` | `/email/messages/{message_id}` | email detail plus reply prompt input for inbound |
+| `POST` | `/email/drafts` | queue outbound reply draft |
+| `POST` | `/email/messages/{message_id}/approval` | approve/send, save draft, or reject outbound email |
+| `POST` | `/email/messages/{message_id}/internal-approve` | mark inbound email approved for internal delivery |
+| `GET` | `/email/internal-approved` | list inbound emails approved for internal delivery |
+| `POST` | `/email/messages/{message_id}/internal-deliver` | deliver approved inbound email to internal input path |
+
+### Private Report Request
+
+`POST /private-reports`:
+
 ```json
 {
-    "history": [
-        {
-            "user_query": "질문",
-            "bot_answer": "답변",
-            "created_at": "2026-03-21T12:00:00"
-        }
-    ]
+  "title": "Report title",
+  "slug": "stable-slug",
+  "markdown_body": "# Markdown",
+  "source_task_id": 123
 }
 ```
 
-**호출자:** BichonWebsite (`public/js/chat.js`) — 연결 끊김 시 최근 대화 복구용
+`POST /private-reports/{slug}/publish`:
 
----
-
-### 태스크 리포트
-
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| GET | `/reports` | 없음 | 완료된 태스크 리포트 목록 |
-| GET | `/reports/{report_id}` | 없음 | 개별 리포트 조회 |
-
-**`/reports` Query Parameters:**
-
-| 파라미터 | 필수 | 기본값 | 설명 |
-|----------|------|--------|------|
-| `limit` | X | 20 | 최대 반환 수 (1-100) |
-| `offset` | X | 0 | 페이지네이션 오프셋 |
-
-**`/reports` 응답:**
 ```json
 {
-    "reports": [
-        {
-            "id": 1,
-            "content": "태스크 내용",
-            "result": "결과 (마크다운)",
-            "created_at": "2026-03-21T12:00:00",
-            "completed_at": "2026-03-21T12:05:00"
-        }
-    ],
-    "total": 42
+  "title": "Optional public title",
+  "body": "Optional replacement markdown"
 }
 ```
 
-**`/reports/{report_id}` 응답:**
-```json
-{
-    "report": { "id": 1, "content": "...", "result": "...", "created_at": "...", "completed_at": "..." }
-}
-```
+## Email Approval Actions
 
-404 시: `{"detail": "Report not found"}`
+`POST /email/messages/{message_id}/approval` accepts:
 
-**호출자:** BichonWebsite (`routes/reports.js`) — 서버 사이드 캐싱 포함
-
----
-
-### 채팅 로그 (관리자)
-
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| GET | `/logs` | `X-Admin-Key` | 전체 채팅 로그 조회 (관리자용) |
-
-**Query Parameters:**
-
-| 파라미터 | 필수 | 기본값 | 설명 |
-|----------|------|--------|------|
-| `limit` | X | 50 | 최대 반환 수 (1-500) |
-| `offset` | X | 0 | 페이지네이션 오프셋 |
-
-**응답:**
-```json
-{
-    "logs": [
-        {
-            "id": 1,
-            "session_id": "abc123",
-            "fingerprint": "uuid",
-            "user_agent": "...",
-            "ip_address": "1.2.3.4",
-            "user_query": "질문",
-            "bot_answer": "답변",
-            "route": "vectorstore",
-            "documents_count": 3,
-            "web_search_used": false,
-            "strategy": null,
-            "processing_logs": "[\"로그1\", \"로그2\"]",
-            "created_at": "2026-03-21T12:00:00"
-        }
-    ],
-    "count": 50
-}
-```
-
-**호출자:** BichonWebsite (`/admin/api/logs` 프록시 → 이 엔드포인트)
-
----
-
-### 세션 관리 (관리자)
-
-| Method | Path | 인증 | 설명 |
-|--------|------|------|------|
-| DELETE | `/session/{session_id}` | `X-Admin-Key` | 특정 세션의 체크포인트 삭제 |
-| DELETE | `/sessions` | `X-Admin-Key` | 전체 세션 체크포인트 삭제 |
-
-**`DELETE /session/{session_id}` 응답:**
-```json
-{"session_id": "abc123", "cleared": true}
-```
-
-**`DELETE /sessions` 응답:**
-```json
-{"cleared_sessions": 5, "session_ids": ["abc123", "def456", "..."]}
-```
-
-**참고:** 체크포인트는 인메모리(`MemorySaver`)이므로 서버 재시작 시 자동 초기화됨. 이 API는 재시작 없이 특정 세션만 리셋할 때 사용.
-
----
+| `action` | Effect |
+|---|---|
+| `approve_send` | send queued outbound email |
+| `save_draft` | keep as draft without sending |
+| `reject` | reject outbound email |
 
 ## CORS
 
-허용 오리진:
+Current CORS allow-list in `api.py`:
+
 - `https://bichonwebpage.onrender.com`
 - `http://localhost:3000`
 
----
-
-## systemd 타이머 (스케줄 작업)
-
-API 서버와 분리된 독립 systemd timer로 실행:
-
-| 타이머 | 주기 | 설명 |
-|--------|------|------|
-| `leninbot-experience.timer` | 매일 00:30 KST | 대화 경험 압축 및 저장 (`experience_writer.py`) |
-
-> **Note**: 일기 작성은 `telegram_schedules` 테이블 기반 diary agent로 이동.
-
-로그 확인: `journalctl -u leninbot-experience`
-
----
-
-## 환경변수
-
-| 변수 | 필수 | 설명 |
-|------|------|------|
-| `ADMIN_API_KEY` | O | 관리자 API 인증 키 |
-| `RUN_TELEGRAM_IN_API` | X | `true`면 텔레그램 봇도 같은 프로세스에서 실행 (개발용) |
-
-DB, LLM 등 기타 환경변수는 `dev_docs/project_state.md` 참조.
+Update this list in code when frontend deployment origin changes.
