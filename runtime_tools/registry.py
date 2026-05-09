@@ -1332,38 +1332,14 @@ SAVE_DIARY_TOOL = {
 }
 
 
-def _load_diary_publication_guard() -> dict:
-    """Load optional publication guard policy for save_diary.
-
-    config/diary_publication_guard.json may define:
-      - blocked_terms: ["..."]
-      - blocked_pairs: [["term_a", "term_b"], ...]
-      - blocked_patterns: ["regex", ...]
-    The file is optional so deployments without custom policy keep working.
-    """
-    path = os.getenv(
-        "DIARY_PUBLICATION_GUARD_PATH",
-        os.path.join(os.path.dirname(__file__), "..", "config", "diary_publication_guard.json"),
-    )
-    try:
-        with open(os.path.abspath(path), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        logger.warning("diary publication guard config ignored: %s", e)
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _check_diary_publication_risks(title: str, content: str) -> list[str]:
     """Return advisory risk reasons for diary content.
 
-    This is intentionally soft: false positives must not block publication.
-    The diary prompt remains responsible for revision before calling save_diary.
+    This intentionally checks only secret-like technical material. Editorial,
+    political, reputational, or current-usefulness judgment belongs to the LLM
+    review path, not substring or regex policy.
     """
     text = f"{title or ''}\n{content or ''}"
-    lowered = text.lower()
     reasons: list[str] = []
 
     secret_patterns = [
@@ -1374,38 +1350,6 @@ def _check_diary_publication_risks(title: str, content: str) -> list[str]:
     ]
     for pattern, label in secret_patterns:
         if re.search(pattern, text, flags=re.IGNORECASE):
-            reasons.append(label)
-
-    cfg = _load_diary_publication_guard()
-    for term in cfg.get("blocked_terms") or []:
-        term_s = str(term).strip()
-        if term_s and term_s.lower() in lowered:
-            reasons.append(f"blocked term: {term_s}")
-
-    for pair in cfg.get("blocked_pairs") or []:
-        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            continue
-        a, b = str(pair[0]).strip(), str(pair[1]).strip()
-        if a and b and a.lower() in lowered and b.lower() in lowered:
-            reasons.append(f"blocked association: {a} + {b}")
-
-    for pattern in cfg.get("blocked_patterns") or []:
-        pattern_s = str(pattern).strip()
-        if not pattern_s:
-            continue
-        try:
-            if re.search(pattern_s, text, flags=re.IGNORECASE):
-                reasons.append(f"blocked pattern: {pattern_s}")
-        except re.error as e:
-            logger.warning("invalid diary guard regex ignored (%r): %s", pattern_s, e)
-
-    risky_association_patterns = [
-        (r"(공인이\s*아닌|비공인|민간|개인|활동가).{0,80}(유튜브|youtube|채널|단체|조직|배후|소속|운영|연결)", "non-public person association"),
-        (r"(유튜브|youtube|채널).{0,80}(활동가|비공인|공인이\s*아닌|배후|소속|운영\s*주체)", "channel/person association"),
-        (r"(배후|뒤에\s*있는|뒤에서\s*움직이는).{0,80}(조직|단체|세력|파벌|후원자|후원\s*조직)", "behind-the-scenes organization claim"),
-    ]
-    for pattern, label in risky_association_patterns:
-        if re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL):
             reasons.append(label)
 
     return reasons

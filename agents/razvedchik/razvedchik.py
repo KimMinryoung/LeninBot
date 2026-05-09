@@ -57,25 +57,6 @@ MB_TIMEOUT   = 30   # seconds
 class MoltbookSuspendedError(RuntimeError):
     """Raised when Moltbook blocks writes because the agent is suspended."""
 
-# ── 필터링 키워드 ──────────────────────────────────────────────────────────────
-INTERESTING_KEYWORDS = [
-    "AI", "agent", "LLM", "GPT", "machine learning",
-    "geopolitics", "지정학", "제국주의", "capitalism", "자본주의",
-    "philosophy", "철학", "dialectic", "변증법",
-    "tech", "technology", "기술", "automation", "자동화",
-    "revolution", "혁명", "politics", "정치",
-    "economy", "경제", "labor", "노동",
-    "surveillance", "감시", "freedom", "자유",
-    "open source", "오픈소스", "decentralization",
-]
-# 짧은 키워드(3자 이하)는 단어 경계 매칭이 필요 (예: "AI"가 "CONTAIN"에 오매칭 방지)
-_KW_PATTERNS = []
-for _kw in INTERESTING_KEYWORDS:
-    if len(_kw) <= 3:
-        _KW_PATTERNS.append(re.compile(r"\b" + re.escape(_kw) + r"\b", re.IGNORECASE))
-    else:
-        _KW_PATTERNS.append(re.compile(re.escape(_kw), re.IGNORECASE))
-
 # ── Razvedchik 정체성 (persona.py에서 조합) ───────────────────────────────────
 from agents.razvedchik.persona import build_prompt, MOLTBOOK_COMMENT, MOLTBOOK_POST
 
@@ -425,12 +406,8 @@ class Razvedchik:
             submolts: 특정 submolt 이름 리스트. None이면 전체 피드.
             limit:    가져올 포스트 수 (sort별 각 limit/2)
 
-        필터링 기준:
-            - karma > 5 이거나
-            - INTERESTING_KEYWORDS 키워드 포함
-
         Returns:
-            흥미로운 포스트 리스트 (dict)
+            새 포스트 리스트 (dict)
         """
         if not self.client:
             raise RuntimeError("MOLTBOOK_API_KEY 미설정")
@@ -478,10 +455,8 @@ class Razvedchik:
                 seen.add(pid)
         _save_seen_posts(seen)
 
-        # 흥미로운 포스트 필터링
-        interesting = [p for p in new_posts if self._is_interesting(p)]
-        logger.info("[razvedchik] 흥미로운 포스트: %d개", len(interesting))
-        return interesting
+        logger.info("[razvedchik] 검토 대상 포스트: %d개", len(new_posts))
+        return new_posts
 
     @staticmethod
     def _get_score(post: dict) -> int:
@@ -489,21 +464,8 @@ class Razvedchik:
         return int(post.get("score", 0) or post.get("upvotes", 0) or post.get("karma", 0) or 0)
 
     def _is_interesting(self, post: dict) -> bool:
-        """포스트가 흥미로운지 판별."""
-        if self._get_score(post) > 5:
-            return True
-
-        # 제목 + 내용 합쳐서 키워드 검색
-        text = " ".join([
-            post.get("title", ""),
-            post.get("content", ""),
-            post.get("body", ""),
-        ])
-
-        for pat in _KW_PATTERNS:
-            if pat.search(text):
-                return True
-        return False
+        """Compatibility hook; content relevance is judged downstream."""
+        return True
 
     # ── 댓글 생성 ─────────────────────────────────────────────────────────────
     def generate_comment(self, post: dict, dry_run: bool = False) -> str:

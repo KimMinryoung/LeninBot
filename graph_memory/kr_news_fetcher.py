@@ -91,18 +91,6 @@ def _parse_json_from_text(text: str):
 # 1. 한국 국내 뉴스 수집
 # ============================================================
 
-_KOREA_KEYWORDS = {
-    "korea", "korean", "seoul", "busan", "lee jae", "이재명",
-    "yoon", "윤석열", "rok", "south korea", "pyongyang", "dprk",
-}
-
-
-def _is_korea_relevant(title: str, content: str) -> bool:
-    """title + content 앞 500자에서 한국 관련 키워드를 확인한다."""
-    text = (title + " " + content[:500]).lower()
-    return any(kw in text for kw in _KOREA_KEYWORDS)
-
-
 async def _extract_article_body(raw_content: str) -> str:
     """Tavily raw_content에서 기사 본문만 LLM으로 추출한다.
 
@@ -188,12 +176,6 @@ async def fetch_kr_news(
             "url": r.get("url", ""),
             "content": content,
         })
-
-    # 관련성 필터: 한국 관련 키워드가 없는 기사 제거
-    before = len(articles)
-    articles = [a for a in articles if _is_korea_relevant(a["title"], a["content"])]
-    if before != len(articles):
-        print(f"🔎 관련성 필터: {before}건 → {len(articles)}건", flush=True)
 
     # 본문 정제: LLM으로 사이드바/광고/관련기사 노이즈 제거
     print(f"🧹 {len(articles)}건 본문 정제 중...", flush=True)
