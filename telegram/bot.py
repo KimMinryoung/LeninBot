@@ -11,6 +11,7 @@ import json
 import asyncio
 import logging
 import re
+import warnings
 from datetime import datetime
 from pathlib import Path
 from identity.prompts import CORE_IDENTITY, EXTERNAL_SOURCE_RULE
@@ -21,7 +22,9 @@ from db import query as _query, execute as _execute, query_one as _query_one, ge
 from psycopg2.extras import RealDictCursor
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, Router
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
+from aiogram.utils.backoff import BackoffConfig
 
 from secrets_loader import get_secret
 
@@ -42,6 +45,7 @@ from telegram.schema import ensure_summary_tables, ensure_telegram_tables
 from runtime_tools.allowlists import select_orchestrator_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
+from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
 from telegram.tasks import (
     process_task, system_monitor,
     task_worker, schedule_worker, check_deploy_meta,
@@ -67,6 +71,12 @@ class _ConflictFilter(logging.Filter):
 
 logging.getLogger("aiogram.dispatcher").addFilter(_ConflictFilter())
 logging.getLogger("aiogram.event").addFilter(_ConflictFilter())
+warnings.filterwarnings(
+    "ignore",
+    message=r"Detected unknown update type\.",
+    category=RuntimeWarning,
+    module=r"aiogram\.dispatcher\.event\.handler",
+)
 
 # Throttle Neo4j DNS/connection retry spam (100s of warnings per second when AuraDB is down)
 class _ThrottleFilter(logging.Filter):
@@ -113,6 +123,38 @@ PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS = max(
     int(os.getenv("PUBLIC_ACCESS_NOTICE_COOLDOWN_SECONDS", "86400") or "0"),
 )
 CHAT_PERSIST_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_CHAT_PERSIST_TIMEOUT_SECONDS", "15"))
+TELEGRAM_GUEST_MODE_POLICY = os.getenv("TELEGRAM_GUEST_MODE_POLICY", "owner_only").strip().lower() or "owner_only"
+TELEGRAM_POLLING_TIMEOUT_SECONDS = max(10, int(os.getenv("TELEGRAM_POLLING_TIMEOUT_SECONDS", "30") or "30"))
+TELEGRAM_SESSION_TIMEOUT_SECONDS = max(
+    TELEGRAM_POLLING_TIMEOUT_SECONDS + 15,
+    int(os.getenv("TELEGRAM_SESSION_TIMEOUT_SECONDS", "75") or "75"),
+)
+TELEGRAM_POLLING_CONCURRENCY_LIMIT = max(1, int(os.getenv("TELEGRAM_POLLING_CONCURRENCY_LIMIT", "8") or "8"))
+TELEGRAM_BACKOFF_MIN_SECONDS = max(0.1, float(os.getenv("TELEGRAM_BACKOFF_MIN_SECONDS", "1.0") or "1.0"))
+TELEGRAM_BACKOFF_MAX_SECONDS = max(
+    TELEGRAM_BACKOFF_MIN_SECONDS,
+    float(os.getenv("TELEGRAM_BACKOFF_MAX_SECONDS", "30.0") or "30.0"),
+)
+TELEGRAM_BACKOFF_FACTOR = max(1.0, float(os.getenv("TELEGRAM_BACKOFF_FACTOR", "1.7") or "1.7"))
+TELEGRAM_BACKOFF_JITTER = max(0.0, float(os.getenv("TELEGRAM_BACKOFF_JITTER", "0.2") or "0.2"))
+TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS = max(
+    0,
+    int(os.getenv("TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS", "60") or "60"),
+)
+TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS = max(
+    3,
+    int(os.getenv("TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS", "10") or "10"),
+)
+DEFAULT_ALLOWED_UPDATES = [
+    "message",
+    "edited_message",
+    "callback_query",
+    "my_chat_member",
+    "chat_member",
+    "message_reaction",
+    "message_reaction_count",
+    "guest_message",
+]
 _public_access_notice_last: dict[int, float] = {}
 _GROUP_CHAT_TYPES = {"group", "supergroup"}
 
@@ -239,6 +281,76 @@ class OwnerOnlyMiddleware(BaseMiddleware):
 
 
 async def _ignore_chat_member_update(event: ChatMemberUpdated):
+    return None
+
+
+def _allowed_updates() -> list[str]:
+    raw = os.getenv("TELEGRAM_ALLOWED_UPDATES", "").strip()
+    if not raw:
+        return list(DEFAULT_ALLOWED_UPDATES)
+    values = [part.strip() for part in raw.split(",") if part.strip()]
+    return values or list(DEFAULT_ALLOWED_UPDATES)
+
+
+def _has_guest_message(update) -> bool:
+    return bool(getattr(update, "guest_message", None))
+
+
+def _guest_message_dict(update) -> dict:
+    value = getattr(update, "guest_message", None)
+    return value if isinstance(value, dict) else {}
+
+
+def _guest_message_user_id(guest_message: dict) -> int | None:
+    user = guest_message.get("from") or guest_message.get("from_user") or guest_message.get("guest_bot_caller_user")
+    if isinstance(user, dict) and user.get("id") is not None:
+        try:
+            return int(user["id"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+async def _handle_guest_update(update, bot: Bot):
+    guest_message = _guest_message_dict(update)
+    guest_query_id = str(guest_message.get("guest_query_id") or "").strip()
+    caller_user_id = _guest_message_user_id(guest_message)
+    chat = guest_message.get("chat") if isinstance(guest_message.get("chat"), dict) else {}
+    chat_id = chat.get("id") if isinstance(chat, dict) else None
+
+    logger.info(
+        "blocked Telegram guest_message update_id=%s caller_user_id=%s chat_id=%s policy=%s",
+        getattr(update, "update_id", None),
+        caller_user_id,
+        chat_id,
+        TELEGRAM_GUEST_MODE_POLICY,
+    )
+    if OWNER_USER_ID:
+        try:
+            await asyncio.to_thread(
+                _save_system_event,
+                OWNER_USER_ID,
+                "guest_message_blocked",
+                f"Blocked guest_message update={getattr(update, 'update_id', None)} "
+                f"caller_user_id={caller_user_id} chat_id={chat_id}",
+            )
+        except Exception as e:
+            logger.warning("failed to persist guest_message block event: %s", e)
+
+    if not guest_query_id:
+        return None
+
+    notice = (
+        "Cyber-Lenin은 비공개 운영 봇입니다. 공개 글은 https://cyber-lenin.com 에서 볼 수 있고, "
+        "텔레그램 채널은 https://t.me/cyber_lenin_kr 입니다."
+    )
+    try:
+        client = TelegramBotApi10Client(token=TELEGRAM_BOT_TOKEN)
+        await client.answer_guest_query_text(guest_query_id, notice)
+    except TelegramBotApiError as e:
+        logger.warning("answerGuestQuery failed for guest_message update_id=%s: %s", getattr(update, "update_id", None), e)
+    except Exception as e:
+        logger.warning("unexpected answerGuestQuery failure update_id=%s: %s", getattr(update, "update_id", None), e)
     return None
 
 
@@ -472,6 +584,60 @@ def _format_system_alerts(provider: str = "claude") -> str:
     if provider == "claude":
         return f"<system-alerts>\n{items}\n</system-alerts>"
     return f"### System Alerts\n{items}"
+
+
+async def _telegram_connectivity_watchdog(bot: Bot) -> None:
+    """Probe Telegram periodically so network stalls become visible."""
+    if TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS <= 0:
+        return
+
+    was_down = False
+    failure_count = 0
+    while True:
+        await asyncio.sleep(TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS)
+        try:
+            await asyncio.wait_for(bot.get_me(), timeout=TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            failure_count += 1
+            if not was_down:
+                _add_system_alert(f"Telegram connectivity degraded: {type(e).__name__}: {e}")
+                logger.warning("Telegram connectivity probe failed: %s: %s", type(e).__name__, e)
+                if OWNER_USER_ID:
+                    try:
+                        await asyncio.to_thread(
+                            _save_system_event,
+                            OWNER_USER_ID,
+                            "telegram_connectivity_down",
+                            f"Telegram connectivity probe failed: {type(e).__name__}: {e}",
+                        )
+                    except Exception:
+                        pass
+            elif failure_count % 5 == 0:
+                logger.warning("Telegram connectivity still degraded after %d probes: %s", failure_count, e)
+            was_down = True
+            continue
+
+        if was_down:
+            _clear_system_alert("Telegram connectivity degraded")
+            logger.info("Telegram connectivity restored after %d failed probes", failure_count)
+            if OWNER_USER_ID:
+                try:
+                    await asyncio.to_thread(
+                        _save_system_event,
+                        OWNER_USER_ID,
+                        "telegram_connectivity_restored",
+                        f"Telegram connectivity restored after {failure_count} failed probes",
+                    )
+                    await bot.send_message(
+                        chat_id=OWNER_USER_ID,
+                        text=f"🟢 Telegram 연결 복구 — 실패 probe {failure_count}회 후 정상화.",
+                    )
+                except Exception:
+                    pass
+        was_down = False
+        failure_count = 0
 
 
 
@@ -1783,7 +1949,8 @@ async def bot_main():
         )
 
     global _bot_instance
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    session = AiohttpSession(timeout=TELEGRAM_SESSION_TIMEOUT_SECONDS, limit=100)
+    bot = Bot(token=TELEGRAM_BOT_TOKEN, session=session)
     _bot_instance = bot
     dp = Dispatcher()
     access_middleware = OwnerOnlyMiddleware()
@@ -1791,6 +1958,7 @@ async def bot_main():
     dp.callback_query.middleware(access_middleware)
     dp.my_chat_member.middleware(access_middleware)
     dp.my_chat_member.register(_ignore_chat_member_update)
+    dp.update.register(_handle_guest_update, _has_guest_message)
     dp.include_router(router)
 
     email_bridge_task = None
@@ -1809,9 +1977,35 @@ async def bot_main():
         BotCommand(command="projects", description="자율 프로젝트 목록"),
         BotCommand(command="project", description="자율 프로젝트 상세/수정"),
         BotCommand(command="channel", description="브로드캐스트 채널 설정"),
+        BotCommand(command="reactions", description="그룹 메시지 반응 삭제"),
         BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])
+
+    try:
+        me = await bot.get_me()
+        supports_guest_queries = getattr(me, "supports_guest_queries", None)
+        aiogram_version = "unknown"
+        try:
+            import aiogram
+            aiogram_version = aiogram.__version__
+        except Exception:
+            pass
+        if OWNER_USER_ID:
+            await asyncio.to_thread(
+                _save_system_event,
+                OWNER_USER_ID,
+                "telegram_api10_startup",
+                "Telegram Bot API 10.0 shim active; "
+                f"aiogram={aiogram_version}; supports_guest_queries={supports_guest_queries}; "
+                f"guest_policy={TELEGRAM_GUEST_MODE_POLICY}; allowed_updates={','.join(_allowed_updates())}; "
+                f"polling_timeout={TELEGRAM_POLLING_TIMEOUT_SECONDS}; "
+                f"session_timeout={TELEGRAM_SESSION_TIMEOUT_SECONDS}; "
+                f"polling_concurrency={TELEGRAM_POLLING_CONCURRENCY_LIMIT}; "
+                f"backoff_max={TELEGRAM_BACKOFF_MAX_SECONDS}",
+            )
+    except Exception as e:
+        logger.warning("Telegram API 10.0 startup self-check failed: %s", e)
 
     # Detect fresh deploy — inject context so the bot knows it was just updated
     await check_deploy_meta(bot, add_alert_fn=_add_system_alert)
@@ -2132,6 +2326,10 @@ async def bot_main():
             schedule_worker(bot, allowed_user_ids=ALLOWED_USER_IDS),
             name="schedule_worker",
         ),
+        asyncio.create_task(
+            _telegram_connectivity_watchdog(bot),
+            name="telegram_connectivity_watchdog",
+        ),
     ]
     if email_bridge_task is not None:
         _bg_tasks.insert(0, email_bridge_task)
@@ -2211,7 +2409,19 @@ async def bot_main():
     asyncio.create_task(_notify_ready(), name="startup_notify")
 
     # drop_pending_updates: new instance takes over quickly, avoids processing stale updates
-    await dp.start_polling(bot, drop_pending_updates=True)
+    await dp.start_polling(
+        bot,
+        drop_pending_updates=True,
+        allowed_updates=_allowed_updates(),
+        polling_timeout=TELEGRAM_POLLING_TIMEOUT_SECONDS,
+        backoff_config=BackoffConfig(
+            min_delay=TELEGRAM_BACKOFF_MIN_SECONDS,
+            max_delay=TELEGRAM_BACKOFF_MAX_SECONDS,
+            factor=TELEGRAM_BACKOFF_FACTOR,
+            jitter=TELEGRAM_BACKOFF_JITTER,
+        ),
+        tasks_concurrency_limit=TELEGRAM_POLLING_CONCURRENCY_LIMIT,
+    )
     # After polling stops — graceful shutdown sequence
     # 1. Cancel background tasks
     for t in _bg_tasks:
