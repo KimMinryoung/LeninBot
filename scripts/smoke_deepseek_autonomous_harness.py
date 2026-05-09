@@ -49,6 +49,14 @@ def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     assert "from openai_tool_loop import chat_with_tools as openai_chat" in source
 
 
+def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
+    source = _read("browser/use_agent.py")
+    assert "class _DeepSeekAnthropicBrowserChat(ChatAnthropic)" in source
+    assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
+    assert 'params["thinking"] = {"type": "disabled"}' in source
+    assert "ChatDeepSeek" not in source
+
+
 def test_deepseek_pricing_uses_deepseek_rows() -> None:
     pro = _pricing_for("deepseek-v4-pro")
     flash = _pricing_for("deepseek-v4-flash")
@@ -70,5 +78,6 @@ if __name__ == "__main__":
     test_telegram_deepseek_routes_to_anthropic_harness()
     test_a2a_deepseek_routes_to_anthropic_harness()
     test_browser_worker_deepseek_routes_to_anthropic_harness()
+    test_browser_use_deepseek_routes_to_anthropic_harness()
     test_deepseek_pricing_uses_deepseek_rows()
     print("deepseek harness smoke ok")

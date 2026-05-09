@@ -44,7 +44,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
-Telegram chat, background tasks, A2A, browser worker tasks, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. These paths send `thinking={"type": "disabled"}` because DeepSeek Anthropic thinking mode requires replaying thinking blocks across tool turns. Public web chat remains on the OpenAI-compatible DeepSeek path for availability until it is separately migrated.
+Telegram chat, background tasks, A2A, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. These paths send `thinking={"type": "disabled"}` because DeepSeek Anthropic thinking mode requires replaying thinking blocks across tool turns. Public web chat remains on the OpenAI-compatible DeepSeek path for availability until it is separately migrated.
 
 ## Runtime Config Keys
 

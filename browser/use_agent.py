@@ -13,6 +13,7 @@ import logging
 import os
 
 from browser_use import Agent, Browser
+from browser_use.llm.anthropic.chat import ChatAnthropic
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,15 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 _DEFAULT_MAX_STEPS = 20
 _DEFAULT_BROWSER_USE_PROVIDER = "deepseek"
 _DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
+
+
+class _DeepSeekAnthropicBrowserChat(ChatAnthropic):
+    """ChatAnthropic wrapper that disables DeepSeek thinking mode per request."""
+
+    def _get_client_params_for_invoke(self):
+        params = super()._get_client_params_for_invoke()
+        params["thinking"] = {"type": "disabled"}
+        return params
 
 
 def _resolve_provider_and_model() -> tuple[str, str]:
@@ -75,27 +85,31 @@ def _build_llm(model: str | None = None):
         return llm
 
     if provider == "deepseek":
-        from browser_use.llm.deepseek.chat import ChatDeepSeek
-
-        llm = ChatDeepSeek(
+        llm = _DeepSeekAnthropicBrowserChat(
             model=model,
             api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
+            base_url=os.getenv(
+                "DEEPSEEK_ANTHROPIC_BASE_URL",
+                "https://api.deepseek.com/anthropic",
+            ).rstrip("/"),
             timeout=120,
         )
-        logger.info("browser-use LLM: DeepSeek %s", model)
+        logger.info("browser-use LLM: DeepSeek Anthropic-compatible %s", model)
         return llm
 
     if provider == "claude" or provider == "anthropic":
         logger.warning("browser-use forbids Claude provider; using DeepSeek instead")
 
-    from browser_use.llm.deepseek.chat import ChatDeepSeek
-
-    llm = ChatDeepSeek(
+    llm = _DeepSeekAnthropicBrowserChat(
         model="deepseek-v4-flash",
         api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
+        base_url=os.getenv(
+            "DEEPSEEK_ANTHROPIC_BASE_URL",
+            "https://api.deepseek.com/anthropic",
+        ).rstrip("/"),
         timeout=120,
     )
-    logger.info("browser-use LLM: DeepSeek deepseek-v4-flash")
+    logger.info("browser-use LLM: DeepSeek Anthropic-compatible deepseek-v4-flash")
     return llm
 
 
