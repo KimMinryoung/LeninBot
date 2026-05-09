@@ -20,6 +20,8 @@ DEEPSEEK_ANTHROPIC_BASE_URL = os.getenv(
     "DEEPSEEK_ANTHROPIC_BASE_URL",
     "https://api.deepseek.com/anthropic",
 ).rstrip("/")
+DEEPSEEK_THINKING_MODE = os.getenv("DEEPSEEK_THINKING_MODE", "thinking").strip().lower()
+DEEPSEEK_THINKING_EFFORT = os.getenv("DEEPSEEK_THINKING_EFFORT", "high").strip().lower()
 
 # ── LLM Clients ──────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
@@ -299,6 +301,30 @@ def _resolve_openai_model(alias: str) -> str:
 def _resolve_deepseek_model(alias: str) -> str:
     """Resolve DeepSeek model alias to the current official API model ID."""
     return _DEEPSEEK_MODEL_MAP.get(alias, alias)
+
+
+def _get_deepseek_thinking_params() -> dict:
+    """Return DeepSeek Anthropic-compatible thinking controls.
+
+    DeepSeek V4 defaults to thinking mode. We send the toggle and effort
+    explicitly so every non-web agent harness behaves predictably.
+    """
+    mode = (os.getenv("DEEPSEEK_THINKING_MODE", DEEPSEEK_THINKING_MODE) or "thinking").strip().lower()
+    if mode in {"0", "false", "off", "none", "disabled", "disable", "non-thinking", "non_thinking"}:
+        return {"thinking": {"type": "disabled"}}
+
+    effort = (os.getenv("DEEPSEEK_THINKING_EFFORT", DEEPSEEK_THINKING_EFFORT) or "high").strip().lower()
+    if mode in {"thinking_max", "max", "xhigh"}:
+        effort = "max"
+    elif effort in {"xhigh", "highest"}:
+        effort = "max"
+    elif effort not in {"high", "max"}:
+        effort = "high"
+
+    return {
+        "thinking": {"type": "enabled"},
+        "output_config": {"effort": effort},
+    }
 
 
 def _resolve_tier(tier: str, provider: str | None = None) -> str:

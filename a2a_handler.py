@@ -21,6 +21,7 @@ from identity.prompts import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _deepseek_anthropic_client, _config,
+    _get_deepseek_thinking_params,
 )
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
@@ -376,6 +377,7 @@ async def _run_llm(
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
         from claude_loop import chat_with_tools
+        deepseek_thinking = _get_deepseek_thinking_params()
         return await chat_with_tools(
             history,
             client=_deepseek_anthropic_client,
@@ -386,7 +388,8 @@ async def _run_llm(
             max_rounds=profile.max_rounds,
             max_tokens=profile.max_tokens,
             budget_usd=profile.budget_usd,
-            thinking={"type": "disabled"},
+            thinking=deepseek_thinking.get("thinking"),
+            output_config=deepseek_thinking.get("output_config"),
         )
     else:
         from claude_loop import chat_with_tools

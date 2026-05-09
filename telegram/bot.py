@@ -36,7 +36,7 @@ from bot_config import (
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
-    _get_task_provider,
+    _get_task_provider, _get_deepseek_thinking_params,
     get_current_model_selection,
     _extract_text,
 )
@@ -1533,6 +1533,7 @@ async def _chat_with_tools(
         )
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
+        deepseek_thinking = _get_deepseek_thinking_params()
         return await chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,
@@ -1551,7 +1552,8 @@ async def _chat_with_tools(
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
-            thinking={"type": "disabled"},
+            thinking=deepseek_thinking.get("thinking"),
+            output_config=deepseek_thinking.get("output_config"),
         )
 
     if effective_provider in ("openai", "deepseek"):

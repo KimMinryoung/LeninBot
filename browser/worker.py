@@ -227,6 +227,8 @@ async def execute_browser_task(task: dict) -> dict:
 
         if provider == "deepseek":
             from claude_loop import chat_with_tools as deepseek_chat
+            from bot_config import _get_deepseek_thinking_params
+            deepseek_thinking = _get_deepseek_thinking_params()
             return await deepseek_chat(
                 messages,
                 client=client,
@@ -242,7 +244,8 @@ async def execute_browser_task(task: dict) -> dict:
                 task_id=task_id,
                 finalization_tools=finalization_tools,
                 terminal_tools=terminal_tools,
-                thinking={"type": "disabled"},
+                thinking=deepseek_thinking.get("thinking"),
+                output_config=deepseek_thinking.get("output_config"),
             )
 
         from openai_tool_loop import chat_with_tools as openai_chat

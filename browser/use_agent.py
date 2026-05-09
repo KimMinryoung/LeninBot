@@ -27,11 +27,13 @@ _DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
 
 
 class _DeepSeekAnthropicBrowserChat(ChatAnthropic):
-    """ChatAnthropic wrapper that disables DeepSeek thinking mode per request."""
+    """ChatAnthropic wrapper that sends DeepSeek thinking controls per request."""
 
     def _get_client_params_for_invoke(self):
+        from bot_config import _get_deepseek_thinking_params
+
         params = super()._get_client_params_for_invoke()
-        params["thinking"] = {"type": "disabled"}
+        params.update(_get_deepseek_thinking_params())
         return params
 
 

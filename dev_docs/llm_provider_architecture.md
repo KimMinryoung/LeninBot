@@ -44,7 +44,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
-Telegram chat, background tasks, A2A, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. These paths send `thinking={"type": "disabled"}` because DeepSeek Anthropic thinking mode requires replaying thinking blocks across tool turns. Public web chat remains on the OpenAI-compatible DeepSeek path for availability until it is separately migrated.
+Telegram chat, background tasks, A2A, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. These non-web DeepSeek paths enable thinking mode by default and send `output_config.effort` explicitly; `claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat remains on the OpenAI-compatible DeepSeek path for availability until it is separately migrated.
 
 ## Runtime Config Keys
 
@@ -60,6 +60,13 @@ Telegram chat, background tasks, A2A, browser worker tasks, browser-use automati
 | `autonomous_model` | `high`, `medium`, `low` | autonomous tier |
 
 `task_provider=default` inherits `provider`. `autonomous_provider=default` inherits the resolved task provider. Public web chat deliberately does not allow `local`.
+
+DeepSeek Anthropic-compatible thinking is controlled by environment variables:
+
+| Env | Default | Meaning |
+|---|---|---|
+| `DEEPSEEK_THINKING_MODE` | `thinking` | `thinking` enables DeepSeek thinking; `thinking_max` forces max effort; `disabled`/`non-thinking` disables it |
+| `DEEPSEEK_THINKING_EFFORT` | `high` | `high` or `max`; invalid values fall back to `high` |
 
 ## Tier Resolution
 

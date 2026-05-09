@@ -9,7 +9,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from claude_loop import _calculate_cost, _pricing_for
+from claude_loop import _calculate_cost, _content_block_for_replay, _pricing_for
+from bot_config import _get_deepseek_thinking_params
 
 
 def _read(path: str) -> str:
@@ -28,7 +29,8 @@ def test_telegram_deepseek_routes_to_anthropic_harness() -> None:
     anth = 'effective_provider == "deepseek" and _deepseek_anthropic_client'
     assert anth in source
     assert "client=_deepseek_anthropic_client" in source
-    assert 'thinking={"type": "disabled"}' in source
+    assert "_get_deepseek_thinking_params" in source
+    assert "output_config=deepseek_thinking.get" in source
     assert 'provider_label="deepseek"' not in source
 
 
@@ -36,7 +38,8 @@ def test_a2a_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("a2a_handler.py")
     assert 'provider == "deepseek" and _deepseek_anthropic_client' in source
     assert "client=_deepseek_anthropic_client" in source
-    assert 'thinking={"type": "disabled"}' in source
+    assert "_get_deepseek_thinking_params" in source
+    assert "output_config=deepseek_thinking.get" in source
     assert 'provider_label="deepseek:a2a"' not in source
 
 
@@ -45,7 +48,8 @@ def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
     assert "anthropic.AsyncAnthropic" in source
     assert 'if provider == "deepseek":' in source
-    assert 'thinking={"type": "disabled"}' in source
+    assert "_get_deepseek_thinking_params" in source
+    assert "output_config=deepseek_thinking.get" in source
     assert "from openai_tool_loop import chat_with_tools as openai_chat" in source
 
 
@@ -53,8 +57,25 @@ def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("browser/use_agent.py")
     assert "class _DeepSeekAnthropicBrowserChat(ChatAnthropic)" in source
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
-    assert 'params["thinking"] = {"type": "disabled"}' in source
+    assert "params.update(_get_deepseek_thinking_params())" in source
     assert "ChatDeepSeek" not in source
+
+
+def test_deepseek_thinking_config_is_enabled_by_default() -> None:
+    params = _get_deepseek_thinking_params()
+    assert params["thinking"] == {"type": "enabled"}
+    assert params["output_config"]["effort"] in {"high", "max"}
+
+
+def test_thinking_blocks_are_replayed_not_coerced_to_text() -> None:
+    thinking_block = {
+        "type": "thinking",
+        "thinking": "provider-private reasoning payload",
+        "signature": "sig",
+    }
+    redacted_block = {"type": "redacted_thinking", "data": "opaque"}
+    assert _content_block_for_replay(thinking_block) == thinking_block
+    assert _content_block_for_replay(redacted_block) == redacted_block
 
 
 def test_deepseek_pricing_uses_deepseek_rows() -> None:
@@ -79,5 +100,7 @@ if __name__ == "__main__":
     test_a2a_deepseek_routes_to_anthropic_harness()
     test_browser_worker_deepseek_routes_to_anthropic_harness()
     test_browser_use_deepseek_routes_to_anthropic_harness()
+    test_deepseek_thinking_config_is_enabled_by_default()
+    test_thinking_blocks_are_replayed_not_coerced_to_text()
     test_deepseek_pricing_uses_deepseek_rows()
     print("deepseek harness smoke ok")

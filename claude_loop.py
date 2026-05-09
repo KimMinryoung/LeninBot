@@ -25,6 +25,8 @@ from tool_loop_common import (
 
 logger = logging.getLogger(__name__)
 
+_REPLAY_ONLY_BLOCK_TYPES = {"thinking", "redacted_thinking"}
+
 
 def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
     """Deduplicate tool schemas by name while preserving first occurrence.
@@ -133,10 +135,10 @@ def _calculate_cost(usage, model: str | None = None) -> float:
 def _to_block_dict(block):
     """Best-effort conversion of SDK block objects to plain dict."""
     if isinstance(block, dict):
-        return dict(block)
+        return {k: v for k, v in block.items() if v is not None}
     if hasattr(block, "model_dump"):
         try:
-            dumped = block.model_dump()
+            dumped = block.model_dump(exclude_none=True)
             if isinstance(dumped, dict):
                 return dumped
         except Exception:
@@ -147,6 +149,23 @@ def _to_block_dict(block):
             if hasattr(block, key):
                 out[key] = getattr(block, key)
         return out
+    return None
+
+
+def _content_block_for_replay(block: dict) -> dict | None:
+    """Return the exact assistant content block shape that can be replayed.
+
+    DeepSeek's Anthropic-compatible thinking mode requires reasoning blocks to
+    be included in replayed assistant messages when a turn performs tool calls.
+    Those blocks are provider protocol, not user-visible text.
+    """
+    if not isinstance(block, dict):
+        return None
+    btype = block.get("type")
+    if btype in _REPLAY_ONLY_BLOCK_TYPES:
+        return {k: v for k, v in block.items() if v is not None}
+    if btype == "text":
+        return {"type": "text", "text": str(block.get("text", ""))}
     return None
 
 
@@ -300,6 +319,7 @@ async def chat_with_tools(
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
     thinking: dict | None = None,
+    output_config: dict | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -351,6 +371,8 @@ async def chat_with_tools(
     async def _claude_call(**kwargs):
         if thinking is not None:
             kwargs["thinking"] = thinking
+        if output_config is not None:
+            kwargs["output_config"] = output_config
         if on_progress is None:
             return await client.messages.create(**kwargs)
         async with client.messages.stream(**kwargs) as stream:
@@ -438,13 +460,19 @@ async def chat_with_tools(
             btype = b.get("type")
 
             if btype == "text":
+                replay_block = _content_block_for_replay(b)
                 text = str(b.get("text", ""))
-                assistant_content.append({"type": "text", "text": text})
+                if replay_block:
+                    assistant_content.append(replay_block)
                 # Accumulate substantial text from tool_use rounds for final result
                 if text.strip() and len(text.strip()) > 20:
                     accumulated_text_parts.append(text.strip())
                 if text.strip():
                     await emit_progress(on_progress, "thinking", f"[{round_num}] {text.strip()}")
+            elif btype in _REPLAY_ONLY_BLOCK_TYPES:
+                replay_block = _content_block_for_replay(b)
+                if replay_block:
+                    assistant_content.append(replay_block)
             elif btype in ("server_tool_use", "web_search_tool_result"):
                 # Defensive fallback: server-side tools are no longer used
                 # (replaced by Tavily client tool), but convert to text if
@@ -625,7 +653,13 @@ async def chat_with_tools(
         b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
         btype = b.get("type")
         if btype == "text":
-            final_assistant_content.append({"type": "text", "text": str(b.get("text", ""))})
+            replay_block = _content_block_for_replay(b)
+            if replay_block:
+                final_assistant_content.append(replay_block)
+        elif btype in _REPLAY_ONLY_BLOCK_TYPES:
+            replay_block = _content_block_for_replay(b)
+            if replay_block:
+                final_assistant_content.append(replay_block)
         elif btype == "tool_use":
             tid = str(b.get("id", "")).strip()
             tname = str(b.get("name", "")).strip()
