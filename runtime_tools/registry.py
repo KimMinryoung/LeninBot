@@ -62,7 +62,8 @@ TOOLS = [
             "Search Neo4j KG for geopolitical entities and relationships. "
             "Do not invent English names for Korean organizations/publications; "
             "prefer canonical names already used in KG, e.g. '디아마트 (DiaMat)' "
-            "and '웹진 반란(Uprising)'."
+            "and '웹진 반란(Uprising)'. Preserve Korean person names such as "
+            "'신현준' instead of romanizing them."
         ),
         "input_schema": {
             "type": "object",
@@ -73,7 +74,8 @@ TOOLS = [
                         "What entities/relations to find. Preserve proper nouns in "
                         "their known canonical language/name; do not translate or "
                         "romanize Korean organization names unless that spelling is "
-                        "part of the canonical name."
+                        "part of the canonical name. For Korean people, use the "
+                        "Korean name if known."
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Results count (1-20).", "default": 10},

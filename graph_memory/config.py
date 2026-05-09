@@ -342,6 +342,13 @@ NAME_NORMALIZATION = {
     "webzine banlan": "웹진 반란(Uprising)",
     "banlan": "웹진 반란(Uprising)",
     "uprising.kr": "웹진 반란(Uprising)",
+    # Korean person aliases. Keep Korean names canonical in KG; romanization
+    # variants are search/write aliases only.
+    "shin hyunjoon": "신현준",
+    "shin hyun-joon": "신현준",
+    "shin hyun-joon (신현준)": "신현준",
+    "shin hyeonjun": "신현준",
+    "shin hyeon-joon": "신현준",
 }
 
 

@@ -20,6 +20,11 @@ KG_QUERY_ALIASES = {
     "uprising.kr": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
     "uprising": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
     "웹진 반란": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+    "shin hyunjoon": ["신현준"],
+    "shin hyun-joon": ["신현준"],
+    "shin hyeonjun": ["신현준"],
+    "shin hyeon-joon": ["신현준"],
+    "신현준": ["신현준"],
 }
 
 
@@ -37,6 +42,48 @@ def _expand_query_aliases(query: str) -> str:
     if not additions:
         return query
     return query + " " + " ".join(additions)
+
+
+def _canonical_alias_hits(query: str) -> list[str]:
+    """Return canonical names implied by alias matches in the query."""
+    if not query:
+        return []
+    lowered = query.lower()
+    hits = []
+    for alias, canonicals in KG_QUERY_ALIASES.items():
+        if alias in lowered:
+            for canonical in canonicals:
+                if canonical not in hits:
+                    hits.append(canonical)
+    return hits
+
+
+def _prioritize_canonical_hits(nodes: list[dict], edges: list[dict], query: str) -> tuple[list[dict], list[dict]]:
+    canonicals = _canonical_alias_hits(query)
+    if not canonicals:
+        return nodes, edges
+
+    def node_score(n: dict) -> int:
+        name = str(n.get("name") or "")
+        summary = str(n.get("summary") or "")
+        return max(
+            (
+                3 if name == canonical
+                else 2 if canonical in name
+                else 1 if canonical in summary
+                else 0
+            )
+            for canonical in canonicals
+        )
+
+    def edge_score(e: dict) -> int:
+        fact = str(e.get("fact") or "")
+        return max((1 if canonical in fact else 0) for canonical in canonicals)
+
+    return (
+        sorted(nodes, key=node_score, reverse=True),
+        sorted(edges, key=edge_score, reverse=True),
+    )
 
 
 def _format_kg_results(nodes: list[dict], edges: list[dict], edge_tier: dict[str, str] | None = None) -> str:
@@ -311,6 +358,8 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
 
     if not all_nodes and not all_edges:
         return None
+
+    all_nodes, all_edges = _prioritize_canonical_hits(all_nodes, all_edges, query)
 
     # ── Trust-tier lookup: pull source episode names for all edges in one
     # Cypher pass and extract the [T:tier] prefix encoded by add_kg_episode.

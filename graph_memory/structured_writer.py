@@ -248,7 +248,12 @@ async def write_structured_facts(
         if msg:
             rejected_facts.append(_reject_fact(i, f, msg))
         else:
-            valid_facts.append(f)
+            from graph_memory.graphiti_patches import normalize_entity_names_in_text
+            nf = dict(f)
+            for key in ("subject_name", "object_name", "fact"):
+                if isinstance(nf.get(key), str):
+                    nf[key] = normalize_entity_names_in_text(nf[key])
+            valid_facts.append(nf)
             written_fact_indices.append(i)
 
     if not valid_facts:
