@@ -75,14 +75,18 @@ def _init_provider_client(provider: str):
     if provider in _provider_clients:
         return _provider_clients[provider]
     from secrets_loader import get_secret
-    from openai import AsyncOpenAI
 
     if provider == "openai":
+        from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=get_secret("OPENAI_API_KEY", "") or "")
     else:
-        client = AsyncOpenAI(
+        import anthropic
+        client = anthropic.AsyncAnthropic(
             api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
-            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
+            base_url=os.getenv(
+                "DEEPSEEK_ANTHROPIC_BASE_URL",
+                "https://api.deepseek.com/anthropic",
+            ).rstrip("/"),
         )
     _provider_clients[provider] = client
     return client
@@ -123,7 +127,6 @@ async def execute_browser_task(task: dict) -> dict:
     from agents import get_agent
     from agents.base import AgentSpec
     from claude_loop import dedupe_tools_by_name
-    from openai_tool_loop import chat_with_tools
     from self_runtime.tools import build_task_context_tools
     from runtime_tools.registry import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
@@ -222,7 +225,28 @@ async def execute_browser_task(task: dict) -> dict:
             _join_context_blocks(_build_runtime_prelude(provider, kind="task")),
         )
 
-        return await chat_with_tools(
+        if provider == "deepseek":
+            from claude_loop import chat_with_tools as deepseek_chat
+            return await deepseek_chat(
+                messages,
+                client=client,
+                model=resolved_model,
+                tools=merged_tools,
+                tool_handlers=merged_handlers,
+                system_prompt=system_prompt or "",
+                max_rounds=max_rounds or spec.max_rounds,
+                max_tokens=max_tokens or 8192,
+                budget_usd=budget_usd or spec.budget_usd,
+                on_progress=on_progress,
+                budget_tracker=budget_tracker,
+                task_id=task_id,
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
+                thinking={"type": "disabled"},
+            )
+
+        from openai_tool_loop import chat_with_tools as openai_chat
+        return await openai_chat(
             messages,
             client=client,
             model=resolved_model,

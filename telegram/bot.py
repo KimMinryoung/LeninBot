@@ -1532,7 +1532,7 @@ async def _chat_with_tools(
             provider_label="openai",
         )
 
-    if effective_provider == "deepseek" and _runtime_kind == "autonomous" and _deepseek_anthropic_client:
+    if effective_provider == "deepseek" and _deepseek_anthropic_client:
         return await chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,
@@ -1552,36 +1552,6 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             thinking={"type": "disabled"},
-        )
-
-    if effective_provider == "deepseek" and _deepseek_client:
-        from openai_tool_loop import chat_with_tools as openai_chat
-        return await openai_chat(
-            messages,
-            client=_deepseek_client,
-            model=profile.model_id,
-            tools=merged_tools,
-            tool_handlers=merged_handlers,
-            system_prompt=sys_prompt,
-            max_rounds=resolved_max_rounds,
-            max_tokens=resolved_max_tokens,
-            log_event=_log_event,
-            budget_usd=resolved_budget,
-            on_progress=on_progress,
-            budget_tracker=budget_tracker,
-            task_id=task_id,
-            agent_name=_agent_name,
-            mission_id=_mission_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
-            # DeepSeek V4 thinking mode requires preserving reasoning_content
-            # across tool sub-turns. This loop stores text-only history, so use
-            # non-thinking mode for reliable tool calling and lower task cost.
-            context_limit=DEEPSEEK_CONTEXT_LIMIT,
-            extra_body={"thinking": {"type": "disabled"}},
-            sdk_max_token_param="max_tokens",
-            include_parallel_tool_calls=False,
-            provider_label="deepseek",
         )
 
     if effective_provider in ("openai", "deepseek"):
