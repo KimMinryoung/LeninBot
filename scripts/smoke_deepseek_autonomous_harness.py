@@ -61,6 +61,18 @@ def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
     assert "ChatDeepSeek" not in source
 
 
+def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> None:
+    source = _read("web_chat.py")
+    assert "_deepseek_anthropic_client" in source
+    assert 'provider == "deepseek"' in source
+    assert "client=_deepseek_anthropic_client" in source
+    assert 'thinking={"type": "disabled"}' in source
+    assert "_deepseek_client" not in source
+    assert 'event == "tool_call"' in source
+    assert '"type": "tool_done" if done else "tool_start"' in source
+    assert "on_progress=on_progress" in source
+
+
 def test_deepseek_thinking_config_is_enabled_by_default() -> None:
     params = _get_deepseek_thinking_params()
     assert params["thinking"] == {"type": "enabled"}
@@ -100,6 +112,7 @@ if __name__ == "__main__":
     test_a2a_deepseek_routes_to_anthropic_harness()
     test_browser_worker_deepseek_routes_to_anthropic_harness()
     test_browser_use_deepseek_routes_to_anthropic_harness()
+    test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress()
     test_deepseek_thinking_config_is_enabled_by_default()
     test_thinking_blocks_are_replayed_not_coerced_to_text()
     test_deepseek_pricing_uses_deepseek_rows()

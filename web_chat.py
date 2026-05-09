@@ -19,7 +19,7 @@ from pathlib import Path
 from identity.prompts import CORE_IDENTITY
 from shared import KST
 from bot_config import (
-    _claude, _openai_client, _deepseek_client,
+    _claude, _openai_client, _deepseek_anthropic_client,
 )
 from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
@@ -782,18 +782,11 @@ async def handle_web_chat(
 
     async def _run_llm():
         try:
-            if provider in ("openai", "deepseek"):
+            if provider == "openai":
                 from openai_tool_loop import chat_with_tools as openai_chat
-                client = _deepseek_client if provider == "deepseek" else _openai_client
-                extra_kwargs = {}
-                if provider == "deepseek":
-                    extra_kwargs = {
-                        "extra_body": {"thinking": {"type": "disabled"}},
-                        "sdk_max_token_param": "max_tokens",
-                    }
                 result = await openai_chat(
                     history,
-                    client=client,
+                    client=_openai_client,
                     model=profile.model_id,
                     tools=_web_tools,
                     tool_handlers=_web_handlers,
@@ -807,7 +800,25 @@ async def handle_web_chat(
                     max_length_continuations=2,
                     return_metadata=True,
                     budget_tracker=budget_tracker,
-                    **extra_kwargs,
+                )
+            elif provider == "deepseek":
+                if not _deepseek_anthropic_client:
+                    raise RuntimeError("DEEPSEEK_API_KEY is not configured for webchat_provider=deepseek")
+                result = await chat_with_tools(
+                    history,
+                    client=_deepseek_anthropic_client,
+                    model=profile.model_id,
+                    tools=_web_tools,
+                    tool_handlers=_web_handlers,
+                    system_prompt=system_prompt,
+                    max_rounds=profile.max_rounds,
+                    max_tokens=profile.max_tokens,
+                    budget_usd=profile.budget_usd,
+                    on_progress=on_progress,
+                    continue_on_length=True,
+                    max_length_continuations=2,
+                    budget_tracker=budget_tracker,
+                    thinking={"type": "disabled"},
                 )
             else:
                 result = await chat_with_tools(
