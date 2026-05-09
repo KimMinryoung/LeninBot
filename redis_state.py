@@ -275,6 +275,71 @@ def get_active_task_ids() -> set[int]:
         return set()
 
 
+# ── Active Web Chat Registry ─────────────────────────────────────────
+
+def register_active_web_chat(request_id: str, session_id: str = "", fingerprint: str = ""):
+    """Register an in-flight web chat answer generation."""
+    try:
+        r = get_redis()
+        if not r:
+            return
+        key = f"web_chat:{request_id}:state"
+        r.sadd("active_web_chats", request_id)
+        r.hset(key, mapping={
+            "session_id": session_id,
+            "fingerprint": fingerprint[:16],
+            "started_at": f"{time.time():.0f}",
+            "updated_at": f"{time.time():.0f}",
+        })
+        r.expire(key, _KEY_TTL)
+        r.expire("active_web_chats", _KEY_TTL)
+    except Exception as e:
+        logger.debug("register_active_web_chat failed (%s): %s", request_id, e)
+
+
+def unregister_active_web_chat(request_id: str):
+    """Remove an in-flight web chat marker."""
+    try:
+        r = get_redis()
+        if not r:
+            return
+        r.srem("active_web_chats", request_id)
+        r.delete(f"web_chat:{request_id}:state")
+    except Exception as e:
+        logger.debug("unregister_active_web_chat failed (%s): %s", request_id, e)
+
+
+def get_active_web_chats(max_age_sec: int = 1800) -> list[dict]:
+    """Return web chat generations still considered active.
+
+    Stale markers are ignored and removed so a crashed API process does not
+    block restarts forever.
+    """
+    try:
+        r = get_redis()
+        if not r:
+            return []
+        now = time.time()
+        result = []
+        for request_id in r.smembers("active_web_chats"):
+            key = f"web_chat:{request_id}:state"
+            state = r.hgetall(key)
+            if not state:
+                r.srem("active_web_chats", request_id)
+                continue
+            started = float(state.get("started_at") or 0)
+            if started and now - started > max_age_sec:
+                r.srem("active_web_chats", request_id)
+                r.delete(key)
+                continue
+            state["request_id"] = request_id
+            result.append(state)
+        return result
+    except Exception as e:
+        logger.debug("get_active_web_chats failed: %s", e)
+        return []
+
+
 # ── Mission Bulletin Board (inter-agent messaging) ───────────────────
 
 def post_to_board(mission_id: int, from_task_id: int, agent_type: str, message: str):

@@ -180,7 +180,7 @@ _HELP_TEXT = """\
 /project <id> goal <새 goal> — goal 수정
 /project <id> publishing <일일최대> <쿨다운분> — 발행 속도 조정
 /project <id> pause|resume|archive — 상태 변경
-/restart \\[telegram|api|all] — 서비스 재시작
+/restart \\[telegram|api|all] [force] — 작업 중이면 거부하는 안전 재시작
 
 /help — 이 도움말 표시
 """
@@ -1169,31 +1169,16 @@ async def cmd_cancel(message: Message):
 
 
 async def cmd_restart(message: Message):
-    """Restart service(s) without git pull. Pure systemctl restart."""
+    """Restart service(s) without git pull, guarded against active work."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
 
-    args = (message.text or "").split(maxsplit=1)
-    target = args[1].strip().lower() if len(args) > 1 else "telegram"
+    parts = (message.text or "").split()
+    target = parts[1].strip().lower() if len(parts) > 1 else "telegram"
+    force = any(p.lower() == "force" for p in parts[2:])
     if target not in ("telegram", "api", "all"):
-        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/restart [telegram|api|all]`", parse_mode="Markdown")
+        await message.answer(f"❌ 알 수 없는 대상: `{target}`\n사용법: `/restart [telegram|api|all] [force]`", parse_mode="Markdown")
         return
-
-    services = {
-        "telegram": ["leninbot-telegram"],
-        "api": ["leninbot-api"],
-        "all": ["leninbot-api", "leninbot-telegram"],  # API first, telegram last
-    }[target]
-
-    # Force-fail all processing/pending tasks before restart
-    try:
-        _execute(
-            "UPDATE telegram_tasks SET status = 'done', result = COALESCE(result, '') || '\n[SYSTEM] 강제 종료: /restart 명령으로 서비스 재시작', completed_at = NOW() "
-            "WHERE status IN ('processing', 'queued', 'pending') AND completed_at IS NULL"
-        )
-        logger.info("/restart: force-closed all active tasks")
-    except Exception as e:
-        logger.warning("/restart: failed to close tasks: %s", e)
 
     # Save restart context to chat history BEFORE restarting (SIGTERM handler may not complete)
     user_id = message.from_user.id
@@ -1206,28 +1191,33 @@ async def cmd_restart(message: Message):
     except Exception:
         pass
 
-    status_msg = await message.answer(f"🔄 서비스 재시작 중... ({target})")
-    results = []
-    for svc in services:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "sudo", "-n", "systemctl", "restart", svc,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode == 0:
-                results.append(f"✅ {svc}")
-            else:
-                results.append(f"❌ {svc}: {stdout.decode(errors='replace').strip()}")
-        except asyncio.TimeoutError:
-            results.append(f"⏱ {svc}: timeout")
-        except (asyncio.CancelledError, ConnectionError, OSError):
-            return  # telegram being restarted — expected
+    status_msg = await message.answer(f"🔄 서비스 재시작 요청 확인 중... ({target})")
+    cmd = ["/home/grass/leninbot/venv/bin/python", "scripts/safe_restart.py", target]
+    if force:
+        cmd.append("--force")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd="/home/grass/leninbot",
+            start_new_session=True,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=45)
+        output = stdout.decode(errors="replace").strip()
+        if proc.returncode == 0:
+            results = [f"✅ {line}" for line in output.splitlines() if line.strip()] or [f"✅ {target}"]
+        elif proc.returncode == 2:
+            results = [f"⛔ 재시작 거부됨:\n{output}"]
+        else:
+            results = [f"❌ safe_restart failed ({proc.returncode}):\n{output}"]
+    except asyncio.TimeoutError:
+        results = [f"⏱ {target}: timeout"]
+    except (asyncio.CancelledError, ConnectionError, OSError):
+        return  # telegram being restarted — expected
 
     try:
-        await status_msg.edit_text(f"서비스 재시작 완료:\n" + "\n".join(results))
+        await status_msg.edit_text(f"서비스 재시작 처리 결과:\n" + "\n".join(results))
     except Exception:
         pass  # bot was restarted
 

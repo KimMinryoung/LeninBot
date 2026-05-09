@@ -12,6 +12,7 @@ from contextlib import suppress
 import json
 import logging
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -721,6 +722,12 @@ async def handle_web_chat(
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
+    web_request_id = uuid.uuid4().hex
+    try:
+        from redis_state import register_active_web_chat
+        register_active_web_chat(web_request_id, session_id=session_id, fingerprint=fingerprint)
+    except Exception:
+        pass
 
     async def _run_llm():
         try:
@@ -772,6 +779,11 @@ async def handle_web_chat(
             logger.error("Web chat LLM error: %s", e)
             error_holder.append(str(e))
         finally:
+            try:
+                from redis_state import unregister_active_web_chat
+                unregister_active_web_chat(web_request_id)
+            except Exception:
+                pass
             await queue.put(None)  # sentinel
 
     llm_task = asyncio.create_task(_run_llm())

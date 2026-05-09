@@ -138,6 +138,13 @@ do_graceful_restart() {
         log "$name: restarting container..."
         docker restart "$container"
     else
+        if [[ "$name" == "telegram" || "$name" == "api" ]]; then
+            log "$name: checking restart guard..."
+            if ! "$VENV/bin/python" "$DEPLOY_DIR/scripts/restart_guard.py" "$name"; then
+                err "$name: restart refused by guard. Re-run explicit restart with --force only if active work can be lost."
+                exit 2
+            fi
+        fi
         log "$name: restarting $unit..."
         _run_systemctl restart "$unit"
     fi
