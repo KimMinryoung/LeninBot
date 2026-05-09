@@ -299,6 +299,7 @@ async def chat_with_tools(
     terminal_tools: list[str] | None = None,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
+    thinking: dict | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -348,6 +349,8 @@ async def chat_with_tools(
     # Callers that don't care about text_delta (e.g. Telegram) simply drop
     # the event — the final Message object is identical either way.
     async def _claude_call(**kwargs):
+        if thinking is not None:
+            kwargs["thinking"] = thinking
         if on_progress is None:
             return await client.messages.create(**kwargs)
         async with client.messages.stream(**kwargs) as stream:

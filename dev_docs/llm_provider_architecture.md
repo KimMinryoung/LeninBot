@@ -44,7 +44,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
-The hourly autonomous project loop uses DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Other DeepSeek surfaces continue to use the OpenAI-compatible path.
+The hourly autonomous project loop uses DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. It sends `thinking={"type": "disabled"}` because DeepSeek Anthropic thinking mode requires replaying thinking blocks across tool turns. Other DeepSeek surfaces continue to use the OpenAI-compatible path.
 
 ## Runtime Config Keys
 

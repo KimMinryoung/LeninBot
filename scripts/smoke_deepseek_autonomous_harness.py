@@ -31,6 +31,7 @@ def test_autonomous_deepseek_routes_before_openai_compatible_fallback() -> None:
     assert openai in source
     assert source.index(anth) < source.index(openai)
     assert "client=_deepseek_anthropic_client" in source
+    assert 'thinking={"type": "disabled"}' in source
     assert 'provider_label="deepseek"' in source
 
 

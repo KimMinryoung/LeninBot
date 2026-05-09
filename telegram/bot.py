@@ -1551,6 +1551,7 @@ async def _chat_with_tools(
             mission_id=_mission_id,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
+            thinking={"type": "disabled"},
         )
 
     if effective_provider == "deepseek" and _deepseek_client:
