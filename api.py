@@ -130,6 +130,25 @@ _webchat_active_count = 0
 _WEBCHAT_RATE_LIMIT = max(1, int(os.getenv("WEBCHAT_RATE_LIMIT", "20") or "20"))
 _WEBCHAT_RATE_WINDOW_SECONDS = max(10, int(os.getenv("WEBCHAT_RATE_WINDOW_SECONDS", "300") or "300"))
 _WEBCHAT_GLOBAL_ACTIVE_LIMIT = max(1, int(os.getenv("WEBCHAT_GLOBAL_ACTIVE_LIMIT", "8") or "8"))
+_DEFAULT_CORS_ORIGINS = "https://cyber-lenin.com,http://localhost:3000"
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _a2a_enabled() -> bool:
+    return _env_flag("A2A_ENABLED", default=True)
+
+
+def _parse_cors_origins() -> list[str]:
+    """Read comma-separated CORS origins from env, preserving safe defaults."""
+    raw = os.getenv("WEBCHAT_CORS_ORIGINS") or os.getenv("CORS_ALLOW_ORIGINS") or _DEFAULT_CORS_ORIGINS
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return origins or [item.strip() for item in _DEFAULT_CORS_ORIGINS.split(",")]
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
@@ -165,8 +184,7 @@ async def api_health():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://bichonwebpage.onrender.com",
-    "http://localhost:3000"],
+    allow_origins=_parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -892,6 +910,8 @@ async def clear_session(session_id: str):
 
 async def _serve_agent_card():
     """Serve the public A2A Agent Card for discovery."""
+    if not _a2a_enabled():
+        raise HTTPException(status_code=503, detail="A2A is temporarily disabled")
     filepath = AGENT_CARD_DIR / "cyber_lenin_a2a_agent_card.json"
     if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Agent card not found")
@@ -907,7 +927,6 @@ async def a2a_agent_card_v1():
 @app.post("/a2a")
 async def a2a_endpoint(request: Request):
     """A2A JSON-RPC 2.0 endpoint (SendMessage)."""
-    from a2a_handler import handle_a2a_message
     try:
         body = await request.json()
     except Exception:
@@ -916,6 +935,17 @@ async def a2a_endpoint(request: Request):
             media_type="application/json",
             status_code=400,
         )
+    if not _a2a_enabled():
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "error": {"code": -32000, "message": "A2A is temporarily disabled"},
+                "id": body.get("id"),
+            }, ensure_ascii=False),
+            media_type="application/json",
+            status_code=503,
+        )
+    from a2a_handler import handle_a2a_message
     result = await handle_a2a_message(body)
     status_code = 200 if "result" in result else 400
     return Response(content=json.dumps(result, ensure_ascii=False), media_type="application/json", status_code=status_code)

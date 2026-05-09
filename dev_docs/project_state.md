@@ -85,6 +85,8 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 - Static page smoke tests: `scripts/smoke_static_pages.py`
 - Runtime smoke tests: `scripts/smoke_runtime.py`, `scripts/smoke_tool_allowlists.py`, `scripts/smoke_webchat_security.py`, `scripts/smoke_kg_schema_docs.py`
 - Secret management: `scripts/manage_secrets.py`
+- Schema migrations: `scripts/schema_migrations.py`
+- Model/provider audit: `scripts/model_runtime_audit.py`
 - KG maintenance: `scripts/check_kg_integrity.py`, `scripts/kg_enricher.py`, `skills/kg-maintenance/scripts/*`
 
 ## Design Notes
@@ -93,3 +95,4 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 - `config.json` stores mutable runtime config. `config/agent_runtime.json` overlays per-agent execution settings.
 - Prompt text under `identity/agent_prompts/` hot-reloads on the next prompt render. Python code, tool definitions, and systemd credentials require service restart.
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.
+- Startup DDL can be disabled with `LENINBOT_SKIP_STARTUP_DDL=true` after explicit migrations have been applied with `scripts/schema_migrations.py`.

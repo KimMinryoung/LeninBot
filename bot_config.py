@@ -327,7 +327,7 @@ def get_current_model_selection(
     kind: str = "chat",
     provider_override: str | None = None,
 ) -> dict:
-    """Return runtime-selected provider/model metadata for chat or task path.
+    """Return runtime-selected provider/model metadata for chat, task, autonomous, or webchat path.
 
     ``provider_override`` lets callers that know they are running against a
     specific provider (e.g. agents with spec.provider pinned to "claude" even
@@ -335,9 +335,11 @@ def get_current_model_selection(
     model map, so the surfaced model_id/display_name match what actually runs.
     Without the override, falls back to the runtime config's provider.
     """
-    kind = kind if kind in ("chat", "task", "autonomous") else "chat"
+    kind = kind if kind in ("chat", "task", "autonomous", "webchat") else "chat"
     if provider_override:
         provider = provider_override
+    elif kind == "webchat":
+        provider = str(_config.get("webchat_provider", "claude") or "claude")
     elif kind == "autonomous":
         provider = _get_autonomous_provider()
     elif kind == "task":
@@ -348,6 +350,7 @@ def get_current_model_selection(
         "chat": "chat_model",
         "task": "task_model",
         "autonomous": "autonomous_model",
+        "webchat": "webchat_model",
     }[kind]
     tier = str(_config.get(tier_key, "high"))
     alias = _resolve_tier(tier, provider=provider)

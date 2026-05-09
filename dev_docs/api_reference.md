@@ -16,6 +16,8 @@ Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admi
 
 Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `api.py`.
 
+Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call.
+
 ## Public Endpoints
 
 | Method | Path | Description |
@@ -85,6 +87,7 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/admin/private-reports` | noindex admin HTML shell; data actions still require `X-Admin-Key` through the JSON endpoints |
 | `GET` | `/logs` | raw chat log admin list |
 | `GET` | `/reports` | completed non-programmer task reports |
 | `GET` | `/reports/{report_id}` | one completed task report |
@@ -137,9 +140,9 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 ## CORS
 
-Current CORS allow-list in `api.py`:
+API CORS origins are read from `WEBCHAT_CORS_ORIGINS` as a comma-separated env value. `CORS_ALLOW_ORIGINS` is accepted as a compatibility alias. Default:
 
-- `https://bichonwebpage.onrender.com`
+- `https://cyber-lenin.com`
 - `http://localhost:3000`
 
-Update this list in code when frontend deployment origin changes.
+Update `.env` or the systemd environment when frontend deployment origins change; Python code should not need to change.

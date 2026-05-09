@@ -356,6 +356,9 @@ async def _handle_guest_update(update, bot: Bot):
 
 def _ensure_table():
     """Compatibility wrapper for Telegram-owned schema setup."""
+    if os.getenv("LENINBOT_SKIP_STARTUP_DDL", "").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.info("Skipping Telegram startup DDL because LENINBOT_SKIP_STARTUP_DDL is enabled")
+        return
     ensure_telegram_tables()
 
 
@@ -1022,6 +1025,9 @@ _BAD_SUMMARY_PATTERNS = (
 
 
 def _ensure_summary_table():
+    if os.getenv("LENINBOT_SKIP_STARTUP_DDL", "").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.info("Skipping summary startup DDL because LENINBOT_SKIP_STARTUP_DDL is enabled")
+        return
     ensure_summary_tables(_clear_after_id)
 
 

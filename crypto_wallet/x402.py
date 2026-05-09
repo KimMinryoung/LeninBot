@@ -380,6 +380,14 @@ async def pay_and_fetch(
     method = method.upper()
     extra_headers = dict(headers or {})
 
+    def _record_client_attempt(**kwargs) -> None:
+        try:
+            from crypto_wallet.x402_ledger import record_x402_attempt
+
+            record_x402_attempt(direction="outbound", resource=url, method=method, **kwargs)
+        except Exception:
+            logger.debug("x402 outbound ledger write skipped", exc_info=True)
+
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         # ── First request ───────────────────────────────────────
         try:
@@ -388,9 +396,11 @@ async def pay_and_fetch(
             else:
                 resp1 = await client.get(url, headers=extra_headers)
         except Exception as e:
+            _record_client_attempt(stage="initial_request", status="failed", error=str(e))
             return {"status": "error", "stage": "initial_request", "error": str(e)}
 
         if resp1.status_code == 200:
+            _record_client_attempt(stage="initial_request", status="no_payment_required", http_status=200)
             return {
                 "status": "ok",
                 "paid": False,
@@ -398,6 +408,12 @@ async def pay_and_fetch(
                 "body": resp1.text,
             }
         if resp1.status_code != 402:
+            _record_client_attempt(
+                stage="initial_request",
+                status="failed",
+                http_status=resp1.status_code,
+                error=resp1.text[:500],
+            )
             return {
                 "status": "error",
                 "stage": "initial_request",
@@ -431,6 +447,7 @@ async def pay_and_fetch(
                         continue
 
         if not accepts:
+            _record_client_attempt(stage="parse_402", status="failed", http_status=402, error="no accepts list")
             return {"status": "error", "stage": "parse_402", "error": "no accepts list in body or headers", "body": resp1.text[:500]}
 
         # Pick first compatible (exact / Base mainnet)
@@ -440,6 +457,13 @@ async def pay_and_fetch(
                 chosen = opt
                 break
         if chosen is None:
+            _record_client_attempt(
+                stage="select_requirement",
+                status="failed",
+                http_status=402,
+                error="no exact/eip155:8453 option",
+                metadata={"accepts_count": len(accepts)},
+            )
             return {
                 "status": "error",
                 "stage": "select_requirement",
@@ -451,6 +475,15 @@ async def pay_and_fetch(
         try:
             payload = await asyncio.to_thread(sign_payment, chosen, max_atomic)
         except (ValueError, RuntimeError) as e:
+            _record_client_attempt(
+                stage="sign",
+                status="rejected",
+                pay_to=chosen.get("payTo"),
+                amount_atomic=int(chosen.get("maxAmountRequired") or chosen.get("amount") or 0),
+                asset=chosen.get("asset"),
+                network=chosen.get("network"),
+                error=str(e),
+            )
             return {"status": "rejected", "stage": "sign", "error": str(e)}
 
         amount_atomic = int(chosen.get("maxAmountRequired") or chosen.get("amount"))
@@ -469,6 +502,16 @@ async def pay_and_fetch(
             else:
                 resp2 = await client.get(url, headers=pay_headers)
         except Exception as e:
+            _record_client_attempt(
+                stage="retry_request",
+                status="failed",
+                payer=payload["authorization"].get("from"),
+                pay_to=payload["authorization"].get("to"),
+                amount_atomic=amount_atomic,
+                asset=chosen.get("asset"),
+                network=chosen.get("network"),
+                error=str(e),
+            )
             return {"status": "error", "stage": "retry_request", "error": str(e)}
 
         # Decode settlement details if present
@@ -481,6 +524,19 @@ async def pay_and_fetch(
                 settlement = {"raw": ph}
 
         if resp2.status_code != 200:
+            _record_client_attempt(
+                stage="retry_request",
+                status="failed",
+                payer=payload["authorization"].get("from"),
+                pay_to=payload["authorization"].get("to"),
+                amount_atomic=amount_atomic,
+                asset=chosen.get("asset"),
+                network=chosen.get("network"),
+                tx_hash=(settlement or {}).get("tx_hash"),
+                gas_used=(settlement or {}).get("gas_used"),
+                http_status=resp2.status_code,
+                error=resp2.text[:500],
+            )
             return {
                 "status": "error",
                 "stage": "retry_request",
@@ -489,6 +545,18 @@ async def pay_and_fetch(
                 "settlement": settlement,
             }
 
+        _record_client_attempt(
+            stage="retry_request",
+            status="success",
+            payer=payload["authorization"].get("from"),
+            pay_to=payload["authorization"].get("to"),
+            amount_atomic=amount_atomic,
+            asset=chosen.get("asset"),
+            network=chosen.get("network"),
+            tx_hash=(settlement or {}).get("tx_hash"),
+            gas_used=(settlement or {}).get("gas_used"),
+            http_status=200,
+        )
         return {
             "status": "ok",
             "paid": True,
@@ -508,7 +576,7 @@ PAY_AND_FETCH_TOOL = {
         "Fetch an x402-paywalled URL (GET/POST). Auto-signs USDC on 402 "
         "response and retries. Hard-capped $0.05/call by default. Returns body "
         "+ settlement details. Demo: http://localhost:8000/x402-demo/quote "
-        "(self-loop, 0.001 USDC) — use this when asked for an x402 demo with "
+        "(self-loop, default 0.05 USDC) — use this when asked for an x402 demo with "
         "no specific target."
     ),
     "input_schema": {

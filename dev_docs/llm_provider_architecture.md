@@ -80,7 +80,9 @@ Each `AgentSpec` may set `provider` and `model`. `None` means follow task config
 
 ## Model Context Injection
 
-`get_current_model_selection(kind, provider_override=None)` returns provider, tier, alias, model ID, display name, and resolution status. Telegram and task prompts inject this metadata so the model sees the actual runtime model selection.
+`get_current_model_selection(kind, provider_override=None)` returns provider, tier, alias, model ID, display name, and resolution status for `chat`, `task`, `autonomous`, and `webchat`. Telegram and task prompts inject this metadata so the model sees the actual runtime model selection.
+
+Use `scripts/model_runtime_audit.py` to print the current surface-level and per-agent provider/model/budget policy. Add `--json` for a full machine-readable snapshot.
 
 Do not hardcode model names in prompts or docs beyond describing current maps. Use `bot_config.py` as source of truth.
 
