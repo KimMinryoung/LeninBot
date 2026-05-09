@@ -156,8 +156,6 @@ def validate_autonomous_static_page(
         errors.append("html_body is required (got empty)")
     if not plain:
         errors.append("page body must contain reader-visible text (got none)")
-    if not (summary or "").strip():
-        errors.append("summary is required (got empty)")
     if not _HTML_SECTION_RE.search(html_body or ""):
         errors.append("html_body must use semantic structure such as <article>, <section>, or <h2> (got none)")
 

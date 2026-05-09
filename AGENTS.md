@@ -23,3 +23,4 @@ Legacy `CLAUDE.md` is for Claude Code only. For Codex, follow this `AGENTS.md`.
 Use the project virtualenv before Python commands.
 Prefer small, surgical changes.
 Do not treat old handoff notes as source of truth.
+For this repository, push with `sudo -u grass git push`; do not try plain `git push` first.

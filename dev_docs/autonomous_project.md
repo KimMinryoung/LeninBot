@@ -75,7 +75,7 @@ For autonomous projects, `autonomous_publication_controls.py` also enforces a na
 
 - research publication must include fact-check notes with at least two source markers/URLs.
 - hub curations must include source title, source publication, a valid source URL, rationale/context fields, and a stable slug.
-- static pages must include a stable slug, title, HTML body with reader-visible text, semantic structure, and a summary.
+- static pages must include a stable slug, title, HTML body with reader-visible text, and semantic structure. Summary is optional metadata, not a publication blocker.
 - The hard gate must not decide semantic quality, length sufficiency, current usefulness, political/reputational risk, or placeholder status by keyword or substring matching. Those judgments belong to the LLM/Stasova review path and must return concrete review reasons when they block or warn.
 
 `publish_hub_curation` creates structured curation entries for Korean-language sources.

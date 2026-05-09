@@ -86,7 +86,7 @@ def test_static_page_gate() -> None:
         slug="current-reference-page",
         title="실천 참고 페이지",
         html_body="<article><section><h2>검토 기준</h2><p>짧은 본문</p></section></article>",
-        summary="짧은 요약",
+        summary=None,
     )
     assert good is None, good
 

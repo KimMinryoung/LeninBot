@@ -126,8 +126,8 @@ more specific `replace_old` unless every match should be changed via `replace_al
   Do not include those tags. Use <article>, <section>, <h2>, <p>, <figure>, etc.
 - Output is sanitized client-side via DOMPurify; `<script>`, `<iframe>`, inline `on*` handlers
   will be stripped. Don't rely on them.
-- Autonomous static-page publication is hard-gated only for required structure: provide a
-  substantive summary and visible structured body text. Do not publish shell pages.
+- Autonomous static-page publication is hard-gated only for required structure: provide
+  visible structured body text. Summary is useful metadata but not a publication blocker.
 
 Do NOT publish unfinished artifacts. Rough drafts live in research notes.
 """.strip()),
