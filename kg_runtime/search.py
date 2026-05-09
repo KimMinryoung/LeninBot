@@ -10,6 +10,34 @@ from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
+KG_QUERY_ALIASES = {
+    "diamat": ["디아마트 (DiaMat)", "디아마트 (Diamat)"],
+    "dia mat": ["디아마트 (DiaMat)", "디아마트 (Diamat)"],
+    "다이아마트": ["디아마트 (DiaMat)", "디아마트 (Diamat)"],
+    "디아마트": ["디아마트 (DiaMat)", "디아마트 (Diamat)"],
+    "webzine banlan": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+    "banlan": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+    "uprising.kr": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+    "uprising": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+    "웹진 반란": ["웹진 반란(Uprising)", "웹진 반란 (uprising.kr)"],
+}
+
+
+def _expand_query_aliases(query: str) -> str:
+    """Append canonical KG names when a query uses common LLM-made aliases."""
+    if not query:
+        return query
+    lowered = query.lower()
+    additions = []
+    for alias, canonicals in KG_QUERY_ALIASES.items():
+        if alias in lowered:
+            for canonical in canonicals:
+                if canonical not in query and canonical not in additions:
+                    additions.append(canonical)
+    if not additions:
+        return query
+    return query + " " + " ".join(additions)
+
 
 def _format_kg_results(nodes: list[dict], edges: list[dict], edge_tier: dict[str, str] | None = None) -> str:
     lines = []
@@ -35,8 +63,13 @@ def _direct_cypher_search(query: str, num_results: int = 10) -> str | None:
     This is intentionally simpler than Graphiti search. It exists so parser,
     embedder, or LLM failures do not masquerade as "no KG data".
     """
-    raw_terms = [query.strip()]
-    raw_terms.extend(re.findall(r"[0-9A-Za-z가-힣_-]{2,}", query))
+    expanded_query = _expand_query_aliases(query)
+    raw_terms = [query.strip(), expanded_query.strip()]
+    raw_terms.extend(re.findall(r"[0-9A-Za-z가-힣_.-]{2,}", expanded_query))
+    for alias, canonicals in KG_QUERY_ALIASES.items():
+        if alias in expanded_query.lower():
+            raw_terms.append(alias)
+            raw_terms.extend(canonicals)
     terms = []
     seen = set()
     for term in raw_terms:
@@ -201,6 +234,10 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
     search_errors: list[str] = []
 
+    query = _expand_query_aliases(query)
+    if query_en:
+        query_en = _expand_query_aliases(query_en)
+
     svc = get_kg_service()
     if not svc:
         fallback = _direct_cypher_search(query, num_results)
@@ -329,4 +366,3 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
         logger.debug("[KG] tier lookup skipped: %s", _tier_err)
 
     return _format_kg_results(all_nodes, all_edges, edge_tier)
-

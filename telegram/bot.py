@@ -558,6 +558,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
         ("chat-audience", _CHAT_AUDIENCE_INNER),
         ("tool-strategy", """
 - Geopolitics → knowledge_graph_search first, then vector_search
+- For Korean organizations/publications already known to KG, preserve canonical names; do not invent translations/romanizations. Use `디아마트 (DiaMat)` and `웹진 반란(Uprising)`, not `Diamat` or `Webzine Banlan`.
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page; for x.com/twitter.com status/profile URLs use fetch_x_post

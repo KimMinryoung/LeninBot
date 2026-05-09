@@ -333,6 +333,15 @@ NAME_NORMALIZATION = {
     "uae": "United Arab Emirates",
     "drc": "Democratic Republic of the Congo",
     "ksa": "Saudi Arabia",
+    # Korean left/publication aliases. Prevent LLM-made English names from
+    # becoming duplicate Organizations during future structured writes.
+    "diamat": "디아마트 (DiaMat)",
+    "dia mat": "디아마트 (DiaMat)",
+    "디아마트 (diamat)": "디아마트 (DiaMat)",
+    "다이아마트": "디아마트 (DiaMat)",
+    "webzine banlan": "웹진 반란(Uprising)",
+    "banlan": "웹진 반란(Uprising)",
+    "uprising.kr": "웹진 반란(Uprising)",
 }
 
 

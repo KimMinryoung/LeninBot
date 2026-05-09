@@ -121,8 +121,9 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
                 # all Graphiti-required properties so cleanup cannot create
                 # parser-breaking legacy edges.
                 r1 = list(tx.run(
+                    "MATCH (t:Entity {name: $tgt}) "
                     "MATCH (s:Entity {name: $src})-[r:RELATES_TO]->(x:Entity) "
-                    "MERGE (t:Entity {name: $tgt})-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(x) "
+                    "MERGE (t)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(x) "
                     "SET nr += properties(r), "
                     "    nr.group_id = coalesce(r.group_id, 'legacy'), "
                     "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
@@ -135,8 +136,9 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
 
                 # Transfer incoming RELATES_TO to source from target
                 r2 = list(tx.run(
+                    "MATCH (t:Entity {name: $tgt}) "
                     "MATCH (x:Entity)-[r:RELATES_TO]->(s:Entity {name: $src}) "
-                    "MERGE (x)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(t:Entity {name: $tgt}) "
+                    "MERGE (x)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(t) "
                     "SET nr += properties(r), "
                     "    nr.group_id = coalesce(r.group_id, 'legacy'), "
                     "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
@@ -149,8 +151,9 @@ def kg_merge_entities(source_name: str, target_name: str) -> dict:
 
                 # Transfer MENTIONS
                 r3 = list(tx.run(
+                    "MATCH (t:Entity {name: $tgt}) "
                     "MATCH (e:Episodic)-[r:MENTIONS]->(s:Entity {name: $src}) "
-                    "MERGE (e)-[:MENTIONS]->(t:Entity {name: $tgt}) "
+                    "MERGE (e)-[:MENTIONS]->(t) "
                     "DELETE r RETURN count(r) AS cnt",
                     src=source_name, tgt=target_name
                 ))
