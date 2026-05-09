@@ -430,7 +430,10 @@ def _format_invalidation_note(
 PUBLISH_RESEARCH_TOOL = {
     "name": "publish_research",
     "description": (
-        "Stage or publish a markdown document to the public research database. "
+        "Stage or publish a public markdown research document. Use this for polished "
+        "analysis, forecasts, and investigative findings. Do NOT use for completed "
+        "Telegram task reports (use edit_public_post kind='report'), static/custom "
+        "HTML pages, hub curations, diary entries, blog posts, or private research documents. "
         "First call WITHOUT fact_check_passed=true saves an exact draft backup under "
         "data/publication_drafts/research/ and does NOT publish. Before the second call, "
         "independently verify proper nouns, dates, figures, current officeholders, vote/seat "
@@ -439,14 +442,11 @@ PUBLISH_RESEARCH_TOOL = {
         "fact-check finds errors in the draft, revise the content yourself and call this tool "
         "again with the same filename; do not set fact_check_passed=true until the revised draft "
         "has been re-checked. "
-        "Published documents are stored in the research_documents DB table and served at "
-        "https://cyber-lenin.com/reports/research/{slug}, where slug is derived from the "
-        "filename/identifier without the .md extension. "
-        "Use for polished analysis, forecasts, and investigative findings. "
+        "The public identifier is derived from the filename without the .md extension. "
         "The filename parameter is a stable document identifier, not a filesystem path. "
         "It is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) unless "
-        "`filename` is passed explicitly. Reusing the same filename updates the same DB row; the "
-            "frontend Redis cache is invalidated so readers see the new version immediately."
+        "`filename` is passed explicitly. Reusing the same filename updates the same "
+        "research document and invalidates caches so readers see the new version immediately."
     ),
     "input_schema": {
         "type": "object",
@@ -620,15 +620,16 @@ async def _exec_publish_research(
 EDIT_RESEARCH_TOOL = {
     "name": "edit_research",
     "description": (
-        "Edit, unpublish, or publish a research document. "
-        "Research documents are stored in the research_documents DB table; filename is the stable "
-        "public identifier used to derive /reports/research/{slug}. "
-        "operation='edit': update the database Markdown with new content (and optionally a new title) "
+        "Edit, unpublish, or re-publish a public research document. Use only for "
+        "research documents. Do NOT use for completed Telegram task reports "
+        "(edit_public_post kind='report'), static/custom HTML pages, hub curations, "
+        "diary entries, or blog posts. filename is the stable research document identifier. "
+        "operation='edit': update the Markdown with new content (and optionally a new title) "
         "and invalidate Redis plus Cloudflare cache so readers see the new version immediately. "
         "Original 작성일 is preserved when present in the existing DB markdown. "
-        "operation='unpublish': mark the DB row private and invalidate Redis plus Cloudflare cache so it disappears "
-        "from cyber-lenin.com. Only legacy fallback files are moved to research/private/. "
-        "operation='publish': mark an existing private DB row public and invalidate Redis plus Cloudflare cache so it "
+        "operation='unpublish': make it private and invalidate Redis plus Cloudflare cache so it disappears "
+        "from cyber-lenin.com. "
+        "operation='publish': make an existing private research document public and invalidate Redis plus Cloudflare cache so it "
         "appears on cyber-lenin.com again. Use this instead of publish_research when changing "
         "the visibility of an existing document."
     ),
@@ -638,7 +639,7 @@ EDIT_RESEARCH_TOOL = {
             "operation": {
                 "type": "string",
                 "enum": ["edit", "unpublish", "publish"],
-                "description": "'edit' updates the DB row; 'unpublish' marks the DB row private; 'publish' marks a private DB row public.",
+                "description": "'edit' updates the research document; 'unpublish' makes it private; 'publish' makes a private research document public.",
             },
             "filename": {
                 "type": "string",
@@ -848,10 +849,142 @@ async def _exec_edit_research(
     )
 
 
+# ── Unified research_document tool ───────────────────────────────────
+
+RESEARCH_DOCUMENT_TOOL = {
+    "name": "research_document",
+    "description": (
+        "Create, publish, edit, unpublish, republish, or privately save a markdown "
+        "research document. Public and private documents are the same content family; "
+        "private documents are simply unpublished research documents. The public "
+        "publishing flow is two-step: action='stage_public' saves an exact draft and "
+        "does not publish; action='publish_public' requires fact_check_notes and publishes "
+        "the checked version. Use this tool for research documents only. Use edit_content "
+        "for diary, task report, blog post, and hub curation edits."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "stage_public",
+                    "publish_public",
+                    "edit_public",
+                    "unpublish_public",
+                    "republish_public",
+                    "save_private",
+                    "publish_private",
+                ],
+                "description": "Research-document mutation to perform.",
+            },
+            "title": {"type": "string", "description": "Document title or optional replacement title."},
+            "content": {"type": "string", "description": "Markdown body/content for public stage/publish/edit."},
+            "slug": {"type": "string", "description": "Stable research document slug. '.md' is optional."},
+            "id": {"type": "integer", "description": "Optional private research document id for compatibility reads/edits."},
+            "markdown_body": {"type": "string", "description": "Markdown body for action='save_private'."},
+            "body": {"type": "string", "description": "Optional replacement Markdown body for action='publish_private'."},
+            "source_task_id": {"type": "integer", "description": "Optional originating task id for private saves."},
+            "fact_check_notes": {
+                "type": "string",
+                "description": "Required for action='publish_public'. Summarize checked claims, sources, and corrections.",
+            },
+            "broadcast": {
+                "type": "boolean",
+                "description": "For publish_private/republish_public: whether to broadcast to Telegram. Default true.",
+                "default": True,
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+def _filename_from_slug(slug: str | None) -> str | None:
+    if not slug:
+        return None
+    return _validate_filename(slug)
+
+
+async def _exec_research_document(
+    action: str,
+    title: str | None = None,
+    content: str | None = None,
+    slug: str | None = None,
+    id: int | None = None,
+    markdown_body: str | None = None,
+    body: str | None = None,
+    source_task_id: int | None = None,
+    fact_check_notes: str | None = None,
+    broadcast: bool = True,
+) -> str:
+    op = (action or "").strip().lower()
+    if op in {"stage_public", "publish_public"}:
+        return await _exec_publish_research(
+            title=title or "",
+            content=content or "",
+            filename=slug,
+            fact_check_passed=(op == "publish_public"),
+            fact_check_notes=fact_check_notes,
+        )
+    if op == "edit_public":
+        try:
+            filename = _filename_from_slug(slug)
+        except ValueError as e:
+            return f"Error: {e}."
+        return await _exec_edit_research(
+            operation="edit",
+            filename=filename or "",
+            title=title,
+            content=content,
+            broadcast=broadcast,
+        )
+    if op == "unpublish_public":
+        try:
+            filename = _filename_from_slug(slug)
+        except ValueError as e:
+            return f"Error: {e}."
+        return await _exec_edit_research(operation="unpublish", filename=filename or "", broadcast=broadcast)
+    if op == "republish_public":
+        try:
+            filename = _filename_from_slug(slug)
+        except ValueError as e:
+            return f"Error: {e}."
+        return await _exec_edit_research(operation="publish", filename=filename or "", broadcast=broadcast)
+    if op == "save_private":
+        if not title or not slug or not markdown_body:
+            return "Error: action='save_private' requires title, slug, and markdown_body."
+        from runtime_tools.private_reports import _exec_save_private_report
+
+        return await _exec_save_private_report(
+            title=title,
+            slug=slug,
+            markdown_body=markdown_body,
+            source_task_id=source_task_id,
+        )
+    if op == "publish_private":
+        if not slug:
+            return "Error: action='publish_private' requires slug."
+        from runtime_tools.private_reports import _exec_publish_private_report
+
+        return await _exec_publish_private_report(
+            slug=slug,
+            body=body if body is not None else content,
+            title=title,
+            broadcast=broadcast,
+        )
+    return (
+        "Error: action must be one of stage_public, publish_public, edit_public, "
+        "unpublish_public, republish_public, save_private, publish_private."
+    )
+
+
 # ── Registry exports ─────────────────────────────────────────────────
 
-RESEARCH_TOOLS = [PUBLISH_RESEARCH_TOOL, EDIT_RESEARCH_TOOL]
+RESEARCH_TOOLS = [RESEARCH_DOCUMENT_TOOL]
 RESEARCH_TOOL_HANDLERS = {
+    "research_document": _exec_research_document,
+    # Backward-compatible aliases. These names are intentionally not exposed.
     "publish_research": _exec_publish_research,
     "edit_research": _exec_edit_research,
 }

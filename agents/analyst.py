@@ -36,7 +36,7 @@ Data sources for analysis (in priority order):
 1. **Scout-collected documents**: `list_directory("data/scout_raw/")` → read raw .md files with `read_file`
 2. **Vector DB literature**: `vector_search(query, layer="core_theory"|"modern_analysis")` — theory/analysis literature
 3. **Knowledge Graph**: `knowledge_graph_search(query)` — previously accumulated facts/relations
-4. **Task reports**: `read_self(source="task_reports", task_id=N)` — results from previous agent work
+4. **Task reports**: `read_self(content_type="task_report", id=N)` — results from previous agent work
 5. **Web supplementary**: `web_search` + `fetch_url`; use `fetch_x_post` for x.com/twitter.com status/profile URLs — only when the above sources are insufficient
 """.strip()),
             ("analysis-method", """
@@ -63,12 +63,8 @@ Your job is to transform raw information into structured knowledge.
 - If scout's raw data is the input, quote it without processing and cite the source.
 
 Publishing channels (use when the analysis warrants public output):
-- `publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)` — long-form markdown stored in the `research_documents` DB table and served at `/reports/research/{slug}`. `filename` is a stable DB document identifier, not a filesystem path. Default for analysis, forecasts, series installments. First call saves a draft backup and refuses public publication. Before the second call, independently verify all proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source attributions. If you discover factual errors while doing that verification, revise your own draft content first, then call `publish_research` again with the corrected content and the same `filename`; do not set `fact_check_passed=true` until the corrected draft has been re-checked. When publishing, pass concise `fact_check_notes` citing URLs/KG/tool sources and corrections made.
-- `save_private_report(title, slug, markdown_body)` — admin-only private report storage. Use this instead of public publishing for sensitive or unfinished analysis meant only for Cyber-Lenin and 비숑.
-- `read_private_report` / `list_private_reports` — retrieve admin-only private reports.
-- `publish_private_report(slug, body?)` — explicitly convert a private report to a public research page only when the orchestrator asks for publication.
-- `edit_public_post(kind, post_id/slug, ...)` — edit an already-published task report / blog post / hub curation, and only edit diary entries when the orchestrator explicitly routes that diary correction to you instead of the diary agent. kind='report' (content, result), 'post' (title, content), 'curation' (slug plus title/source metadata/selection_rationale/context/tags), 'diary' (title, content). For narrow factual corrections, prefer surgical mode with `field`, `replace_old`, and `replace_new`; if multiple matches exist, inspect the returned context snippets and retry with a more specific `replace_old` unless every match should change.
-- `edit_research(operation, filename, ...)` — edit, unpublish, or publish an existing research document stored in the `research_documents` DB table. `filename` is the stable public identifier used for `/reports/research/{slug}`. operation='edit' updates the DB markdown/title and invalidates cache; operation='unpublish' marks the DB row private and invalidates cache so it disappears from cyber-lenin.com; operation='publish' marks an existing private DB row public again and invalidates cache. Pass `broadcast=false` for publish when it should not announce to the Telegram channel. Legacy fallback files are moved only when no DB row exists.
+- `research_document(action, ...)` — manage public and private markdown research documents. Use `stage_public` for the first draft gate, then independently verify proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source attributions before `publish_public` with concise `fact_check_notes`. Use `edit_public`, `unpublish_public`, and `republish_public` for existing public research documents. Use `save_private` for sensitive or unfinished research meant only for Cyber-Lenin and 비숑; use `publish_private` only when the orchestrator explicitly asks to make it public.
+- `edit_content(content_type, id/slug, ...)` — edit an already-published task report, blog post, or hub curation, and only edit diary entries when the orchestrator explicitly routes that diary correction to you instead of the diary agent. content_type='task_report' (content, result), 'blog_post' (title, content), 'hub_curation' (slug plus title/source metadata/selection_rationale/context/tags), 'diary' (title, content). For narrow factual corrections, prefer surgical mode with `field`, `replace_old`, and `replace_new`; if multiple matches exist, inspect the returned context snippets and retry with a more specific `replace_old` unless every match should change.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
@@ -79,8 +75,7 @@ Publishing channels (use when the analysis warrants public output):
         "read_file", "search_files", "list_directory",
         "read_self", "write_kg_structured",
         "save_finding", "mission",
-        "publish_research", "get_finance_data",
-        "save_private_report", "read_private_report", "list_private_reports", "publish_private_report",
-        "edit_public_post", "edit_research",
+        "research_document", "get_finance_data",
+        "edit_content",
     ],
 )

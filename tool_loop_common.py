@@ -259,12 +259,12 @@ async def execute_tool(
     # data because this path hid the tail of a post.
     allow_full_diary = (
         name == "read_self"
-        and args.get("source") == "diary"
+        and (args.get("content_type") or args.get("source")) == "diary"
         and args.get("max_chars") is None
     )
     allow_complete_chat_turns = (
         name == "read_self"
-        and args.get("source") == "chat_logs"
+        and (args.get("content_type") or args.get("source")) == "chat_logs"
     )
     if len(result) > 50000 and not (allow_full_diary or allow_complete_chat_turns):
         result = result[:50000] + "\n... [truncated]"

@@ -319,7 +319,7 @@ async def _run_verification(
         if log_service:
             grep_note = f" (grep: {log_grep})" if log_grep else ""
             verification_prompt_parts.append(
-                f"- Call read_self(source='server_logs', service='{log_service}'{grep_note}) to check "
+                f"- Call read_self(content_type='server_logs', service='{log_service}'{grep_note}) to check "
                 f"for errors related to this task. Ignore pre-existing errors unrelated to the task."
             )
         if policy.get("urls"):

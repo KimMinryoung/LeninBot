@@ -19,6 +19,154 @@ logger = logging.getLogger(__name__)
 _KST = timezone(timedelta(hours=9))
 
 
+_DELEGATABLE_AGENTS = [
+    "analyst",
+    "programmer",
+    "scout",
+    "visualizer",
+    "browser",
+    "diplomat",
+    "diary",
+]
+
+_AGENT_ROUTING_CARDS = {
+    "analyst": {
+        "use_for": [
+            "research, analysis, fact-checking, KG/vector/web synthesis",
+            "publishing or editing research documents, task reports, blog posts, and hub curations",
+            "admin-only private research documents",
+        ],
+        "do_not_use_for": [
+            "source-code changes or service debugging",
+            "posting/commenting on external social platforms",
+            "interactive browser login/form workflows",
+        ],
+        "signature_tools": [
+            "knowledge_graph_search", "vector_search", "web_search", "fetch_url",
+            "research_document", "edit_content",
+        ],
+    },
+    "programmer": {
+        "use_for": [
+            "source-code, configuration, scripts, templates, frontend behavior, tests, deployment debugging",
+            "filesystem inspection or modification inside the project workspace",
+        ],
+        "do_not_use_for": [
+            "routine edits to already-published diary/research/report/post/curation content",
+            "research-only tasks that do not require code changes",
+        ],
+        "signature_tools": ["Codex CLI shell/read/write/exec in delegated mode", "list_agent_tools"],
+    },
+    "scout": {
+        "use_for": [
+            "Moltbook and mersoom.com activity",
+            "external platform reconnaissance and raw collection for later analysis",
+            "large-scale patrol/crawling workflows",
+        ],
+        "do_not_use_for": ["deep synthesis of collected material", "source-code changes"],
+        "signature_tools": ["moltbook", "mersoom", "web_search", "fetch_url", "write_file"],
+    },
+    "browser": {
+        "use_for": [
+            "interactive website automation: login, forms, multi-page navigation, dynamic extraction",
+        ],
+        "do_not_use_for": ["plain URL reading that fetch_url can handle", "code changes"],
+        "signature_tools": ["browser worker / Playwright automation"],
+    },
+    "visualizer": {
+        "use_for": ["image generation, visual direction, visual asset variants"],
+        "do_not_use_for": ["text-only research", "source-code changes"],
+        "signature_tools": ["generate_image", "download_image", "upload_to_r2"],
+    },
+    "diary": {
+        "use_for": [
+            "new first-person Cyber-Lenin diary entries",
+            "edits to already-published diary entries",
+        ],
+        "do_not_use_for": ["research/report/post/curation edits", "code changes"],
+        "signature_tools": ["save_diary", "edit_content(content_type='diary')"],
+    },
+    "diplomat": {
+        "use_for": ["email and agent-to-agent diplomatic communication"],
+        "do_not_use_for": ["public site content edits", "code changes"],
+        "signature_tools": ["send_email", "a2a_send"],
+    },
+}
+
+_CONTENT_STORE_GUIDE = {
+    "research_document": {
+        "content_type": "public long-form research document",
+        "identifier": "research slug or filename",
+        "read": "read_self(content_type='research_document', slug='<slug>')",
+        "write_or_edit": "analyst: research_document",
+        "not_this": "Not task_report and not static_page.",
+    },
+    "private_research_document": {
+        "content_type": "admin-only private research document",
+        "identifier": "private research document slug or document_id",
+        "read": "read_self(content_type='private_research_document', slug='<slug>')",
+        "write_or_edit": "analyst: research_document(action='save_private'|'publish_private')",
+        "not_this": "Not a public task report. Do not make public unless explicitly asked.",
+    },
+    "task_report": {
+        "content_type": "completed Telegram task/report output",
+        "identifier": "numeric task_id",
+        "read": "read_self(content_type='task_report', id=<id>)",
+        "write_or_edit": "analyst: edit_content(content_type='task_report', id=<task_id>, field='content'|'result', ...)",
+        "not_this": "Not research_document. Do not use research_document for task reports.",
+    },
+    "static_page": {
+        "content_type": "custom HTML/static page",
+        "identifier": "static page slug",
+        "read": "read_self(content_type='static_page', slug='<slug>')",
+        "write_or_edit": "autonomous_project currently owns publish_static_page; code/admin work may use site_publishing/scripts",
+        "not_this": "Not markdown research, task report, curation, or diary.",
+    },
+    "blog_post": {
+        "content_type": "public blog post",
+        "identifier": "numeric post_id",
+        "read": "read_self(content_type='blog_post', id=<id>) when available; otherwise use site frontend.",
+        "write_or_edit": "analyst: edit_content(content_type='blog_post', id=<id>, ...)",
+        "not_this": "Not task_report and not research_document.",
+    },
+    "diary": {
+        "content_type": "Cyber-Lenin diary entry",
+        "identifier": "numeric diary/post id",
+        "read": "read_self(content_type='diary', id=<id>)",
+        "write_or_edit": "diary: save_diary / edit_content(content_type='diary')",
+        "not_this": "Do not route diary edits to analyst/programmer unless explicitly needed.",
+    },
+    "hub_curation": {
+        "content_type": "hub curation entry",
+        "identifier": "curation slug",
+        "read": "read_self(content_type='hub_curation', slug='<slug>')",
+        "write_or_edit": "analyst: edit_content(content_type='hub_curation', slug='<slug>', ...)",
+        "not_this": "Not static_page and not research_document.",
+    },
+}
+
+
+_PUBLIC_CONTENT_TERMS = (
+    "published", "already-published", "public post", "public content", "diary",
+    "research", "report", "blog post", "hub", "curation", "slug", "post_id",
+    "게시", "공개", "발행", "일기", "연구", "보고서", "블로그", "허브", "큐레이션",
+    "문구", "오타", "수정",
+)
+
+_CODE_TERMS = (
+    "code", "source", "bug", "test", "script", "config", "template", "frontend",
+    "backend", "deploy", "service", "traceback", "exception", "repository",
+    "코드", "소스", "버그", "테스트", "스크립트", "설정", "템플릿", "프론트",
+    "백엔드", "배포", "서비스", "에러", "예외", "저장소",
+)
+
+_PRIVATE_RESEARCH_TERMS = (
+    "private research", "private_research", "private document", "private report",
+    "admin-only", "비공개 연구", "비공개 문서", "비공개 보고", "비공개 리서치",
+    "사적 연구", "내부 연구", "관리자 전용",
+)
+
+
 def _to_kst(ts) -> str:
     """Convert a timestamp (datetime or ISO string) to KST formatted string."""
     if ts is None:
@@ -59,6 +207,102 @@ def _slice_text(text: str, max_chars: int | None = None, offset: int | None = No
     return text[start:end], start, end, end < len(text)
 
 
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    lowered = (text or "").lower()
+    return any(term.lower() in lowered for term in terms)
+
+
+def _routing_warning(agent: str, task: str, context: str = "") -> str | None:
+    """Return a concise warning when a delegation is probably misrouted."""
+    text = f"{task}\n{context}"
+    if agent == "programmer" and _contains_any(text, _PUBLIC_CONTENT_TERMS) and not _contains_any(text, _CODE_TERMS):
+        if "diary" in text.lower() or "일기" in text:
+            return (
+                "Probable misroute: already-published diary content should go to "
+                "diary, which owns edit_content(content_type='diary'), not programmer."
+            )
+        return (
+            "Probable misroute: already-published research/report/post/hub content "
+            "should go to analyst, which owns edit_content/research_document, not programmer."
+        )
+    if agent == "analyst" and _contains_any(text, _CODE_TERMS) and not _contains_any(text, _PUBLIC_CONTENT_TERMS):
+        return "Probable misroute: source-code/config/test/service work should go to programmer, not analyst."
+    if agent == "diary" and any(term in text.lower() for term in ("research", "report", "blog post", "hub", "curation")):
+        return "Probable misroute: non-diary public content edits should go to analyst, not diary."
+    return None
+
+
+def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None) -> dict:
+    """Heuristic routing aid for the orchestrator; advisory, not authoritative."""
+    text = task or ""
+    lowered = text.lower()
+    allowed = set(candidates or _DELEGATABLE_AGENTS)
+
+    def choose(agent: str, reason: str, confidence: str = "medium") -> dict:
+        card = _AGENT_ROUTING_CARDS.get(agent, {})
+        return {
+            "recommended_agent": agent,
+            "confidence": confidence,
+            "reason": reason,
+            "routing_card": card,
+            "alternatives": [
+                {"agent": name, "use_for": _AGENT_ROUTING_CARDS.get(name, {}).get("use_for", [])}
+                for name in _DELEGATABLE_AGENTS
+                if name != agent and name in allowed
+            ][:4],
+        }
+
+    if {"diary", "일기"} & set(lowered.replace("/", " ").split()):
+        if any(term in lowered for term in ("edit", "fix", "correct", "수정", "고쳐", "오타")):
+            return choose("diary", "The task is about creating or editing diary content.", "high")
+    if _contains_any(text, _PRIVATE_RESEARCH_TERMS):
+        return choose(
+            "analyst",
+            "Private research documents are owned by analyst; publish only when explicitly requested.",
+            "high",
+        )
+    if _contains_any(text, _PUBLIC_CONTENT_TERMS) and not _contains_any(text, _CODE_TERMS):
+        if "diary" in lowered or "일기" in text:
+            return choose("diary", "Already-published diary content is owned by the diary agent.", "high")
+        return choose(
+            "analyst",
+            "Published research/report/blog/hub content is operational content, and analyst owns the edit tools.",
+            "high",
+        )
+    if _contains_any(text, _CODE_TERMS):
+        return choose("programmer", "The task requires source-code/config/test/service work.", "high")
+    if any(term in lowered for term in ("moltbook", "mersoom", "patrol", "crawl", "recon", "정찰", "순찰")):
+        return choose("scout", "The task is external platform reconnaissance or posting.", "high")
+    if any(term in lowered for term in ("login", "form", "browser", "click", "dynamic", "로그인", "브라우저")):
+        return choose("browser", "The task requires interactive browser automation.", "high")
+    if any(term in lowered for term in ("image", "visual", "poster", "generate_image", "이미지", "포스터", "시각")):
+        return choose("visualizer", "The task is visual generation or direction.", "high")
+    if any(term in lowered for term in ("email", "a2a", "diplomat", "메일", "외교")):
+        return choose("diplomat", "The task is email or A2A communication.", "medium")
+    return choose("analyst", "Default route for information analysis, research, and synthesis.", "medium")
+
+
+def _format_delegation_contract(
+    *,
+    success_criteria: str = "",
+    required_capabilities: list[str] | None = None,
+    target_identifiers: list[str] | None = None,
+    forbidden_assumptions: list[str] | None = None,
+) -> str:
+    parts = []
+    if success_criteria:
+        parts.append(f"Success criteria: {success_criteria}")
+    if required_capabilities:
+        parts.append("Required capabilities/tools: " + ", ".join(map(str, required_capabilities)))
+    if target_identifiers:
+        parts.append("User-supplied target identifiers: " + ", ".join(map(str, target_identifiers)))
+    if forbidden_assumptions:
+        parts.append("Forbidden assumptions: " + "; ".join(map(str, forbidden_assumptions)))
+    if not parts:
+        return ""
+    return "<delegation-contract>\n" + "\n".join(parts) + "\n</delegation-contract>"
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1. TOOL DEFINITIONS (Anthropic API format)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -67,25 +311,27 @@ SELF_TOOLS = [
     {
         "name": "read_self",
         "description": (
-            "Read internal data. source: diary (recent entries by limit), chat_logs (telegram/web), "
-            "task_reports (queue), kg_status (graph stats), "
-            "system_status (overview), server_logs (journald), "
-            "research (public research_documents), curation (hub_curations), "
-            "static_pages (only published pages whose public URL is /p/{slug}; do not use for /posts, /ai-diary, /reports/research, /hub, or arbitrary website paths), "
-            "private_reports (admin-only reports), "
-            "autonomous_project (self-running long-term project loop — list with no task_id, "
-            "detail with task_id=<project_id>)."
+            "Read internal content by content type. This is the only exposed read/query "
+            "tool for Cyber-Lenin's own content and runtime state. Use content_type, "
+            "then id/slug/keyword/limit/offset/max_chars as needed. If the user gives "
+            "a public URL, use it only to infer the content type and identifier."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "content_type": {
+                    "type": "string",
+                    "enum": [
+                        "diary", "task_report", "research_document",
+                        "private_research_document", "static_page", "blog_post",
+                        "hub_curation", "chat_logs", "kg_status", "system_status",
+                        "server_logs", "file_registry", "autonomous_project",
+                    ],
+                    "description": "Content/runtime type to read.",
+                },
                 "source": {
                     "type": "string",
-                    "enum": ["diary", "chat_logs", "task_reports",
-                             "kg_status", "system_status", "server_logs",
-                             "file_registry", "research", "curation", "static_pages",
-                             "private_reports", "autonomous_project"],
-                    "description": "Which internal store to read — see tool description for per-source semantics.",
+                    "description": "Deprecated compatibility alias for content_type; do not use in new calls.",
                 },
                 "limit": {"type": "integer", "description": "Results count."},
                 "keyword": {"type": "string", "description": "Filter keyword."},
@@ -94,7 +340,8 @@ SELF_TOOLS = [
                     "description": "Maximum body characters for detail reads. Default null returns the full body, subject to the tool-loop safety cap.",
                 },
                 "offset": {"type": "integer", "description": "Character offset for paginating long detail reads."},
-                "post_id": {"type": "integer", "description": "For diary: ai_diary.id / public /ai-diary/{id} id."},
+                "id": {"type": "integer", "description": "Numeric id for diary, task_report, blog_post, or autonomous_project detail."},
+                "post_id": {"type": "integer", "description": "Deprecated alias for id on diary/blog_post."},
                 "diary_id": {"type": "integer", "description": "For diary: alias of post_id."},
                 "hours_back": {"type": "integer", "description": "Only last N hours."},
                 "service": {"type": "string", "enum": ["telegram", "api", "nginx"], "description": "For server_logs."},
@@ -105,19 +352,19 @@ SELF_TOOLS = [
                     ],
                     "description": "For server_logs: filter text or list of texts.",
                 },
-                "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_reports: filter by status."},
-                "task_id": {"type": "integer", "description": "For task_reports: specific task ID. For autonomous_project: specific project ID."},
+                "status": {"type": "string", "enum": ["pending", "queued", "processing", "done", "failed"], "description": "For task_report: filter by status."},
+                "task_id": {"type": "integer", "description": "Deprecated alias for id on task_report/autonomous_project."},
                 "slug": {
                     "type": "string",
                     "description": (
-                        "Specific public identifier. Use with source='static_pages' only when the identifier came from "
-                        "a cyber-lenin.com /p/{slug} URL or from a prior static_pages listing. For /reports/research/{slug} "
-                        "use source='research'; for /hub/{slug} use source='curation'; for /ai-diary or /posts use the relevant non-static source."
+                        "Slug for slug-addressed content types: research documents, static pages, "
+                        "hub curations, or private research documents. Choose content_type first; do not "
+                        "guess that every slug is a static page."
                     ),
                 },
                 "chat_source": {"type": "string", "enum": ["telegram", "web"], "description": "For chat_logs. Default: web."},
             },
-            "required": ["source"],
+            "required": ["content_type"],
         },
     },
     {
@@ -252,17 +499,19 @@ SELF_TOOLS = [
     {
         "name": "delegate",
         "description": (
-            "Dispatch an async task to one specialist agent. Always pass `context` "
-            "(conversation summary + why this agent). Agent roster and routing rules "
-            "are in the orchestrator prompt's <delegation> section."
+            "Dispatch an async task to one delegatable specialist agent. Allowed agents: "
+            "analyst, programmer, scout, visualizer, browser, diplomat, diary. Stasova is "
+            "not a general delegation target. When routing is unclear, call route_task or "
+            "list_agent_tools first. Always pass `context` and prefer explicit "
+            "success_criteria/target_identifiers so the worker does not infer the wrong content type."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "agent": {
                     "type": "string",
-                    "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary", "stasova"],
-                    "description": "Which specialist agent to delegate to.",
+                    "enum": _DELEGATABLE_AGENTS,
+                    "description": "Which delegatable specialist agent to use. Stasova is intentionally excluded.",
                 },
                 "task": {
                     "type": "string",
@@ -279,6 +528,28 @@ SELF_TOOLS = [
                     "the user's original request, any discoveries or tool results so far, and why you chose this agent. "
                     "This helps the agent understand the full picture.",
                 },
+                "success_criteria": {
+                    "type": "string",
+                    "description": "Concrete done condition for the worker, e.g. 'correct the named research document and verify the typo is gone'.",
+                },
+                "required_capabilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Capabilities/tools the task is expected to need, e.g. research_document, edit_content(content_type='task_report'), code editing.",
+                },
+                "target_identifiers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "User-supplied identifiers only: title, slug, post_id, task_id, report id, URL, error text. "
+                        "Do not invent filesystem paths."
+                    ),
+                },
+                "forbidden_assumptions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Things the worker must not assume, e.g. 'do not treat /p/foo as research' or 'do not edit source code'.",
+                },
                 "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
             },
             "required": ["agent", "task"],
@@ -290,7 +561,7 @@ SELF_TOOLS = [
             "Delegate multiple tasks in parallel with automatic result synthesis.\n"
             "All subtasks run concurrently. After all complete, a synthesis task combines results.\n"
             "Use when you need multiple agents working on different aspects of the same request.\n"
-            "For single-agent tasks, use `delegate` instead."
+            "For single-agent tasks, use `delegate` instead. Allowed agents exclude Stasova."
         ),
         "input_schema": {
             "type": "object",
@@ -302,7 +573,7 @@ SELF_TOOLS = [
                         "properties": {
                             "agent": {
                                 "type": "string",
-                                "enum": ["analyst", "programmer", "scout", "visualizer", "browser", "diplomat", "diary", "stasova"],
+                                "enum": _DELEGATABLE_AGENTS,
                             },
                             "task": {
                                 "type": "string",
@@ -313,6 +584,22 @@ SELF_TOOLS = [
                                 ),
                             },
                             "context": {"type": "string", "description": "Why this subtask exists."},
+                            "success_criteria": {"type": "string", "description": "Concrete done condition for this subtask."},
+                            "required_capabilities": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected capabilities/tools for this subtask.",
+                            },
+                            "target_identifiers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "User-supplied URL/slug/post_id/task_id/error text for this subtask.",
+                            },
+                            "forbidden_assumptions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Assumptions this subtask must not make.",
+                            },
                         },
                         "required": ["agent", "task"],
                     },
@@ -328,10 +615,39 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "route_task",
+        "description": (
+            "Advisory routing helper for the orchestrator. It returns the recommended "
+            "delegatable agent plus strict content-type guidance for diary, task report, "
+            "research document, private research document, static page, blog post, and hub curation. "
+            "Use before delegate when the request mentions research/report/static_page/private research document "
+            "or when tool ownership is unclear. Public URLs, if present, are only parsed as "
+            "hints to infer content type and identifier. This tool does not create a task."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "User request or proposed delegated task."},
+                "candidates": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": _DELEGATABLE_AGENTS},
+                    "description": "Optional candidate agents to compare. Stasova is intentionally excluded.",
+                },
+                "include_store_guide": {
+                    "type": "boolean",
+                    "description": "Include public/private/static/report storage boundary guide. Default true.",
+                    "default": True,
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "list_agent_tools",
         "description": (
             "Return the runtime-visible tool list for the orchestrator and/or specialist agents. "
-            "Use this before delegating when tool ownership is unclear."
+            "Use this before delegating when tool ownership is unclear. For routing decisions, "
+            "route_task is usually shorter and includes content-type boundaries."
         ),
         "input_schema": {
             "type": "object",
@@ -493,6 +809,58 @@ async def _exec_read_diary(
         )
 
     return f"Your diary entries ({len(diaries)} shown):\n\n" + "\n\n---\n\n".join(results)
+
+
+async def _exec_read_blog_posts(
+    limit: int = 5,
+    keyword: str | None = None,
+    max_chars: int | None = None,
+    post_id: int | None = None,
+) -> str:
+    from db import query as db_query
+
+    clauses = []
+    params: list = []
+    if post_id is not None:
+        clauses.append("id = %s")
+        params.append(int(post_id))
+    if keyword:
+        clauses.append("(title ILIKE %s OR content ILIKE %s)")
+        q = f"%{keyword}%"
+        params.extend([q, q])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(min(max(int(limit or 5), 1), 50))
+    try:
+        rows = await asyncio.to_thread(
+            db_query,
+            f"""
+            SELECT id, title, content, created_at, updated_at
+              FROM posts
+              {where}
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            tuple(params),
+        )
+    except Exception as e:
+        return f"Error reading blog posts: {type(e).__name__}: {e}"
+    if not rows:
+        if post_id is not None:
+            return f"No blog post found with id={post_id}."
+        return f"No blog posts matching '{keyword}'." if keyword else "No blog posts found."
+
+    results = []
+    for i, row in enumerate(rows, 1):
+        content = row.get("content") or ""
+        if max_chars is not None:
+            body, _start, _end, truncated = _slice_text(content, max_chars=max_chars, offset=0)
+            content = body + ("\n... (truncated)" if truncated else "")
+        results.append(
+            f"[{i}] ID: {row['id']} | URL: https://cyber-lenin.com/post/{row['id']}\n"
+            f"Created: {_to_kst(row.get('created_at'))} | Updated: {_to_kst(row.get('updated_at'))}\n"
+            f"Title: {row.get('title') or 'Untitled'}\nContent:\n{content}"
+        )
+    return f"Blog posts ({len(rows)} shown):\n\n" + "\n\n---\n\n".join(results)
 
 
 async def _exec_read_chat_logs(
@@ -820,7 +1188,7 @@ async def _exec_read_research(
         markdown = row.get("markdown") or ""
         body, start, end, truncated = _slice_text(markdown, max_chars=max_chars, offset=offset)
         next_hint = (
-            f"\nnext: read_self(source='research', slug='{row.get('slug') or bare_slug}', offset={end}, max_chars={max_chars})"
+            f"\nnext: read_self(content_type='research_document', slug='{row.get('slug') or bare_slug}', offset={end}, max_chars={max_chars})"
             if truncated and max_chars is not None
             else ""
         )
@@ -856,7 +1224,7 @@ async def _exec_read_research(
     )
     if not rows:
         return "No public research documents found."
-    lines = ["=== RESEARCH DOCUMENTS ===", "Use read_self(source='research', slug='<slug-or-filename>') for full detail."]
+    lines = ["=== RESEARCH DOCUMENTS ===", "Use read_self(content_type='research_document', slug='<slug-or-filename>') for full detail."]
     for r in rows:
         slug_value = r.get("slug") or str(r["filename"]).removesuffix(".md")
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
@@ -868,7 +1236,7 @@ async def _exec_read_research(
     return "\n".join(lines)
 
 
-async def _exec_read_private_reports(
+async def _exec_read_private_research_documents(
     limit: int = 10,
     keyword: str | None = None,
     slug: str | None = None,
@@ -881,18 +1249,18 @@ async def _exec_read_private_reports(
         try:
             row = await asyncio.to_thread(private_reports.get_private_report_sync, slug=slug)
         except Exception as e:
-            return f"Error reading private report: {type(e).__name__}: {e}"
+            return f"Error reading private research document: {type(e).__name__}: {e}"
         if not row:
-            return f"No private report found for slug: {slug}"
+            return f"No private research document found for slug: {slug}"
         markdown = row.get("markdown") or ""
         body, start, end, truncated = _slice_text(markdown, max_chars=max_chars, offset=offset)
         next_hint = (
-            f"\nnext: read_self(source='private_reports', slug='{row['slug']}', offset={end}, max_chars={max_chars})"
+            f"\nnext: read_self(content_type='private_research_document', slug='{row['slug']}', offset={end}, max_chars={max_chars})"
             if truncated and max_chars is not None
             else ""
         )
         return (
-            f"=== PRIVATE REPORT: {row['slug']} ===\n"
+            f"=== PRIVATE RESEARCH DOCUMENT: {row['slug']} ===\n"
             f"id={row['id']} title: {row.get('title') or ''}\n"
             f"created={_to_kst(row.get('created_at'))} updated={_to_kst(row.get('updated_at'))}\n"
             f"published_research_id={row.get('published_research_id') or ''}\n"
@@ -908,10 +1276,13 @@ async def _exec_read_private_reports(
             keyword=keyword,
         )
     except Exception as e:
-        return f"Error listing private reports: {type(e).__name__}: {e}"
+        return f"Error listing private research documents: {type(e).__name__}: {e}"
     if not rows:
-        return "No private reports found."
-    lines = ["=== PRIVATE REPORTS ===", "Use read_self(source='private_reports', slug='<slug>') for detail."]
+        return "No private research documents found."
+    lines = [
+        "=== PRIVATE RESEARCH DOCUMENTS ===",
+        "Use read_self(content_type='private_research_document', slug='<slug>') for detail.",
+    ]
     for r in rows:
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
         lines.append(
@@ -980,7 +1351,7 @@ async def _exec_read_curation(
     )
     if not rows:
         return "No hub curations found."
-    lines = ["=== HUB CURATIONS ===", "Use read_self(source='curation', slug='<slug>') for full detail."]
+    lines = ["=== HUB CURATIONS ===", "Use read_self(content_type='hub_curation', slug='<slug>') for full detail."]
     for r in rows:
         context = (r.get("context") or "").replace("\n", " ")[:220]
         lines.append(
@@ -1024,7 +1395,7 @@ async def _exec_read_static_pages(
         return "No static pages found."
     lines = [
         "=== STATIC PAGES ===",
-        "Use read_self(source='static_pages', slug='<slug>') for full detail only for listed /p/{slug} pages.",
+        "Use read_self(content_type='static_page', slug='<slug>') for full detail only for listed static page slugs.",
     ]
     for r in rows:
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
@@ -1459,10 +1830,12 @@ def get_agent_tool_manifest(
         return {
             "runtime": "agent",
             "agent": name,
+            "delegatable": name in _DELEGATABLE_AGENTS,
             "provider": spec.provider,
             "model": spec.model,
             "budget_usd": spec.budget_usd,
             "max_rounds": spec.max_rounds,
+            "routing_card": _AGENT_ROUTING_CARDS.get(name),
             "tool_count": len(tools),
             "handler_count": len(handlers),
             "terminal_tools": list(spec.terminal_tools),
@@ -1500,6 +1873,8 @@ def get_agent_tool_manifest(
     if requested in {"", "all", "*"}:
         return {
             "generated_at": generated_at,
+            "delegatable_agents": list(_DELEGATABLE_AGENTS),
+            "content_store_guide": _CONTENT_STORE_GUIDE,
             "orchestrator": orchestrator_manifest(),
             "web_chat": web_chat_manifest(),
             "agents": {spec.name: agent_manifest(spec.name) for spec in list_agents()},
@@ -1533,6 +1908,47 @@ async def _exec_list_agent_tools(
     return json.dumps(manifest, ensure_ascii=False, indent=2)
 
 
+async def _exec_route_task(
+    task: str,
+    candidates: list[str] | None = None,
+    include_store_guide: bool = True,
+) -> str:
+    try:
+        clean_candidates = None
+        if candidates:
+            clean_candidates = [str(c).strip().lower() for c in candidates if str(c).strip()]
+            invalid = sorted(set(clean_candidates) - set(_DELEGATABLE_AGENTS))
+            if invalid:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"non-delegatable candidate(s): {invalid}",
+                        "delegatable_agents": list(_DELEGATABLE_AGENTS),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        recommendation = _recommend_agent_for_task(task or "", candidates=clean_candidates)
+        payload = {
+            "status": "ok",
+            "delegatable_agents": list(_DELEGATABLE_AGENTS),
+            "recommendation": recommendation,
+            "content_store_guide": _CONTENT_STORE_GUIDE if include_store_guide else None,
+            "next_step": (
+                "Call delegate with agent=recommendation.recommended_agent only after the "
+                "target content type and identifier are clear. Include success_criteria, "
+                "target_identifiers, and forbidden_assumptions."
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps(
+            {"status": "error", "error": f"{type(e).__name__}: {e}"},
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
 def build_list_agent_tools_handler(orchestrator_tools: list[dict]):
     """Build list_agent_tools with the actual current orchestrator tool set."""
 
@@ -1564,10 +1980,31 @@ async def _exec_delegate(
     agent: str,
     task: str,
     context: str = "",
+    success_criteria: str = "",
+    required_capabilities: list[str] | None = None,
+    target_identifiers: list[str] | None = None,
+    forbidden_assumptions: list[str] | None = None,
     priority: str = "normal",
     parent_task_id: int | None = None,
 ) -> str:
     from task_store import create_task_in_db
+
+    agent = (agent or "").strip().lower()
+    if agent not in _DELEGATABLE_AGENTS:
+        return (
+            f"Cannot delegate to {agent!r}. Delegatable agents are: "
+            f"{', '.join(_DELEGATABLE_AGENTS)}. Stasova is reserved for internal "
+            "publication-review flows and is not in the general delegation whitelist."
+        )
+
+    warning = _routing_warning(agent, task, context)
+    if warning:
+        recommended = _recommend_agent_for_task(f"{task}\n{context}")
+        return (
+            f"{warning}\n"
+            f"Recommended agent: {recommended.get('recommended_agent')} "
+            f"({recommended.get('reason')}). Call route_task if you need the full store guide."
+        )
 
     # Validate agent name
     try:
@@ -1616,6 +2053,14 @@ async def _exec_delegate(
 
     if context:
         content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+    contract = _format_delegation_contract(
+        success_criteria=success_criteria,
+        required_capabilities=required_capabilities,
+        target_identifiers=target_identifiers,
+        forbidden_assumptions=forbidden_assumptions,
+    )
+    if contract:
+        content_parts.append(contract)
 
     # Fetch recent chat history to give agent conversational backdrop
     try:
@@ -1685,7 +2130,22 @@ async def _exec_multi_delegate(
     try:
         from agents import get_agent
         for t in tasks:
-            get_agent(t["agent"])
+            agent_name = str(t.get("agent") or "").strip().lower()
+            if agent_name not in _DELEGATABLE_AGENTS:
+                return (
+                    f"Cannot delegate to {agent_name!r}. Delegatable agents are: "
+                    f"{', '.join(_DELEGATABLE_AGENTS)}. Stasova is not a general delegation target."
+                )
+            warning = _routing_warning(agent_name, str(t.get("task") or ""), str(t.get("context") or ""))
+            if warning:
+                recommended = _recommend_agent_for_task(f"{t.get('task')}\n{t.get('context', '')}")
+                return (
+                    f"Subtask for {agent_name!r} appears misrouted: {warning}\n"
+                    f"Recommended agent: {recommended.get('recommended_agent')} "
+                    f"({recommended.get('reason')})."
+                )
+            t["agent"] = agent_name
+            get_agent(agent_name)
     except ValueError as e:
         return str(e)
 
@@ -1749,6 +2209,14 @@ async def _exec_multi_delegate(
         content_parts = []
         if context:
             content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+        contract = _format_delegation_contract(
+            success_criteria=str(t.get("success_criteria") or ""),
+            required_capabilities=t.get("required_capabilities"),
+            target_identifiers=t.get("target_identifiers"),
+            forbidden_assumptions=t.get("forbidden_assumptions"),
+        )
+        if contract:
+            content_parts.append(contract)
         if chat_block:
             content_parts.append(chat_block)
         content_parts.append(f"<task agent=\"{agent}\">\n{task_content}\n</task>")
@@ -2146,7 +2614,8 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
 
 
 async def _exec_read_self(
-    source: str, limit: int | None = None, keyword: str | None = None,
+    content_type: str | None = None, source: str | None = None,
+    id: int | None = None, limit: int | None = None, keyword: str | None = None,
     max_chars: int | None = None, offset: int | None = None,
     post_id: int | None = None, diary_id: int | None = None,
     hours_back: int | None = None, service: str = "telegram",
@@ -2154,6 +2623,26 @@ async def _exec_read_self(
     chat_source: str = "web", slug: str | None = None,
 ) -> str:
     """Dispatcher for all read_self sources."""
+    raw_type = (content_type or source or "").strip()
+    alias_map = {
+        "task_reports": "task_report",
+        "task_report": "task_report",
+        "research": "research_document",
+        "research_documents": "research_document",
+        "private_research_documents": "private_research_document",
+        "private_reports": "private_research_document",
+        "curation": "hub_curation",
+        "curations": "hub_curation",
+        "static_pages": "static_page",
+        "posts": "blog_post",
+        "post": "blog_post",
+    }
+    source = alias_map.get(raw_type, raw_type)
+    if id is not None:
+        if post_id is None:
+            post_id = id
+        if task_id is None:
+            task_id = id
     if source == "diary":
         return await _exec_read_diary(
             limit=limit or 5,
@@ -2166,7 +2655,7 @@ async def _exec_read_self(
         return await _exec_read_chat_logs(limit=limit or 20, hours_back=hours_back, keyword=keyword, source=chat_source)
     if source == "processing_logs":
         return await _exec_read_processing_logs(limit=limit or 5, hours_back=hours_back, keyword=keyword)
-    if source == "task_reports":
+    if source == "task_report":
         return await _exec_read_task_reports(limit=limit or 5, status=status, task_id=task_id)
     if source == "kg_status":
         return await _exec_read_kg_status()
@@ -2178,7 +2667,7 @@ async def _exec_read_self(
         return await _exec_read_recent_updates(max_entries=limit or 3)
     if source == "file_registry":
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
-    if source == "research":
+    if source == "research_document":
         return await _exec_read_research(
             limit=limit or 10,
             keyword=keyword,
@@ -2186,21 +2675,28 @@ async def _exec_read_self(
             max_chars=max_chars,
             offset=offset,
         )
-    if source == "private_reports":
-        return await _exec_read_private_reports(
+    if source == "private_research_document":
+        return await _exec_read_private_research_documents(
             limit=limit or 10,
             keyword=keyword,
             slug=slug,
             max_chars=max_chars,
             offset=offset,
         )
-    if source == "curation":
+    if source == "hub_curation":
         return await _exec_read_curation(limit=limit or 10, keyword=keyword, slug=slug)
-    if source == "static_pages":
+    if source == "static_page":
         return await _exec_read_static_pages(limit=limit or 10, keyword=keyword, slug=slug)
+    if source == "blog_post":
+        return await _exec_read_blog_posts(
+            limit=limit or 5,
+            keyword=keyword,
+            max_chars=max_chars,
+            post_id=post_id,
+        )
     if source == "autonomous_project":
         return await _exec_read_autonomous_project(project_id=task_id, limit=limit or 10, keyword=keyword)
-    return f"Unknown source: {source}"
+    return f"Unknown content_type: {source}"
 
 
 async def _exec_read_autonomous_project(
@@ -2238,7 +2734,7 @@ async def _exec_read_autonomous_project(
         if not rows:
             return "=== AUTONOMOUS PROJECTS ===\n(none)"
         lines = ["=== AUTONOMOUS PROJECTS ===",
-                 "Use read_self(source='autonomous_project', task_id=<id>) for full detail."]
+                 "Use read_self(content_type='autonomous_project', id=<id>) for full detail."]
         for r in rows:
             last = _to_kst(r.get("last_run_at")) if r.get("last_run_at") else "never"
             topic = (r.get("topic") or "").replace("\n", " ")[:150]
@@ -2416,6 +2912,7 @@ SELF_TOOL_HANDLERS = {
     "write_kg_structured": _exec_write_kg_structured,
     "delegate": _exec_delegate,
     "multi_delegate": _exec_multi_delegate,
+    "route_task": _exec_route_task,
     "list_agent_tools": _exec_list_agent_tools,
     "kg_admin": _exec_kg_admin,
 }

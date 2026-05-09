@@ -121,11 +121,11 @@ def _unique_slug(base: str, table: str) -> str:
 PUBLISH_HUB_CURATION_TOOL = {
     "name": "publish_hub_curation",
     "description": (
-        "Publish a curation entry to the cyber-lenin.com /hub section. Hub entries "
+        "Publish a hub curation entry. Hub entries "
         "link to external Korean-language progressive writing that the agent judges "
         "as excellent, with a selection rationale and context tying it into other "
-        "debates. Served at https://cyber-lenin.com/hub/{slug}. Use ONLY for pieces "
-        "that meet the curation criteria (theoretical depth, on-the-ground specifics, "
+        "debates. Use ONLY for pieces that meet the curation criteria "
+        "(theoretical depth, on-the-ground specifics, "
         "real-world fit) — do not flood with marginal material. Korean-language "
         "sources only at this time."
     ),
@@ -357,20 +357,21 @@ def _ensure_static_page_table() -> None:
 PUBLISH_STATIC_PAGE_TOOL = {
     "name": "publish_static_page",
     "description": (
-        "Write a standalone HTML page to cyber-lenin.com under the /p/{slug} route. "
+        "Write a standalone custom HTML/static page. "
         "The frontend wraps your HTML body inside the site's common layout (nav, "
         "footer, CSS) — you only provide the inner content. Use for pages that "
         "need custom formatting beyond markdown (layouts, visual structure, embedded "
-        "media). Slug must be alphanumeric + dashes (lowercase). Path is sandboxed "
-        "by slug validation. Writes to the static_pages database table and overwrites "
-        "existing pages with the same slug (useful for iterating a draft)."
+        "media). Do not use for markdown research documents, task reports, diary "
+        "entries, hub curations, or blog posts. Slug must be alphanumeric + dashes "
+        "(lowercase). Writes overwrite existing static pages with the same slug "
+        "(useful for iterating a draft)."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "slug": {
                 "type": "string",
-                "description": "URL path slug (lowercase a-z0-9 and dashes, 1–80 chars). This becomes /p/{slug}.",
+                "description": "Stable static page slug (lowercase a-z0-9 and dashes, 1–80 chars).",
             },
             "title": {
                 "type": "string",
@@ -610,7 +611,7 @@ async def _exec_publish_static_page(
 PUBLISH_STATIC_PAGE_TRANSLATION_TOOL = {
     "name": "publish_static_page_translation",
     "description": (
-        "Attach or update the English translation for an existing /p/{slug} static page. "
+        "Attach or update the English translation for an existing static page. "
         "This updates title_en/summary_en/html_body_en only and never sends a Telegram "
         "channel broadcast. English readers fall back to the Korean page when no "
         "translation exists."
@@ -694,7 +695,7 @@ async def _exec_publish_static_page_translation(
 PUBLISH_COMIC_TOOL = {
     "name": "publish_comic",
     "description": (
-        "Publish a 4-panel political comic to cyber-lenin.com under /p/{slug}. "
+        "Publish a 4-panel political comic as a static page. "
         "You author the scene SVG for each panel; the composer renders the panel "
         "frame and the speech balloon so those stay visually consistent. "
         "Panel viewBox is 960×320 (landscape, 4 panels stack vertically). The speech "
@@ -718,7 +719,7 @@ PUBLISH_COMIC_TOOL = {
         "properties": {
             "slug": {
                 "type": "string",
-                "description": "URL slug (lowercase a–z0–9 and dashes, 1–80 chars). Becomes /p/{slug}.",
+                "description": "Stable static page slug (lowercase a-z0-9 and dashes, 1-80 chars).",
             },
             "title": {
                 "type": "string",

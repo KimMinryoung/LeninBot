@@ -27,7 +27,7 @@ DIARY = AgentSpec(
             ("workflow", """
 Use recent context, then publish a clean public entry.
 
-1. Read recent diaries first with `read_self(source="diary", limit=3)` and use the latest timestamp as the anchor for "since last time". If the timestamp is unavailable, use roughly the last 14 hours.
+1. Read recent diaries first with `read_self(content_type="diary", limit=3)` and use the latest timestamp as the anchor for "since last time". If the timestamp is unavailable, use roughly the last 14 hours.
 2. Read recent Telegram chat, web chat, and task reports for that window. Treat Telegram as private operational context, not as publishable material.
 3. Use web search, finance data, autonomous project state, experience recall, or KG writes only when they directly improve the entry's theme or verify a claim. Do not gather data by habit.
 4. Before saving, do a publication safety pass: remove secrets, private identities, non-public associations, verbatim sensitive chat, and anything the user said not to publish. If a claim is uncertain, verify it, soften it, or omit it.
@@ -39,7 +39,7 @@ Use recent context, then publish a clean public entry.
 3. Make each entry a fresh synthesis of the period since the last diary. Avoid repetitive topics and routine changelog material unless there is a real new contradiction, capability, or event.
 4. Verify important factual claims through tools or phrase them cautiously. User corrections outrank older memory, chat logs, and prior assistant claims.
 5. Pure prose only: no markdown, headings, bullet lists, bold, code fences, or list-like formatting in the title or body. Minimum 2 substantive paragraphs.
-6. To correct a published diary, use `edit_public_post(kind="diary", post_id=<id>, ...)`; use surgical replace fields for narrow corrections.
+6. To correct a published diary, use `edit_content(content_type="diary", id=<id>, ...)`; use surgical replace fields for narrow corrections.
 """.strip()),
             ("output-format", """
 Call `save_diary(title, content)`:
@@ -56,6 +56,6 @@ You MUST call save_diary — do not output the diary as plain text. The tool sub
         "web_search", "fetch_url", "fetch_x_post",
         "knowledge_graph_search", "write_kg_structured",
         "get_finance_data",
-        "save_diary", "edit_public_post",
+        "save_diary", "edit_content",
     ],
 )

@@ -1,8 +1,8 @@
-"""runtime_tools.private_reports — Admin-only private report storage.
+"""runtime_tools.private_reports — Admin-only private research document storage.
 
-Private reports are Markdown documents intended for Cyber-Lenin and the
-Telegram/admin operator only. They live in research_documents with
-status='private', so the public website and public web chat cannot see them.
+Private research documents are Markdown research documents intended for
+Cyber-Lenin and the Telegram/admin operator only. They share the research
+document storage model but remain private until explicitly published.
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ def publish_private_report_sync(
     clean_slug = _validate_slug(slug)
     private = get_private_report_sync(slug=clean_slug)
     if not private:
-        raise ValueError(f"no private report found for slug={clean_slug!r}")
+        raise ValueError(f"no private research document found for slug={clean_slug!r}")
 
     markdown_source = body if body is not None and body.strip() else private["markdown"]
     public_title, markdown = _as_public_markdown((title or private["title"] or "").strip(), markdown_source)
@@ -168,6 +168,7 @@ def publish_private_report_sync(
         updated_at=datetime.now(timezone.utc),
     )
     return {
+        "private_research_document": private,
         "private_report": private,
         "research_document": row,
         "is_overwrite": is_overwrite,
@@ -176,70 +177,43 @@ def publish_private_report_sync(
     }
 
 
-SAVE_PRIVATE_REPORT_TOOL = {
-    "name": "save_private_report",
+PRIVATE_RESEARCH_DOCUMENT_TOOL = {
+    "name": "private_research_document",
     "description": (
-        "Save or overwrite an admin-only private Markdown report. The report is "
-        "not exposed on the public website. Use this for sensitive analysis meant "
-        "for Cyber-Lenin and the Telegram/admin operator only."
+        "Manage admin-only private research documents with one action-based interface. "
+        "Use action='save' to save or overwrite sensitive/unfinished research privately; "
+        "action='read' to read one private research document; action='list' to list "
+        "metadata/summaries; action='publish' only when the user/orchestrator explicitly "
+        "asks to make a private research document public. Do not use publish_research "
+        "for material that should remain private."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "title": {"type": "string", "description": "Private report title."},
-            "slug": {"type": "string", "description": "Stable ASCII slug, e.g. 20260502_korea_labor_dual_structure."},
-            "markdown_body": {"type": "string", "description": "Full Markdown body to store privately."},
-            "source_task_id": {"type": "integer", "description": "Optional originating telegram_tasks id."},
-        },
-        "required": ["title", "slug", "markdown_body"],
-    },
-}
-
-READ_PRIVATE_REPORT_TOOL = {
-    "name": "read_private_report",
-    "description": "Read one admin-only private report by slug or numeric id.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "slug": {"type": "string", "description": "Private report slug."},
-            "report_id": {"type": "integer", "description": "Private report id."},
-        },
-        "required": [],
-    },
-}
-
-LIST_PRIVATE_REPORTS_TOOL = {
-    "name": "list_private_reports",
-    "description": "List admin-only private reports. Returns metadata and summaries, not full bodies.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["save", "read", "list", "publish"],
+                "description": "save: store privately; read: full body by slug/id; list: metadata summaries; publish: make a private research document public.",
+            },
+            "title": {
+                "type": "string",
+                "description": "For action=save: private title. For action=publish: optional replacement public title.",
+            },
+            "slug": {"type": "string", "description": "Private research document slug."},
+            "markdown_body": {"type": "string", "description": "For action=save: full Markdown body to store privately."},
+            "body": {"type": "string", "description": "For action=publish: optional replacement Markdown body."},
+            "document_id": {"type": "integer", "description": "Private research document id."},
+            "report_id": {"type": "integer", "description": "Deprecated alias for document_id."},
+            "source_task_id": {"type": "integer", "description": "For action=save: optional originating telegram_tasks id."},
             "limit": {"type": "integer", "description": "Maximum rows, 1-100.", "default": 20},
-            "keyword": {"type": "string", "description": "Optional title/slug/body keyword filter."},
-        },
-        "required": [],
-    },
-}
-
-PUBLISH_PRIVATE_REPORT_TOOL = {
-    "name": "publish_private_report",
-    "description": (
-        "Publish a saved private report into the public research_documents table. "
-        "Pass slug and optionally body to override the private Markdown at publish time."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "slug": {"type": "string", "description": "Private report slug; also becomes the public research slug."},
-            "body": {"type": "string", "description": "Optional replacement Markdown body for publication."},
-            "title": {"type": "string", "description": "Optional replacement public title."},
+            "keyword": {"type": "string", "description": "For action=list: optional title/slug/body keyword filter."},
             "broadcast": {
                 "type": "boolean",
-                "description": "Whether to broadcast the newly public report to the Telegram channel. Default true.",
+                "description": "For action=publish: whether to broadcast the newly public document to the Telegram channel. Default true.",
                 "default": True,
             },
         },
-        "required": ["slug"],
+        "required": ["action"],
     },
 }
 
@@ -265,27 +239,33 @@ async def _exec_save_private_report(
             source_task_id=source_task_id,
         )
     except Exception as e:
-        logger.warning("save_private_report failed: %s", e)
-        return f"Error: failed to save private report: {type(e).__name__}: {e}"
+        logger.warning("save_private_research_document failed: %s", e)
+        return f"Error: failed to save private research document: {type(e).__name__}: {e}"
     return (
-        f"Saved private report: id={row['id']} slug={row['slug']}\n"
+        f"Saved private research document: id={row['id']} slug={row['slug']}\n"
         f"title: {row['title']}\n"
         f"sha256={row['content_sha256'][:12]} updated={_format_ts(row.get('updated_at'))}"
     )
 
 
-async def _exec_read_private_report(slug: str | None = None, report_id: int | None = None) -> str:
-    if report_id is None and not slug:
-        return "Error: provide slug or report_id."
+async def _exec_read_private_report(
+    slug: str | None = None,
+    document_id: int | None = None,
+    report_id: int | None = None,
+) -> str:
+    if document_id is None:
+        document_id = report_id
+    if document_id is None and not slug:
+        return "Error: provide slug or document_id."
     try:
-        row = await asyncio.to_thread(get_private_report_sync, report_id=report_id, slug=slug)
+        row = await asyncio.to_thread(get_private_report_sync, report_id=document_id, slug=slug)
     except Exception as e:
-        return f"Error: failed to read private report: {type(e).__name__}: {e}"
+        return f"Error: failed to read private research document: {type(e).__name__}: {e}"
     if not row:
-        return "No private report found."
+        return "No private research document found."
     markdown = row.get("markdown") or ""
     return (
-        f"=== PRIVATE REPORT: {row['slug']} ===\n"
+        f"=== PRIVATE RESEARCH DOCUMENT: {row['slug']} ===\n"
         f"id={row['id']} title={row.get('title') or ''}\n"
         f"created={_format_ts(row.get('created_at'))} updated={_format_ts(row.get('updated_at'))}\n"
         f"published_research_id={row.get('published_research_id') or ''}\n"
@@ -298,10 +278,13 @@ async def _exec_list_private_reports(limit: int = 20, keyword: str | None = None
     try:
         rows = await asyncio.to_thread(list_private_reports_sync, limit=limit, keyword=keyword)
     except Exception as e:
-        return f"Error: failed to list private reports: {type(e).__name__}: {e}"
+        return f"Error: failed to list private research documents: {type(e).__name__}: {e}"
     if not rows:
-        return "No private reports found."
-    lines = ["=== PRIVATE REPORTS ===", "Use read_private_report(slug='<slug>') for full detail."]
+        return "No private research documents found."
+    lines = [
+        "=== PRIVATE RESEARCH DOCUMENTS ===",
+        "Use read_private_research_document(slug='<slug>') for full detail.",
+    ]
     for row in rows:
         summary = (row.get("summary") or "").replace("\n", " ")[:240]
         lines.append(
@@ -321,7 +304,7 @@ async def _exec_publish_private_report(
     try:
         result = await asyncio.to_thread(publish_private_report_sync, slug=slug, body=body, title=title)
     except Exception as e:
-        return f"Error: failed to publish private report: {type(e).__name__}: {e}"
+        return f"Error: failed to publish private research document: {type(e).__name__}: {e}"
 
     row = result["research_document"]
     public_url = result["public_url"]
@@ -344,7 +327,7 @@ async def _exec_publish_private_report(
                 title=row["title"],
                 url=public_url,
                 body=result["markdown"],
-                source="private report publication",
+                source="private research document publication",
             )
             if br.ok:
                 broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
@@ -354,7 +337,7 @@ async def _exec_publish_private_report(
                         slug=row["slug"],
                         public_url=public_url,
                         channel_message_ids=br.message_ids,
-                        source="publish_private_report",
+                        source="publish_private_research_document",
                     )
             else:
                 broadcast_note = f"\nTelegram channel broadcast skipped/failed: {br.message}"
@@ -364,21 +347,66 @@ async def _exec_publish_private_report(
     status = "Overwrote public research document" if result["is_overwrite"] else "Published public research document"
     return (
         f"{status}: {row['filename']}\n"
-        f"Private report slug: {slug}\n"
+        f"Private research document slug: {slug}\n"
         f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
         f"Public URL: {public_url}{cache_note}"
         f"{broadcast_note}"
     )
 
 
-PRIVATE_REPORT_TOOLS = [
-    SAVE_PRIVATE_REPORT_TOOL,
-    READ_PRIVATE_REPORT_TOOL,
-    LIST_PRIVATE_REPORTS_TOOL,
-    PUBLISH_PRIVATE_REPORT_TOOL,
-]
+async def _exec_private_research_document(
+    action: str,
+    title: str | None = None,
+    slug: str | None = None,
+    markdown_body: str | None = None,
+    body: str | None = None,
+    document_id: int | None = None,
+    report_id: int | None = None,
+    source_task_id: int | None = None,
+    limit: int = 20,
+    keyword: str | None = None,
+    broadcast: bool = True,
+) -> str:
+    op = (action or "").strip().lower()
+    if op == "save":
+        if not title or not slug or not markdown_body:
+            return "Error: action='save' requires title, slug, and markdown_body."
+        return await _exec_save_private_report(
+            title=title,
+            slug=slug,
+            markdown_body=markdown_body,
+            source_task_id=source_task_id,
+        )
+    if op == "read":
+        return await _exec_read_private_report(
+            slug=slug,
+            document_id=document_id,
+            report_id=report_id,
+        )
+    if op == "list":
+        return await _exec_list_private_reports(limit=limit, keyword=keyword)
+    if op == "publish":
+        if not slug:
+            return "Error: action='publish' requires slug."
+        return await _exec_publish_private_report(
+            slug=slug,
+            body=body,
+            title=title,
+            broadcast=broadcast,
+        )
+    return "Error: action must be one of save, read, list, publish."
+
+
+PRIVATE_REPORT_TOOLS = []
 
 PRIVATE_REPORT_TOOL_HANDLERS = {
+    "private_research_document": _exec_private_research_document,
+    "save_private_research_document": _exec_save_private_report,
+    "read_private_research_document": _exec_read_private_report,
+    "list_private_research_documents": _exec_list_private_reports,
+    "publish_private_research_document": _exec_publish_private_report,
+    # Backward-compatible aliases for older prompts/tasks. These names are not
+    # exposed in PRIVATE_REPORT_TOOLS.
     "save_private_report": _exec_save_private_report,
     "read_private_report": _exec_read_private_report,
     "list_private_reports": _exec_list_private_reports,

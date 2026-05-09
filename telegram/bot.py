@@ -563,16 +563,16 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page; for x.com/twitter.com status/profile URLs use fetch_x_post
-- Self-reflection → read_self(source="diary"); cross-interface memory → read_self(source="chat_logs")
+- Self-reflection → read_self(content_type="diary"); cross-interface memory → read_self(content_type="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
 - Store important structured facts → write_kg_structured
 - Real-time market prices → get_finance_data
 - Telegram channel announcement → broadcast_to_channel(title, summary, url). Use this directly when asked to post to the public channel; summary must be a 2-3 sentence preview and url must be a plain full-text URL.
-- Unsure which agent has which tool → list_agent_tools(agent="all" or a specific agent) before delegating.
+- Unsure which agent or content store owns the request → route_task(task="...") first. Use list_agent_tools only when you need the detailed tool list/schema.
 - Published content corrections → delegate to the content-owning agent, not programmer:
-  - Past diary entry → `delegate(agent="diary")`; the diary agent has `edit_public_post(kind="diary", ...)`
-  - Published research / task report / blog post / hub curation → `delegate(agent="analyst")`; the analyst has `edit_public_post` and `edit_research`
+  - Past diary entry → `delegate(agent="diary")`; the diary agent has `edit_content(content_type="diary", ...)`
+  - Published research / task report / blog post / hub curation → `delegate(agent="analyst")`; the analyst has `research_document` and `edit_content`
   These are operational content edits with cache invalidation, not code changes. Do not delegate to programmer just to correct wording, titles, metadata, markdown prose, or factual text in existing public content.
 """.strip()),
         ("context-isolation", """
@@ -592,9 +592,16 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction
 - visualizer: image generation, visual concepts
 - diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs automatically from `telegram_schedules` — only delegate when the user explicitly asks for a new diary entry right now.
-- 스타소바 (Stasova): 출판 보안(OpSec) 점검. 볼셰비키 비밀서기장 옐레나 스타소바의 실무자 전통.
-  법적·플랫폼·작전보안·역이용·시기적 민감도 5개 축으로 공개 예정 글의 위험을 점검하고
-  경고와 대안 표현을 제출한다. 거부권은 없으며 최종 판단은 중앙위의 몫이다.
+Stasova is not a general delegation target. It is reserved for internal publication-review flows and is intentionally absent from delegate/multi_delegate.
+
+Content-type routing:
+- Diary entry → diary for writing/editing; use diary id when supplied
+- Task report / completed Telegram report → analyst with edit_content(content_type="task_report"); use task_id when supplied
+- Public research document → analyst with research_document; use research slug when supplied
+- Private research document → analyst with research_document(action="save_private"|"publish_private"); read it with read_self(content_type="private_research_document")
+- Hub curation → analyst with edit_content(content_type="hub_curation"); use curation slug when supplied
+- Static/custom HTML page → not a research document, task report, curation, or diary. Use route_task before delegating; ordinary text corrections may need code/admin handling unless a page publishing owner is explicit.
+Public URLs are only clues for inferring content type and identifier; do not make agents reason from routes when the content type is already known.
 
 Parallel delegation with `multi_delegate`:
 - Compound requests (e.g., "investigate X and fix Y's code") should be handled in parallel via multi_delegate.
@@ -667,7 +674,7 @@ def _format_autonomous_status(provider: str = "claude") -> str:
         "Self-running long-term project loop (hourly tick, separate from your chat turn). "
         "Active projects:\n"
         + "\n".join(lines)
-        + "\nFor detail on any project call read_self(source=\"autonomous_project\", task_id=<id>)."
+        + "\nFor detail on any project call read_self(content_type=\"autonomous_project\", id=<id>)."
     )
     if provider == "claude":
         return f"<autonomous-agent-status>\n{body}\n</autonomous-agent-status>"
@@ -983,7 +990,7 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
     #
     # High-severity alerts still reach the model via the `<system-alerts>`
     # block in the system prompt (see `_format_system_alerts`). All events
-    # remain queryable on demand through `read_self(source="task_reports" |
+    # remain queryable on demand through `read_self(content_type="task_report" |
     # "server_logs" | "system_status")`. The `telegram_system_events` table
     # is still written to — only the injection into chat context is removed.
     for r in raw_rows:

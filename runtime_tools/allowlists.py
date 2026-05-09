@@ -17,6 +17,7 @@ ORCHESTRATOR_TOOL_NAMES: frozenset[str] = frozenset({
     "save_self_analysis",
     "write_kg_structured",
     "read_self",
+    "route_task",
     "list_agent_tools",
     "run_agent",
 })

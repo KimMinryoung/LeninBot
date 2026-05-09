@@ -27,6 +27,36 @@ DYNAMIC_HANDLER_TOOLS = {
     "run_agent",
 }
 
+REQUIRED_PUBLIC_TOOLS = {
+    "read_self",
+    "research_document",
+    "edit_content",
+    "route_task",
+    "delegate",
+}
+
+REMOVED_PUBLIC_TOOLS = {
+    "publish_research",
+    "edit_research",
+    "private_research_document",
+    "save_private_research_document",
+    "read_private_research_document",
+    "list_private_research_documents",
+    "publish_private_research_document",
+    "edit_public_post",
+}
+
+REQUIRED_COMPAT_HANDLERS = {
+    "publish_research",
+    "edit_research",
+    "private_research_document",
+    "save_private_research_document",
+    "read_private_research_document",
+    "list_private_research_documents",
+    "publish_private_research_document",
+    "edit_public_post",
+}
+
 
 def _tool_names(tools: list[dict]) -> set[str]:
     return {str(tool.get("name") or "") for tool in tools if tool.get("name")}
@@ -39,6 +69,12 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
     handler_names = set(TOOL_HANDLERS)
     missing_handlers = sorted(tool_names - handler_names - DYNAMIC_HANDLER_TOOLS)
     assert not missing_handlers, f"tools without handlers: {missing_handlers}"
+    missing_public = sorted(REQUIRED_PUBLIC_TOOLS - tool_names)
+    assert not missing_public, f"required public tools missing: {missing_public}"
+    removed_still_public = sorted(REMOVED_PUBLIC_TOOLS & tool_names)
+    assert not removed_still_public, f"removed tools still exposed: {removed_still_public}"
+    missing_compat = sorted(REQUIRED_COMPAT_HANDLERS - handler_names)
+    assert not missing_compat, f"compat handlers missing: {missing_compat}"
     return tool_names, handler_names
 
 
@@ -77,11 +113,24 @@ def _assert_web_chat(tool_names: set[str]) -> None:
     assert "read_self" in _web_handlers
 
 
+def _assert_delegation_enums() -> None:
+    from runtime_tools.registry import TOOLS
+
+    tools_by_name = {str(tool.get("name") or ""): tool for tool in TOOLS}
+    delegate_agents = tools_by_name["delegate"]["input_schema"]["properties"]["agent"]["enum"]
+    multi_agents = (
+        tools_by_name["multi_delegate"]["input_schema"]["properties"]["tasks"]["items"]["properties"]["agent"]["enum"]
+    )
+    assert "stasova" not in delegate_agents
+    assert "stasova" not in multi_agents
+
+
 def main() -> int:
     tool_names, _handler_names = _assert_global_registry()
     _assert_orchestrator(tool_names)
     _assert_agents(tool_names)
     _assert_web_chat(tool_names)
+    _assert_delegation_enums()
     print("tool allowlist smoke ok")
     return 0
 

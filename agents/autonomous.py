@@ -65,8 +65,8 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
    - Research gap → focused web_search / fetch_url / fetch_x_post / vector_search / knowledge_graph_search
    - Accumulated research but no plan → draft or revise the plan with `revise_plan`
    - Plan exists, artifact ready to draft → proceed through the publishing pipeline
-   - Published research needs revision → use `edit_research`
-   - Published curation needs revision → use `edit_public_post(kind="curation", slug=...)`
+   - Published research needs revision → use `research_document(action="edit_public", ...)`
+   - Published curation needs revision → use `edit_content(content_type="hub_curation", slug=...)`
 2. **Execute**: Take the step. Save findings via `add_research_note` IMMEDIATELY — chat memory
    does not persist across ticks.
 3. **Publish (when appropriate)**: If the tick is at the "build" step for an artifact, use the
@@ -82,44 +82,39 @@ response — the round budget is hard.
             ("building-modalities", """
 Three publishing tools, each for a distinct artifact type:
 
-**publish_research(title, content, filename?, fact_check_passed?, fact_check_notes?)** — markdown document stored in
-the `research_documents` DB table and served at `/reports/research/{slug}` (without `.md` in the public URL). Use for:
-- Series installments (장편 연재) — one DB document per installment; `filename` is the stable document identifier and carries the series slug
+**research_document(action, title?, content?, slug?, fact_check_notes?, ...)** — public/private markdown research document. Use for:
+- Series installments (장편 연재) — one research document per installment; `filename` is the stable document identifier
 - Long-form essays, analysis, forecasts (정세 분석)
 - Anything where the format is primarily prose
-- This tool is a mandatory two-step gate: first call saves an exact draft backup and does
-  not publish. Before calling it again with `fact_check_passed=true`, independently verify
+- This tool is a mandatory two-step gate: `action="stage_public"` saves an exact draft backup and does
+  not publish. Before `action="publish_public"`, independently verify
   proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source
   attributions. If you discover factual errors while doing that verification, revise your
-  own draft content first and call `publish_research` again with the corrected content and
-  the same `filename`; do not set `fact_check_passed=true` until the corrected draft has
-  been re-checked. Put checked claims, URLs/KG/tool sources, and corrections in
+  own draft content first and call `research_document` again with the corrected content and
+  the same `slug`; do not publish until the corrected draft has been re-checked. Put checked claims, URLs/KG/tool sources, and corrections in
   `fact_check_notes`.
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
-structured DB row served at `/hub/{slug}`. Use for:
+structured hub curation entry. Use for:
 - Curation digest entries — one external Korean-language piece per call
 - Fields are DISCRETE for a reason: title (your framing), source (link/author/publication),
   rationale (why selected, tied to criteria), context (how it connects)
 - Do NOT put prose commentary into `context` — keep it tight (a paragraph)
 - Korean-language sources only at this time
 
-**edit_research(operation, filename, title?, content?, broadcast?)** — edit, unpublish, or publish an existing
-research DB row. `filename` is the stable DB document identifier, not a filesystem path.
-Use `operation="edit"` for corrections and `operation="unpublish"` to make a bad
-research document private. Use `operation="publish"` to make an existing private
+Use `action="edit_public"` for corrections and `action="unpublish_public"` to make a bad
+research document private. Use `action="republish_public"` to make an existing private
 research document public again; pass `broadcast=false` when it should not announce
 to the Telegram channel. Use this instead of publishing a duplicate document.
 
-**edit_public_post(kind="curation", slug, ...fields)** — edit an existing hub curation DB
-row. Use this for corrections to curation title, source metadata, selection_rationale,
+**edit_content(content_type="hub_curation", slug, ...fields)** — edit an existing hub curation
+entry. Use this for corrections to curation title, source metadata, selection_rationale,
 context, or tags. Do not create a duplicate curation when the existing row should be fixed.
 For narrow text corrections, use surgical mode with `field`, `replace_old`, and
 `replace_new`; if the tool reports multiple matches with surrounding snippets, retry with
 more specific `replace_old` unless every match should be changed via `replace_all=true`.
 
-**publish_static_page(slug, title, html_body, summary?)** — sandboxed HTML page served at
-`/p/{slug}`. Use for:
+**publish_static_page(slug, title, html_body, summary?)** — custom HTML/static page. Use for:
 - Wiki-style reference pages (인물·사건·쟁점 구조도)
 - Layouts that exceed markdown (visual structure, embedded media, tables of KG relations)
 - Overwrite the same slug to iterate a draft
@@ -170,9 +165,8 @@ operator-needed dependency and continue with the work your current tools allow.
         # Knowledge graph writes
         "write_kg_structured",
         # Publishing to owned Cyber-Lenin surfaces
-        "publish_research", "edit_research",
-        "save_private_report", "read_private_report", "list_private_reports", "publish_private_report",
-        "publish_hub_curation", "edit_public_post",
+        "research_document",
+        "publish_hub_curation", "edit_content",
         "publish_static_page",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",

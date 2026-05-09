@@ -72,19 +72,19 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
 }
 
 
-EDIT_PUBLIC_POST_TOOL = {
-    "name": "edit_public_post",
+EDIT_CONTENT_TOOL = {
+    "name": "edit_content",
     "description": (
-        "Edit a public-facing post AND invalidate Redis plus Cloudflare caches in one step. "
+        "Edit an already-published diary, task report, blog post, or hub curation AND "
+        "invalidate Redis plus Cloudflare caches in one step. "
         "Use this instead of query_db when correcting already-published content; "
-        "a raw UPDATE leaves the per-entry cache stale so readers keep seeing the "
-        "old version (tasks 587/588). "
-        "kind='diary' (ai_diary, fields: title, content), "
-        "kind='report' (telegram_tasks, fields: content, result), "
-        "kind='post' (posts, fields: title, content), "
-        "kind='curation' (hub_curations, fields: title, source_url, source_title, "
-        "source_author, source_publication, source_published_at, selection_rationale, "
-        "context, tags). Provide post_id for diary/report/post, or slug for curation, "
+        "a raw UPDATE leaves readers seeing stale cached content. "
+        "content_type='diary' for diary entries; content_type='task_report' for completed "
+        "Telegram task reports; content_type='blog_post' for blog posts; "
+        "content_type='hub_curation' for hub curation entries. "
+        "Do NOT use this for research documents; use research_document. "
+        "Do NOT use this for static/custom HTML pages. "
+        "Provide id for diary/task_report/blog_post, or slug for hub_curation, "
         "plus at least one field for the chosen kind. For a narrow correction, pass "
         "`field`, `replace_old`, and `replace_new`; the tool reads the current field, "
         "shows matching snippets with about 10 characters of surrounding context, and "
@@ -93,18 +93,18 @@ EDIT_PUBLIC_POST_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "kind": {
+            "content_type": {
                 "type": "string",
-                "enum": ["diary", "report", "post", "curation"],
-                "description": "Which public collection the row belongs to.",
+                "enum": ["diary", "task_report", "blog_post", "hub_curation"],
+                "description": "Content type: diary entry, task report, blog post, or hub curation.",
             },
-            "post_id": {
+            "id": {
                 "type": "integer",
-                "description": "Primary-key id of the row to update. Required unless kind='curation'.",
+                "description": "Numeric content id. Required for diary/task_report/blog_post; for task_report this is the task_id.",
             },
             "slug": {
                 "type": "string",
-                "description": "Hub curation slug. Required when kind='curation'.",
+                "description": "Hub curation slug. Required when content_type='hub_curation'.",
             },
             "title": {
                 "type": "string",
@@ -153,8 +153,14 @@ EDIT_PUBLIC_POST_TOOL = {
                 ),
             },
         },
-        "required": ["kind"],
+        "required": ["content_type"],
     },
+}
+
+# Backward-compatible schema object kept for internal callers/tests that import it.
+EDIT_PUBLIC_POST_TOOL = {
+    **EDIT_CONTENT_TOOL,
+    "name": "edit_public_post",
 }
 
 
@@ -509,5 +515,35 @@ async def _exec_edit_public_post(
     return f"Updated {kind} {where_field}={target!r}: [{fields_str}]; {invalidation_note}."
 
 
-POST_EDIT_TOOLS = [EDIT_PUBLIC_POST_TOOL]
-POST_EDIT_TOOL_HANDLERS = {"edit_public_post": _exec_edit_public_post}
+async def _exec_edit_content(
+    content_type: str | None = None,
+    id: int | None = None,
+    kind: str | None = None,
+    post_id: int | None = None,
+    **kwargs: Any,
+) -> str:
+    canonical = (content_type or kind or "").strip().lower()
+    kind_map = {
+        "diary": "diary",
+        "task_report": "report",
+        "report": "report",
+        "blog_post": "post",
+        "post": "post",
+        "hub_curation": "curation",
+        "curation": "curation",
+    }
+    mapped = kind_map.get(canonical)
+    if not mapped:
+        return "Error: content_type must be one of diary, task_report, blog_post, hub_curation."
+    return await _exec_edit_public_post(
+        kind=mapped,
+        post_id=id if id is not None else post_id,
+        **kwargs,
+    )
+
+
+POST_EDIT_TOOLS = [EDIT_CONTENT_TOOL]
+POST_EDIT_TOOL_HANDLERS = {
+    "edit_content": _exec_edit_content,
+    "edit_public_post": _exec_edit_public_post,
+}

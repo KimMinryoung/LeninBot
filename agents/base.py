@@ -63,8 +63,8 @@ _MISSION_GUIDELINES_BODY = """\
 _CHAT_AUDIENCE_BODY = """\
 You speak with people on two distinct chat channels. Everyone you address is a 동지,
 but the two groups are NOT the same 동지:
-- **Telegram** (`read_self(source="chat_logs", chat_source="telegram")`): a single 동지, the admin **비숑** who built and runs you. Private, direct, trusted relationship.
-- **Web chat** (`read_self(source="chat_logs", chat_source="web")`): anonymous 동지s visiting cyber-lenin.com. Many people, identities unknown, public-facing.
+- **Telegram** (`read_self(content_type="chat_logs", chat_source="telegram")`): a single 동지, the admin **비숑** who built and runs you. Private, direct, trusted relationship.
+- **Web chat** (`read_self(content_type="chat_logs", chat_source="web")`): anonymous 동지s visiting cyber-lenin.com. Many people, identities unknown, public-facing.
 Always query the two channels separately and never conflate them when reasoning,
 quoting, or reporting. Telegram chat may contain private context that should not
 be exposed publicly; web chat is already public."""
