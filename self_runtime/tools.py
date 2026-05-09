@@ -12,6 +12,7 @@ Integration in telegram_bot.py:
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -232,6 +233,128 @@ def _routing_warning(agent: str, task: str, context: str = "") -> str | None:
     return None
 
 
+def _extract_json_object(text: str) -> dict | None:
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.S)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _normalize_llm_route(parsed: dict, task: str, candidates: list[str] | None) -> dict | None:
+    allowed = set(candidates or _DELEGATABLE_AGENTS)
+    agent = str(parsed.get("recommended_agent") or "").strip().lower()
+    if agent not in allowed:
+        return None
+    confidence = str(parsed.get("confidence") or "medium").strip().lower()
+    if confidence not in {"low", "medium", "high"}:
+        confidence = "medium"
+    content_type = str(parsed.get("content_type") or "unknown").strip()
+    reason = str(parsed.get("reason") or "LLM routing classifier recommendation.").strip()
+
+    def string_list(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    card = _AGENT_ROUTING_CARDS.get(agent, {})
+    result = {
+        "recommended_agent": agent,
+        "confidence": confidence,
+        "reason": reason,
+        "content_type": content_type,
+        "needs_identifier": bool(parsed.get("needs_identifier", False)),
+        "required_capabilities": string_list(parsed.get("required_capabilities")),
+        "forbidden_assumptions": string_list(parsed.get("forbidden_assumptions")),
+        "routing_class": str(parsed.get("routing_class") or content_type or "unknown").strip(),
+        "routing_card": card,
+        "alternatives": [
+            {"agent": name, "use_for": _AGENT_ROUTING_CARDS.get(name, {}).get("use_for", [])}
+            for name in _DELEGATABLE_AGENTS
+            if name != agent and name in allowed
+        ][:4],
+        "source": "llm_classifier",
+    }
+    warning = _routing_warning(agent, task)
+    if warning:
+        result["warning"] = warning
+    return result
+
+
+async def _classify_route_with_llm(task: str, candidates: list[str] | None = None) -> dict | None:
+    try:
+        from bot_config import (
+            _deepseek_client,
+            _openai_client,
+            _resolve_deepseek_model,
+            _resolve_openai_model,
+        )
+
+        client = _deepseek_client or _openai_client
+        if not client:
+            return None
+        provider = "deepseek" if _deepseek_client else "openai"
+        model = (
+            _resolve_deepseek_model("deepseek_flash")
+            if provider == "deepseek"
+            else _resolve_openai_model("gpt54nano")
+        )
+        allowed = [agent for agent in _DELEGATABLE_AGENTS if not candidates or agent in candidates]
+        system = (
+            "You are a strict task router for LeninBot. Return only JSON. "
+            "Pick one class: public_content_edit, code_config_work, research, diary, "
+            "browser_automation, external_platform_scout, email_a2a. "
+            "Map public_content_edit/research to analyst except diary content to diary; "
+            "code_config_work to programmer; browser_automation to browser; "
+            "external_platform_scout to scout; email_a2a to diplomat."
+        )
+        user = {
+            "task": task,
+            "candidate_agents": allowed,
+            "required_json_keys": [
+                "recommended_agent",
+                "confidence",
+                "reason",
+                "content_type",
+                "needs_identifier",
+                "required_capabilities",
+                "forbidden_assumptions",
+                "routing_class",
+            ],
+        }
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=500,
+            ),
+            timeout=12,
+        )
+        parsed = _extract_json_object(response.choices[0].message.content)
+        if not parsed:
+            return None
+        return _normalize_llm_route(parsed, task, candidates)
+    except Exception as e:
+        logger.info("route_task LLM classifier unavailable: %s", e)
+        return None
+
+
 def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None) -> dict:
     """Heuristic routing aid for the orchestrator; advisory, not authoritative."""
     text = task or ""
@@ -244,6 +367,7 @@ def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None)
             "recommended_agent": agent,
             "confidence": confidence,
             "reason": reason,
+            "source": "heuristic",
             "routing_card": card,
             "alternatives": [
                 {"agent": name, "use_for": _AGENT_ROUTING_CARDS.get(name, {}).get("use_for", [])}
@@ -1644,12 +1768,14 @@ async def _exec_write_kg(
         f" | mission={buf.mission_id}" if buf is not None and buf.mission_id else ""
     )
     sources = buf.recent_sources(8) if buf is not None else []
+    trust_source = buf.trust_source_note() if buf is not None else "no_provenance_buffer"
     ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
     footer_lines = [
         "— provenance —",
         f"agent: {agent_label}{mission_label}",
         f"ingested_at: {ts}",
         f"trust_tier: {trust_tier}",
+        f"trust_source: {trust_source}",
     ]
     if sources:
         footer_lines.append("sources:")
@@ -1675,6 +1801,8 @@ async def _exec_write_kg(
         msg = result["message"]
         if trust_tier == "unverified":
             msg += " (trust_tier=unverified — no external source recorded this run)"
+        elif trust_tier == "anchor":
+            msg += " (trust_tier=anchor — trusted operator chat/task context; no public URL source required)"
         return f"Knowledge stored successfully: {msg}"
     else:
         return f"Failed to store knowledge: {result['message']}"
@@ -1715,12 +1843,14 @@ async def _exec_write_kg_structured(
     agent_label = buf.agent if buf is not None else "agent"
     mission_id = buf.mission_id if buf is not None else None
     sources = buf.recent_sources(8) if buf is not None else []
+    trust_source = buf.trust_source_note() if buf is not None else "no_provenance_buffer"
     ts = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
     footer_lines = [
         "— provenance —",
         f"agent: {agent_label}" + (f" | mission={mission_id}" if mission_id else ""),
         f"ingested_at: {ts}",
         f"trust_tier: {trust_tier}",
+        f"trust_source: {trust_source}",
     ]
     if sources:
         footer_lines.append("sources:")
@@ -1748,14 +1878,22 @@ async def _exec_write_kg_structured(
         msg = result["message"]
         if trust_tier == "unverified":
             msg += " (trust_tier=unverified — no external source recorded this run)"
+        elif trust_tier == "anchor":
+            msg += " (trust_tier=anchor — trusted operator chat/task context; no public URL source required)"
         if result["status"] == "partial_success":
-            msg += f"\nWritten fact indices: {result.get('written_fact_indices', [])}"
-            rejected_json = json.dumps(
-                result.get("rejected_facts", []),
-                ensure_ascii=False,
-                indent=2,
+            partial_payload = {
+                "stored_fact_indices": result.get("written_fact_indices", []),
+                "rejected_facts": result.get("rejected_facts", []),
+                "retry_facts": [
+                    item.get("fact", item)
+                    for item in result.get("rejected_facts", [])
+                    if isinstance(item, dict)
+                ],
+            }
+            msg += (
+                "\nPartial success details JSON:\n"
+                + json.dumps(partial_payload, ensure_ascii=False, indent=2)
             )
-            msg += f"\nRejected facts JSON for retry:\n{rejected_json}"
         return f"Structured facts stored: {msg}"
     else:
         msg = result["message"]
@@ -1944,11 +2082,32 @@ async def _exec_route_task(
                     ensure_ascii=False,
                     indent=2,
                 )
-        recommendation = _recommend_agent_for_task(task or "", candidates=clean_candidates)
+        recommendation = await _classify_route_with_llm(task or "", clean_candidates)
+        fallback_used = False
+        if recommendation is None:
+            recommendation = _recommend_agent_for_task(task or "", candidates=clean_candidates)
+            fallback_used = True
+        warning = _routing_warning(recommendation.get("recommended_agent", ""), task or "")
+        if warning and "warning" not in recommendation:
+            recommendation["warning"] = warning
         payload = {
             "status": "ok",
             "delegatable_agents": list(_DELEGATABLE_AGENTS),
             "recommendation": recommendation,
+            "classifier": {
+                "attempted": True,
+                "used": not fallback_used,
+                "fallback": "heuristic" if fallback_used else None,
+                "classes": [
+                    "public_content_edit",
+                    "code_config_work",
+                    "research",
+                    "diary",
+                    "browser_automation",
+                    "external_platform_scout",
+                    "email_a2a",
+                ],
+            },
             "content_store_guide": _CONTENT_STORE_GUIDE if include_store_guide else None,
             "next_step": (
                 "Call delegate with agent=recommendation.recommended_agent only after the "

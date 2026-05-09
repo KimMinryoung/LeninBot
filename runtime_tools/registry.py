@@ -16,6 +16,144 @@ from runtime_tools.social import SOCIAL_TOOL_HANDLERS, SOCIAL_TOOLS
 
 logger = logging.getLogger(__name__)
 
+
+def _looks_korean(text: str) -> bool:
+    return bool(re.search(r"[\uac00-\ud7af]", text or ""))
+
+
+def _looks_english(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", text or "")) and not _looks_korean(text)
+
+
+def _extract_json_object(text: str) -> dict | None:
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.S)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+async def _llm_translate_search_query(query: str, target_language: str, layer: str) -> str | None:
+    """Best-effort query translation for cross-language corpus recall."""
+    try:
+        from bot_config import (
+            _deepseek_client,
+            _openai_client,
+            _resolve_deepseek_model,
+            _resolve_openai_model,
+        )
+
+        client = _deepseek_client or _openai_client
+        if not client:
+            return None
+        provider = "deepseek" if _deepseek_client else "openai"
+        model = (
+            _resolve_deepseek_model("deepseek_flash")
+            if provider == "deepseek"
+            else _resolve_openai_model("gpt54nano")
+        )
+        system = (
+            "Translate a vector-search query for Marxist/political document retrieval. "
+            "Return only JSON with key translated_query. Preserve names and technical terms."
+        )
+        user = {
+            "query": query,
+            "target_language": target_language,
+            "target_corpus_layer": layer,
+        }
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=200,
+            ),
+            timeout=12,
+        )
+        content = response.choices[0].message.content
+        parsed = _extract_json_object(content)
+        translated = str((parsed or {}).get("translated_query") or "").strip()
+        if translated and translated.lower() != query.lower():
+            return translated
+    except Exception as e:
+        logger.info("vector_search query translation unavailable: %s", e)
+    return None
+
+
+def _doc_dedupe_key(doc) -> tuple[str, str]:
+    meta = getattr(doc, "metadata", {}) or {}
+    source = str(meta.get("source") or meta.get("public_url") or meta.get("source_url") or meta.get("title") or "")
+    chunk = str(meta.get("chunk_index", ""))
+    if source:
+        return (source, chunk)
+    return ("content", str(hash(getattr(doc, "page_content", "") or "")))
+
+
+def _rerank_merged_docs(query: str, docs: list, k: int) -> list:
+    if len(docs) <= 2:
+        return docs[:k]
+    try:
+        from corpus.embeddings import _get_exp_embeddings
+
+        emb = _get_exp_embeddings()
+        ranked = emb.rerank(query, [d.page_content for d in docs], top_k=k)
+        return [docs[idx] for idx, _score in ranked]
+    except Exception as e:
+        logger.warning("vector_search merged rerank failed, using merged order: %s", e)
+        return docs[:k]
+
+
+async def _search_corpus_multilingual(query: str, num_results: int, layer: str | None) -> list:
+    from corpus.store import similarity_search
+
+    k = max(1, min(int(num_results or 5), 10))
+    searches: list[tuple[str, str, str | None]] = [("original", query, layer)]
+    if _looks_korean(query) and layer in (None, "core_theory"):
+        translated = await _llm_translate_search_query(query, "English", "core_theory")
+        if translated:
+            searches.append(("translated_en", translated, "core_theory"))
+    elif _looks_english(query) and layer == "modern_analysis":
+        translated = await _llm_translate_search_query(query, "Korean", "modern_analysis")
+        if translated:
+            searches.append(("translated_ko", translated, "modern_analysis"))
+
+    if len(searches) == 1:
+        return await asyncio.to_thread(similarity_search, query, k, layer, rerank=True)
+
+    tasks = [
+        asyncio.to_thread(similarity_search, q, k * 2, search_layer, rerank=False)
+        for _label, q, search_layer in searches
+    ]
+    batches = await asyncio.gather(*tasks, return_exceptions=True)
+    merged = []
+    seen: set[tuple[str, str]] = set()
+    for batch in batches:
+        if isinstance(batch, Exception):
+            logger.info("vector_search parallel query failed: %s", batch)
+            continue
+        for doc in batch:
+            key = _doc_dedupe_key(doc)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(doc)
+    return _rerank_merged_docs(query, merged, k)
+
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
 TOOLS = [
     {
@@ -105,8 +243,8 @@ TOOLS = [
 async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
     """Execute vector similarity search via chatbot module."""
     try:
-        from corpus.store import fetch_corpus_source_context, similarity_search
-        docs = await asyncio.to_thread(similarity_search, query, num_results, layer, rerank=True)
+        from corpus.store import fetch_corpus_source_context
+        docs = await _search_corpus_multilingual(query, num_results, layer)
         if not docs:
             return "No documents found."
         results = []

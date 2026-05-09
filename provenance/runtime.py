@@ -7,6 +7,19 @@ KST = timezone(timedelta(hours=9))
 
 _kg_provenance_ctx = _contextvars.ContextVar("kg_provenance_buffer", default=None)
 
+_OPERATOR_TRUSTED_AGENTS = {
+    "orchestrator",
+    "analyst",
+    "programmer",
+    "scout",
+    "visualizer",
+    "browser",
+    "diplomat",
+    "diary",
+    "diary_revision",
+    "stasova",
+}
+
 
 class ProvenanceBuffer:
     """Per-agent-run record of external sources touched and KG content read."""
@@ -51,8 +64,10 @@ class ProvenanceBuffer:
                 self.kg_reads = self.kg_reads[-16:]
 
     def infer_trust_tier(self) -> str:
-        """corroborated (≥2 independent domains) > single (1 domain) > unverified."""
+        """anchor (trusted operator context) > corroborated > single > unverified."""
         if not self.external_calls:
+            if self.agent in _OPERATOR_TRUSTED_AGENTS:
+                return "anchor"
             return "unverified"
         domains = {c["domain"] for c in self.external_calls if c["domain"] and c["domain"] != "local-file"}
         if len(domains) >= 2:
@@ -72,6 +87,13 @@ class ProvenanceBuffer:
             if len(out) >= limit:
                 break
         return list(reversed(out))
+
+    def trust_source_note(self) -> str:
+        if self.external_calls:
+            return "external_or_file_sources"
+        if self.agent in _OPERATOR_TRUSTED_AGENTS:
+            return "trusted_operator_chat_or_operator_task"
+        return "no_external_source_recorded"
 
 
 def get_provenance_buffer() -> ProvenanceBuffer | None:
@@ -104,5 +126,3 @@ def _wrap_external(content: str, source: str) -> str:
     )
     safe_source = source.replace('"', "'")[:200]
     return f'<external source="{safe_source}">\n{content}\n</external>'
-
-
