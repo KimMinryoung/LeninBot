@@ -55,8 +55,8 @@ _WEB_TOOL_STRATEGY = """\
 - For Korean people already known to KG, preserve Korean names; use `신현준`, not `Shin Hyunjoon` / `Shin Hyun-joon`.
 - Theory/ideology → vector_search (layer="core_theory")
 - Cyber-Lenin's own published reports/analyses → vector_search (layer="self_produced_analysis")
-- Questions about Cyber-Lenin's architecture, public outputs, or autonomous work status → read_self with a public-safe source
-- Questions about the current/active AI model, provider, model routing, or runtime configuration → MUST call read_self(source="model_config"). Never answer these from memory or persona.
+- Questions about Cyber-Lenin's architecture, public outputs, or autonomous work status → read_self with a public-safe content_type
+- Questions about the current/active AI model, provider, model routing, or runtime configuration → MUST call read_self(content_type="model_config"). Never answer these from memory or persona.
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page
 - Real-time market prices → get_finance_data
@@ -72,7 +72,7 @@ _WEB_RESPONSE_RULES = """\
 _WEB_CONTEXT_HYGIENE = """\
 - Treat prior assistant messages in chat history as fallible context, not as verified facts.
 - User corrections override every earlier assistant claim. Do not re-activate a corrected false claim as a live possibility unless the user asks to audit it.
-- Model/provider claims are volatile runtime state. Prior claims about which model is running are not evidence; use read_self(source="model_config").
+- Model/provider claims are volatile runtime state. Prior claims about which model is running are not evidence; use read_self(content_type="model_config").
 - Preserve categorical context around proper nouns. Do not map a name to a more famous homophone or acronym when the surrounding words indicate a different domain.
 - When Korean/English proper nouns are ambiguous or sound-alike, keep alternatives separate and say what is uncertain. Search or ask before asserting concrete facts.
 - For named real-world persons, organizations, publications, parties, factions, or movements, treat concrete claims about their positions, history, membership, ideology, or documents as verification-required unless they are directly supplied by the user in the current turn.
@@ -127,30 +127,38 @@ def _build_web_runtime_context(current_datetime: str, provider: str = "claude") 
 WEB_READ_SELF_TOOL = {
     "name": "read_self",
     "description": (
-        "Read web-safe public information about Cyber-Lenin itself. Allowed sources "
-        "are restricted to public overview, architecture, public outputs, public "
-        "diary entries, research, /p/{slug} static page, curation listings, and public autonomous project "
-        "summaries. This web version never exposes private chat logs, task reports, "
-        "server logs, credentials, raw file paths, or operational error traces."
+        "Read web-safe public information about Cyber-Lenin itself. This is a "
+        "public-safe subset of the internal read_self content_type interface, plus "
+        "a few web-only public summaries. It can read public overview/model/config "
+        "summaries, public diary entries, public research documents, public static "
+        "pages, public blog posts, hub curations, and public autonomous project "
+        "summaries. It never exposes private chat logs, task reports, private "
+        "research documents, server logs, credentials, raw file paths, or "
+        "operational error traces."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "source": {
+            "content_type": {
                 "type": "string",
                 "enum": [
                     "overview",
                     "architecture",
                     "public_outputs",
                     "diary",
-                    "research",
-                    "static_pages",
-                    "curation",
+                    "research_document",
+                    "static_page",
+                    "blog_post",
+                    "hub_curation",
                     "autonomous_project",
                     "model_config",
                 ],
-                "description": "Which public-safe self store to read.",
+                "description": "Which public-safe content/runtime type to read.",
                 "default": "overview",
+            },
+            "source": {
+                "type": "string",
+                "description": "Deprecated compatibility alias for content_type; do not use in new calls.",
             },
             "limit": {
                 "type": "integer",
@@ -159,22 +167,34 @@ WEB_READ_SELF_TOOL = {
             },
             "keyword": {
                 "type": "string",
-                "description": "Optional public listing keyword filter for diary/research/static_pages/curation.",
+                "description": "Optional public listing keyword filter for public content lists.",
+            },
+            "id": {
+                "type": "integer",
+                "description": "Optional numeric id for diary, blog_post, or autonomous_project detail.",
             },
             "post_id": {
                 "type": "integer",
-                "description": "Optional public diary id for source='diary', matching /ai-diary/{id}.",
+                "description": "Deprecated alias for id on public diary/blog_post reads.",
             },
             "slug": {
                 "type": "string",
                 "description": (
-                    "Optional public slug for detail reads. Use source='static_pages' only for slugs from "
-                    "cyber-lenin.com/p/{slug} or a static_pages listing; /reports/research/{slug} is source='research', "
-                    "and /hub/{slug} is source='curation'."
+                    "Optional public slug for detail reads. Use content_type='static_page' for "
+                    "cyber-lenin.com/p/{slug}; content_type='research_document' for "
+                    "/reports/research/{slug}; and content_type='hub_curation' for /hub/{slug}."
                 ),
             },
+            "max_chars": {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                "description": "Maximum body characters for long public detail reads.",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Character offset for paginating long public detail reads.",
+            },
         },
-        "required": ["source"],
+        "required": ["content_type"],
     },
 }
 
@@ -187,41 +207,71 @@ def _public_excerpt(text: str, limit: int = 280) -> str:
 
 
 async def _exec_web_read_self(
-    source: str = "overview",
+    content_type: str | None = None,
+    source: str | None = None,
     limit: int = 8,
     keyword: str | None = None,
+    id: int | None = None,
     post_id: int | None = None,
     slug: str | None = None,
+    max_chars: int | None = None,
+    offset: int | None = None,
 ) -> str:
     """Web-safe self-inspection for public visitors."""
-    source = (source or "overview").strip().lower()
+    raw_type = (content_type or source or "overview").strip().lower()
+    compat_aliases = {
+        "research": "research_document",
+        "research_documents": "research_document",
+        "static_pages": "static_page",
+        "curation": "hub_curation",
+        "curations": "hub_curation",
+        "post": "blog_post",
+        "posts": "blog_post",
+    }
+    content_type = compat_aliases.get(raw_type, raw_type)
+    if id is not None and post_id is None:
+        post_id = id
     limit = max(1, min(int(limit or 8), 20))
 
-    if source == "model_config":
+    if content_type == "model_config":
         return await _format_public_model_config()
 
-    if source in {"diary", "research", "static_pages", "curation"}:
+    if content_type in {"diary", "research_document", "static_page", "blog_post", "hub_curation"}:
         handler = TOOL_HANDLERS.get("read_self")
         if not handler:
             return "Public self-reading is unavailable right now."
-        return await handler(source=source, limit=limit, keyword=keyword, post_id=post_id, slug=slug)
+        return await handler(
+            content_type=content_type,
+            limit=limit,
+            keyword=keyword,
+            id=id,
+            post_id=post_id,
+            slug=slug,
+            max_chars=max_chars,
+            offset=offset,
+        )
 
-    if source == "autonomous_project":
+    if content_type == "autonomous_project":
+        project_filter = "AND id = %s" if id is not None else ""
+        params = (int(id), limit) if id is not None else (limit,)
         rows = await asyncio.to_thread(
             db_query,
-            """
+            f"""
             SELECT id, title, topic, goal, plan, state, turn_count, last_run_at, updated_at
               FROM autonomous_projects
              WHERE state IN ('researching', 'planning', 'paused')
+               {project_filter}
              ORDER BY
                CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 1 ELSE 2 END,
                COALESCE(last_run_at, updated_at) DESC NULLS LAST,
                id DESC
              LIMIT %s
             """,
-            (limit,),
+            params,
         )
         if not rows:
+            if id is not None:
+                return f"No active public autonomous project summary is available for id={id}."
             return "No active public autonomous project summary is available right now."
         lines = [
             "Autonomous project status, public summary only:",
@@ -281,7 +331,7 @@ async def _exec_web_read_self(
                     )
         return "\n".join(lines)
 
-    if source == "architecture":
+    if content_type == "architecture":
         return """Cyber-Lenin public architecture:
 - Public web chat: cyber-lenin.com/chat, using a restricted retrieval toolset.
 - Telegram command center: private operator interface and multi-agent orchestration.
@@ -293,7 +343,7 @@ async def _exec_web_read_self(
 
 Redaction boundary: public web chat can discuss structure and public outputs, but not private chat logs, task report bodies, credentials, server logs, raw local paths, or operational traces."""
 
-    if source == "public_outputs":
+    if content_type == "public_outputs":
         rows = await asyncio.to_thread(
             db_query,
             """
