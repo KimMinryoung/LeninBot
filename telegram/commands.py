@@ -2272,19 +2272,10 @@ def _project_usage() -> str:
     )
 
 
-async def _ensure_autonomous_tables_for_telegram() -> None:
-    try:
-        from autonomous_project import _ensure_tables
-        await asyncio.to_thread(_ensure_tables)
-    except Exception as e:
-        logger.warning("autonomous table ensure failed from telegram command: %s", e)
-
-
 async def cmd_project(message: Message):
     """Manage one autonomous project from Telegram."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
-    await _ensure_autonomous_tables_for_telegram()
     raw = (message.text or "").removeprefix("/project").strip()
     parts = raw.split(None, 2)
     if len(parts) < 2 or not parts[0].isdigit():

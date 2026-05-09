@@ -346,7 +346,6 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
 # ── Project selection ───────────────────────────────────────────────
 def _pick_next_project() -> dict | None:
     """Return the active project with the oldest last_run_at (NULLS FIRST)."""
-    _ensure_tables()
     return db_query_one(
         """
         SELECT id, title, topic, goal, state, plan, research_notes, turn_count,
@@ -864,7 +863,6 @@ def run_tick() -> dict | None:
     if not is_autonomous_active():
         logger.info("Autonomous loop paused via config (autonomous_active=false) — skipping tick.")
         return None
-    _ensure_tables()
     project = _pick_next_project()
     if not project:
         logger.info("No active projects — nothing to do.")

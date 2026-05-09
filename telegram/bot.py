@@ -41,7 +41,7 @@ from bot_config import (
     _extract_text,
 )
 from runtime_profile import resolve_runtime_profile
-from telegram.schema import ensure_summary_tables, ensure_telegram_tables
+from telegram.schema import hydrate_summary_state
 from runtime_tools.allowlists import select_orchestrator_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
@@ -352,14 +352,6 @@ async def _handle_guest_update(update, bot: Bot):
     except Exception as e:
         logger.warning("unexpected answerGuestQuery failure update_id=%s: %s", getattr(update, "update_id", None), e)
     return None
-
-
-def _ensure_table():
-    """Compatibility wrapper for Telegram-owned schema setup."""
-    if os.getenv("LENINBOT_SKIP_STARTUP_DDL", "").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.info("Skipping Telegram startup DDL because LENINBOT_SKIP_STARTUP_DDL is enabled")
-        return
-    ensure_telegram_tables()
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
@@ -878,6 +870,7 @@ MAX_HISTORY_TURNS = 10  # 10 pairs = 20 messages
 
 # Per-user clear marker: messages with id <= this value are ignored
 _clear_after_id: dict[int, int] = {}
+_summary_state_hydrated = False
 
 
 
@@ -1024,11 +1017,12 @@ _BAD_SUMMARY_PATTERNS = (
 )
 
 
-def _ensure_summary_table():
-    if os.getenv("LENINBOT_SKIP_STARTUP_DDL", "").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.info("Skipping summary startup DDL because LENINBOT_SKIP_STARTUP_DDL is enabled")
+def _hydrate_summary_state():
+    global _summary_state_hydrated
+    if _summary_state_hydrated:
         return
-    ensure_summary_tables(_clear_after_id)
+    hydrate_summary_state(_clear_after_id)
+    _summary_state_hydrated = True
 
 
 _RAW_MSG_HARD_CAP = 500  # safety ceiling; normally the summary cursor keeps
@@ -1084,7 +1078,7 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
     summarizer collapses them into a new summary, which is the one moment
     the prefix legitimately shifts.
     """
-    _ensure_summary_table()
+    _hydrate_summary_state()
     min_id = _clear_after_id.get(user_id, 0)
 
     # Last N chunk summaries (DESC then reverse for chronological order)
@@ -1183,7 +1177,7 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
 async def _maybe_summarize_chunk(user_id: int):
     """Create a summary chunk if enough unsummarized messages have accumulated."""
     try:
-        await asyncio.to_thread(_ensure_summary_table)
+        await asyncio.to_thread(_hydrate_summary_state)
         min_id = _clear_after_id.get(user_id, 0)
 
         last = await asyncio.to_thread(
@@ -1943,8 +1937,7 @@ async def bot_main():
         logger.error("Security: ALLOWED_USER_IDS must contain exactly one user ID, got %d. Aborting.", len(ALLOWED_USER_IDS))
         return
 
-    # Ensure task table exists
-    await asyncio.to_thread(_ensure_table)
+    await asyncio.to_thread(hydrate_summary_state, _clear_after_id)
     recovery = await recover_processing_tasks_on_startup(stale_minutes=60, max_resume_attempts=2)
     handed_off = int(recovery.get("handed_off", recovery.get("resumed", 0)))
     closed_stale = int(recovery.get("closed_stale", 0))

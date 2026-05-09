@@ -8,7 +8,7 @@ The autonomous project loop advances long-running projects without a live user t
 
 | File | Role |
 |---|---|
-| `autonomous_project.py` | DB schema bootstrap, project selection, tick prompt assembly, event logging |
+| `autonomous_project.py` | project selection, tick prompt assembly, event logging |
 | `scripts/autonomous_work.py` | systemd-friendly runner |
 | `agents/autonomous.py` | `autonomous_project` AgentSpec and capability boundary |
 | `bot_config.py` | `autonomous_active`, `autonomous_provider`, `autonomous_model` |
@@ -18,7 +18,7 @@ The autonomous project loop advances long-running projects without a live user t
 
 ## Project State
 
-`autonomous_project.py` ensures these tables:
+`scripts/schema_migrations.py --only autonomous-projects` ensures these tables before runtime:
 
 | Table | Purpose |
 |---|---|
@@ -39,14 +39,13 @@ Inactive states are:
 
 ## Tick Lifecycle
 
-1. Ensure schema.
-2. Check `autonomous_active`.
-3. Select one due active project.
-4. Load project, plan, recent notes, last tick tool log, and pending operator advisories.
-5. Mark advisories consumed for that project.
-6. Run the `autonomous_project` agent with a small bounded round/budget.
-7. Persist notes, plan changes, state changes, publications, and a clipped tool log.
-8. Increment turn metadata and emit project events.
+1. Check `autonomous_active`.
+2. Select one due active project.
+3. Load project, plan, recent notes, last tick tool log, and pending operator advisories.
+4. Mark advisories consumed for that project.
+5. Run the `autonomous_project` agent with a small bounded round/budget.
+6. Persist notes, plan changes, state changes, publications, and a clipped tool log.
+7. Increment turn metadata and emit project events.
 
 Each tick should make one concrete advance. The agent prompt explicitly prioritizes saving durable notes before final prose because chat text does not persist across ticks.
 

@@ -318,3 +318,12 @@ def ensure_summary_tables(clear_after_id: MutableMapping[int, int]) -> None:
         ")"
     )
     _summary_table_ready = True
+
+
+def hydrate_summary_state(clear_after_id: MutableMapping[int, int]) -> None:
+    """Hydrate persisted clear markers without creating or altering tables."""
+    rows = _query("SELECT user_id, clear_after_id FROM chat_clear_markers")
+    for row in rows:
+        user_id = row["user_id"]
+        current = clear_after_id.get(user_id, 0)
+        clear_after_id[user_id] = max(current, row["clear_after_id"])

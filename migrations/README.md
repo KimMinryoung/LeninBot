@@ -12,8 +12,8 @@ venv/bin/python scripts/schema_migrations.py
 ```
 
 The runner currently applies Telegram, research document, publication record,
-site publishing, experiential memory, and x402 ledger schema blocks.
+site publishing, experiential memory, autonomous project, and x402 ledger schema
+blocks.
 
-Existing service startup calls remain for compatibility. After the explicit
-runner is part of the deploy flow, set `LENINBOT_SKIP_STARTUP_DDL=true` for
-Telegram to skip the legacy startup DDL path and rely on this command instead.
+Services do not run startup DDL. Apply this runner before deploying code that
+depends on new tables, columns, indexes, or constraints.

@@ -95,4 +95,4 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 - `config.json` stores mutable runtime config. `config/agent_runtime.json` overlays per-agent execution settings.
 - Prompt text under `identity/agent_prompts/` hot-reloads on the next prompt render. Python code, tool definitions, and systemd credentials require service restart.
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.
-- Startup DDL can be disabled with `LENINBOT_SKIP_STARTUP_DDL=true` after explicit migrations have been applied with `scripts/schema_migrations.py`.
+- Services do not run startup DDL. Apply `scripts/schema_migrations.py` before deploying code that depends on new tables, columns, indexes, or constraints.

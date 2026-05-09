@@ -56,6 +56,12 @@ def _experiential_memory() -> None:
     _ensure_table()
 
 
+def _autonomous_projects() -> None:
+    from autonomous_project import _ensure_tables
+
+    _ensure_tables()
+
+
 def _x402_ledger() -> None:
     from crypto_wallet.x402_ledger import ensure_x402_ledger_table
 
@@ -69,6 +75,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("publication-records", _publication_records),
     ("site-publishing", _site_publishing),
     ("experiential-memory", _experiential_memory),
+    ("autonomous-projects", _autonomous_projects),
     ("x402-ledger", _x402_ledger),
 ]
 
