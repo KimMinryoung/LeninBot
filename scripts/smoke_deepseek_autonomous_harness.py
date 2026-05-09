@@ -71,6 +71,8 @@ def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> No
     assert 'event == "tool_call"' in source
     assert '"type": "tool_done" if done else "tool_start"' in source
     assert "on_progress=on_progress" in source
+    assert "def _build_web_model_context" in source
+    assert "### Current Model" in source
 
 
 def test_deepseek_thinking_config_is_enabled_by_default() -> None:

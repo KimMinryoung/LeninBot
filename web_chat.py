@@ -122,6 +122,33 @@ def _build_web_runtime_context(current_datetime: str, provider: str = "claude") 
         return f"<runtime>\n<current-time>{current_datetime}</current-time>\n</runtime>"
     return f"### Runtime\n- **Current Time**: {current_datetime}"
 
+
+def _build_web_model_context(profile, provider: str = "claude") -> str:
+    """Render authoritative current web-chat model metadata."""
+    if uses_xml(provider):
+        return (
+            "<current-model>\n"
+            f"<surface>public web chat</surface>\n"
+            f"<provider>{profile.provider}</provider>\n"
+            f"<model-id>{profile.model_id}</model-id>\n"
+            f"<display-name>{profile.display_name}</display-name>\n"
+            f"<tier>{profile.tier}</tier>\n"
+            f"<max-rounds>{profile.max_rounds}</max-rounds>\n"
+            f"<budget-usd>{profile.budget_usd:.2f}</budget-usd>\n"
+            "</current-model>"
+        )
+    return (
+        "### Current Model\n"
+        "- **Surface**: public web chat\n"
+        f"- **Provider**: {profile.provider}\n"
+        f"- **Model ID**: {profile.model_id}\n"
+        f"- **Display Name**: {profile.display_name}\n"
+        f"- **Tier**: {profile.tier}\n"
+        f"- **Max Rounds**: {profile.max_rounds}\n"
+        f"- **Budget USD**: {profile.budget_usd:.2f}"
+    )
+
+
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
 WEB_READ_SELF_TOOL = {
@@ -740,12 +767,13 @@ async def handle_web_chat(
 
     # Fold the runtime header directly into the current user turn so the
     # history prefix stays byte-stable across requests (→ prompt caching).
-    # Provider-native format: XML for Claude, Markdown for GPT.
+    # Provider-native format: XML for Claude, Markdown for OpenAI/DeepSeek.
     now = datetime.now(KST)
     runtime_context = _build_web_runtime_context(
         now.strftime("%Y-%m-%d %H:%M KST (%A)"),
         provider=provider,
     )
+    runtime_context = f"{runtime_context}\n\n{_build_web_model_context(profile, provider=provider)}"
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = _build_web_system_prompt(provider)
 
@@ -891,6 +919,8 @@ async def handle_web_chat(
                 "type": "warning",
                 "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
             })
+        rounds_used = metadata.get("rounds", budget_tracker.get("rounds_used"))
+        cost_usd = metadata.get("cost_usd", budget_tracker.get("total_cost"))
         documents_count, web_search_used, strategy = _summarize_tool_usage(
             budget_tracker.get("tool_work_details", [])
         )
@@ -907,8 +937,8 @@ async def handle_web_chat(
             "truncated": bool(metadata.get("truncated", False)),
             "finish_reason": metadata.get("finish_reason"),
             "continuations_used": metadata.get("continuations_used", 0),
-            "rounds": metadata.get("rounds"),
-            "cost_usd": metadata.get("cost_usd"),
+            "rounds": rounds_used,
+            "cost_usd": cost_usd,
         })
     else:
         yield _format_sse({"type": "error", "content": "응답을 생성하지 못했습니다."})
