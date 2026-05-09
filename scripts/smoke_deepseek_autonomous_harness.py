@@ -73,6 +73,8 @@ def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> No
     assert "on_progress=on_progress" in source
     assert "def _build_web_model_context" in source
     assert "### Current Model" in source
+    assert "profile.display_name" in source
+    assert "model-id" not in source
 
 
 def test_deepseek_thinking_config_is_enabled_by_default() -> None:

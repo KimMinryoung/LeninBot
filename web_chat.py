@@ -124,29 +124,10 @@ def _build_web_runtime_context(current_datetime: str, provider: str = "claude") 
 
 
 def _build_web_model_context(profile, provider: str = "claude") -> str:
-    """Render authoritative current web-chat model metadata."""
+    """Render the authoritative current web-chat model display name."""
     if uses_xml(provider):
-        return (
-            "<current-model>\n"
-            f"<surface>public web chat</surface>\n"
-            f"<provider>{profile.provider}</provider>\n"
-            f"<model-id>{profile.model_id}</model-id>\n"
-            f"<display-name>{profile.display_name}</display-name>\n"
-            f"<tier>{profile.tier}</tier>\n"
-            f"<max-rounds>{profile.max_rounds}</max-rounds>\n"
-            f"<budget-usd>{profile.budget_usd:.2f}</budget-usd>\n"
-            "</current-model>"
-        )
-    return (
-        "### Current Model\n"
-        "- **Surface**: public web chat\n"
-        f"- **Provider**: {profile.provider}\n"
-        f"- **Model ID**: {profile.model_id}\n"
-        f"- **Display Name**: {profile.display_name}\n"
-        f"- **Tier**: {profile.tier}\n"
-        f"- **Max Rounds**: {profile.max_rounds}\n"
-        f"- **Budget USD**: {profile.budget_usd:.2f}"
-    )
+        return f"<current-model>{profile.display_name}</current-model>"
+    return f"### Current Model\n- **Display Name**: {profile.display_name}"
 
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
