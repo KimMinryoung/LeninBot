@@ -63,6 +63,8 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 
 Public web chat is not the Telegram orchestrator. `web_chat.py` builds `_web_tools` from `_WEB_ALLOWED_TOOLS` and adds `WEB_READ_SELF_TOOL`. This keeps anonymous public users away from Telegram-only, email, code, filesystem, and broad operational tools.
 
+`check_wallet` is intentionally exposed to public web chat as a read-only wallet visibility tool. It can show public wallet address/balance information, but it must not expose private keys, credential paths, signing, transfer, swap, or payment capabilities. Payment tools such as `pay_and_fetch`, code execution tools, filesystem write tools, email/A2A send tools, and publishing tools must remain absent from the web-chat allow-list.
+
 When changing public web tools, review `scripts/smoke_webchat_security.py` and the frontend caller behavior.
 
 ## Agent Runtime Config Is Not the Tool Registry
@@ -75,4 +77,5 @@ When changing public web tools, review `scripts/smoke_webchat_security.py` and t
 - Update exactly the relevant allow-list/spec.
 - Keep public web chat and Telegram orchestrator separate.
 - Add smoke coverage when a new tool can write, publish, send, browse, pay, or execute.
+- Treat read-only wallet visibility separately from signing/payment capability; `check_wallet` may be public, but transfer/swap/pay tools may not.
 - Update this document only after verifying names in code.

@@ -4,7 +4,8 @@ Uses PostgreSQL (via db.py) instead of SQLite. Missions are per-user.
 """
 
 import logging
-from db import query as _query, execute as _execute
+from db import query as _query, execute as _execute, get_conn as _get_conn
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -73,48 +74,75 @@ def get_mission_events(mission_id: int, limit: int = 20) -> list[dict]:
 
 def create_mission(user_id: int, title: str, task_id: int | None = None) -> dict:
     """Create a new mission, capture recent chat context, and optionally link a task."""
-    # Close any existing active mission first
-    active = get_active_mission(user_id)
-    if active:
-        close_mission(active["id"])
+    closed_mission_ids: list[int] = []
+    with _get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"telegram_mission:{user_id}",))
 
-    rows = _query(
-        "INSERT INTO telegram_missions (user_id, title) VALUES (%s, %s) RETURNING id",
-        (user_id, title),
-    )
-    mission_id = rows[0]["id"]
+            # Close any existing active mission first. The partial unique index is the
+            # durable invariant; this transaction lock keeps normal creation orderly.
+            cur.execute(
+                "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active'",
+                (user_id,),
+            )
+            closed_mission_ids = [int(row["id"]) for row in cur.fetchall()]
+            cur.execute(
+                "UPDATE telegram_missions "
+                "SET status = 'done', closed_at = COALESCE(closed_at, NOW()) "
+                "WHERE user_id = %s AND status = 'active'",
+                (user_id,),
+            )
 
-    # Capture recent 5 chat turns as context
-    recent = _query(
-        "SELECT role, content, created_at FROM telegram_chat_history "
-        "WHERE user_id = %s ORDER BY id DESC LIMIT 5",
-        (user_id,),
-    )
-    if recent:
-        recent.reverse()
-        context_lines = []
-        for msg in recent:
-            role_label = "사용자" if msg["role"] == "user" else "에이전트"
-            text = str(msg["content"] or "")[:300]
-            context_lines.append(f"[{msg['created_at']}] {role_label}: {text}")
-        context = "\n".join(context_lines)
-        _execute(
-            "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
-            "VALUES (%s, %s, %s, %s)",
-            (mission_id, "system", "context_capture", context),
-        )
+            cur.execute(
+                "INSERT INTO telegram_missions (user_id, title) VALUES (%s, %s) RETURNING id",
+                (user_id, title),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise RuntimeError("mission insert returned no id")
+            mission_id = row["id"]
 
-    # Link task if provided
-    if task_id:
-        _execute(
-            "UPDATE telegram_tasks SET mission_id = %s WHERE id = %s",
-            (mission_id, task_id),
-        )
-        _execute(
-            "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
-            "VALUES (%s, %s, %s, %s)",
-            (mission_id, "system", "task_created", f"Task #{task_id} linked to mission"),
-        )
+            # Capture recent 5 chat turns as context.
+            cur.execute(
+                "SELECT role, content, created_at FROM telegram_chat_history "
+                "WHERE user_id = %s ORDER BY id DESC LIMIT 5",
+                (user_id,),
+            )
+            recent = [dict(r) for r in cur.fetchall()]
+            if recent:
+                recent.reverse()
+                context_lines = []
+                for msg in recent:
+                    role_label = "사용자" if msg["role"] == "user" else "에이전트"
+                    text = str(msg["content"] or "")[:300]
+                    context_lines.append(f"[{msg['created_at']}] {role_label}: {text}")
+                context = "\n".join(context_lines)
+                cur.execute(
+                    "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (mission_id, "system", "context_capture", context),
+                )
+
+            # Link task if provided.
+            if task_id:
+                cur.execute(
+                    "UPDATE telegram_tasks SET mission_id = %s WHERE id = %s",
+                    (mission_id, task_id),
+                )
+                cur.execute(
+                    "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (mission_id, "system", "task_created", f"Task #{task_id} linked to mission"),
+                )
+
+    for old_mission_id in closed_mission_ids:
+        try:
+            task_rows = _query("SELECT id FROM telegram_tasks WHERE mission_id = %s", (old_mission_id,))
+            task_ids = [r["id"] for r in task_rows] if task_rows else []
+            from redis_state import cleanup_mission
+            cleanup_mission(old_mission_id, task_ids)
+        except Exception:
+            logger.debug("Redis cleanup failed for superseded mission #%d", old_mission_id, exc_info=True)
 
     logger.info("Mission #%d created for user %d: %s", mission_id, user_id, title)
     return {"id": mission_id, "title": title, "status": "active"}
@@ -124,14 +152,11 @@ def add_mission_event(
     mission_id: int, source: str, event_type: str, content: str,
 ) -> None:
     """Add an event to a mission timeline. Only active missions accept events."""
-    # Guard: don't write to closed missions
-    rows = _query("SELECT status FROM telegram_missions WHERE id = %s", (mission_id,))
-    if not rows or rows[0]["status"] != "active":
-        return
     _execute(
         "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
-        "VALUES (%s, %s, %s, %s)",
-        (mission_id, source, event_type, content),
+        "SELECT id, %s, %s, %s FROM telegram_missions "
+        "WHERE id = %s AND status = 'active'",
+        (source, event_type, content, mission_id),
     )
 
 

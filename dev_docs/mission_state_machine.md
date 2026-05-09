@@ -12,7 +12,7 @@
 | `active` | 과제 진행 중. 이벤트 기록 가능. 시스템 프롬프트에 주입됨. | `create_mission()` | `close_mission()` → `done` |
 | `done` | 과제 완료/종료. 읽기 전용. 시스템 프롬프트에 주입 안 됨. | `close_mission()` | (terminal) |
 
-**불변식**: 사용자당 `active` 미션은 최대 1개.
+**불변식**: 사용자당 `active` 미션은 최대 1개. PostgreSQL에서는 `telegram_missions(user_id) WHERE status = 'active'` partial unique index가 이를 강제한다.
 
 ## 3. State Transitions
 
@@ -106,14 +106,16 @@ create_task (자율, user_id=0) ── mission_id = 최신 active mission
 |------|------|
 | 미션 없이 `save_finding` 호출 | "No mission linked" 반환, 데이터 유실 없음 (에러 메시지로 안내) |
 | `done` 미션에 이벤트 INSERT 시도 | `add_mission_event`가 상태 체크 후 무시 (guard 적용됨) |
-| 동시에 2개 태스크가 미션 생성 시도 | `LIMIT 1` + application-level 체크로 1개만 생성 (race 가능) |
+| 동시에 2개 태스크가 미션 생성 시도 | 사용자별 advisory transaction lock + partial unique index로 active mission 중복 생성 방지 |
 | user_id=0 (자율 생성) 미션 조회 | 전역 최신 active 미션 사용 |
-| 24시간 만료 중 이벤트 기록 race | 만료가 먼저 처리되면 이벤트는 orphan됨 |
+| 24시간 만료 중 이벤트 기록 race | `INSERT ... SELECT ... WHERE status='active'`로 closed mission에는 이벤트가 기록되지 않음 |
 
 ### 8.1 적용된 Guard
 
 1. **`add_mission_event` 상태 체크**: `done` 미션에 이벤트 기록 시 무시 (양쪽 모두 적용)
 2. **`done` → `active` 전이 불가**: `close_mission()`은 단방향. 코드에 역전이 경로 없음.
+3. **active mission partial unique index**: 사용자당 active mission은 DB가 강제.
+4. **mission 생성 transaction lock**: `create_mission()`은 사용자별 advisory lock 안에서 기존 active mission 종료, 새 mission 생성, task 연결, 초기 이벤트 기록을 처리.
 
 ## 9. Database Schema
 
@@ -137,6 +139,8 @@ CREATE TABLE telegram_mission_events (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_mission_events_timeline ON telegram_mission_events(mission_id, created_at);
+CREATE UNIQUE INDEX idx_telegram_missions_one_active_per_user
+    ON telegram_missions(user_id) WHERE status = 'active';
 
 ALTER TABLE telegram_tasks ADD COLUMN mission_id INTEGER REFERENCES telegram_missions(id);
 ```

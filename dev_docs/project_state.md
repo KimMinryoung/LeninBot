@@ -83,7 +83,7 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 - Service status: `systemctl status leninbot-api.service leninbot-telegram.service leninbot-browser.service`
 - Logs: `journalctl -u <unit> -f`
 - Static page smoke tests: `scripts/smoke_static_pages.py`
-- Runtime smoke tests: `scripts/smoke_runtime.py`, `scripts/smoke_tool_allowlists.py`, `scripts/smoke_webchat_security.py`
+- Runtime smoke tests: `scripts/smoke_runtime.py`, `scripts/smoke_tool_allowlists.py`, `scripts/smoke_webchat_security.py`, `scripts/smoke_kg_schema_docs.py`
 - Secret management: `scripts/manage_secrets.py`
 - KG maintenance: `scripts/check_kg_integrity.py`, `scripts/kg_enricher.py`, `skills/kg-maintenance/scripts/*`
 

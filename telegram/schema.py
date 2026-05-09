@@ -137,6 +137,27 @@ def ensure_telegram_tables() -> None:
         )
     """)
     _execute("""
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY user_id
+                    ORDER BY created_at DESC, id DESC
+                ) AS rn
+            FROM telegram_missions
+            WHERE status = 'active'
+        )
+        UPDATE telegram_missions m
+        SET status = 'done', closed_at = COALESCE(closed_at, NOW())
+        FROM ranked r
+        WHERE m.id = r.id AND r.rn > 1
+    """)
+    _execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_missions_one_active_per_user
+        ON telegram_missions(user_id)
+        WHERE status = 'active'
+    """)
+    _execute("""
         CREATE TABLE IF NOT EXISTS telegram_mission_events (
             id          SERIAL PRIMARY KEY,
             mission_id  INTEGER NOT NULL REFERENCES telegram_missions(id),
@@ -149,6 +170,28 @@ def ensure_telegram_tables() -> None:
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_mission_events_timeline
         ON telegram_mission_events(mission_id, created_at)
+    """)
+    _execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                JOIN pg_attribute
+                  ON pg_attribute.attrelid = pg_constraint.conrelid
+                 AND pg_attribute.attnum = ANY(pg_constraint.conkey)
+                WHERE pg_constraint.contype = 'f'
+                  AND pg_constraint.conrelid = 'telegram_tasks'::regclass
+                  AND pg_constraint.confrelid = 'telegram_missions'::regclass
+                  AND pg_attribute.attname = 'mission_id'
+            ) THEN
+                ALTER TABLE telegram_tasks
+                ADD CONSTRAINT telegram_tasks_mission_id_fkey
+                FOREIGN KEY (mission_id)
+                REFERENCES telegram_missions(id)
+                NOT VALID;
+            END IF;
+        END $$;
     """)
     _execute("""
         CREATE TABLE IF NOT EXISTS email_threads (

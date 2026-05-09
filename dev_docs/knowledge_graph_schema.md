@@ -1,12 +1,12 @@
 # 지식그래프 스키마 설계
 
-**버전:** v2  
-**작성일:** 2026-02-27  
+**버전:** v2.2  
+**최종 확인 기준:** 2026-05-09 코드 트리  
 **기반 프레임워크:** Graphiti + Pydantic
 
 ---
 
-## 1. 엔티티 타입 (7 종 42 필드)
+## 1. 엔티티 타입 (10 종)
 
 | 엔티티 | 설명 | 주요 필드 |
 |--------|------|-----------|
@@ -17,10 +17,13 @@
 | **Incident** | 사건 (사이버공격, 인사변동, 정책변화, 군사배치, 단속 등) | `incident_type`, `severity`, `occurred_at`, `detected_at`, `status`, `confidence`, `impact_summary`, `geopolitical_context`, `information_source_type` |
 | **Policy** | 정책 (제재, 조약, 수출통제, 무역협정, 군사교리, 법률, 행정명령 등) | `policy_type`, `issuing_entity`, `target_scope`, `status`, `effective_date`, `strategic_impact` |
 | **Campaign** | 캠페인 (군사작전, 영향력공작, 사이버캠페인, 사회운동, 선전전, 경제전 등) | `campaign_type`, `objective`, `status`, `scale`, `started_at`, `ideological_framing`, `effectiveness` |
+| **Concept** | 추상 개념 (이데올로기, 이론, 사회현상, 사회계층, 역사적 시기 등) | `concept_type`, `domain`, `related_thinkers`, `historical_period`, `contemporary_relevance` |
+| **Role** | 직책/직위 자체 (그 직책을 점유하는 사람과 분리) | `role_type`, `domain`, `jurisdiction`, `seniority`, `selection_method` |
+| **Industry** | 산업, 섹터, 가치사슬 노드 | `sector_type`, `value_chain_position`, `strategic_importance`, `capital_intensity`, `labor_composition` |
 
 ---
 
-## 2. 엣지 타입 (10 종)
+## 2. 엣지 타입 (12 종)
 
 | 엣지 | 소스 → 타겟 | 설명 | 주요 필드 |
 |------|-------------|------|-----------|
@@ -34,6 +37,8 @@
 | **Presence** | Person/Org/Incident/Campaign → Location | 위치 관련 (본사, 운영지역, 방문, 주둔 등) | `presence_type`, `frequency`, `purpose` |
 | **PolicyEffect** | Policy → Entity / Org → Policy | 정책 효과 (제재, 규제, 면제, 위반 등) | `effect_type`, `impact_description`, `compliance_status` |
 | **Participation** | Person/Org → Campaign | 캠페인 참여 (주도, 수행, 지원, 반대, 자금조달 등) | `role`, `contribution`, `commitment_level` |
+| **Statement** | Entity → Entity | 발화, 성명, 발표, 비판, 저술, 공개 주장 | `statement_type`, `medium`, `audience`, `statement_date`, `verbatim_excerpt` |
+| **Causation** | Entity → Entity | 원인, 기여요인, 촉발, 가속, 완화 같은 분석적 인과 관계 | `causal_type`, `confidence`, `mechanism`, `evidence_basis` |
 
 ---
 
@@ -64,7 +69,17 @@
 | Campaign | Location | Presence |
 | Campaign | Incident | Involvement |
 | Campaign | Policy | PolicyEffect |
-| Entity (폴백) | Entity (폴백) | Funding, AssetTransfer |
+| Person | Role | Affiliation |
+| Role | Organization | Affiliation |
+| Role | Location | Presence |
+| Organization | Industry | Affiliation |
+| Industry | Location | Presence |
+| Policy | Industry | PolicyEffect |
+| Industry | Asset | AssetTransfer |
+| Campaign | Industry | ThreatAction |
+| `Entity` fallback | `Entity` fallback | Funding, AssetTransfer, Statement, Causation |
+
+`Entity` fallback에는 `Statement`와 `Causation`이 포함된다. 두 관계는 주제 독립적이므로 특정 entity 쌍에만 묶지 않는다.
 
 ---
 
@@ -103,8 +118,8 @@
 graph_memory/
 ├── __init__.py       # 패키지 초기화
 ├── config.py         # 엣지 타입 매핑, 에피소드 소스 매핑 설정
-├── entities.py       # 7 개 엔티티 타입 정의 (Person, Organization, Location, Asset, Incident, Policy, Campaign)
-├── edges.py          # 10 개 엣지 타입 정의
+├── entities.py       # 10 개 엔티티 타입 정의
+├── edges.py          # 12 개 엣지 타입 정의
 └── service.py        # 지식그래프 서비스 구현
 ```
 
@@ -117,3 +132,7 @@ graph_memory/
 3. **Incident vs Campaign** — 단발 사건은 Incident, 지속 활동은 Campaign
 4. **Incident vs Policy** — 단발 사건은 Incident, 지속 제도는 Policy
 5. **ThreatAction vs PolicyEffect** — 물리적/사이버 공격은 ThreatAction, 제도적 효과는 PolicyEffect
+6. **Person vs Role** — 실제 개인은 Person, 직책/직위 자체는 Role
+7. **Organization vs Industry** — 특정 기관/기업/국가는 Organization, 산업/섹터는 Industry
+8. **Statement vs ThreatAction** — 발언·비판·주장은 Statement, 실제 공격/위협 행위는 ThreatAction
+9. **Causation** — 단순 선후관계가 아니라 명시적 원인/기여요인 주장에만 사용
