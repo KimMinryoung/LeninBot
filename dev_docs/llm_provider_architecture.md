@@ -32,6 +32,11 @@ DeepSeek
   -> openai_tool_loop.chat_with_tools(client=...)
   -> OpenAI-compatible Chat Completions API
 
+DeepSeek autonomous
+  bot_config._deepseek_anthropic_client
+  -> claude_loop.chat_with_tools(client=...)
+  -> DeepSeek Anthropic-compatible Messages API
+
 Local
   llm.client backend
   -> openai_tool_loop.chat_with_tools(base_url=...)
@@ -39,6 +44,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
+The hourly autonomous project loop uses DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Other DeepSeek surfaces continue to use the OpenAI-compatible path.
 
 ## Runtime Config Keys
 
@@ -95,4 +101,4 @@ Do not hardcode model names in prompts or docs beyond describing current maps. U
 - result truncation for large tool output
 - forced final response after budget/round exhaustion
 
-`claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls.
+`claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and DeepSeek autonomous calls. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.

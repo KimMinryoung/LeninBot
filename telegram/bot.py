@@ -31,7 +31,7 @@ from secrets_loader import get_secret
 # Extracted modules
 from bot_config import (
     ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    _claude, _openai_client, _deepseek_client,
+    _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client,
     _CLAUDE_MAX_TOKENS, _CLAUDE_MAX_TOKENS_TASK,
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
@@ -1532,6 +1532,27 @@ async def _chat_with_tools(
             provider_label="openai",
         )
 
+    if effective_provider == "deepseek" and _runtime_kind == "autonomous" and _deepseek_anthropic_client:
+        return await chat_with_tools(
+            messages,
+            client=_deepseek_anthropic_client,
+            model=profile.model_id,
+            tools=merged_tools,
+            tool_handlers=merged_handlers,
+            system_prompt=sys_prompt,
+            max_rounds=resolved_max_rounds,
+            max_tokens=resolved_max_tokens,
+            log_event=_log_event,
+            budget_usd=resolved_budget,
+            on_progress=on_progress,
+            budget_tracker=budget_tracker,
+            task_id=task_id,
+            agent_name=_agent_name,
+            mission_id=_mission_id,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+        )
+
     if effective_provider == "deepseek" and _deepseek_client:
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
@@ -1622,6 +1643,7 @@ register_handlers(router, ctx={
     "claude_client": _claude,
     "openai_client": _openai_client,
     "deepseek_client": _deepseek_client,
+    "deepseek_anthropic_client": _deepseek_anthropic_client,
     "extract_text": _extract_text,
     "local_llm_generate": _local_llm_generate,
     "get_model_light": _get_model_light,

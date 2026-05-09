@@ -84,6 +84,18 @@ PRICING_TABLE = {
         "cache_creation":  2.00 / 1_000_000,   # 2.0× input (1h TTL)
         "cache_read":      0.10 / 1_000_000,
     },
+    "deepseek-v4-flash": {
+        "input":           0.14 / 1_000_000,
+        "output":          0.28 / 1_000_000,
+        "cache_creation":  0.14 / 1_000_000,
+        "cache_read":      0.028 / 1_000_000,
+    },
+    "deepseek-v4-pro": {
+        "input":           1.74 / 1_000_000,
+        "output":          3.48 / 1_000_000,
+        "cache_creation":  1.74 / 1_000_000,
+        "cache_read":      0.145 / 1_000_000,
+    },
 }
 
 # Fallback when the model string doesn't match any known family — use Sonnet

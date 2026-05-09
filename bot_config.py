@@ -16,6 +16,10 @@ ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", "") or ""
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "") or ""
 DEEPSEEK_API_KEY = get_secret("DEEPSEEK_API_KEY", "") or ""
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+DEEPSEEK_ANTHROPIC_BASE_URL = os.getenv(
+    "DEEPSEEK_ANTHROPIC_BASE_URL",
+    "https://api.deepseek.com/anthropic",
+).rstrip("/")
 
 # ── LLM Clients ──────────────────────────────────────────────────────
 _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
@@ -23,12 +27,17 @@ _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 # OpenAI-compatible clients (lazy — only created if keys exist)
 _openai_client = None
 _deepseek_client = None
+_deepseek_anthropic_client = None
 if OPENAI_API_KEY or DEEPSEEK_API_KEY:
     from openai import AsyncOpenAI
 if OPENAI_API_KEY:
     _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 if DEEPSEEK_API_KEY:
     _deepseek_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    _deepseek_anthropic_client = anthropic.AsyncAnthropic(
+        api_key=DEEPSEEK_API_KEY,
+        base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
+    )
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 _WEBCHAT_MAX_TOKENS = 4096
