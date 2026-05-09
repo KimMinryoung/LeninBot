@@ -32,6 +32,10 @@ _SHUTDOWN_CHECKPOINT_MARKER = "## Checkpoint: shutdown before restart"
 _RESTART_COMPLETED_MARKER = "[restart already completed by parent task]"
 _RESTART_RESUME_MARKER = "[same-task resumed after self restart]"
 _RESTART_PHASE_KEY = "restart_state"
+_RATE_LIMIT_REQUEUE_DELAY_SECONDS = max(
+    60,
+    int(os.getenv("TASK_RATE_LIMIT_REQUEUE_SECONDS", "300") or "300"),
+)
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -1011,8 +1015,6 @@ async def process_task(
         content = f"{restart_note}\n\n{content}"
 
     max_retries = 10
-    retry_delay = 60
-
     for attempt in range(max_retries):
         try:
             report, bt = await _run_task_llm(
@@ -1088,9 +1090,31 @@ async def process_task(
             )
 
             if is_rate_limit and attempt < max_retries - 1:
-                logger.warning("Task %d rate limited (attempt %d/%d), retrying in %ds...", task_id, attempt + 1, max_retries, retry_delay)
-                await asyncio.sleep(retry_delay)
-                continue
+                logger.warning(
+                    "Task %d rate limited (attempt %d/%d), requeueing after %ds",
+                    task_id,
+                    attempt + 1,
+                    max_retries,
+                    _RATE_LIMIT_REQUEUE_DELAY_SECONDS,
+                )
+                await asyncio.to_thread(
+                    _execute,
+                    "UPDATE telegram_tasks SET status = 'pending', available_at = NOW() + (%s || ' seconds')::interval, "
+                    "scratchpad = COALESCE(scratchpad, '') || %s "
+                    "WHERE id = %s AND status = 'processing'",
+                    (
+                        str(_RATE_LIMIT_REQUEUE_DELAY_SECONDS),
+                        f"\n[{datetime.now(KST).isoformat()}] Rate limited on attempt {attempt + 1}/{max_retries}; "
+                        f"requeued by worker. Retry no earlier than about {_RATE_LIMIT_REQUEUE_DELAY_SECONDS}s.",
+                        task_id,
+                    ),
+                )
+                return {
+                    "status": "requeued",
+                    "task_id": task_id,
+                    "summary": "rate limited; requeued",
+                    "is_subtask": is_subtask,
+                }
 
             return await _handle_task_failure(
                 task=task,
@@ -1616,8 +1640,9 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
             task = await asyncio.to_thread(
                 _query_one,
                 "UPDATE telegram_tasks SET status = 'queued' "
-                "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' "
-                "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
+                "WHERE id = (SELECT id FROM telegram_tasks WHERE status = 'pending' AND COALESCE(available_at, created_at) <= NOW() "
+                "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, created_at "
+                "LIMIT 1 FOR UPDATE SKIP LOCKED) "
                 f"RETURNING {_TASK_PICKUP_RETURNING}",
             )
             if task:

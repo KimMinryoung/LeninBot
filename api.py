@@ -2,7 +2,8 @@ import asyncio
 import json
 import logging
 import os
-from collections import defaultdict
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -57,6 +58,7 @@ def _clean_chat_history_rows(rows: list[dict]) -> list[dict]:
 
 # ── Admin API key authentication ──────────────────────────────────
 _ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
+_WEBCHAT_PROXY_SECRET = get_secret("WEBCHAT_PROXY_SECRET", "") or ""
 _admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 
 
@@ -123,6 +125,11 @@ app.include_router(x402_demo_router)
 # Uses LRU-style eviction to prevent unbounded memory growth.
 _session_locks: dict[str, asyncio.Lock] = {}
 _SESSION_LOCKS_MAX = 200
+_webchat_hits: defaultdict[str, deque[float]] = defaultdict(deque)
+_webchat_active_count = 0
+_WEBCHAT_RATE_LIMIT = max(1, int(os.getenv("WEBCHAT_RATE_LIMIT", "20") or "20"))
+_WEBCHAT_RATE_WINDOW_SECONDS = max(10, int(os.getenv("WEBCHAT_RATE_WINDOW_SECONDS", "300") or "300"))
+_WEBCHAT_GLOBAL_ACTIVE_LIMIT = max(1, int(os.getenv("WEBCHAT_GLOBAL_ACTIVE_LIMIT", "8") or "8"))
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
@@ -563,12 +570,56 @@ async def private_reports_admin_page():
     )
 
 
+def _trusted_proxy_request(http_req: Request) -> bool:
+    """Return True only for headers injected by the trusted frontend proxy."""
+    if not _WEBCHAT_PROXY_SECRET:
+        return False
+    supplied = http_req.headers.get("x-webchat-proxy-secret", "")
+    return bool(supplied and supplied == _WEBCHAT_PROXY_SECRET)
+
+
 def _parse_user_fingerprints(http_req: Request) -> list[str]:
     """Read X-User-Fingerprints header (CSV) — injected by the frontend proxy
     for logged-in users so their bound fingerprints (across devices) can be
     queried as one. Empty when unauthenticated."""
+    if not _trusted_proxy_request(http_req):
+        return []
     raw = http_req.headers.get("x-user-fingerprints", "")
-    return [f.strip() for f in raw.split(",") if f.strip()]
+    return [f.strip()[:256] for f in raw.split(",") if f.strip()][:20]
+
+
+def _client_ip(http_req: Request) -> str:
+    if _trusted_proxy_request(http_req):
+        forwarded = http_req.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return http_req.client.host if http_req.client else ""
+
+
+def _webchat_rate_key(request: ChatRequest, http_req: Request, ip_address: str) -> str:
+    fingerprint = (request.fingerprint or "").strip()
+    if fingerprint:
+        return f"fp:{fingerprint[:128]}"
+    return f"ip:{ip_address or 'unknown'}"
+
+
+def _check_webchat_rate_limit(key: str) -> bool:
+    now = time.monotonic()
+    hits = _webchat_hits[key]
+    cutoff = now - _WEBCHAT_RATE_WINDOW_SECONDS
+    while hits and hits[0] < cutoff:
+        hits.popleft()
+    if len(hits) >= _WEBCHAT_RATE_LIMIT:
+        return False
+    hits.append(now)
+    if len(_webchat_hits) > 5000:
+        stale = [
+            item_key for item_key, item_hits in _webchat_hits.items()
+            if not item_hits or item_hits[-1] < cutoff
+        ][:1000]
+        for item_key in stale:
+            _webchat_hits.pop(item_key, None)
+    return True
 
 
 @app.post("/chat")
@@ -580,33 +631,49 @@ async def chat(request: ChatRequest, http_req: Request):
     from web_chat import handle_web_chat
 
     user_agent = http_req.headers.get("user-agent", "")
-    forwarded = http_req.headers.get("x-forwarded-for", "")
-    ip_address = forwarded.split(",")[0].strip() if forwarded else (http_req.client.host if http_req.client else "")
+    ip_address = _client_ip(http_req)
     user_fingerprints = _parse_user_fingerprints(http_req)
+    rate_key = _webchat_rate_key(request, http_req, ip_address)
 
     lock = _get_session_lock(request.session_id)
 
     async def event_generator():
+        global _webchat_active_count
+        if not _check_webchat_rate_limit(rate_key):
+            logger.warning("web chat rate limited key=%s session=%s", rate_key[:24], request.session_id)
+            yield format_sse({"type": "error", "content": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
+            return
+        if _webchat_active_count >= _WEBCHAT_GLOBAL_ACTIVE_LIMIT:
+            logger.warning("web chat global active limit reached session=%s", request.session_id)
+            yield format_sse({"type": "error", "content": "현재 동시 요청이 많습니다. 잠시 후 다시 시도해 주세요."})
+            return
         if lock.locked():
-            print(f"⚠️ [요청 거부] session={request.session_id} — 이전 요청 처리 중", flush=True)
+            logger.info("web chat rejected because session is locked session=%s", request.session_id)
             yield format_sse({"type": "error", "content": "이전 질문에 대한 답변이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요."})
             return
 
-        async with lock:
-            print(f"\n{'='*60}", flush=True)
-            print(f"📩 [요청] session={request.session_id} fp={request.fingerprint[:8] or 'none'} | \"{request.message[:80]}\"", flush=True)
+        _webchat_active_count += 1
+        try:
+            async with lock:
+                logger.info(
+                    "web chat request session=%s fingerprint_prefix=%s chars=%d trusted_proxy=%s",
+                    request.session_id,
+                    (request.fingerprint or "")[:8] or "none",
+                    len(request.message or ""),
+                    _trusted_proxy_request(http_req),
+                )
 
-            async for sse_event in handle_web_chat(
-                message=request.message,
-                session_id=request.session_id,
-                fingerprint=request.fingerprint,
-                user_agent=user_agent,
-                ip_address=ip_address,
-                user_fingerprints=user_fingerprints,
-            ):
-                yield sse_event
-
-            print(f"{'='*60}\n", flush=True)
+                async for sse_event in handle_web_chat(
+                    message=request.message,
+                    session_id=request.session_id,
+                    fingerprint=request.fingerprint,
+                    user_agent=user_agent,
+                    ip_address=ip_address,
+                    user_fingerprints=user_fingerprints,
+                ):
+                    yield sse_event
+        finally:
+            _webchat_active_count = max(0, _webchat_active_count - 1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -91,8 +91,11 @@ def _assert_orchestrator(tool_names: set[str]) -> None:
 
 def _assert_agents(tool_names: set[str]) -> None:
     from agents import list_agents
+    from agents.base import AgentSpec
+    from llm.prompt_renderer import SystemPrompt
 
     for spec in list_agents():
+        assert spec.tools, f"{spec.name} has empty fail-closed tool allowlist"
         dynamic = DYNAMIC_AGENT_TOOLS.get("*", set()) | DYNAMIC_AGENT_TOOLS.get(spec.name, set())
         unknown = sorted(set(spec.tools) - tool_names - dynamic)
         assert not unknown, f"{spec.name} allowlist references unknown tools: {unknown}"
@@ -100,6 +103,19 @@ def _assert_agents(tool_names: set[str]) -> None:
         assert not terminal_unknown, f"{spec.name} terminal_tools outside allowlist: {terminal_unknown}"
         final_unknown = sorted(set(spec.finalization_tools) - set(spec.tools))
         assert not final_unknown, f"{spec.name} finalization_tools outside allowlist: {final_unknown}"
+
+    dummy = AgentSpec(
+        name="dummy",
+        description="empty tools must not expose the global registry",
+        prompt_ir=SystemPrompt(identity="dummy"),
+        tools=[],
+    )
+    filtered_tools, filtered_handlers = dummy.filter_tools(
+        [{"name": "read_file"}, {"name": "write_file"}],
+        {"read_file": object(), "write_file": object()},
+    )
+    assert filtered_tools == []
+    assert filtered_handlers == {}
 
 
 def _assert_web_chat(tool_names: set[str]) -> None:

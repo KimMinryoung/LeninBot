@@ -282,6 +282,22 @@ def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None)
     return choose("analyst", "Default route for information analysis, research, and synthesis.", "medium")
 
 
+def _resolve_recent_operator_user_id() -> int:
+    """Best-effort owner/user scope for mission lookup from recent Telegram chat."""
+    try:
+        from db import query as _db_q
+
+        recent_user = _db_q(
+            "SELECT user_id FROM telegram_chat_history "
+            "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
+        )
+        if recent_user:
+            return int(recent_user[0]["user_id"])
+    except Exception:
+        pass
+    return 0
+
+
 def _format_delegation_contract(
     *,
     success_criteria: str = "",
@@ -2018,8 +2034,11 @@ async def _exec_delegate(
     if not parent_task_id:
         try:
             from db import query as _db_q
+            user_id_for_mission = _resolve_recent_operator_user_id()
             active = _db_q(
-                "SELECT id FROM telegram_missions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+                "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (user_id_for_mission,),
             )
             if active:
                 task_mission_id = active[0]["id"]
@@ -2027,17 +2046,6 @@ async def _exec_delegate(
                 # Auto-create mission from delegation context
                 from telegram.mission import create_mission
                 mission_title = task[:80].replace("\n", " ").strip()
-                # user_id 0 = orchestrator-initiated, find the real user from recent tasks
-                user_id_for_mission = 0
-                try:
-                    recent_user = _db_q(
-                        "SELECT user_id FROM telegram_chat_history "
-                        "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
-                    )
-                    if recent_user:
-                        user_id_for_mission = recent_user[0]["user_id"]
-                except Exception:
-                    pass
                 if user_id_for_mission:
                     new_mission = create_mission(user_id_for_mission, mission_title)
                     task_mission_id = new_mission["id"]
@@ -2153,24 +2161,17 @@ async def _exec_multi_delegate(
     task_mission_id = None
     try:
         from db import query as _db_q
+        user_id_for_mission = _resolve_recent_operator_user_id()
         active = _db_q(
-            "SELECT id FROM telegram_missions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+            "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (user_id_for_mission,),
         )
         if active:
             task_mission_id = active[0]["id"]
         else:
             from telegram.mission import create_mission
             mission_title = tasks[0]["task"][:80].replace("\n", " ").strip()
-            user_id_for_mission = 0
-            try:
-                recent_user = _db_q(
-                    "SELECT user_id FROM telegram_chat_history "
-                    "WHERE user_id != 0 ORDER BY id DESC LIMIT 1"
-                )
-                if recent_user:
-                    user_id_for_mission = recent_user[0]["user_id"]
-            except Exception:
-                pass
             if user_id_for_mission:
                 new_mission = create_mission(user_id_for_mission, mission_title)
                 task_mission_id = new_mission["id"]
@@ -2199,7 +2200,7 @@ async def _exec_multi_delegate(
         pass
 
     # Create subtasks
-    created_ids = []
+    created_items = []
     created_info = []
     for t in tasks:
         agent = t["agent"]
@@ -2229,16 +2230,17 @@ async def _exec_multi_delegate(
         )
         if result["status"] == "ok":
             tid = result["task_id"]
-            created_ids.append(tid)
+            created_items.append({"id": tid, "agent": agent, "task": task_content})
             spec = get_agent(agent)
             created_info.append(f"  #{tid} [{agent}] ${spec.budget_usd:.2f}")
         else:
             created_info.append(f"  FAILED [{agent}]: {result.get('error')}")
 
-    if not created_ids:
+    if not created_items:
         return "Failed to create any subtasks."
 
     # Set plan_id = first subtask ID for all subtasks
+    created_ids = [item["id"] for item in created_items]
     plan_id = created_ids[0]
     if len(created_ids) > 1:
         id_list = ",".join(str(i) for i in created_ids)
@@ -2255,8 +2257,10 @@ async def _exec_multi_delegate(
         )
 
     # Create synthesis task (blocked until subtasks complete)
-    subtask_summary = "\n".join(f"- #{tid}: [{tasks[i]['agent']}] {tasks[i]['task'][:200]}"
-                                for i, tid in enumerate(created_ids))
+    subtask_summary = "\n".join(
+        f"- #{item['id']}: [{item['agent']}] {item['task'][:200]}"
+        for item in created_items
+    )
     synthesis_content = (
         f"<synthesis-task plan_id=\"{plan_id}\">\n"
         f"This task synthesizes results from subtasks that were executed in parallel.\n"

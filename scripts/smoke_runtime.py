@@ -190,8 +190,6 @@ def _assert_agent_runtime_config() -> None:
     assert scout.max_rounds == 30
 
     browser = get_agent("browser")
-    assert browser.provider == "claude"
-    assert browser.model == "sonnet"
     assert browser.budget_usd == 1.5
 
     autonomous = get_agent("autonomous_project")

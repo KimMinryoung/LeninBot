@@ -155,7 +155,7 @@ class AgentSpec:
     description: str
     prompt_ir: SystemPrompt | None = None
     system_prompt_template: str | None = None
-    tools: list[str] = field(default_factory=list)  # empty = all tools allowed
+    tools: list[str] = field(default_factory=list)
     # Tools that MUST remain callable even after budget/round limits are hit,
     # so the agent can persist its work on its way out (e.g. save_diary for the
     # diary agent). Forced-final response path will expose only these tools.
@@ -237,10 +237,12 @@ class AgentSpec:
     ) -> tuple[list[dict], dict]:
         """Filter tools and handlers to only those allowed by this agent.
 
-        If self.tools is empty, all tools are allowed (passthrough).
+        Empty tool lists are fail-closed. Agents that need broad access must
+        declare each tool explicitly so config mistakes do not silently expose
+        the global registry.
         """
         if not self.tools:
-            return list(all_tools), dict(all_handlers)
+            return [], {}
         allowed = set(self.tools)
         filtered_t = [t for t in all_tools if t.get("name") in allowed]
         filtered_h = {k: v for k, v in all_handlers.items() if k in allowed}

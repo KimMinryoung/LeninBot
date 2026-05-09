@@ -37,6 +37,9 @@ def create_task_in_db(
     from db import execute as db_execute, query as db_query
 
     tagged_content = content
+    priority = (priority or "normal").strip().lower()
+    if priority not in {"high", "normal", "low"}:
+        priority = "normal"
 
     # Determine depth (and inherit mission_id/agent_type) from parent
     depth = 0
@@ -69,14 +72,15 @@ def create_task_in_db(
         restart_state = metadata.get("restart_state") if isinstance(metadata.get("restart_state"), dict) else None
         metadata_json = json.dumps(metadata) if metadata else None
         rows = db_query(
-            "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, depth, mission_id, agent_type, metadata, "
+            "INSERT INTO telegram_tasks (user_id, content, status, priority, available_at, parent_task_id, depth, mission_id, agent_type, metadata, "
             "plan_id, plan_role, "
             "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
                 user_id,
                 tagged_content,
                 status,
+                priority,
                 parent_task_id,
                 depth,
                 mission_id,
@@ -101,5 +105,3 @@ def create_task_in_db(
     except Exception as e:
         logger.error("[shared] create_task_in_db error: %s", e)
         return {"status": "error", "error": str(e)}
-
-

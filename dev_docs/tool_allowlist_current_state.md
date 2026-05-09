@@ -85,9 +85,9 @@ instances. Each spec declares a static `tools=[...]` list. Task execution calls:
 spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
 ```
 
-from `agents/base.py`, so each agent only sees tools listed in its spec. If
-`tools=[]`, the current `AgentSpec` implementation treats that as "all tools
-allowed"; avoid using empty lists for normal in-process agents.
+from `agents/base.py`, so each agent only sees tools listed in its spec.
+`tools=[]` is fail-closed and exposes no runtime tools; agents must list every
+capability explicitly.
 
 Current notable ownership:
 
@@ -156,6 +156,7 @@ orchestrator view from `runtime_tools.allowlists.select_orchestrator_tools()`.
 - orchestrator allow-list names exist in the global registry
 - specialist `AgentSpec.tools` names exist in the global registry or in known
   dynamic task/project tool sets (`save_finding`, autonomous project state tools)
+- specialist agents do not rely on empty fail-open tool lists
 - terminal/finalization tools remain inside each agent's declared allow-list
 - web chat's bespoke allow-list resolves to real global tools plus its safe
   `read_self` override

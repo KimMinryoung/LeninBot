@@ -97,6 +97,8 @@ def ensure_telegram_tables() -> None:
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS last_verification_at TIMESTAMPTZ")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_id INTEGER")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS plan_role VARCHAR(20)")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal'")
+    _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ DEFAULT NOW()")
     _execute("ALTER TABLE telegram_schedules ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_parent
@@ -109,6 +111,20 @@ def ensure_telegram_tables() -> None:
     _execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_agent_user
         ON telegram_tasks(user_id, agent_type, status) WHERE status = 'done'
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_tasks_pending_priority
+        ON telegram_tasks(
+            status,
+            (CASE priority
+                WHEN 'high' THEN 0
+                WHEN 'normal' THEN 1
+                WHEN 'low' THEN 2
+                ELSE 1
+            END),
+            available_at,
+            created_at
+        ) WHERE status = 'pending'
     """)
     _execute("""
         CREATE TABLE IF NOT EXISTS telegram_missions (
