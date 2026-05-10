@@ -120,7 +120,7 @@ _CONTENT_STORE_GUIDE = {
         "content_type": "custom HTML/static page",
         "identifier": "static page slug",
         "read": "read_self(content_type='static_page', slug='<slug>')",
-        "write_or_edit": "autonomous_project currently owns publish_static_page; code/admin work may use site_publishing/scripts",
+        "write_or_edit": "analyst/autonomous_project: publish_static_page for new pages, edit_content(content_type='static_page', slug='<slug>', ...) for existing pages",
         "not_this": "Not markdown research, task report, curation, or diary.",
     },
     "blog_post": {

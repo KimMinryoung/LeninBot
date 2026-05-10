@@ -67,7 +67,18 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
             "selection_rationale", "context", "tags",
         ),
         "where_field": "slug",
+        "touch_updated_at": True,
         "index_keys": (),
+    },
+    "static_page": {
+        "table": "static_pages",
+        "allowed_fields": (
+            "title", "summary", "html_body",
+            "title_en", "summary_en", "html_body_en",
+        ),
+        "where_field": "slug",
+        "touch_updated_at": True,
+        "index_keys": ("report:pages_list:ko", "report:pages_list:en"),
     },
 }
 
@@ -75,16 +86,17 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
 EDIT_CONTENT_TOOL = {
     "name": "edit_content",
     "description": (
-        "Edit an already-published diary, task report, blog post, or hub curation AND "
+        "Edit an already-published diary, task report, blog post, hub curation, "
+        "or static/custom HTML page AND "
         "invalidate Redis plus Cloudflare caches in one step. "
         "Use this instead of query_db when correcting already-published content; "
         "a raw UPDATE leaves readers seeing stale cached content. "
         "content_type='diary' for diary entries; content_type='task_report' for completed "
         "Telegram task reports; content_type='blog_post' for blog posts; "
-        "content_type='hub_curation' for hub curation entries. "
+        "content_type='hub_curation' for hub curation entries; "
+        "content_type='static_page' for /p/{slug} custom HTML pages. "
         "Do NOT use this for research documents; use research_document. "
-        "Do NOT use this for static/custom HTML pages. "
-        "Provide id for diary/task_report/blog_post, or slug for hub_curation, "
+        "Provide id for diary/task_report/blog_post, or slug for hub_curation/static_page, "
         "plus at least one field for the chosen kind. For a narrow correction, pass "
         "`field`, `replace_old`, and `replace_new`; the tool reads the current field, "
         "shows matching snippets with about 10 characters of surrounding context, and "
@@ -95,8 +107,8 @@ EDIT_CONTENT_TOOL = {
         "properties": {
             "content_type": {
                 "type": "string",
-                "enum": ["diary", "task_report", "blog_post", "hub_curation"],
-                "description": "Content type: diary entry, task report, blog post, or hub curation.",
+                "enum": ["diary", "task_report", "blog_post", "hub_curation", "static_page"],
+                "description": "Content type: diary entry, task report, blog post, hub curation, or static page.",
             },
             "id": {
                 "type": "integer",
@@ -104,11 +116,11 @@ EDIT_CONTENT_TOOL = {
             },
             "slug": {
                 "type": "string",
-                "description": "Hub curation slug. Required when content_type='hub_curation'.",
+                "description": "Slug. Required when content_type='hub_curation' or content_type='static_page'.",
             },
             "title": {
                 "type": "string",
-                "description": "New title. Valid for diary, post, and curation.",
+                "description": "New title. Valid for diary, post, curation, and static_page.",
             },
             "content": {
                 "type": "string",
@@ -125,6 +137,33 @@ EDIT_CONTENT_TOOL = {
             "source_published_at": {"type": "string", "description": "New source publication date in YYYY-MM-DD. Valid for curation only."},
             "selection_rationale": {"type": "string", "description": "New selection rationale. Valid for curation only."},
             "context": {"type": "string", "description": "New contextual framing. Valid for curation only."},
+            "summary": {
+                "type": "string",
+                "description": "New static page summary/description. Valid for static_page only.",
+            },
+            "html_body": {
+                "type": "string",
+                "description": (
+                    "New static page Korean HTML inner body. Valid for static_page only; "
+                    "must not include <html>, <head>, <body>, <script>, <iframe>, "
+                    "inline event handlers, or javascript:/data: URLs."
+                ),
+            },
+            "title_en": {
+                "type": "string",
+                "description": "New English title. Valid for static_page only.",
+            },
+            "summary_en": {
+                "type": "string",
+                "description": "New English summary/description. Valid for static_page only.",
+            },
+            "html_body_en": {
+                "type": "string",
+                "description": (
+                    "New static page English HTML inner body. Valid for static_page only; "
+                    "same safety restrictions as html_body."
+                ),
+            },
             "tags": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -134,7 +173,7 @@ EDIT_CONTENT_TOOL = {
                 "type": "string",
                 "description": (
                     "Surgical mode only. Editable text field to modify, e.g. content, result, "
-                    "title, context, selection_rationale."
+                    "title, context, selection_rationale, html_body."
                 ),
             },
             "replace_old": {
@@ -262,7 +301,40 @@ def _cloudflare_purge_paths(kind: str, target: int | str) -> list[str]:
             "/atom.xml",
             "/sitemap.xml",
         ]
+    if kind == "static_page":
+        return [
+            f"/p/{target}",
+            "/reports",
+            "/",
+            "/sitemap.xml",
+        ]
     return []
+
+
+def _validate_static_page_updates(provided: dict[str, Any]) -> str | None:
+    from site_publishing import _validate_inner_html
+
+    if provided.get("title") is not None and not str(provided["title"]).strip():
+        return "Error: title must not be empty for kind='static_page'."
+    if provided.get("title_en") is not None and not str(provided["title_en"]).strip():
+        return "Error: title_en must not be empty for kind='static_page'."
+
+    for html_field in ("html_body", "html_body_en"):
+        if provided.get(html_field) is None:
+            continue
+        html = str(provided[html_field]).strip()
+        if not html:
+            return f"Error: {html_field} must not be empty for kind='static_page'."
+        validation_error = _validate_inner_html(html, html_field)
+        if validation_error:
+            return validation_error
+    return None
+
+
+def _ensure_static_page_storage_sync() -> None:
+    from site_publishing import _ensure_static_page_table
+
+    _ensure_static_page_table()
 
 
 def _purge_cloudflare_sync(kind: str, target: int | str) -> dict[str, Any]:
@@ -353,6 +425,11 @@ async def _exec_edit_public_post(
     title: str | None = None,
     content: str | None = None,
     result: str | None = None,
+    summary: str | None = None,
+    html_body: str | None = None,
+    title_en: str | None = None,
+    summary_en: str | None = None,
+    html_body_en: str | None = None,
     source_url: str | None = None,
     source_title: str | None = None,
     source_author: str | None = None,
@@ -373,10 +450,10 @@ async def _exec_edit_public_post(
     cfg = _KIND_CONFIG[kind]
     allowed = cfg["allowed_fields"]
 
-    if kind == "curation":
+    if kind in {"curation", "static_page"}:
         slug = (slug or "").strip().lower()
         if not slug:
-            return "Error: slug is required for kind='curation'."
+            return f"Error: slug is required for kind='{kind}'."
         if not re.match(r"^[a-z0-9][a-z0-9-]{0,79}$", slug):
             return "Error: slug must match ^[a-z0-9][a-z0-9-]{0,79}$."
         target = slug
@@ -390,6 +467,11 @@ async def _exec_edit_public_post(
         "title": title,
         "content": content,
         "result": result,
+        "summary": summary,
+        "html_body": html_body,
+        "title_en": title_en,
+        "summary_en": summary_en,
+        "html_body_en": html_body_en,
         "source_url": source_url,
         "source_title": source_title,
         "source_author": source_author,
@@ -422,6 +504,8 @@ async def _exec_edit_public_post(
             return "Error: replace_old must not be empty."
 
         where_field = cfg.get("where_field", "id")
+        if kind == "static_page":
+            await asyncio.to_thread(_ensure_static_page_storage_sync)
         try:
             row = await asyncio.to_thread(
                 db_query_one,
@@ -474,6 +558,11 @@ async def _exec_edit_public_post(
         cleaned_url = str(provided["source_url"]).strip()
         if cleaned_url and not cleaned_url.startswith(("http://", "https://")):
             return "Error: source_url must be an http(s) URL."
+    if kind == "static_page":
+        validation_error = _validate_static_page_updates(provided)
+        if validation_error:
+            return validation_error
+        await asyncio.to_thread(_ensure_static_page_storage_sync)
 
     set_parts = [f"{f} = %s" for f, _ in updates]
     params = []
@@ -486,7 +575,7 @@ async def _exec_edit_public_post(
             params.append(value)
     if kind == "diary" and any(f in {"title", "content"} for f, _ in updates):
         set_parts.extend(["title_en = NULL", "content_en = NULL"])
-    if kind == "curation":
+    if cfg.get("touch_updated_at"):
         set_parts.append("updated_at = NOW()")
     set_clause = ", ".join(set_parts)
     where_field = cfg.get("where_field", "id")
@@ -531,10 +620,12 @@ async def _exec_edit_content(
         "post": "post",
         "hub_curation": "curation",
         "curation": "curation",
+        "static_page": "static_page",
+        "static_pages": "static_page",
     }
     mapped = kind_map.get(canonical)
     if not mapped:
-        return "Error: content_type must be one of diary, task_report, blog_post, hub_curation."
+        return "Error: content_type must be one of diary, task_report, blog_post, hub_curation, static_page."
     return await _exec_edit_public_post(
         kind=mapped,
         post_id=id if id is not None else post_id,

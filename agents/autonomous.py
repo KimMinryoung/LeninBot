@@ -118,6 +118,11 @@ For narrow text corrections, use surgical mode with `field`, `replace_old`, and
 `replace_new`; if the tool reports multiple matches with surrounding snippets, retry with
 more specific `replace_old` unless every match should be changed via `replace_all=true`.
 
+**edit_content(content_type="static_page", slug, ...fields)** — edit an existing static page.
+Use this for corrections to `title`, `summary`, `html_body`, or their English translation
+fields. `html_body` and `html_body_en` are still inner HTML only and are validated with the
+same safety rules as `publish_static_page`.
+
 **publish_static_page(slug, title, html_body, summary?)** — custom HTML/static page. Use for:
 - Wiki-style reference pages (인물·사건·쟁점 구조도)
 - Layouts that exceed markdown (visual structure, embedded media, tables of KG relations)

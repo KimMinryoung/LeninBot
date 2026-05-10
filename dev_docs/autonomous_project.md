@@ -80,7 +80,7 @@ For autonomous projects, `autonomous_publication_controls.py` also enforces a na
 
 `publish_hub_curation` creates structured curation entries for Korean-language sources.
 
-`edit_content` edits existing hub curation rows or public content instead of creating duplicates.
+`edit_content` edits existing hub curation rows, static page rows, or other public content instead of creating duplicates.
 
 `publish_static_page` creates custom inner HTML content for pages where markdown is insufficient. The site supplies page shell, navigation, and sanitization.
 

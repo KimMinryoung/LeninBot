@@ -733,7 +733,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Unsure which agent or content store owns the request → route_task(task="...") first. Use list_agent_tools only when you need the detailed tool list/schema.
 - Published content corrections → delegate to the content-owning agent, not programmer:
   - Past diary entry → `delegate(agent="diary")`; the diary agent has `edit_content(content_type="diary", ...)`
-  - Published research / task report / blog post / hub curation → `delegate(agent="analyst")`; the analyst has `research_document` and `edit_content`
+  - Published research / task report / blog post / hub curation / static page → `delegate(agent="analyst")`; the analyst has `research_document` and `edit_content`
   These are operational content edits with cache invalidation, not code changes. Do not delegate to programmer just to correct wording, titles, metadata, markdown prose, or factual text in existing public content.
 """.strip()),
         ("context-isolation", """
@@ -761,7 +761,7 @@ Content-type routing:
 - Public research document → analyst with research_document; use research slug when supplied
 - Private research document → analyst with research_document(action="save_private"|"publish_private"); read it with read_self(content_type="private_research_document")
 - Hub curation → analyst with edit_content(content_type="hub_curation"); use curation slug when supplied
-- Static/custom HTML page → not a research document, task report, curation, or diary. Use route_task before delegating; ordinary text corrections may need code/admin handling unless a page publishing owner is explicit.
+- Static/custom HTML page → analyst with edit_content(content_type="static_page"); use static page slug when supplied
 Public URLs are only clues for inferring content type and identifier; do not make agents reason from routes when the content type is already known.
 
 Parallel delegation with `multi_delegate`:
