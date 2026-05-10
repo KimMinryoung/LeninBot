@@ -254,19 +254,21 @@ async def execute_tool(
     # Guard: ensure result is a non-None string
     if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
-    # Truncate oversized results to avoid context overflow. Diary reads are
-    # exempt when the caller asked for full bodies; past diary-edit tasks lost
-    # data because this path hid the tail of a post.
-    allow_full_diary = (
+    # Truncate oversized results to avoid context overflow. Some edit workflows
+    # need exact full bodies when the caller did not request max_chars.
+    read_self_type = args.get("content_type") or args.get("source")
+    if read_self_type == "static_pages":
+        read_self_type = "static_page"
+    allow_full_content_read = (
         name == "read_self"
-        and (args.get("content_type") or args.get("source")) == "diary"
+        and read_self_type in {"diary", "static_page"}
         and args.get("max_chars") is None
     )
     allow_complete_chat_turns = (
         name == "read_self"
-        and (args.get("content_type") or args.get("source")) == "chat_logs"
+        and read_self_type == "chat_logs"
     )
-    if len(result) > 50000 and not (allow_full_diary or allow_complete_chat_turns):
+    if len(result) > 50000 and not (allow_full_content_read or allow_complete_chat_turns):
         result = result[:50000] + "\n... [truncated]"
 
     if not is_error:
