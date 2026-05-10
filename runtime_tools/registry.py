@@ -118,10 +118,80 @@ def _rerank_merged_docs(query: str, docs: list, k: int) -> list:
         return docs[:k]
 
 
-async def _search_corpus_multilingual(query: str, num_results: int, layer: str | None) -> list:
+_AUTHOR_ALIASES = [
+    ("joseph stalin", "Stalin"),
+    ("j. v. stalin", "Stalin"),
+    ("stalin", "Stalin"),
+    ("스탈린", "Stalin"),
+    ("마오쩌둥", "Mao"),
+    ("mao", "Mao"),
+    ("마오", "Mao"),
+    ("lenin", "Lenin"),
+    ("레닌", "Lenin"),
+    ("luxemburg", "Rosa Luxemburg"),
+    ("룩셈부르크", "Rosa Luxemburg"),
+    ("trotsky", "Trotsky"),
+    ("트로츠키", "Trotsky"),
+    ("gramsci", "Gramsci"),
+    ("그람시", "Gramsci"),
+]
+
+_TITLE_HINTS = [
+    (("national question", "민족 문제", "민족문제"), "National Question"),
+    (("chinese revolution", "중국 혁명", "중국혁명"), "Chinese Revolution"),
+    (("leninism", "레닌주의"), "Leninism"),
+    (("trotskyism", "트로츠키주의"), "Trotskyism"),
+]
+
+
+def _infer_corpus_filters(query: str) -> dict:
+    lowered = (query or "").lower()
+    filters: dict = {}
+    for alias, author in _AUTHOR_ALIASES:
+        if _looks_korean(alias):
+            found = alias in lowered
+        else:
+            found = bool(re.search(rf"(?<![a-z]){re.escape(alias)}(?![a-z])", lowered))
+        if found:
+            filters["author"] = author
+            break
+    year_match = re.search(r"(?<!\d)(18|19|20)\d{2}(?!\d)", query or "")
+    if year_match:
+        filters["year"] = int(year_match.group(0))
+    for hints, title in _TITLE_HINTS:
+        if any(hint in lowered for hint in hints):
+            filters["title"] = title
+            break
+    return filters
+
+
+async def _search_corpus_multilingual(
+    query: str,
+    num_results: int,
+    layer: str | None,
+    *,
+    author: str | None = None,
+    title: str | None = None,
+    year: int | str | None = None,
+    keywords: str | list[str] | None = None,
+) -> list:
     from corpus.store import similarity_search
 
     k = max(1, min(int(num_results or 5), 10))
+    filters = _infer_corpus_filters(query)
+    relaxable_filters = set(filters)
+    if author:
+        filters["author"] = author
+        relaxable_filters.discard("author")
+    if title:
+        filters["title"] = title
+        relaxable_filters.discard("title")
+    if year:
+        filters["year"] = year
+        relaxable_filters.discard("year")
+    if keywords:
+        filters["keywords"] = keywords
+        relaxable_filters.discard("keywords")
     searches: list[tuple[str, str, str | None]] = [("original", query, layer)]
     if _looks_korean(query) and layer in (None, "core_theory"):
         translated = await _llm_translate_search_query(query, "English", "core_theory")
@@ -132,27 +202,57 @@ async def _search_corpus_multilingual(query: str, num_results: int, layer: str |
         if translated:
             searches.append(("translated_ko", translated, "modern_analysis"))
 
-    if len(searches) == 1:
-        return await asyncio.to_thread(similarity_search, query, k, layer, rerank=True)
+    async def run_with(search_filters: dict) -> list:
+        if len(searches) == 1:
+            return await asyncio.to_thread(
+                similarity_search,
+                query,
+                k,
+                layer,
+                True,
+                **search_filters,
+            )
 
-    tasks = [
-        asyncio.to_thread(similarity_search, q, k * 2, search_layer, rerank=False)
-        for _label, q, search_layer in searches
-    ]
-    batches = await asyncio.gather(*tasks, return_exceptions=True)
-    merged = []
-    seen: set[tuple[str, str]] = set()
-    for batch in batches:
-        if isinstance(batch, Exception):
-            logger.info("vector_search parallel query failed: %s", batch)
-            continue
-        for doc in batch:
-            key = _doc_dedupe_key(doc)
-            if key in seen:
+        tasks = [
+            asyncio.to_thread(
+                similarity_search,
+                q,
+                k * 2,
+                search_layer,
+                False,
+                **search_filters,
+            )
+            for _label, q, search_layer in searches
+        ]
+        batches = await asyncio.gather(*tasks, return_exceptions=True)
+        merged = []
+        seen: set[tuple[str, str]] = set()
+        for batch in batches:
+            if isinstance(batch, Exception):
+                logger.info("vector_search parallel query failed: %s", batch)
                 continue
-            seen.add(key)
-            merged.append(doc)
-    return _rerank_merged_docs(query, merged, k)
+            for doc in batch:
+                key = _doc_dedupe_key(doc)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(doc)
+        return _rerank_merged_docs(query, merged, k)
+
+    docs = await run_with(filters)
+    if docs:
+        return docs
+
+    relaxed = dict(filters)
+    for key in ("year", "title"):
+        if key not in relaxable_filters:
+            continue
+        relaxed.pop(key, None)
+        docs = await run_with(relaxed)
+        if docs:
+            logger.info("vector_search relaxed inferred %s filter after empty result", key)
+            return docs
+    return []
 
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
 TOOLS = [
@@ -188,6 +288,31 @@ TOOLS = [
                         "modern_analysis: Korean-language contemporary analysis/commentary. "
                         "self_produced_analysis: your own actively saved analytical outputs. "
                         "Omit to search all layers (not recommended — mixes languages)."
+                    ),
+                },
+                "author": {
+                    "type": "string",
+                    "description": (
+                        "Optional metadata filter. Use canonical author names such as "
+                        "Stalin, Lenin, Mao, Rosa Luxemburg, Trotsky, Gramsci."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "Optional title/source metadata substring filter, e.g. "
+                        "'National Question' or 'Chinese Revolution'."
+                    ),
+                },
+                "year": {
+                    "type": "integer",
+                    "description": "Optional metadata year filter, e.g. 1913.",
+                },
+                "keywords": {
+                    "type": "string",
+                    "description": (
+                        "Optional exact keyword/phrase filter against chunk text or title. "
+                        "Use this when vector similarity alone returns adjacent authors."
                     ),
                 },
             },
@@ -240,11 +365,27 @@ TOOLS = [
 
 # ── Tool Execution Functions ─────────────────────────────────────────
 
-async def _exec_vector_search(query: str, num_results: int = 5, layer: str | None = None) -> str:
+async def _exec_vector_search(
+    query: str,
+    num_results: int = 5,
+    layer: str | None = None,
+    author: str | None = None,
+    title: str | None = None,
+    year: int | str | None = None,
+    keywords: str | None = None,
+) -> str:
     """Execute vector similarity search via chatbot module."""
     try:
         from corpus.store import fetch_corpus_source_context
-        docs = await _search_corpus_multilingual(query, num_results, layer)
+        docs = await _search_corpus_multilingual(
+            query,
+            num_results,
+            layer,
+            author=author,
+            title=title,
+            year=year,
+            keywords=keywords,
+        )
         if not docs:
             return "No documents found."
         results = []

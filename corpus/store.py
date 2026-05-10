@@ -8,7 +8,17 @@ from corpus.embeddings import _get_exp_embeddings
 
 logger = logging.getLogger(__name__)
 
-def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = False) -> list:
+def similarity_search(
+    query: str,
+    k: int = 5,
+    layer: str = None,
+    rerank: bool = False,
+    *,
+    author: str | None = None,
+    title: str | None = None,
+    year: int | str | None = None,
+    keywords: str | list[str] | None = None,
+) -> list:
     """Search lenin_corpus via pgvector cosine similarity.
 
     Returns list of LangChain Document objects with page_content + metadata.
@@ -38,10 +48,45 @@ def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = 
                 # SET LOCAL so the bump applies only within this transaction.
                 # Integer literal is safe; no user input flows through this SET.
                 cur.execute("SET LOCAL hnsw.ef_search = 200")
-                cur.execute(
-                    "SELECT * FROM match_documents(%s::vector, %s, %s, %s)",
-                    (embedding_str, threshold, fetch_k, layer),
-                )
+                if author or title or year or keywords:
+                    clauses = ["1 = 1"]
+                    params: list = []
+                    if layer:
+                        clauses.append("metadata->>'layer' = %s")
+                        params.append(layer)
+                    if author:
+                        clauses.append("metadata->>'author' ILIKE %s")
+                        params.append(f"%{author}%")
+                    if title:
+                        clauses.append(
+                            "(metadata->>'title' ILIKE %s OR metadata->>'source' ILIKE %s)"
+                        )
+                        title_pattern = f"%{title}%"
+                        params.extend([title_pattern, title_pattern])
+                    if year:
+                        clauses.append("metadata->>'year' = %s")
+                        params.append(str(year))
+                    kw_values = [keywords] if isinstance(keywords, str) else (keywords or [])
+                    for kw in [str(v).strip() for v in kw_values if str(v).strip()]:
+                        clauses.append("(content ILIKE %s OR metadata->>'title' ILIKE %s)")
+                        kw_pattern = f"%{kw}%"
+                        params.extend([kw_pattern, kw_pattern])
+                    params.extend([embedding_str, fetch_k])
+                    cur.execute(
+                        f"""
+                        SELECT content, metadata
+                          FROM lenin_corpus
+                         WHERE {' AND '.join(clauses)}
+                         ORDER BY embedding <=> %s::vector
+                         LIMIT %s
+                        """,
+                        params,
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM match_documents(%s::vector, %s, %s, %s)",
+                        (embedding_str, threshold, fetch_k, layer),
+                    )
                 rows = [dict(r) for r in cur.fetchall()]
     except Exception as e:
         error_msg = str(e)
@@ -261,4 +306,3 @@ def delete_corpus_source(source: str, layer: str | None = None) -> int:
             deleted = cur.rowcount
         conn.commit()
     return deleted
-

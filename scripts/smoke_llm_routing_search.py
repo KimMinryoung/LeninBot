@@ -92,6 +92,46 @@ async def _assert_vector_translation_parallel_merge() -> None:
         registry._rerank_merged_docs = original_rerank
 
 
+async def _assert_vector_metadata_filter_inference() -> None:
+    import corpus.store as store
+    import runtime_tools.registry as registry
+
+    original_similarity = store.similarity_search
+    original_translate = registry._llm_translate_search_query
+    calls: list[dict] = []
+
+    def fake_similarity(
+        query: str,
+        k: int = 5,
+        layer: str | None = None,
+        rerank: bool = False,
+        **filters,
+    ):
+        calls.append({"query": query, "k": k, "layer": layer, "rerank": rerank, **filters})
+        if filters.get("year"):
+            return []
+        return [_Doc("stalin national question", "stalin-source", 0, layer or "all")]
+
+    try:
+        store.similarity_search = fake_similarity
+
+        async def no_translation(*_args, **_kwargs):
+            return None
+
+        registry._llm_translate_search_query = no_translation
+        docs = await registry._search_corpus_multilingual("1913년 스탈린 민족 문제 문헌", 3, "core_theory")
+        assert len(docs) == 1
+        assert calls[0]["author"] == "Stalin"
+        assert calls[0]["title"] == "National Question"
+        assert calls[0]["year"] == 1913
+        assert calls[1]["author"] == "Stalin"
+        assert calls[1]["title"] == "National Question"
+        assert "year" not in calls[1]
+    finally:
+        store.similarity_search = original_similarity
+        registry._llm_translate_search_query = original_translate
+
+
 async def _assert_route_task_fallbacks() -> None:
     import self_runtime.tools as tools
 
@@ -142,6 +182,7 @@ def _assert_operator_trust_tier() -> None:
 async def main() -> int:
     await _assert_vector_translation_fallbacks()
     await _assert_vector_translation_parallel_merge()
+    await _assert_vector_metadata_filter_inference()
     await _assert_route_task_fallbacks()
     _assert_operator_trust_tier()
     print("llm routing/search smoke ok")
