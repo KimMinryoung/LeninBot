@@ -38,6 +38,7 @@ docs/
 
 # 서버 명령 임시 스크립트
 tmp_cmd.sh
+scripts/ingest_*
 
 # CLAUDE가 사용하는 비밀 설정 파일
 .claude/

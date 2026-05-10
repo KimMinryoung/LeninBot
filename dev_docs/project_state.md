@@ -88,6 +88,7 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 - Schema migrations: `scripts/schema_migrations.py`
 - Model/provider audit: `scripts/model_runtime_audit.py`
 - KG maintenance: `scripts/check_kg_integrity.py`, `scripts/kg_enricher.py`, `skills/kg-maintenance/scripts/*`
+- Vector corpus ingestion: `scripts/ingest_literature.py` for `modern_analysis`; one-off corpus crawlers matching `scripts/ingest_*` are local ignored scripts and should call `corpus.store.ingest_to_corpus` with the intended layer.
 
 ## Design Notes
 

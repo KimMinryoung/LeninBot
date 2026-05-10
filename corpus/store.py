@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 
 from corpus.embeddings import _get_exp_embeddings
 
@@ -76,6 +77,7 @@ def similarity_search(query: str, k: int = 5, layer: str = None, rerank: bool = 
 
 _CORPUS_CHUNK_SIZE = 900
 _CORPUS_CHUNK_OVERLAP = 120
+_EMBED_BATCH_SIZE = int(os.getenv("CORPUS_EMBED_BATCH_SIZE", "32"))
 
 
 def _chunk_text(text: str, size: int = _CORPUS_CHUNK_SIZE, overlap: int = _CORPUS_CHUNK_OVERLAP) -> list[str]:
@@ -148,7 +150,10 @@ def ingest_to_corpus(
         return 0
 
     emb = _get_exp_embeddings()
-    vectors = emb.embed_documents(chunks)
+    batch_size = max(1, _EMBED_BATCH_SIZE)
+    vectors = []
+    for start in range(0, len(chunks), batch_size):
+        vectors.extend(emb.embed_documents(chunks[start:start + batch_size]))
     if len(vectors) != len(chunks):
         raise RuntimeError(
             f"embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
@@ -256,5 +261,4 @@ def delete_corpus_source(source: str, layer: str | None = None) -> int:
             deleted = cur.rowcount
         conn.commit()
     return deleted
-
 
