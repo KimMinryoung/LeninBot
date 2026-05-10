@@ -1517,30 +1517,19 @@ async def _exec_read_static_pages(
         if not data:
             return f"No static page found for slug: {slug}"
         html = data.get("html_body") or ""
-        html_en = data.get("html_body_en") or ""
         body, start, end, truncated = _slice_text(html, max_chars=max_chars, offset=offset)
-        body_en, start_en, end_en, truncated_en = _slice_text(html_en, max_chars=max_chars, offset=offset)
         next_hint = (
             f"\nnext: read_self(content_type='static_page', slug='{data.get('slug') or slug}', offset={end}, max_chars={max_chars})"
             if truncated and max_chars is not None
-            else ""
-        )
-        next_hint_en = (
-            f"\nnext_en: read_self(content_type='static_page', slug='{data.get('slug') or slug}', offset={end_en}, max_chars={max_chars})"
-            if truncated_en and max_chars is not None
             else ""
         )
         return (
             f"=== STATIC PAGE: {data.get('slug') or slug} ===\n"
             f"title: {data.get('title') or ''}\n"
             f"summary: {data.get('summary') or ''}\n"
-            f"title_en: {data.get('title_en') or ''}\n"
-            f"summary_en: {data.get('summary_en') or ''}\n"
             f"updated_at: {data.get('updated_at') or '?'}\n\n"
             f"-- html_body chars={len(html)} returned_chars={start}:{end} truncated={truncated}{next_hint} --\n"
-            f"{body}\n\n"
-            f"-- html_body_en chars={len(html_en)} returned_chars={start_en}:{end_en} truncated={truncated_en}{next_hint_en} --\n"
-            f"{body_en}"
+            f"{body}"
         )
 
     rows = await asyncio.to_thread(site_publishing.list_static_pages, "ko")
