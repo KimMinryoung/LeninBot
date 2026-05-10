@@ -62,31 +62,22 @@ Do not store formal work titles only as free-form `source` while leaving `title`
 
 ## Current Cleanup Targets
 
-### Already handled on server
+### Already handled
 
 - Mao was deleted from `core_theory` because its old corpus was extremely over-chunked and lacked reliable metadata.
 - Stalin is being reingested on the server with English/default `3000/300` chunks and corrected metadata.
+- Windows GPU reingestion completed for non-Mao, non-Stalin `core_theory` source files under `docs/`:
+  - `Marx & Engels`: 2,014 chunks / 114 sources
+  - `Lenin`: 2,845 chunks / 327 sources
+  - `Rosa Luxemburg`: 1,553 chunks / 178 sources
+  - `Trotsky`: 1,431 chunks / 75 sources
+  - `Gramsci`: 203 chunks / 46 sources
+- These rows have `title`, `year`, `source_url`, `language`, `chunk_size`, `chunk_overlap`, `chunk_index`, and `chunk_count`. Index, abstract, study-guide, and other non-work rows discovered during reingestion were removed.
+- Mao was intentionally not reingested in this Windows GPU pass because the local Mao crawl remains very large and needs a curated subset/manifest first.
 
-### Needs Windows GPU reingestion or metadata repair
+### Needs future reingestion or metadata repair
 
-`core_theory` non-Stalin rows generally have `metadata.source` but lack:
-
-- `metadata.title`
-- `metadata.chunk_size`
-- `metadata.chunk_overlap`
-- source URL/public URL in many cases
-
-Observed non-Stalin core-theory counts before cleanup:
-
-| Author | Chunks | Sources | Issue |
-|---|---:|---:|---|
-| Marx & Engels | 25,151 | 135 | missing `title`, missing chunk-size metadata; some sources are chapter-level with very high row counts |
-| Lenin | 10,524 | 335 | missing `title`, missing chunk-size metadata |
-| Rosa Luxemburg | 5,880 | 180 | missing `title`, missing chunk-size metadata |
-| Trotsky | 4,397 | 76 | missing `title`, missing chunk-size metadata |
-| Gramsci | 831 | 48 | missing `title`, missing chunk-size metadata |
-
-`modern_analysis` is also mixed-generation:
+`modern_analysis` remains mixed-generation:
 
 - most rows lack `title` and chunk-size metadata
 - a small newer subset has `chunk_size=900`, too small for long Korean analysis
@@ -94,16 +85,9 @@ Observed non-Stalin core-theory counts before cleanup:
 
 ## Recommended Order
 
-1. Reingest Mao into `core_theory` from clean source files/pages.
-2. Reingest or metadata-repair Marx & Engels, prioritizing works that appear as huge chapter-level sources:
-   - `Capital Vol. I`
-   - `Grundrisse`
-   - `The German Ideology`
-   - `The Civil War in France`
-   - `Anti-Dühring`
-3. Reingest Lenin with formal work titles and chapter/session labels separated.
-4. Reingest Rosa Luxemburg, Trotsky, Gramsci.
-5. Audit `modern_analysis`; reingest Korean long-form material with `language="ko"` and `1800/200` chunks.
+1. Build a curated Mao manifest before reingesting Mao. Do not ingest all `docs/theorists/mao_*.txt` files blindly; the local crawl has large repeated-tail artifacts and totals roughly 9.7M cleaned characters even after simple line dedupe.
+2. Audit `modern_analysis`; reingest Korean long-form material with `language="ko"` and `1800/200` chunks.
+3. If additional Marx/Lenin/etc. source files are added later, use the safe pattern below and skip index/abstract/study-guide pages.
 
 ## Safe Reingestion Pattern
 
@@ -126,6 +110,8 @@ SELECT metadata->>'author', metadata->>'title', metadata->>'chunk_size',
 
 5. Only then delete old rows for that author/source family.
 6. Reingest the full manifest.
+
+For the Windows GPU host, a local helper was used from `temp_dev/vector_reingest.py` with BGE-M3 loaded in-process on CUDA and shared through `corpus.embeddings.set_shared_embeddings()`. This avoids the HTTP embedding server startup path and uses the local 12GB VRAM directly.
 
 Prefer deleting narrowly by `layer`, canonical `author`, and either `source_url` or manifest source IDs. Avoid broad deletes unless the manifest is complete and tested.
 

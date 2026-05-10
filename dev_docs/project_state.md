@@ -69,9 +69,7 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 
 Current known cleanup targets:
 
-- `core_theory` non-Stalin classics need metadata repair or reingestion. Existing Marx & Engels, Lenin, Rosa Luxemburg, Trotsky, Gramsci rows generally have `metadata.source` but no `metadata.title`, so tool output can show `Untitled` even when source contains the work/chapter name. They also lack `chunk_size`/`chunk_overlap`, so exact chunking cannot be audited from DB metadata.
-- `core_theory` Marx & Engels has very large source/chunk counts for chapter-level records such as `Capital Vol. I - Chapter Ten` and `Capital Vol. I — Chapter Fifteen`. Before reingesting, decide whether source granularity should be whole work, volume, or chapter; metadata should distinguish formal work title from chapter/section title.
-- `core_theory` Lenin appears less over-chunked than Mao was, but still lacks `title` and chunk-size metadata. Reingest or metadata backfill should use `author="Lenin"` and formal work titles while preserving chapter/session names separately.
+- `core_theory` Marx & Engels, Lenin, Rosa Luxemburg, Trotsky, and Gramsci were reingested on the Windows GPU host from local `docs/` source files with corrected `title`, `year`, `source_url`, `language`, `chunk_size`, `chunk_overlap`, `chunk_index`, and `chunk_count` metadata. Non-work index/abstract/study-guide rows encountered during the pass were pruned.
 - `modern_analysis` is also mixed-generation. Most rows lack `title` and chunk-size metadata; a small newer subset has `chunk_size=900`, which is too small for long-form Korean analysis. Reingest Korean documents with the Korean default chunk parameters and proper `title`/`author`/`source_url` metadata.
 - Mao has been removed from `core_theory` pending clean reingestion with canonical metadata and larger chunks.
 
@@ -103,6 +101,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - Model/provider audit: `scripts/model_runtime_audit.py`
 - KG maintenance: `scripts/check_kg_integrity.py`, `scripts/kg_enricher.py`, `skills/kg-maintenance/scripts/*`
 - Vector corpus ingestion: `scripts/ingest_literature.py` for `modern_analysis`; one-off corpus crawlers matching `scripts/ingest_*` are local ignored scripts and should call `corpus.store.ingest_to_corpus` with the intended layer.
+- Embedding runtime: `embedding_server.py` exposes BGE-M3 over HTTP. `EMBEDDING_DEVICE=auto` uses CUDA when available and falls back to CPU; set `EMBEDDING_OFFLINE=1` on Windows GPU ingestion hosts with cached Hugging Face models to avoid startup network checks. `EMBEDDING_PRELOAD_RERANKER=0` lets the embedding service start even when the reranker model is not cached.
 
 ## Design Notes
 

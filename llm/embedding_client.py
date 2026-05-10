@@ -21,6 +21,21 @@ _EMBEDDING_URL = os.environ.get(
 _TIMEOUT = 30  # seconds per HTTP request
 _RETRY_TOTAL_SEC = 15  # total retry window (covers ~6s model load + margin)
 _RETRY_INTERVAL = 2  # seconds between retries
+_FALLBACK_DEVICE = os.environ.get("EMBEDDING_FALLBACK_DEVICE", os.environ.get("EMBEDDING_DEVICE", "auto")).lower()
+_OFFLINE = os.environ.get("EMBEDDING_OFFLINE", "1").lower() not in {"0", "false", "no"}
+
+
+def _resolve_device(configured: str) -> str:
+    if configured != "auto":
+        return configured
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
 
 
 class EmbeddingClient:
@@ -32,14 +47,15 @@ class EmbeddingClient:
 
     def _get_fallback(self):
         if self._fallback is None:
+            device = _resolve_device(_FALLBACK_DEVICE)
             logger.warning(
                 "[EmbeddingClient] server unreachable after retries, "
-                "loading BGE-M3 locally (slow)"
+                "loading BGE-M3 locally on %s (slow)", device
             )
             from langchain_huggingface import HuggingFaceEmbeddings
             self._fallback = HuggingFaceEmbeddings(
                 model_name="BAAI/bge-m3",
-                model_kwargs={"device": "cpu"},
+                model_kwargs={"device": device, "local_files_only": _OFFLINE},
                 encode_kwargs={"normalize_embeddings": True},
             )
         return self._fallback
