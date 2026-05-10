@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 
 from corpus.embeddings import _get_exp_embeddings
 
@@ -118,14 +119,31 @@ def similarity_search(
 # ── Corpus Ingestion (modern_analysis layer) ─────────────────────────
 # Chunking/embedding pipeline used by both hub-curation auto-ingest and the
 # manual literature-drop CLI. Keeps insert shape compatible with the existing
-# match_documents() SP and the historical chunk size (~760 char avg, 1000 max).
+# match_documents() SP while using language-specific defaults for new ingests.
 
-_CORPUS_CHUNK_SIZE = 900
-_CORPUS_CHUNK_OVERLAP = 120
+_CORPUS_EN_CHUNK_SIZE = int(os.getenv("CORPUS_EN_CHUNK_SIZE", "3000"))
+_CORPUS_EN_CHUNK_OVERLAP = int(os.getenv("CORPUS_EN_CHUNK_OVERLAP", "300"))
+_CORPUS_KO_CHUNK_SIZE = int(os.getenv("CORPUS_KO_CHUNK_SIZE", "1800"))
+_CORPUS_KO_CHUNK_OVERLAP = int(os.getenv("CORPUS_KO_CHUNK_OVERLAP", "200"))
 _EMBED_BATCH_SIZE = int(os.getenv("CORPUS_EMBED_BATCH_SIZE", "32"))
 
 
-def _chunk_text(text: str, size: int = _CORPUS_CHUNK_SIZE, overlap: int = _CORPUS_CHUNK_OVERLAP) -> list[str]:
+def _is_korean_corpus_text(content: str, extra_metadata: dict | None = None) -> bool:
+    language = str((extra_metadata or {}).get("language") or "").lower()
+    if language in {"ko", "kor", "korean"}:
+        return True
+    if language in {"en", "eng", "english"}:
+        return False
+    return bool(re.search(r"[\uac00-\ud7af]", content or ""))
+
+
+def _default_chunk_params(content: str, extra_metadata: dict | None = None) -> tuple[int, int]:
+    if _is_korean_corpus_text(content, extra_metadata):
+        return _CORPUS_KO_CHUNK_SIZE, _CORPUS_KO_CHUNK_OVERLAP
+    return _CORPUS_EN_CHUNK_SIZE, _CORPUS_EN_CHUNK_OVERLAP
+
+
+def _chunk_text(text: str, size: int = _CORPUS_EN_CHUNK_SIZE, overlap: int = _CORPUS_EN_CHUNK_OVERLAP) -> list[str]:
     """Simple sliding-window chunker tuned to match the existing corpus distribution."""
     text = (text or "").strip()
     if not text:
@@ -188,8 +206,9 @@ def ingest_to_corpus(
                     )
                     return 0
 
-    size = int(chunk_size or _CORPUS_CHUNK_SIZE)
-    overlap = int(chunk_overlap if chunk_overlap is not None else _CORPUS_CHUNK_OVERLAP)
+    default_size, default_overlap = _default_chunk_params(content, extra_metadata)
+    size = int(chunk_size or default_size)
+    overlap = int(chunk_overlap if chunk_overlap is not None else default_overlap)
     chunks = _chunk_text(content, size=size, overlap=overlap)
     if not chunks:
         return 0

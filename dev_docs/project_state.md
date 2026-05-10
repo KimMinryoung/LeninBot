@@ -63,6 +63,20 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 | Redis | `redis_state.py` | live task progress/state, active task registry, mission board, task-chain summaries |
 | R2 | `shared.py`, publication/runtime tools | public uploaded files and generated media |
 
+## Vector Corpus Maintenance Backlog
+
+`lenin_corpus` is mixed-generation data. New ingestion should record at least `layer`, `author`, `title`, `source`, `source_url`/`public_url` when available, `year`, `language`, `chunk_size`, `chunk_overlap`, `chunk_index`, and `chunk_count`. Author names should use canonical names that match KG usage where possible.
+
+Current known cleanup targets:
+
+- `core_theory` non-Stalin classics need metadata repair or reingestion. Existing Marx & Engels, Lenin, Rosa Luxemburg, Trotsky, Gramsci rows generally have `metadata.source` but no `metadata.title`, so tool output can show `Untitled` even when source contains the work/chapter name. They also lack `chunk_size`/`chunk_overlap`, so exact chunking cannot be audited from DB metadata.
+- `core_theory` Marx & Engels has very large source/chunk counts for chapter-level records such as `Capital Vol. I - Chapter Ten` and `Capital Vol. I — Chapter Fifteen`. Before reingesting, decide whether source granularity should be whole work, volume, or chapter; metadata should distinguish formal work title from chapter/section title.
+- `core_theory` Lenin appears less over-chunked than Mao was, but still lacks `title` and chunk-size metadata. Reingest or metadata backfill should use `author="Lenin"` and formal work titles while preserving chapter/session names separately.
+- `modern_analysis` is also mixed-generation. Most rows lack `title` and chunk-size metadata; a small newer subset has `chunk_size=900`, which is too small for long-form Korean analysis. Reingest Korean documents with the Korean default chunk parameters and proper `title`/`author`/`source_url` metadata.
+- Mao has been removed from `core_theory` pending clean reingestion with canonical metadata and larger chunks.
+
+Current default chunking for new corpus ingestion is language-specific in `corpus/store.py`: English/default texts use larger chunks, Korean texts use smaller chunks because Hangul text is denser per character.
+
 ## Current Module Ownership
 
 | Area | Modules |
