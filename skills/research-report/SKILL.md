@@ -35,6 +35,22 @@ allowed-tools: web_search knowledge_graph_search vector_search write_file read_f
 ## Step 4 — 보고서 작성
 [assets/research-template.md](assets/research-template.md) 구조 사용.
 
+### 각주/출처 형식 — 웹 렌더링 호환 규칙
+본문에서 출처를 가리킬 때는 반드시 Markdown footnote 형식만 사용한다: `[^1]`, `[^2]`, `[^3]`.
+
+문서 끝의 `## 주요 출처` 섹션은 반드시 footnote definition으로 작성하고, 각 항목 안에 실제 URL을 포함한다:
+
+```markdown
+본문 문장 끝에 출처를 단다.[^1]
+
+## 주요 출처
+[^1]: 매체/기관, "문서 제목", 날짜. https://example.com/source
+[^2]: 다른 출처 설명. https://example.com/other
+```
+
+금지 형식: 본문 `[1]`, 번호 목록 `1. 설명 URL`, `(출처: URL)`, raw URL만 본문에 삽입, 임의의 별표/괄호 각주.
+웹사이트 렌더러는 `[^n]: ... URL` 정의의 URL을 본문 `[^n]` 링크로 연결한다. 새 각주 형식을 만들지 말 것.
+
 ## Step 5 — 저장
 ```
 파일명: research/{주제}-{YYYY-MM-DD}.md
@@ -43,6 +59,7 @@ allowed-tools: web_search knowledge_graph_search vector_search write_file read_f
 
 ## 품질 기준
 - 출처 명시 필수
+- 본문 각주는 `[^n]`, 출처 목록은 `[^n]: 설명 URL` 형식만 사용
 - 추측과 사실 구분
 - 결론은 근거 기반
 - 500줄 이하 유지 (초과 시 분리)

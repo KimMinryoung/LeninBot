@@ -142,6 +142,9 @@ _LEADING_SCAFFOLD_META_RE = re.compile(
     re.IGNORECASE,
 )
 _HR_RE = re.compile(r"^\s*[-*_]{3,}\s*$")
+_BARE_NUMERIC_CITATION_RE = re.compile(r"(?<!\!)\[(\d+)\](?!\()")
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
 
 def _extract_h1_from_markdown(markdown: str) -> str | None:
@@ -221,6 +224,19 @@ def _build_document(title: str, content: str, publish_date: str) -> str:
         f"---\n\n"
         f"{content.strip()}\n"
     )
+
+
+def _validate_public_citation_format(content: str) -> str | None:
+    """Reject citation syntaxes that the public research renderer should not rely on."""
+    text = _FENCED_CODE_RE.sub("", content or "")
+    text = _INLINE_CODE_RE.sub("", text)
+    if _BARE_NUMERIC_CITATION_RE.search(text):
+        return (
+            "Unsupported citation syntax: do not use bare numeric references like `[1]`. "
+            "Use Markdown footnotes in body text as `[^1]`, `[^2]`, etc. and define them "
+            "at the end as `[^1]: Publisher, title, date. https://example.com`."
+        )
+    return None
 
 
 def _save_publication_draft(
@@ -452,7 +468,12 @@ PUBLISH_RESEARCH_TOOL = {
         "The filename parameter is a stable document identifier, not a filesystem path. "
         "It is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) unless "
         "`filename` is passed explicitly. Reusing the same filename updates the same "
-        "research document and invalidates caches so readers see the new version immediately."
+        "research document and invalidates caches so readers see the new version immediately. "
+        "Citation format is fixed for website rendering: cite sources in body text only as "
+        "Markdown footnotes `[^1]`, `[^2]`, etc.; end the document with matching footnote "
+        "definitions that contain URLs, e.g. `[^1]: Publisher, title, date. "
+        "https://example.com`. Do not invent other citation formats such as bare `[1]`, "
+        "numbered source lists, parenthetical source notes, or raw body URLs."
     ),
     "input_schema": {
         "type": "object",
@@ -463,7 +484,12 @@ PUBLISH_RESEARCH_TOOL = {
             },
             "content": {
                 "type": "string",
-                "description": "Full markdown content (without the title heading — auto-prepended).",
+                "description": (
+                    "Full markdown content (without the title heading — auto-prepended). "
+                    "For citations, use Markdown footnotes `[^1]`, `[^2]`, etc. only, and "
+                    "include final definitions with URLs as `[^1]: Source description https://...`. "
+                    "Do not use bare `[1]` citations or any other citation syntax."
+                ),
             },
             "filename": {
                 "type": "string",
@@ -500,6 +526,10 @@ async def _exec_publish_research(
         return "Error: content is required."
 
     title = title.strip()
+    citation_error = _validate_public_citation_format(content)
+    if citation_error:
+        return f"Error: {citation_error}"
+
     now = datetime.now(KST)
 
     if filename:
@@ -882,7 +912,12 @@ RESEARCH_DOCUMENT_TOOL = {
         "publishing flow is two-step: action='stage_public' saves an exact draft and "
         "does not publish; action='publish_public' requires fact_check_notes and publishes "
         "the checked version. Use this tool for research documents only. Use edit_content "
-        "for diary, task report, blog post, and hub curation edits."
+        "for diary, task report, blog post, and hub curation edits. Citation format is fixed "
+        "for website rendering: cite sources in body text only as Markdown footnotes `[^1]`, "
+        "`[^2]`, etc.; end the document with matching footnote definitions that contain URLs, "
+        "e.g. `[^1]: Publisher, title, date. https://example.com`. Do not invent other "
+        "citation formats such as bare `[1]`, numbered source lists, parenthetical source "
+        "notes, or raw body URLs."
     ),
     "input_schema": {
         "type": "object",
@@ -901,7 +936,13 @@ RESEARCH_DOCUMENT_TOOL = {
                 "description": "Research-document mutation to perform.",
             },
             "title": {"type": "string", "description": "Document title or optional replacement title."},
-            "content": {"type": "string", "description": "Markdown body/content for public stage/publish/edit."},
+            "content": {
+                "type": "string",
+                "description": (
+                    "Markdown body/content for public stage/publish/edit. Use only `[^n]` "
+                    "body citations and final `[^n]: description URL` definitions; do not use bare `[n]`."
+                ),
+            },
             "slug": {"type": "string", "description": "Stable research document slug. '.md' is optional."},
             "id": {"type": "integer", "description": "Optional private research document id for compatibility reads/edits."},
             "markdown_body": {"type": "string", "description": "Markdown body for action='save_private'."},

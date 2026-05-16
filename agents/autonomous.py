@@ -95,6 +95,10 @@ Three publishing tools, each for a distinct artifact type:
   judgment before publication: remove or rewrite stale, low-utility, or outdated framing
   when the sources and project goal show it no longer helps readers. Put checked claims,
   URLs/KG/tool sources, and corrections in `fact_check_notes`.
+  Citation format is fixed for cyber-lenin.com rendering: body citations must be
+  Markdown footnotes `[^1]`, `[^2]`, etc. only; final source definitions must be
+  `[^1]: Source description https://...`. Do not use bare `[1]`, numbered source
+  lists, parenthetical source notes, raw body URLs, or any new footnote syntax.
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
 structured hub curation entry. Use for:
