@@ -75,18 +75,30 @@ Do not store formal work titles only as free-form `source` while leaving `title`
 - These rows have `title`, `year`, `source_url`, `language`, `chunk_size`, `chunk_overlap`, `chunk_index`, and `chunk_count`. Index, abstract, study-guide, and other non-work rows discovered during reingestion were removed.
 - Mao was intentionally not reingested in this Windows GPU pass because the local Mao crawl remains very large and needs a curated subset/manifest first.
 
-### Needs future reingestion or metadata repair
+### Already handled: `modern_analysis`
 
-`modern_analysis` remains mixed-generation:
+`modern_analysis` was reingested on the Windows GPU host from Korean organization
+documents under `docs/modern_analysis/`:
 
-- most rows lack `title` and chunk-size metadata
-- a small newer subset has `chunk_size=900`, too small for long Korean analysis
-- reingest Korean long-form analysis with Korean/default `1800/200`
+- Included prefixes: `bolky_`, `diamat_`, `uprising_`
+- Excluded prefixes: `arxiv_`, `bis_`, `mxo_`
+- Result: 5,651 chunks / 492 sources / 492 files
+- Organization distribution:
+  - `Bolky Group (볼셰비키그룹)`: 4,539 chunks / 332 sources
+  - `DIAMAT`: 880 chunks / 116 sources
+  - `Uprising(반란)`: 232 chunks / 44 sources
+- All rows have `title`, `author`, `organization`, `source`, `source_url` when present, `language="ko"`, `chunk_size=1800`, `chunk_overlap=200`, `chunk_index`, `chunk_count`, and `filepath`.
+
+The reingestion used a local ignored helper under `scripts/ingest_oneoff/` with
+a staging layer (`modern_analysis_reingest_next`) and then promoted the
+validated rows to `modern_analysis`.
 
 ## Recommended Order
 
 1. Build a curated Mao manifest before reingesting Mao. Do not ingest all `docs/theorists/mao_*.txt` files blindly; the local crawl has large repeated-tail artifacts and totals roughly 9.7M cleaned characters even after simple line dedupe.
-2. Audit `modern_analysis`; reingest Korean long-form material with `language="ko"` and `1800/200` chunks.
+2. Keep `modern_analysis` scoped to Korean organization documents unless the
+   layer policy is deliberately changed. Do not re-add arXiv/BIS/MXO material
+   without a curated manifest.
 3. If additional Marx/Lenin/etc. source files are added later, use the safe pattern below and skip index/abstract/study-guide pages.
 
 ## Safe Reingestion Pattern
