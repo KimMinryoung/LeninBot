@@ -26,6 +26,8 @@ Graphiti/Neo4j objects are sensitive to event-loop ownership. `kg_runtime/servic
 - `collect_kg_futures()` waits for multiple submitted tasks
 - transient connection failures mark the singleton unhealthy and apply a 120-second retry cooldown
 
+`graph_memory/service.py` uses Gemini `gemini-3.1-flash-lite` as the primary Graphiti LLM and `gemini-2.5-flash-lite` as the small model. `graph_memory/kr_news_fetcher.py` uses the same Gemini pair for Korean news cleanup and person/profile extraction.
+
 API startup eagerly initializes KG in a background thread and starts a periodic health check, but callers must still tolerate `get_kg_service()` returning `None`.
 
 ## Schema Summary

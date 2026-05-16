@@ -37,7 +37,7 @@ def _get_llm_client() -> GeminiClient:
     return GeminiClient(
         config=LLMConfig(
             api_key=get_secret("GEMINI_API_KEY", "") or "",
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3.1-flash-lite",
             small_model="gemini-2.5-flash-lite",
         )
     )

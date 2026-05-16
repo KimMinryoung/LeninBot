@@ -30,7 +30,7 @@ def get_github_token() -> str:
 # ── Constants ─────────────────────────────────────────────────────────
 KST = timezone(timedelta(hours=9))
 
-MODEL_MAIN = "gemini-3.1-flash-lite-preview"
+MODEL_MAIN = "gemini-3.1-flash-lite"
 MODEL_LIGHT = "gemini-2.5-flash-lite"
 
 

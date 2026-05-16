@@ -18,7 +18,7 @@ from memory_store.queries import fetch_chat_logs
 from secrets_loader import get_secret
 
 KST = timezone(timedelta(hours=9))
-MODEL_MAIN = os.getenv("EXPERIENCE_WRITER_MODEL", "gemini-3.1-flash-lite-preview")
+MODEL_MAIN = os.getenv("EXPERIENCE_WRITER_MODEL", "gemini-3.1-flash-lite")
 
 logger = logging.getLogger("experience_writer")
 
