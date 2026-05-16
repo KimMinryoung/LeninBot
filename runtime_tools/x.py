@@ -51,6 +51,15 @@ X_POST_TOOL = {
                 "description": "For user timeline mode: exclude retweets/reposts. Default true.",
                 "default": True,
             },
+            "include_metrics": {
+                "type": "boolean",
+                "description": (
+                    "Include public metrics such as views/impressions, likes, reposts, replies, quotes, "
+                    "bookmarks, user follower counts, and video view counts. Default false because X bills "
+                    "metrics separately from basic post lookup."
+                ),
+                "default": False,
+            },
             "include_raw": {
                 "type": "boolean",
                 "description": "Include compact raw API JSON for debugging. Default false.",
@@ -166,7 +175,7 @@ def _format_metrics(metrics: dict | None) -> str:
     return ", ".join(parts) if parts else "unavailable"
 
 
-def _format_x_payload(tweet_id: str, payload: dict, include_raw: bool) -> str:
+def _format_x_payload(tweet_id: str, payload: dict, include_raw: bool, include_metrics: bool) -> str:
     data = payload.get("data") or {}
     users = _user_by_id(payload)
     media_map = _media_by_key(payload)
@@ -186,7 +195,8 @@ def _format_x_payload(tweet_id: str, payload: dict, include_raw: bool) -> str:
         lines.append(f"Conversation: {data['conversation_id']}")
     if data.get("possibly_sensitive") is not None:
         lines.append(f"Possibly sensitive: {data['possibly_sensitive']}")
-    lines.append(f"Metrics: {_format_metrics(data.get('public_metrics'))}")
+    if include_metrics:
+        lines.append(f"Metrics: {_format_metrics(data.get('public_metrics'))}")
     lines.append("")
     note_tweet = data.get("note_tweet") or {}
     note_text = note_tweet.get("text") if isinstance(note_tweet, dict) else None
@@ -252,6 +262,7 @@ def _format_x_user_posts_payload(
     include_raw: bool,
     *,
     source: str,
+    include_metrics: bool,
 ) -> str:
     tweets = payload.get("data") or []
     media_map = _media_by_key(payload)
@@ -266,7 +277,7 @@ def _format_x_user_posts_payload(
     ]
     if user:
         lines.append(f"User: {_format_user(user)}")
-        metrics = user.get("public_metrics")
+        metrics = user.get("public_metrics") if include_metrics else None
         if metrics:
             lines.append(f"User metrics: {_format_metrics(metrics)}")
     if meta:
@@ -288,7 +299,8 @@ def _format_x_user_posts_payload(
         lines.append(f"Author: {_format_user(author)}")
         if tweet.get("created_at"):
             lines.append(f"Created: {tweet['created_at']}")
-        lines.append(f"Metrics: {_format_metrics(tweet.get('public_metrics'))}")
+        if include_metrics:
+            lines.append(f"Metrics: {_format_metrics(tweet.get('public_metrics'))}")
         lines.append(_tweet_text(tweet))
 
         refs = tweet.get("referenced_tweets") or []
@@ -339,34 +351,65 @@ def _format_oembed_payload(tweet_id: str, payload: dict) -> str:
     return "\n".join(lines).strip()
 
 
-def _tweet_fields() -> str:
-    return ",".join(
-        [
-            "attachments",
-            "author_id",
-            "conversation_id",
-            "created_at",
-            "display_text_range",
-            "edit_controls",
-            "edit_history_tweet_ids",
-            "entities",
-            "lang",
-            "note_tweet",
-            "possibly_sensitive",
-            "public_metrics",
-            "referenced_tweets",
-            "reply_settings",
-            "source",
-        ]
-    )
+def _tweet_fields(*, include_metrics: bool = False) -> str:
+    fields = [
+        "attachments",
+        "author_id",
+        "conversation_id",
+        "created_at",
+        "display_text_range",
+        "edit_controls",
+        "edit_history_tweet_ids",
+        "entities",
+        "lang",
+        "note_tweet",
+        "possibly_sensitive",
+        "referenced_tweets",
+        "reply_settings",
+        "source",
+    ]
+    if include_metrics:
+        fields.append("public_metrics")
+    return ",".join(fields)
 
 
-def _x_common_params() -> dict[str, str]:
+def _user_fields(*, include_metrics: bool = False) -> str:
+    fields = [
+        "id",
+        "name",
+        "username",
+        "verified",
+        "verified_type",
+        "description",
+        "created_at",
+    ]
+    if include_metrics:
+        fields.append("public_metrics")
+    return ",".join(fields)
+
+
+def _media_fields(*, include_metrics: bool = False) -> str:
+    fields = [
+        "media_key",
+        "type",
+        "url",
+        "preview_image_url",
+        "alt_text",
+        "width",
+        "height",
+        "variants",
+    ]
+    if include_metrics:
+        fields.append("public_metrics")
+    return ",".join(fields)
+
+
+def _x_common_params(*, include_metrics: bool = False) -> dict[str, str]:
     return {
-        "tweet.fields": _tweet_fields(),
+        "tweet.fields": _tweet_fields(include_metrics=include_metrics),
         "expansions": "author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys",
-        "user.fields": "id,name,username,verified,verified_type,description,created_at,public_metrics",
-        "media.fields": "media_key,type,url,preview_image_url,alt_text,width,height,public_metrics,variants",
+        "user.fields": _user_fields(include_metrics=include_metrics),
+        "media.fields": _media_fields(include_metrics=include_metrics),
     }
 
 
@@ -381,6 +424,7 @@ async def _exec_fetch_x_post(
     max_results: int = 10,
     exclude_replies: bool = True,
     exclude_retweets: bool = True,
+    include_metrics: bool = False,
     include_raw: bool = False,
 ) -> str:
     username = extract_x_username(user) if user else None
@@ -426,7 +470,7 @@ async def _exec_fetch_x_post(
 
         resp = requests.get(
             f"https://api.x.com/2/tweets/{tweet_id}",
-            params=_x_common_params(),
+            params=_x_common_params(include_metrics=bool(include_metrics)),
             headers={"Authorization": f"Bearer {token}"},
             timeout=20,
         )
@@ -449,16 +493,20 @@ async def _exec_fetch_x_post(
             return _fallback_oembed(f"X API request failed: {exc}\n{body}")
 
         payload = resp.json()
-        return _format_x_payload(tweet_id, payload, include_raw=bool(include_raw))
+        return _format_x_payload(
+            tweet_id,
+            payload,
+            include_raw=bool(include_raw),
+            include_metrics=bool(include_metrics),
+        )
 
     def _request_user_posts() -> str:
-        import json
         import requests
 
         headers = {"Authorization": f"Bearer {token}"}
         user_resp = requests.get(
             f"https://api.x.com/2/users/by/username/{username}",
-            params={"user.fields": "id,name,username,verified,verified_type,description,created_at,public_metrics"},
+            params={"user.fields": _user_fields(include_metrics=bool(include_metrics))},
             headers=headers,
             timeout=20,
         )
@@ -490,7 +538,7 @@ async def _exec_fetch_x_post(
             count = 10
         count = min(100, max(5, count))
 
-        params = _x_common_params()
+        params = _x_common_params(include_metrics=bool(include_metrics))
         params["max_results"] = str(count)
         exclude = []
         if exclude_replies:
@@ -533,12 +581,13 @@ async def _exec_fetch_x_post(
             payload,
             include_raw=bool(include_raw),
             source="X API user timeline (/2/users/:id/tweets)",
+            include_metrics=bool(include_metrics),
         )
 
     def _request_recent_search(username: str, headers: dict[str, str], count: int) -> str:
         import requests
 
-        params = _x_common_params()
+        params = _x_common_params(include_metrics=bool(include_metrics))
         params["query"] = f"from:{username}"
         params["max_results"] = str(min(100, max(10, count)))
         resp = requests.get(
@@ -566,6 +615,7 @@ async def _exec_fetch_x_post(
             resp.json(),
             include_raw=bool(include_raw),
             source="X API recent search fallback (/2/tweets/search/recent query=from:username)",
+            include_metrics=bool(include_metrics),
         )
 
     try:
