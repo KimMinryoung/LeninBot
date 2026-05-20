@@ -354,6 +354,57 @@ async def _assert_diary_runtime_route_fallbacks() -> None:
         tools._classify_route_with_llm = original_classifier
 
 
+async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
+    import telegram.bot as bot
+    import telegram.diary_publication as publication
+    from tool_loop_common import execute_tool
+
+    original_review = bot._run_stasova_diary_review
+    original_apply = bot._apply_stasova_diary_review
+    original_publish = publication.publish_reviewed_diary_entry
+    seen: list[tuple[str, str]] = []
+
+    async def fake_review(_task, title, content):
+        seen.append((title, content))
+        return "위험도 총평: 낮음\n경고 항목: 없음"
+
+    async def fake_apply(_task, *, title, content, review_report):
+        assert "위험도 총평" in review_report
+        return title, content
+
+    async def fake_publish(**kwargs):
+        assert kwargs["final_title"] == kwargs["title"]
+        assert kwargs["final_content"] == kwargs["content"]
+        return 321, " / Telegram channel: skipped", None
+
+    try:
+        bot._run_stasova_diary_review = fake_review
+        bot._apply_stasova_diary_review = fake_apply
+        publication.publish_reviewed_diary_entry = fake_publish
+
+        handler = bot._make_guarded_diary_save_handler(None, {"id": 900})
+        result, is_error = await execute_tool(
+            "save_diary",
+            {"title": "제목", "content": "본문"},
+            {"save_diary": handler},
+            log_event=None,
+        )
+        assert not is_error
+        assert "Diary reviewed by Stasova" in result
+        assert seen[-1] == ("제목", "본문")
+
+        positional_result = await handler({"title": "딕셔너리 제목", "content": "딕셔너리 본문"})
+        assert "Diary reviewed by Stasova" in positional_result
+        assert seen[-1] == ("딕셔너리 제목", "딕셔너리 본문")
+
+        missing_title = await handler(content="본문")
+        assert "missing required argument: title" in missing_title
+    finally:
+        bot._run_stasova_diary_review = original_review
+        bot._apply_stasova_diary_review = original_apply
+        publication.publish_reviewed_diary_entry = original_publish
+
+
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
@@ -362,6 +413,7 @@ async def main() -> None:
     _assert_web_political_line_dynamic_reload()
     _assert_diary_web_context_injection()
     await _assert_diary_runtime_route_fallbacks()
+    await _assert_guarded_diary_save_handler_accepts_tool_payloads()
     print("runtime smoke ok")
 
 

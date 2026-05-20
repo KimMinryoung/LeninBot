@@ -1890,8 +1890,43 @@ async def _apply_stasova_diary_review(
     return final_title, final_content
 
 
+def _normalize_guarded_diary_save_args(args: tuple, kwargs: dict) -> tuple[str | None, str | None]:
+    """Accept save_diary payloads from strict and loose tool-loop dispatchers."""
+    title = kwargs.get("title")
+    content = kwargs.get("content")
+
+    for nested_key in ("input", "arguments", "args"):
+        nested = kwargs.get(nested_key)
+        if isinstance(nested, dict):
+            title = title if title is not None else nested.get("title")
+            content = content if content is not None else nested.get("content")
+
+    if args:
+        first = args[0]
+        if isinstance(first, dict):
+            title = title if title is not None else first.get("title")
+            content = content if content is not None else first.get("content")
+        else:
+            title = title if title is not None else first
+            if len(args) > 1:
+                content = content if content is not None else args[1]
+
+    return (
+        str(title).strip() if title is not None else None,
+        str(content).strip() if content is not None else None,
+    )
+
+
 def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
-    async def _guarded_save_diary(title: str, content: str) -> str:
+    async def _guarded_save_diary(*args, title: str | None = None, content: str | None = None, **kwargs) -> str:
+        title, content = _normalize_guarded_diary_save_args(
+            args,
+            {"title": title, "content": content, **kwargs},
+        )
+        if not title:
+            return "Failed to publish reviewed diary: save_diary missing required argument: title"
+        if not content:
+            return "Failed to publish reviewed diary: save_diary missing required argument: content"
         try:
             review_report = await _run_stasova_diary_review(task, title, content)
             final_title, final_content = await _apply_stasova_diary_review(
