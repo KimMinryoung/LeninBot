@@ -100,6 +100,7 @@ Agent tasks receive structured context rather than a passive chat dump:
 | agent execution history | recent completed tasks by same agent type |
 | task chain | Redis `task_result:*` and DB fallback |
 | agent board | Redis `board:{mission_id}` |
+| diary web-chat preflight | diary tasks only: recent public web `chat_logs` are injected automatically so correction, omission, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
 
 Agents can call chat-reading tools when they need the original timestamped user messages.

@@ -167,6 +167,18 @@ _PRIVATE_RESEARCH_TERMS = (
     "사적 연구", "내부 연구", "관리자 전용",
 )
 
+_PROGRAMMER_EXPLICIT_TERMS = (
+    "programmer", "coding agent", "code agent", "developer",
+    "프로그래머", "코더", "개발자",
+)
+
+_PIPELINE_ERROR_TERMS = (
+    "pipeline", "workflow", "scheduler", "cron", "route", "routing",
+    "failure", "failed", "error", "bug", "regression",
+    "파이프라인", "워크플로우", "스케줄러", "크론", "라우팅", "분기",
+    "실패", "오류", "에러", "버그", "결함",
+)
+
 
 def _to_kst(ts) -> str:
     """Convert a timestamp (datetime or ISO string) to KST formatted string."""
@@ -317,7 +329,10 @@ async def _classify_route_with_llm(task: str, candidates: list[str] | None = Non
             "browser_automation, external_platform_scout, email_a2a. "
             "Map public_content_edit/research to analyst except diary content to diary; "
             "code_config_work to programmer; browser_automation to browser; "
-            "external_platform_scout to scout; email_a2a to diplomat."
+            "external_platform_scout to scout; email_a2a to diplomat. "
+            "If the user explicitly asks for programmer/developer handling and the request is about "
+            "a failure, runtime pipeline, scheduler, routing, code, config, or test problem, choose programmer "
+            "even when a public content type such as diary is mentioned."
         )
         user = {
             "task": task,
@@ -375,6 +390,22 @@ def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None)
                 if name != agent and name in allowed
             ][:4],
         }
+
+    explicit_programmer = _contains_any(text, _PROGRAMMER_EXPLICIT_TERMS)
+    pipeline_or_code_fix = _contains_any(text, _PIPELINE_ERROR_TERMS) or _contains_any(text, _CODE_TERMS)
+    if explicit_programmer and pipeline_or_code_fix and "programmer" in allowed:
+        return choose(
+            "programmer",
+            "The user explicitly requested programmer handling for code, routing, pipeline, or failure work.",
+            "high",
+        )
+
+    if ("diary" in lowered or "일기" in text) and pipeline_or_code_fix and "programmer" in allowed:
+        return choose(
+            "programmer",
+            "This is about the diary pipeline/runtime failing, not a routine diary content edit.",
+            "high",
+        )
 
     if {"diary", "일기"} & set(lowered.replace("/", " ").split()):
         if any(term in lowered for term in ("edit", "fix", "correct", "수정", "고쳐", "오타")):

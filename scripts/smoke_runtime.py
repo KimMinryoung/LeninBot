@@ -306,12 +306,62 @@ def _assert_web_political_line_dynamic_reload() -> None:
             agent_base._POLITICAL_LINE_PATH = original_path
 
 
+def _assert_diary_web_context_injection() -> None:
+    import telegram.tasks as tasks
+
+    original_formatter = tasks._format_diary_web_chat_context
+    try:
+        tasks._format_diary_web_chat_context = (
+            lambda provider: "### Diary Web Chat Preflight\n\nWeb user: 일기에서 이 수정 지시를 반영해"
+        )
+        content = tasks._build_task_context_content(
+            {"id": 900, "user_id": 0, "agent_type": "diary", "content": "write diary"},
+            "write diary",
+            context_provider="deepseek",
+        )
+        assert "### Diary Web Chat Preflight" in content
+        assert "Web user: 일기에서 이 수정 지시를 반영해" in content
+        assert content.index("### Diary Web Chat Preflight") < content.index("### Task")
+
+        non_diary = tasks._build_task_context_content(
+            {"id": 901, "user_id": 0, "agent_type": "analyst", "content": "analyze"},
+            "analyze",
+            context_provider="deepseek",
+        )
+        assert "Diary Web Chat Preflight" not in non_diary
+    finally:
+        tasks._format_diary_web_chat_context = original_formatter
+
+
+async def _assert_diary_runtime_route_fallbacks() -> None:
+    import self_runtime.tools as tools
+
+    original_classifier = tools._classify_route_with_llm
+    try:
+        async def unavailable_classifier(_task: str, _candidates=None):
+            return None
+
+        tools._classify_route_with_llm = unavailable_classifier
+        content_edit = json.loads(await tools._exec_route_task("일기 123번 오타 수정해줘", include_store_guide=False))
+        assert content_edit["recommendation"]["recommended_agent"] == "diary"
+
+        pipeline_fix = json.loads(await tools._exec_route_task("프로그래머한테 일기 쓰기 실패 오류 고치라고 시켜", include_store_guide=False))
+        assert pipeline_fix["recommendation"]["recommended_agent"] == "programmer"
+
+        runtime_fix = json.loads(await tools._exec_route_task("diary agent 파이프라인 결함 수정", include_store_guide=False))
+        assert runtime_fix["recommendation"]["recommended_agent"] == "programmer"
+    finally:
+        tools._classify_route_with_llm = original_classifier
+
+
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
     _assert_agent_runtime_config()
     _assert_agent_runtime_dynamic_reload()
     _assert_web_political_line_dynamic_reload()
+    _assert_diary_web_context_injection()
+    await _assert_diary_runtime_route_fallbacks()
     print("runtime smoke ok")
 
 

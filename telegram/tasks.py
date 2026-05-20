@@ -20,6 +20,7 @@ from prompt_context import (
     format_mission_context,
     format_subtask_results,
     uses_xml,
+    wrap_context_block,
     wrap_task_content,
 )
 
@@ -36,6 +37,10 @@ _RATE_LIMIT_REQUEUE_DELAY_SECONDS = max(
     60,
     int(os.getenv("TASK_RATE_LIMIT_REQUEUE_SECONDS", "300") or "300"),
 )
+_DIARY_WEB_CONTEXT_FALLBACK_HOURS = 72
+_DIARY_WEB_CONTEXT_MAX_HOURS = 24 * 14
+_DIARY_WEB_CONTEXT_LIMIT = 8
+_DIARY_WEB_CONTEXT_PER_SESSION_LIMIT = 6
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -209,6 +214,87 @@ def _load_task_metadata(task: dict | None) -> dict:
         except Exception:
             metadata = None
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _truncate_context_text(text: str, max_chars: int) -> str:
+    text = str(text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 16)].rstrip() + "\n... (truncated)"
+
+
+def _diary_web_context_hours_back() -> int:
+    """Return a bounded lookback window covering at least the last diary gap."""
+    try:
+        row = _query_one(
+            "SELECT created_at FROM ai_diary ORDER BY created_at DESC LIMIT 1"
+        )
+        created_at = (row or {}).get("created_at")
+        if created_at and hasattr(created_at, "astimezone"):
+            now = datetime.now(timezone.utc)
+            latest = created_at.astimezone(timezone.utc)
+            elapsed = max(0.0, (now - latest).total_seconds())
+            since_last = int(elapsed // 3600) + 2
+            return min(
+                _DIARY_WEB_CONTEXT_MAX_HOURS,
+                max(_DIARY_WEB_CONTEXT_FALLBACK_HOURS, since_last),
+            )
+    except Exception as e:
+        logger.debug("Diary latest timestamp lookup failed: %s", e)
+    return _DIARY_WEB_CONTEXT_FALLBACK_HOURS
+
+
+def _format_diary_web_chat_context(provider: str | None) -> str:
+    """Inject recent public web-chat turns before diary writing.
+
+    The diary agent can call read_self itself, but scheduled runs are quiet
+    failures when the model skips that step. This preflight makes recent web
+    correction/non-publication instructions unavoidable in the task context.
+    """
+    try:
+        from memory_store.queries import fetch_chat_logs
+
+        hours_back = _diary_web_context_hours_back()
+        rows = fetch_chat_logs(
+            limit=_DIARY_WEB_CONTEXT_LIMIT,
+            hours_back=hours_back,
+            source="web",
+            group_web_contexts=True,
+            per_context_limit=_DIARY_WEB_CONTEXT_PER_SESSION_LIMIT,
+        )
+    except Exception as e:
+        logger.debug("Diary web-chat context load failed: %s", e)
+        return ""
+
+    if not rows:
+        return ""
+
+    lines = [
+        "Diary web-chat preflight: these public web-chat turns were automatically loaded before diary writing.",
+        "Scan them before drafting for diary corrections, rewrite requests, omission/non-publication instructions, and topic-priority instructions. Such user corrections outrank older memory and prior diary drafts.",
+        f"For deeper inspection, call read_self(content_type=\"chat_logs\", chat_source=\"web\", hours_back={hours_back}, limit=20).",
+    ]
+    for idx, row in enumerate(rows[: _DIARY_WEB_CONTEXT_LIMIT * _DIARY_WEB_CONTEXT_PER_SESSION_LIMIT], 1):
+        ts = row.get("created_at")
+        if hasattr(ts, "astimezone"):
+            ts_text = ts.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
+        else:
+            ts_text = str(ts or "?")[:19]
+        user_query = _truncate_context_text(row.get("user_query") or "", 700)
+        bot_answer = _truncate_context_text(row.get("bot_answer") or "", 900)
+        lines.append(
+            f"[{idx}] {ts_text}\n"
+            f"Web user: {user_query or '(empty)'}\n"
+            f"Cyber-Lenin: {bot_answer or '(empty)'}"
+        )
+
+    return wrap_context_block(
+        "diary-web-chat-preflight",
+        "\n\n".join(lines),
+        provider,
+        heading="Diary Web Chat Preflight",
+        attrs={"source": "web", "hours_back": hours_back},
+    )
 
 
 def _normalize_verification_policy(task: dict) -> dict | None:
@@ -749,7 +835,19 @@ def _build_task_context_content(
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
 
-    context_parts = [part for part in (state_ctx, mission_ctx, history_ctx, board_ctx) if part]
+    diary_web_ctx = ""
+    if agent_type == "diary":
+        diary_web_ctx = _format_diary_web_chat_context(context_provider)
+
+    context_parts = [
+        part for part in (
+            state_ctx,
+            diary_web_ctx,
+            mission_ctx,
+            history_ctx,
+            board_ctx,
+        ) if part
+    ]
     if context_parts:
         return "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
     return content

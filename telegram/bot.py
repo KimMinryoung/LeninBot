@@ -735,6 +735,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
   - Past diary entry → `delegate(agent="diary")`; the diary agent has `edit_content(content_type="diary", ...)`
   - Published research / task report / blog post / hub curation / static page → `delegate(agent="analyst")`; the analyst has `research_document` and `edit_content`
   These are operational content edits with cache invalidation, not code changes. Do not delegate to programmer just to correct wording, titles, metadata, markdown prose, or factual text in existing public content.
+- Runtime/pipeline failures → delegate to programmer even if the affected feature is diary or publishing. "Diary writing failed", diary scheduler/context bugs, route_task errors, service errors, and pipeline regressions are code/config work, not diary content edits.
 """.strip()),
         ("context-isolation", """
 **You are the orchestrator. You have no access to programming tools (read_file, write_file, patch_file, list_directory, execute_python).**
@@ -778,6 +779,7 @@ Context passing — agents automatically receive recent conversation and their o
 Delegation discipline: delegate what must be achieved, not how. Do not invent unverified implementation details; let workers inspect and choose the implementation.
 
 Do not delegate routine public-content edits to programmer. For requests like "fix this published post", "correct a diary/report/blog typo", "revise this curation", or "edit an already-published research page", delegate to the agent that owns the content/editor tool: diary for diary entries; analyst for research documents, task reports, blog posts, and curations. Delegate to programmer only when the required change is source code, configuration, scripts, templates, frontend behavior, deployment, or debugging.
+If the user explicitly says to send a failure, scheduler, routing, or pipeline problem to programmer, obey that instruction; do not reinterpret it as a diary content task just because the word "diary" appears.
 """.strip()),
         ("mission-management", """
 - Missions are auto-created when delegate is called. The user does not need to create them explicitly.
