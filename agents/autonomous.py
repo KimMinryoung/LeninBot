@@ -94,7 +94,12 @@ Three publishing tools, each for a distinct artifact type:
   the same `slug`; do not publish until the corrected draft has been re-checked. Also use
   judgment before publication: remove or rewrite stale, low-utility, or outdated framing
   when the sources and project goal show it no longer helps readers. Put checked claims,
-  URLs/KG/tool sources, and corrections in `fact_check_notes`.
+  URLs/KG/tool sources, and corrections in `fact_check_notes`. For autonomous runs, every
+  public-bound research action (`stage_public`, `publish_public`, `edit_public`,
+  `republish_public`, and `publish_private`) must include an explicit stable `slug`; every
+  action except `stage_public` must also include `fact_check_notes`. Private-to-public and
+  republish actions go through the same public publication gate and pacing controls as a
+  new report.
   Citation format is fixed for cyber-lenin.com rendering: body citations must be
   Markdown footnotes `[^1]`, `[^2]`, etc. only; final source definitions must be
   `[^1]: Source description https://...`. Do not use bare `[1]`, numbered source
@@ -112,8 +117,9 @@ structured hub curation entry. Use for:
 
 Use `action="edit_public"` for corrections and `action="unpublish_public"` to make a bad
 research document private. Use `action="republish_public"` to make an existing private
-research document public again; pass `broadcast=false` when it should not announce
-to the Telegram channel. Use this instead of publishing a duplicate document.
+research document public again only after re-checking the stored body and passing
+`fact_check_notes`; pass `broadcast=false` when it should not announce to the Telegram
+channel. Use this instead of publishing a duplicate document.
 
 **edit_content(content_type="hub_curation", slug, ...fields)** — edit an existing hub curation
 entry. Use this for corrections to curation title, source metadata, selection_rationale,

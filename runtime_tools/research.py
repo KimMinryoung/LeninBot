@@ -519,6 +519,8 @@ async def _exec_publish_research(
     filename: str | None = None,
     fact_check_passed: bool = False,
     fact_check_notes: str | None = None,
+    source_task_id: int | None = None,
+    broadcast: bool = True,
 ) -> str:
     if not title or not title.strip():
         return "Error: title is required."
@@ -537,6 +539,11 @@ async def _exec_publish_research(
             fname = _validate_filename(filename)
         except ValueError as e:
             return f"Error: {e}."
+    elif is_autonomous_publication_context():
+        return (
+            "Error: autonomous research_document public actions require an explicit stable slug. "
+            "Pass the same slug to stage_public and publish_public so later ticks update the same report."
+        )
     else:
         fname = f"{now.strftime('%Y%m%d')}_{_slug_from_title(title)}.md"
 
@@ -606,6 +613,11 @@ async def _exec_publish_research(
         public_url=public_url,
     )
 
+    existing_before = await asyncio.to_thread(
+        research_store.get_document, fname, include_private=True
+    )
+    was_already_public = bool(existing_before and existing_before.get("status") == "public")
+
     try:
         row, is_overwrite = await asyncio.to_thread(
             research_store.upsert_document,
@@ -614,6 +626,7 @@ async def _exec_publish_research(
             markdown=document,
             summary=research_store.extract_excerpt(document),
             status="public",
+            source_task_id=source_task_id,
         )
     except Exception as e:
         logger.error("publish_research DB write error for %s: %s", fname, e)
@@ -621,41 +634,47 @@ async def _exec_publish_research(
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
-    status = "Overwrote" if is_overwrite else "Published"
+    status = "Updated public document" if was_already_public else "Published"
     broadcast_note = ""
-    try:
-        br = await maybe_broadcast_autonomous_publication(
-            title=title,
-            url=public_url,
-            body=content,
-            source="cyber-lenin.com research",
-        )
-        if br.ok:
-            broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
-            if getattr(br, "message_ids", None):
-                try:
-                    from publication_records import record_publication_broadcast_sync
+    if broadcast:
+        try:
+            br = await maybe_broadcast_autonomous_publication(
+                title=title,
+                url=public_url,
+                body=content,
+                source="cyber-lenin.com research",
+            )
+            if br.ok:
+                broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
+                if getattr(br, "message_ids", None):
+                    try:
+                        from publication_records import record_publication_broadcast_sync
 
-                    await asyncio.to_thread(
-                        record_publication_broadcast_sync,
-                        slug=row["slug"],
-                        public_url=public_url,
-                        channel_message_ids=br.message_ids,
-                        source="publish_research",
-                    )
-                    broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
-                except Exception as e:
-                    logger.warning("publication broadcast record failed for %s: %s", fname, e)
-                    broadcast_note += f"; message-id tracking failed ({e})"
-    except Exception as e:
-        logger.warning("research channel broadcast failed for %s: %s", fname, e)
-        broadcast_note = f"\nTelegram channel broadcast failed: {e}"
-    if not is_overwrite:
+                        await asyncio.to_thread(
+                            record_publication_broadcast_sync,
+                            slug=row["slug"],
+                            public_url=public_url,
+                            channel_message_ids=br.message_ids,
+                            source="publish_research",
+                        )
+                        broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
+                    except Exception as e:
+                        logger.warning("publication broadcast record failed for %s: %s", fname, e)
+                        broadcast_note += f"; message-id tracking failed ({e})"
+        except Exception as e:
+            logger.warning("research channel broadcast failed for %s: %s", fname, e)
+            broadcast_note = f"\nTelegram channel broadcast failed: {e}"
+    else:
+        broadcast_note = "\nTelegram channel broadcast: skipped by request"
+    if not was_already_public:
+        meta = {"filename": fname, "research_document_id": row["id"]}
+        if source_task_id is not None:
+            meta["source_task_id"] = source_task_id
         record_autonomous_publication(
             publication_kind="research",
             title=title,
             public_url=public_url,
-            meta={"filename": fname, "research_document_id": row["id"]},
+            meta=meta,
         )
     return (
         f"{status}: {fname}\n"
@@ -741,6 +760,7 @@ async def _exec_edit_research(
     title: str | None = None,
     content: str | None = None,
     broadcast: bool = True,
+    fact_check_notes: str | None = None,
 ) -> str:
     op = (operation or "").strip().lower()
     if op not in {"edit", "unpublish", "publish"}:
@@ -769,12 +789,48 @@ async def _exec_edit_research(
         body = _strip_leading_research_scaffold(content)
         if not body:
             return "Error: content has no body after removing the research-document header."
+        citation_error = _validate_public_citation_format(body)
+        if citation_error:
+            return f"Error: {citation_error}"
+        draft_path = None
+        review_note = ""
+        if is_autonomous_publication_context():
+            fact_check_error = _validate_fact_check_notes(fact_check_notes)
+            if fact_check_error:
+                return f"Error: autonomous edit_public requires fact_check_notes. {fact_check_error}."
+            gate_error = validate_autonomous_research_publication(
+                title=new_title,
+                content=body,
+                identifier=fname,
+                fact_check_notes=fact_check_notes,
+            )
+            if gate_error:
+                return gate_error
         publish_date = (
             _extract_publish_date_from_markdown(existing_markdown)
             or (None if existing is None else _extract_publish_date(existing))
             or datetime.now(KST).strftime("%Y-%m-%d")
         )
         document = _build_document(new_title, body, publish_date)
+        if is_autonomous_publication_context():
+            try:
+                draft_path = await asyncio.to_thread(
+                    _save_publication_draft,
+                    filename=fname,
+                    title=new_title,
+                    document=document,
+                    fact_check_passed=True,
+                    fact_check_notes=fact_check_notes,
+                )
+            except Exception as e:
+                logger.error("publication edit draft backup failed for %s: %s", fname, e)
+                return f"Error: failed to back up edited draft before publication: {type(e).__name__}: {e}"
+            review_note = await review_autonomous_publication(
+                publication_kind="research_edit",
+                title=new_title,
+                content=body,
+                public_url=_public_url(fname),
+            )
         try:
             row, _ = await asyncio.to_thread(
                 research_store.upsert_document,
@@ -790,10 +846,14 @@ async def _exec_edit_research(
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
         cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
+        draft_note = f"Draft backup: {draft_path}\n" if draft_path else ""
+        review_line = f"{review_note}\n" if review_note else ""
         return (
             f"Edited: {fname}\n"
+            f"{draft_note}"
             f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {_public_url(fname)}\n"
+            f"{review_line}"
             f"Title: {new_title}; size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
         )
 
@@ -802,6 +862,18 @@ async def _exec_edit_research(
             return f"Error: cannot publish legacy fallback file '{fname}' because no DB row exists. Import it into research_documents first."
         if existing_doc.get("status") == "public":
             return f"Already public: {fname}\nPublic URL: {_public_url(fname)}"
+        if is_autonomous_publication_context():
+            body = _strip_leading_research_scaffold(existing_doc.get("markdown") or "")
+            title_for_gate = existing_doc.get("title") or research_store.extract_title(existing_doc.get("markdown") or "", "")
+            return await _exec_publish_research(
+                title=title_for_gate or "",
+                content=body,
+                filename=fname,
+                fact_check_passed=True,
+                fact_check_notes=fact_check_notes,
+                source_task_id=existing_doc.get("source_task_id"),
+                broadcast=broadcast,
+            )
         try:
             row = await asyncio.to_thread(research_store.set_status, fname, "public")
             if not row:
@@ -933,7 +1005,7 @@ RESEARCH_DOCUMENT_TOOL = {
                     "save_private",
                     "publish_private",
                 ],
-                "description": "Research-document mutation to perform.",
+                "description": "Research-document mutation to perform. Autonomous public-bound actions require an explicit stable slug.",
             },
             "title": {"type": "string", "description": "Document title or optional replacement title."},
             "content": {
@@ -943,18 +1015,18 @@ RESEARCH_DOCUMENT_TOOL = {
                     "body citations and final `[^n]: description URL` definitions; do not use bare `[n]`."
                 ),
             },
-            "slug": {"type": "string", "description": "Stable research document slug. '.md' is optional."},
+            "slug": {"type": "string", "description": "Stable research document slug. '.md' is optional. Required for autonomous public-bound actions."},
             "id": {"type": "integer", "description": "Optional private research document id for compatibility reads/edits."},
             "markdown_body": {"type": "string", "description": "Markdown body for action='save_private'."},
             "body": {"type": "string", "description": "Optional replacement Markdown body for action='publish_private'."},
             "source_task_id": {"type": "integer", "description": "Optional originating task id for private saves."},
             "fact_check_notes": {
                 "type": "string",
-                "description": "Required for action='publish_public'. Summarize checked claims, sources, and corrections.",
+                "description": "Required for autonomous public-bound actions: publish_public, edit_public, republish_public, and publish_private. Summarize checked claims, sources, and corrections.",
             },
             "broadcast": {
                 "type": "boolean",
-                "description": "For publish_private/republish_public: whether to broadcast to Telegram. Default true.",
+                "description": "For publish_private/republish_public and manual visibility changes: whether to broadcast to Telegram. Default true.",
                 "default": True,
             },
         },
@@ -989,6 +1061,8 @@ async def _exec_research_document(
             filename=slug,
             fact_check_passed=(op == "publish_public"),
             fact_check_notes=fact_check_notes,
+            source_task_id=source_task_id,
+            broadcast=broadcast,
         )
     if op == "edit_public":
         try:
@@ -1001,6 +1075,7 @@ async def _exec_research_document(
             title=title,
             content=content,
             broadcast=broadcast,
+            fact_check_notes=fact_check_notes,
         )
     if op == "unpublish_public":
         try:
@@ -1013,7 +1088,12 @@ async def _exec_research_document(
             filename = _filename_from_slug(slug)
         except ValueError as e:
             return f"Error: {e}."
-        return await _exec_edit_research(operation="publish", filename=filename or "", broadcast=broadcast)
+        return await _exec_edit_research(
+            operation="publish",
+            filename=filename or "",
+            broadcast=broadcast,
+            fact_check_notes=fact_check_notes,
+        )
     if op == "save_private":
         if not title or not slug or not markdown_body:
             return "Error: action='save_private' requires title, slug, and markdown_body."
@@ -1028,6 +1108,28 @@ async def _exec_research_document(
     if op == "publish_private":
         if not slug:
             return "Error: action='publish_private' requires slug."
+        if is_autonomous_publication_context():
+            from runtime_tools.private_reports import get_private_report_sync
+
+            clean_slug = slug[:-3] if slug.endswith(".md") else slug
+            try:
+                private = await asyncio.to_thread(get_private_report_sync, slug=clean_slug)
+            except Exception as e:
+                return f"Error: failed to read private research document before autonomous publication: {type(e).__name__}: {e}"
+            if not private:
+                return f"Error: no private research document found for slug={clean_slug!r}."
+            markdown_source = body if body is not None and body.strip() else (content if content is not None and content.strip() else private.get("markdown") or "")
+            public_title = (title or "").strip() or research_store.extract_title(markdown_source, private.get("title") or "")
+            public_body = _strip_leading_research_scaffold(markdown_source)
+            return await _exec_publish_research(
+                title=public_title or "",
+                content=public_body,
+                filename=f"{clean_slug}.md",
+                fact_check_passed=True,
+                fact_check_notes=fact_check_notes,
+                source_task_id=private.get("source_task_id"),
+                broadcast=broadcast,
+            )
         from runtime_tools.private_reports import _exec_publish_private_report
 
         return await _exec_publish_private_report(
