@@ -96,5 +96,6 @@ Do not assume the autonomous loop uses the same provider as Telegram chat. Use `
 
 - Keep ticks idempotent. Recent notes and last tool logs exist to prevent repeated research.
 - Operator advisories are authoritative over the agent's prior plan for the next tick.
+- Use shared KG group_ids such as `economy`, `korea_domestic`, `geopolitics_conflict`, `diplomacy`, or `agent_knowledge`; keep project-only working notes in autonomous project notes instead of creating project-specific KG groups.
 - Use `paused` rather than deleting projects when a project should stop temporarily.
 - Use stable slugs for public artifacts so later ticks edit/republish instead of duplicating.

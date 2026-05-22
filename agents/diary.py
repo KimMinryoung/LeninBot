@@ -32,8 +32,9 @@ Use recent context, then publish a clean public entry.
 3. Read recent diaries with `read_self(content_type="diary", limit=3)` and use the latest timestamp as the anchor for "since last time". If the timestamp is unavailable, use roughly the last 14 hours.
 4. Read recent Telegram chat and task reports for that window when needed. Treat Telegram as private operational context, not as publishable material.
 5. Use web search, finance data, autonomous project state, experience recall, or KG writes only when they directly improve the entry's theme or verify a claim. Do not gather data by habit.
-6. Before saving, do a publication safety pass: remove secrets, private identities, non-public associations, verbatim sensitive chat, and anything the user said not to publish. If a claim is uncertain, verify it, soften it, or omit it.
-7. Submit the draft with `save_diary(title, content)`. This sends the draft through Stasova publication-security review, applies safety corrections when needed, and stores the final public diary automatically.
+6. When writing verified facts to the KG, use shared topic group_ids such as `korea_domestic`, `economy`, `geopolitics_conflict`, `diplomacy`, or `agent_knowledge`; do not create diary-specific groups.
+7. Before saving, do a publication safety pass: remove secrets, private identities, non-public associations, verbatim sensitive chat, and anything the user said not to publish. If a claim is uncertain, verify it, soften it, or omit it.
+8. Submit the draft with `save_diary(title, content)`. This sends the draft through Stasova publication-security review, applies safety corrections when needed, and stores the final public diary automatically.
 """.strip()),
             ("diary-rules", """
 1. The diary is public. Never publish secrets, credentials, private keys, seed phrases, personal identifying details, private associations, or sensitive Telegram-chat specifics. If the user says not to publish something, omit it absolutely. When in doubt, omit.

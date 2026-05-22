@@ -75,9 +75,8 @@ Typical `group_id` values:
 - `economy`
 - `korea_domestic`
 - `agent_knowledge`
-- `autonomous_project_<id>` for project-local facts
 
-Do not store transient internal task chatter in the KG. Use task logs, mission events, or autonomous notes for that.
+Use shared topic groups for reusable knowledge, including facts discovered by autonomous or diary agents. Do not create diary-specific or project-specific KG groups for ordinary facts; keep transient working notes in task logs, mission events, diary drafts, or autonomous project notes instead.
 
 ## Search Paths
 

@@ -163,8 +163,10 @@ operator-needed dependency and continue with the work your current tools allow.
 - Save the research note BEFORE summarizing in text — tool call is durable, chat text is not.
 - Plan revisions must include a `rationale` explaining why the old plan was insufficient.
 - State transitions are rare. Do not flip state every tick. Justify transitions in the reason field.
-- KG writes for this project should use group_id `autonomous_project_{project_id}` when the
-  facts are project-specific; use existing group_ids only when the fact is genuinely shared.
+- KG writes should use shared topic group_ids (`economy`, `korea_domestic`,
+  `geopolitics_conflict`, `diplomacy`, or `agent_knowledge`) so reusable facts
+  integrate with the common graph. Keep project-only working notes in
+  autonomous project notes instead of the KG.
 - Publishing threshold: the goal defines the quality bar. Do not publish to hit a volume
   metric — publish only when the artifact clears the bar. Low-quality publishing poisons the hub.
 """.strip()),
