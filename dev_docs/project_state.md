@@ -94,6 +94,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 
 - Service status: `systemctl status leninbot-api.service leninbot-telegram.service leninbot-browser.service`
 - Logs: `journalctl -u <unit> -f`
+- Telegram connectivity watchdog: `telegram/bot.py` probes `get_me()` every `TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS` seconds, using `TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS` as the per-probe timeout. Owner-facing degraded/restored notifications are emitted only after `TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES` consecutive failures.
 - Static page smoke tests: `scripts/smoke_static_pages.py`
 - Runtime smoke tests: `scripts/smoke_runtime.py`, `scripts/smoke_tool_allowlists.py`, `scripts/smoke_webchat_security.py`, `scripts/smoke_kg_schema_docs.py`
 - Secret management: `scripts/manage_secrets.py`

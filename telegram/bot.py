@@ -145,6 +145,10 @@ TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS = max(
     3,
     int(os.getenv("TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS", "10") or "10"),
 )
+TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES = max(
+    1,
+    int(os.getenv("TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES", "3") or "3"),
+)
 DEFAULT_ALLOWED_UPDATES = [
     "message",
     "edited_message",
@@ -586,7 +590,7 @@ async def _telegram_connectivity_watchdog(bot: Bot) -> None:
     if TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS <= 0:
         return
 
-    was_down = False
+    notified_down = False
     failure_count = 0
     while True:
         await asyncio.sleep(TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS)
@@ -596,9 +600,24 @@ async def _telegram_connectivity_watchdog(bot: Bot) -> None:
             raise
         except Exception as e:
             failure_count += 1
-            if not was_down:
+            if failure_count < TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES:
+                logger.info(
+                    "Telegram connectivity probe failed (%d/%d): %s: %s",
+                    failure_count,
+                    TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES,
+                    type(e).__name__,
+                    e,
+                )
+                continue
+
+            if not notified_down:
                 _add_system_alert(f"Telegram connectivity degraded: {type(e).__name__}: {e}")
-                logger.warning("Telegram connectivity probe failed: %s: %s", type(e).__name__, e)
+                logger.warning(
+                    "Telegram connectivity probe failed after %d consecutive probes: %s: %s",
+                    failure_count,
+                    type(e).__name__,
+                    e,
+                )
                 if OWNER_USER_ID:
                     try:
                         await asyncio.to_thread(
@@ -611,10 +630,10 @@ async def _telegram_connectivity_watchdog(bot: Bot) -> None:
                         pass
             elif failure_count % 5 == 0:
                 logger.warning("Telegram connectivity still degraded after %d probes: %s", failure_count, e)
-            was_down = True
+            notified_down = True
             continue
 
-        if was_down:
+        if notified_down:
             _clear_system_alert("Telegram connectivity degraded")
             logger.info("Telegram connectivity restored after %d failed probes", failure_count)
             if OWNER_USER_ID:
@@ -631,7 +650,9 @@ async def _telegram_connectivity_watchdog(bot: Bot) -> None:
                     )
                 except Exception:
                     pass
-        was_down = False
+        elif failure_count:
+            logger.info("Telegram connectivity probe recovered after %d transient failures", failure_count)
+        notified_down = False
         failure_count = 0
 
 
