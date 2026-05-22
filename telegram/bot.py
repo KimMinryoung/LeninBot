@@ -2029,7 +2029,6 @@ async def bot_main():
         BotCommand(command="projects", description="자율 프로젝트 목록"),
         BotCommand(command="project", description="자율 프로젝트 상세/수정"),
         BotCommand(command="channel", description="브로드캐스트 채널 설정"),
-        BotCommand(command="reactions", description="그룹 메시지 반응 삭제"),
         BotCommand(command="restart", description="서비스 재시작"),
         BotCommand(command="clear", description="대화 히스토리 초기화"),
     ])

@@ -35,8 +35,6 @@ from telegram.channel_broadcast import (
     save_channel_config,
     validate_channel,
 )
-from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
-from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +131,31 @@ def _is_near_user_echo(reply: str | None, user_text: str | None) -> bool:
     return SequenceMatcher(None, user_norm, reply_norm).ratio() >= 0.88
 
 
+def _exception_summary(exc: BaseException) -> str:
+    """Return a non-empty exception summary for logs and user-facing fallbacks."""
+    cls_name = type(exc).__name__
+    msg = str(exc).strip()
+    if msg:
+        return msg if cls_name in msg else f"{cls_name}: {msg}"
+    return cls_name
+
+
+def _is_timeout_exception(exc: BaseException) -> bool:
+    """Best-effort timeout classifier across asyncio/httpx/provider SDK errors."""
+    cls_name = type(exc).__name__.lower()
+    return isinstance(exc, TimeoutError) or cls_name.endswith("timeout") or "timeout" in cls_name
+
+
+def _chat_error_reply(provider: str, exc: BaseException) -> str:
+    summary = _exception_summary(exc)
+    if _is_timeout_exception(exc):
+        return (
+            f"오류가 발생했습니다: {provider} 응답이 시간 초과되었습니다. "
+            f"잠시 후 다시 시도해 주세요. (세부: {summary})"
+        )
+    return f"오류가 발생했습니다: {summary}"
+
+
 async def _persist_assistant_turn(user_id: int, reply: str) -> None:
     """Persist a sent assistant turn without delaying Telegram delivery."""
     try:
@@ -174,9 +197,6 @@ _HELP_TEXT = """\
 /channel set <@채널핸들|-100...chat_id> — 대상 지정
 채널 글 발행은 명령어 대신 "확성기에 올려줘"처럼 자연어로 요청
 
-*그룹 관리*
-/reactions delete <chat_id> <message_id> user <user_id> — 특정 사용자 반응 삭제
-/reactions delete_all <chat_id> user <user_id> — 최근 반응 일괄 삭제
 
 *시스템*
 /agents — 에이전트 및 워커 상태
@@ -384,77 +404,6 @@ async def cmd_channel_info(message: Message):
         return
     await _reply_channel_info(message)
 
-
-def _parse_chat_id(value: str) -> int | str:
-    value = value.strip()
-    if not value:
-        raise ValueError("chat_id가 비어있습니다.")
-    if value.startswith("@"):
-        return value
-    return int(value)
-
-
-def _parse_reaction_actor(parts: list[str]) -> tuple[int | None, int | None]:
-    if len(parts) != 2 or parts[0] not in {"user", "actor_chat"}:
-        raise ValueError("대상은 `user <id>` 또는 `actor_chat <id>` 형식이어야 합니다.")
-    actor_id = int(parts[1])
-    if parts[0] == "user":
-        return actor_id, None
-    return None, actor_id
-
-
-async def cmd_reactions(message: Message):
-    if not _ctx["is_allowed"](message.from_user.id):
-        return
-
-    arg = _command_arg(message)
-    parts = arg.split()
-    usage = (
-        "사용법:\n"
-        "/reactions delete <chat_id|@supergroup> <message_id> user <user_id>\n"
-        "/reactions delete <chat_id|@supergroup> <message_id> actor_chat <chat_id>\n"
-        "/reactions delete_all <chat_id|@supergroup> user <user_id>\n"
-        "/reactions delete_all <chat_id|@supergroup> actor_chat <chat_id>"
-    )
-    if not parts or parts[0] not in {"delete", "delete_all"}:
-        await message.answer(usage)
-        return
-
-    token = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
-    client = TelegramBotApi10Client(token=token)
-    action = parts[0]
-    try:
-        if action == "delete":
-            if len(parts) != 5:
-                raise ValueError(usage)
-            chat_id = _parse_chat_id(parts[1])
-            message_id = int(parts[2])
-            user_id, actor_chat_id = _parse_reaction_actor(parts[3:])
-            await client.delete_message_reaction(
-                chat_id,
-                message_id,
-                user_id=user_id,
-                actor_chat_id=actor_chat_id,
-            )
-            await message.answer("반응 삭제 요청 완료.")
-            return
-
-        if len(parts) != 4:
-            raise ValueError(usage)
-        chat_id = _parse_chat_id(parts[1])
-        user_id, actor_chat_id = _parse_reaction_actor(parts[2:])
-        await client.delete_all_message_reactions(
-            chat_id,
-            user_id=user_id,
-            actor_chat_id=actor_chat_id,
-        )
-        await message.answer("최근 반응 일괄 삭제 요청 완료.")
-    except ValueError as e:
-        await message.answer(str(e))
-    except TelegramBotApiError as e:
-        await message.answer(f"Telegram API 오류: {e}")
-    except Exception as e:
-        await message.answer(f"반응 삭제 실패: {e}")
 
 
 async def cmd_mission(message: Message):
@@ -1644,12 +1593,14 @@ async def handle_message(message: Message):
                 if hasattr(progress_cb, "flush"):
                     await progress_cb.flush()
             except Exception as e2:
-                logger.error("Retry after tool pair recovery also failed: %s", e2)
-                reply = f"오류가 발생했습니다 (자동 복구 실패): {e2}"
+                summary = _exception_summary(e2)
+                logger.exception("Retry after tool pair recovery also failed: %s", summary)
+                reply = f"오류가 발생했습니다 (자동 복구 실패): {summary}"
         else:
-            logger.error("Chat LLM error (%s): %s", _provider, e)
-            _ctx["log_event"]("error", "chat", f"Chat LLM error ({_provider}): {e}", detail=user_text[:500])
-            reply = f"오류가 발생했습니다: {e}"
+            summary = _exception_summary(e)
+            logger.exception("Chat LLM error (%s): %s", _provider, summary)
+            _ctx["log_event"]("error", "chat", f"Chat LLM error ({_provider}): {summary}", detail=user_text[:500])
+            reply = _chat_error_reply(_provider, e)
 
     # Mission: log interrupted tool work to active mission
     if bt.get("was_interrupted") and bt.get("tool_work_details"):
@@ -2579,7 +2530,6 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_channel_create, Command("channel_create"))
     router.message.register(cmd_channel_set, Command("channel_set"))
     router.message.register(cmd_channel_info, Command("channel_info"))
-    router.message.register(cmd_reactions, Command("reactions"))
     router.message.register(cmd_mission, Command("mission"))
     router.message.register(cmd_errors, Command("errors"))
     router.message.register(cmd_chat, Command("chat"))

@@ -73,35 +73,6 @@ class TelegramBotApi10Client:
             },
         )
 
-    async def delete_message_reaction(
-        self,
-        chat_id: int | str,
-        message_id: int,
-        *,
-        user_id: int | None = None,
-        actor_chat_id: int | None = None,
-    ) -> bool:
-        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
-        if user_id is not None:
-            payload["user_id"] = user_id
-        if actor_chat_id is not None:
-            payload["actor_chat_id"] = actor_chat_id
-        return bool(await self.call("deleteMessageReaction", payload))
-
-    async def delete_all_message_reactions(
-        self,
-        chat_id: int | str,
-        *,
-        user_id: int | None = None,
-        actor_chat_id: int | None = None,
-    ) -> bool:
-        payload: dict[str, Any] = {"chat_id": chat_id}
-        if user_id is not None:
-            payload["user_id"] = user_id
-        if actor_chat_id is not None:
-            payload["actor_chat_id"] = actor_chat_id
-        return bool(await self.call("deleteAllMessageReactions", payload))
-
     async def get_managed_bot_access_settings(self, user_id: int) -> dict[str, Any]:
         result = await self.call("getManagedBotAccessSettings", {"user_id": user_id})
         return result if isinstance(result, dict) else {}
