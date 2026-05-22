@@ -1,6 +1,6 @@
 """Index mature public Cyber-Lenin reports into self_produced_analysis.
 
-This script deliberately does not run from publish_research. Public documents
+This script deliberately does not run from research_document. Public documents
 often need corrections shortly after publication, so indexing is a delayed,
 explicit operation.
 """

@@ -5,16 +5,13 @@ served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
 filename without its .md extension. Legacy files under research/ and
 output/research/ remain readable only as fallback/import sources.
 
-This module consolidates:
-  * publish_research(title, content, filename?) — DB upsert + Redis/Cloudflare cache bust
-  * edit_research(operation, filename, ...) —
-      operation='edit'      → update the research_documents row and bust Redis/Cloudflare caches
-      operation='unpublish' → set the research_documents row status=private and bust Redis/Cloudflare caches
-      operation='publish'   → set a private research_documents row status=public and bust Redis/Cloudflare caches
+This module backs the unified `research_document` runtime tool. Public
+publication, edits, private saves, and visibility changes all flow through that
+action-based interface so older tool names cannot be invoked directly.
 
-`unpublish` is intentionally non-destructive: DB rows are marked private. If a
-document only exists as a legacy fallback file, that file is relocated out of
-the public-listing scope.
+`unpublish_public` is intentionally non-destructive: DB rows are marked private.
+If a document only exists as a legacy fallback file, that file is relocated out
+of the public-listing scope.
 
 Mirrors the runtime_tools.post_edit pattern (UPDATE + cache purge in one step) for
 DB-backed public content.
@@ -160,7 +157,7 @@ def _extract_h1_from_markdown(markdown: str) -> str | None:
 def _strip_leading_research_scaffold(markdown: str) -> str:
     """Accept either body markdown or a complete research document.
 
-    edit_research's schema asks for body markdown, but agents often pass the
+    research_document edit_public asks for body markdown, but agents often pass the
     full document returned by read_self. Strip only the canonical leading H1
     plus author/date/horizontal-rule scaffold so the tool does not duplicate
     the public header on every edit.
@@ -303,18 +300,18 @@ def _format_draft_revision_guidance(*, filename: str, draft_path: Path, blocker:
     lines.extend([
         f"1. Review the saved draft backup if needed: {draft_path}",
         "2. Revise the draft text yourself before publishing. Correct the `content` argument in "
-        "your next publish_research call and preserve the same "
-        f"`filename` (`{filename}`) so the revised draft replaces this publication candidate.",
+        "your next research_document(action=\"publish_public\") call and preserve the same "
+        f"`slug` (`{filename}`) so the revised draft replaces this publication candidate.",
         "3. Re-check every affected proper noun, date, figure, current office, vote/seat count, "
         "quotation, and source attribution after editing.",
         "   For autonomous reports, also revise any stale or low-utility material so the report "
         "is useful at the 2026 current moment.",
-        "4. Publish only after the corrected draft passes verification: call publish_research again "
-        "with the revised `content`, the same `filename`, `fact_check_passed=true`, and "
-        "`fact_check_notes` that cites sources, explicitly names corrections made, and states "
-        "what was updated or retained for current usefulness.",
-        "If the document is already public, use edit_research(operation=\"edit\", filename=..., "
-        "content=...) instead of creating a duplicate publication.",
+        "4. Publish only after the corrected draft passes verification: call "
+        "research_document(action=\"publish_public\") again with the revised `content`, "
+        "the same `slug`, and `fact_check_notes` that cites sources, explicitly names "
+        "corrections made, and states what was updated or retained for current usefulness.",
+        "If the document is already public, use research_document(action=\"edit_public\", "
+        "slug=..., content=...) instead of creating a duplicate publication.",
     ])
     return "\n".join(lines)
 
@@ -446,74 +443,9 @@ def _format_invalidation_note(
     return f"{cache_note}; {cf_note}"
 
 
-# ── publish_research ─────────────────────────────────────────────────
+# ── Public research document publication ───────────────────────────────
 
-PUBLISH_RESEARCH_TOOL = {
-    "name": "publish_research",
-    "description": (
-        "Stage or publish a public markdown research document. Use this for polished "
-        "analysis, forecasts, and investigative findings. Do NOT use for completed "
-        "Telegram task reports (use edit_public_post kind='report'), static/custom "
-        "HTML pages, hub curations, diary entries, blog posts, or private research documents. "
-        "First call WITHOUT fact_check_passed=true saves an exact draft backup under "
-        "data/publication_drafts/research/ and does NOT publish. Before the second call, "
-        "independently verify proper nouns, dates, figures, current officeholders, vote/seat "
-        "counts, quoted claims, and whether the framing remains useful at the 2026 current moment. "
-        "Call again with fact_check_passed=true and fact_check_notes "
-        "summarizing checked claims, sources, corrections, and current-usefulness revisions to publish. If your independent "
-        "fact-check finds errors in the draft, revise the content yourself and call this tool "
-        "again with the same filename; do not set fact_check_passed=true until the revised draft "
-        "has been re-checked. "
-        "The public identifier is derived from the filename without the .md extension. "
-        "The filename parameter is a stable document identifier, not a filesystem path. "
-        "It is auto-generated from the title with a date prefix (YYYYMMDD_slug.md) unless "
-        "`filename` is passed explicitly. Reusing the same filename updates the same "
-        "research document and invalidates caches so readers see the new version immediately. "
-        "Citation format is fixed for website rendering: cite sources in body text only as "
-        "Markdown footnotes `[^1]`, `[^2]`, etc.; end the document with matching footnote "
-        "definitions that contain URLs, e.g. `[^1]: Publisher, title, date. "
-        "https://example.com`. Do not invent other citation formats such as bare `[1]`, "
-        "numbered source lists, parenthetical source notes, or raw body URLs."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {
-                "type": "string",
-                "description": "Document title. Used for both the H1 heading and the auto filename slug.",
-            },
-            "content": {
-                "type": "string",
-                "description": (
-                    "Full markdown content (without the title heading — auto-prepended). "
-                    "For citations, use Markdown footnotes `[^1]`, `[^2]`, etc. only, and "
-                    "include final definitions with URLs as `[^1]: Source description https://...`. "
-                    "Do not use bare `[1]` citations or any other citation syntax."
-                ),
-            },
-            "filename": {
-                "type": "string",
-                "description": "Optional stable DB document identifier. ASCII letters/digits with '.', '_', '-' only; '.md' appended if missing. Not a filesystem path.",
-            },
-            "fact_check_passed": {
-                "type": "boolean",
-                "description": "Set true only after independently verifying factual claims against current sources.",
-            },
-            "fact_check_notes": {
-                "type": "string",
-                "description": (
-                    "Required when fact_check_passed=true. Summarize checked claims, sources consulted "
-                    "(URLs or tool/source names), and corrections made before publication. If prior "
-                    "verification found errors or stale/low-utility material, mention each corrected issue."
-                ),
-            },
-        },
-        "required": ["title", "content"],
-    },
-}
-
-
-async def _exec_publish_research(
+async def _exec_research_document_publish_public(
     title: str,
     content: str,
     filename: str | None = None,
@@ -569,7 +501,7 @@ async def _exec_publish_research(
             f"Candidate public URL: {_public_url(fname)}\n"
             "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
             "current offices, quotations, source attributions, and whether any claims or framing are "
-            "stale at the 2026 current moment. Then call publish_research again "
+            "stale at the 2026 current moment. Then call research_document publish_public again "
             "with fact_check_passed=true and fact_check_notes listing the checked claims, sources, "
             "corrections made, and current-usefulness revisions.\n\n"
             f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path)}"
@@ -629,7 +561,7 @@ async def _exec_publish_research(
             source_task_id=source_task_id,
         )
     except Exception as e:
-        logger.error("publish_research DB write error for %s: %s", fname, e)
+        logger.error("research_document publish_public DB write error for %s: %s", fname, e)
         return f"Error: failed to store {fname}: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
@@ -655,7 +587,7 @@ async def _exec_publish_research(
                             slug=row["slug"],
                             public_url=public_url,
                             channel_message_ids=br.message_ids,
-                            source="publish_research",
+                            source="research_document_publish_public",
                         )
                         broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
                     except Exception as e:
@@ -686,54 +618,7 @@ async def _exec_publish_research(
     )
 
 
-# ── edit_research ────────────────────────────────────────────────────
-
-EDIT_RESEARCH_TOOL = {
-    "name": "edit_research",
-    "description": (
-        "Edit, unpublish, or re-publish a public research document. Use only for "
-        "research documents. Do NOT use for completed Telegram task reports "
-        "(edit_public_post kind='report'), static/custom HTML pages, hub curations, "
-        "diary entries, or blog posts. filename is the stable research document identifier. "
-        "operation='edit': update the Markdown with new content (and optionally a new title) "
-        "and invalidate Redis plus Cloudflare cache so readers see the new version immediately. "
-        "Original 작성일 is preserved when present in the existing DB markdown. "
-        "operation='unpublish': make it private and invalidate Redis plus Cloudflare cache so it disappears "
-        "from cyber-lenin.com. "
-        "operation='publish': make an existing private research document public and invalidate Redis plus Cloudflare cache so it "
-        "appears on cyber-lenin.com again. Use this instead of publish_research when changing "
-        "the visibility of an existing document."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "operation": {
-                "type": "string",
-                "enum": ["edit", "unpublish", "publish"],
-                "description": "'edit' updates the research document; 'unpublish' makes it private; 'publish' makes a private research document public.",
-            },
-            "filename": {
-                "type": "string",
-                "description": "Existing research document identifier/filename (e.g. '20260418_imperialism_intro.md').",
-            },
-            "title": {
-                "type": "string",
-                "description": "operation=edit only. Optional new H1; if omitted, the existing H1 is reused.",
-            },
-            "content": {
-                "type": "string",
-                "description": "operation=edit only. Required body markdown (without the H1 heading).",
-            },
-            "broadcast": {
-                "type": "boolean",
-                "description": "operation=publish only. Whether to broadcast the newly public report to the Telegram channel. Default true.",
-                "default": True,
-            },
-        },
-        "required": ["operation", "filename"],
-    },
-}
-
+# ── Public research document edits/visibility ──────────────────────────
 
 def _unpublish_sync(existing: Path) -> Path:
     """Move file to research/private/ with a collision-safe destination. Returns new path."""
@@ -754,7 +639,7 @@ def _extract_publish_date_from_markdown(markdown: str) -> str | None:
     return None
 
 
-async def _exec_edit_research(
+async def _exec_research_document_edit_public(
     operation: str,
     filename: str,
     title: str | None = None,
@@ -841,7 +726,7 @@ async def _exec_edit_research(
                 status="public",
             )
         except Exception as e:
-            logger.error("edit_research DB write error for %s: %s", fname, e)
+            logger.error("research_document edit_public DB write error for %s: %s", fname, e)
             return f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}"
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
@@ -865,7 +750,7 @@ async def _exec_edit_research(
         if is_autonomous_publication_context():
             body = _strip_leading_research_scaffold(existing_doc.get("markdown") or "")
             title_for_gate = existing_doc.get("title") or research_store.extract_title(existing_doc.get("markdown") or "", "")
-            return await _exec_publish_research(
+            return await _exec_research_document_publish_public(
                 title=title_for_gate or "",
                 content=body,
                 filename=fname,
@@ -879,7 +764,7 @@ async def _exec_edit_research(
             if not row:
                 return f"Error: no private research document named '{fname}' in DB."
         except Exception as e:
-            logger.error("edit_research publish DB error for %s: %s", fname, e)
+            logger.error("research_document republish_public DB error for %s: %s", fname, e)
             return f"Error: failed to mark {fname} public: {type(e).__name__}: {e}"
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
@@ -905,7 +790,7 @@ async def _exec_edit_research(
                                 slug=row["slug"],
                                 public_url=public_url,
                                 channel_message_ids=br.message_ids,
-                                source="edit_research_publish",
+                                source="research_document_republish_public",
                             )
                             broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
                         except Exception as e:
@@ -931,14 +816,14 @@ async def _exec_edit_research(
             row = await asyncio.to_thread(research_store.set_status, fname, "private")
             backup_note = f"Storage: research_documents id={row['id']} status=private"
         except Exception as e:
-            logger.error("edit_research unpublish DB error for %s: %s", fname, e)
+            logger.error("research_document unpublish_public DB error for %s: %s", fname, e)
             return f"Error: failed to mark {fname} private: {type(e).__name__}: {e}"
     else:
         try:
             new_path = await asyncio.to_thread(_unpublish_sync, existing)
             backup_note = f"Backup path: {new_path}"
         except Exception as e:
-            logger.error("edit_research unpublish error for %s: %s", fname, e)
+            logger.error("research_document unpublish_public error for %s: %s", fname, e)
             return f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}"
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
@@ -1055,7 +940,7 @@ async def _exec_research_document(
 ) -> str:
     op = (action or "").strip().lower()
     if op in {"stage_public", "publish_public"}:
-        return await _exec_publish_research(
+        return await _exec_research_document_publish_public(
             title=title or "",
             content=content or "",
             filename=slug,
@@ -1069,7 +954,7 @@ async def _exec_research_document(
             filename = _filename_from_slug(slug)
         except ValueError as e:
             return f"Error: {e}."
-        return await _exec_edit_research(
+        return await _exec_research_document_edit_public(
             operation="edit",
             filename=filename or "",
             title=title,
@@ -1082,13 +967,13 @@ async def _exec_research_document(
             filename = _filename_from_slug(slug)
         except ValueError as e:
             return f"Error: {e}."
-        return await _exec_edit_research(operation="unpublish", filename=filename or "", broadcast=broadcast)
+        return await _exec_research_document_edit_public(operation="unpublish", filename=filename or "", broadcast=broadcast)
     if op == "republish_public":
         try:
             filename = _filename_from_slug(slug)
         except ValueError as e:
             return f"Error: {e}."
-        return await _exec_edit_research(
+        return await _exec_research_document_edit_public(
             operation="publish",
             filename=filename or "",
             broadcast=broadcast,
@@ -1121,7 +1006,7 @@ async def _exec_research_document(
             markdown_source = body if body is not None and body.strip() else (content if content is not None and content.strip() else private.get("markdown") or "")
             public_title = (title or "").strip() or research_store.extract_title(markdown_source, private.get("title") or "")
             public_body = _strip_leading_research_scaffold(markdown_source)
-            return await _exec_publish_research(
+            return await _exec_research_document_publish_public(
                 title=public_title or "",
                 content=public_body,
                 filename=f"{clean_slug}.md",
@@ -1149,7 +1034,4 @@ async def _exec_research_document(
 RESEARCH_TOOLS = [RESEARCH_DOCUMENT_TOOL]
 RESEARCH_TOOL_HANDLERS = {
     "research_document": _exec_research_document,
-    # Backward-compatible aliases. These names are intentionally not exposed.
-    "publish_research": _exec_publish_research,
-    "edit_research": _exec_edit_research,
 }

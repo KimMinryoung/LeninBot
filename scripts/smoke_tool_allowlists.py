@@ -47,8 +47,6 @@ REMOVED_PUBLIC_TOOLS = {
 }
 
 REQUIRED_COMPAT_HANDLERS = {
-    "publish_research",
-    "edit_research",
     "private_research_document",
     "save_private_research_document",
     "read_private_research_document",

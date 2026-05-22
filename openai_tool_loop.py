@@ -45,8 +45,6 @@ _SIDE_EFFECT_TOOL_NAMES = {
     "edit_content",
     "research_document",
     "edit_public_post",
-    "publish_research",
-    "edit_research",
     "save_private_research_document",
     "publish_private_research_document",
     "save_private_report",

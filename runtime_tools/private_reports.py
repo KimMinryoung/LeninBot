@@ -184,8 +184,8 @@ PRIVATE_RESEARCH_DOCUMENT_TOOL = {
         "Use action='save' to save or overwrite sensitive/unfinished research privately; "
         "action='read' to read one private research document; action='list' to list "
         "metadata/summaries; action='publish' only when the user/orchestrator explicitly "
-        "asks to make a private research document public. Do not use publish_research "
-        "for material that should remain private."
+        "asks to make a private research document public. Do not use public `research_document` "
+        "actions for material that should remain private."
     ),
     "input_schema": {
         "type": "object",
