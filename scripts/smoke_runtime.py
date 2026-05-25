@@ -662,6 +662,7 @@ def _assert_collect_tick_actions_includes_publications() -> None:
         assert "FROM autonomous_project_events" in sql
         return [
             {"event_type": "note_added", "content": "saved note", "meta": {}},
+            {"event_type": "research_draft_staged", "content": "research: Staged Report\n/reports/staged", "meta": {}},
             {"event_type": "publication_created", "content": "research: Public Report\n/reports/public", "meta": {}},
             {"event_type": "plan_revised", "content": "next plan", "meta": {}},
             {"event_type": "state_transition", "content": "finished", "meta": {"from": "researching", "to": "paused"}},
@@ -671,12 +672,117 @@ def _assert_collect_tick_actions_includes_publications() -> None:
         ap.db_query = fake_query
         actions = ap._collect_tick_actions(7, "2026-05-25T10:00:00+00:00")
         assert actions["notes"] == ["saved note"]
+        assert actions["staged_drafts"] == ["research: Staged Report\n/reports/staged"]
         assert actions["publications"] == ["research: Public Report\n/reports/public"]
         assert actions["plan_rationale"] == "next plan"
         assert actions["state_change"] == ("researching", "paused", "finished")
     finally:
         ap.db_query = original_query
 
+
+
+async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
+    import autonomous_project as ap
+
+    original_get_agent = __import__("agents").get_agent
+    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_execute = ap.db_execute
+    original_log_event = ap._log_event
+    original_notify = ap._notify_telegram
+    original_collect = ap._collect_tick_actions
+    original_fetch_advisories = ap._fetch_pending_advisories
+    original_mark_advisories = ap._mark_advisories_consumed
+    original_recent_notes = ap._recent_notes
+    original_recent_staged = ap._recent_staged_research_drafts
+    original_last_log = ap._fetch_last_tick_tool_log
+
+    events: list[tuple[str, str, dict]] = []
+    consumed_advisories: list[tuple[int, list[int]]] = []
+    notifications: list[dict] = []
+
+    class DummySpec:
+        max_rounds = 2
+        model = None
+        budget_usd = 0.1
+        finalization_tools = []
+        terminal_tools = []
+
+        def effective_provider(self, _configured_provider):
+            return "openai"
+
+        def filter_tools(self, _tools, _handlers):
+            return [], {}
+
+        def render_prompt(self, *, provider="claude", **_kwargs):
+            return "system"
+
+    async def staged_chat(*_args, **kwargs):
+        tracker = kwargs.get("budget_tracker")
+        if isinstance(tracker, dict):
+            tracker["rounds_used"] = 1
+            tracker["total_cost"] = 0.003
+        return "Staged a public draft.\n\nSelf-critique: draft is ready for fact-checking."
+
+    def fake_log_event(_project_id, event_type, content="", meta=None, **_kwargs):
+        events.append((event_type, content, meta or {}))
+
+    async def fake_notify(_project, _result_text, actions, runtime):
+        notifications.append({"actions": actions, "runtime": runtime})
+
+    import agents
+    import telegram.bot as bot
+
+    try:
+        agents.get_agent = lambda _name: DummySpec()
+        bot._chat_with_tools = staged_chat
+        ap.db_execute = lambda *_args, **_kwargs: None
+        ap._log_event = fake_log_event
+        ap._notify_telegram = fake_notify
+        ap._collect_tick_actions = lambda _project_id, _since: {
+            "notes": [],
+            "staged_drafts": ["research: Staged Report\n/reports/research/staged-report"],
+            "publications": [],
+            "plan_rationale": None,
+            "state_change": None,
+        }
+        ap._fetch_pending_advisories = lambda _project_id: [
+            {"id": 201, "content": "stage the checked draft", "created_at": None},
+        ]
+        ap._mark_advisories_consumed = lambda project_id, ids: consumed_advisories.append((project_id, ids))
+        ap._recent_notes = lambda _project: []
+        ap._recent_staged_research_drafts = lambda _project_id: []
+        ap._fetch_last_tick_tool_log = lambda _project_id: None
+
+        project = {
+            "id": 45,
+            "title": "Staged Draft Advisory Action",
+            "topic": "runtime",
+            "goal": "Treat staged drafts as durable progress.",
+            "state": "researching",
+            "plan": {"goals": [], "steps": []},
+            "research_notes": [],
+            "turn_count": 8,
+            "last_run_at": None,
+            "created_at": None,
+        }
+        result = await ap._run_one_tick(project)
+        assert result["project_id"] == 45
+        assert consumed_advisories == [(45, [201])]
+        assert any(event_type == "advisories_consumed" for event_type, _content, _meta in events)
+        assert not any(event_type == "tick_no_durable_action" for event_type, _content, _meta in events)
+        assert notifications and notifications[-1]["actions"]["staged_drafts"] == ["research: Staged Report\n/reports/research/staged-report"]
+    finally:
+        agents.get_agent = original_get_agent
+        bot._chat_with_tools = original_chat
+        ap.db_execute = original_execute
+        ap._log_event = original_log_event
+        ap._notify_telegram = original_notify
+        ap._collect_tick_actions = original_collect
+        ap._fetch_pending_advisories = original_fetch_advisories
+        ap._mark_advisories_consumed = original_mark_advisories
+        ap._recent_notes = original_recent_notes
+        ap._recent_staged_research_drafts = original_recent_staged
+        ap._fetch_last_tick_tool_log = original_last_log
 
 
 async def _assert_successful_durable_tick_consumes_advisories() -> None:
@@ -1580,6 +1686,7 @@ async def main() -> None:
     await _assert_autonomous_tick_failure_updates_cooldown()
     _assert_collect_tick_actions_includes_publications()
     await _assert_successful_durable_tick_consumes_advisories()
+    await _assert_successful_staged_draft_tick_consumes_advisories()
     await _assert_successful_noop_tick_logs_no_durable_action()
     _assert_autonomous_cli_status_uses_config_without_db()
     _assert_autonomous_cli_events_orders_by_id()

@@ -309,11 +309,12 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
     ]
 
     notes: list[str] = actions.get("notes") or []
+    staged_drafts: list[str] = actions.get("staged_drafts") or []
     publications: list[str] = actions.get("publications") or []
     plan_rationale = actions.get("plan_rationale")
     state_change = actions.get("state_change")
 
-    if not (notes or publications or plan_rationale or state_change):
+    if not (notes or staged_drafts or publications or plan_rationale or state_change):
         parts.append("")
         parts.append("(저장된 프로젝트 액션 없음 — 노트/출판/계획/상태 변경 없이 종료)")
     else:
@@ -321,6 +322,12 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
         for i, note_text in enumerate(notes, 1):
             prefix = f"[노트 {i}/{len(notes)}]" if len(notes) > 1 else "[노트]"
             excerpt = _excerpt(note_text, limit=900)
+            parts.append("")
+            parts.append(f"{prefix} {excerpt}")
+
+        for i, draft_text in enumerate(staged_drafts, 1):
+            prefix = f"[공개 초안 {i}/{len(staged_drafts)}]" if len(staged_drafts) > 1 else "[공개 초안]"
+            excerpt = _excerpt(draft_text, limit=700)
             parts.append("")
             parts.append(f"{prefix} {excerpt}")
 
@@ -360,8 +367,8 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
 
 def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
     """Read back events logged during this tick and extract the substantive content
-    (note text, plan rationale, state transition) so the Telegram summary can show
-    WHAT the agent did, not just how many times."""
+    (note text, staged drafts, publications, plan rationale, state transition)
+    so the Telegram summary can show WHAT the agent did, not just how many times."""
     rows = db_query(
         """
         SELECT event_type, content, meta
@@ -372,6 +379,7 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
         (project_id, since_iso_utc),
     )
     notes: list[str] = []
+    staged_drafts: list[str] = []
     publications: list[str] = []
     plan_rationale: str | None = None
     state_change: tuple[str, str, str] | None = None  # (from, to, reason)
@@ -381,6 +389,8 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
         m = r.get("meta") or {}
         if t == "note_added":
             notes.append(c)
+        elif t == "research_draft_staged":
+            staged_drafts.append(c)
         elif t == "publication_created":
             publications.append(c)
         elif t == "plan_revised":
@@ -389,6 +399,7 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
             state_change = (str(m.get("from")), str(m.get("to")), c)
     return {
         "notes": notes,
+        "staged_drafts": staged_drafts,
         "publications": publications,
         "plan_rationale": plan_rationale,
         "state_change": state_change,
@@ -979,6 +990,7 @@ async def _run_one_tick(project: dict) -> dict:
     actions = _collect_tick_actions(project["id"], tick_started_at_utc)
     has_durable_action = bool(
         actions.get("notes")
+        or actions.get("staged_drafts")
         or actions.get("publications")
         or actions.get("plan_rationale")
         or actions.get("state_change")
