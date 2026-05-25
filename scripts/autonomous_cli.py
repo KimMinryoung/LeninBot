@@ -279,6 +279,29 @@ def _latest_project_event(project_id: int, event_type: str) -> dict | None:
     return dict(rows[0]) if rows else None
 
 
+def _latest_current_staged_research_draft(project_id: int) -> dict | None:
+    try:
+        rows = db_query(
+            """
+            SELECT ev.content, ev.meta, ev.created_at
+              FROM autonomous_project_events ev
+              JOIN research_documents rd
+                ON rd.id::text = ev.meta->>'research_document_id'
+                OR rd.filename = ev.meta->>'filename'
+                OR rd.slug = ev.meta->>'slug'
+             WHERE ev.project_id = %s
+               AND ev.event_type = 'research_draft_staged'
+               AND rd.status = 'staged'
+             ORDER BY ev.created_at DESC, ev.id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+    except Exception:
+        return None
+    return dict(rows[0]) if rows else None
+
+
 def _recent_project_advisories(project_id: int, limit: int = 10) -> list[dict]:
     try:
         rows = db_query(
@@ -351,7 +374,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
             f"    - turn {n.get('turn')} @ {when}: {(n.get('text') or '')[:300]}"
             + (f"  [{src}]" if src else "")
         )
-    staged_draft = _latest_project_event(row["id"], "research_draft_staged")
+    staged_draft = _latest_current_staged_research_draft(row["id"])
     tick_error = _latest_project_event(row["id"], "tick_error")
     if staged_draft:
         content = str(staged_draft.get("content") or "")

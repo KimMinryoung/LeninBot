@@ -1182,7 +1182,8 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
                 {"id": 3, "content": "pending CLI advice", "created_at": None, "consumed_at": None},
                 {"id": 2, "content": "consumed CLI advice", "created_at": None, "consumed_at": datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)},
             ]
-        if params and len(params) >= 2 and params[1] == "research_draft_staged":
+        if "research_draft_staged" in sql and "research_documents" in sql:
+            assert "rd.status = 'staged'" in sql
             return [{"content": "research: CLI Staged Draft\n/reports/research/cli-staged", "meta": {"slug": "cli-staged"}, "created_at": None}]
         if params and len(params) >= 2 and params[1] == "tick_tool_log":
             return [{

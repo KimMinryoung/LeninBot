@@ -2365,11 +2365,16 @@ async def cmd_project(message: Message):
         last_staged_draft = await asyncio.to_thread(
             _query_one,
             """
-            SELECT content, meta, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'research_draft_staged'
-             ORDER BY created_at DESC, id DESC
+            SELECT ev.content, ev.meta, ev.created_at
+              FROM autonomous_project_events ev
+              JOIN research_documents rd
+                ON rd.id::text = ev.meta->>'research_document_id'
+                OR rd.filename = ev.meta->>'filename'
+                OR rd.slug = ev.meta->>'slug'
+             WHERE ev.project_id = %s
+               AND ev.event_type = 'research_draft_staged'
+               AND rd.status = 'staged'
+             ORDER BY ev.created_at DESC, ev.id DESC
              LIMIT 1
             """,
             (project_id,),
