@@ -1,6 +1,6 @@
 # Project State
 
-최종 확인 기준: 2026-05-09 코드 트리.
+최종 확인 기준: 2026-05-25 코드 트리.
 
 Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 PostgreSQL/Supabase와 Neo4j에 저장하고, Redis는 실행 중인 task 상태와 mission board 같은 단기 공유 상태를 맡는다.
 
@@ -47,7 +47,7 @@ systemd timers
 | `leninbot-telegram.service` | `telegram/bot.py` | Telegram orchestrator and task worker |
 | `leninbot-api.service` | `uvicorn api:app` | web chat, admin API, email/A2A/private reports |
 | `leninbot-browser.service` | `browser/worker.py` | browser automation worker over Unix socket |
-| `leninbot-autonomous.service` | `scripts/autonomous_work.py` | one autonomous project tick |
+| `leninbot-autonomous.service` | `venv/bin/python -m autonomous_project` | one autonomous project tick |
 | `leninbot-experience.service` | `experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
 

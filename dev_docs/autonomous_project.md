@@ -9,12 +9,13 @@ The autonomous project loop advances long-running projects without a live user t
 | File | Role |
 |---|---|
 | `autonomous_project.py` | project selection, tick prompt assembly, event logging |
-| `scripts/autonomous_work.py` | systemd-friendly runner |
+| `scripts/autonomous_work.py` | compatibility wrapper for older manual invocations |
 | `agents/autonomous.py` | `autonomous_project` AgentSpec and capability boundary |
 | `bot_config.py` | `autonomous_active`, `autonomous_provider`, `autonomous_model` |
 | `systemd/leninbot-autonomous.service` / `.timer` | scheduled execution |
 
 `is_autonomous_active()` reloads config from disk each call, so timer-spawned processes see Telegram `/config` toggles without a long-running process reload.
+The production systemd service runs `venv/bin/python -m autonomous_project`; `scripts/autonomous_work.py` delegates to the same entrypoint for compatibility and must not grow a separate workflow.
 
 ## Project State
 
