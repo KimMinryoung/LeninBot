@@ -664,7 +664,14 @@ def main() -> int:
     pt.set_defaults(func=_cmd_tick)
 
     args = p.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Missing database configuration" in message:
+            print(f"error: {message}", file=sys.stderr)
+            return 1
+        raise
 
 
 if __name__ == "__main__":

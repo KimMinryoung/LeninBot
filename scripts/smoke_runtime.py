@@ -1079,6 +1079,30 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         cli._systemctl_show = original_systemctl_show
 
 
+def _assert_autonomous_cli_main_reports_missing_db_config() -> None:
+    import contextlib
+    import io
+    import scripts.autonomous_cli as cli
+
+    original_list = cli._cmd_list
+    original_argv = sys.argv
+
+    try:
+        cli._cmd_list = lambda _args: (_ for _ in ()).throw(
+            RuntimeError("Missing database configuration: DB_PASSWORD")
+        )
+        sys.argv = ["autonomous_cli.py", "list"]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cli.main()
+        assert rc == 1
+        assert "Missing database configuration: DB_PASSWORD" in err.getvalue()
+        assert "Traceback" not in err.getvalue()
+    finally:
+        cli._cmd_list = original_list
+        sys.argv = original_argv
+
+
 def _assert_autonomous_cli_events_orders_by_id() -> None:
     import argparse
     import contextlib
@@ -1709,6 +1733,7 @@ async def main() -> None:
     await _assert_successful_staged_draft_tick_consumes_advisories()
     await _assert_successful_noop_tick_logs_no_durable_action()
     _assert_autonomous_cli_status_uses_config_without_db()
+    _assert_autonomous_cli_main_reports_missing_db_config()
     _assert_autonomous_cli_events_orders_by_id()
     _assert_autonomous_cli_list_includes_operational_signals()
     _assert_autonomous_cli_show_uses_note_table()
