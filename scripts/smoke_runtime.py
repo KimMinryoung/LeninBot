@@ -376,7 +376,11 @@ def _assert_autonomous_prompt_surfaces_staged_drafts() -> None:
             "last_run_at": None,
         }
 
-        markdown_prompt = ap._build_task_prompt(project, turn_budget=3, provider="deepseek")
+        advisories = [{"id": 91, "content": "Finish the waiting staged draft before starting new research.", "created_at": None}]
+        markdown_prompt = ap._build_task_prompt(project, turn_budget=3, advisories=advisories, provider="deepseek")
+        assert "### Operator Advice" in markdown_prompt
+        assert "remain pending until this tick saves durable project work" in markdown_prompt
+        assert "shown once" not in markdown_prompt
         assert "### Staged Research Drafts" in markdown_prompt
         assert "[this-project] slug=draft-report" in markdown_prompt
         assert "status='staged'" in markdown_prompt
@@ -384,7 +388,16 @@ def _assert_autonomous_prompt_surfaces_staged_drafts() -> None:
         assert "tick_no_durable_action" in markdown_prompt
         assert "advisories_retained_no_durable_action" in markdown_prompt
 
-        xml_prompt = ap._build_task_prompt(project, turn_budget=3, provider="claude")
+        from agents import get_agent
+
+        system_prompt = get_agent("autonomous_project").render_prompt(provider="deepseek")
+        assert "Advice remains pending until a tick saves" in system_prompt
+        assert "Shown once" not in system_prompt
+
+        xml_prompt = ap._build_task_prompt(project, turn_budget=3, advisories=advisories, provider="claude")
+        assert "<operator-advice>" in xml_prompt
+        assert "remain pending until this tick saves durable project work" in xml_prompt
+        assert "shown once" not in xml_prompt
         assert "<staged-research-drafts>" in xml_prompt
         assert "slug=draft-report" in xml_prompt
         assert "read_self(content_type='research_document'" in xml_prompt
@@ -665,6 +678,112 @@ def _assert_collect_tick_actions_includes_publications() -> None:
         ap.db_query = original_query
 
 
+
+async def _assert_successful_durable_tick_consumes_advisories() -> None:
+    import autonomous_project as ap
+
+    original_get_agent = __import__("agents").get_agent
+    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_execute = ap.db_execute
+    original_log_event = ap._log_event
+    original_notify = ap._notify_telegram
+    original_collect = ap._collect_tick_actions
+    original_fetch_advisories = ap._fetch_pending_advisories
+    original_mark_advisories = ap._mark_advisories_consumed
+    original_recent_notes = ap._recent_notes
+    original_recent_staged = ap._recent_staged_research_drafts
+    original_last_log = ap._fetch_last_tick_tool_log
+
+    events: list[tuple[str, str, dict]] = []
+    consumed_advisories: list[tuple[int, list[int]]] = []
+    notifications: list[dict] = []
+
+    class DummySpec:
+        max_rounds = 2
+        model = None
+        budget_usd = 0.1
+        finalization_tools = []
+        terminal_tools = []
+
+        def effective_provider(self, _configured_provider):
+            return "openai"
+
+        def filter_tools(self, _tools, _handlers):
+            return [], {}
+
+        def render_prompt(self, *, provider="claude", **_kwargs):
+            return "system"
+
+    async def durable_chat(*_args, **kwargs):
+        tracker = kwargs.get("budget_tracker")
+        if isinstance(tracker, dict):
+            tracker["rounds_used"] = 1
+            tracker["total_cost"] = 0.002
+        return "Saved a durable note.\n\nSelf-critique: advice was acted on."
+
+    def fake_log_event(_project_id, event_type, content="", meta=None, **_kwargs):
+        events.append((event_type, content, meta or {}))
+
+    async def fake_notify(_project, _result_text, actions, runtime):
+        notifications.append({"actions": actions, "runtime": runtime})
+
+    import agents
+    import telegram.bot as bot
+
+    try:
+        agents.get_agent = lambda _name: DummySpec()
+        bot._chat_with_tools = durable_chat
+        ap.db_execute = lambda *_args, **_kwargs: None
+        ap._log_event = fake_log_event
+        ap._notify_telegram = fake_notify
+        ap._collect_tick_actions = lambda _project_id, _since: {
+            "notes": ["durable note from advised work"],
+            "publications": [],
+            "plan_rationale": None,
+            "state_change": None,
+        }
+        ap._fetch_pending_advisories = lambda _project_id: [
+            {"id": 101, "content": "do the durable work", "created_at": None},
+            {"id": 102, "content": "record the result", "created_at": None},
+        ]
+        ap._mark_advisories_consumed = lambda project_id, ids: consumed_advisories.append((project_id, ids))
+        ap._recent_notes = lambda _project: []
+        ap._recent_staged_research_drafts = lambda _project_id: []
+        ap._fetch_last_tick_tool_log = lambda _project_id: None
+
+        project = {
+            "id": 44,
+            "title": "Durable Advisory Action",
+            "topic": "runtime",
+            "goal": "Consume advice only after durable work.",
+            "state": "researching",
+            "plan": {"goals": [], "steps": []},
+            "research_notes": [],
+            "turn_count": 7,
+            "last_run_at": None,
+            "created_at": None,
+        }
+        result = await ap._run_one_tick(project)
+        assert result["project_id"] == 44
+        assert consumed_advisories == [(44, [101, 102])]
+        assert any(event_type == "advisories_consumed" for event_type, _content, _meta in events)
+        assert not any(event_type == "advisories_retained_no_durable_action" for event_type, _content, _meta in events)
+        assert not any(event_type == "tick_no_durable_action" for event_type, _content, _meta in events)
+        assert notifications and notifications[-1]["actions"]["notes"] == ["durable note from advised work"]
+    finally:
+        agents.get_agent = original_get_agent
+        bot._chat_with_tools = original_chat
+        ap.db_execute = original_execute
+        ap._log_event = original_log_event
+        ap._notify_telegram = original_notify
+        ap._collect_tick_actions = original_collect
+        ap._fetch_pending_advisories = original_fetch_advisories
+        ap._mark_advisories_consumed = original_mark_advisories
+        ap._recent_notes = original_recent_notes
+        ap._recent_staged_research_drafts = original_recent_staged
+        ap._fetch_last_tick_tool_log = original_last_log
+
+
 async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
     import autonomous_project as ap
 
@@ -765,6 +884,46 @@ async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
         ap._recent_notes = original_recent_notes
         ap._recent_staged_research_drafts = original_recent_staged
         ap._fetch_last_tick_tool_log = original_last_log
+
+
+
+def _assert_autonomous_cli_status_uses_config_without_db() -> None:
+    import argparse
+    import bot_config
+    import contextlib
+    import io
+    import scripts.autonomous_cli as cli
+
+    original_config = dict(bot_config._config)
+    original_load = bot_config._load_config
+    original_ensure = cli._ensure_tables
+    try:
+        cfg = dict(original_config)
+        cfg.update({
+            "autonomous_active": False,
+            "autonomous_provider": "deepseek",
+            "autonomous_model": "medium",
+        })
+        bot_config._config.clear()
+        bot_config._config.update(cfg)
+        bot_config._load_config = lambda: dict(cfg)
+        cli._ensure_tables = lambda: (_ for _ in ()).throw(AssertionError("status must not touch DB tables"))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli._cmd_status(argparse.Namespace(no_systemd=True))
+        output = buf.getvalue()
+        assert rc == 0
+        assert "autonomous_active: false" in output
+        assert "provider: deepseek" in output
+        assert "model: medium (deepseek-v4-flash)" in output
+        assert "paused by config" in output
+        assert "timer:" not in output
+    finally:
+        bot_config._config.clear()
+        bot_config._config.update(original_config)
+        bot_config._load_config = original_load
+        cli._ensure_tables = original_ensure
 
 
 def _assert_autonomous_cli_events_orders_by_id() -> None:
@@ -911,10 +1070,12 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
 
 
 def _assert_orchestrator_autonomous_status_includes_operational_signals() -> None:
+    import bot_config
     import db
     from telegram.bot import _format_autonomous_status
 
     original_query = db.query
+    original_is_active = bot_config.is_autonomous_active
 
     def fake_query(sql, params=()):
         assert "pending_advisories" in sql
@@ -932,23 +1093,29 @@ def _assert_orchestrator_autonomous_status_includes_operational_signals() -> Non
 
     try:
         db.query = fake_query
+        bot_config.is_autonomous_active = lambda: False
         markdown = _format_autonomous_status("deepseek")
+        assert "Loop is PAUSED by config" in markdown
         assert "pending advice 2" in markdown
         assert "last event tick_error" in markdown
         assert "Operational Signals" in markdown
 
         xml = _format_autonomous_status("claude")
         assert xml.startswith("<autonomous-agent-status>")
+        assert "Loop is PAUSED by config" in xml
         assert "pending advice 2" in xml
     finally:
         db.query = original_query
+        bot_config.is_autonomous_active = original_is_active
 
 
 async def _assert_telegram_projects_lists_operational_signals() -> None:
+    import bot_config
     import telegram.commands as commands
 
     original_query = commands._query
     original_ctx = getattr(commands, "_ctx", None)
+    original_is_active = bot_config.is_autonomous_active
 
     class User:
         id = 1
@@ -979,15 +1146,18 @@ async def _assert_telegram_projects_lists_operational_signals() -> None:
     try:
         commands._query = fake_query
         commands._ctx = {"is_allowed": lambda _user_id: True}
+        bot_config.is_autonomous_active = lambda: False
         message = Message()
         await commands.cmd_projects(message)
         assert message.replies
         output = message.replies[-1]
+        assert "inactive (autonomous_active=false" in output
         assert "advice=1" in output
         assert "event=tick_error" in output
         assert "Project List Signals" in output
     finally:
         commands._query = original_query
+        bot_config.is_autonomous_active = original_is_active
         if original_ctx is None:
             try:
                 delattr(commands, "_ctx")
@@ -1130,9 +1300,11 @@ def _assert_web_political_line_dynamic_reload() -> None:
 
 
 async def _assert_web_autonomous_summary_includes_publication_events() -> None:
+    import bot_config
     import web_chat
 
     original_query = web_chat.db_query
+    original_is_active = bot_config.is_autonomous_active
 
     def fake_query(sql, params=()):
         if "FROM autonomous_projects" in sql:
@@ -1159,13 +1331,44 @@ async def _assert_web_autonomous_summary_includes_publication_events() -> None:
 
     try:
         web_chat.db_query = fake_query
+        bot_config.is_autonomous_active = lambda: False
         output = await web_chat._exec_web_read_self(content_type="autonomous_project", id=7)
         assert "Autonomous project status, public summary only" in output
+        assert "Autonomous loop: paused by config" in output
         assert "publication_created" in output
         assert "Public Report" in output
         assert "operator" not in output.lower() or "not exposed" in output
     finally:
         web_chat.db_query = original_query
+        bot_config.is_autonomous_active = original_is_active
+
+
+async def _assert_web_public_summary_includes_autonomous_loop_state() -> None:
+    import bot_config
+    import web_chat
+
+    original_query = web_chat.db_query
+    original_is_active = bot_config.is_autonomous_active
+
+    def fake_query(sql, params=()):
+        assert "research_count" in sql
+        return [{
+            "research_count": 12,
+            "static_page_count": 3,
+            "active_project_count": 2,
+        }]
+
+    try:
+        web_chat.db_query = fake_query
+        bot_config.is_autonomous_active = lambda: False
+        output = await web_chat._exec_web_read_self(content_type="system")
+        assert "Public research reports: 12" in output
+        assert "Static pages: 3" in output
+        assert "Active autonomous projects: 2" in output
+        assert "Autonomous loop: paused by config" in output
+    finally:
+        web_chat.db_query = original_query
+        bot_config.is_autonomous_active = original_is_active
 
 
 async def _assert_stage_public_records_autonomous_staged_draft_event() -> None:
@@ -1334,7 +1537,9 @@ async def main() -> None:
     _assert_autonomous_project_selection_prioritizes_advice()
     await _assert_autonomous_tick_failure_updates_cooldown()
     _assert_collect_tick_actions_includes_publications()
+    await _assert_successful_durable_tick_consumes_advisories()
     await _assert_successful_noop_tick_logs_no_durable_action()
+    _assert_autonomous_cli_status_uses_config_without_db()
     _assert_autonomous_cli_events_orders_by_id()
     _assert_autonomous_cli_list_includes_operational_signals()
     _assert_autonomous_cli_show_uses_note_table()
@@ -1343,6 +1548,7 @@ async def main() -> None:
     await _assert_telegram_project_show_includes_tick_signals()
     _assert_web_political_line_dynamic_reload()
     await _assert_web_autonomous_summary_includes_publication_events()
+    await _assert_web_public_summary_includes_autonomous_loop_state()
     await _assert_stage_public_records_autonomous_staged_draft_event()
     _assert_diary_web_context_injection()
     await _assert_diary_runtime_route_fallbacks()

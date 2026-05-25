@@ -3,9 +3,9 @@
 Entry point: `run_tick()` — invoked hourly by `leninbot-autonomous.service`.
 Picks a due active project, prioritizing pending operator advisories, and runs one bounded agent wake on it.
 
-This is the T0 pilot tier: research + planning only, no external output. See
-`agents/autonomous.py` for the agent spec that enforces the tier via its tool
-whitelist and prompt constraints.
+This runtime is scoped to research, planning, and publishing only on owned
+Cyber-Lenin surfaces. See `agents/autonomous.py` for the agent spec that
+enforces the boundary via its tool whitelist and prompt constraints.
 """
 
 from __future__ import annotations
@@ -87,10 +87,10 @@ def _ensure_tables() -> None:
         CREATE INDEX IF NOT EXISTS autonomous_project_events_project_idx
         ON autonomous_project_events(project_id, created_at DESC)
     """)
-    # Operator advisories — one-shot messages that the next tick reads and then
-    # the system marks consumed. Separate from research_notes (different
-    # authority: operator vs agent-self) and from events (events are passive
-    # logs, advisories are active directives).
+    # Operator advisories — active operator directives. A tick reads pending
+    # advisories and consumes them only after it saves durable project work;
+    # no-op ticks retain them. Separate from research_notes (agent-self
+    # findings) and events (passive logs).
     db_execute("""
         CREATE TABLE IF NOT EXISTS autonomous_project_advisories (
             id          SERIAL PRIMARY KEY,
@@ -767,7 +767,8 @@ def _build_task_prompt(
             parts.append(
                 "### Operator Advice\n\n"
                 "Read these messages before acting. They override your prior plan when they conflict. "
-                "These messages are shown once; after this tick they are marked consumed.\n\n"
+                "They remain pending until this tick saves durable project work; if the tick ends "
+                "without a note, publication, plan revision, or state change, they will be shown again next tick.\n\n"
                 + "\n\n".join(advisory_lines)
             )
         parts.extend([
@@ -819,8 +820,9 @@ def _build_task_prompt(
             "<operator-advice>\n"
             "The following messages were left for you by the operator between your last tick "
             "and this one. Read them BEFORE acting. They override your prior plan when they "
-            "conflict — the operator sees context you don't. These messages are shown once; "
-            "after this tick they are marked consumed.\n\n"
+            "conflict — the operator sees context you don't. They remain pending until this "
+            "tick saves durable project work; if the tick ends without a note, publication, "
+            "plan revision, or state change, they will be shown again next tick.\n\n"
             + "\n\n".join(advisory_lines)
             + "\n</operator-advice>"
         )
@@ -894,9 +896,9 @@ async def _run_one_tick(project: dict) -> dict:
     # context into the user message below so the system prompt never drifts.
     system_prompt = spec.render_prompt(provider=provider)
 
-    # Fetch pending operator advisories. Marked consumed AFTER the tick
-    # succeeds — if the tick raises, advisories remain pending for the next
-    # tick to see so the operator's message isn't lost to an infra error.
+    # Fetch pending operator advisories. They are marked consumed only after
+    # the tick saves durable project work. If the tick raises or completes as a
+    # no-op, advisories remain pending so operator direction is not lost.
     pending_advisories = _fetch_pending_advisories(project["id"])
     user_content = _build_task_prompt(
         project,

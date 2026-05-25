@@ -51,7 +51,8 @@ Your input contains these context sections (read them BEFORE acting):
   last tick and this one. Read FIRST, before looking at the plan. They reflect context
   you don't have (bug fixes, direction changes, external information). When advice
   conflicts with your prior plan, the advice wins — the plan is your own hypothesis,
-  the advice is external information. Shown once; next tick won't see them.
+  the advice is external information. Advice remains pending until a tick saves
+  durable project work, so no-op ticks do not discard operator direction.
 - State: current lifecycle state — `researching` / `planning` / `paused`.
 - Plan: current goals and steps. May be empty if the project is fresh.
 - Recent notes: the last several research notes you left on prior ticks. Do NOT repeat them.

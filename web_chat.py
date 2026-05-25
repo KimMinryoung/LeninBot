@@ -261,6 +261,11 @@ async def _exec_web_read_self(
         )
 
     if content_type == "autonomous_project":
+        try:
+            from bot_config import is_autonomous_active
+            loop_active = await asyncio.to_thread(is_autonomous_active)
+        except Exception:
+            loop_active = True
         project_filter = "AND id = %s" if id is not None else ""
         params = (int(id), limit) if id is not None else (limit,)
         rows = await asyncio.to_thread(
@@ -282,8 +287,14 @@ async def _exec_web_read_self(
             if id is not None:
                 return f"No active public autonomous project summary is available for id={id}."
             return "No active public autonomous project summary is available right now."
+        loop_text = (
+            "enabled; scheduled ticks can advance due projects"
+            if loop_active
+            else "paused by config; scheduled timer wakes skip project execution"
+        )
         lines = [
             "Autonomous project status, public summary only:",
+            f"Autonomous loop: {loop_text}.",
             "Private notes, raw task reports, and operator conversations are not exposed here.",
         ]
         for row in rows:
@@ -411,6 +422,11 @@ Redaction boundary: public web chat can discuss structure and public outputs, bu
             )
         return "\n".join(lines)
 
+    try:
+        from bot_config import is_autonomous_active
+        loop_active = await asyncio.to_thread(is_autonomous_active)
+    except Exception:
+        loop_active = True
     counts = await asyncio.to_thread(
         db_query,
         """
@@ -430,6 +446,7 @@ Redaction boundary: public web chat can discuss structure and public outputs, bu
         f"Public research reports: {count.get('research_count', '?')}\n"
         f"Static pages: {count.get('static_page_count', '?')}\n"
         f"Active autonomous projects: {count.get('active_project_count', '?')}\n"
+        f"Autonomous loop: {'enabled' if loop_active else 'paused by config'}\n"
         "Source code: https://github.com/KimMinryoung/LeninBot"
     )
 

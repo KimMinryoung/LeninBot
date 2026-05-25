@@ -1,6 +1,6 @@
 # Autonomous Project Loop
 
-최종 확인 기준: 2026-05-09 코드 트리.
+최종 확인 기준: 2026-05-25 코드 트리.
 
 The autonomous project loop advances long-running projects without a live user turn. It is a bounded scheduled worker, not a conversational surface.
 
@@ -24,7 +24,7 @@ The autonomous project loop advances long-running projects without a live user t
 |---|---|
 | `autonomous_projects` | project title, topic, goal, state, plan, counters, optional publication pacing knobs |
 | `autonomous_project_events` | durable tick/event log, including bounded tool traces |
-| `autonomous_project_advisories` | operator one-shot advice consumed by the next tick |
+| `autonomous_project_advisories` | operator advice kept pending until a tick saves durable project work |
 | `autonomous_project_notes` | durable research notes with sources |
 
 Active states are:
@@ -42,15 +42,15 @@ Inactive states are:
 1. Check `autonomous_active`.
 2. Select one due active project. Projects with pending operator advisories are selected before ordinary oldest-`last_run_at` round-robin order.
 3. Load project, plan, recent notes, recent tick warnings, currently staged research drafts, last tick tool log, and pending operator advisories.
-4. Mark advisories consumed for that project.
-5. Run the `autonomous_project` agent with a small bounded round/budget.
-6. Persist notes, plan changes, state changes, publications, and a clipped tool log.
-7. Increment turn metadata and emit project events.
+4. Run the `autonomous_project` agent with a small bounded round/budget.
+5. Persist notes, plan changes, state changes, publications, and a clipped tool log.
+6. Increment turn metadata and emit project events.
+7. Mark pending advisories consumed only if the tick produced durable project work; otherwise retain them for the next tick.
 
 Each tick should make one concrete advance. The agent prompt explicitly prioritizes saving durable notes before final prose because chat text does not persist across ticks. The base autonomous agent spec keeps project-state tools (`add_research_note`, `revise_plan`, `set_project_state`) and owned publishing tools (`research_document`, `publish_hub_curation`, `edit_content`, `publish_static_page`) in finalization tools so durable persistence still has pressure even when no runtime override file is present.
 
-`read_self(content_type="autonomous_project", id=<id>)` and `scripts/autonomous_cli.py show <id>` read recent notes from `autonomous_project_notes` first and include pending/recent operator advisories, the latest tick error, no-durable-action warning, and tick tool log; both fall back to legacy `autonomous_projects.research_notes` only if the note table is unavailable. `scripts/autonomous_cli.py list` also shows pending advisory counts and the most recent project event for quick triage.
-The Telegram orchestrator autonomous status block and `/projects` list include pending advisory counts and the most recent project event so normal chat context can see stalled/error states without an extra project-detail call. `/project <id> show` lists pending operator advisories and includes the latest tick error, no-durable-action warning, and tick tool log for direct operator triage. Public web chat autonomous summaries remain public-safe but include public `publication_created` events in recent work.
+`scripts/autonomous_cli.py status` reads config without DB access, so an operator can see `autonomous_active=false`, the autonomous provider/model, and optional systemd timer/service state even from a shell that lacks production DB credentials. `read_self(content_type="autonomous_project", id=<id>)` and `scripts/autonomous_cli.py show <id>` read recent notes from `autonomous_project_notes` first and include pending/recent operator advisories, the latest tick error, no-durable-action warning, and tick tool log; both fall back to legacy `autonomous_projects.research_notes` only if the note table is unavailable. `scripts/autonomous_cli.py list` also shows pending advisory counts and the most recent project event for quick triage.
+The Telegram orchestrator autonomous status block and `/projects` list include pending advisory counts, the most recent project event, and whether the loop is paused by `autonomous_active=false`, so normal chat context can see stalled/error/config-paused states without an extra project-detail call. `/project <id> show` lists pending operator advisories and includes the latest tick error, no-durable-action warning, and tick tool log for direct operator triage. Public web chat autonomous summaries remain public-safe but include the loop enabled/paused state and public `publication_created` events in recent work.
 If a tick raises before completion, the runtime logs `tick_error` and updates `last_run_at` without incrementing `turn_count`; this gives the failed project a scheduling cooldown so another due project can run on the next timer tick. If a tick succeeds without any durable note, publication, plan revision, or state transition, the runtime logs `tick_no_durable_action` so no-op wakes are visible in normal project status views. Pending operator advisories are consumed only when that successful tick produced a durable project action; no-op ticks retain them and log `advisories_retained_no_durable_action`. Recent `tick_error`, `tick_no_durable_action`, and `advisories_retained_no_durable_action` events are also surfaced in the next tick prompt to discourage repeated failure/no-save loops.
 
 ## Capability Boundary

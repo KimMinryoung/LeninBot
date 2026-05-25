@@ -2163,6 +2163,11 @@ async def cmd_projects(message: Message):
     """List autonomous projects (id, state, turn count, title)."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
+    try:
+        from bot_config import is_autonomous_active
+        loop_active = await asyncio.to_thread(is_autonomous_active)
+    except Exception:
+        loop_active = True
     rows = await asyncio.to_thread(
         _query,
         """
@@ -2193,6 +2198,8 @@ async def cmd_projects(message: Message):
         await message.answer("등록된 자율 프로젝트가 없습니다.")
         return
     lines = ["자율 프로젝트"]
+    if not loop_active:
+        lines.append("상태: inactive (autonomous_active=false; timer tick은 run_tick을 skip)")
     for r in rows:
         last = r["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if r["last_run_at"] else "never"
         bits = [f"turn {r['turn_count']}", f"last={last}"]
@@ -2207,8 +2214,8 @@ async def cmd_projects(message: Message):
     lines.append("")
     lines.append("상세/수정: /project <id> show  |  /project <id> publishing 3 180")
     lines.append("조언: /advise <id> <내용>  |  조언 목록: /advisories <id>")
+    lines.append("루프 상태: /autonomous status")
     await message.answer("\n".join(lines))
-
 
 def _parse_advise_args(text: str) -> tuple[int | None, str]:
     """Split '/advise [<id>] <content>' into (project_id_or_None, content).

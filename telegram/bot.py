@@ -840,6 +840,11 @@ def _format_autonomous_status(provider: str = "claude") -> str:
     chat must never break because this auxiliary block can't be built).
     """
     try:
+        from bot_config import is_autonomous_active
+        loop_active = is_autonomous_active()
+    except Exception:
+        loop_active = True
+    try:
         from db import query as db_query
         rows = db_query(
             """
@@ -881,9 +886,15 @@ def _format_autonomous_status(provider: str = "claude") -> str:
             event_at = r["last_event_at"].astimezone(KST).strftime("%m/%d %H:%M KST") if r.get("last_event_at") else "?"
             bits.append(f"last event {r['last_event_type']} @ {event_at}")
         lines.append(f"- #{r['id']} \"{title}\" — " + ", ".join(bits))
+    loop_line = (
+        "Loop is enabled; hourly timer can advance due projects."
+        if loop_active
+        else "Loop is PAUSED by config (autonomous_active=false); timer wakes skip run_tick until re-enabled."
+    )
     body = (
         "Self-running long-term project loop (hourly tick, separate from your chat turn). "
-        "Active projects:\n"
+        + loop_line
+        + "\nActive projects:\n"
         + "\n".join(lines)
         + "\nFor detail on any project call read_self(content_type=\"autonomous_project\", id=<id>)."
     )

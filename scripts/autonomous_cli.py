@@ -3,6 +3,7 @@
 
 Usage:
   python scripts/autonomous_cli.py create --title "..." --topic "..." --goal "..."
+  python scripts/autonomous_cli.py status
   python scripts/autonomous_cli.py list
   python scripts/autonomous_cli.py show <project_id>
   python scripts/autonomous_cli.py events <project_id> [--limit N]
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime
 
@@ -50,6 +52,51 @@ def _cmd_create(args: argparse.Namespace) -> int:
     pid = row["id"]
     _log_event(pid, "project_created", f"title={args.title}", {"topic": args.topic})
     print(f"Created project #{pid}: {args.title}")
+    return 0
+
+
+
+def _systemctl_state(unit: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception as exc:
+        return f"unavailable ({exc.__class__.__name__})"
+    value = (result.stdout or result.stderr or "").strip()
+    return value or f"unknown ({result.returncode})"
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    """Show scheduler/runtime status without requiring DB credentials."""
+    from bot_config import _config, _load_config, get_current_model_selection
+
+    cfg = _load_config()
+    previous_config = dict(_config)
+    try:
+        _config.clear()
+        _config.update(cfg)
+        model = get_current_model_selection("autonomous")
+    finally:
+        _config.clear()
+        _config.update(previous_config)
+
+    active = bool(cfg.get("autonomous_active", True))
+    print(f"autonomous_active: {str(active).lower()}")
+    print(f"provider: {model.get('provider')}")
+    print(f"model: {model.get('tier')} ({model.get('model_id')})")
+    if not active:
+        print("effective_state: paused by config; timer wakes will skip run_tick")
+    else:
+        print("effective_state: enabled; next timer/manual tick can advance a due project")
+
+    if not getattr(args, "no_systemd", False):
+        print(f"timer: {_systemctl_state('leninbot-autonomous.timer')}")
+        print(f"service: {_systemctl_state('leninbot-autonomous.service')}")
     return 0
 
 
@@ -451,6 +498,10 @@ def main() -> int:
     pc.add_argument("--topic", required=True, help="Short description of the research subject")
     pc.add_argument("--goal", required=True, help="This project's directive: what we want to accomplish + success criteria")
     pc.set_defaults(func=_cmd_create)
+
+    pst = sub.add_parser("status", help="Show autonomous runtime status without DB access")
+    pst.add_argument("--no-systemd", action="store_true", help="Only read config; do not call systemctl")
+    pst.set_defaults(func=_cmd_status)
 
     pl = sub.add_parser("list", help="List all projects")
     pl.set_defaults(func=_cmd_list)
