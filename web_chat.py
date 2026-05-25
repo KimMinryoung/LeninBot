@@ -255,6 +255,7 @@ async def _exec_web_read_self(
             id=id,
             post_id=post_id,
             slug=slug,
+            status="public" if content_type == "research_document" else None,
             max_chars=max_chars,
             offset=offset,
         )

@@ -1333,10 +1333,25 @@ async def _exec_read_research(
     limit: int = 10,
     keyword: str | None = None,
     slug: str | None = None,
+    status: str | None = None,
     max_chars: int | None = None,
     offset: int | None = None,
 ) -> str:
     from db import query as db_query, query_one as db_query_one
+
+    status_value = (status or "").strip().lower()
+    if status_value in {"public", "private", "staged"}:
+        status_clause = "status = %s"
+        status_params: tuple[str, ...] = (status_value,)
+        empty_label = f"No {status_value} research documents found."
+    elif status_value == "all":
+        status_clause = "TRUE"
+        status_params = ()
+        empty_label = "No research documents found."
+    else:
+        status_clause = "status IN ('public', 'staged')"
+        status_params = ()
+        empty_label = "No public or staged research documents found."
 
     if slug:
         raw = slug.strip()
@@ -1344,15 +1359,16 @@ async def _exec_read_research(
         bare_slug = raw[:-3] if raw.endswith(".md") else raw
         row = await asyncio.to_thread(
             db_query_one,
-            """
+            f"""
             SELECT id, filename, slug, title, summary, markdown, status,
                    published_at, updated_at, title_en, summary_en,
                    markdown_en IS NOT NULL AND length(trim(markdown_en)) > 0 AS has_translation
               FROM research_documents
-             WHERE filename = %s OR slug = %s
+             WHERE (filename = %s OR slug = %s)
+               AND {status_clause}
              LIMIT 1
             """,
-            (filename, bare_slug),
+            (filename, bare_slug, *status_params),
         )
         if not row:
             return f"No research document found for slug/filename: {slug}"
@@ -1374,8 +1390,8 @@ async def _exec_read_research(
             f"-- markdown {start}:{end}/{len(markdown)} --\n{body}"
         )
 
-    clauses = ["status = 'public'"]
-    params: list = []
+    clauses = [status_clause]
+    params: list = list(status_params)
     if keyword:
         clauses.append("(title ILIKE %s OR summary ILIKE %s OR markdown ILIKE %s OR filename ILIKE %s)")
         q = f"%{keyword}%"
@@ -1384,7 +1400,7 @@ async def _exec_read_research(
     rows = await asyncio.to_thread(
         db_query,
         f"""
-        SELECT id, filename, slug, title, summary, published_at, updated_at,
+        SELECT id, filename, slug, title, summary, status, published_at, updated_at,
                markdown_en IS NOT NULL AND length(trim(markdown_en)) > 0 AS has_translation
           FROM research_documents
          WHERE {' AND '.join(clauses)}
@@ -1394,13 +1410,13 @@ async def _exec_read_research(
         tuple(params),
     )
     if not rows:
-        return "No public research documents found."
+        return empty_label
     lines = ["=== RESEARCH DOCUMENTS ===", "Use read_self(content_type='research_document', slug='<slug-or-filename>') for full detail."]
     for r in rows:
         slug_value = r.get("slug") or str(r["filename"]).removesuffix(".md")
         summary = (r.get("summary") or "").replace("\n", " ")[:220]
         lines.append(
-            f"- {r['filename']} | slug={slug_value} | updated={_to_kst(r.get('updated_at'))} | en={r.get('has_translation')}\n"
+            f"- {r['filename']} | slug={slug_value} | status={r.get('status')} | updated={_to_kst(r.get('updated_at'))} | en={r.get('has_translation')}\n"
             f"  title: {r.get('title') or ''}\n"
             f"  summary: {summary}"
         )
@@ -2877,6 +2893,7 @@ async def _exec_read_self(
             limit=limit or 10,
             keyword=keyword,
             slug=slug,
+            status=status,
             max_chars=max_chars,
             offset=offset,
         )

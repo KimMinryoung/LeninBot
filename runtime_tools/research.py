@@ -494,9 +494,38 @@ async def _exec_research_document_publish_public(
         return f"Error: failed to back up draft before publication: {type(e).__name__}: {e}"
 
     if fact_check_passed is not True:
+        existing_before = await asyncio.to_thread(
+            research_store.get_document, fname, include_private=True
+        )
+        if existing_before and existing_before.get("status") == "public":
+            return (
+                "Error: staged draft would overwrite an already-public research document.\n"
+                f"Draft backup: {draft_path}\n"
+                f"Existing public document: {fname}\n"
+                "Use action='edit_public' for public-document revisions, or choose a new stable slug "
+                "for a new research document."
+            )
+        try:
+            row, _ = await asyncio.to_thread(
+                research_store.upsert_document,
+                filename=fname,
+                title=title,
+                markdown=document,
+                summary=research_store.extract_excerpt(document),
+                status="staged",
+                source_task_id=source_task_id,
+            )
+        except Exception as e:
+            logger.error("research_document stage_public DB write error for %s: %s", fname, e)
+            return (
+                "Error: failed to store staged draft after backup.\n"
+                f"Draft backup: {draft_path}\n"
+                f"Storage error: {type(e).__name__}: {e}"
+            )
         return (
             "Draft saved, not published.\n"
             f"Draft backup: {draft_path}\n"
+            f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
             f"Candidate filename: {fname}\n"
             f"Candidate public URL: {_public_url(fname)}\n"
             "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
