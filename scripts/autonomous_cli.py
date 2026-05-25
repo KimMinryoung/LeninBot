@@ -3,7 +3,7 @@
 
 Usage:
   python scripts/autonomous_cli.py create --title "..." --topic "..." --goal "..."
-  python scripts/autonomous_cli.py status
+  python scripts/autonomous_cli.py status [--json]
   python scripts/autonomous_cli.py list
   python scripts/autonomous_cli.py show <project_id>
   python scripts/autonomous_cli.py events <project_id> [--limit N]
@@ -111,13 +111,17 @@ def _cmd_status(args: argparse.Namespace) -> int:
         _config.update(previous_config)
 
     active = bool(cfg.get("autonomous_active", True))
-    print(f"autonomous_active: {str(active).lower()}")
-    print(f"provider: {model.get('provider')}")
-    print(f"model: {model.get('tier')} ({model.get('model_id')})")
-    if not active:
-        print("effective_state: paused by config; timer wakes will skip run_tick")
-    else:
-        print("effective_state: enabled; next timer/manual tick can advance a due project")
+    status = {
+        "autonomous_active": active,
+        "provider": model.get("provider"),
+        "model_tier": model.get("tier"),
+        "model_id": model.get("model_id"),
+        "effective_state": (
+            "enabled; next timer/manual tick can advance a due project"
+            if active
+            else "paused by config; timer wakes will skip run_tick"
+        ),
+    }
 
     if not getattr(args, "no_systemd", False):
         timer_state = _systemctl_state("leninbot-autonomous.timer")
@@ -133,20 +137,45 @@ def _cmd_status(args: argparse.Namespace) -> int:
             "ExecMainStatus",
             "InactiveEnterTimestamp",
         )
-        print(f"timer: {timer_state}")
+        status["timer"] = {"state": timer_state}
         if timer_info.get("error"):
-            print(f"timer_detail: {timer_info['error']}")
+            status["timer"]["detail"] = timer_info["error"]
         else:
-            print(f"timer_next: {timer_info.get('NextElapseUSecRealtime') or 'n/a'}")
-            print(f"timer_last: {timer_info.get('LastTriggerUSec') or 'n/a'}")
-        print(f"service: {service_state}")
+            status["timer"]["next"] = timer_info.get("NextElapseUSecRealtime") or "n/a"
+            status["timer"]["last"] = timer_info.get("LastTriggerUSec") or "n/a"
+        status["service"] = {"state": service_state}
         if service_info.get("error"):
-            print(f"service_detail: {service_info['error']}")
+            status["service"]["detail"] = service_info["error"]
         else:
-            result = service_info.get("Result") or "n/a"
-            exit_status = service_info.get("ExecMainStatus") or "n/a"
-            print(f"service_result: {result} (exit={exit_status})")
-            print(f"service_last_exit: {service_info.get('InactiveEnterTimestamp') or 'n/a'}")
+            status["service"]["result"] = service_info.get("Result") or "n/a"
+            status["service"]["exit_status"] = service_info.get("ExecMainStatus") or "n/a"
+            status["service"]["last_exit"] = service_info.get("InactiveEnterTimestamp") or "n/a"
+
+    if getattr(args, "json", False):
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"autonomous_active: {str(active).lower()}")
+    print(f"provider: {status['provider']}")
+    print(f"model: {status['model_tier']} ({status['model_id']})")
+    print(f"effective_state: {status['effective_state']}")
+
+    timer = status.get("timer")
+    if timer:
+        print(f"timer: {timer['state']}")
+        if timer.get("detail"):
+            print(f"timer_detail: {timer['detail']}")
+        else:
+            print(f"timer_next: {timer.get('next') or 'n/a'}")
+            print(f"timer_last: {timer.get('last') or 'n/a'}")
+    service = status.get("service")
+    if service:
+        print(f"service: {service['state']}")
+        if service.get("detail"):
+            print(f"service_detail: {service['detail']}")
+        else:
+            print(f"service_result: {service.get('result') or 'n/a'} (exit={service.get('exit_status') or 'n/a'})")
+            print(f"service_last_exit: {service.get('last_exit') or 'n/a'}")
     return 0
 
 
@@ -551,6 +580,7 @@ def main() -> int:
 
     pst = sub.add_parser("status", help="Show autonomous runtime status without DB access")
     pst.add_argument("--no-systemd", action="store_true", help="Only read config; do not call systemctl")
+    pst.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     pst.set_defaults(func=_cmd_status)
 
     pl = sub.add_parser("list", help="List all projects")

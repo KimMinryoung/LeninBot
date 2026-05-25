@@ -927,7 +927,7 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
 
         systemd_buf = io.StringIO()
         with contextlib.redirect_stdout(systemd_buf):
-            systemd_rc = cli._cmd_status(argparse.Namespace(no_systemd=False))
+            systemd_rc = cli._cmd_status(argparse.Namespace(no_systemd=False, json=False))
         systemd_output = systemd_buf.getvalue()
         assert systemd_rc == 0
         assert "timer: active" in systemd_output
@@ -937,9 +937,21 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         assert "service_result: success (exit=0)" in systemd_output
         assert "service_last_exit: Mon 2026-05-25 13:17:03 UTC" in systemd_output
 
+        json_buf = io.StringIO()
+        with contextlib.redirect_stdout(json_buf):
+            json_rc = cli._cmd_status(argparse.Namespace(no_systemd=False, json=True))
+        json_output = json.loads(json_buf.getvalue())
+        assert json_rc == 0
+        assert json_output["autonomous_active"] is False
+        assert json_output["provider"] == "deepseek"
+        assert json_output["model_id"] == "deepseek-v4-flash"
+        assert json_output["timer"]["next"] == "Mon 2026-05-25 14:17:00 UTC"
+        assert json_output["service"]["result"] == "success"
+        assert json_output["service"]["exit_status"] == "0"
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = cli._cmd_status(argparse.Namespace(no_systemd=True))
+            rc = cli._cmd_status(argparse.Namespace(no_systemd=True, json=False))
         output = buf.getvalue()
         assert rc == 0
         assert "autonomous_active: false" in output
