@@ -71,6 +71,31 @@ def _systemctl_state(unit: str) -> str:
     return value or f"unknown ({result.returncode})"
 
 
+def _systemctl_show(unit: str, *properties: str) -> dict[str, str]:
+    try:
+        cmd = ["systemctl", "show", unit, "--no-pager"]
+        for prop in properties:
+            cmd.append(f"--property={prop}")
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception as exc:
+        return {"error": f"unavailable ({exc.__class__.__name__})"}
+    data: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key] = value.strip()
+    if not data and result.returncode != 0:
+        data["error"] = (result.stderr or "").strip() or f"unknown ({result.returncode})"
+    return data
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     """Show scheduler/runtime status without requiring DB credentials."""
     from bot_config import _config, _load_config, get_current_model_selection
@@ -95,8 +120,33 @@ def _cmd_status(args: argparse.Namespace) -> int:
         print("effective_state: enabled; next timer/manual tick can advance a due project")
 
     if not getattr(args, "no_systemd", False):
-        print(f"timer: {_systemctl_state('leninbot-autonomous.timer')}")
-        print(f"service: {_systemctl_state('leninbot-autonomous.service')}")
+        timer_state = _systemctl_state("leninbot-autonomous.timer")
+        service_state = _systemctl_state("leninbot-autonomous.service")
+        timer_info = _systemctl_show(
+            "leninbot-autonomous.timer",
+            "NextElapseUSecRealtime",
+            "LastTriggerUSec",
+        )
+        service_info = _systemctl_show(
+            "leninbot-autonomous.service",
+            "Result",
+            "ExecMainStatus",
+            "InactiveEnterTimestamp",
+        )
+        print(f"timer: {timer_state}")
+        if timer_info.get("error"):
+            print(f"timer_detail: {timer_info['error']}")
+        else:
+            print(f"timer_next: {timer_info.get('NextElapseUSecRealtime') or 'n/a'}")
+            print(f"timer_last: {timer_info.get('LastTriggerUSec') or 'n/a'}")
+        print(f"service: {service_state}")
+        if service_info.get("error"):
+            print(f"service_detail: {service_info['error']}")
+        else:
+            result = service_info.get("Result") or "n/a"
+            exit_status = service_info.get("ExecMainStatus") or "n/a"
+            print(f"service_result: {result} (exit={exit_status})")
+            print(f"service_last_exit: {service_info.get('InactiveEnterTimestamp') or 'n/a'}")
     return 0
 
 

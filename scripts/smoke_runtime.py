@@ -897,6 +897,8 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
     original_config = dict(bot_config._config)
     original_load = bot_config._load_config
     original_ensure = cli._ensure_tables
+    original_systemctl_state = cli._systemctl_state
+    original_systemctl_show = cli._systemctl_show
     try:
         cfg = dict(original_config)
         cfg.update({
@@ -908,6 +910,32 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         bot_config._config.update(cfg)
         bot_config._load_config = lambda: dict(cfg)
         cli._ensure_tables = lambda: (_ for _ in ()).throw(AssertionError("status must not touch DB tables"))
+        cli._systemctl_state = lambda unit: "active" if unit.endswith(".timer") else "inactive"
+        def fake_systemctl_show(unit, *props):
+            if unit.endswith(".timer"):
+                return {
+                    "NextElapseUSecRealtime": "Mon 2026-05-25 14:17:00 UTC",
+                    "LastTriggerUSec": "Mon 2026-05-25 13:17:02 UTC",
+                }
+            return {
+                "Result": "success",
+                "ExecMainStatus": "0",
+                "InactiveEnterTimestamp": "Mon 2026-05-25 13:17:03 UTC",
+            }
+
+        cli._systemctl_show = fake_systemctl_show
+
+        systemd_buf = io.StringIO()
+        with contextlib.redirect_stdout(systemd_buf):
+            systemd_rc = cli._cmd_status(argparse.Namespace(no_systemd=False))
+        systemd_output = systemd_buf.getvalue()
+        assert systemd_rc == 0
+        assert "timer: active" in systemd_output
+        assert "timer_next: Mon 2026-05-25 14:17:00 UTC" in systemd_output
+        assert "timer_last: Mon 2026-05-25 13:17:02 UTC" in systemd_output
+        assert "service: inactive" in systemd_output
+        assert "service_result: success (exit=0)" in systemd_output
+        assert "service_last_exit: Mon 2026-05-25 13:17:03 UTC" in systemd_output
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -924,6 +952,8 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         bot_config._config.update(original_config)
         bot_config._load_config = original_load
         cli._ensure_tables = original_ensure
+        cli._systemctl_state = original_systemctl_state
+        cli._systemctl_show = original_systemctl_show
 
 
 def _assert_autonomous_cli_events_orders_by_id() -> None:
