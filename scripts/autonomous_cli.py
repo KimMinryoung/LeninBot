@@ -57,9 +57,27 @@ def _cmd_list(_args: argparse.Namespace) -> int:
     _ensure_tables()
     rows = db_query(
         """
-        SELECT id, title, state, turn_count, last_run_at, created_at
-          FROM autonomous_projects
-         ORDER BY state, id
+        SELECT p.id, p.title, p.state, p.turn_count, p.last_run_at, p.created_at,
+               COALESCE(a.pending_advisories, 0) AS pending_advisories,
+               e.event_type AS last_event_type,
+               e.created_at AS last_event_at
+          FROM autonomous_projects p
+          LEFT JOIN LATERAL (
+              SELECT COUNT(*)::int AS pending_advisories
+                FROM autonomous_project_advisories adv
+               WHERE adv.project_id = p.id
+                 AND adv.consumed_at IS NULL
+          ) a ON TRUE
+          LEFT JOIN LATERAL (
+              SELECT event_type, created_at
+                FROM autonomous_project_events ev
+               WHERE ev.project_id = p.id
+               ORDER BY ev.created_at DESC, ev.id DESC
+               LIMIT 1
+          ) e ON TRUE
+         ORDER BY CASE p.state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0
+                               WHEN 'paused' THEN 1 ELSE 2 END,
+                  p.id
         """,
     )
     if not rows:
@@ -67,8 +85,106 @@ def _cmd_list(_args: argparse.Namespace) -> int:
         return 0
     for r in rows:
         last = r["last_run_at"].strftime("%Y-%m-%d %H:%M") if r["last_run_at"] else "never"
-        print(f"#{r['id']}  [{r['state']:<11}]  turns={r['turn_count']:<4}  last={last}  {r['title']}")
+        bits = [f"turns={r['turn_count']}", f"last={last}"]
+        pending = int(r.get("pending_advisories") or 0)
+        if pending:
+            bits.append(f"advice={pending}")
+        if r.get("last_event_type"):
+            event_at = r["last_event_at"].strftime("%Y-%m-%d %H:%M") if hasattr(r.get("last_event_at"), "strftime") else str(r.get("last_event_at") or "?")
+            bits.append(f"event={r['last_event_type']}@{event_at}")
+        print(f"#{r['id']}  [{r['state']:<11}]  {'  '.join(bits)}  {r['title']}")
     return 0
+
+
+def _coerce_note_sources(sources) -> list[str]:
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except Exception:
+            sources = [sources]
+    if sources is None:
+        return []
+    if not isinstance(sources, list):
+        sources = [sources]
+    return [str(source) for source in sources]
+
+
+def _recent_project_notes(project_id: int, *, legacy_notes: list, limit: int = 5) -> tuple[list[dict], int, str]:
+    try:
+        count_row = db_query_one(
+            "SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE project_id = %s",
+            (project_id,),
+        )
+        rows = db_query(
+            """
+            SELECT turn, text, sources, created_at
+              FROM autonomous_project_notes
+             WHERE project_id = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (project_id, limit),
+        )
+        return (
+            list(reversed([dict(row) for row in rows])),
+            int((count_row or {}).get("count") or 0),
+            "autonomous_project_notes",
+        )
+    except Exception:
+        notes = legacy_notes or []
+        return notes[-limit:], len(notes), "legacy JSONB"
+
+
+def _latest_project_event(project_id: int, event_type: str) -> dict | None:
+    try:
+        rows = db_query(
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id, event_type),
+        )
+    except Exception:
+        return None
+    return dict(rows[0]) if rows else None
+
+
+def _recent_project_advisories(project_id: int, limit: int = 10) -> list[dict]:
+    try:
+        rows = db_query(
+            """
+            SELECT id, content, created_at, consumed_at
+              FROM autonomous_project_advisories
+             WHERE project_id = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (project_id, limit),
+        )
+    except Exception:
+        return []
+    return [dict(row) for row in rows]
+
+
+def _format_tick_log_header(row: dict) -> str:
+    meta = row.get("meta") or {}
+    bits = []
+    if meta.get("turn") is not None:
+        bits.append(f"turn={meta.get('turn')}")
+    if meta.get("rounds_used") is not None:
+        bits.append(f"rounds={meta.get('rounds_used')}")
+    if meta.get("tool_calls") is not None:
+        bits.append(f"tools={meta.get('tool_calls')}")
+    if meta.get("cost_usd") is not None:
+        bits.append(f"cost=${float(meta.get('cost_usd') or 0):.3f}")
+    if bits:
+        return ", ".join(bits)
+    created = row.get("created_at")
+    return created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
@@ -84,11 +200,50 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print(f"  topic: {row['topic']}")
     print(f"  goal:\n    {row['goal']}")
     print(f"  plan:\n{json.dumps(row['plan'], indent=2, ensure_ascii=False)}")
-    notes = row["research_notes"] or []
-    print(f"  research_notes: {len(notes)} entries")
-    for n in notes[-5:]:
-        src = ", ".join((n.get("sources") or [])[:3])
-        print(f"    - turn {n.get('turn')}: {(n.get('text') or '')[:300]}" + (f"  [{src}]" if src else ""))
+    advisories = _recent_project_advisories(row["id"])
+    if advisories:
+        pending = [a for a in advisories if a.get("consumed_at") is None]
+        consumed = [a for a in advisories if a.get("consumed_at") is not None]
+        print(f"  operator_advisories: pending={len(pending)} recent_consumed={len(consumed)}")
+        for a in pending:
+            created = a.get("created_at")
+            when = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
+            print(f"    - PENDING #{a['id']} @ {when}: {(a.get('content') or '')[:300]}")
+        for a in consumed[:3]:
+            created = a.get("created_at")
+            when = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
+            print(f"    - consumed #{a['id']} @ {when}: {(a.get('content') or '')[:180]}")
+    notes, note_total, note_source = _recent_project_notes(
+        row["id"], legacy_notes=row["research_notes"] or [], limit=5
+    )
+    print(f"  research_notes: {note_total} entries (source={note_source})")
+    for n in notes:
+        src = ", ".join(_coerce_note_sources(n.get("sources"))[:3])
+        ts = n.get("created_at")
+        when = ts.strftime("%Y-%m-%d %H:%M") if hasattr(ts, "strftime") else (str(ts) if ts else "?")
+        print(
+            f"    - turn {n.get('turn')} @ {when}: {(n.get('text') or '')[:300]}"
+            + (f"  [{src}]" if src else "")
+        )
+    tick_error = _latest_project_event(row["id"], "tick_error")
+    if tick_error:
+        content = str(tick_error.get("content") or "")
+        created = tick_error.get("created_at")
+        when = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
+        print(f"  last_tick_error: {when}")
+        print("    " + content[:800].replace("\n", "\n    ") + ("…" if len(content) > 800 else ""))
+    no_action = _latest_project_event(row["id"], "tick_no_durable_action")
+    if no_action:
+        content = str(no_action.get("content") or "")
+        created = no_action.get("created_at")
+        when = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
+        print(f"  last_tick_no_durable_action: {when}")
+        print("    " + content[:800].replace("\n", "\n    ") + ("…" if len(content) > 800 else ""))
+    tick_log = _latest_project_event(row["id"], "tick_tool_log")
+    if tick_log:
+        content = str(tick_log.get("content") or "")
+        print(f"  last_tick_tool_log: {_format_tick_log_header(tick_log)}")
+        print("    " + content[:1000].replace("\n", "\n    ") + ("…" if len(content) > 1000 else ""))
     return 0
 
 
@@ -99,7 +254,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
         SELECT id, event_type, content, meta, created_at
           FROM autonomous_project_events
          WHERE project_id = %s
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, id DESC
          LIMIT %s
         """,
         (args.project_id, args.limit),

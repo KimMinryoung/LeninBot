@@ -40,14 +40,18 @@ Inactive states are:
 ## Tick Lifecycle
 
 1. Check `autonomous_active`.
-2. Select one due active project.
-3. Load project, plan, recent notes, last tick tool log, and pending operator advisories.
+2. Select one due active project. Projects with pending operator advisories are selected before ordinary oldest-`last_run_at` round-robin order.
+3. Load project, plan, recent notes, recent tick warnings, currently staged research drafts, last tick tool log, and pending operator advisories.
 4. Mark advisories consumed for that project.
 5. Run the `autonomous_project` agent with a small bounded round/budget.
 6. Persist notes, plan changes, state changes, publications, and a clipped tool log.
 7. Increment turn metadata and emit project events.
 
-Each tick should make one concrete advance. The agent prompt explicitly prioritizes saving durable notes before final prose because chat text does not persist across ticks.
+Each tick should make one concrete advance. The agent prompt explicitly prioritizes saving durable notes before final prose because chat text does not persist across ticks. The base autonomous agent spec keeps project-state tools (`add_research_note`, `revise_plan`, `set_project_state`) and owned publishing tools (`research_document`, `publish_hub_curation`, `edit_content`, `publish_static_page`) in finalization tools so durable persistence still has pressure even when no runtime override file is present.
+
+`read_self(content_type="autonomous_project", id=<id>)` and `scripts/autonomous_cli.py show <id>` read recent notes from `autonomous_project_notes` first and include pending/recent operator advisories, the latest tick error, no-durable-action warning, and tick tool log; both fall back to legacy `autonomous_projects.research_notes` only if the note table is unavailable. `scripts/autonomous_cli.py list` also shows pending advisory counts and the most recent project event for quick triage.
+The Telegram orchestrator autonomous status block and `/projects` list include pending advisory counts and the most recent project event so normal chat context can see stalled/error states without an extra project-detail call. `/project <id> show` lists pending operator advisories and includes the latest tick error, no-durable-action warning, and tick tool log for direct operator triage. Public web chat autonomous summaries remain public-safe but include public `publication_created` events in recent work.
+If a tick raises before completion, the runtime logs `tick_error` and updates `last_run_at` without incrementing `turn_count`; this gives the failed project a scheduling cooldown so another due project can run on the next timer tick. If a tick succeeds without any durable note, publication, plan revision, or state transition, the runtime logs `tick_no_durable_action` so no-op wakes are visible in normal project status views. Pending operator advisories are consumed only when that successful tick produced a durable project action; no-op ticks retain them and log `advisories_retained_no_durable_action`. Recent `tick_error`, `tick_no_durable_action`, and `advisories_retained_no_durable_action` events are also surfaced in the next tick prompt to discourage repeated failure/no-save loops.
 
 ## Capability Boundary
 
@@ -69,7 +73,7 @@ Current autonomous tools include:
 
 ## Publishing Gates
 
-`research_document` is the long-form markdown path. Public publication is gated through staged drafts and fact-check notes. `stage_public` writes an exact draft backup under `data/publication_drafts/research/` and stores the same document in `research_documents` with `status='staged'`; internal agents can retrieve it with `read_self(content_type="research_document", slug="<slug>")`. `stage_public` refuses to overwrite an already-public row, so revisions to public documents must use `edit_public` instead of staging over the live slug. Public web chat remains restricted to `status='public'` research documents. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing. Autonomous public-bound research calls require an explicit stable slug. `publish_public`, `republish_public`, `publish_private`, and `edit_public` also require fact-check notes when they affect a public research document; private-to-public and republish calls are routed through the same public publication path as new reports.
+`research_document` is the long-form markdown path. Public publication is gated through staged drafts and fact-check notes. `stage_public` writes an exact draft backup under `data/publication_drafts/research/` and stores the same document in `research_documents` with `status='staged'`; internal agents can retrieve it with `read_self(content_type="research_document", slug="<slug>")`. In autonomous context, `stage_public` also records a `research_draft_staged` project event, and autonomous ticks surface that project's staged drafts before other recent staged drafts so later wakes can resume fact-checking or publication without relying only on the previous raw tool log. `stage_public` refuses to overwrite an already-public row, so revisions to public documents must use `edit_public` instead of staging over the live slug. Public web chat remains restricted to `status='public'` research documents. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing. Autonomous public-bound research calls require an explicit stable slug. `publish_public`, `republish_public`, `publish_private`, and `edit_public` also require fact-check notes when they affect a public research document; private-to-public and republish calls are routed through the same public publication path as new reports.
 
 For autonomous projects, `autonomous_publication_controls.py` enforces a narrow structural gate before public publication:
 

@@ -842,8 +842,28 @@ def _format_autonomous_status(provider: str = "claude") -> str:
     try:
         from db import query as db_query
         rows = db_query(
-            "SELECT id, title, state, turn_count, last_run_at FROM autonomous_projects "
-            "WHERE state IN ('researching', 'planning') ORDER BY id"
+            """
+            SELECT p.id, p.title, p.state, p.turn_count, p.last_run_at,
+                   COALESCE(a.pending_advisories, 0) AS pending_advisories,
+                   e.event_type AS last_event_type,
+                   e.created_at AS last_event_at
+              FROM autonomous_projects p
+              LEFT JOIN LATERAL (
+                  SELECT COUNT(*)::int AS pending_advisories
+                    FROM autonomous_project_advisories adv
+                   WHERE adv.project_id = p.id
+                     AND adv.consumed_at IS NULL
+              ) a ON TRUE
+              LEFT JOIN LATERAL (
+                  SELECT event_type, created_at
+                    FROM autonomous_project_events ev
+                   WHERE ev.project_id = p.id
+                   ORDER BY ev.created_at DESC, ev.id DESC
+                   LIMIT 1
+              ) e ON TRUE
+             WHERE p.state IN ('researching', 'planning')
+             ORDER BY p.id
+            """
         )
     except Exception:
         return ""
@@ -853,7 +873,14 @@ def _format_autonomous_status(provider: str = "claude") -> str:
     for r in rows:
         last = r["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M KST") if r.get("last_run_at") else "never"
         title = str(r.get("title") or "").replace("\n", " ")[:80]
-        lines.append(f"- #{r['id']} \"{title}\" — {r['state']}, turn {r['turn_count']}, last ran {last}")
+        bits = [f"{r['state']}", f"turn {r['turn_count']}", f"last ran {last}"]
+        pending = int(r.get("pending_advisories") or 0)
+        if pending:
+            bits.append(f"pending advice {pending}")
+        if r.get("last_event_type"):
+            event_at = r["last_event_at"].astimezone(KST).strftime("%m/%d %H:%M KST") if r.get("last_event_at") else "?"
+            bits.append(f"last event {r['last_event_type']} @ {event_at}")
+        lines.append(f"- #{r['id']} \"{title}\" — " + ", ".join(bits))
     body = (
         "Self-running long-term project loop (hourly tick, separate from your chat turn). "
         "Active projects:\n"

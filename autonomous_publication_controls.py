@@ -416,3 +416,24 @@ def record_autonomous_publication(
         f"{publication_kind}: {title}\n{public_url}",
         payload,
     )
+
+
+def record_autonomous_staged_draft(
+    *,
+    publication_kind: str,
+    title: str,
+    public_url: str,
+    meta: dict | None = None,
+) -> None:
+    project_id = _project_id()
+    if project_id is None:
+        return
+    payload = {"kind": publication_kind, "title": title, "public_url": public_url}
+    if meta:
+        payload.update(meta)
+    _log_autonomous_event(
+        project_id,
+        "research_draft_staged",
+        f"{publication_kind}: {title}\n{public_url}",
+        payload,
+    )

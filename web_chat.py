@@ -325,8 +325,11 @@ async def _exec_web_read_self(
                 SELECT event_type, content, created_at
                   FROM autonomous_project_events
                  WHERE project_id = %s
-                   AND event_type IN ('tick_end', 'plan_revised', 'state_transition', 'project_created')
-                 ORDER BY created_at DESC
+                   AND event_type IN (
+                       'tick_end', 'plan_revised', 'state_transition',
+                       'project_created', 'publication_created'
+                   )
+                 ORDER BY created_at DESC, id DESC
                  LIMIT 4
                 """,
                 (project_id,),

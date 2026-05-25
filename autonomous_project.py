@@ -1,7 +1,7 @@
 """autonomous_project.py — Runtime for Cyber-Lenin's autonomous project loop.
 
 Entry point: `run_tick()` — invoked hourly by `leninbot-autonomous.service`.
-Picks the oldest-due active project and runs one 3-round agent wake on it.
+Picks a due active project, prioritizing pending operator advisories, and runs one bounded agent wake on it.
 
 This is the T0 pilot tier: research + planning only, no external output. See
 `agents/autonomous.py` for the agent spec that enforces the tier via its tool
@@ -185,6 +185,7 @@ def _log_event(
 
 
 _TICK_TOOL_LOG_EVENT_TYPE = "tick_tool_log"
+_TICK_ATTENTION_EVENT_TYPES = ("tick_error", "tick_no_durable_action", "advisories_retained_no_durable_action")
 
 
 def _format_tick_tool_log(
@@ -232,6 +233,42 @@ def _fetch_last_tick_tool_log(project_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
+def _recent_tick_attention_events(project_id: int, limit: int = 3) -> list[dict]:
+    """Return recent tick-level failures or no-op warnings for prompt handoff."""
+    try:
+        rows = db_query(
+            """
+            SELECT event_type, content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = ANY(%s)
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (project_id, list(_TICK_ATTENTION_EVENT_TYPES), limit),
+        )
+    except Exception as e:
+        logger.debug("Fetch tick attention events failed (project=%s): %s", project_id, e)
+        return []
+    return [dict(row) for row in rows]
+
+
+def _format_tick_attention_events(rows: list[dict]) -> str:
+    if not rows:
+        return "(none)"
+    lines = []
+    for row in rows:
+        event_type = row.get("event_type") or "?"
+        created = row.get("created_at")
+        if hasattr(created, "astimezone"):
+            created_text = created.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
+        else:
+            created_text = str(created or "?")
+        content = str(row.get("content") or "").replace("\n", " ")[:500]
+        lines.append(f"- {event_type} @ {created_text}: {content}")
+    return "\n".join(lines)
+
+
 def _excerpt(text: str, limit: int = 500) -> str:
     """Trim a block of text to `limit` chars, collapsing whitespace and appending …."""
     if not text:
@@ -272,17 +309,24 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
     ]
 
     notes: list[str] = actions.get("notes") or []
+    publications: list[str] = actions.get("publications") or []
     plan_rationale = actions.get("plan_rationale")
     state_change = actions.get("state_change")
 
-    if not (notes or plan_rationale or state_change):
+    if not (notes or publications or plan_rationale or state_change):
         parts.append("")
-        parts.append("(도구 호출 없음 — agent가 저장 없이 종료)")
+        parts.append("(저장된 프로젝트 액션 없음 — 노트/출판/계획/상태 변경 없이 종료)")
     else:
         # Show what was saved, not counts.
         for i, note_text in enumerate(notes, 1):
             prefix = f"[노트 {i}/{len(notes)}]" if len(notes) > 1 else "[노트]"
             excerpt = _excerpt(note_text, limit=900)
+            parts.append("")
+            parts.append(f"{prefix} {excerpt}")
+
+        for i, publication_text in enumerate(publications, 1):
+            prefix = f"[출판 {i}/{len(publications)}]" if len(publications) > 1 else "[출판]"
+            excerpt = _excerpt(publication_text, limit=700)
             parts.append("")
             parts.append(f"{prefix} {excerpt}")
 
@@ -328,6 +372,7 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
         (project_id, since_iso_utc),
     )
     notes: list[str] = []
+    publications: list[str] = []
     plan_rationale: str | None = None
     state_change: tuple[str, str, str] | None = None  # (from, to, reason)
     for r in rows:
@@ -336,23 +381,44 @@ def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
         m = r.get("meta") or {}
         if t == "note_added":
             notes.append(c)
+        elif t == "publication_created":
+            publications.append(c)
         elif t == "plan_revised":
             plan_rationale = c
         elif t == "state_transition":
             state_change = (str(m.get("from")), str(m.get("to")), c)
-    return {"notes": notes, "plan_rationale": plan_rationale, "state_change": state_change}
+    return {
+        "notes": notes,
+        "publications": publications,
+        "plan_rationale": plan_rationale,
+        "state_change": state_change,
+    }
 
 
 # ── Project selection ───────────────────────────────────────────────
 def _pick_next_project() -> dict | None:
-    """Return the active project with the oldest last_run_at (NULLS FIRST)."""
+    """Return the next active project to run.
+
+    Pending operator advisories are explicit external direction, so those
+    projects jump ahead of ordinary round-robin scheduling. Within the same
+    advisory priority, keep the oldest last_run_at first.
+    """
     return db_query_one(
         """
-        SELECT id, title, topic, goal, state, plan, research_notes, turn_count,
-               last_run_at, created_at
-          FROM autonomous_projects
-         WHERE state = ANY(%s)
-         ORDER BY last_run_at ASC NULLS FIRST, id ASC
+        SELECT p.id, p.title, p.topic, p.goal, p.state, p.plan,
+               p.research_notes, p.turn_count, p.last_run_at, p.created_at,
+               COALESCE(a.pending_advisories, 0) AS pending_advisories
+          FROM autonomous_projects p
+          LEFT JOIN LATERAL (
+              SELECT COUNT(*)::int AS pending_advisories
+                FROM autonomous_project_advisories adv
+               WHERE adv.project_id = p.id
+                 AND adv.consumed_at IS NULL
+          ) a ON TRUE
+         WHERE p.state = ANY(%s)
+         ORDER BY COALESCE(a.pending_advisories, 0) DESC,
+                  p.last_run_at ASC NULLS FIRST,
+                  p.id ASC
          LIMIT 1
         """,
         (list(ACTIVE_STATES),),
@@ -590,6 +656,93 @@ def _format_notes(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _recent_staged_research_drafts(project_id: int, limit: int = 8) -> list[dict]:
+    project_rows: list[dict] = []
+    try:
+        project_rows = [
+            dict(row)
+            for row in db_query(
+                """
+                WITH project_drafts AS (
+                    SELECT rd.filename, rd.slug, rd.title, rd.summary, rd.updated_at,
+                           ev.created_at AS staged_at,
+                           ROW_NUMBER() OVER (PARTITION BY rd.id ORDER BY ev.created_at DESC, ev.id DESC) AS rn
+                      FROM autonomous_project_events ev
+                      JOIN research_documents rd
+                        ON rd.id::text = ev.meta->>'research_document_id'
+                        OR rd.filename = ev.meta->>'filename'
+                     WHERE ev.project_id = %s
+                       AND ev.event_type = 'research_draft_staged'
+                       AND rd.status = 'staged'
+                )
+                SELECT filename, slug, title, summary, updated_at, TRUE AS project_match
+                  FROM project_drafts
+                 WHERE rn = 1
+                 ORDER BY staged_at DESC, updated_at DESC
+                 LIMIT %s
+                """,
+                (project_id, limit),
+            )
+        ]
+    except Exception as e:
+        logger.warning("project staged research draft lookup failed: %s", e)
+        project_rows = []
+
+    if len(project_rows) >= limit:
+        return project_rows[:limit]
+
+    seen = {row.get("filename") for row in project_rows}
+    try:
+        global_rows = [
+            dict(row)
+            for row in db_query(
+                """
+                SELECT filename, slug, title, summary, updated_at, FALSE AS project_match
+                  FROM research_documents
+                 WHERE status = 'staged'
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT %s
+                """,
+                (limit,),
+            )
+        ]
+    except Exception as e:
+        logger.warning("staged research draft lookup failed: %s", e)
+        return project_rows
+
+    for row in global_rows:
+        if row.get("filename") in seen:
+            continue
+        project_rows.append(row)
+        if len(project_rows) >= limit:
+            break
+    return project_rows
+
+
+def _format_staged_research_drafts(rows: list[dict]) -> str:
+    if not rows:
+        return "(no staged research drafts)"
+    lines = []
+    for row in rows:
+        filename = row.get("filename") or "?"
+        slug = row.get("slug") or str(filename).removesuffix(".md")
+        title = (row.get("title") or "").replace("\n", " ")[:180]
+        summary = (row.get("summary") or "").replace("\n", " ")[:220]
+        updated = row.get("updated_at")
+        if hasattr(updated, "astimezone"):
+            updated_text = updated.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
+        else:
+            updated_text = str(updated or "?")
+        scope = "this-project" if row.get("project_match") else "other-staged"
+        lines.append(
+            f"- [{scope}] slug={slug} file={filename} updated={updated_text}\n"
+            f"  title: {title}\n"
+            f"  summary: {summary}\n"
+            f"  read: read_self(content_type='research_document', slug='{slug}', status='staged')"
+        )
+    return "\n".join(lines)
+
+
 def _build_task_prompt(
     project: dict,
     turn_budget: int,
@@ -599,6 +752,8 @@ def _build_task_prompt(
 ) -> str:
     plan_text = _format_plan(project.get("plan"))
     notes_text = _format_notes(_recent_notes(project))
+    staged_drafts_text = _format_staged_research_drafts(_recent_staged_research_drafts(project["id"]))
+    tick_attention_text = _format_tick_attention_events(_recent_tick_attention_events(project["id"]))
     if not uses_xml(provider):
         parts = [
             f"### Project\n- **id**: {project['id']}\n- **title**: {project['title']}\n- **topic**: {project['topic']}",
@@ -619,6 +774,8 @@ def _build_task_prompt(
             f"### State\n\n{project['state']}",
             f"### Plan\n\n{plan_text}",
             f"### Recent Notes\n\n{notes_text}",
+            f"### Recent Tick Warnings\n\n{tick_attention_text}",
+            f"### Staged Research Drafts\n\n{staged_drafts_text}",
         ])
         last_log = _fetch_last_tick_tool_log(project["id"])
         if last_log and last_log.get("content"):
@@ -671,6 +828,8 @@ def _build_task_prompt(
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
         f"<recent-notes>\n{notes_text}\n</recent-notes>",
+        f"<recent-tick-warnings>\n{tick_attention_text}\n</recent-tick-warnings>",
+        f"<staged-research-drafts>\n{staged_drafts_text}\n</staged-research-drafts>",
     ])
 
     # Previous tick's full tool trace — what YOU called and what came back.
@@ -795,6 +954,16 @@ async def _run_one_tick(project: dict) -> dict:
     except Exception as e:
         logger.exception("Tick failed for project %s", project["id"])
         _log_event(project["id"], "tick_error", str(e)[:2000])
+        # Treat a failed wake as an attempted run for scheduling purposes, but
+        # do not increment turn_count. This prevents one broken project from
+        # monopolizing every timer tick while preserving the failure in events.
+        try:
+            db_execute(
+                "UPDATE autonomous_projects SET last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
+                (project["id"],),
+            )
+        except Exception as update_error:
+            logger.warning("Failed to record autonomous tick failure cooldown for project %s: %s", project["id"], update_error)
         raise
     finally:
         current_autonomous_project_id.reset(ctx_token)
@@ -804,16 +973,31 @@ async def _run_one_tick(project: dict) -> dict:
         "UPDATE autonomous_projects SET turn_count = turn_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
         (project["id"],),
     )
-    # Mark pending advisories as consumed — tick saw them, job done.
-    if pending_advisories:
-        _mark_advisories_consumed(
-            project["id"], [a["id"] for a in pending_advisories]
-        )
+
+    actions = _collect_tick_actions(project["id"], tick_started_at_utc)
+    has_durable_action = bool(
+        actions.get("notes")
+        or actions.get("publications")
+        or actions.get("plan_rationale")
+        or actions.get("state_change")
+    )
+
+    advisory_ids = [a["id"] for a in pending_advisories]
+    if pending_advisories and has_durable_action:
+        _mark_advisories_consumed(project["id"], advisory_ids)
         _log_event(
             project["id"], "advisories_consumed",
             f"{len(pending_advisories)} advisories marked consumed",
-            {"ids": [a["id"] for a in pending_advisories]},
+            {"ids": advisory_ids},
         )
+    elif pending_advisories:
+        _log_event(
+            project["id"],
+            "advisories_retained_no_durable_action",
+            f"{len(pending_advisories)} advisories retained because tick saved no durable project action",
+            {"ids": advisory_ids},
+        )
+
     _log_event(
         project["id"], "tick_end",
         (result_text or "")[:3000],
@@ -842,7 +1026,16 @@ async def _run_one_tick(project: dict) -> dict:
 
     # Telegram notification — runs after tick data is committed so a notify
     # failure can never lose work. _notify_telegram swallows its own errors.
-    actions = _collect_tick_actions(project["id"], tick_started_at_utc)
+    if not has_durable_action:
+        no_action_meta = {"turn": (project.get("turn_count") or 0) + 1}
+        if advisory_ids:
+            no_action_meta["retained_advisory_ids"] = advisory_ids
+        _log_event(
+            project["id"],
+            "tick_no_durable_action",
+            "tick completed without note, publication, plan revision, or state transition",
+            no_action_meta,
+        )
     runtime = {
         "cost_usd": budget_tracker.get("total_cost", 0.0),
         "rounds_used": budget_tracker.get("rounds_used", 0),

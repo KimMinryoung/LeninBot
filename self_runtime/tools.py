@@ -2987,22 +2987,104 @@ async def _exec_read_autonomous_project(
     if not proj:
         return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(not found)"
 
-    notes = proj.get("research_notes") or []
+    legacy_notes = proj.get("research_notes") or []
     plan = proj.get("plan") or {}
-    if keyword:
-        notes = [n for n in notes if keyword.lower() in (n.get("text") or "").lower()]
-    recent_notes = notes[-min(limit, 5):]
+    note_limit = min(limit, 10)
+    note_total = len(legacy_notes)
+    note_source = "legacy JSONB"
+    try:
+        note_clauses = ["project_id = %s"]
+        note_params: list = [project_id]
+        if keyword:
+            note_clauses.append("text ILIKE %s")
+            note_params.append(f"%{keyword}%")
+        note_count = await asyncio.to_thread(
+            db_query_one,
+            f"SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE {' AND '.join(note_clauses)}",
+            tuple(note_params),
+        )
+        note_total = int((note_count or {}).get("count") or 0)
+        note_rows = await asyncio.to_thread(
+            db_query,
+            f"""
+            SELECT turn, text, sources, created_at
+              FROM autonomous_project_notes
+             WHERE {' AND '.join(note_clauses)}
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            tuple([*note_params, note_limit]),
+        )
+        recent_notes = list(reversed([dict(row) for row in note_rows]))
+        note_source = "autonomous_project_notes"
+    except Exception:
+        notes = legacy_notes
+        if keyword:
+            notes = [n for n in notes if keyword.lower() in (n.get("text") or "").lower()]
+        note_total = len(notes)
+        recent_notes = notes[-note_limit:]
 
     # Recent events (last `limit` entries)
     try:
         events = await asyncio.to_thread(
             db_query,
-            "SELECT created_at, event_type, content FROM autonomous_project_events "
-            "WHERE project_id = %s ORDER BY created_at DESC LIMIT %s",
+            "SELECT id, created_at, event_type, content FROM autonomous_project_events "
+            "WHERE project_id = %s ORDER BY created_at DESC, id DESC LIMIT %s",
             (project_id, min(limit, 20)),
         )
     except Exception:
         events = []
+
+    try:
+        tick_logs = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_tool_log'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_tick_log = dict(tick_logs[0]) if tick_logs else None
+    except Exception:
+        last_tick_log = None
+
+    try:
+        tick_errors = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT content, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_error'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_tick_error = dict(tick_errors[0]) if tick_errors else None
+    except Exception:
+        last_tick_error = None
+
+    try:
+        no_action_rows = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT content, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_no_durable_action'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_no_action = dict(no_action_rows[0]) if no_action_rows else None
+    except Exception:
+        last_no_action = None
 
     out = [f"=== AUTONOMOUS PROJECT #{proj['id']}: {proj['title']} ==="]
     out.append(f"state: {proj['state']}   turns: {proj['turn_count']}   last_run: {_to_kst(proj.get('last_run_at')) if proj.get('last_run_at') else 'never'}")
@@ -3052,17 +3134,53 @@ async def _exec_read_autonomous_project(
             out.append(f"(rationale: {plan['rationale']})")
     out.append("")
 
-    out.append(f"-- recent notes ({len(recent_notes)} shown / {len(proj.get('research_notes') or [])} total) --")
+    out.append(f"-- recent notes ({len(recent_notes)} shown / {note_total} total, source={note_source}) --")
     if not recent_notes:
         out.append("(no notes)")
     else:
         for n in recent_notes:
             text = (n.get("text") or "")[:600]
             sources = n.get("sources") or []
+            if isinstance(sources, str):
+                try:
+                    sources = json.loads(sources)
+                except Exception:
+                    sources = [sources]
+            if not isinstance(sources, list):
+                sources = [str(sources)]
+            sources = [str(source) for source in sources]
             src = f"  [{', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}]" if sources else ""
-            out.append(f"[turn {n.get('turn', '?')}, {n.get('created_at', '?')}]")
+            out.append(f"[turn {n.get('turn', '?')}, {_to_kst(n.get('created_at'))}]")
             out.append(f"  {text}{'…' if len(n.get('text') or '') > 600 else ''}{src}")
     out.append("")
+
+    if last_tick_error:
+        out.append(f"-- last tick error ({_to_kst(last_tick_error.get('created_at'))}) --")
+        content = str(last_tick_error.get("content") or "")
+        out.append(content[:1200] + ("…" if len(content) > 1200 else ""))
+        out.append("")
+
+    if last_no_action:
+        out.append(f"-- last tick no durable action ({_to_kst(last_no_action.get('created_at'))}) --")
+        content = str(last_no_action.get("content") or "")
+        out.append(content[:1200] + ("…" if len(content) > 1200 else ""))
+        out.append("")
+
+    if last_tick_log:
+        meta = last_tick_log.get("meta") or {}
+        header_bits = []
+        if meta.get("turn") is not None:
+            header_bits.append(f"turn={meta.get('turn')}")
+        if meta.get("rounds_used") is not None:
+            header_bits.append(f"rounds={meta.get('rounds_used')}")
+        if meta.get("tool_calls") is not None:
+            header_bits.append(f"tools={meta.get('tool_calls')}")
+        if meta.get("cost_usd") is not None:
+            header_bits.append(f"cost=${float(meta.get('cost_usd') or 0):.3f}")
+        out.append(f"-- last tick tool log ({', '.join(header_bits) or _to_kst(last_tick_log.get('created_at'))}) --")
+        content = str(last_tick_log.get("content") or "")
+        out.append(content[:1800] + ("…" if len(content) > 1800 else ""))
+        out.append("")
 
     out.append(f"-- recent events ({len(events)}) --")
     if not events:

@@ -2165,10 +2165,29 @@ async def cmd_projects(message: Message):
         return
     rows = await asyncio.to_thread(
         _query,
-        "SELECT id, title, state, turn_count, last_run_at "
-        "FROM autonomous_projects ORDER BY "
-        "CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 "
-        "           WHEN 'paused' THEN 1 ELSE 2 END, id",
+        """
+        SELECT p.id, p.title, p.state, p.turn_count, p.last_run_at,
+               COALESCE(a.pending_advisories, 0) AS pending_advisories,
+               e.event_type AS last_event_type,
+               e.created_at AS last_event_at
+          FROM autonomous_projects p
+          LEFT JOIN LATERAL (
+              SELECT COUNT(*)::int AS pending_advisories
+                FROM autonomous_project_advisories adv
+               WHERE adv.project_id = p.id
+                 AND adv.consumed_at IS NULL
+          ) a ON TRUE
+          LEFT JOIN LATERAL (
+              SELECT event_type, created_at
+                FROM autonomous_project_events ev
+               WHERE ev.project_id = p.id
+               ORDER BY ev.created_at DESC, ev.id DESC
+               LIMIT 1
+          ) e ON TRUE
+         ORDER BY CASE p.state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0
+                               WHEN 'paused' THEN 1 ELSE 2 END,
+                  p.id
+        """,
     )
     if not rows:
         await message.answer("등록된 자율 프로젝트가 없습니다.")
@@ -2176,7 +2195,14 @@ async def cmd_projects(message: Message):
     lines = ["자율 프로젝트"]
     for r in rows:
         last = r["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if r["last_run_at"] else "never"
-        lines.append(f"#{r['id']} [{r['state']}] turn {r['turn_count']} last={last}")
+        bits = [f"turn {r['turn_count']}", f"last={last}"]
+        pending = int(r.get("pending_advisories") or 0)
+        if pending:
+            bits.append(f"advice={pending}")
+        if r.get("last_event_type"):
+            event_at = r["last_event_at"].astimezone(KST).strftime("%m/%d %H:%M") if r.get("last_event_at") else "?"
+            bits.append(f"event={r['last_event_type']}@{event_at}")
+        lines.append(f"#{r['id']} [{r['state']}] " + " ".join(bits))
         lines.append(f"  {r['title']}")
     lines.append("")
     lines.append("상세/수정: /project <id> show  |  /project <id> publishing 3 180")
@@ -2221,6 +2247,45 @@ def _project_usage() -> str:
         "/project <id> publishing <일일최대> <쿨다운분>\n"
         "/project <id> pause|resume|archive"
     )
+
+
+def _format_autonomous_event_time(value) -> str:
+    if not value:
+        return "?"
+    if hasattr(value, "astimezone"):
+        return value.astimezone(KST).strftime("%m/%d %H:%M")
+    return str(value)
+
+
+def _coerce_event_meta(meta) -> dict:
+    if isinstance(meta, dict):
+        return meta
+    if isinstance(meta, str) and meta.strip():
+        try:
+            parsed = json.loads(meta)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _format_tick_tool_log_header(event: dict) -> str:
+    meta = _coerce_event_meta(event.get("meta"))
+    bits = []
+    if meta.get("turn") is not None:
+        bits.append(f"turn={meta['turn']}")
+    if meta.get("rounds_used") is not None:
+        bits.append(f"rounds={meta['rounds_used']}")
+    if meta.get("tool_calls") is not None:
+        bits.append(f"tools={meta['tool_calls']}")
+    if meta.get("cost_usd") is not None:
+        try:
+            bits.append(f"cost=${float(meta['cost_usd']):.3f}")
+        except Exception:
+            bits.append(f"cost={meta['cost_usd']}")
+    if bits:
+        return ", ".join(bits)
+    return _format_autonomous_event_time(event.get("created_at"))
 
 
 async def cmd_project(message: Message):
@@ -2278,6 +2343,54 @@ async def cmd_project(message: Message):
             """,
             (project_id,),
         )
+        pending_advisories = await asyncio.to_thread(
+            _query,
+            """
+            SELECT id, content, created_at
+              FROM autonomous_project_advisories
+             WHERE project_id = %s
+               AND consumed_at IS NULL
+             ORDER BY created_at ASC, id ASC
+             LIMIT 5
+            """,
+            (project_id,),
+        )
+        last_tick_error = await asyncio.to_thread(
+            _query_one,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_error'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_no_action = await asyncio.to_thread(
+            _query_one,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_no_durable_action'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_tick_log = await asyncio.to_thread(
+            _query_one,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'tick_tool_log'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
         last = project["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if project["last_run_at"] else "never"
         lines = [
             f"자율 프로젝트 #{project_id}",
@@ -2289,11 +2402,25 @@ async def cmd_project(message: Message):
             "goal:",
             str(project["goal"])[:1200],
             "",
-            f"notes: {note_count['n']}",
+            f"pending_advice: {len(pending_advisories)}",
         ]
+        for advisory in pending_advisories:
+            when = _format_autonomous_event_time(advisory.get("created_at"))
+            snip = str(advisory.get("content") or "")[:250]
+            lines.append(f"- #{advisory['id']} {when}: {snip}")
+        lines.extend(["", f"notes: {note_count['n']}"])
         for note in recent_notes:
             snip = str(note["text"] or "")[:250]
             lines.append(f"- turn {note['turn']}: {snip}")
+        if last_tick_error:
+            when = _format_autonomous_event_time(last_tick_error.get("created_at"))
+            lines.extend(["", f"last_tick_error: {when}", str(last_tick_error.get("content") or "")[:500]])
+        if last_no_action:
+            when = _format_autonomous_event_time(last_no_action.get("created_at"))
+            lines.extend(["", f"last_tick_no_durable_action: {when}", str(last_no_action.get("content") or "")[:500]])
+        if last_tick_log:
+            header = _format_tick_tool_log_header(last_tick_log)
+            lines.extend(["", f"last_tick_tool_log: {header}", str(last_tick_log.get("content") or "")[:700]])
         await message.answer("\n".join(lines))
         return
 

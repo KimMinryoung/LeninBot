@@ -194,4 +194,13 @@ operator-needed dependency and continue with the work your current tools allow.
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "revise_plan", "set_project_state",
     ],
+    finalization_tools=[
+        "add_research_note",
+        "revise_plan",
+        "set_project_state",
+        "research_document",
+        "publish_hub_curation",
+        "edit_content",
+        "publish_static_page",
+    ],
 )

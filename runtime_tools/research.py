@@ -36,6 +36,7 @@ from autonomous_publication_controls import (
     check_autonomous_publication_allowed,
     is_autonomous_publication_context,
     record_autonomous_publication,
+    record_autonomous_staged_draft,
     review_autonomous_publication,
     validate_autonomous_research_publication,
 )
@@ -522,6 +523,15 @@ async def _exec_research_document_publish_public(
                 f"Draft backup: {draft_path}\n"
                 f"Storage error: {type(e).__name__}: {e}"
             )
+        draft_meta = {"filename": fname, "research_document_id": row["id"], "status": "staged"}
+        if source_task_id is not None:
+            draft_meta["source_task_id"] = source_task_id
+        record_autonomous_staged_draft(
+            publication_kind="research",
+            title=title,
+            public_url=_public_url(fname),
+            meta=draft_meta,
+        )
         return (
             "Draft saved, not published.\n"
             f"Draft backup: {draft_path}\n"
