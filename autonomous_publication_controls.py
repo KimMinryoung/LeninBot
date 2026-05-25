@@ -1,9 +1,10 @@
 """Autonomous publication controls.
 
 This module holds the policy that sits around public-bound autonomous output:
-publication pacing and Stasova publication-security review. Telegram channel
-broadcasts are intentionally not treated as an external-platform tier here; the
-channel is an owned Cyber-Lenin distribution surface.
+structural publication gates, optional pacing, and Stasova publication-security
+review. Telegram channel broadcasts are intentionally not treated as an
+external-platform tier here; the channel is an owned Cyber-Lenin distribution
+surface.
 """
 
 from __future__ import annotations
@@ -29,6 +30,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("invalid boolean env %s=%r; using %s", name, value, default)
+    return default
+
+
+PUBLICATION_PACING_ENABLED = _env_bool("AUTONOMOUS_PUBLICATION_PACING_ENABLED", False)
 DEFAULT_MAX_PUBLICATIONS_PER_DAY = _env_int("AUTONOMOUS_MAX_PUBLICATIONS_PER_DAY", 3)
 DEFAULT_COOLDOWN_AFTER_PUBLISH_MINUTES = _env_int(
     "AUTONOMOUS_COOLDOWN_AFTER_PUBLISH_MINUTES", 180
@@ -208,6 +223,8 @@ def check_autonomous_publication_allowed(publication_kind: str) -> tuple[bool, s
     project_id = _project_id()
     if project_id is None:
         return True, "not an autonomous project publication"
+    if not PUBLICATION_PACING_ENABLED:
+        return True, "autonomous publication pacing disabled"
 
     try:
         row = db_query_one(

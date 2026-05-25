@@ -22,7 +22,7 @@ The autonomous project loop advances long-running projects without a live user t
 
 | Table | Purpose |
 |---|---|
-| `autonomous_projects` | project title, topic, goal, state, plan, counters, publication throttles |
+| `autonomous_projects` | project title, topic, goal, state, plan, counters, optional publication pacing knobs |
 | `autonomous_project_events` | durable tick/event log, including bounded tool traces |
 | `autonomous_project_advisories` | operator one-shot advice consumed by the next tick |
 | `autonomous_project_notes` | durable research notes with sources |
@@ -71,12 +71,19 @@ Current autonomous tools include:
 
 `research_document` is the long-form markdown path. Public publication is gated through staged drafts and fact-check notes. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing. Autonomous public-bound research calls require an explicit stable slug. `publish_public`, `republish_public`, `publish_private`, and `edit_public` also require fact-check notes when they affect a public research document; private-to-public and republish calls are routed through the same public publication path as new reports.
 
-For autonomous projects, `autonomous_publication_controls.py` also enforces a narrow structural gate before public publication:
+For autonomous projects, `autonomous_publication_controls.py` enforces a narrow structural gate before public publication:
 
 - autonomous public-bound research calls must include a stable slug; research publication and autonomous public research edits must include fact-check notes with at least two source markers/URLs.
 - hub curations must include source title, source publication, a valid source URL, rationale/context fields, and a stable slug.
 - static pages must include a stable slug, title, HTML body with reader-visible text, and semantic structure. Summary is optional metadata, not a publication blocker.
 - The hard gate must not decide semantic quality, length sufficiency, current usefulness, political/reputational risk, or placeholder status by keyword or substring matching. Those judgments belong to the LLM/Stasova review path and must return concrete review reasons when they block or warn.
+
+Publication pacing is no longer a default hard gate. `max_publications_per_day`
+and `cooldown_after_publish_minutes` remain in `autonomous_projects` as dormant
+knobs for emergency throttling, but scheduled autonomous publication ignores
+them unless `AUTONOMOUS_PUBLICATION_PACING_ENABLED=true` is set for the process.
+This leaves operator control to `autonomous_active`/manual tick timing without
+blocking a queued publication batch.
 
 `publish_hub_curation` creates structured curation entries for Korean-language sources.
 
