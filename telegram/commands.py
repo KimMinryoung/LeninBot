@@ -2362,6 +2362,18 @@ async def cmd_project(message: Message):
             """,
             (project_id,),
         )
+        last_staged_draft = await asyncio.to_thread(
+            _query_one,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'research_draft_staged'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
         last_tick_error = await asyncio.to_thread(
             _query_one,
             """
@@ -2419,6 +2431,13 @@ async def cmd_project(message: Message):
         for note in recent_notes:
             snip = str(note["text"] or "")[:250]
             lines.append(f"- turn {note['turn']}: {snip}")
+        if last_staged_draft:
+            when = _format_autonomous_event_time(last_staged_draft.get("created_at"))
+            staged_meta = _coerce_event_meta(last_staged_draft.get("meta"))
+            staged_slug = staged_meta.get("slug") or str(staged_meta.get("filename") or "").removesuffix(".md")
+            lines.extend(["", f"last_staged_research_draft: {when}", str(last_staged_draft.get("content") or "")[:500]])
+            if staged_slug:
+                lines.append(f"read draft: read_self(content_type=\"research_document\", slug=\"{staged_slug}\", status=\"staged\")")
         if last_tick_error:
             when = _format_autonomous_event_time(last_tick_error.get("created_at"))
             lines.extend(["", f"last_tick_error: {when}", str(last_tick_error.get("content") or "")[:500]])

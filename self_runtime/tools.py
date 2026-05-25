@@ -3086,6 +3086,23 @@ async def _exec_read_autonomous_project(
     except Exception:
         last_no_action = None
 
+    try:
+        staged_rows = await asyncio.to_thread(
+            db_query,
+            """
+            SELECT content, meta, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type = 'research_draft_staged'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+        last_staged_draft = dict(staged_rows[0]) if staged_rows else None
+    except Exception:
+        last_staged_draft = None
+
     out = [f"=== AUTONOMOUS PROJECT #{proj['id']}: {proj['title']} ==="]
     out.append(f"state: {proj['state']}   turns: {proj['turn_count']}   last_run: {_to_kst(proj.get('last_run_at')) if proj.get('last_run_at') else 'never'}")
     out.append(f"topic: {proj.get('topic') or ''}")
@@ -3154,6 +3171,15 @@ async def _exec_read_autonomous_project(
             out.append(f"  {text}{'…' if len(n.get('text') or '') > 600 else ''}{src}")
     out.append("")
 
+    if last_staged_draft:
+        out.append("-- last staged research draft (" + _to_kst(last_staged_draft.get("created_at")) + ") --")
+        content = str(last_staged_draft.get("content") or "")
+        meta = last_staged_draft.get("meta") or {}
+        slug = meta.get("slug") or str(meta.get("filename") or "").removesuffix(".md")
+        out.append(content[:1200] + ("…" if len(content) > 1200 else ""))
+        if slug:
+            out.append(f"read draft: read_self(content_type=\"research_document\", slug=\"{slug}\", status=\"staged\")")
+        out.append("")
     if last_tick_error:
         out.append(f"-- last tick error ({_to_kst(last_tick_error.get('created_at'))}) --")
         content = str(last_tick_error.get("content") or "")

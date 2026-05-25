@@ -495,6 +495,8 @@ async def _assert_read_self_autonomous_project_uses_note_table() -> None:
                 {"turn": 2, "text": "newer durable note", "sources": ["https://source/2"], "created_at": None},
                 {"turn": 1, "text": "older durable note", "sources": ["https://source/1"], "created_at": None},
             ]
+        if "event_type = 'research_draft_staged'" in sql:
+            return [{"content": "research: Staged Draft\n/reports/research/staged-draft", "meta": {"filename": "staged-draft.md"}, "created_at": None}]
         if "event_type = 'tick_tool_log'" in sql:
             return [{
                 "content": "  [1] web_search({\"query\": \"already checked\"}) -> result",
@@ -520,6 +522,9 @@ async def _assert_read_self_autonomous_project_uses_note_table() -> None:
         assert "2 shown / 2 total" in output
         assert "older durable note" in output
         assert "newer durable note" in output
+        assert "-- last staged research draft (?) --" in output
+        assert "Staged Draft" in output
+        assert "read_self(content_type=\"research_document\", slug=\"staged-draft\", status=\"staged\")" in output
         assert "-- last tick error (?) --" in output
         assert "failed autonomous fetch" in output
         assert "-- last tick no durable action (?) --" in output
@@ -1177,6 +1182,8 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
                 {"id": 3, "content": "pending CLI advice", "created_at": None, "consumed_at": None},
                 {"id": 2, "content": "consumed CLI advice", "created_at": None, "consumed_at": datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)},
             ]
+        if params and len(params) >= 2 and params[1] == "research_draft_staged":
+            return [{"content": "research: CLI Staged Draft\n/reports/research/cli-staged", "meta": {"slug": "cli-staged"}, "created_at": None}]
         if params and len(params) >= 2 and params[1] == "tick_tool_log":
             return [{
                 "content": "  [1] vector_search({\"query\": \"done already\"}) -> result",
@@ -1204,6 +1211,9 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
         assert "source=autonomous_project_notes" in output
         assert "newer CLI durable note" in output
         assert "older CLI durable note" in output
+        assert "last_staged_research_draft: ?" in output
+        assert "CLI Staged Draft" in output
+        assert "read_self(content_type=\"research_document\", slug=\"cli-staged\", status=\"staged\")" in output
         assert "last_tick_error: ?" in output
         assert "broken CLI tick" in output
         assert "last_tick_no_durable_action: ?" in output
@@ -1351,6 +1361,12 @@ async def _assert_telegram_project_show_includes_tick_signals() -> None:
             }
         if "COUNT(*)::int AS n FROM autonomous_project_notes" in sql:
             return {"n": 2}
+        if "event_type = 'research_draft_staged'" in sql:
+            return {
+                "content": "research: Telegram Staged Draft\n/reports/research/telegram-staged",
+                "meta": {"filename": "telegram-staged.md"},
+                "created_at": datetime(2026, 5, 25, 10, 4, tzinfo=timezone.utc),
+            }
         if "event_type = 'publication_created'" in sql:
             return {"n": 1}
         if "event_type = 'tick_error'" in sql:
@@ -1401,6 +1417,9 @@ async def _assert_telegram_project_show_includes_tick_signals() -> None:
         assert "pending_advice: 1" in output
         assert "Prioritize the waiting staged draft" in output
         assert "durable telegram note" in output
+        assert "last_staged_research_draft:" in output
+        assert "Telegram Staged Draft" in output
+        assert "read_self(content_type=\"research_document\", slug=\"telegram-staged\", status=\"staged\")" in output
         assert "last_tick_error:" in output
         assert "detail smoke failure" in output
         assert "last_tick_no_durable_action:" in output

@@ -351,7 +351,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
             f"    - turn {n.get('turn')} @ {when}: {(n.get('text') or '')[:300]}"
             + (f"  [{src}]" if src else "")
         )
+    staged_draft = _latest_project_event(row["id"], "research_draft_staged")
     tick_error = _latest_project_event(row["id"], "tick_error")
+    if staged_draft:
+        content = str(staged_draft.get("content") or "")
+        meta = staged_draft.get("meta") or {}
+        slug = meta.get("slug") or str(meta.get("filename") or "").removesuffix(".md")
+        created = staged_draft.get("created_at")
+        when = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else str(created or "?")
+        print(f"  last_staged_research_draft: {when}")
+        print("    " + content[:800].replace("\n", "\n    ") + ("…" if len(content) > 800 else ""))
+        if slug:
+            print(f"    read: read_self(content_type=\"research_document\", slug=\"{slug}\", status=\"staged\")")
     if tick_error:
         content = str(tick_error.get("content") or "")
         created = tick_error.get("created_at")
