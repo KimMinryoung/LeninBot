@@ -41,6 +41,11 @@ _DIARY_WEB_CONTEXT_FALLBACK_HOURS = 72
 _DIARY_WEB_CONTEXT_MAX_HOURS = 24 * 14
 _DIARY_WEB_CONTEXT_LIMIT = 8
 _DIARY_WEB_CONTEXT_PER_SESSION_LIMIT = 6
+_DIARY_ACTIVITY_FALLBACK_HOURS = 14
+_DIARY_ACTIVITY_CHAT_LIMIT = 16
+_DIARY_ACTIVITY_TASK_LIMIT = 10
+_DIARY_ACTIVITY_REPORT_LIMIT = 6
+_DIARY_ACTIVITY_PROJECT_LIMIT = 6
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -242,6 +247,160 @@ def _diary_web_context_hours_back() -> int:
     except Exception as e:
         logger.debug("Diary latest timestamp lookup failed: %s", e)
     return _DIARY_WEB_CONTEXT_FALLBACK_HOURS
+
+
+def _format_ts_for_diary(ts) -> str:
+    if hasattr(ts, "astimezone"):
+        return ts.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
+    return str(ts or "?")[:19]
+
+
+def _format_diary_activity_context(provider: str | None) -> str:
+    """Inject a compact activity digest anchored to the latest diary timestamp."""
+    hours_back = _DIARY_ACTIVITY_FALLBACK_HOURS
+    sections: list[str] = []
+
+    try:
+        latest = _query_one(
+            "SELECT id, title, created_at FROM ai_diary ORDER BY created_at DESC LIMIT 1"
+        )
+    except Exception as e:
+        logger.debug("Diary activity latest timestamp lookup failed: %s", e)
+        latest = None
+
+    if latest:
+        created_at = latest.get("created_at")
+        if created_at and hasattr(created_at, "astimezone"):
+            elapsed = max(0.0, (datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)).total_seconds())
+            hours_back = min(_DIARY_WEB_CONTEXT_MAX_HOURS, max(1, int(elapsed // 3600) + 2))
+        sections.append(
+            "Anchor: write about the period after the latest diary, "
+            f"#{latest.get('id')} \"{latest.get('title') or ''}\" at "
+            f"{_format_ts_for_diary(latest.get('created_at'))}."
+        )
+    else:
+        sections.append(
+            f"Anchor: no previous diary timestamp was found; use roughly the last {hours_back} hours."
+        )
+
+    try:
+        from memory_store.queries import fetch_chat_logs
+
+        telegram_rows = fetch_chat_logs(
+            limit=_DIARY_ACTIVITY_CHAT_LIMIT,
+            hours_back=hours_back,
+            source="telegram",
+        )
+    except Exception as e:
+        logger.debug("Diary Telegram activity load failed: %s", e)
+        telegram_rows = []
+
+    if telegram_rows:
+        lines = [
+            "Recent Telegram context, private and not directly publishable. Use only public-safe implications:"
+        ]
+        for row in reversed(telegram_rows[-_DIARY_ACTIVITY_CHAT_LIMIT:]):
+            role = row.get("role") or "?"
+            content = _truncate_context_text(row.get("content") or "", 420).replace("\n", " ")
+            lines.append(f"- [{_format_ts_for_diary(row.get('created_at'))}] {role}: {content}")
+        sections.append("\n".join(lines))
+
+    try:
+        task_rows = _query(
+            """
+            SELECT id, agent_type, content, result, status, created_at, completed_at
+              FROM telegram_tasks
+             WHERE COALESCE(completed_at, created_at) > NOW() - (%s::int * INTERVAL '1 hour')
+               AND COALESCE(agent_type, '') != 'diary'
+             ORDER BY COALESCE(completed_at, created_at) DESC
+             LIMIT %s
+            """,
+            (hours_back, _DIARY_ACTIVITY_TASK_LIMIT),
+        )
+    except Exception as e:
+        logger.debug("Diary task activity load failed: %s", e)
+        task_rows = []
+
+    if task_rows:
+        lines = ["Recent tasks and reports since the anchor:"]
+        for row in task_rows:
+            result = _truncate_context_text(row.get("result") or row.get("content") or "", 520).replace("\n", " ")
+            ts = row.get("completed_at") or row.get("created_at")
+            lines.append(
+                f"- [{_format_ts_for_diary(ts)}] task #{row.get('id')} "
+                f"{row.get('agent_type') or '?'} status={row.get('status')}: {result}"
+            )
+        sections.append("\n".join(lines))
+
+    try:
+        report_rows = _query(
+            """
+            SELECT id, slug, title, status, summary, updated_at, published_at
+              FROM research_documents
+             WHERE COALESCE(updated_at, published_at) > NOW() - (%s::int * INTERVAL '1 hour')
+               AND status IN ('public', 'staged')
+             ORDER BY COALESCE(updated_at, published_at) DESC, id DESC
+             LIMIT %s
+            """,
+            (hours_back, _DIARY_ACTIVITY_REPORT_LIMIT),
+        )
+    except Exception as e:
+        logger.debug("Diary report activity load failed: %s", e)
+        report_rows = []
+
+    if report_rows:
+        lines = ["Recent public/staged research documents:"]
+        for row in report_rows:
+            summary = _truncate_context_text(row.get("summary") or "", 360).replace("\n", " ")
+            ts = row.get("updated_at") or row.get("published_at")
+            slug = row.get("slug") or f"#{row.get('id')}"
+            detail = f" - {summary}" if summary else ""
+            lines.append(
+                f"- [{_format_ts_for_diary(ts)}] {row.get('status')} {slug}: "
+                f"{row.get('title') or '(untitled)'}{detail}"
+            )
+        sections.append("\n".join(lines))
+
+    try:
+        project_rows = _query(
+            """
+            SELECT id, title, topic, state, turn_count, last_run_at
+              FROM autonomous_projects
+             WHERE state IN ('researching', 'planning', 'paused')
+                OR last_run_at > NOW() - (%s::int * INTERVAL '1 hour')
+             ORDER BY
+                CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
+                COALESCE(last_run_at, created_at) DESC,
+                id DESC
+             LIMIT %s
+            """,
+            (hours_back, _DIARY_ACTIVITY_PROJECT_LIMIT),
+        )
+    except Exception as e:
+        logger.debug("Diary autonomous project activity load failed: %s", e)
+        project_rows = []
+
+    if project_rows:
+        lines = [
+            'Autonomous project state. For detail call read_self(content_type="autonomous_project", id=<id>):'
+        ]
+        for row in project_rows:
+            topic = _truncate_context_text(row.get("topic") or "", 260).replace("\n", " ")
+            detail = f" - {topic}" if topic else ""
+            lines.append(
+                f"- #{row.get('id')} [{row.get('state')}] turns={row.get('turn_count')} "
+                f"last_run={_format_ts_for_diary(row.get('last_run_at'))}: "
+                f"{row.get('title') or '(untitled)'}{detail}"
+            )
+        sections.append("\n".join(lines))
+
+    return wrap_context_block(
+        "diary-activity-preflight",
+        "\n\n".join(sections),
+        provider,
+        heading="Diary Activity Preflight",
+        attrs={"hours_back": hours_back},
+    )
 
 
 def _format_diary_web_chat_context(provider: str | None) -> str:
@@ -836,12 +995,15 @@ def _build_task_context_content(
             logger.debug("Board context load failed: %s", e)
 
     diary_web_ctx = ""
+    diary_activity_ctx = ""
     if agent_type == "diary":
+        diary_activity_ctx = _format_diary_activity_context(context_provider)
         diary_web_ctx = _format_diary_web_chat_context(context_provider)
 
     context_parts = [
         part for part in (
             state_ctx,
+            diary_activity_ctx,
             diary_web_ctx,
             mission_ctx,
             history_ctx,
