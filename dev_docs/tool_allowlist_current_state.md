@@ -13,6 +13,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `web_chat.py` | `_WEB_ALLOWED_TOOLS` plus `WEB_READ_SELF_TOOL` |
+| Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 
 ## Global Registry
 
@@ -67,6 +68,19 @@ Public web chat is not the Telegram orchestrator. `web_chat.py` builds `_web_too
 
 When changing public web tools, review `scripts/smoke_webchat_security.py` and the frontend caller behavior.
 
+## Inbound MCP Gateway
+
+`mcp_gateway.server` is an on-demand stdio MCP server for local developer/operator clients such as Codex or Claude Code. It is not the Telegram orchestrator and not the public web chat API.
+
+The gateway is fail-closed by profile. The old `readonly` profile name is accepted only as an alias for `inspect`:
+
+- `inspect` is the default profile. It exposes gateway-local inspection tools, `kg_integrity_check`, and selected read-only runtime tools: `vector_search`, `knowledge_graph_search`, and `fetch_url`.
+- `operator` includes all `inspect` tools and adds `readonly_query_db`, which shells out to `scripts/query-db` so SQL remains limited to a single `SELECT`/`WITH`/`SHOW`/`EXPLAIN` diagnostic in a read-only transaction. It also adds `bounded_query_db`, which reuses the existing `runtime_tools.db` guard for one-statement DB work, and `kg_maintenance_run`, which exposes only bounded KG maintenance scripts and requires an explicit confirmation string for mutating runs.
+
+The gateway must not export the global registry wholesale. High-risk runtime tools such as filesystem writes, arbitrary Python execution, service restart, email/A2A send, publishing, payment/signing, arbitrary KG writes/Cypher, and broad or unguarded DB mutation remain absent from MCP profiles.
+
+When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scripts/smoke_mcp_gateway.py`.
+
 ## Agent Runtime Config Is Not the Tool Registry
 
 `config/agent_runtime.json` overlays execution settings onto registered agents. It can adjust finalization and terminal tool controls, but normal tool ownership should stay in Python specs so capability boundaries are reviewed with code.
@@ -76,6 +90,7 @@ When changing public web tools, review `scripts/smoke_webchat_security.py` and t
 - Update `runtime_tools/registry.py` for new global tools.
 - Update exactly the relevant allow-list/spec.
 - Keep public web chat and Telegram orchestrator separate.
+- Keep MCP profiles separate from public web chat and Telegram orchestrator.
 - Add smoke coverage when a new tool can write, publish, send, browse, pay, or execute.
 - Treat read-only wallet visibility separately from signing/payment capability; `check_wallet` may be public, but transfer/swap/pay tools may not.
 - Update this document only after verifying names in code.

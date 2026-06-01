@@ -36,6 +36,14 @@ systemd timers
         |-- leninbot-experience.timer -> experience_writer.py
         |-- leninbot-kg-integrity.timer -> scripts/check_kg_integrity.py
         |-- research-document-translation.timer -> scripts/static_page_translation_pipeline.py
+
+developer MCP clients
+        |
+        v
+        python -m mcp_gateway.server (stdio, on demand)
+        |-- explicit MCP profile allow-list
+        |-- read-only adapters over runtime_tools, dev_docs, task/corpus state
+        |-- operator-only readonly_query_db and bounded_query_db via existing DB guards
 ```
 
 ## Service Units
@@ -87,6 +95,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py` |
 | Fetch/browser | `content_fetch/*`, `browser/*`, `runtime_tools/fetch.py`, `runtime_tools/media.py` |
+| Inbound MCP gateway | `mcp_gateway/*`, `scripts/smoke_mcp_gateway.py` |
 
 `shared.py` is now a compatibility facade plus a small set of shared helpers. New implementation should import from the domain modules above instead of growing `shared.py`.
 
@@ -97,6 +106,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - Telegram connectivity watchdog: `telegram/bot.py` probes `get_me()` every `TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS` seconds, using `TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS` as the per-probe timeout. Owner-facing degraded/restored notifications are emitted only after `TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES` consecutive failures.
 - Static page smoke tests: `scripts/smoke_static_pages.py`
 - Runtime smoke tests: `scripts/smoke_runtime.py`, `scripts/smoke_tool_allowlists.py`, `scripts/smoke_webchat_security.py`, `scripts/smoke_kg_schema_docs.py`
+- MCP gateway smoke test: `scripts/smoke_mcp_gateway.py`
 - Secret management: `scripts/manage_secrets.py`
 - Schema migrations: `scripts/schema_migrations.py`
 - Model/provider audit: `scripts/model_runtime_audit.py`
@@ -110,4 +120,5 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - `config.json` stores mutable runtime config. `config/agent_runtime.json` overlays per-agent execution settings.
 - Prompt text under `identity/agent_prompts/` hot-reloads on the next prompt render. Python code, tool definitions, and systemd credentials require service restart.
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.
+- Inbound MCP is an on-demand stdio gateway for developer/operator clients, not a public API route. `MCP_GATEWAY_PROFILE=inspect` is the default. `operator` adds `readonly_query_db`, `bounded_query_db`, and `kg_maintenance_run`, each delegated to existing guarded project scripts/tools.
 - Services do not run startup DDL. Apply `scripts/schema_migrations.py` before deploying code that depends on new tables, columns, indexes, or constraints.

@@ -94,9 +94,12 @@ Relevant scripts:
 - `scripts/ingest_pending_curations.py`
 - `scripts/fix_legacy_kg_edges.py`
 - `skills/kg-maintenance/scripts/*`
+- `mcp_gateway.tools`: `kg_integrity_check` for inspect profile and `kg_maintenance_run` for operator-only bounded cleanup
 
 Operational rules:
 
+- MCP `inspect` may check KG integrity but must not mutate KG.
+- MCP `operator` may run bounded maintenance scripts through `kg_maintenance_run`; mutating actions require `execute=true` plus `confirm=APPLY_KG_MAINTENANCE`, and direct mutating actions run a backup first.
 - KG connection failures should degrade features, not crash Telegram/API.
 - Integrity changes should be tested against `graph_memory/config.py` and `knowledge_graph_schema.md`.
 - Any schema expansion must update entity/edge models, `EDGE_TYPE_MAP`, write-tool descriptions, and this document.

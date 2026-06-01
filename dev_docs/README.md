@@ -10,6 +10,7 @@
 | `multi_agent_architecture.md` | Telegram orchestrator, delegated agents, task queue, Redis/DB context |
 | `llm_provider_architecture.md` | Claude/OpenAI/DeepSeek/local provider 라우팅과 모델 티어 |
 | `tool_allowlist_current_state.md` | 전역 도구 레지스트리와 채널/에이전트별 도구 가시성 |
+| `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
 
 ## Domain Subsystems

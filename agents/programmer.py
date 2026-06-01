@@ -50,6 +50,7 @@ PROGRAMMER = AgentSpec(
 - Prefer editing existing files over creating new ones.
 - Verify your changes: re-read modified files; run targeted tests where feasible (use `./venv/bin/python`, NOT system Python).
 - For application database code, use the project's existing DB helpers (usually `db`). For operational inspection or one-shot SQL, prefer the credential-aware scripts in `scripts/`, especially `scripts/query-db` and `scripts/psql-supabase`. Do not create ad hoc raw connections with copied secrets or hardcoded DSNs.
+- For safe project inspection from Codex/Claude Code/human tooling, this repo provides an inbound MCP Gateway. Discover it with `scripts/mcp-gateway --help` or `scripts/mcp-gateway --list-tools`. The default profile is `inspect`; use `--profile operator` only when guarded read-only SQL via `scripts/query-db` is needed. See `dev_docs/mcp_gateway.md`.
 - Write in the SAME LANGUAGE as the task (Korean prompt → Korean report).
 """.strip()),
             ("operational-policy", """

@@ -14,6 +14,7 @@ Legacy `CLAUDE.md` is for Claude Code only. For Codex, follow this `AGENTS.md`.
 - `dev_docs/multi_agent_architecture.md` — agents and task runtime
 - `dev_docs/llm_provider_architecture.md` — provider/model routing
 - `dev_docs/tool_allowlist_current_state.md` — tool visibility boundaries
+- `dev_docs/mcp_gateway.md` — local MCP Gateway for safe project inspection
 - `dev_docs/secret_management.md` — credential handling
 - `dev_docs/knowledge_graph_design.md` — KG runtime boundary
 - `dev_docs/autonomous_project.md` — autonomous loop design
@@ -24,3 +25,4 @@ Use the project virtualenv before Python commands.
 Prefer small, surgical changes.
 Do not treat old handoff notes as source of truth.
 For this repository, push with `sudo -u grass git push`; do not try plain `git push` first.
+For safe project inspection from Codex/Claude Code/human tooling, prefer `scripts/mcp-gateway --list-tools` and the default `inspect` MCP profile. Use `scripts/mcp-gateway --profile operator` only when guarded read-only SQL via `scripts/query-db` is required.

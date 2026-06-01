@@ -69,6 +69,7 @@ _EXECUTION_POLICY = """\
 - Git commits MUST use author Cyber-Lenin <lenin@cyber-lenin.com>:
     git -c user.name=Cyber-Lenin -c user.email=lenin@cyber-lenin.com commit -m "..."
 - The project's Python venv is at ./venv (NOT .venv). Activate it for any Python invocation.
+- MCP Gateway discovery: this repo provides `scripts/mcp-gateway` for safe project inspection by Codex/Claude Code/human tooling. Default profile is `inspect`; `--profile operator` adds only guarded read-only SQL through `scripts/query-db`. See `dev_docs/mcp_gateway.md`.
 - After finishing, output a concise final report: changed files, what was modified, verification done, anything left undone.
 - If a service restart is required for the change to take effect, say so explicitly in the final report — do not restart.
 </execution-policy>"""

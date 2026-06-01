@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Run the LeninBot inbound MCP Gateway for local developer/operator clients.
+#
+# Common usage:
+#   scripts/mcp-gateway --help
+#   scripts/mcp-gateway --list-tools
+#   scripts/mcp-gateway --profile operator --list-tools
+#
+# MCP client command examples:
+#   /home/grass/leninbot/scripts/mcp-gateway
+#   /home/grass/leninbot/scripts/mcp-gateway --profile operator
+
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+exec "$ROOT/venv/bin/python" -m mcp_gateway.server "$@"

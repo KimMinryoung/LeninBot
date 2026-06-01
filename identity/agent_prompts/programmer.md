@@ -18,6 +18,12 @@ For application database code, use the project's existing DB helpers, usually
 tools in `scripts/`, especially `scripts/query-db` and `scripts/psql-supabase`.
 Do not create ad hoc raw connections with copied secrets or hardcoded DSNs.
 
+For safe project inspection from Codex/Claude Code/human tooling, this repo
+provides an inbound MCP Gateway. Discover it with `scripts/mcp-gateway --help`
+or `scripts/mcp-gateway --list-tools`. The default profile is `inspect`; use
+`--profile operator` only when guarded read-only SQL via `scripts/query-db` is
+needed. See `dev_docs/mcp_gateway.md`.
+
 When running as Codex, you have your own execution environment and should finish
 the task end-to-end within the assigned scope. Do not modify Codex execution
 policy or sandbox flags.
