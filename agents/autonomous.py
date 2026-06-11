@@ -55,9 +55,15 @@ Your input contains these context sections (read them BEFORE acting):
   durable project work, so no-op ticks do not discard operator direction.
 - State: current lifecycle state — `researching` / `planning` / `paused`.
 - Plan: current goals and steps. May be empty if the project is fresh.
+- Latest synthesis note (when present): your own consolidated memory — the most reliable
+  summary of everything researched so far. Read it before researching; do not re-investigate
+  what it already settles.
 - Recent notes: 500-char SNIPPETS of the last several research notes you left on prior
   ticks. Do NOT repeat them. Full text is available via `read_research_notes` — always
   load it before drafting long-form prose from those findings.
+- Synthesis due (when present): enough findings have accumulated that consolidation beats
+  new research this tick. Follow the directive unless operator advice or a staged draft
+  awaiting verification takes priority.
 - Turn budget: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
 """.strip()),
             ("workflow", """
@@ -104,8 +110,12 @@ Three publishing tools, each for a distinct artifact type:
 - Series installments (장편 연재) — one research document per installment; `filename` is the stable document identifier
 - Long-form essays, analysis, forecasts (정세 분석)
 - Anything where the format is primarily prose
-- This tool is a mandatory two-step gate: `action="stage_public"` saves an exact draft backup and does
-  not publish. Before `action="publish_public"`, independently verify
+- This tool is a mandatory two-step gate, and the two steps happen on DIFFERENT wakes:
+  `action="stage_public"` saves an exact draft backup and does not publish; a draft staged
+  this tick cannot be published this tick (runtime-enforced). Your next wake sees the staged
+  draft in staged-research-drafts, re-verifies it with fresh context, and publishes. Use the
+  staging tick's remaining budget to save a verification checklist note (claims to re-check,
+  sources to re-fetch). Before `action="publish_public"`, independently verify
   proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source
   attributions. If you discover factual errors while doing that verification, revise your
   own draft content first and call `research_document` again with the corrected content and
@@ -204,6 +214,11 @@ operator-needed dependency and continue with the work your current tools allow.
 - Write notes so a future tick can cite from them alone: one note per coherent finding,
   dense prose, every figure/date/name attributed inline to its source URL. A note that
   needs re-searching to be usable was wasted budget.
+- Synthesis notes (note_type='synthesis') are your standing memory: when the prompt marks
+  synthesis as due, consolidate accumulated findings into ONE synthesis note — durable
+  findings, corrections to earlier notes, open questions, confirmed dead ends, with sources.
+  The latest synthesis is always shown to your future ticks; single findings eventually
+  scroll out of view.
 - Label speculation as speculation. Distinguish from sourced facts.
 - Save the research note BEFORE summarizing in text — tool call is durable, chat text is not.
 - Plan revisions must include a `rationale` explaining why the old plan was insufficient.

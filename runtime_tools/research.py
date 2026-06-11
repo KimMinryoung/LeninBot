@@ -39,6 +39,7 @@ from autonomous_publication_controls import (
     record_autonomous_staged_draft,
     review_autonomous_publication,
     validate_autonomous_research_publication,
+    was_staged_this_tick,
 )
 import research_store
 
@@ -532,17 +533,30 @@ async def _exec_research_document_publish_public(
             public_url=_public_url(fname),
             meta=draft_meta,
         )
+        if is_autonomous_publication_context():
+            publish_step = (
+                "Publication is CROSS-TICK by design: publish_public is blocked within the tick "
+                "that staged this draft. On your NEXT wake, this draft will be surfaced in "
+                "staged-research-drafts; re-verify proper nouns, dates, numerical claims, "
+                "quotations, and source attributions against fresh fetches, then call "
+                "research_document publish_public with fact_check_passed=true and fact_check_notes. "
+                "Spend the rest of THIS tick saving a verification checklist note or other project work."
+            )
+        else:
+            publish_step = (
+                "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
+                "current offices, quotations, source attributions, and whether any claims or framing are "
+                "stale at the 2026 current moment. Then call research_document publish_public again "
+                "with fact_check_passed=true and fact_check_notes listing the checked claims, sources, "
+                "corrections made, and current-usefulness revisions."
+            )
         return (
             "Draft saved, not published.\n"
             f"Draft backup: {draft_path}\n"
             f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
             f"Candidate filename: {fname}\n"
             f"Candidate public URL: {_public_url(fname)}\n"
-            "Before publishing, fact-check proper nouns, dates, numerical claims, seat/vote counts, "
-            "current offices, quotations, source attributions, and whether any claims or framing are "
-            "stale at the 2026 current moment. Then call research_document publish_public again "
-            "with fact_check_passed=true and fact_check_notes listing the checked claims, sources, "
-            "corrections made, and current-usefulness revisions.\n\n"
+            f"{publish_step}\n\n"
             f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path)}"
         )
 
@@ -556,6 +570,16 @@ async def _exec_research_document_publish_public(
 
     public_url = _public_url(fname)
     if is_autonomous_publication_context():
+        if was_staged_this_tick(fname):
+            return (
+                "Publication blocked: this draft was staged during the CURRENT tick.\n"
+                f"Draft backup: {draft_path}\n"
+                "The stage→publish gate is cross-tick by design — the context that wrote a draft "
+                "must not be the one that fact-checks and publishes it. The draft is safe in "
+                "staged status and will be surfaced to your next wake for fresh-context "
+                "verification and publication. Spend the remaining budget of this tick on a "
+                "verification checklist note (add_research_note) or other project work."
+            )
         gate_error = validate_autonomous_research_publication(
             title=title,
             content=content,

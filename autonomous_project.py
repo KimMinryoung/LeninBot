@@ -43,6 +43,8 @@ ACTIVE_STATES = (STATE_RESEARCHING, STATE_PLANNING)
 RECENT_NOTES_WINDOW = 8      # how many recent notes to surface in the prompt
 NOTE_SNIPPET_CHARS = 500     # char cap per note when surfaced in prompt
 TICK_LOG_TOOL_CAP_CHARS = 500   # char cap per tool result when persisting a tick's tool log
+SYNTHESIS_DUE_AFTER_FINDINGS = 12   # finding-notes since last synthesis before synthesis is due
+SYNTHESIS_PROMPT_CHARS = 3000       # char cap for the latest synthesis note in the tick prompt
 
 
 # ── Schema bootstrap ────────────────────────────────────────────────
@@ -119,6 +121,12 @@ def _ensure_tables() -> None:
         CREATE INDEX IF NOT EXISTS autonomous_project_notes_project_created_idx
         ON autonomous_project_notes(project_id, created_at DESC)
     """)
+    # kind='finding' is a single research result; kind='synthesis' is a periodic
+    # consolidation note that distills accumulated findings into standing memory.
+    db_execute(
+        "ALTER TABLE autonomous_project_notes "
+        "ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'finding'"
+    )
     db_execute("""
         INSERT INTO autonomous_project_notes(project_id, turn, text, sources, created_at)
         SELECT
@@ -453,7 +461,11 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
     add_research_note / read_research_notes / read_document / revise_plan /
     set_project_state."""
 
-    async def _handle_add_note(text: str = "", sources: list | None = None) -> str:
+    async def _handle_add_note(
+        text: str = "",
+        sources: list | None = None,
+        note_type: str = "finding",
+    ) -> str:
         text = (text or "").strip()
         if not text:
             return "error: text is required"
@@ -461,9 +473,13 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             sources = []
         elif not isinstance(sources, list):
             sources = [str(sources)]
+        kind = "synthesis" if str(note_type or "").strip().lower() == "synthesis" else "finding"
+        # Synthesis notes consolidate many findings — allow them more room.
+        text_cap = 12000 if kind == "synthesis" else 6000
         note = {
             "turn": _current_turn_counter(project_id),
-            "text": text[:6000],
+            "kind": kind,
+            "text": text[:text_cap],
             "sources": [str(s)[:500] for s in sources][:20],
             "created_at": datetime.now(KST).isoformat(timespec="seconds"),
         }
@@ -478,18 +494,19 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         )
         db_execute(
             """
-            INSERT INTO autonomous_project_notes(project_id, turn, text, sources)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO autonomous_project_notes(project_id, turn, text, sources, kind)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (project_id, note["turn"], note["text"], json.dumps(note["sources"])),
+            (project_id, note["turn"], note["text"], json.dumps(note["sources"]), kind),
         )
-        _log_event(project_id, "note_added", text[:400], {"sources": note["sources"]})
-        return f"ok: note saved ({len(note['sources'])} sources)"
+        _log_event(project_id, "note_added", text[:400], {"sources": note["sources"], "kind": kind})
+        return f"ok: {kind} note saved ({len(note['sources'])} sources)"
 
     async def _handle_read_notes(
         keyword: str = "",
         note_ids: list | None = None,
         limit: int = 5,
+        note_type: str = "",
     ) -> str:
         try:
             limit = max(1, min(int(limit), 10))
@@ -497,6 +514,10 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             limit = 5
         clauses = ["project_id = %s"]
         params: list = [project_id]
+        note_type = str(note_type or "").strip().lower()
+        if note_type in ("finding", "synthesis"):
+            clauses.append("kind = %s")
+            params.append(note_type)
         if note_ids:
             if not isinstance(note_ids, list):
                 note_ids = [note_ids]
@@ -524,7 +545,7 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             return "no notes matched (check keyword/note_ids, or save notes first)"
         rows = db_query(
             f"""
-            SELECT id, turn, text, sources, created_at
+            SELECT id, turn, text, sources, created_at, kind
               FROM autonomous_project_notes
              WHERE {where}
              ORDER BY created_at DESC, id DESC
@@ -545,8 +566,9 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             created = row["created_at"].astimezone(KST).isoformat(timespec="seconds") \
                 if row.get("created_at") else "?"
             src_line = ", ".join(str(s) for s in sources) or "(none)"
+            kind_tag = " | SYNTHESIS" if row.get("kind") == "synthesis" else ""
             blocks.append(
-                f"[note #{row['id']} | turn {row.get('turn', '?')} | {created}]\n"
+                f"[note #{row['id']} | turn {row.get('turn', '?')} | {created}{kind_tag}]\n"
                 f"{row.get('text') or ''}\n"
                 f"sources: {src_line}"
             )
@@ -634,7 +656,9 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             "name": "add_research_note",
             "description": (
                 "Persist a single research finding to the project's note log. Use this IMMEDIATELY after "
-                "a research step — chat memory does not persist across hourly ticks, only notes do."
+                "a research step — chat memory does not persist across hourly ticks, only notes do. "
+                "When the prompt marks synthesis as due, write one note_type='synthesis' note that "
+                "consolidates accumulated findings into standing memory."
             ),
             "input_schema": {
                 "type": "object",
@@ -644,6 +668,16 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "URLs, KG node ids, or vector-DB ids that back this finding. Unsourced notes are discouraged.",
+                    },
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["finding", "synthesis"],
+                        "description": (
+                            "finding (default): one research result. synthesis: a consolidation note that "
+                            "distills the durable findings, corrections, open questions, and dead ends from "
+                            "many earlier notes — your future ticks read the latest synthesis first."
+                        ),
+                        "default": "finding",
                     },
                 },
                 "required": ["text"],
@@ -667,6 +701,11 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
                         "description": "Specific note ids (shown as #id in the Recent Notes list).",
                     },
                     "limit": {"type": "integer", "description": "Max notes to return (1-10).", "default": 5},
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["finding", "synthesis"],
+                        "description": "Filter by note kind. Omit for both.",
+                    },
                 },
             },
         },
@@ -743,7 +782,7 @@ def _recent_notes(project: dict) -> list[dict]:
         try:
             rows = db_query(
                 """
-                SELECT id, turn, text, sources, created_at
+                SELECT id, turn, text, sources, created_at, kind
                   FROM autonomous_project_notes
                  WHERE project_id = %s
                  ORDER BY created_at DESC, id DESC
@@ -757,6 +796,7 @@ def _recent_notes(project: dict) -> list[dict]:
                     out.append({
                         "id": row.get("id"),
                         "turn": row.get("turn"),
+                        "kind": row.get("kind"),
                         "text": row.get("text"),
                         "sources": row.get("sources") or [],
                         "created_at": row["created_at"].astimezone(KST).isoformat(timespec="seconds")
@@ -809,11 +849,95 @@ def _format_notes(notes: list[dict]) -> str:
         sources = n.get("sources") or []
         src_str = f" [{', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}]" if sources else ""
         note_id = f"#{n['id']} " if n.get("id") else ""
+        kind_tag = "SYNTHESIS, " if n.get("kind") == "synthesis" else ""
         lines.append(
-            f"- ({note_id}turn {n.get('turn', '?')}, {n.get('created_at', '?')}) "
+            f"- ({note_id}{kind_tag}turn {n.get('turn', '?')}, {n.get('created_at', '?')}) "
             f"{snippet}{'…' if truncated else ''}{src_str}"
         )
     return "\n".join(lines)
+
+
+def _latest_synthesis_note(project_id: int) -> dict | None:
+    """Return the most recent synthesis note, or None."""
+    try:
+        return db_query_one(
+            """
+            SELECT id, turn, text, created_at
+              FROM autonomous_project_notes
+             WHERE project_id = %s AND kind = 'synthesis'
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+            """,
+            (project_id,),
+        )
+    except Exception as e:
+        logger.debug("latest synthesis note lookup failed (project=%s): %s", project_id, e)
+        return None
+
+
+def _count_findings_since(project_id: int, since) -> int:
+    """Count finding-notes created after `since` (all findings when since is None)."""
+    try:
+        if since is None:
+            row = db_query_one(
+                "SELECT COUNT(*) AS count FROM autonomous_project_notes "
+                "WHERE project_id = %s AND kind = 'finding'",
+                (project_id,),
+            )
+        else:
+            row = db_query_one(
+                "SELECT COUNT(*) AS count FROM autonomous_project_notes "
+                "WHERE project_id = %s AND kind = 'finding' AND created_at > %s",
+                (project_id, since),
+            )
+        return int((row or {}).get("count") or 0)
+    except Exception as e:
+        logger.debug("findings-since count failed (project=%s): %s", project_id, e)
+        return 0
+
+
+def _synthesis_context(project_id: int) -> tuple[str | None, str | None]:
+    """Return (latest_synthesis_block, synthesis_due_directive); either may be None.
+
+    The latest synthesis note is the project's standing consolidated memory and
+    is always surfaced (bounded). When enough findings have accumulated since
+    the last synthesis, a directive asks the tick to consolidate instead of
+    piling on more single findings that fall out of the recent-notes window.
+    """
+    latest = _latest_synthesis_note(project_id)
+    synthesis_block = None
+    if latest and (latest.get("text") or "").strip():
+        created = latest["created_at"].astimezone(KST).strftime("%Y-%m-%d %H:%M KST") \
+            if latest.get("created_at") else "?"
+        text = (latest["text"] or "").strip()
+        clipped = text[:SYNTHESIS_PROMPT_CHARS]
+        if len(text) > SYNTHESIS_PROMPT_CHARS:
+            clipped = clipped.rstrip() + (
+                f"…\n(clipped — full text: read_research_notes(note_ids=[{latest['id']}]))"
+            )
+        synthesis_block = (
+            f"[synthesis note #{latest['id']} | turn {latest.get('turn', '?')} | {created}]\n{clipped}"
+        )
+
+    findings_since = _count_findings_since(
+        project_id, (latest or {}).get("created_at")
+    )
+    due_directive = None
+    if findings_since >= SYNTHESIS_DUE_AFTER_FINDINGS:
+        if latest:
+            backlog = f"{findings_since} finding-notes have accumulated since your last synthesis note"
+        else:
+            backlog = f"this project has {findings_since} finding-notes but no synthesis note yet"
+        due_directive = (
+            f"SYNTHESIS DUE: {backlog}. Older notes fall out of the recent-notes window and "
+            "become invisible unless keyword-searched. Unless an operator advisory or a staged "
+            "draft awaiting verification takes priority, spend THIS tick consolidating: load the "
+            "unsynthesized notes with read_research_notes (paginate by keyword/note_ids), then "
+            "save ONE add_research_note(note_type='synthesis') that distills durable findings, "
+            "corrections to earlier notes, open questions, and confirmed dead ends — with sources. "
+            "Revise the plan afterwards if the synthesis changes it."
+        )
+    return synthesis_block, due_directive
 
 
 def _recent_staged_research_drafts(project_id: int, limit: int = 8) -> list[dict]:
@@ -914,6 +1038,7 @@ def _build_task_prompt(
     notes_text = _format_notes(_recent_notes(project))
     staged_drafts_text = _format_staged_research_drafts(_recent_staged_research_drafts(project["id"]))
     tick_attention_text = _format_tick_attention_events(_recent_tick_attention_events(project["id"]))
+    synthesis_block, synthesis_due = _synthesis_context(project["id"])
     if not uses_xml(provider):
         parts = [
             f"### Project\n- **id**: {project['id']}\n- **title**: {project['title']}\n- **topic**: {project['topic']}",
@@ -934,7 +1059,18 @@ def _build_task_prompt(
         parts.extend([
             f"### State\n\n{project['state']}",
             f"### Plan\n\n{plan_text}",
-            f"### Recent Notes (snippets only — full text via read_research_notes)\n\n{notes_text}",
+        ])
+        if synthesis_block:
+            parts.append(
+                "### Latest Synthesis Note (your consolidated memory — read before researching)\n\n"
+                + synthesis_block
+            )
+        parts.append(
+            f"### Recent Notes (snippets only — full text via read_research_notes)\n\n{notes_text}"
+        )
+        if synthesis_due:
+            parts.append(f"### Synthesis Due\n\n{synthesis_due}")
+        parts.extend([
             f"### Recent Tick Warnings\n\n{tick_attention_text}",
             f"### Staged Research Drafts\n\n{staged_drafts_text}",
         ])
@@ -989,9 +1125,22 @@ def _build_task_prompt(
     parts.extend([
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
+    ])
+    if synthesis_block:
+        parts.append(
+            "<latest-synthesis>\n"
+            "Your consolidated memory — the most reliable summary of past research. "
+            "Read before researching; do not re-investigate what it already settles.\n"
+            f"{synthesis_block}\n</latest-synthesis>"
+        )
+    parts.append(
         f"<recent-notes snippets-only=\"true\">\n"
         f"These are 500-char snippets. Full text: read_research_notes(note_ids=[...] or keyword=...).\n"
-        f"{notes_text}\n</recent-notes>",
+        f"{notes_text}\n</recent-notes>"
+    )
+    if synthesis_due:
+        parts.append(f"<synthesis-due>\n{synthesis_due}\n</synthesis-due>")
+    parts.extend([
         f"<recent-tick-warnings>\n{tick_attention_text}\n</recent-tick-warnings>",
         f"<staged-research-drafts>\n{staged_drafts_text}\n</staged-research-drafts>",
     ])
@@ -1093,7 +1242,12 @@ async def _run_one_tick(project: dict) -> dict:
 
     tick_messages = [{"role": "user", "content": user_content}]
 
+    from autonomous_publication_controls import current_tick_staged_slugs
+
     ctx_token = current_autonomous_project_id.set(int(project["id"]))
+    # Fresh per-tick set backing the cross-tick stage→publish gate: a draft
+    # staged during this tick cannot be published by this same tick.
+    staged_token = current_tick_staged_slugs.set(set())
     try:
         from telegram.bot import _chat_with_tools
 
@@ -1130,6 +1284,7 @@ async def _run_one_tick(project: dict) -> dict:
             logger.warning("Failed to record autonomous tick failure cooldown for project %s: %s", project["id"], update_error)
         raise
     finally:
+        current_tick_staged_slugs.reset(staged_token)
         current_autonomous_project_id.reset(ctx_token)
 
     # Increment turn counter and last_run_at AFTER the agent loop completes.

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+from contextvars import ContextVar
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -21,6 +22,27 @@ from db import execute as db_execute, query_one as db_query_one
 from telegram.channel_broadcast import current_autonomous_project_id
 
 logger = logging.getLogger(__name__)
+
+# Filenames of research drafts staged during the CURRENT autonomous tick.
+# autonomous_project._run_one_tick initializes this to a fresh set per tick;
+# outside the tick runtime it stays None so operator/task publication paths
+# are unaffected. Used to enforce the cross-tick stage→publish gate: the
+# context that wrote a draft must not be the context that fact-checks and
+# publishes it.
+current_tick_staged_slugs: ContextVar[set | None] = ContextVar(
+    "current_tick_staged_slugs", default=None
+)
+
+
+def note_staged_this_tick(filename: str | None) -> None:
+    staged = current_tick_staged_slugs.get()
+    if staged is not None and filename:
+        staged.add(str(filename))
+
+
+def was_staged_this_tick(filename: str | None) -> bool:
+    staged = current_tick_staged_slugs.get()
+    return bool(staged) and str(filename or "") in staged
 
 def _env_int(name: str, default: int) -> int:
     try:
@@ -428,6 +450,7 @@ def record_autonomous_staged_draft(
     project_id = _project_id()
     if project_id is None:
         return
+    note_staged_this_tick((meta or {}).get("filename"))
     payload = {"kind": publication_kind, "title": title, "public_url": public_url}
     if meta:
         payload.update(meta)
