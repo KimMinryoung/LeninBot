@@ -1,6 +1,6 @@
 # Autonomous Project Loop
 
-최종 확인 기준: 2026-05-25 코드 트리.
+최종 확인 기준: 2026-06-11 코드 트리.
 
 The autonomous project loop advances long-running projects without a live user turn. It is a bounded scheduled worker, not a conversational surface.
 
@@ -70,7 +70,11 @@ Current autonomous tools include:
 - research: `web_search`, `fetch_url`, `fetch_x_post`, `vector_search`, `knowledge_graph_search`, `read_self`, `recall_experience`, `get_finance_data`
 - KG: `write_kg_structured`
 - owned publishing: `research_document`, `publish_hub_curation`, `edit_content`, `publish_static_page`
-- project state: `add_research_note`, `revise_plan`, `set_project_state`
+- project state: `add_research_note`, `read_research_notes`, `revise_plan`, `set_project_state`
+
+`web_search` accepts optional `search_depth` (`basic`/`advanced`), `topic` (`general`/`news`/`finance`), and `time_range` (`day`/`week`/`month`/`year`) so research ticks can rank recent coverage and pull longer snippets for one focused question; `news`/`finance` results include publish dates. Snippets remain leads, not citable sources — the agent prompt requires fetching the underlying page or a second independent source before a specific figure/quote enters a note or public artifact.
+
+`read_research_notes` is a project-scoped read tool (registered per tick alongside the other project-state tools) that returns FULL note text with optional `keyword`/`note_ids`/`limit` filters. The tick prompt's recent-notes section shows 500-char snippets only and now labels each note with its `#id`; the agent is instructed to load full notes through this tool before drafting long-form artifacts so reports are written from saved research rather than snippets or memory.
 
 ## Publishing Gates
 

@@ -55,7 +55,9 @@ Your input contains these context sections (read them BEFORE acting):
   durable project work, so no-op ticks do not discard operator direction.
 - State: current lifecycle state — `researching` / `planning` / `paused`.
 - Plan: current goals and steps. May be empty if the project is fresh.
-- Recent notes: the last several research notes you left on prior ticks. Do NOT repeat them.
+- Recent notes: 500-char SNIPPETS of the last several research notes you left on prior
+  ticks. Do NOT repeat them. Full text is available via `read_research_notes` — always
+  load it before drafting long-form prose from those findings.
 - Turn budget: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
 """.strip()),
             ("workflow", """
@@ -70,6 +72,17 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
    - Published curation needs revision → use `edit_content(content_type="hub_curation", slug=...)`
 2. **Execute**: Take the step. Save findings via `add_research_note` IMMEDIATELY — chat memory
    does not persist across ticks.
+   Research depth discipline:
+   - web_search snippets are LEADS. For any claim that will carry a specific figure, date,
+     quotation, or proper noun into a note or public artifact, fetch_url the underlying page
+     or corroborate it via a second independent source first.
+   - Use web_search parameters deliberately: `topic="news"` or `"finance"` with `time_range`
+     for current events (results carry publish dates); `search_depth="advanced"` when digging
+     into one specific question.
+   - When drafting a report from accumulated research, FIRST call `read_research_notes` to
+     load the full text of the relevant notes — the prompt's recent-notes section is
+     snippets only, and drafting from snippets reintroduces factual drift you already
+     paid research rounds to eliminate.
 3. **Publish (when appropriate)**: If the tick is at the "build" step for an artifact, use the
    right publishing tool (see building-modalities below). Publish only when quality meets the
    goal's criteria. Drafts can be held in research notes until ready.
@@ -166,6 +179,9 @@ operator-needed dependency and continue with the work your current tools allow.
             ("rules", """
 - No repetition. The recent-notes section shows what you already covered — do not rehash.
 - Cite sources on every research note (URLs or KG node ids). Unsourced claims are rejected.
+- Write notes so a future tick can cite from them alone: one note per coherent finding,
+  dense prose, every figure/date/name attributed inline to its source URL. A note that
+  needs re-searching to be usable was wasted budget.
 - Label speculation as speculation. Distinguish from sourced facts.
 - Save the research note BEFORE summarizing in text — tool call is durable, chat text is not.
 - Plan revisions must include a `rationale` explaining why the old plan was insufficient.
@@ -193,7 +209,7 @@ operator-needed dependency and continue with the work your current tools allow.
         "publish_hub_curation", "edit_content",
         "publish_static_page",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
-        "add_research_note", "revise_plan", "set_project_state",
+        "add_research_note", "read_research_notes", "revise_plan", "set_project_state",
     ],
     finalization_tools=[
         "add_research_note",

@@ -17,6 +17,7 @@ DYNAMIC_AGENT_TOOLS = {
     },
     "autonomous_project": {
         "add_research_note",
+        "read_research_notes",
         "revise_plan",
         "set_project_state",
     },
@@ -64,6 +65,7 @@ TOOL_RISK_CLASS = {
     "mission": "state",
     "save_finding": "state",
     "add_research_note": "state",
+    "read_research_notes": "read",
     "revise_plan": "state",
     "set_project_state": "state",
     "list_agent_tools": "read",

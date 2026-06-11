@@ -442,7 +442,8 @@ def _pick_next_project() -> dict | None:
 # mutate a different project. They are registered fresh on every tick.
 
 def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
-    """Return (tool_schemas, handlers) for add_research_note / revise_plan / set_project_state."""
+    """Return (tool_schemas, handlers) for add_research_note / read_research_notes /
+    revise_plan / set_project_state."""
 
     async def _handle_add_note(text: str = "", sources: list | None = None) -> str:
         text = (text or "").strip()
@@ -476,6 +477,75 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         )
         _log_event(project_id, "note_added", text[:400], {"sources": note["sources"]})
         return f"ok: note saved ({len(note['sources'])} sources)"
+
+    async def _handle_read_notes(
+        keyword: str = "",
+        note_ids: list | None = None,
+        limit: int = 5,
+    ) -> str:
+        try:
+            limit = max(1, min(int(limit), 10))
+        except (TypeError, ValueError):
+            limit = 5
+        clauses = ["project_id = %s"]
+        params: list = [project_id]
+        if note_ids:
+            if not isinstance(note_ids, list):
+                note_ids = [note_ids]
+            ids = []
+            for raw in note_ids:
+                try:
+                    ids.append(int(raw))
+                except (TypeError, ValueError):
+                    continue
+            if not ids:
+                return "error: note_ids must contain integer note ids"
+            clauses.append("id = ANY(%s)")
+            params.append(ids[:limit])
+        keyword = (keyword or "").strip()
+        if keyword:
+            clauses.append("text ILIKE %s")
+            params.append(f"%{keyword}%")
+        where = " AND ".join(clauses)
+        total_row = db_query_one(
+            f"SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE {where}",
+            tuple(params),
+        )
+        total = int((total_row or {}).get("count") or 0)
+        if not total:
+            return "no notes matched (check keyword/note_ids, or save notes first)"
+        rows = db_query(
+            f"""
+            SELECT id, turn, text, sources, created_at
+              FROM autonomous_project_notes
+             WHERE {where}
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (*params, limit),
+        )
+        blocks = []
+        for row in reversed(rows):  # oldest first for narrative reading order
+            sources = row.get("sources") or []
+            if isinstance(sources, str):
+                try:
+                    sources = json.loads(sources)
+                except Exception:
+                    sources = [sources]
+            if not isinstance(sources, list):
+                sources = [str(sources)]
+            created = row["created_at"].astimezone(KST).isoformat(timespec="seconds") \
+                if row.get("created_at") else "?"
+            src_line = ", ".join(str(s) for s in sources) or "(none)"
+            blocks.append(
+                f"[note #{row['id']} | turn {row.get('turn', '?')} | {created}]\n"
+                f"{row.get('text') or ''}\n"
+                f"sources: {src_line}"
+            )
+        header = f"{len(rows)} of {total} matching notes, FULL TEXT, oldest first:"
+        if total > len(rows):
+            header += " (narrow with keyword/note_ids to reach the rest)"
+        return header + "\n\n" + "\n\n".join(blocks)
 
     async def _handle_revise_plan(
         rationale: str = "",
@@ -549,6 +619,27 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             },
         },
         {
+            "name": "read_research_notes",
+            "description": (
+                "Read this project's saved research notes in FULL TEXT. The Recent Notes section of "
+                "your prompt shows only 500-char snippets of the last few notes — before drafting a "
+                "report or other long-form artifact, use this to load the complete findings you saved "
+                "on earlier ticks instead of re-searching or writing from memory."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "Case-insensitive substring filter on note text."},
+                    "note_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Specific note ids (shown as #id in the Recent Notes list).",
+                    },
+                    "limit": {"type": "integer", "description": "Max notes to return (1-10).", "default": 5},
+                },
+            },
+        },
+        {
             "name": "revise_plan",
             "description": (
                 "Overwrite the project's plan. The previous plan is preserved in the event log. "
@@ -582,6 +673,7 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
     ]
     handlers = {
         "add_research_note": _handle_add_note,
+        "read_research_notes": _handle_read_notes,
         "revise_plan": _handle_revise_plan,
         "set_project_state": _handle_set_state,
     }
@@ -600,7 +692,7 @@ def _recent_notes(project: dict) -> list[dict]:
         try:
             rows = db_query(
                 """
-                SELECT turn, text, sources, created_at
+                SELECT id, turn, text, sources, created_at
                   FROM autonomous_project_notes
                  WHERE project_id = %s
                  ORDER BY created_at DESC, id DESC
@@ -612,6 +704,7 @@ def _recent_notes(project: dict) -> list[dict]:
                 out = []
                 for row in reversed(rows):
                     out.append({
+                        "id": row.get("id"),
                         "turn": row.get("turn"),
                         "text": row.get("text"),
                         "sources": row.get("sources") or [],
@@ -661,9 +754,14 @@ def _format_notes(notes: list[dict]) -> str:
     lines = []
     for n in notes:
         snippet = (n.get("text") or "")[:NOTE_SNIPPET_CHARS]
+        truncated = len(n.get("text") or "") > NOTE_SNIPPET_CHARS
         sources = n.get("sources") or []
         src_str = f" [{', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}]" if sources else ""
-        lines.append(f"- (turn {n.get('turn', '?')}, {n.get('created_at', '?')}) {snippet}{src_str}")
+        note_id = f"#{n['id']} " if n.get("id") else ""
+        lines.append(
+            f"- ({note_id}turn {n.get('turn', '?')}, {n.get('created_at', '?')}) "
+            f"{snippet}{'…' if truncated else ''}{src_str}"
+        )
     return "\n".join(lines)
 
 
@@ -785,7 +883,7 @@ def _build_task_prompt(
         parts.extend([
             f"### State\n\n{project['state']}",
             f"### Plan\n\n{plan_text}",
-            f"### Recent Notes\n\n{notes_text}",
+            f"### Recent Notes (snippets only — full text via read_research_notes)\n\n{notes_text}",
             f"### Recent Tick Warnings\n\n{tick_attention_text}",
             f"### Staged Research Drafts\n\n{staged_drafts_text}",
         ])
@@ -840,7 +938,9 @@ def _build_task_prompt(
     parts.extend([
         f"<state>{project['state']}</state>",
         f"<plan>\n{plan_text}\n</plan>",
-        f"<recent-notes>\n{notes_text}\n</recent-notes>",
+        f"<recent-notes snippets-only=\"true\">\n"
+        f"These are 500-char snippets. Full text: read_research_notes(note_ids=[...] or keyword=...).\n"
+        f"{notes_text}\n</recent-notes>",
         f"<recent-tick-warnings>\n{tick_attention_text}\n</recent-tick-warnings>",
         f"<staged-research-drafts>\n{staged_drafts_text}\n</staged-research-drafts>",
     ])

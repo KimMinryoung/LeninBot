@@ -348,12 +348,33 @@ TOOLS = [
     },
     {
         "name": "web_search",
-        "description": "Search the web via Tavily API. Returns relevant snippets with URLs. Use for current events, real-time data, fact-checking.",
+        "description": (
+            "Search the web via Tavily API. Returns relevant snippets with URLs. Use for current events, "
+            "real-time data, fact-checking. Snippets are leads, not sources — fetch_url the page before "
+            "citing a specific figure or quotation."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query."},
                 "max_results": {"type": "integer", "description": "Number of results (1-10).", "default": 5},
+                "search_depth": {
+                    "type": "string",
+                    "enum": ["basic", "advanced"],
+                    "description": "advanced returns longer, more relevant snippets at higher API cost. Use when digging into one specific question.",
+                    "default": "basic",
+                },
+                "topic": {
+                    "type": "string",
+                    "enum": ["general", "news", "finance"],
+                    "description": "news/finance rank recent coverage higher and return publish dates. Use for current events and market data.",
+                    "default": "general",
+                },
+                "time_range": {
+                    "type": "string",
+                    "enum": ["day", "week", "month", "year"],
+                    "description": "Restrict results to this recency window. Omit for no restriction.",
+                },
             },
             "required": ["query"],
         },
@@ -487,17 +508,34 @@ def build_mission_handler(user_id: int):
 
 # ── Web Search (Tavily) ──────────────────────────────────────────────
 
-async def _exec_web_search(query: str, max_results: int = 5) -> str:
+async def _exec_web_search(
+    query: str,
+    max_results: int = 5,
+    search_depth: str = "basic",
+    topic: str = "general",
+    time_range: str | None = None,
+) -> str:
     """Search the web via Tavily API."""
     api_key = get_secret("TAVILY_API_KEY", "") or ""
     if not api_key:
         return "Error: TAVILY_API_KEY not set."
     max_results = max(1, min(max_results, 10))
+    if search_depth not in ("basic", "advanced"):
+        search_depth = "basic"
+    if topic not in ("general", "news", "finance"):
+        topic = "general"
+    if time_range not in ("day", "week", "month", "year"):
+        time_range = None
+    # Advanced search returns longer, query-focused snippets; give them room.
+    snippet_cap = 1000 if search_depth == "advanced" else 500
     try:
         from tavily import AsyncTavilyClient
         from provenance.runtime import _wrap_external
         client = AsyncTavilyClient(api_key=api_key)
-        resp = await client.search(query, max_results=max_results)
+        kwargs: dict = {"max_results": max_results, "search_depth": search_depth, "topic": topic}
+        if time_range:
+            kwargs["time_range"] = time_range
+        resp = await client.search(query, **kwargs)
         results = resp.get("results", [])
         if not results:
             return f"No results for: {query}"
@@ -505,8 +543,10 @@ async def _exec_web_search(query: str, max_results: int = 5) -> str:
         for r in results:
             title = r.get("title", "")
             url = r.get("url", "")
-            content = r.get("content", "")[:500]
-            lines.append(f"### {title}\n{url}\n{content}")
+            content = r.get("content", "")[:snippet_cap]
+            published = r.get("published_date") or ""
+            header = f"### {title}" + (f" ({published})" if published else "")
+            lines.append(f"{header}\n{url}\n{content}")
         return _wrap_external("\n\n".join(lines), f"web_search:{query}")
     except Exception as e:
         logger.error("Tavily search error: %s", e)
