@@ -441,9 +441,17 @@ def _pick_next_project() -> dict | None:
 # These tools close over the current project_id so the agent can't accidentally
 # mutate a different project. They are registered fresh on every tick.
 
+# Directories read_document may serve from. The autonomous agent deliberately
+# does NOT get the general read_file tool — it publishes publicly without a
+# human in the loop, so its file reads stay confined to downloaded research
+# sources and their conversions.
+_READ_DOCUMENT_ALLOWED_PREFIXES = ("data/downloads/", "data/converted/")
+
+
 def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
-    """Return (tool_schemas, handlers) for add_research_note / read_research_notes /
-    revise_plan / set_project_state."""
+    """Return (tool_schemas, handlers) for the per-tick project tools:
+    add_research_note / read_research_notes / read_document / revise_plan /
+    set_project_state."""
 
     async def _handle_add_note(text: str = "", sources: list | None = None) -> str:
         text = (text or "").strip()
@@ -547,6 +555,29 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             header += " (narrow with keyword/note_ids to reach the rest)"
         return header + "\n\n" + "\n\n".join(blocks)
 
+    async def _handle_read_document(
+        path: str = "",
+        char_offset: int = 0,
+        char_limit: int = 20000,
+    ) -> str:
+        from runtime_tools.filesystem import _exec_read_file, _normalize_project_path
+
+        path = (path or "").strip()
+        if not path:
+            return "error: path is required"
+        _, rel = _normalize_project_path(path)
+        rel_norm = rel.replace("\\", "/")
+        if not rel_norm.startswith(_READ_DOCUMENT_ALLOWED_PREFIXES):
+            return (
+                "error: read_document only reads files under data/downloads/ or "
+                "data/converted/ — paths returned by download_file and convert_document"
+            )
+        try:
+            char_offset = max(0, int(char_offset or 0))
+        except (TypeError, ValueError):
+            char_offset = 0
+        return await _exec_read_file(path, char_offset=char_offset, char_limit=char_limit)
+
     async def _handle_revise_plan(
         rationale: str = "",
         goals: list | None = None,
@@ -640,6 +671,25 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
             },
         },
         {
+            "name": "read_document",
+            "description": (
+                "Read a downloaded source file or converted document with character pagination. "
+                "Only serves paths under data/downloads/ and data/converted/ — i.e. what "
+                "download_file and convert_document return. Use to read long primary sources "
+                "(PDF reports, statistical releases) in full; the result header shows the next "
+                "char_offset when more remains."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path returned by download_file or convert_document."},
+                    "char_offset": {"type": "integer", "description": "0-indexed start character. Default 0.", "default": 0},
+                    "char_limit": {"type": "integer", "description": "Max characters to return (default 20,000, max 100,000).", "default": 20000},
+                },
+                "required": ["path"],
+            },
+        },
+        {
             "name": "revise_plan",
             "description": (
                 "Overwrite the project's plan. The previous plan is preserved in the event log. "
@@ -674,6 +724,7 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
     handlers = {
         "add_research_note": _handle_add_note,
         "read_research_notes": _handle_read_notes,
+        "read_document": _handle_read_document,
         "revise_plan": _handle_revise_plan,
         "set_project_state": _handle_set_state,
     }

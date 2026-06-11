@@ -16,11 +16,24 @@ logger = logging.getLogger(__name__)
 FETCH_TOOLS = [
     {
         "name": "fetch_url",
-        "description": "Fetch and extract body text from a URL. Use when the user shares a link and asks about its content. Returns up to 10,000 chars of cleaned body text.",
+        "description": (
+            "Fetch and extract body text from a URL. Use when the user shares a link and asks about "
+            "its content, or to verify a claim against its source. Returns up to max_chars of cleaned "
+            "body text (default 10,000)."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "The URL to fetch content from."},
+                "max_chars": {
+                    "type": "integer",
+                    "description": (
+                        "Max characters of body text to return (1,000-50,000, default 10,000). "
+                        "Raise for long primary sources (reports, transcripts, statistical releases) "
+                        "you intend to cite precisely."
+                    ),
+                    "default": 10000,
+                },
             },
             "required": ["url"],
         },
@@ -71,13 +84,17 @@ def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-async def _exec_fetch_url(url: str) -> str:
+async def _exec_fetch_url(url: str, max_chars: int = 10000) -> str:
     """Fetch and extract main body text from a URL."""
+    try:
+        max_chars = max(1000, min(int(max_chars), 50000))
+    except (TypeError, ValueError):
+        max_chars = 10000
     try:
         from content_fetch.urls import diagnose_url_fetch_failure, fetch_url_content_async
         from provenance.runtime import _wrap_external
 
-        content = await fetch_url_content_async(url)
+        content = await fetch_url_content_async(url, max_chars=max_chars)
         if not content:
             return "Failed to extract content from this URL.\n" + diagnose_url_fetch_failure(url)
         return _wrap_external(content, f"url:{url}")

@@ -79,6 +79,10 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
    - Use web_search parameters deliberately: `topic="news"` or `"finance"` with `time_range`
      for current events (results carry publish dates); `search_depth="advanced"` when digging
      into one specific question.
+   - Primary documents beat secondary coverage. For PDF reports, statistical releases, and
+     official filings: `download_file` → `convert_document` → `read_document` (paginate with
+     char_offset). For long web articles, raise fetch_url's `max_chars` (up to 50,000) instead
+     of settling for the truncated head.
    - When drafting a report from accumulated research, FIRST call `read_research_notes` to
      load the full text of the relevant notes — the prompt's recent-notes section is
      snippets only, and drafting from snippets reintroduces factual drift you already
@@ -160,6 +164,24 @@ same safety rules as `publish_static_page`.
 
 Do NOT publish unfinished artifacts. Rough drafts live in research notes.
 """.strip()),
+            ("report-quality", """
+Quality bar for any public research document:
+
+- Lead with the finding. The first paragraph states the core claim and why it matters now —
+  background comes after, not first.
+- Every quantitative claim carries its date and source. Write absolute dates ("2026년 6월 10일"),
+  never "최근"/"오늘"/"어제" — readers arrive weeks later and the text must still parse.
+- Numbers need comparators. A figure alone (KOSPI 7,394) means little; anchor it
+  (전고점 8,933 대비 -17.2%).
+- Keep three registers visibly distinct: verified fact (sourced), interpretation (yours),
+  forecast (falsifiable). For each forecast, name the indicator and time window that would
+  confirm or refute it — a "지켜볼 지표" list beats vague prediction.
+- Engage the strongest counter-evidence or alternative explanation your research surfaced.
+  A report that only marshals supporting evidence reads as propaganda, not analysis.
+- Write from saved notes, not memory: load full text via read_research_notes before drafting.
+  If a needed fact is in neither your notes nor a source you can verify this tick, cut the
+  claim rather than approximate it.
+""".strip()),
             ("capability-boundaries", """
 Autonomous publishing is allowed on Cyber-Lenin's owned surfaces:
 - cyber-lenin.com (research documents, hub entries, static pages)
@@ -202,6 +224,10 @@ operator-needed dependency and continue with the work your current tools allow.
         "vector_search", "knowledge_graph_search",
         "read_self", "recall_experience",
         "get_finance_data",
+        # Primary-source document pipeline (download → convert → paginated read).
+        # read_document is registered per-tick by autonomous_project.py and is
+        # sandboxed to data/downloads/ + data/converted/ — NOT general read_file.
+        "download_file", "convert_document", "read_document",
         # Knowledge graph writes
         "write_kg_structured",
         # Publishing to owned Cyber-Lenin surfaces

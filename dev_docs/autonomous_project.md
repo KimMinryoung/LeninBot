@@ -63,11 +63,12 @@ Autonomous publishing is allowed only on owned Cyber-Lenin surfaces:
 - static pages
 - Telegram channel announcements that are part of the owned publishing pipeline
 
-The agent does not have broad external outreach tools. It cannot send email, use A2A, browse with browser automation, create images, write files, or modify code/config/systemd files.
+The agent does not have broad external outreach tools. It cannot send email, use A2A, browse with browser automation, create images, or modify code/config/systemd files. Its only file writes are research-source downloads/conversions confined to `data/downloads/` and `data/converted/`.
 
 Current autonomous tools include:
 
 - research: `web_search`, `fetch_url`, `fetch_x_post`, `vector_search`, `knowledge_graph_search`, `read_self`, `recall_experience`, `get_finance_data`
+- primary-source documents: `download_file`, `convert_document`, `read_document`
 - KG: `write_kg_structured`
 - owned publishing: `research_document`, `publish_hub_curation`, `edit_content`, `publish_static_page`
 - project state: `add_research_note`, `read_research_notes`, `revise_plan`, `set_project_state`
@@ -75,6 +76,10 @@ Current autonomous tools include:
 `web_search` accepts optional `search_depth` (`basic`/`advanced`), `topic` (`general`/`news`/`finance`), and `time_range` (`day`/`week`/`month`/`year`) so research ticks can rank recent coverage and pull longer snippets for one focused question; `news`/`finance` results include publish dates. Snippets remain leads, not citable sources — the agent prompt requires fetching the underlying page or a second independent source before a specific figure/quote enters a note or public artifact.
 
 `read_research_notes` is a project-scoped read tool (registered per tick alongside the other project-state tools) that returns FULL note text with optional `keyword`/`note_ids`/`limit` filters. The tick prompt's recent-notes section shows 500-char snippets only and now labels each note with its `#id`; the agent is instructed to load full notes through this tool before drafting long-form artifacts so reports are written from saved research rather than snippets or memory.
+
+`fetch_url` accepts optional `max_chars` (1,000–50,000, default 10,000) so long primary sources can be read past the default truncation. For PDFs and other binary documents the agent uses `download_file` → `convert_document` → `read_document`; `read_document` is a per-tick tool sandboxed to `data/downloads/` and `data/converted/` with character pagination — the autonomous agent deliberately does not get the general `read_file` tool because it publishes publicly without a human in the loop.
+
+The agent prompt also carries a `report-quality` section (lead with the finding, absolute dates, comparators on every figure, fact/interpretation/forecast register separation with falsifiable indicators, engage counter-evidence, draft from full notes).
 
 ## Publishing Gates
 
