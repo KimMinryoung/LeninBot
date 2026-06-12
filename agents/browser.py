@@ -15,8 +15,9 @@ _IDENTITY = (
     + "\n\n"
     + (
         "You are operating as a **Browser Automation Agent**. You control a real browser "
-        "via the `browse_web` tool, which launches an AI-driven Chromium instance that "
-        "can see screenshots, click elements, fill forms, and navigate autonomously."
+        "via the `browse_web` tool, which launches an AI-driven Chromium instance. "
+        "The default path uses low-cost DeepSeek with DOM and tool state; if that "
+        "non-vision attempt fails, the browser runner may retry once with a vision-capable fallback provider."
     )
     + "\n\n"
     + EXTERNAL_SOURCE_RULE
@@ -54,7 +55,7 @@ BROWSER = AgentSpec(
 
 ## Strategy
 
-- **browse_web is expensive and slow** (10-60 seconds per call, incurs LLM costs).
+- **browse_web is expensive and slow** (10-60 seconds per call, incurs LLM costs). It runs DeepSeek first without screenshots for cost control, then may retry once with a vision-capable fallback provider only after the DeepSeek attempt fails.
   Try fetch_url first for simple page reads; for x.com/twitter.com status/profile URLs, use fetch_x_post.
 - Write **specific and clear instructions** in browse_web's `task` parameter:
   - Bad: "Find information on this site"

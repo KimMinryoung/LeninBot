@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from claude_loop import _calculate_cost, _content_block_for_replay, _pricing_for
-from bot_config import _get_deepseek_thinking_params
+from bot_config import _get_deepseek_browser_params, _get_deepseek_thinking_params
 
 
 def _read(path: str) -> str:
@@ -48,8 +48,8 @@ def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
     assert "anthropic.AsyncAnthropic" in source
     assert 'if provider == "deepseek":' in source
-    assert "_get_deepseek_thinking_params" in source
-    assert "output_config=deepseek_thinking.get" in source
+    assert "_get_deepseek_browser_params" in source
+    assert "output_config=deepseek_params.get" in source
     assert "from openai_tool_loop import chat_with_tools as openai_chat" in source
 
 
@@ -57,7 +57,9 @@ def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("browser/use_agent.py")
     assert "class _DeepSeekAnthropicBrowserChat(ChatAnthropic)" in source
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
-    assert "params.update(_get_deepseek_thinking_params())" in source
+    assert "params.update(_get_deepseek_browser_params())" in source
+    assert "_browser_use_vision_enabled" in source
+    assert "_resolve_vision_fallback" in source
     assert "ChatDeepSeek" not in source
 
 

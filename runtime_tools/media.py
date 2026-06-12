@@ -61,7 +61,8 @@ BROWSE_WEB_TOOL = {
     "description": (
         "AI-driven browser automation using browser-use. "
         "An AI agent will autonomously navigate websites, fill forms, click buttons, "
-        "and extract information. Use for complex multi-step web interactions "
+        "and extract information. Defaults to low-cost DeepSeek DOM/tool control "
+        "with a vision-capable fallback retry on failure. Use for complex multi-step web interactions "
         "(e.g., login flows, form submissions, multi-page navigation, data extraction "
         "from dynamic sites). For simple page reads, prefer fetch_url (faster, cheaper)."
     ),
@@ -243,6 +244,16 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
             parts.append("[FAIL] Task did not complete successfully")
 
         parts.append(f"Steps: {result['steps']} | Duration: {result['duration_seconds']}s")
+        if result.get("provider") or result.get("model"):
+            vision = "vision" if result.get("use_vision") else "non-vision"
+            parts.append(f"LLM: {result.get('provider', 'unknown')} {result.get('model', 'unknown')} ({vision})")
+        if result.get("fallback_from"):
+            previous = result["fallback_from"]
+            parts.append(
+                "Fallback: "
+                f"{previous.get('provider', 'unknown')} {previous.get('model', 'unknown')} "
+                "non-vision failed; retried with vision"
+            )
 
         if result["urls"]:
             parts.append(f"Visited: {', '.join(str(url) for url in result['urls'][:5])}")

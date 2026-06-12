@@ -29,6 +29,7 @@ _DEFAULT_BROWSER_USE_MODELS = {
     "openai": "gpt-5.5-mini",
     "google": "gemini-2.5-flash",
 }
+_DEFAULT_VISION_FALLBACK_PROVIDER = "google"
 
 _DEEPSEEK_MODEL_ALIASES = {
     "deepseek_pro": "deepseek-v4-pro",
@@ -60,12 +61,53 @@ def _resolve_provider_and_model() -> tuple[str, str]:
     high-volume, so the default must not use Claude API.
     Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL for controlled tests.
     """
-    provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
+    raw_provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
+    if raw_provider in {"deepseek", "openai", "google"}:
+        provider = raw_provider
+    else:
+        if raw_provider in {"claude", "anthropic"}:
+            logger.warning("browser-use forbids Claude provider; using DeepSeek instead")
+        else:
+            logger.warning("Unsupported browser-use provider %r; using DeepSeek instead", raw_provider)
+        provider = "deepseek"
     model = (
         os.getenv("BROWSER_USE_MODEL")
         or _DEFAULT_BROWSER_USE_MODELS.get(provider, _DEFAULT_BROWSER_USE_MODEL)
     ).strip()
     return provider, model
+
+
+def _browser_use_vision_enabled(provider: str) -> bool:
+    raw = os.getenv("BROWSER_USE_VISION", "auto").strip().lower()
+    if raw in {"1", "true", "yes", "on", "vision"}:
+        return True
+    if raw in {"0", "false", "no", "off", "text", "non-vision", "non_vision"}:
+        return False
+    return provider not in {"deepseek"}
+
+
+def _vision_fallback_enabled() -> bool:
+    raw = os.getenv("BROWSER_USE_VISION_FALLBACK", "auto").strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled", "disable", "none"}
+
+
+def _resolve_vision_fallback() -> tuple[str, str]:
+    provider = (
+        os.getenv("BROWSER_USE_VISION_FALLBACK_PROVIDER")
+        or _DEFAULT_VISION_FALLBACK_PROVIDER
+    ).strip().lower()
+    if provider not in {"openai", "google"}:
+        logger.warning(
+            "Unsupported browser-use vision fallback provider %r; using %s instead",
+            provider,
+            _DEFAULT_VISION_FALLBACK_PROVIDER,
+        )
+        provider = _DEFAULT_VISION_FALLBACK_PROVIDER
+    model = (
+        os.getenv("BROWSER_USE_VISION_FALLBACK_MODEL")
+        or _DEFAULT_BROWSER_USE_MODELS.get(provider, _DEFAULT_BROWSER_USE_MODEL)
+    ).strip()
+    return provider, _normalize_model(model, provider)
 
 
 def _normalize_model(model: str | None, provider: str) -> str:
@@ -91,12 +133,15 @@ def _normalize_model(model: str | None, provider: str) -> str:
     return value
 
 
-def _build_llm(model: str | None = None):
+def _build_llm(model: str | None = None, provider: str | None = None):
     """Build browser-use LLM based on current runtime provider config.
 
     Browser automation must not use Claude API by default or fallback.
     """
-    provider, default_model = _resolve_provider_and_model()
+    if provider is None:
+        provider, default_model = _resolve_provider_and_model()
+    else:
+        default_model = _DEFAULT_BROWSER_USE_MODELS.get(provider, _DEFAULT_BROWSER_USE_MODEL)
     model = _normalize_model(model or default_model, provider)
     if str(model).lower().startswith("claude") or str(model).lower() in {"opus", "sonnet", "haiku"}:
         logger.warning("browser-use forbids Claude model override %r; using deepseek-v4-flash", model)
@@ -221,6 +266,73 @@ async def _save_cookies_from_session(browser_session):
         logger.warning("Failed to save cookies from browser-use: %s", e)
 
 
+async def _run_browser_use_agent(
+    task: str,
+    *,
+    provider: str,
+    model: str,
+    use_vision: bool,
+    max_steps: int,
+    start_url: str | None,
+) -> dict:
+    llm = _build_llm(model, provider=provider)
+    browser = _build_browser()
+
+    initial_actions = None
+    if start_url:
+        initial_actions = [{"navigate": {"url": start_url}}]
+
+    agent = Agent(
+        task=task,
+        llm=llm,
+        browser=browser,
+        initial_actions=initial_actions,
+        use_vision=use_vision,
+        generate_gif=False,
+        max_failures=3,
+    )
+
+    try:
+        history = await agent.run(max_steps=max_steps)
+
+        if agent.browser_session:
+            await _save_cookies_from_session(agent.browser_session)
+
+        return {
+            "success": history.is_done() and not history.has_errors(),
+            "result": history.final_result() or "",
+            "extracted_content": history.extracted_content(),
+            "steps": history.number_of_steps(),
+            "urls": history.urls(),
+            "errors": history.errors(),
+            "duration_seconds": round(history.total_duration_seconds(), 1),
+            "provider": provider,
+            "model": model,
+            "use_vision": use_vision,
+        }
+    except Exception as e:
+        logger.error("browser-use agent failed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "result": f"Agent error: {e}",
+            "extracted_content": [],
+            "steps": 0,
+            "urls": [],
+            "errors": [str(e)],
+            "duration_seconds": 0,
+            "provider": provider,
+            "model": model,
+            "use_vision": use_vision,
+        }
+    finally:
+        try:
+            raw = browser.close()
+            if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
+                await raw
+        except Exception:
+            pass
+
+
 async def browse(
     task: str,
     *,
@@ -239,54 +351,46 @@ async def browse(
     Returns:
         dict with keys: success, result, steps, urls, errors, duration_seconds
     """
-    llm = _build_llm(model)
-    browser = _build_browser()
-
-    initial_actions = None
-    if start_url:
-        initial_actions = [{"navigate": {"url": start_url}}]
-
-    agent = Agent(
-        task=task,
-        llm=llm,
-        browser=browser,
-        initial_actions=initial_actions,
-        use_vision=True,
-        generate_gif=False,
-        max_failures=3,
+    provider, default_model = _resolve_provider_and_model()
+    llm_model = _normalize_model(model or default_model, provider)
+    use_vision = _browser_use_vision_enabled(provider)
+    result = await _run_browser_use_agent(
+        task,
+        provider=provider,
+        model=llm_model,
+        use_vision=use_vision,
+        max_steps=max_steps,
+        start_url=start_url,
     )
 
-    try:
-        history = await agent.run(max_steps=max_steps)
+    should_fallback = (
+        provider == "deepseek"
+        and not use_vision
+        and not result.get("success")
+        and _vision_fallback_enabled()
+    )
+    if not should_fallback:
+        return result
 
-        # Try to save cookies
-        if agent.browser_session:
-            await _save_cookies_from_session(agent.browser_session)
-
-        return {
-            "success": history.is_done() and not history.has_errors(),
-            "result": history.final_result() or "",
-            "extracted_content": history.extracted_content(),
-            "steps": history.number_of_steps(),
-            "urls": history.urls(),
-            "errors": history.errors(),
-            "duration_seconds": round(history.total_duration_seconds(), 1),
-        }
-    except Exception as e:
-        logger.error("browser-use agent failed: %s", e, exc_info=True)
-        return {
-            "success": False,
-            "result": f"Agent error: {e}",
-            "extracted_content": [],
-            "steps": 0,
-            "urls": [],
-            "errors": [str(e)],
-            "duration_seconds": 0,
-        }
-    finally:
-        try:
-            raw = browser.close()
-            if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
-                await raw
-        except Exception:
-            pass
+    fallback_provider, fallback_model = _resolve_vision_fallback()
+    logger.info(
+        "browser-use DeepSeek non-vision attempt failed; retrying with %s %s vision",
+        fallback_provider,
+        fallback_model,
+    )
+    fallback = await _run_browser_use_agent(
+        task,
+        provider=fallback_provider,
+        model=fallback_model,
+        use_vision=True,
+        max_steps=max_steps,
+        start_url=start_url,
+    )
+    fallback["fallback_from"] = {
+        "provider": result.get("provider"),
+        "model": result.get("model"),
+        "use_vision": result.get("use_vision"),
+        "result": result.get("result"),
+        "errors": result.get("errors", []),
+    }
+    return fallback
