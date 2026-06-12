@@ -26,7 +26,7 @@ Graphiti/Neo4j objects are sensitive to event-loop ownership. `kg_runtime/servic
 - `collect_kg_futures()` waits for multiple submitted tasks
 - transient connection failures mark the singleton unhealthy and apply a 120-second retry cooldown
 
-`graph_memory/service.py` uses Gemini `gemini-3.1-flash-lite` as the primary Graphiti LLM and `gemini-2.5-flash-lite` as the small model. `graph_memory/kr_news_fetcher.py` uses the same Gemini pair for Korean news cleanup and person/profile extraction.
+`graph_memory/service.py` uses Gemini `gemini-3.1-flash-lite` as the primary Graphiti LLM and `gemini-2.5-flash-lite` as the small model. Graphiti semantic search and structured writer embeddings use `gemini-embedding-001` through a bounded retry wrapper for transient Gemini/Vertex `429 RESOURCE_EXHAUSTED` and `503 UNAVAILABLE` responses. The retry delays default to `5,15,45` seconds and can be overridden with `KG_EMBED_RETRY_DELAYS` as a comma-separated seconds list. `graph_memory/kr_news_fetcher.py` uses the same Gemini pair for Korean news cleanup and person/profile extraction.
 
 API startup eagerly initializes KG in a background thread and starts a periodic health check, but callers must still tolerate `get_kg_service()` returning `None`.
 
@@ -101,5 +101,6 @@ Operational rules:
 - MCP `inspect` may check KG integrity but must not mutate KG.
 - MCP `operator` may run bounded maintenance scripts through `kg_maintenance_run`; mutating actions require `execute=true` plus `confirm=APPLY_KG_MAINTENANCE`, and direct mutating actions run a backup first.
 - KG connection failures should degrade features, not crash Telegram/API.
+- If `scripts/check_kg_integrity.py --smoke-query ...` reports degraded search with `429 RESOURCE_EXHAUSTED`, first rerun after a short wait and check service logs. A passing rerun indicates transient Gemini/Vertex rate pressure; repeated failures over several minutes usually require checking the Google AI Studio / Google Cloud quota page for the API key's `gemini-embedding-001` request quota and requesting an increase or moving KG embeddings to a separate key/project.
 - Integrity changes should be tested against `graph_memory/config.py` and `knowledge_graph_schema.md`.
 - Any schema expansion must update entity/edge models, `EDGE_TYPE_MAP`, write-tool descriptions, and this document.

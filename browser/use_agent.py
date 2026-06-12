@@ -24,16 +24,32 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 _DEFAULT_MAX_STEPS = 20
 _DEFAULT_BROWSER_USE_PROVIDER = "deepseek"
 _DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
+_DEFAULT_BROWSER_USE_MODELS = {
+    "deepseek": "deepseek-v4-flash",
+    "openai": "gpt-5.5-mini",
+    "google": "gemini-2.5-flash",
+}
+
+_DEEPSEEK_MODEL_ALIASES = {
+    "deepseek_pro": "deepseek-v4-pro",
+    "deepseek_flash": "deepseek-v4-flash",
+}
+
+_OPENAI_MODEL_ALIASES = {
+    "gpt54": "gpt-5.5",
+    "gpt54mini": "gpt-5.5-mini",
+    "gpt54nano": "gpt-5.5-nano",
+}
 
 
 class _DeepSeekAnthropicBrowserChat(ChatAnthropic):
-    """ChatAnthropic wrapper that sends DeepSeek thinking controls per request."""
+    """ChatAnthropic wrapper that disables thinking for browser tool calls."""
 
     def _get_client_params_for_invoke(self):
-        from bot_config import _get_deepseek_thinking_params
+        from bot_config import _get_deepseek_browser_params
 
         params = super()._get_client_params_for_invoke()
-        params.update(_get_deepseek_thinking_params())
+        params.update(_get_deepseek_browser_params())
         return params
 
 
@@ -45,8 +61,34 @@ def _resolve_provider_and_model() -> tuple[str, str]:
     Override with BROWSER_USE_PROVIDER/BROWSER_USE_MODEL for controlled tests.
     """
     provider = (os.getenv("BROWSER_USE_PROVIDER") or _DEFAULT_BROWSER_USE_PROVIDER).strip().lower()
-    model = (os.getenv("BROWSER_USE_MODEL") or _DEFAULT_BROWSER_USE_MODEL).strip()
+    model = (
+        os.getenv("BROWSER_USE_MODEL")
+        or _DEFAULT_BROWSER_USE_MODELS.get(provider, _DEFAULT_BROWSER_USE_MODEL)
+    ).strip()
     return provider, model
+
+
+def _normalize_model(model: str | None, provider: str) -> str:
+    value = str(model or "").strip() or _DEFAULT_BROWSER_USE_MODEL
+    lowered = value.lower()
+
+    if provider == "deepseek":
+        if lowered == "high":
+            return "deepseek-v4-pro"
+        if lowered in {"medium", "low"}:
+            return "deepseek-v4-flash"
+        return _DEEPSEEK_MODEL_ALIASES.get(lowered, value)
+
+    if provider == "openai":
+        if lowered == "high":
+            return "gpt-5.5"
+        if lowered == "medium":
+            return "gpt-5.5-mini"
+        if lowered == "low":
+            return "gpt-5.5-nano"
+        return _OPENAI_MODEL_ALIASES.get(lowered, value)
+
+    return value
 
 
 def _build_llm(model: str | None = None):
@@ -55,7 +97,7 @@ def _build_llm(model: str | None = None):
     Browser automation must not use Claude API by default or fallback.
     """
     provider, default_model = _resolve_provider_and_model()
-    model = model or default_model
+    model = _normalize_model(model or default_model, provider)
     if str(model).lower().startswith("claude") or str(model).lower() in {"opus", "sonnet", "haiku"}:
         logger.warning("browser-use forbids Claude model override %r; using deepseek-v4-flash", model)
         model = "deepseek-v4-flash"

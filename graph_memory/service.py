@@ -11,6 +11,7 @@ Neo4j + Gemini를 사용하여 에피소드 수집, 검색, 브리핑 생성을 
 import asyncio
 import os
 import json
+import logging
 from datetime import datetime, timezone
 import re
 from typing import Any
@@ -55,6 +56,76 @@ from .config import (
 )
 from .conformance import validate_episode_result, apply_hard_fixes
 
+logger = logging.getLogger(__name__)
+
+
+_EMBED_RETRYABLE_KEYWORDS = (
+    "429",
+    "resource_exhausted",
+    "rate limit",
+    "quota",
+    "503",
+    "unavailable",
+)
+
+
+def _is_retryable_embedding_error(exc: Exception) -> bool:
+    err = str(exc).lower()
+    return any(keyword in err for keyword in _EMBED_RETRYABLE_KEYWORDS)
+
+
+def _embedding_retry_delays() -> list[float]:
+    raw = os.getenv("KG_EMBED_RETRY_DELAYS", "5,15,45")
+    delays: list[float] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            delay = float(part)
+        except ValueError:
+            continue
+        if delay >= 0:
+            delays.append(delay)
+    return delays or [5.0, 15.0, 45.0]
+
+
+class RetryingGeminiEmbedder(GeminiEmbedder):
+    """Gemini embedder with bounded retry for transient Vertex/Gemini limits."""
+
+    async def _with_retry(self, operation: str, call):
+        delays = _embedding_retry_delays()
+        max_attempts = len(delays) + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await call()
+            except Exception as exc:
+                if attempt >= max_attempts or not _is_retryable_embedding_error(exc):
+                    raise
+                delay = delays[attempt - 1]
+                logger.warning(
+                    "[KG] Gemini embedding %s failed with retryable error "
+                    "(attempt %s/%s); sleeping %.1fs: %s",
+                    operation,
+                    attempt,
+                    max_attempts,
+                    delay,
+                    str(exc)[:300],
+                )
+                await asyncio.sleep(delay)
+
+    async def create(self, input_data):
+        return await self._with_retry(
+            "create",
+            lambda: super(RetryingGeminiEmbedder, self).create(input_data),
+        )
+
+    async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        return await self._with_retry(
+            "create_batch",
+            lambda: super(RetryingGeminiEmbedder, self).create_batch(input_data_list),
+        )
+
 
 class GraphMemoryService:
     """Graphiti 기반 지식 그래프 서비스. 레닌봇의 정보 에이전트 기능."""
@@ -95,7 +166,7 @@ class GraphMemoryService:
             )
         )
 
-        embedder = GeminiEmbedder(
+        embedder = RetryingGeminiEmbedder(
             config=GeminiEmbedderConfig(
                 api_key=gemini_api_key,
                 embedding_model="gemini-embedding-001",

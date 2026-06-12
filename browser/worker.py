@@ -21,6 +21,17 @@ import importlib
 BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
 BROWSER_PROVIDER_OVERRIDE = os.getenv("BROWSER_PROVIDER", "").strip().lower() or None
 
+_DEEPSEEK_BROWSER_MODEL_ALIASES = {
+    "deepseek_pro": "deepseek-v4-pro",
+    "deepseek_flash": "deepseek-v4-flash",
+}
+
+_OPENAI_BROWSER_MODEL_ALIASES = {
+    "gpt54": "gpt-5.5",
+    "gpt54mini": "gpt-5.5-mini",
+    "gpt54nano": "gpt-5.5-nano",
+}
+
 
 def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") -> str:
     model = str(raw_model or "").strip()
@@ -36,6 +47,11 @@ def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") 
         else:
             tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
         return tier_map[lowered]
+
+    if provider == "deepseek" and lowered in _DEEPSEEK_BROWSER_MODEL_ALIASES:
+        return _DEEPSEEK_BROWSER_MODEL_ALIASES[lowered]
+    if provider == "openai" and lowered in _OPENAI_BROWSER_MODEL_ALIASES:
+        return _OPENAI_BROWSER_MODEL_ALIASES[lowered]
 
     if lowered in {"opus", "sonnet", "haiku"} or lowered.startswith("claude"):
         print(f"[browser_worker] WARNING: Claude model override '{model}' ignored for browser worker")
@@ -227,8 +243,8 @@ async def execute_browser_task(task: dict) -> dict:
 
         if provider == "deepseek":
             from claude_loop import chat_with_tools as deepseek_chat
-            from bot_config import _get_deepseek_thinking_params
-            deepseek_thinking = _get_deepseek_thinking_params()
+            from bot_config import _get_deepseek_browser_params
+            deepseek_params = _get_deepseek_browser_params()
             return await deepseek_chat(
                 messages,
                 client=client,
@@ -244,8 +260,8 @@ async def execute_browser_task(task: dict) -> dict:
                 task_id=task_id,
                 finalization_tools=finalization_tools,
                 terminal_tools=terminal_tools,
-                thinking=deepseek_thinking.get("thinking"),
-                output_config=deepseek_thinking.get("output_config"),
+                thinking=deepseek_params.get("thinking"),
+                output_config=deepseek_params.get("output_config"),
             )
 
         from openai_tool_loop import chat_with_tools as openai_chat

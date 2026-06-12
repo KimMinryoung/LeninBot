@@ -327,6 +327,17 @@ def _get_deepseek_thinking_params() -> dict:
     }
 
 
+def _get_deepseek_browser_params() -> dict:
+    """Return DeepSeek controls for browser automation.
+
+    Browser automation uses forced tool calls for structured browser-use steps.
+    DeepSeek rejects or destabilizes tool_choice when thinking mode is enabled,
+    so browser surfaces must explicitly disable thinking regardless of the
+    global DEEPSEEK_THINKING_MODE default used by other task agents.
+    """
+    return {"thinking": {"type": "disabled"}}
+
+
 def _resolve_tier(tier: str, provider: str | None = None) -> str:
     """Resolve a tier name (high/medium/low) to provider-specific model alias.
 

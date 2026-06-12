@@ -32,7 +32,7 @@ DeepSeek
   -> claude_loop.chat_with_tools(client=...)
   -> DeepSeek Anthropic-compatible Messages API
 
-DeepSeek web chat
+DeepSeek web chat / browser automation
   bot_config._deepseek_anthropic_client
   -> claude_loop.chat_with_tools(client=..., thinking={"type": "disabled"})
   -> DeepSeek Anthropic-compatible Messages API
@@ -44,7 +44,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
-Telegram chat, background tasks, A2A, browser worker tasks, browser-use automation, public web chat, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths enable thinking mode by default and send `output_config.effort` explicitly; `claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat deliberately keeps DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`) for lower latency while still using the same Anthropic-compatible tool loop and web tool-progress SSE events.
+Telegram chat, background tasks, A2A, public web chat, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths enable thinking mode by default and send `output_config.effort` explicitly; `claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat and browser automation deliberately keep DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`): web chat does it for lower latency, while browser automation does it because browser-use relies on forced structured tool calls and DeepSeek does not support that path with thinking enabled.
 
 ## Runtime Config Keys
 
@@ -90,6 +90,8 @@ Each `AgentSpec` may set `provider` and `model`. `None` means follow task config
 | `analyst`, `diplomat`, `visualizer` | inherit task config unless overridden |
 
 `AgentSpec.effective_provider()` renders `codex`, `moon`, and `local` prompts as local/Markdown format. Claude gets XML-style rendering; OpenAI-compatible providers get Markdown rendering through `llm/prompt_renderer.py`.
+
+The browser worker accepts tier names, legacy model aliases such as `deepseek_flash`, and official API model IDs, but normalizes them before sending requests upstream. `config/agent_runtime.json` should prefer official API IDs for browser automation because that worker calls DeepSeek's Anthropic-compatible endpoint directly.
 
 ## Model Context Injection
 

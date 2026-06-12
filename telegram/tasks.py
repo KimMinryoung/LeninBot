@@ -1790,7 +1790,20 @@ async def _delegate_to_browser_worker(task: dict) -> dict | None:
         writer.write_eof()
 
         raw = await asyncio.wait_for(reader.read(1024 * 1024), timeout=_BROWSER_DELEGATE_TIMEOUT)
-        result = json.loads(raw.decode("utf-8"))
+        if not raw:
+            logger.error("Browser worker returned empty response for task #%d", task["id"])
+            return None
+        decoded = raw.decode("utf-8", errors="replace")
+        try:
+            result = json.loads(decoded)
+        except json.JSONDecodeError as e:
+            logger.error(
+                "Browser worker returned invalid JSON for task #%d: %s; raw=%r",
+                task["id"],
+                e,
+                decoded[:1000],
+            )
+            return None
         logger.info("Browser worker returned for task #%d: %s", task["id"], result.get("status"))
         return result
 
