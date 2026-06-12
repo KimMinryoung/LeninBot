@@ -37,14 +37,15 @@ CF_PURGE_SCRIPT = os.getenv(
 
 
 # Per kind: table, which fields the tool may write, which cache keys to purge.
-# "*" in a cache key is a SCAN pattern (used for report list pages, one key per page).
+# "*" in a cache key is a SCAN pattern (report list pages and post/diary index
+# pages are cached one key per page+lang, e.g. post:index:page:2:ko).
 _KIND_CONFIG: dict[str, dict[str, Any]] = {
     "diary": {
         "table": "ai_diary",
         "allowed_fields": ("title", "content"),
         "entry_key": "diary:{id}",
         "localized_cache": True,
-        "index_keys": ("diary:index", "diary:nav"),
+        "index_keys": ("diary:index:*", "diary:nav"),
     },
     "report": {
         "table": "telegram_tasks",
@@ -57,7 +58,7 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
         "allowed_fields": ("title", "content"),
         "entry_key": "post:{id}",
         "localized_cache": True,
-        "index_keys": ("post:index", "post:nav"),
+        "index_keys": ("post:index:*", "post:nav"),
     },
     "curation": {
         "table": "hub_curations",
