@@ -26,8 +26,8 @@ from aiogram.types import BotCommand, Message
 
 from secrets_loader import get_secret
 from db import query as _query, execute as _execute
-from bot_config import _deepseek_client, _resolve_deepseek_model
-from openai_tool_loop import chat_with_tools
+from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
+from claude_loop import chat_with_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from identity.prompts import EXTERNAL_SOURCE_RULE
 
@@ -48,9 +48,13 @@ ALLOWED_USER_IDS: set[int] = {
 
 PERSONA_PATH = Path(__file__).resolve().parent.parent / "identity" / "roleplay_persona.md"
 
-# Roleplay tuning: flash + thinking OFF + creative temperature.
+# Roleplay tuning: flash + thinking ON for answer quality. We call DeepSeek over
+# its Anthropic-compatible endpoint via claude_loop, which keeps reasoning as
+# replay-only "thinking" blocks — used for quality but excluded from the
+# user-facing reply (see _REPLAY_ONLY_BLOCK_TYPES in claude_loop). This is what
+# separates the inner monologue from the final answer; the OpenAI path instead
+# prepends reasoning to the reply, which is why it leaked.
 ROLEPLAY_MODEL = _resolve_deepseek_model("deepseek_flash")  # "deepseek-v4-flash"
-ROLEPLAY_TEMPERATURE = float(os.getenv("ROLEPLAY_TEMPERATURE", "1.1"))
 ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "4096"))
 ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "8"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
@@ -180,17 +184,6 @@ def _split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
-def _strip_reasoning_prefix(text: str) -> str:
-    """Remove a leading ``💭 reasoning\\n\\n`` block (the loop's non-streaming
-    prepend). Reasoning is already delivered via progress messages, so the
-    user-facing reply should be only the final answer. If no separator follows
-    the marker, leave the text untouched rather than blanking the reply."""
-    if not text.startswith("💭"):
-        return text
-    sep = text.find("\n\n")
-    return text[sep + 2:].lstrip() if sep != -1 else text
-
-
 def _make_progress_callback(bot: Bot, chat_id: int):
     """on_progress callback that streams reasoning/tool steps as separate messages.
 
@@ -224,12 +217,12 @@ def _make_progress_callback(bot: Bot, chat_id: int):
         if round_num > 0:
             _current_round[0] = round_num
 
-        # Stream reasoning + tool steps only. Budget ("💰") is mechanics noise
-        # that breaks roleplay immersion — and a plain chat turn (no tools, no
-        # reasoning) then sends no progress message at all, just the reply.
-        if event == "thinking":
-            _buf.append(f"💭 {detail}")
-        elif event in ("tool_call", "tool_result"):
+        # Stream ONLY tool steps. The model's in-character prose arrives as
+        # "thinking"/"text_delta" but is also folded into the final reply by
+        # the loop — streaming it here would duplicate it. Budget ("💰") is
+        # mechanics noise. So a plain chat turn sends no progress at all (just
+        # the reply); a tool turn shows the 🔧 steps, then the clean answer.
+        if event in ("tool_call", "tool_result"):
             _buf.append(detail)
 
     _on_progress.flush = _flush
@@ -254,7 +247,7 @@ async def cmd_help(message: Message) -> None:
         "• 그냥 메시지를 보내면 캐릭터가 답해.\n"
         "• /new — 현재 대화 맥락을 끊고 새 세션 시작\n"
         "• 캐릭터 설정은 identity/roleplay_persona.md 파일에서 편집 (재시작 불필요)\n"
-        f"• 모델: {ROLEPLAY_MODEL} (thinking off, temp {ROLEPLAY_TEMPERATURE})"
+        f"• 모델: {ROLEPLAY_MODEL} (thinking on, 추론은 답변에 미포함)"
     )
 
 
@@ -284,7 +277,7 @@ async def handle_message(message: Message) -> None:
     try:
         reply = await chat_with_tools(
             history,
-            client=_deepseek_client,
+            client=_deepseek_anthropic_client,
             model=ROLEPLAY_MODEL,
             tools=RP_TOOLS,
             tool_handlers=RP_HANDLERS,
@@ -292,12 +285,10 @@ async def handle_message(message: Message) -> None:
             max_rounds=ROLEPLAY_MAX_ROUNDS,
             max_tokens=ROLEPLAY_MAX_TOKENS,
             budget_usd=ROLEPLAY_BUDGET_USD,
-            enable_thinking=False,
-            sdk_max_token_param="max_tokens",
-            extra_body={"temperature": ROLEPLAY_TEMPERATURE},
             on_progress=progress_cb,
-            provider_label="deepseek-roleplay",
             agent_name="roleplay",
+            thinking={"type": "enabled"},
+            output_config={"effort": "high"},
         )
     except Exception as e:
         logger.exception("roleplay turn failed: %s", e)
@@ -305,10 +296,6 @@ async def handle_message(message: Message) -> None:
         return
     finally:
         await progress_cb.flush()
-
-    # Reasoning is streamed live via progress messages; drop any leftover
-    # 💭-prefixed reasoning block the loop prepends on the non-streaming path.
-    reply = _strip_reasoning_prefix(reply)
 
     await asyncio.to_thread(save_message, user_id, "assistant", reply)
     for chunk in _split_message(reply):
@@ -320,7 +307,7 @@ async def bot_main() -> None:
         raise RuntimeError("ROLEPLAY_BOT_TOKEN is not set (.env or systemd credential).")
     if not ALLOWED_USER_IDS:
         raise RuntimeError("No allowed users: set ROLEPLAY_ALLOWED_USER_IDS or ALLOWED_USER_IDS.")
-    if _deepseek_client is None:
+    if _deepseek_anthropic_client is None:
         raise RuntimeError("DEEPSEEK_API_KEY is not configured; roleplay bot needs DeepSeek.")
 
     await asyncio.to_thread(ensure_tables)
