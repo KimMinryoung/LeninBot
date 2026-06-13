@@ -31,6 +31,12 @@ def _telegram_summaries() -> None:
     ensure_summary_tables({})
 
 
+def _roleplay_tables() -> None:
+    from telegram.schema import ensure_roleplay_tables
+
+    ensure_roleplay_tables()
+
+
 def _research_documents() -> None:
     from research_store import ensure_research_table
 
@@ -71,6 +77,7 @@ def _x402_ledger() -> None:
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
+    ("roleplay-tables", _roleplay_tables),
     ("research-documents", _research_documents),
     ("publication-records", _publication_records),
     ("site-publishing", _site_publishing),
