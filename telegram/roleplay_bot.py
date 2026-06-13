@@ -180,6 +180,62 @@ def _split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
+def _strip_reasoning_prefix(text: str) -> str:
+    """Remove a leading ``💭 reasoning\\n\\n`` block (the loop's non-streaming
+    prepend). Reasoning is already delivered via progress messages, so the
+    user-facing reply should be only the final answer. If no separator follows
+    the marker, leave the text untouched rather than blanking the reply."""
+    if not text.startswith("💭"):
+        return text
+    sep = text.find("\n\n")
+    return text[sep + 2:].lstrip() if sep != -1 else text
+
+
+def _make_progress_callback(bot: Bot, chat_id: int):
+    """on_progress callback that streams reasoning/tool steps as separate messages.
+
+    Mirrors the Cyber-Lenin bot: buffer events per round, flush one code-block
+    message per round so the final answer stays clean prose. Expose ``.flush``
+    for the trailing round after the loop returns.
+    """
+    _buf: list[str] = []
+    _current_round = [0]
+
+    async def _flush():
+        if not _buf:
+            return
+        text = "\n".join(_buf)
+        _buf.clear()
+        try:
+            for chunk in _split_message(f"```\n{text}\n```"):
+                await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
+        except Exception as e:
+            logger.debug("progress send failed: %s", e)
+
+    async def _on_progress(event: str, detail: str):
+        round_num = 0
+        if detail.startswith("["):
+            try:
+                round_num = int(detail[1:detail.index("]")])
+            except (ValueError, IndexError):
+                pass
+        if round_num > _current_round[0] and _current_round[0] > 0:
+            await _flush()
+        if round_num > 0:
+            _current_round[0] = round_num
+
+        # Stream reasoning + tool steps only. Budget ("💰") is mechanics noise
+        # that breaks roleplay immersion — and a plain chat turn (no tools, no
+        # reasoning) then sends no progress message at all, just the reply.
+        if event == "thinking":
+            _buf.append(f"💭 {detail}")
+        elif event in ("tool_call", "tool_result"):
+            _buf.append(detail)
+
+    _on_progress.flush = _flush
+    return _on_progress
+
+
 router = Router()
 
 
@@ -223,6 +279,8 @@ async def handle_message(message: Message) -> None:
     except Exception:
         pass
 
+    # Stream reasoning/tool steps as separate messages; keep the final reply clean.
+    progress_cb = _make_progress_callback(message.bot, message.chat.id)
     try:
         reply = await chat_with_tools(
             history,
@@ -237,6 +295,7 @@ async def handle_message(message: Message) -> None:
             enable_thinking=False,
             sdk_max_token_param="max_tokens",
             extra_body={"temperature": ROLEPLAY_TEMPERATURE},
+            on_progress=progress_cb,
             provider_label="deepseek-roleplay",
             agent_name="roleplay",
         )
@@ -244,6 +303,12 @@ async def handle_message(message: Message) -> None:
         logger.exception("roleplay turn failed: %s", e)
         await message.answer("…(잠깐 말이 막혔어. 다시 한 번 말해줄래?)")
         return
+    finally:
+        await progress_cb.flush()
+
+    # Reasoning is streamed live via progress messages; drop any leftover
+    # 💭-prefixed reasoning block the loop prepends on the non-streaming path.
+    reply = _strip_reasoning_prefix(reply)
 
     await asyncio.to_thread(save_message, user_id, "assistant", reply)
     for chunk in _split_message(reply):
