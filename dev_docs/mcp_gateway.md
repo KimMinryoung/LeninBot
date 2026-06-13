@@ -105,7 +105,7 @@ Gateway-local inspection tools:
 - `search_dev_docs`
 - `get_project_runtime_summary`
 - `list_recent_tasks`
-- `get_task_status`
+- `get_task_status` — supports `field`, `offset`, and `max_chars` for paginating long `content`, `result`, or `tool_log` fields
 - `list_recent_task_reports`
 - `corpus_metadata_audit`
 - `kg_integrity_check`

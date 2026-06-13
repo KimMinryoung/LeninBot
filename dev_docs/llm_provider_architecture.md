@@ -118,7 +118,7 @@ Do not hardcode model names in prompts or docs beyond describing current maps. U
 
 - tool-call/result pairing validation
 - text-only recovery after provider protocol errors
-- result truncation for large tool output
+- result truncation for large tool output, with a larger cap for pagination-capable read tools (`fetch_url`, `read_file`, `read_document`, `read_self`) so their own offset/next-hint contracts remain usable
 - forced final response after budget/round exhaustion
 
 `claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and non-web DeepSeek agent-harness calls. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.

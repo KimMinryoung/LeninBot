@@ -1210,6 +1210,20 @@ CHECK_INBOX_TOOL = {
                 "description": "Maximum extracted body characters per email (default 4000, max 12000).",
                 "default": 4000,
             },
+            "body_offset": {
+                "type": "integer",
+                "description": "Character offset into a single email body when uid is provided. Default 0.",
+                "default": 0,
+            },
+            "folder": {
+                "type": "string",
+                "description": "Mailbox folder for a single-email uid read. Use INBOX or Junk. Default INBOX.",
+                "default": "INBOX",
+            },
+            "uid": {
+                "type": "string",
+                "description": "IMAP UID from a previous check_inbox result. When provided, read that single email and paginate its body with body_offset/body_max_chars.",
+            },
         },
         "required": [],
     },
@@ -1230,7 +1244,13 @@ def _imap_connect():
     return conn
 
 
-def _parse_email_message(raw_bytes, *, include_body: bool = True, body_max_chars: int = 4000):
+def _parse_email_message(
+    raw_bytes,
+    *,
+    include_body: bool = True,
+    body_max_chars: int = 4000,
+    body_offset: int = 0,
+):
     """Parse a raw email and return dict with subject, from, date, links, and extracted body text."""
     import email as _email
     from email.header import decode_header
@@ -1307,8 +1327,20 @@ def _parse_email_message(raw_bytes, *, include_body: bool = True, body_max_chars
     extracted_body = "\n\n".join(text_parts).strip()
     if not extracted_body and html_parts:
         extracted_body = "\n\n".join(_html_to_text(part) for part in html_parts if part.strip()).strip()
-    if body_max_chars > 0 and extracted_body:
-        extracted_body = extracted_body[:body_max_chars]
+    body_chars = len(extracted_body)
+    try:
+        body_start = max(0, int(body_offset or 0))
+    except (TypeError, ValueError):
+        body_start = 0
+    if body_start >= body_chars:
+        sliced_body = ""
+        body_end = body_start
+    elif body_max_chars > 0:
+        body_end = min(body_chars, body_start + body_max_chars)
+        sliced_body = extracted_body[body_start:body_end]
+    else:
+        body_end = body_chars
+        sliced_body = extracted_body[body_start:]
 
     links = re.findall(r'https?://[^\s<>")\']+', raw_body_for_links)
     seen = set()
@@ -1324,8 +1356,11 @@ def _parse_email_message(raw_bytes, *, include_body: bool = True, body_max_chars
         "from": sender,
         "date": date,
         "links": unique_links[:50],
-        "body": extracted_body if include_body else "",
-        "body_truncated": bool(extracted_body) and body_max_chars > 0 and len(extracted_body) >= body_max_chars,
+        "body": sliced_body if include_body else "",
+        "body_chars": body_chars,
+        "body_start": body_start,
+        "body_end": body_end,
+        "body_truncated": include_body and body_end < body_chars,
     }
 
 
@@ -1336,10 +1371,19 @@ async def _exec_check_inbox(
     limit: int = 5,
     include_body: bool = True,
     body_max_chars: int = 4000,
+    body_offset: int = 0,
+    folder: str = "INBOX",
+    uid: str = "",
 ) -> str:
     """Check IMAP INBOX + Junk folders and extract readable body text plus links from recent emails."""
     limit = max(1, min(20, limit))
     body_max_chars = max(0, min(12000, body_max_chars))
+    try:
+        body_offset = max(0, int(body_offset or 0))
+    except (TypeError, ValueError):
+        body_offset = 0
+    uid = str(uid or "").strip()
+    folder = "Junk" if str(folder or "").lower() == "junk" else "INBOX"
 
     def _fetch():
         conn = _imap_connect()
@@ -1348,6 +1392,26 @@ async def _exec_check_inbox(
 
         results = []
         try:
+            if uid:
+                status, _ = conn.select(folder, readonly=True)
+                if status != "OK":
+                    return f"Error: could not select folder {folder}"
+                fetch_status, msg_data = conn.uid("fetch", uid, "(FLAGS BODY.PEEK[])")
+                if fetch_status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                    return f"Email not found: folder={folder} uid={uid}"
+                flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
+                raw = msg_data[0][1]
+                parsed = _parse_email_message(
+                    raw,
+                    include_body=include_body,
+                    body_max_chars=body_max_chars,
+                    body_offset=body_offset,
+                )
+                parsed["folder"] = folder
+                parsed["uid"] = uid
+                parsed["is_read"] = b"\\Seen" in flags_raw
+                return [parsed]
+
             for folder in ["INBOX", "Junk"]:
                 try:
                     status, _ = conn.select(folder, readonly=True)
@@ -1368,7 +1432,7 @@ async def _exec_check_inbox(
                 for mid in candidate_ids:
                     if len(results) >= limit:
                         break
-                    _, msg_data = conn.fetch(mid, "(FLAGS RFC822)")
+                    _, msg_data = conn.fetch(mid, "(FLAGS UID BODY.PEEK[])")
                     if not msg_data or not isinstance(msg_data[0], tuple):
                         continue
                     flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
@@ -1376,7 +1440,13 @@ async def _exec_check_inbox(
                     if not raw:
                         continue
                     is_read = b"\\Seen" in flags_raw
-                    parsed = _parse_email_message(raw, include_body=include_body, body_max_chars=body_max_chars)
+                    uid_match = re.search(rb"UID (\d+)", flags_raw)
+                    parsed = _parse_email_message(
+                        raw,
+                        include_body=include_body,
+                        body_max_chars=body_max_chars,
+                        body_offset=0,
+                    )
 
                     if sender_filter and sender_filter.lower() not in parsed["from"].lower():
                         continue
@@ -1384,6 +1454,7 @@ async def _exec_check_inbox(
                         continue
 
                     parsed["folder"] = folder
+                    parsed["uid"] = uid_match.group(1).decode("ascii") if uid_match else mid.decode("ascii", errors="replace")
                     parsed["is_read"] = is_read
                     results.append(parsed)
         finally:
@@ -1413,11 +1484,22 @@ async def _exec_check_inbox(
         lines.append(f"[{i}]{tags} {em['subject']}")
         lines.append(f"    From: {em['from']}")
         lines.append(f"    Date: {em['date']}")
+        lines.append(f"    Folder: {em.get('folder') or '?'} | UID: {em.get('uid') or '?'}")
         if include_body:
             body = (em.get("body") or "").strip()
             if body:
                 suffix = " …[truncated]" if em.get("body_truncated") else ""
-                lines.append(f"    Body:\n      {body.replace(chr(10), chr(10) + '      ')}{suffix}")
+                lines.append(
+                    f"    Body chars={em.get('body_chars', 0)} "
+                    f"returned_chars={em.get('body_start', 0)}:{em.get('body_end', 0)}{suffix}\n"
+                    f"      {body.replace(chr(10), chr(10) + '      ')}"
+                )
+                if em.get("body_truncated"):
+                    lines.append(
+                        "    next: check_inbox("
+                        f"folder='{em.get('folder')}', uid='{em.get('uid')}', "
+                        f"body_offset={em.get('body_end', 0)}, body_max_chars={body_max_chars})"
+                    )
             else:
                 lines.append("    Body: none")
         if em["links"]:

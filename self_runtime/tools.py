@@ -945,6 +945,7 @@ async def _exec_read_diary(
     limit: int = 5,
     keyword: str | None = None,
     max_chars: int | None = None,
+    offset: int | None = None,
     post_id: int | None = None,
     diary_id: int | None = None,
 ) -> str:
@@ -966,17 +967,20 @@ async def _exec_read_diary(
         updated = _to_kst(d.get("updated_at"))
         title = d.get("title", "Untitled")
         content = d.get("content", "")
+        slice_header = ""
         if max_chars is not None:
-            try:
-                max_len = max(0, int(max_chars))
-            except (TypeError, ValueError):
-                max_len = 0
-            if max_len and len(content) > max_len:
-                content = content[:max_len] + "\n... (truncated)"
+            body, start, end, truncated = _slice_text(content, max_chars=max_chars, offset=offset)
+            next_hint = (
+                f"\nnext: read_self(content_type='diary', id={entry_id}, offset={end}, max_chars={max_chars})"
+                if truncated
+                else ""
+            )
+            slice_header = f"Content chars={len(content)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
+            content = body
         results.append(
             f"[{i}] ID: {entry_id} | URL: https://cyber-lenin.com/ai-diary/{entry_id}\n"
             f"Created: {ts} | Updated: {updated}\n"
-            f"Title: {title}\nContent:\n{content}"
+            f"Title: {title}\n{slice_header}Content:\n{content}"
         )
 
     return f"Your diary entries ({len(diaries)} shown):\n\n" + "\n\n---\n\n".join(results)
@@ -986,6 +990,7 @@ async def _exec_read_blog_posts(
     limit: int = 5,
     keyword: str | None = None,
     max_chars: int | None = None,
+    offset: int | None = None,
     post_id: int | None = None,
 ) -> str:
     from db import query as db_query
@@ -1023,13 +1028,20 @@ async def _exec_read_blog_posts(
     results = []
     for i, row in enumerate(rows, 1):
         content = row.get("content") or ""
+        slice_header = ""
         if max_chars is not None:
-            body, _start, _end, truncated = _slice_text(content, max_chars=max_chars, offset=0)
-            content = body + ("\n... (truncated)" if truncated else "")
+            body, start, end, truncated = _slice_text(content, max_chars=max_chars, offset=offset)
+            next_hint = (
+                f"\nnext: read_self(content_type='blog_post', id={row['id']}, offset={end}, max_chars={max_chars})"
+                if truncated
+                else ""
+            )
+            slice_header = f"Content chars={len(content)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
+            content = body
         results.append(
             f"[{i}] ID: {row['id']} | URL: https://cyber-lenin.com/post/{row['id']}\n"
             f"Created: {_to_kst(row.get('created_at'))} | Updated: {_to_kst(row.get('updated_at'))}\n"
-            f"Title: {row.get('title') or 'Untitled'}\nContent:\n{content}"
+            f"Title: {row.get('title') or 'Untitled'}\n{slice_header}Content:\n{content}"
         )
     return f"Blog posts ({len(rows)} shown):\n\n" + "\n\n---\n\n".join(results)
 
@@ -1271,7 +1283,11 @@ async def _exec_read_processing_logs(
 
 
 async def _exec_read_task_reports(
-    limit: int = 5, status: str | None = None, task_id: int | None = None,
+    limit: int = 5,
+    status: str | None = None,
+    task_id: int | None = None,
+    max_chars: int | None = None,
+    offset: int | None = None,
 ) -> str:
     # Single task full report
     if task_id:
@@ -1290,12 +1306,22 @@ async def _exec_read_task_reports(
         result = str(row.get("result") or "(no result)")
         tool_log = str(row.get("tool_log") or "")
         content = str(row.get("content") or "")
+        report_header = ""
+        if max_chars is not None:
+            body, start, end, truncated = _slice_text(result, max_chars=max_chars, offset=offset)
+            next_hint = (
+                f"\nnext: read_self(content_type='task_report', id={row['id']}, offset={end}, max_chars={max_chars})"
+                if truncated
+                else ""
+            )
+            report_header = f"Report chars={len(result)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
+            result = body
         header = (
             f"Task #{row['id']} | status={row['status']} | agent={row.get('agent_type', '?')}\n"
             f"created={ts} | completed={completed}\n"
             f"mission_id={row.get('mission_id', 'N/A')} | parent={row.get('parent_task_id', 'N/A')} | depth={row.get('depth', 0)}\n"
             f"\n## Request\n{content[:1000]}\n"
-            f"\n## Full Report\n{result}"
+            f"\n## Full Report\n{report_header}{result}"
         )
         if tool_log:
             header += f"\n\n## Tool Log\n{tool_log[:5000]}"
@@ -2869,6 +2895,7 @@ async def _exec_read_self(
             limit=limit or 5,
             keyword=keyword,
             max_chars=max_chars,
+            offset=offset,
             post_id=post_id,
             diary_id=diary_id,
         )
@@ -2877,7 +2904,13 @@ async def _exec_read_self(
     if source == "processing_logs":
         return await _exec_read_processing_logs(limit=limit or 5, hours_back=hours_back, keyword=keyword)
     if source == "task_report":
-        return await _exec_read_task_reports(limit=limit or 5, status=status, task_id=task_id)
+        return await _exec_read_task_reports(
+            limit=limit or 5,
+            status=status,
+            task_id=task_id,
+            max_chars=max_chars,
+            offset=offset,
+        )
     if source == "kg_status":
         return await _exec_read_kg_status()
     if source == "system_status":

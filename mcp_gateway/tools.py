@@ -76,7 +76,15 @@ GATEWAY_TOOLS: list[dict[str, Any]] = [
                 },
                 "max_chars": {
                     "type": "integer",
-                    "description": "Maximum content/result chars. Default 4000, max 20000.",
+                    "description": "Maximum field chars. Default 4000, max 20000.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Character offset for the selected field. Default 0.",
+                },
+                "field": {
+                    "type": "string",
+                    "description": "Long text field to paginate: content, result, or tool_log. Default result when include_result=true, otherwise content.",
                 },
             },
             ["task_id"],
@@ -224,6 +232,18 @@ def _clip(text: str | None, max_chars: int) -> str:
     return text[:max_chars] + "\n...[truncated]"
 
 
+def _slice_text(text: str | None, max_chars: int, offset: int = 0) -> tuple[str, int, int, bool]:
+    text = text or ""
+    try:
+        start = max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        start = 0
+    if start >= len(text):
+        return "", start, start, False
+    end = min(len(text), start + max_chars)
+    return text[start:end], start, end, end < len(text)
+
+
 def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     try:
         return max(minimum, min(int(value), maximum))
@@ -323,11 +343,17 @@ async def get_task_status(
     task_id: int,
     include_result: bool = False,
     max_chars: int = 4000,
+    offset: int = 0,
+    field: str = "",
     **_: Any,
 ) -> str:
     from db import query
 
     max_chars = _bounded_int(max_chars, 4000, 500, 20000)
+    offset = _bounded_int(offset, 0, 0, 10_000_000)
+    selected_field = (field or ("result" if include_result else "content")).strip()
+    if selected_field not in {"content", "result", "tool_log"}:
+        selected_field = "result" if include_result else "content"
     rows = await asyncio.to_thread(
         query,
         """
@@ -343,13 +369,31 @@ async def get_task_status(
     if not rows:
         return f"Task not found: {task_id}"
     row = rows[0]
-    row["content"] = _clip(row.get("content"), max_chars)
-    row["tool_log"] = _clip(row.get("tool_log"), max_chars)
+    page, start, end, truncated = _slice_text(row.get(selected_field), max_chars, offset)
+    total = len(row.get(selected_field) or "")
+
+    row["content_preview"] = _clip(row.get("content"), 500)
+    row["tool_log_preview"] = _clip(row.get("tool_log"), 500)
+    row.pop("content", None)
+    row.pop("tool_log", None)
     if include_result:
-        row["result"] = _clip(row.get("result"), max_chars)
-    else:
         row["result_preview"] = _clip(row.get("result"), 500)
-        row.pop("result", None)
+    row.pop("result", None)
+
+    row["selected_field"] = selected_field
+    row["selected_field_chars"] = total
+    row["returned_chars"] = [start, end]
+    row["truncated"] = truncated
+    if truncated:
+        row["next"] = {
+            "tool": "get_task_status",
+            "task_id": int(task_id),
+            "include_result": include_result,
+            "field": selected_field,
+            "offset": end,
+            "max_chars": max_chars,
+        }
+    row[selected_field] = page
     return _json_text(row)
 
 

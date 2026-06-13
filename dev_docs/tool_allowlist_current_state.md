@@ -39,6 +39,10 @@ When adding a new orchestrator tool:
 3. Confirm the tool is safe for a top-level conversational loop.
 4. Run or update `scripts/smoke_tool_allowlists.py`.
 
+## Read Tool Pagination
+
+Long body reads should keep per-call character limits and expose continuation parameters instead of forcing agents to rely on one large result. `fetch_url` uses `max_chars` + `offset`; `read_self` detail reads use `max_chars` + `offset`; `check_inbox` list mode returns bounded previews with `folder`/`uid`, and a single-email read uses `folder` + `uid` + `body_offset` + `body_max_chars`. `read_file`/`read_document` use their existing line or character pagination parameters.
+
 ## Specialist Agents
 
 Each `AgentSpec` declares its own `tools` list. Current registered agents are:

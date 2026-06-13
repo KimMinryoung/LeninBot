@@ -18,8 +18,9 @@ FETCH_TOOLS = [
         "name": "fetch_url",
         "description": (
             "Fetch and extract body text from a URL. Use when the user shares a link and asks about "
-            "its content, or to verify a claim against its source. Returns up to max_chars of cleaned "
-            "body text (default 10,000)."
+            "its content, or to verify a claim against its source. Returns a character slice of cleaned "
+            "body text (default offset 0, max_chars 10,000). Use offset from the next hint to paginate "
+            "long pages."
         ),
         "input_schema": {
             "type": "object",
@@ -33,6 +34,11 @@ FETCH_TOOLS = [
                         "you intend to cite precisely."
                     ),
                     "default": 10000,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "0-indexed character offset into the extracted body text. Default 0.",
+                    "default": 0,
                 },
             },
             "required": ["url"],
@@ -84,20 +90,55 @@ def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-async def _exec_fetch_url(url: str, max_chars: int = 10000) -> str:
+async def _exec_fetch_url(
+    url: str,
+    max_chars: int = 10000,
+    offset: int = 0,
+    char_offset: int | None = None,
+    **kwargs,
+) -> str:
     """Fetch and extract main body text from a URL."""
     try:
         max_chars = max(1000, min(int(max_chars), 50000))
     except (TypeError, ValueError):
         max_chars = 10000
+    if char_offset is None:
+        char_offset = (
+            kwargs.get("offset_chars")
+            or kwargs.get("char_start")
+            or kwargs.get("start_char")
+        )
+    try:
+        start = max(0, int(char_offset if char_offset is not None else offset or 0))
+    except (TypeError, ValueError):
+        start = 0
+    # Fetch one extra character as a sentinel so exact-boundary pages do not
+    # falsely report another page. The returned slice still respects max_chars.
+    fetch_limit = start + max_chars + 1
     try:
         from content_fetch.urls import diagnose_url_fetch_failure, fetch_url_content_async
         from provenance.runtime import _wrap_external
 
-        content = await fetch_url_content_async(url, max_chars=max_chars)
+        content = await fetch_url_content_async(url, max_chars=fetch_limit)
         if not content:
             return "Failed to extract content from this URL.\n" + diagnose_url_fetch_failure(url)
-        return _wrap_external(content, f"url:{url}")
+        if start >= len(content):
+            return (
+                f"[fetch_url] url={url}\n"
+                f"chars {start}:{start} of at least {len(content)}\n"
+                f"Error: offset is beyond the fetched content. Last available offset is {max(len(content) - 1, 0)}."
+            )
+        end = min(len(content), start + max_chars)
+        body = content[start:end]
+        more = len(content) > end
+        known_chars = end if more else len(content)
+        next_hint = f"\nnext: fetch_url(url='{url}', offset={end}, max_chars={max_chars})" if more else ""
+        header = (
+            f"[fetch_url] url={url}\n"
+            f"chars {start}:{end} of {'at least ' if more else ''}{known_chars} "
+            f"truncated={more}{next_hint}\n\n"
+        )
+        return header + _wrap_external(body, f"url:{url}")
     except Exception as exc:
         logger.error("fetch_url error: %s", exc)
         try:

@@ -254,8 +254,8 @@ async def execute_tool(
     # Guard: ensure result is a non-None string
     if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
-    # Truncate oversized results to avoid context overflow. Some edit workflows
-    # need exact full bodies when the caller did not request max_chars.
+    # Truncate oversized results to avoid context overflow. Pagination-capable
+    # tools get a larger cap so their own offset/next hints remain usable.
     read_self_type = args.get("content_type") or args.get("source")
     if read_self_type == "static_pages":
         read_self_type = "static_page"
@@ -268,8 +268,10 @@ async def execute_tool(
         name == "read_self"
         and read_self_type == "chat_logs"
     )
-    if len(result) > 50000 and not (allow_full_content_read or allow_complete_chat_turns):
-        result = result[:50000] + "\n... [truncated]"
+    paginated_large_result = name in {"fetch_url", "read_file", "read_document", "read_self"}
+    result_cap = 120000 if paginated_large_result else 50000
+    if len(result) > result_cap and not (allow_full_content_read or allow_complete_chat_turns):
+        result = result[:result_cap] + f"\n... [truncated by tool loop at {result_cap} chars]"
 
     if not is_error:
         _record_tool_provenance(name, args, result)
