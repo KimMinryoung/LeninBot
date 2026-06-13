@@ -51,6 +51,10 @@ Relevant implementation files:
 - `scripts/apply_credentials_dropin.sh`
 - `systemd/*.service`
 
+## Per-Service Notes
+
+- `leninbot-roleplay.service` mounts a minimal credential set via its `.service.d/credentials.conf` drop-in: `deepseek_api_key`, `db_password`, `neo4j_password`, `tavily_api_key` — enough for its four read-only tools and DeepSeek over the Anthropic-compatible endpoint, nothing more. The bot token `ROLEPLAY_BOT_TOKEN` is supplied via `EnvironmentFile=.env` (or a `roleplay_bot_token` credential if migrated). Drop-ins are applied with `scripts/apply_credentials_dropin.sh` and are host-managed (not committed), matching the existing services.
+
 ## Operational Notes
 
 - A service restart is required after credential rotation because clients and `get_secret()` cache values in-process.
