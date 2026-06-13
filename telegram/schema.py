@@ -290,6 +290,34 @@ def ensure_telegram_tables() -> None:
     """)
 
 
+def ensure_roleplay_tables() -> None:
+    """Create tables owned by the standalone roleplay bot (telegram/roleplay_bot.py).
+
+    Kept isolated from the Cyber-Lenin chat tables so the two bots' sessions
+    never share history. Applied via scripts/schema_migrations.py, not at
+    service startup.
+    """
+    _execute("""
+        CREATE TABLE IF NOT EXISTS roleplay_chat_history (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            role        VARCHAR(10) NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    _execute("""
+        CREATE INDEX IF NOT EXISTS idx_rp_history_user
+        ON roleplay_chat_history (user_id, id DESC)
+    """)
+    _execute("""
+        CREATE TABLE IF NOT EXISTS roleplay_clear_markers (
+            user_id        BIGINT PRIMARY KEY,
+            clear_after_id BIGINT NOT NULL DEFAULT 0
+        )
+    """)
+
+
 def ensure_summary_tables(clear_after_id: MutableMapping[int, int]) -> None:
     """Create summary tables and hydrate persisted clear markers."""
     global _summary_table_ready

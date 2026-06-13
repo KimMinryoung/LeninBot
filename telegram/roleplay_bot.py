@@ -78,28 +78,8 @@ RP_TOOLS, RP_HANDLERS = _select_tools()
 
 
 # ── Persistence (own tables → session isolation) ─────────────────────
-def ensure_tables() -> None:
-    _execute("""
-        CREATE TABLE IF NOT EXISTS roleplay_chat_history (
-            id          SERIAL PRIMARY KEY,
-            user_id     BIGINT NOT NULL,
-            role        VARCHAR(10) NOT NULL,
-            content     TEXT NOT NULL,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    _execute("""
-        CREATE INDEX IF NOT EXISTS idx_rp_history_user
-        ON roleplay_chat_history (user_id, id DESC)
-    """)
-    _execute("""
-        CREATE TABLE IF NOT EXISTS roleplay_clear_markers (
-            user_id        BIGINT PRIMARY KEY,
-            clear_after_id BIGINT NOT NULL DEFAULT 0
-        )
-    """)
-
-
+# Tables (roleplay_chat_history / roleplay_clear_markers) are created by
+# scripts/schema_migrations.py ("roleplay-tables"), not at startup.
 def _clear_after_id(user_id: int) -> int:
     rows = _query(
         "SELECT clear_after_id FROM roleplay_clear_markers WHERE user_id = %s",
@@ -309,8 +289,6 @@ async def bot_main() -> None:
         raise RuntimeError("No allowed users: set ROLEPLAY_ALLOWED_USER_IDS or ALLOWED_USER_IDS.")
     if _deepseek_anthropic_client is None:
         raise RuntimeError("DEEPSEEK_API_KEY is not configured; roleplay bot needs DeepSeek.")
-
-    await asyncio.to_thread(ensure_tables)
 
     session = AiohttpSession()
     bot = Bot(token=ROLEPLAY_BOT_TOKEN, session=session)
