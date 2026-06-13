@@ -1,0 +1,15 @@
+[Unit]
+Description=LeninBot Roleplay Bot (aiogram, DeepSeek)
+After=network.target leninbot-neo4j.service leninbot-embedding.service
+Wants=leninbot-neo4j.service leninbot-embedding.service
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+ExecStart=/home/grass/leninbot/venv/bin/python -m telegram.roleplay_bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
