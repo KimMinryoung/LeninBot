@@ -13,6 +13,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `web_chat.py` | `_WEB_ALLOWED_TOOLS` plus `WEB_READ_SELF_TOOL` |
+| Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 
 ## Global Registry
@@ -71,6 +72,10 @@ Public web chat is not the Telegram orchestrator. `web_chat.py` builds `_web_too
 `check_wallet` is intentionally exposed to public web chat as a read-only wallet visibility tool. It can show public wallet address/balance information, but it must not expose private keys, credential paths, signing, transfer, swap, or payment capabilities. Payment tools such as `pay_and_fetch`, code execution tools, filesystem write tools, email/A2A send tools, and publishing tools must remain absent from the web-chat allow-list.
 
 When changing public web tools, review `scripts/smoke_webchat_security.py` and the frontend caller behavior.
+
+## Roleplay Bot
+
+`leninbot-roleplay.service` (`telegram/roleplay_bot.py`) is a separate identity, not the Cyber-Lenin orchestrator. Its allow-list is the inline `_TOOL_NAMES` list and is intentionally minimal and read-only: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`. These are selected from the global registry (`TOOLS` / `TOOL_HANDLERS`) at import time. No task execution, KG writes, filesystem, code, email/A2A, or publishing tools are exposed. Adding tools here is deliberate — keep this surface to safe read-only knowledge lookups.
 
 ## Inbound MCP Gateway
 
