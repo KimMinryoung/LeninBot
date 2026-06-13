@@ -114,6 +114,8 @@ Do not hardcode model names in prompts or docs beyond describing current maps. U
 
 ## Error Recovery and Tool Conversion
 
+Provider-facing tool definitions are compacted before API calls: long human-readable `description` strings in tool definitions and nested schemas are shortened, while tool names, schema keys, types, enums, defaults, and required fields are preserved. This reduces prompt overhead without changing execution capabilities.
+
 `openai_tool_loop.py` converts Anthropic-style tool definitions to Chat Completions function tools and normalizes malformed tool-call messages. It also handles:
 
 - tool-call/result pairing validation

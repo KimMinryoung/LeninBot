@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
-    update_redis_state, save_redis_progress, execute_tool,
+    update_redis_state, save_redis_progress, execute_tool, compact_tool_definitions,
     execute_tools_batch,
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
@@ -1026,7 +1026,7 @@ async def chat_with_tools(
     from provenance.runtime import init_provenance_buffer
     init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
-    openai_tools = _convert_tools(tools)
+    openai_tools = _convert_tools(compact_tool_definitions(tools))
 
     # ── Root-cause fix: start from text-only canonical history ──
     # Tool protocol blocks are generated only within this call.

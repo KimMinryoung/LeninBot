@@ -17,7 +17,7 @@ import logging
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
     update_redis_state, save_redis_progress, execute_tool,
-    execute_tools_batch,
+    execute_tools_batch, compact_tool_definitions,
     build_limit_message, build_budget_warning, build_round_warning,
     EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
@@ -359,8 +359,9 @@ async def chat_with_tools(
     # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above).
     cached_system = [{"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}]
 
-    # Mark last tool for prompt caching
-    cached_tools = [dict(t) for t in tools]
+    # Compact verbose tool/schema descriptions before sending them to the model.
+    # Names, parameter types, required keys, enums, and defaults are preserved.
+    cached_tools = compact_tool_definitions(tools)
     if cached_tools:
         cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
 

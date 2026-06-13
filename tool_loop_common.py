@@ -5,11 +5,65 @@ progress events, and Redis state management only need to be made in one place.
 """
 
 import asyncio
+import copy
 import inspect
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+_TOOL_DESC_LIMIT = 360
+_SCHEMA_DESC_LIMIT = 160
+
+
+def _compact_text(text: str, limit: int) -> str:
+    """Collapse long tool/schema descriptions while preserving their meaning."""
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[: max(0, limit - 1)].rstrip()
+    split_at = max(cut.rfind(". "), cut.rfind("; "), cut.rfind(", "))
+    if split_at >= int(limit * 0.55):
+        cut = cut[: split_at + 1].rstrip()
+    return cut + "…"
+
+
+def _compact_schema_descriptions(value):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key == "description" and isinstance(item, str):
+                out[key] = _compact_text(item, _SCHEMA_DESC_LIMIT)
+            else:
+                out[key] = _compact_schema_descriptions(item)
+        return out
+    if isinstance(value, list):
+        return [_compact_schema_descriptions(item) for item in value]
+    return value
+
+
+def compact_tool_definitions(tools: list[dict]) -> list[dict]:
+    """Return provider payload tool definitions with compact descriptions.
+
+    Tool names, schema keys, types, enums, defaults, and required lists are left
+    intact. Only human-readable description strings are shortened to reduce
+    prompt overhead from large tool surfaces.
+    """
+    compacted: list[dict] = []
+    for tool in tools or []:
+        t = copy.deepcopy(tool)
+        if isinstance(t.get("description"), str):
+            t["description"] = _compact_text(t["description"], _TOOL_DESC_LIMIT)
+        if isinstance(t.get("input_schema"), dict):
+            t["input_schema"] = _compact_schema_descriptions(t["input_schema"])
+        fn = t.get("function")
+        if isinstance(fn, dict):
+            if isinstance(fn.get("description"), str):
+                fn["description"] = _compact_text(fn["description"], _TOOL_DESC_LIMIT)
+            if isinstance(fn.get("parameters"), dict):
+                fn["parameters"] = _compact_schema_descriptions(fn["parameters"])
+        compacted.append(t)
+    return compacted
 
 
 # ── Budget ───────────────────────────────────────────────────────────

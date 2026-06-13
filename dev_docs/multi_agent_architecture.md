@@ -37,7 +37,7 @@ Registered in `agents/__init__.py`:
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
 
-Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, max rounds, and political-line inclusion flag.
+Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
 
 ## Runtime Overlay
 
@@ -52,6 +52,10 @@ Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalizatio
 - `skip_orchestrator_report`
 
 `agents/runtime_config.py` reloads this overlay when specs are requested.
+
+## Prompt And Tool Payload Efficiency
+
+System prompts are rendered from provider-aware prompt IR and kept as stable as possible so provider prompt caching can work. Tool definitions are filtered by allow-list before every run, then provider loops compact human-readable tool and schema `description` strings before sending them to the model. The compaction preserves tool names, schema structure, parameter types, enums, defaults, and required keys; it only shortens long explanatory prose.
 
 ## Tool Isolation
 
