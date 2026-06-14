@@ -74,6 +74,12 @@ def _x402_ledger() -> None:
     ensure_x402_ledger_table()
 
 
+def _tool_audit_log() -> None:
+    from security_gateway.audit import ensure_tool_audit_log_table
+
+    ensure_tool_audit_log_table()
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
@@ -84,6 +90,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("experiential-memory", _experiential_memory),
     ("autonomous-projects", _autonomous_projects),
     ("x402-ledger", _x402_ledger),
+    ("tool-audit-log", _tool_audit_log),
 ]
 
 

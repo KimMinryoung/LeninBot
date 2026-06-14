@@ -360,6 +360,13 @@ async def _run_llm(
     profile,
 ) -> str:
     """Run the LLM pipeline with the given tool set."""
+    # Security gateway: inbound A2A is an external, non-owner peer. Runs in the
+    # per-request handler task, so the contextvar is isolated to this request.
+    try:
+        from security_gateway import set_caller, CallerContext
+        set_caller(CallerContext(interface="a2a", is_owner=False))
+    except Exception:
+        pass
     provider = profile.provider
     if provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat

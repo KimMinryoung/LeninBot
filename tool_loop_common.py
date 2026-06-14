@@ -9,6 +9,7 @@ import copy
 import inspect
 import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +291,34 @@ async def execute_tool(
                 log_event("warning", "tool", msg)
             return msg, True
 
+    # ── Security gateway: authorize this call against the unified policy ──
+    # Funnels every tool call through one control plane (policy + audit).
+    # Fails open on any internal gateway error — a broken gateway must never
+    # take down the agent.
+    started = time.perf_counter()
+    gw_ctx = None
+    gw_decision = None
+    try:
+        from security_gateway import authorize as _gw_authorize, get_caller as _gw_caller
+
+        gw_ctx = _gw_caller()
+        gw_decision = _gw_authorize(gw_ctx, name, args)
+        if gw_decision.denied:
+            from security_gateway import audit as _gw_audit
+
+            msg = (
+                f"Tool '{name}' denied by security gateway "
+                f"(caller={gw_ctx.label()}): {gw_decision.reason}"
+            )
+            logger.warning(msg)
+            if log_event:
+                log_event("warning", "tool", msg)
+            _gw_audit(gw_ctx, name, args, gw_decision, result_status="denied", latency_ms=0)
+            return msg, True
+    except Exception as e:
+        logger.warning("gateway pre-check failed open for %s: %s", name, e)
+        gw_decision = None
+
     logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
     try:
         raw = handler(**args)
@@ -329,6 +358,30 @@ async def execute_tool(
 
     if not is_error:
         _record_tool_provenance(name, args, result)
+
+    # ── Audit the executed call (allow / shadow_deny) ──
+    try:
+        if gw_ctx is not None:
+            from security_gateway import audit as _gw_audit
+
+            if gw_decision is None:
+                # Pre-check errored: synthesize an allow decision so the call is
+                # still recorded rather than silently dropped from the audit log.
+                from security_gateway import policy as _gw_policy
+                from security_gateway.gateway import Decision as _GwDecision
+
+                gw_decision = _GwDecision(
+                    True, "allow", _gw_policy.risk_class(name),
+                    "gateway pre-check error", _gw_policy.enforce_mode(), "error",
+                )
+            _gw_audit(
+                gw_ctx, name, args, gw_decision,
+                result_status="error" if is_error else "ok",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                error_excerpt=result if is_error else None,
+            )
+    except Exception as e:
+        logger.warning("gateway audit failed (ignored) for %s: %s", name, e)
 
     return result, is_error
 
