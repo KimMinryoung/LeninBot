@@ -65,6 +65,10 @@ _CONFIG_DEFAULTS = {
     # the next `systemctl restart leninbot-api`.
     "webchat_provider": "claude",  # "claude" | "openai" | "deepseek" (no "local" on public web)
     "webchat_model":    "medium",  # tier: "high" | "medium" | "low"
+    # Security gateway enforcement posture. "shadow" logs would-be denials but
+    # allows the call (new owner-gating / rate-limit rules); "enforce" blocks.
+    # The gateway re-reads this with a short TTL, so it flips without restart.
+    "gateway_enforce_mode": "shadow",  # "shadow" | "enforce"
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -151,6 +155,7 @@ _CONFIG_META = {
     "autonomous_model": _config_meta("자율 모델", "", ["high", "medium", "low"], ["autonomous-next-tick"]),
     "webchat_provider": _config_meta("웹챗 제공자", "", ["claude", "openai", "deepseek"], ["webchat"], ["api"]),
     "webchat_model": _config_meta("웹챗 모델", "", ["high", "medium", "low"], ["webchat"], ["api"]),
+    "gateway_enforce_mode": _config_meta("보안 게이트웨이", "", ["shadow", "enforce"], ["all"]),
 }
 
 _MODEL_ALIAS_MAP = {
@@ -367,6 +372,18 @@ def set_autonomous_active(active: bool) -> bool:
     _config["autonomous_active"] = bool(active)
     _save_config()
     return _config["autonomous_active"]
+
+
+def get_gateway_enforce_mode() -> str:
+    """Return the security gateway enforcement posture ("shadow" | "enforce")."""
+    return str(_config.get("gateway_enforce_mode", "shadow"))
+
+
+def set_gateway_enforce_mode(mode: str) -> str:
+    """Set the gateway enforcement posture and persist. Returns the new value."""
+    _config["gateway_enforce_mode"] = "enforce" if str(mode).strip().lower() == "enforce" else "shadow"
+    _save_config()
+    return _config["gateway_enforce_mode"]
 
 
 def get_current_model_selection(
