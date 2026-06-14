@@ -57,70 +57,10 @@ REQUIRED_COMPAT_HANDLERS = {
     "edit_public_post",
 }
 
-TOOL_RISK_CLASS = {
-    # Coordination / routing
-    "delegate": "delegate",
-    "multi_delegate": "delegate",
-    "run_agent": "delegate",
-    "route_task": "delegate",
-    "mission": "state",
-    "save_finding": "state",
-    "add_research_note": "state",
-    "read_research_notes": "read",
-    "read_document": "read",
-    "revise_plan": "state",
-    "set_project_state": "state",
-    "list_agent_tools": "read",
-    # Read/search/fetch
-    "knowledge_graph_search": "read",
-    "vector_search": "read",
-    "web_search": "fetch",
-    "fetch_url": "fetch",
-    "fetch_x_post": "fetch",
-    "convert_document": "fetch",
-    "download_file": "fetch",
-    "download_image": "fetch",
-    "get_finance_data": "read",
-    "read_self": "read",
-    "recall_experience": "read",
-    "query_db": "read",
-    "check_inbox": "read",
-    "check_wallet": "wallet_read",
-    # Writes / publication
-    "save_self_analysis": "write",
-    "write_kg": "write",
-    "write_kg_structured": "write",
-    "save_diary": "write",
-    "research_document": "publish",
-    "edit_content": "publish",
-    "publish_hub_curation": "publish",
-    "publish_static_page": "publish",
-    "publish_static_page_translation": "publish",
-    "publish_comic": "publish",
-    "broadcast_to_channel": "send",
-    "send_email": "send",
-    "a2a_send": "send",
-    "allowlist_sender": "send",
-    # Files/code/browser/media
-    "read_file": "file_read",
-    "list_directory": "file_read",
-    "search_files": "file_read",
-    "write_file": "file_write",
-    "patch_file": "file_write",
-    "execute_python": "execute",
-    "restart_service": "execute",
-    "browse_web": "browser",
-    "generate_image": "media",
-    "upload_to_r2": "publish",
-    # Wallet/payment
-    "pay_and_fetch": "pay",
-    "swap_eth_to_usdc": "pay",
-    "transfer_usdc": "pay",
-    # External platform integrations
-    "mersoom": "send",
-    "moltbook": "send",
-    "kg_admin": "admin",
-}
+# Single source of truth: the risk taxonomy now lives in security_gateway.policy
+# (the tool-call gateway enforces and audits against it). Imported here so the
+# allow-list smoke checks validate the same map the runtime gateway uses.
+from security_gateway.policy import TOOL_RISK_CLASS  # noqa: E402
 
 WEB_FORBIDDEN_RISK_CLASSES = {
     "admin",

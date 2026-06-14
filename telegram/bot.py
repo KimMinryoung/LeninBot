@@ -1531,6 +1531,19 @@ async def _chat_with_tools(
         except Exception:
             pass
 
+    # ── Security gateway caller context ──
+    # Telegram is the owner's gated control channel (ALLOWED_USER_IDS upstream),
+    # so calls here are trusted. Orchestrator vs delegated-agent is distinguished
+    # for audit attribution; caller_scope restores the parent on exit so a nested
+    # run_agent sub-call doesn't leak its agent identity back to the orchestrator.
+    from security_gateway import CallerContext, caller_scope
+    _gw_ctx = CallerContext(
+        interface="telegram" if is_orchestrator else "agent",
+        agent_name=None if is_orchestrator else _agent_name,
+        is_owner=True,
+        task_id=str(task_id) if task_id is not None else None,
+    )
+
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
     # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
@@ -1545,7 +1558,7 @@ async def _chat_with_tools(
         # mid-<think> on Q4 quantizations, so the tool_call is never
         # emitted and the loop returns an empty answer.
         local_max_tokens = max(resolved_max_tokens, LOCAL_MAX_TOKENS)
-        return await openai_chat(
+        _chat_coro = openai_chat(
             messages,
             client=None,
             base_url=backend["base"],
@@ -1569,10 +1582,12 @@ async def _chat_with_tools(
             api_semaphore=LOCAL_SEMAPHORE,
             provider_label=f"local:{backend['base']}",
         )
+        with caller_scope(_gw_ctx):
+            return await _chat_coro
 
     if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        return await openai_chat(
+        _chat_coro = openai_chat(
             messages,
             client=_openai_client,
             model=profile.model_id,
@@ -1592,10 +1607,12 @@ async def _chat_with_tools(
             terminal_tools=terminal_tools,
             provider_label="openai",
         )
+        with caller_scope(_gw_ctx):
+            return await _chat_coro
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
         deepseek_thinking = _get_deepseek_thinking_params()
-        return await chat_with_tools(
+        _chat_coro = chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,
             model=profile.model_id,
@@ -1616,6 +1633,8 @@ async def _chat_with_tools(
             thinking=deepseek_thinking.get("thinking"),
             output_config=deepseek_thinking.get("output_config"),
         )
+        with caller_scope(_gw_ctx):
+            return await _chat_coro
 
     if effective_provider in ("openai", "deepseek"):
         missing = "OPENAI_API_KEY" if effective_provider == "openai" else "DEEPSEEK_API_KEY"
@@ -1624,7 +1643,7 @@ async def _chat_with_tools(
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_merge_runtime_context_into_last_user` above,
     # so history remains byte-stable across turns and prefix caching works.
-    return await chat_with_tools(
+    _chat_coro = chat_with_tools(
         messages,
         client=_claude,
         model=profile.model_id,
@@ -1643,6 +1662,8 @@ async def _chat_with_tools(
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
     )
+    with caller_scope(_gw_ctx):
+        return await _chat_coro
 
 
 # ── Router & Handlers ───────────────────────────────────────────────

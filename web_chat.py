@@ -812,6 +812,15 @@ async def handle_web_chat(
 
     async def _run_llm():
         try:
+            # Security gateway: public, untrusted, non-owner caller. Runs in its
+            # own task (create_task below), so the contextvar is isolated.
+            from security_gateway import set_caller, CallerContext
+            set_caller(CallerContext(
+                interface="webchat",
+                user_id=fingerprint or None,
+                session_id=session_id,
+                is_owner=False,
+            ))
             if provider == "openai":
                 from openai_tool_loop import chat_with_tools as openai_chat
                 result = await openai_chat(

@@ -66,7 +66,7 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 
 | Store | Owner modules | Stored state |
 |---|---|---|
-| PostgreSQL/Supabase | `db.py`, `task_store.py`, `memory_store/*`, `autonomous_project.py`, `email_bridge.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata |
+| PostgreSQL/Supabase | `db.py`, `task_store.py`, `memory_store/*`, `autonomous_project.py`, `email_bridge.py`, `security_gateway/audit.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata, `tool_audit_log` (per-call security audit) |
 | pgvector | `corpus/*`, `memory_store/experiential.py` | core theory, modern analysis, self-produced analysis, experience memory vectors |
 | Neo4j | `graph_memory/*`, `kg_runtime/*` | typed KG entities, relations, Graphiti episodes |
 | Redis | `redis_state.py` | live task progress/state, active task registry, mission board, task-chain summaries |
@@ -97,6 +97,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py` |
 | Fetch/browser | `content_fetch/*`, `browser/*`, `runtime_tools/fetch.py`, `runtime_tools/media.py` |
 | Inbound MCP gateway | `mcp_gateway/*`, `scripts/smoke_mcp_gateway.py` |
+| Tool security gateway | `security_gateway/*`, `tool_loop_common.execute_tool` (seam), `scripts/security_gateway.py`, `scripts/smoke_security_gateway.py` |
 
 `shared.py` is now a compatibility facade plus a small set of shared helpers. New implementation should import from the domain modules above instead of growing `shared.py`.
 
@@ -123,4 +124,5 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.
 - Inbound MCP is an on-demand stdio gateway for developer/operator clients, not a public API route. `MCP_GATEWAY_PROFILE=inspect` is the default. `operator` adds `readonly_query_db`, `bounded_query_db`, and `kg_maintenance_run`, each delegated to existing guarded project scripts/tools.
 - Services do not run startup DDL. Apply `scripts/schema_migrations.py` before deploying code that depends on new tables, columns, indexes, or constraints. The roleplay bot's tables are the `roleplay-tables` migration (`ensure_roleplay_tables` in `telegram/schema.py`).
+- Every tool call from every interface funnels through `tool_loop_common.execute_tool`, where the **tool security gateway** (`security_gateway/*`) authorizes the call against one unified policy and writes a `tool_audit_log` row + structured journal line. The gateway is fail-open on internal error. New rules (owner-gating, rate limits) ship in **shadow** mode by default (`gateway_enforce_mode` in `config.json`); web-chat interface restriction is always enforced (it already mirrors the pre-filter). Inspect with `scripts/security_gateway.py {policy,check,audit}`. Full design: `dev_docs/security_gateway.md`.
 - `leninbot-roleplay.service` is a **separate identity**, not Cyber-Lenin. It runs `telegram/roleplay_bot.py`: owner-gated, DeepSeek over the Anthropic-compatible endpoint via `claude_loop` (thinking on, kept out of replies), a hot-reloaded persona at `identity/roleplay_persona.md`, its own isolated chat tables, and a narrow read-only tool set (see `tool_allowlist_current_state.md`). Runtime config is the `ROLEPLAY_*` env vars; the bot token is `ROLEPLAY_BOT_TOKEN`.
