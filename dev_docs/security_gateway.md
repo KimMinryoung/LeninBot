@@ -61,8 +61,12 @@ interface boundary  →  installs CallerContext (contextvar) for its run
    here changes nothing observable — it just adds defense-in-depth + audit).
 3. **Owner-gating** → `pay`/`send`/`execute`/`admin` require `is_owner`. **Shadow by
    default** (non-owner call allowed but logged `shadow_deny`); blocks only in enforce.
-4. **Rate limit** → per `(caller, risk_class)` sliding window (e.g. `pay` = 5/hour).
-   **Shadow by default**; blocks only in enforce. Denied calls don't consume a slot.
+4. **Rate limit** → per `(caller, risk_class)` sliding window on outbound/irreversible
+   classes only: `pay` = 3/hour, `send` = 20/hour, `publish` = 20/hour. `execute` and
+   `admin` are intentionally **uncapped** (risk is in the payload, not the call count;
+   legitimate bulk runs are common). **Shadow by default**; blocks only in enforce.
+   Denied calls don't consume a slot. In practice these classes are reachable only by
+   the trusted owner/agent/autonomous paths (webchat/a2a never expose them).
 
 Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny`.
 

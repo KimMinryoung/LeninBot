@@ -83,15 +83,21 @@ def main() -> int:
     from redis_state import redis_available
 
     _force_mode(policy.ENFORCE)
-    # 'pay' is limited to 5/hour. Use a fresh caller so the window starts empty.
+    # Read the configured 'pay' cap so the test tracks policy, not a literal.
+    cap = policy.rate_limit_for("pay")["max_calls"]
     pay_ctx = CallerContext(interface="telegram", user_id=f"payer-{uuid.uuid4().hex[:8]}", is_owner=True)
-    labels = [authorize(pay_ctx, "transfer_usdc").label for _ in range(7)]
+    labels = [authorize(pay_ctx, "transfer_usdc").label for _ in range(cap + 2)]
     if redis_available():
-        first5_ok = all(x == "allow" for x in labels[:5])
-        rest_denied = all(x == "deny" for x in labels[5:])
-        check("rate limit: first 5 pay allowed, rest denied", first5_ok and rest_denied, str(labels))
+        first_ok = all(x == "allow" for x in labels[:cap])
+        rest_denied = all(x == "deny" for x in labels[cap:])
+        check(f"rate limit: first {cap} pay allowed, rest denied", first_ok and rest_denied, str(labels))
     else:
         check("rate limit fails open without Redis", all(x == "allow" for x in labels), str(labels))
+
+    # execute and admin are intentionally uncapped.
+    for uncapped in ("execute", "admin"):
+        check(f"{uncapped} has no rate limit", policy.rate_limit_for(uncapped) is None,
+              str(policy.rate_limit_for(uncapped)))
 
     print("== uncategorized tool is never blocked ==")
     _force_mode(policy.ENFORCE)

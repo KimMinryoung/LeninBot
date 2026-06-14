@@ -117,13 +117,17 @@ OWNER_REQUIRED_RISK_CLASSES = frozenset({"pay", "send", "execute", "admin"})
 
 # ── Rate limits (NEW — shadow by default) ─────────────────────────────
 # Per (caller, risk_class) sliding-window caps. window_seconds + max_calls.
-# Absent class => unlimited. Tuned conservatively for high-impact classes.
+# Absent class => unlimited.
+#
+# Only outbound/irreversible side-effect classes are capped: pay (funds leave),
+# send (messages go out), publish (content goes public). execute and admin are
+# intentionally NOT capped — their risk depends on the payload, not the call
+# count, and legitimate bulk runs are common; throttling by count would just
+# break normal work without adding safety.
 DEFAULT_RATE_LIMITS: dict[str, dict[str, int]] = {
-    "pay": {"window_seconds": 3600, "max_calls": 5},
-    "send": {"window_seconds": 3600, "max_calls": 60},
-    "execute": {"window_seconds": 3600, "max_calls": 30},
-    "publish": {"window_seconds": 3600, "max_calls": 60},
-    "admin": {"window_seconds": 3600, "max_calls": 20},
+    "pay": {"window_seconds": 3600, "max_calls": 3},
+    "send": {"window_seconds": 3600, "max_calls": 20},
+    "publish": {"window_seconds": 3600, "max_calls": 20},
 }
 
 # ── Config overlay ────────────────────────────────────────────────────
