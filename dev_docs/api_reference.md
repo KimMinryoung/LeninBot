@@ -67,7 +67,7 @@ Concurrency and rate controls:
 
 ### `POST /chat/feedback`
 
-Stores explicit feedback for a completed web-chat answer. The frontend should use `message_id` from the final `/chat` SSE `answer` event. Feedback is scoped by fingerprint/session/persona and is folded into later `/chat` turns as lightweight style guidance.
+Stores explicit feedback for a completed web-chat answer. The frontend should use `message_id` from the final `/chat` SSE `answer` event. Feedback is scoped by fingerprint/session/persona and is folded into the next normal `/chat` turn once, then marked consumed so specific correction notes do not keep reappearing. Feedback passed inline with `regenerate_from_id` is applied only to that regeneration request.
 
 Request:
 

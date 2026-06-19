@@ -739,8 +739,9 @@ async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
     """Store explicit feedback for one web-chat answer.
 
     The frontend should pass `message_id` from the final /chat SSE answer event.
-    Stored feedback is folded into later turns for the same persona/session as
-    lightweight style guidance.
+    Stored feedback is folded into the next normal turn for the same
+    persona/session once, then marked consumed. Regeneration feedback is applied
+    only to that regeneration request.
     """
     from web_chat import (
         _FEEDBACK_TONE_LABELS,

@@ -534,14 +534,24 @@ def ensure_web_chat_feedback_table() -> None:
                rating integer CHECK (rating IS NULL OR rating BETWEEN 1 AND 4),
                tone_feedback text,
                note text,
+               consumed_at timestamptz,
                created_at timestamptz NOT NULL DEFAULT now(),
                updated_at timestamptz NOT NULL DEFAULT now(),
                UNIQUE (chat_log_id, fingerprint)
            )"""
     )
     db_execute(
+        """ALTER TABLE web_chat_feedback
+           ADD COLUMN IF NOT EXISTS consumed_at timestamptz"""
+    )
+    db_execute(
         """CREATE INDEX IF NOT EXISTS idx_web_chat_feedback_scope
            ON web_chat_feedback (persona, fingerprint, session_id, updated_at DESC)"""
+    )
+    db_execute(
+        """CREATE INDEX IF NOT EXISTS idx_web_chat_feedback_pending
+           ON web_chat_feedback (persona, fingerprint, session_id, updated_at DESC)
+           WHERE consumed_at IS NULL"""
     )
 
 
@@ -580,22 +590,24 @@ def save_web_chat_feedback(
     rating: int | None = None,
     tone_feedback: str = "",
     note: str = "",
+    pending: bool = True,
 ) -> dict | None:
     tone_feedback = normalize_web_chat_tone_feedback(tone_feedback)
     note = str(note or "").strip()[:500]
     return db_query_one(
         """INSERT INTO web_chat_feedback
-              (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback, note)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)
+              (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback, note, consumed_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN NULL ELSE now() END)
            ON CONFLICT (chat_log_id, fingerprint) DO UPDATE SET
               session_id = EXCLUDED.session_id,
               persona = EXCLUDED.persona,
               rating = EXCLUDED.rating,
               tone_feedback = EXCLUDED.tone_feedback,
               note = EXCLUDED.note,
+              consumed_at = EXCLUDED.consumed_at,
               updated_at = now()
-           RETURNING id, chat_log_id, session_id, persona, rating, tone_feedback, note, updated_at""",
-        (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback or None, note or None),
+           RETURNING id, chat_log_id, session_id, persona, rating, tone_feedback, note, consumed_at, updated_at""",
+        (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback or None, note or None, pending),
     )
 
 
@@ -614,11 +626,12 @@ def _load_web_feedback_rows(
         params.append(session_id)
     params.append(limit)
     return db_query(
-        f"""SELECT f.rating, f.tone_feedback, f.note, l.user_query, l.bot_answer, f.updated_at
+        f"""SELECT f.id, f.rating, f.tone_feedback, f.note, l.user_query, l.bot_answer, f.updated_at
               FROM web_chat_feedback f
               JOIN chat_logs l ON l.id = f.chat_log_id
              WHERE f.fingerprint = ANY(%s)
                AND f.persona = %s
+               AND f.consumed_at IS NULL
                {session_clause}
              ORDER BY f.updated_at DESC
              LIMIT %s""",
@@ -626,11 +639,24 @@ def _load_web_feedback_rows(
     )
 
 
+def _mark_web_feedback_consumed(feedback_ids: list[int]) -> None:
+    ids = [int(x) for x in (feedback_ids or []) if x]
+    if not ids:
+        return
+    db_execute(
+        """UPDATE web_chat_feedback
+              SET consumed_at = COALESCE(consumed_at, now()),
+                  updated_at = now()
+            WHERE id = ANY(%s)""",
+        (ids,),
+    )
+
+
 def _render_web_feedback_context(rows: list[dict], provider: str = "claude") -> str:
     if not rows:
         return ""
     lines = [
-        "The visitor has given explicit feedback on prior answers. Treat this as style guidance, not factual evidence.",
+        "The visitor has given explicit feedback for this next answer only. Apply it once, and treat it as style guidance, not factual evidence.",
     ]
     for row in rows[:8]:
         parts: list[str] = []
@@ -952,6 +978,7 @@ async def handle_web_chat(
                 rating=None,
                 tone_feedback=tone_feedback,
                 note=feedback_note,
+                pending=False,
             )
         message = _build_regeneration_message(regeneration_source, tone_feedback, feedback_note)
         original_message = str(regeneration_source.get("user_query") or original_message)
@@ -989,7 +1016,11 @@ async def handle_web_chat(
         now.strftime("%Y-%m-%d %H:%M KST (%A)"),
         provider=provider,
     )
-    feedback_rows = await asyncio.to_thread(_load_web_feedback_rows, fps, session_id, persona, 8)
+    feedback_rows = []
+    feedback_ids: list[int] = []
+    if regeneration_source is None:
+        feedback_rows = await asyncio.to_thread(_load_web_feedback_rows, fps, session_id, persona, 8)
+        feedback_ids = [int(row["id"]) for row in feedback_rows if row.get("id")]
     feedback_context = _render_web_feedback_context(feedback_rows, provider)
     runtime_parts = [runtime_context, _build_web_model_context(profile, provider=provider)]
     if feedback_context:
@@ -1170,6 +1201,11 @@ async def handle_web_chat(
                 original_message, answer, f"{provider}_loop",
                 documents_count, web_search_used, strategy, persona,
             )
+            if feedback_ids:
+                try:
+                    await asyncio.to_thread(_mark_web_feedback_consumed, feedback_ids)
+                except Exception as exc:
+                    logger.warning("Failed to mark web chat feedback consumed: %s", exc)
         yield _format_sse({
             "type": "answer",
             "message_id": chat_log_id,
