@@ -154,7 +154,7 @@ _CL_CONTEXT_HYGIENE = """\
 
 CYBER_LENIN = PersonaSpec(
     id="cyber-lenin",
-    display_name="Cyber-Lenin",
+    display_name="사이버-레닌",
     description="혁명 사상가 사이버-레닌. 변증법적 유물론 분석, 지식그래프·웹 검색 기반.",
     identity=CORE_IDENTITY,
     interface_line="Operating via web interface (cyber-lenin.com).",
@@ -273,8 +273,9 @@ def _verbatim_persona(
 
 
 # Nikolai Yezhov — adult historical roleplay character, reused from the standalone
-# roleplay bot's persona file so there is a single source of truth. Admin-only:
-# surfaced and usable only by authenticated admins (for testing / gated access).
+# roleplay bot's persona file so there is a single source of truth. Public:
+# surfaced to all visitors (the admin_only gating infra remains available for
+# future personas).
 def _load_roleplay_md() -> str:
     try:
         path = Path(__file__).resolve().parent / "identity" / "roleplay_persona.md"
@@ -292,7 +293,7 @@ YEZHOV = _verbatim_persona(
     body=_YEZHOV_BODY,
     allowed_tools=frozenset({"vector_search", "web_search", "fetch_url", "knowledge_graph_search"}),
     provider_override="deepseek",
-    admin_only=True,
+    admin_only=False,
 )
 
 
