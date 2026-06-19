@@ -726,6 +726,7 @@ async def get_history(
     http_req: Request,
     fingerprint: str | None = Query(default=None, description="Browser fingerprint (anonymous visitors)"),
     session_id: str | None = Query(default=None, description="Restrict to a single conversation session"),
+    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
@@ -733,28 +734,32 @@ async def get_history(
     - Anonymous: ?fingerprint=X — only that device's turns.
     - Logged-in: frontend proxy sets X-User-Fingerprints header — union of all bound devices.
       If `session_id` is given, only that session is returned.
+      If `persona` is given, only that persona's turns are returned.
     """
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"history": []}
 
+    persona_clause = " AND persona = %s" if persona else ""
     if session_id:
+        params = (session_id, fps) + ((persona,) if persona else ()) + (limit,)
         rows = db_query(
-            """SELECT user_query, bot_answer, created_at
+            f"""SELECT user_query, bot_answer, created_at
                FROM chat_logs
-               WHERE session_id = %s AND fingerprint = ANY(%s)
+               WHERE session_id = %s AND fingerprint = ANY(%s){persona_clause}
                ORDER BY created_at ASC
                LIMIT %s""",
-            (session_id, fps, limit),
+            params,
         )
     else:
+        params = (fps,) + ((persona,) if persona else ()) + (limit,)
         rows = db_query(
-            """SELECT user_query, bot_answer, created_at
+            f"""SELECT user_query, bot_answer, created_at
                FROM chat_logs
-               WHERE fingerprint = ANY(%s)
+               WHERE fingerprint = ANY(%s){persona_clause}
                ORDER BY created_at ASC
                LIMIT %s""",
-            (fps, limit),
+            params,
         )
     return {"history": _clean_chat_history_rows(rows)}
 
@@ -763,21 +768,25 @@ async def get_history(
 async def list_sessions(
     http_req: Request,
     fingerprint: str | None = Query(default=None, description="Anonymous browser fingerprint"),
+    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
     List distinct chat sessions (session_id groups) visible to the caller, with a
     preview of the first user message and timestamps. Ordered by most-recent activity.
+    Scoped to `persona` when provided so each character has its own session list.
     """
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"sessions": []}
 
+    persona_clause = " AND persona = %s" if persona else ""
+    params = (fps,) + ((persona,) if persona else ()) + (limit,)
     rows = db_query(
-        """WITH scoped AS (
+        f"""WITH scoped AS (
               SELECT id, session_id, fingerprint, user_query, created_at
                 FROM chat_logs
-               WHERE fingerprint = ANY(%s)
+               WHERE fingerprint = ANY(%s){persona_clause}
             ),
             agg AS (
               SELECT session_id,
@@ -799,7 +808,7 @@ async def list_sessions(
               JOIN first_msg USING (session_id)
              ORDER BY agg.last_at DESC
              LIMIT %s""",
-        (fps, limit),
+        params,
     )
     # Truncate previews for transport
     for r in rows:
