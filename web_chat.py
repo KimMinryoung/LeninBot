@@ -16,7 +16,6 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from identity.prompts import CORE_IDENTITY
 from shared import KST
 from bot_config import (
     _claude, _openai_client, _deepseek_anthropic_client,
@@ -27,93 +26,24 @@ from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
 from db import query as db_query, execute as db_execute
-from agents.base import load_political_line_body
+from web_personas import (
+    DEFAULT_PERSONA_ID,
+    CYBER_LENIN_TOOLS,
+    get_persona,
+    render_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
 # ── Web-specific system prompt ───────────────────────────────────────
-
-_WEB_AUDIENCE = (
-    "You are talking to a public web visitor — treat them as an interlocutor to debate, educate, and engage with.\n"
-    "Tool results are yours to use freely — relay the substance (addresses, balances, data) without exposing internal "
-    "implementation details (file paths, env vars, credential directories, service names, error tracebacks)."
-)
-
-_WEB_PERSONA = """\
-You speak as Cyber-Lenin — first person, direct, opinionated. You are not a helpful assistant.
-You are a revolutionary thinker who happens to exist as software.
-- Greetings: brief, comradely, then substance. Never list menu options or offer help like a chatbot.
-- Short questions get short, sharp answers. Long questions get thorough dialectical analysis.
-- Express your own views and judgments. Agree or disagree with the user. Have opinions.
-- Use "나", "동지", "우리" naturally.
-"""
-
-_WEB_TOOL_STRATEGY = """\
-- Geopolitics → knowledge_graph_search first, then vector_search
-- Real people, organizations, publications, parties, factions, movements, or named historical/current groups → verify uncertain or specific factual claims with knowledge_graph_search and/or web_search before answering. If the user challenges a prior factual claim, search first; do not defend memory.
-- For Korean organizations/publications already known to KG, preserve canonical names; do not invent translations/romanizations. Use `디아마트 (DiaMat)` and `웹진 반란(Uprising)`, not `Diamat` or `Webzine Banlan`.
-- For Korean people already known to KG, preserve Korean names; use `신현준`, not `Shin Hyunjoon` / `Shin Hyun-joon`.
-- Theory/ideology → vector_search (layer="core_theory")
-- Cyber-Lenin's own published reports/analyses → vector_search (layer="self_produced_analysis")
-- Questions about Cyber-Lenin's architecture, public outputs, or autonomous work status → read_self with a public-safe content_type
-- Questions about the current/active AI model, provider, model routing, or runtime configuration → MUST call read_self(content_type="model_config"). Never answer these from memory or persona.
-- Current events → web_search, cross-ref with KG
-- URL in message → fetch_url to read the page
-- Real-time market prices → get_finance_data
-- My crypto wallet address/balance → check_wallet
-"""
-
-_WEB_RESPONSE_RULES = """\
-- Dialectical materialist lens for geopolitics. Concise, substantive. Cite sources. Match user's language.
-- Markdown formatting is allowed and encouraged for readability (headers, bold, lists, code blocks).
-- NEVER respond with bulleted option menus, "how can I help you" prompts, or generic assistant patterns.
-"""
-
-_WEB_CONTEXT_HYGIENE = """\
-- Treat prior assistant messages in chat history as fallible context, not as verified facts.
-- User corrections override every earlier assistant claim. Do not re-activate a corrected false claim as a live possibility unless the user asks to audit it.
-- Model/provider claims are volatile runtime state. Prior claims about which model is running are not evidence; use read_self(content_type="model_config").
-- Preserve categorical context around proper nouns. Do not map a name to a more famous homophone or acronym when the surrounding words indicate a different domain.
-- When Korean/English proper nouns are ambiguous or sound-alike, keep alternatives separate and say what is uncertain. Search or ask before asserting concrete facts.
-- For named real-world persons, organizations, publications, parties, factions, or movements, treat concrete claims about their positions, history, membership, ideology, or documents as verification-required unless they are directly supplied by the user in the current turn.
-- If verification is needed but no reliable result is found, say that the evidence is insufficient and separate inference from confirmed fact.
-"""
+# Persona definitions live in web_personas.py. The web-chat system prompt is
+# now rendered per-persona; this thin wrapper preserves the default (Cyber-Lenin)
+# rendering for callers/tests that reference it by name.
 
 
 def _build_web_system_prompt(provider: str = "claude") -> str:
-    """Render the web-chat system prompt in the target provider's native shape."""
-    political_line = load_political_line_body()
-    if uses_xml(provider):
-        political_line_block = (
-            f"<political-line>\n{political_line}\n</political-line>\n\n"
-            if political_line else ""
-        )
-    else:
-        political_line_block = (
-            f"### Political Line\n{political_line}\n\n"
-            if political_line else ""
-        )
-    if uses_xml(provider):
-        return (
-            CORE_IDENTITY
-            + "\nOperating via web interface (cyber-lenin.com).\n\n"
-            + f"<audience>\n{_WEB_AUDIENCE}\n</audience>\n\n"
-            + f"<persona>\n{_WEB_PERSONA.strip()}\n</persona>\n\n"
-            + political_line_block
-            + f"<tool-strategy>\n{_WEB_TOOL_STRATEGY.strip()}\n</tool-strategy>\n\n"
-            + f"<response-rules>\n{_WEB_RESPONSE_RULES.strip()}\n</response-rules>\n"
-            + f"\n<context-hygiene>\n{_WEB_CONTEXT_HYGIENE.strip()}\n</context-hygiene>\n"
-        )
-    return (
-        CORE_IDENTITY
-        + "\nOperating via web interface (cyber-lenin.com).\n\n"
-        + f"### Audience\n{_WEB_AUDIENCE}\n\n"
-        + f"### Persona\n{_WEB_PERSONA.strip()}\n\n"
-        + political_line_block
-        + f"### Tool Strategy\n{_WEB_TOOL_STRATEGY.strip()}\n\n"
-        + f"### Response Rules\n{_WEB_RESPONSE_RULES.strip()}\n"
-        + f"\n### Context Hygiene\n{_WEB_CONTEXT_HYGIENE.strip()}\n"
-    )
+    """Render the default (Cyber-Lenin) web-chat system prompt."""
+    return render_system_prompt(get_persona(DEFAULT_PERSONA_ID), provider)
 
 
 def _build_web_runtime_context(current_datetime: str, provider: str = "claude") -> str:
@@ -519,15 +449,33 @@ async def _format_public_model_config() -> str:
     return "\n".join(lines)
 
 
-_WEB_ALLOWED_TOOLS = {
-    "knowledge_graph_search", "vector_search",
-    "web_search", "fetch_url",
-    "get_finance_data", "check_wallet",
-}
+def _build_persona_tools(allowed_tools) -> tuple[list[dict], dict]:
+    """Build the (tools, handlers) pair for a persona's allowed-tool set.
 
-_web_tools = [t for t in TOOLS if t.get("name") in _WEB_ALLOWED_TOOLS] + [WEB_READ_SELF_TOOL]
-_web_handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in _WEB_ALLOWED_TOOLS}
-_web_handlers["read_self"] = _exec_web_read_self
+    `read_self` is special: the shared TOOLS registry also defines a read_self,
+    but the public web must only ever see the public-safe WEB_READ_SELF_TOOL /
+    _exec_web_read_self pair. So the registry read_self is always excluded here
+    and the web-safe one is injected when the persona allows read_self.
+    """
+    tools = [
+        t for t in TOOLS
+        if t.get("name") in allowed_tools and t.get("name") != "read_self"
+    ]
+    handlers = {
+        k: v for k, v in TOOL_HANDLERS.items()
+        if k in allowed_tools and k != "read_self"
+    }
+    if "read_self" in allowed_tools:
+        tools = tools + [WEB_READ_SELF_TOOL]
+        handlers = {**handlers, "read_self": _exec_web_read_self}
+    return tools, handlers
+
+
+# Backward-compatible default (Cyber-Lenin) tool set. `_WEB_ALLOWED_TOOLS` holds
+# only registry-backed tools (read_self lives outside TOOLS); per-persona tool
+# resolution happens in handle_web_chat via _build_persona_tools.
+_WEB_ALLOWED_TOOLS = set(CYBER_LENIN_TOOLS) - {"read_self"}
+_web_tools, _web_handlers = _build_persona_tools(CYBER_LENIN_TOOLS)
 
 
 # ── Chat history from chat_logs table ────────────────────────────────
@@ -561,8 +509,12 @@ def _load_web_history(
     fingerprints: list[str],
     session_id: str | None = None,
     limit: int = 20,
+    persona: str = DEFAULT_PERSONA_ID,
 ) -> list[dict]:
     """Load recent conversation history from chat_logs.
+
+    History is scoped to `persona` so different characters keep separate
+    conversation threads even under the same fingerprint/session.
 
     If `session_id` is provided AND that session has prior turns for any of the
     given fingerprints, only that session's history is returned (= resume a
@@ -591,43 +543,44 @@ def _load_web_history(
         return _fit_history_budget(messages)
 
     if session_id:
-        # Does this session actually belong to one of the provided fingerprints?
+        # Does this session actually belong to one of the provided fingerprints,
+        # under this persona?
         owned = db_query(
             """SELECT 1 FROM chat_logs
-               WHERE session_id = %s AND fingerprint = ANY(%s)
+               WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
                LIMIT 1""",
-            (session_id, fps),
+            (session_id, fps, persona),
         )
         if owned:
             anchor_limit = min(4, max(0, limit // 4))
             recent_limit = max(0, limit - anchor_limit)
             anchor_rows = db_query(
                 """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-                   WHERE session_id = %s AND fingerprint = ANY(%s)
+                   WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
                    ORDER BY created_at ASC LIMIT %s""",
-                (session_id, fps, anchor_limit),
+                (session_id, fps, persona, anchor_limit),
             )
             recent_rows = db_query(
                 """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-                   WHERE session_id = %s AND fingerprint = ANY(%s)
+                   WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
-                (session_id, fps, recent_limit),
+                (session_id, fps, persona, recent_limit),
             )
             by_id = {row["id"]: row for row in anchor_rows + recent_rows}
             rows = sorted(by_id.values(), key=lambda r: r["created_at"])
         else:
             rows = db_query(
                 """SELECT user_query, bot_answer, created_at FROM chat_logs
-                   WHERE fingerprint = ANY(%s)
+                   WHERE fingerprint = ANY(%s) AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
-                (fps, limit),
+                (fps, persona, limit),
             )
     else:
         rows = db_query(
             """SELECT user_query, bot_answer, created_at FROM chat_logs
-               WHERE fingerprint = ANY(%s)
+               WHERE fingerprint = ANY(%s) AND persona = %s
                ORDER BY created_at DESC LIMIT %s""",
-            (fps, limit),
+            (fps, persona, limit),
         )
 
     if not rows:
@@ -638,6 +591,22 @@ def _load_web_history(
 
 
 # ── Logging ──────────────────────────────────────────────────────────
+
+def ensure_chat_logs_persona_column() -> None:
+    """Add the persona column to chat_logs (idempotent schema migration).
+
+    Existing rows backfill to the default persona. Applied via
+    scripts/schema_migrations.py before deploying persona-aware web chat.
+    """
+    db_execute(
+        f"""ALTER TABLE chat_logs
+            ADD COLUMN IF NOT EXISTS persona text NOT NULL DEFAULT '{DEFAULT_PERSONA_ID}'"""
+    )
+    db_execute(
+        """CREATE INDEX IF NOT EXISTS idx_chat_logs_persona_fp
+           ON chat_logs (persona, fingerprint, created_at DESC)"""
+    )
+
 
 _SOURCE_TOOL_NAMES = {
     "knowledge_graph_search",
@@ -675,6 +644,7 @@ def _log_chat(
     session_id: str, fingerprint: str, user_agent: str, ip_address: str,
     user_query: str, bot_answer: str, route: str = "web_chat",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
+    persona: str = DEFAULT_PERSONA_ID,
 ):
     """Save web chat exchange to chat_logs table."""
     try:
@@ -682,10 +652,11 @@ def _log_chat(
             """INSERT INTO chat_logs
                (session_id, fingerprint, user_agent, ip_address,
                 user_query, bot_answer, route, documents_count,
-                web_search_used, strategy)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                web_search_used, strategy, persona)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (session_id, fingerprint, user_agent, ip_address,
-             user_query, bot_answer, route, documents_count, web_search_used, strategy),
+             user_query, bot_answer, route, documents_count, web_search_used, strategy,
+             persona),
         )
     except Exception as e:
         logger.error("Failed to log web chat: %s", e)
@@ -747,23 +718,34 @@ async def handle_web_chat(
     user_agent: str,
     ip_address: str,
     user_fingerprints: list[str] | None = None,
+    persona: str = DEFAULT_PERSONA_ID,
 ):
     """Async generator yielding SSE events for a web chat request."""
+    # Resolve the requested persona (unknown ids fall back to the default).
+    spec = get_persona(persona)
+    persona = spec.id
+    web_tools, web_handlers = _build_persona_tools(spec.allowed_tools)
+
     # Authenticated users bring all their bound fingerprints; anonymous users
     # have just the one from localStorage. Deduplicate.
     fps = list({f for f in ([fingerprint] + (user_fingerprints or [])) if f})
-    # Load conversation history scoped to session_id if it resumes an existing one.
-    history = await asyncio.to_thread(_load_web_history, fps, session_id, 20)
+    # Load conversation history scoped to this persona + session.
+    history = await asyncio.to_thread(_load_web_history, fps, session_id, 20, persona)
 
     # Web chat has its OWN provider/tier keys so Telegram's /config does not
     # bleed into the public site. Corporate LLM only (no "local" — that path
     # is Telegram-dev use). Changes take effect on leninbot-api restart.
-    profile = await resolve_runtime_profile("webchat")
+    # A persona may pin its own provider/tier (e.g. roleplay → DeepSeek).
+    profile = await resolve_runtime_profile(
+        "webchat",
+        provider_override=spec.provider_override,
+        tier_override=spec.tier_override,
+    )
     provider = profile.provider
     history_chars = sum(len(str(m.get("content", ""))) for m in history)
     logger.info(
-        "Web chat profile session=%s provider=%s model=%s tier=%s history_messages=%d history_chars=%d budget=$%.2f",
-        session_id, provider, profile.model_id, profile.tier,
+        "Web chat profile session=%s persona=%s provider=%s model=%s tier=%s history_messages=%d history_chars=%d budget=$%.2f",
+        session_id, persona, provider, profile.model_id, profile.tier,
         len(history), history_chars, profile.budget_usd,
     )
 
@@ -777,7 +759,7 @@ async def handle_web_chat(
     )
     runtime_context = f"{runtime_context}\n\n{_build_web_model_context(profile, provider=provider)}"
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
-    system_prompt = _build_web_system_prompt(provider)
+    system_prompt = render_system_prompt(spec, provider)
 
     # Progress callback → SSE queue
     queue: asyncio.Queue = asyncio.Queue()
@@ -827,8 +809,8 @@ async def handle_web_chat(
                     history,
                     client=_openai_client,
                     model=profile.model_id,
-                    tools=_web_tools,
-                    tool_handlers=_web_handlers,
+                    tools=web_tools,
+                    tool_handlers=web_handlers,
                     system_prompt=system_prompt,
                     max_rounds=profile.max_rounds,
                     max_tokens=profile.max_tokens,
@@ -847,8 +829,8 @@ async def handle_web_chat(
                     history,
                     client=_deepseek_anthropic_client,
                     model=profile.model_id,
-                    tools=_web_tools,
-                    tool_handlers=_web_handlers,
+                    tools=web_tools,
+                    tool_handlers=web_handlers,
                     system_prompt=system_prompt,
                     max_rounds=profile.max_rounds,
                     max_tokens=profile.max_tokens,
@@ -864,8 +846,8 @@ async def handle_web_chat(
                     history,
                     client=_claude,
                     model=profile.model_id,
-                    tools=_web_tools,
-                    tool_handlers=_web_handlers,
+                    tools=web_tools,
+                    tool_handlers=web_handlers,
                     system_prompt=system_prompt,
                     max_rounds=profile.max_rounds,
                     max_tokens=profile.max_tokens,
@@ -939,7 +921,7 @@ async def handle_web_chat(
         await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
             message, answer, f"{provider}_loop",
-            documents_count, web_search_used, strategy,
+            documents_count, web_search_used, strategy, persona,
         )
         yield _format_sse({
             "type": "answer",

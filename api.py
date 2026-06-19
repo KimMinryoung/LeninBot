@@ -195,6 +195,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=8000)
     session_id: str = Field(default="default", min_length=1, max_length=128)
     fingerprint: str = Field(default="", max_length=256)  # Browser fingerprint from localStorage (persistent across server restarts)
+    persona: str = Field(default="cyber-lenin", max_length=64)  # Selected chat persona; unknown ids fall back to the default server-side
 
 
 class EmailDraftRequest(BaseModel):
@@ -687,12 +688,21 @@ async def chat(request: ChatRequest, http_req: Request):
                     user_agent=user_agent,
                     ip_address=ip_address,
                     user_fingerprints=user_fingerprints,
+                    persona=request.persona,
                 ):
                     yield sse_event
         finally:
             _webchat_active_count = max(0, _webchat_active_count - 1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/personas")
+async def list_chat_personas():
+    """Public catalog of selectable chat personas for the frontend picker."""
+    from web_personas import list_personas, DEFAULT_PERSONA_ID
+
+    return {"personas": list_personas(), "default": DEFAULT_PERSONA_ID}
 
 
 @app.get("/logs", dependencies=[Depends(require_admin)])
