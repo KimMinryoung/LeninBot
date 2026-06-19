@@ -70,6 +70,15 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
         raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
 
 
+def _is_admin_request(http_req: Request) -> bool:
+    """Non-raising admin check for endpoints that are public but expose extra
+    capability (e.g. admin-only personas) when a valid X-Admin-Key is present."""
+    if not _ADMIN_API_KEY:
+        return False
+    key = http_req.headers.get("x-admin-key", "")
+    return bool(key) and key == _ADMIN_API_KEY
+
+
 class PrivateReportRequest(BaseModel):
     title: str
     slug: str
@@ -195,6 +204,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=8000)
     session_id: str = Field(default="default", min_length=1, max_length=128)
     fingerprint: str = Field(default="", max_length=256)  # Browser fingerprint from localStorage (persistent across server restarts)
+    persona: str = Field(default="cyber-lenin", max_length=64)  # Selected chat persona; unknown ids fall back to the default server-side
 
 
 class EmailDraftRequest(BaseModel):
@@ -646,16 +656,28 @@ async def chat(request: ChatRequest, http_req: Request):
     Uses claude_loop via web_chat module.
     """
     from web_chat import handle_web_chat
+    from web_personas import get_persona
 
     user_agent = http_req.headers.get("user-agent", "")
     ip_address = _client_ip(http_req)
     user_fingerprints = _parse_user_fingerprints(http_req)
     rate_key = _webchat_rate_key(request, http_req, ip_address)
 
+    # Admin-only personas (e.g. adult roleplay) require a valid X-Admin-Key.
+    persona_spec = get_persona(request.persona)
+    persona_blocked = persona_spec.admin_only and not _is_admin_request(http_req)
+
     lock = _get_session_lock(request.session_id)
 
     async def event_generator():
         global _webchat_active_count
+        if persona_blocked:
+            logger.warning(
+                "web chat blocked admin-only persona=%s session=%s",
+                request.persona, request.session_id,
+            )
+            yield format_sse({"type": "error", "content": "이 대화 상대는 관리자만 이용할 수 있습니다."})
+            return
         if not _check_webchat_rate_limit(rate_key):
             logger.warning("web chat rate limited key=%s session=%s", rate_key[:24], request.session_id)
             yield format_sse({"type": "error", "content": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
@@ -687,12 +709,26 @@ async def chat(request: ChatRequest, http_req: Request):
                     user_agent=user_agent,
                     ip_address=ip_address,
                     user_fingerprints=user_fingerprints,
+                    persona=request.persona,
                 ):
                     yield sse_event
         finally:
             _webchat_active_count = max(0, _webchat_active_count - 1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/personas")
+async def list_chat_personas(http_req: Request):
+    """Catalog of selectable chat personas for the frontend picker.
+
+    Admin-only personas are included only when the request carries a valid
+    X-Admin-Key header.
+    """
+    from web_personas import list_personas, DEFAULT_PERSONA_ID
+
+    is_admin = _is_admin_request(http_req)
+    return {"personas": list_personas(include_admin=is_admin), "default": DEFAULT_PERSONA_ID}
 
 
 @app.get("/logs", dependencies=[Depends(require_admin)])
@@ -716,6 +752,7 @@ async def get_history(
     http_req: Request,
     fingerprint: str | None = Query(default=None, description="Browser fingerprint (anonymous visitors)"),
     session_id: str | None = Query(default=None, description="Restrict to a single conversation session"),
+    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
@@ -723,28 +760,32 @@ async def get_history(
     - Anonymous: ?fingerprint=X — only that device's turns.
     - Logged-in: frontend proxy sets X-User-Fingerprints header — union of all bound devices.
       If `session_id` is given, only that session is returned.
+      If `persona` is given, only that persona's turns are returned.
     """
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"history": []}
 
+    persona_clause = " AND persona = %s" if persona else ""
     if session_id:
+        params = (session_id, fps) + ((persona,) if persona else ()) + (limit,)
         rows = db_query(
-            """SELECT user_query, bot_answer, created_at
+            f"""SELECT user_query, bot_answer, created_at
                FROM chat_logs
-               WHERE session_id = %s AND fingerprint = ANY(%s)
+               WHERE session_id = %s AND fingerprint = ANY(%s){persona_clause}
                ORDER BY created_at ASC
                LIMIT %s""",
-            (session_id, fps, limit),
+            params,
         )
     else:
+        params = (fps,) + ((persona,) if persona else ()) + (limit,)
         rows = db_query(
-            """SELECT user_query, bot_answer, created_at
+            f"""SELECT user_query, bot_answer, created_at
                FROM chat_logs
-               WHERE fingerprint = ANY(%s)
+               WHERE fingerprint = ANY(%s){persona_clause}
                ORDER BY created_at ASC
                LIMIT %s""",
-            (fps, limit),
+            params,
         )
     return {"history": _clean_chat_history_rows(rows)}
 
@@ -753,21 +794,25 @@ async def get_history(
 async def list_sessions(
     http_req: Request,
     fingerprint: str | None = Query(default=None, description="Anonymous browser fingerprint"),
+    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
     List distinct chat sessions (session_id groups) visible to the caller, with a
     preview of the first user message and timestamps. Ordered by most-recent activity.
+    Scoped to `persona` when provided so each character has its own session list.
     """
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"sessions": []}
 
+    persona_clause = " AND persona = %s" if persona else ""
+    params = (fps,) + ((persona,) if persona else ()) + (limit,)
     rows = db_query(
-        """WITH scoped AS (
+        f"""WITH scoped AS (
               SELECT id, session_id, fingerprint, user_query, created_at
                 FROM chat_logs
-               WHERE fingerprint = ANY(%s)
+               WHERE fingerprint = ANY(%s){persona_clause}
             ),
             agg AS (
               SELECT session_id,
@@ -789,7 +834,7 @@ async def list_sessions(
               JOIN first_msg USING (session_id)
              ORDER BY agg.last_at DESC
              LIMIT %s""",
-        (fps, limit),
+        params,
     )
     # Truncate previews for transport
     for r in rows:

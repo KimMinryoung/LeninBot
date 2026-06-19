@@ -80,6 +80,12 @@ def _tool_audit_log() -> None:
     ensure_tool_audit_log_table()
 
 
+def _chat_logs_persona() -> None:
+    from web_chat import ensure_chat_logs_persona_column
+
+    ensure_chat_logs_persona_column()
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
@@ -91,6 +97,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("autonomous-projects", _autonomous_projects),
     ("x402-ledger", _x402_ledger),
     ("tool-audit-log", _tool_audit_log),
+    ("chat-logs-persona", _chat_logs_persona),
 ]
 
 
