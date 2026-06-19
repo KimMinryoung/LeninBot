@@ -676,6 +676,7 @@ def _load_web_history(
     session_id: str | None = None,
     limit: int = 20,
     persona: str = DEFAULT_PERSONA_ID,
+    exclude_chat_log_ids: set[int] | None = None,
 ) -> list[dict]:
     """Load recent conversation history from chat_logs.
 
@@ -692,8 +693,11 @@ def _load_web_history(
     fps = [f for f in (fingerprints or []) if f]
     if not fps:
         return []
+    excluded_ids = {int(x) for x in (exclude_chat_log_ids or set()) if x}
 
     def _rows_to_messages(rows: list[dict]) -> list[dict]:
+        if excluded_ids:
+            rows = [row for row in rows if int(row.get("id") or 0) not in excluded_ids]
         messages = []
         for row in rows:
             if row.get("user_query"):
@@ -736,14 +740,14 @@ def _load_web_history(
             rows = sorted(by_id.values(), key=lambda r: r["created_at"])
         else:
             rows = db_query(
-                """SELECT user_query, bot_answer, created_at FROM chat_logs
+                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
                    WHERE fingerprint = ANY(%s) AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
                 (fps, persona, limit),
             )
     else:
         rows = db_query(
-            """SELECT user_query, bot_answer, created_at FROM chat_logs
+            """SELECT id, user_query, bot_answer, created_at FROM chat_logs
                WHERE fingerprint = ANY(%s) AND persona = %s
                ORDER BY created_at DESC LIMIT %s""",
             (fps, persona, limit),
@@ -828,6 +832,29 @@ def _log_chat(
         return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
         logger.error("Failed to log web chat: %s", e)
+        return None
+
+
+def _update_chat_answer(
+    chat_log_id: int, fingerprint: str, bot_answer: str, route: str = "web_chat_regenerated",
+    documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
+) -> int | None:
+    """Replace an existing web-chat answer during regeneration and return its id."""
+    try:
+        row = db_query_one(
+            """UPDATE chat_logs
+                  SET bot_answer = %s,
+                      route = %s,
+                      documents_count = %s,
+                      web_search_used = %s,
+                      strategy = %s
+                WHERE id = %s AND fingerprint = %s
+                RETURNING id""",
+            (bot_answer, route, documents_count, web_search_used, strategy, chat_log_id, fingerprint),
+        )
+        return int(row["id"]) if row and row.get("id") is not None else None
+    except Exception as e:
+        logger.error("Failed to update regenerated web chat: %s", e)
         return None
 
 
@@ -929,8 +956,13 @@ async def handle_web_chat(
         message = _build_regeneration_message(regeneration_source, tone_feedback, feedback_note)
         original_message = str(regeneration_source.get("user_query") or original_message)
 
-    # Load conversation history scoped to this persona + session.
-    history = await asyncio.to_thread(_load_web_history, fps, session_id, 20, persona)
+    # Load conversation history scoped to this persona + session. During
+    # regeneration, exclude the answer being replaced so it cannot contaminate
+    # the new answer's conversational context.
+    exclude_history_ids = {int(regeneration_source["id"])} if regeneration_source else set()
+    history = await asyncio.to_thread(
+        _load_web_history, fps, session_id, 20, persona, exclude_history_ids
+    )
 
     # Web chat has its OWN provider/tier keys so Telegram's /config does not
     # bleed into the public site. Corporate LLM only (no "local" — that path
@@ -1123,11 +1155,21 @@ async def handle_web_chat(
             budget_tracker.get("tool_work_details", [])
         )
         # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
-        chat_log_id = await asyncio.to_thread(
-            _log_chat, session_id, fingerprint, user_agent, ip_address,
-            original_message, answer, f"{provider}_loop" + ("_regenerated" if regeneration_source else ""),
-            documents_count, web_search_used, strategy, persona,
-        )
+        if regeneration_source:
+            chat_log_id = await asyncio.to_thread(
+                _update_chat_answer,
+                int(regeneration_source["id"]),
+                regeneration_source["fingerprint"],
+                answer,
+                f"{provider}_loop_regenerated",
+                documents_count, web_search_used, strategy,
+            )
+        else:
+            chat_log_id = await asyncio.to_thread(
+                _log_chat, session_id, fingerprint, user_agent, ip_address,
+                original_message, answer, f"{provider}_loop",
+                documents_count, web_search_used, strategy, persona,
+            )
         yield _format_sse({
             "type": "answer",
             "message_id": chat_log_id,
