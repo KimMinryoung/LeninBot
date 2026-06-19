@@ -53,6 +53,7 @@ def fetch_chat_logs(
     source: str = "web",
     group_web_contexts: bool = False,
     per_context_limit: int = 10,
+    persona: str | None = "cyber-lenin",
 ) -> list[dict]:
     """Fetch chat logs from PostgreSQL.
 
@@ -64,6 +65,12 @@ def fetch_chat_logs(
                             contexts, then several turns inside each context.
         per_context_limit: Rows per fingerprint/session context when
                            group_web_contexts=True.
+        persona: Web only — scope to a single chat persona so the Cyber-Lenin
+                 agent reads only its own conversations and not other web
+                 personas' (e.g. the Yezhov roleplay). Defaults to "cyber-lenin"
+                 (matches the chat_logs.persona column default and
+                 web_personas.DEFAULT_PERSONA_ID). Pass None to read all
+                 personas. Ignored for source="telegram" (no persona column).
     """
     from db import query as db_query
 
@@ -122,6 +129,10 @@ def fetch_chat_logs(
     if keyword:
         conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
         params.extend([f"%{keyword}%", f"%{keyword}%"])
+    if persona:
+        # Restrict the agent to its own persona's web conversations.
+        conditions.append("persona = %s")
+        params.append(persona)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     if group_web_contexts:
         try:
