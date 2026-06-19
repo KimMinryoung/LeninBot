@@ -25,7 +25,7 @@ from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools
-from db import query as db_query, execute as db_execute
+from db import query as db_query, query_one as db_query_one, execute as db_execute
 from web_personas import (
     DEFAULT_PERSONA_ID,
     CYBER_LENIN_TOOLS,
@@ -505,6 +505,172 @@ def _fit_history_budget(messages: list[dict], limit: int = _HISTORY_TOTAL_CHAR_L
     return trimmed
 
 
+_FEEDBACK_TONE_LABELS = {
+    "shorter": "shorter and less digressive",
+    "longer": "more developed and detailed",
+    "warmer": "warmer and more emotionally responsive",
+    "colder": "colder, sharper, and more severe",
+    "more_direct": "more direct and less hedged",
+    "more_in_character": "more strongly in character",
+    "less_formal": "less formal and more conversational",
+    "more_cited": "more grounded with citations or concrete references when factual",
+}
+
+
+def normalize_web_chat_tone_feedback(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in _FEEDBACK_TONE_LABELS else ""
+
+
+def ensure_web_chat_feedback_table() -> None:
+    """Create the web-chat feedback table used by rating/regeneration UX."""
+    db_execute(
+        """CREATE TABLE IF NOT EXISTS web_chat_feedback (
+               id bigserial PRIMARY KEY,
+               chat_log_id bigint NOT NULL REFERENCES chat_logs(id) ON DELETE CASCADE,
+               session_id text NOT NULL,
+               fingerprint text NOT NULL,
+               persona text NOT NULL DEFAULT 'cyber-lenin',
+               rating integer CHECK (rating IS NULL OR rating BETWEEN 1 AND 4),
+               tone_feedback text,
+               note text,
+               created_at timestamptz NOT NULL DEFAULT now(),
+               updated_at timestamptz NOT NULL DEFAULT now(),
+               UNIQUE (chat_log_id, fingerprint)
+           )"""
+    )
+    db_execute(
+        """CREATE INDEX IF NOT EXISTS idx_web_chat_feedback_scope
+           ON web_chat_feedback (persona, fingerprint, session_id, updated_at DESC)"""
+    )
+
+
+def get_web_chat_log_for_feedback(
+    chat_log_id: int,
+    fingerprints: list[str],
+    session_id: str | None = None,
+    persona: str | None = None,
+) -> dict | None:
+    fps = [f for f in (fingerprints or []) if f]
+    if not fps:
+        return None
+    clauses = ["id = %s", "fingerprint = ANY(%s)"]
+    params: list = [chat_log_id, fps]
+    if session_id:
+        clauses.append("session_id = %s")
+        params.append(session_id)
+    if persona:
+        clauses.append("persona = %s")
+        params.append(persona)
+    return db_query_one(
+        f"""SELECT id, session_id, fingerprint, user_query, bot_answer, persona, created_at
+              FROM chat_logs
+             WHERE {' AND '.join(clauses)}
+             LIMIT 1""",
+        params,
+    )
+
+
+def save_web_chat_feedback(
+    *,
+    chat_log_id: int,
+    session_id: str,
+    fingerprint: str,
+    persona: str,
+    rating: int | None = None,
+    tone_feedback: str = "",
+    note: str = "",
+) -> dict | None:
+    tone_feedback = normalize_web_chat_tone_feedback(tone_feedback)
+    note = str(note or "").strip()[:500]
+    return db_query_one(
+        """INSERT INTO web_chat_feedback
+              (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback, note)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (chat_log_id, fingerprint) DO UPDATE SET
+              session_id = EXCLUDED.session_id,
+              persona = EXCLUDED.persona,
+              rating = EXCLUDED.rating,
+              tone_feedback = EXCLUDED.tone_feedback,
+              note = EXCLUDED.note,
+              updated_at = now()
+           RETURNING id, chat_log_id, session_id, persona, rating, tone_feedback, note, updated_at""",
+        (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback or None, note or None),
+    )
+
+
+def _load_web_feedback_rows(
+    fingerprints: list[str],
+    session_id: str | None,
+    persona: str,
+    limit: int = 8,
+) -> list[dict]:
+    fps = [f for f in (fingerprints or []) if f]
+    if not fps:
+        return []
+    session_clause = "AND (f.session_id = %s OR f.session_id IS NULL)" if session_id else ""
+    params: list = [fps, persona]
+    if session_id:
+        params.append(session_id)
+    params.append(limit)
+    return db_query(
+        f"""SELECT f.rating, f.tone_feedback, f.note, l.user_query, l.bot_answer, f.updated_at
+              FROM web_chat_feedback f
+              JOIN chat_logs l ON l.id = f.chat_log_id
+             WHERE f.fingerprint = ANY(%s)
+               AND f.persona = %s
+               {session_clause}
+             ORDER BY f.updated_at DESC
+             LIMIT %s""",
+        params,
+    )
+
+
+def _render_web_feedback_context(rows: list[dict], provider: str = "claude") -> str:
+    if not rows:
+        return ""
+    lines = [
+        "The visitor has given explicit feedback on prior answers. Treat this as style guidance, not factual evidence.",
+    ]
+    for row in rows[:8]:
+        parts: list[str] = []
+        rating = row.get("rating")
+        if rating is not None:
+            parts.append(f"rating={rating}/4")
+        tone = normalize_web_chat_tone_feedback(row.get("tone_feedback"))
+        if tone:
+            parts.append(f"tone={_FEEDBACK_TONE_LABELS[tone]}")
+        note = clean_chat_history_text(str(row.get("note") or "")).strip()[:220]
+        if note:
+            parts.append(f"note={note}")
+        if parts:
+            lines.append("- " + "; ".join(parts))
+    body = "\n".join(lines)
+    if uses_xml(provider):
+        return f"<response-feedback>\n{body}\n</response-feedback>"
+    return f"### Response Feedback\n{body}"
+
+
+def _build_regeneration_message(row: dict, tone_feedback: str = "", note: str = "") -> str:
+    tone_feedback = normalize_web_chat_tone_feedback(tone_feedback)
+    feedback_bits: list[str] = []
+    if tone_feedback:
+        feedback_bits.append(_FEEDBACK_TONE_LABELS[tone_feedback])
+    note = clean_chat_history_text(str(note or "")).strip()[:500]
+    if note:
+        feedback_bits.append(note)
+    feedback = "; ".join(feedback_bits) or "Give a better alternative response while preserving the persona."
+    user_query = clean_chat_history_text(str(row.get("user_query") or ""))
+    previous_answer = clean_chat_history_text(str(row.get("bot_answer") or ""))[:2000]
+    return (
+        "Regenerate the previous answer for this same user request. "
+        "Do not mention that this is a regeneration unless the character would naturally do so. "
+        "Apply this feedback: " + feedback + "\n\n"
+        "Original user request:\n" + user_query + "\n\n"
+        "Previous answer to improve:\n" + previous_answer
+    )
+
+
 def _load_web_history(
     fingerprints: list[str],
     session_id: str | None = None,
@@ -645,21 +811,24 @@ def _log_chat(
     user_query: str, bot_answer: str, route: str = "web_chat",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
     persona: str = DEFAULT_PERSONA_ID,
-):
-    """Save web chat exchange to chat_logs table."""
+) -> int | None:
+    """Save web chat exchange to chat_logs table and return its id."""
     try:
-        db_execute(
+        row = db_query_one(
             """INSERT INTO chat_logs
                (session_id, fingerprint, user_agent, ip_address,
                 user_query, bot_answer, route, documents_count,
                 web_search_used, strategy, persona)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               RETURNING id""",
             (session_id, fingerprint, user_agent, ip_address,
              user_query, bot_answer, route, documents_count, web_search_used, strategy,
              persona),
         )
+        return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
         logger.error("Failed to log web chat: %s", e)
+        return None
 
 
 # ── SSE helpers ──────────────────────────────────────────────────────
@@ -719,6 +888,9 @@ async def handle_web_chat(
     ip_address: str,
     user_fingerprints: list[str] | None = None,
     persona: str = DEFAULT_PERSONA_ID,
+    regenerate_from_id: int | None = None,
+    tone_feedback: str = "",
+    feedback_note: str = "",
 ):
     """Async generator yielding SSE events for a web chat request."""
     # Resolve the requested persona (unknown ids fall back to the default).
@@ -729,6 +901,34 @@ async def handle_web_chat(
     # Authenticated users bring all their bound fingerprints; anonymous users
     # have just the one from localStorage. Deduplicate.
     fps = list({f for f in ([fingerprint] + (user_fingerprints or [])) if f})
+
+    regeneration_source: dict | None = None
+    original_message = message
+    if regenerate_from_id is not None:
+        regeneration_source = await asyncio.to_thread(
+            get_web_chat_log_for_feedback,
+            regenerate_from_id,
+            fps,
+            session_id,
+            persona,
+        )
+        if not regeneration_source:
+            yield _format_sse({"type": "error", "content": "재생성할 이전 응답을 찾을 수 없습니다."})
+            return
+        if tone_feedback or feedback_note:
+            await asyncio.to_thread(
+                save_web_chat_feedback,
+                chat_log_id=int(regeneration_source["id"]),
+                session_id=regeneration_source["session_id"],
+                fingerprint=fingerprint or regeneration_source["fingerprint"],
+                persona=persona,
+                rating=None,
+                tone_feedback=tone_feedback,
+                note=feedback_note,
+            )
+        message = _build_regeneration_message(regeneration_source, tone_feedback, feedback_note)
+        original_message = str(regeneration_source.get("user_query") or original_message)
+
     # Load conversation history scoped to this persona + session.
     history = await asyncio.to_thread(_load_web_history, fps, session_id, 20, persona)
 
@@ -757,7 +957,12 @@ async def handle_web_chat(
         now.strftime("%Y-%m-%d %H:%M KST (%A)"),
         provider=provider,
     )
-    runtime_context = f"{runtime_context}\n\n{_build_web_model_context(profile, provider=provider)}"
+    feedback_rows = await asyncio.to_thread(_load_web_feedback_rows, fps, session_id, persona, 8)
+    feedback_context = _render_web_feedback_context(feedback_rows, provider)
+    runtime_parts = [runtime_context, _build_web_model_context(profile, provider=provider)]
+    if feedback_context:
+        runtime_parts.append(feedback_context)
+    runtime_context = "\n\n".join(runtime_parts)
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = render_system_prompt(spec, provider)
 
@@ -918,13 +1123,15 @@ async def handle_web_chat(
             budget_tracker.get("tool_work_details", [])
         )
         # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
-        await asyncio.to_thread(
+        chat_log_id = await asyncio.to_thread(
             _log_chat, session_id, fingerprint, user_agent, ip_address,
-            message, answer, f"{provider}_loop",
+            original_message, answer, f"{provider}_loop" + ("_regenerated" if regeneration_source else ""),
             documents_count, web_search_used, strategy, persona,
         )
         yield _format_sse({
             "type": "answer",
+            "message_id": chat_log_id,
+            "regenerated_from_id": regenerate_from_id,
             "content": answer,
             "complete": bool(metadata.get("complete", True)),
             "truncated": bool(metadata.get("truncated", False)),

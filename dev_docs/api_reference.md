@@ -1,6 +1,6 @@
 # API Reference
 
-최종 확인 기준: 2026-05-09 `api.py`.
+최종 확인 기준: 2026-06-19 `api.py`.
 
 `api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary.
 
@@ -26,6 +26,7 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `GET`, `HEAD` | `/health` | health check |
 | `GET`, `HEAD` | `/api/health` | health check alias |
 | `POST` | `/chat` | public web chat SSE stream |
+| `POST` | `/chat/feedback` | store rating/tone feedback for a web chat answer |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
 | `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
@@ -40,17 +41,21 @@ Request:
 {
   "message": "질문 텍스트",
   "session_id": "browser-session-id",
-  "fingerprint": "browser-fingerprint"
+  "fingerprint": "browser-fingerprint",
+  "persona": "cyber-lenin",
+  "regenerate_from_id": 123,
+  "tone_feedback": "more_in_character",
+  "feedback_note": "더 차갑고 단정적으로"
 }
 ```
 
-Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars.
+Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, regenerates that user turn, and returns a new answer.
 
 Response is `text/event-stream`. Event payloads are JSON:
 
 ```text
 data: {"type":"log","node":"...","content":"..."}
-data: {"type":"answer","content":"..."}
+data: {"type":"answer","message_id":123,"regenerated_from_id":null,"content":"..."}
 data: {"type":"error","content":"..."}
 ```
 
@@ -59,6 +64,26 @@ Concurrency and rate controls:
 - one active request per `session_id`
 - per-client sliding window from `WEBCHAT_RATE_LIMIT` and `WEBCHAT_RATE_WINDOW_SECONDS`
 - global active request cap from `WEBCHAT_GLOBAL_ACTIVE_LIMIT`
+
+### `POST /chat/feedback`
+
+Stores explicit feedback for a completed web-chat answer. The frontend should use `message_id` from the final `/chat` SSE `answer` event. Feedback is scoped by fingerprint/session/persona and is folded into later `/chat` turns as lightweight style guidance.
+
+Request:
+
+```json
+{
+  "message_id": 123,
+  "session_id": "browser-session-id",
+  "fingerprint": "browser-fingerprint",
+  "persona": "yezhov",
+  "rating": 4,
+  "tone_feedback": "more_in_character",
+  "note": "더 위압적으로"
+}
+```
+
+`tone_feedback` is optional and must be one of: `shorter`, `longer`, `warmer`, `colder`, `more_direct`, `more_in_character`, `less_formal`, `more_cited`. At least one of `rating`, `tone_feedback`, or `note` is required.
 
 ### `GET /history`
 

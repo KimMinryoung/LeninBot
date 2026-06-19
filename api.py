@@ -205,6 +205,19 @@ class ChatRequest(BaseModel):
     session_id: str = Field(default="default", min_length=1, max_length=128)
     fingerprint: str = Field(default="", max_length=256)  # Browser fingerprint from localStorage (persistent across server restarts)
     persona: str = Field(default="cyber-lenin", max_length=64)  # Selected chat persona; unknown ids fall back to the default server-side
+    regenerate_from_id: int | None = Field(default=None, gt=0)
+    tone_feedback: str | None = Field(default=None, max_length=64)
+    feedback_note: str | None = Field(default=None, max_length=500)
+
+
+class ChatFeedbackRequest(BaseModel):
+    message_id: int = Field(..., gt=0)
+    session_id: str = Field(default="default", min_length=1, max_length=128)
+    fingerprint: str = Field(default="", max_length=256)
+    persona: str = Field(default="cyber-lenin", max_length=64)
+    rating: int | None = Field(default=None, ge=1, le=4)
+    tone_feedback: str | None = Field(default=None, max_length=64)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class EmailDraftRequest(BaseModel):
@@ -710,12 +723,67 @@ async def chat(request: ChatRequest, http_req: Request):
                     ip_address=ip_address,
                     user_fingerprints=user_fingerprints,
                     persona=request.persona,
+                    regenerate_from_id=request.regenerate_from_id,
+                    tone_feedback=request.tone_feedback or "",
+                    feedback_note=request.feedback_note or "",
                 ):
                     yield sse_event
         finally:
             _webchat_active_count = max(0, _webchat_active_count - 1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/chat/feedback")
+async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
+    """Store explicit feedback for one web-chat answer.
+
+    The frontend should pass `message_id` from the final /chat SSE answer event.
+    Stored feedback is folded into later turns for the same persona/session as
+    lightweight style guidance.
+    """
+    from web_chat import (
+        _FEEDBACK_TONE_LABELS,
+        get_web_chat_log_for_feedback,
+        normalize_web_chat_tone_feedback,
+        save_web_chat_feedback,
+    )
+
+    tone_feedback = normalize_web_chat_tone_feedback(request.tone_feedback)
+    if request.tone_feedback and not tone_feedback:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid tone_feedback", "allowed": sorted(_FEEDBACK_TONE_LABELS)},
+        )
+    note = (request.note or "").strip()
+    if request.rating is None and not tone_feedback and not note:
+        raise HTTPException(status_code=400, detail="rating, tone_feedback, or note is required")
+
+    fps = list({f for f in (_parse_user_fingerprints(http_req) + [request.fingerprint or ""]) if f})
+    if not fps:
+        raise HTTPException(status_code=400, detail="fingerprint is required")
+
+    row = await asyncio.to_thread(
+        get_web_chat_log_for_feedback,
+        request.message_id,
+        fps,
+        request.session_id,
+        request.persona,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="chat message not found")
+
+    feedback = await asyncio.to_thread(
+        save_web_chat_feedback,
+        chat_log_id=int(row["id"]),
+        session_id=row["session_id"],
+        fingerprint=request.fingerprint or row["fingerprint"],
+        persona=row["persona"],
+        rating=request.rating,
+        tone_feedback=tone_feedback,
+        note=note,
+    )
+    return {"feedback": feedback, "allowed_tone_feedback": sorted(_FEEDBACK_TONE_LABELS)}
 
 
 @app.get("/personas")

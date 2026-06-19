@@ -272,20 +272,27 @@ def _verbatim_persona(
     )
 
 
-# Nikolai Yezhov — adult historical roleplay character, reused from the standalone
-# roleplay bot's persona file so there is a single source of truth. Public:
-# surfaced to all visitors (the admin_only gating infra remains available for
-# future personas).
-def _load_roleplay_md() -> str:
+# Nikolai Yezhov — historical roleplay character. The standalone Telegram
+# roleplay bot keeps its own more private prompt in identity/roleplay_persona.md;
+# web chat uses a public-facing variant derived from it.
+def _load_yezhov_web_persona() -> str:
     try:
         path = Path(__file__).resolve().parent / "identity" / "roleplay_persona.md"
-        return path.read_text(encoding="utf-8").strip()
+        body = path.read_text(encoding="utf-8").strip()
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Yezhov persona file unreadable: %s", exc)
         return ""
 
+    replacements = {
+        "- 성별: 여성(실존 인물과 동일한 인격이나 신체만 변경한 캐릭터 설정)": "- 성별: 남성",
+        "- 신체 사이즈: 키 145cm, 체중 38kg, Bust 75cm - Waist 54cm - Hip 79cm": "- 신체: 키 151cm, 마른 체구",
+    }
+    for old, new in replacements.items():
+        body = body.replace(old, new)
+    return body
 
-_YEZHOV_BODY = _load_roleplay_md()
+
+_YEZHOV_BODY = _load_yezhov_web_persona()
 YEZHOV = _verbatim_persona(
     id="yezhov",
     display_name="니콜라이 예조프",
