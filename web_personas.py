@@ -21,11 +21,15 @@ web_chat (no import cycle).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from identity.prompts import CORE_IDENTITY
 from prompt_context import uses_xml
 from agents.base import load_political_line_body
+
+logger = logging.getLogger(__name__)
 
 # Sentinel section tag whose body is filled from the live political-line file at
 # render time (only when the spec opts in via `inherits_political_line`).
@@ -68,6 +72,7 @@ class PersonaSpec:
     provider_override: str | None = None
     tier_override: str | None = None
     is_default: bool = False
+    admin_only: bool = False  # only surfaced to / usable by authenticated admins
 
 
 def _title_for_tag(tag: str) -> str:
@@ -205,6 +210,7 @@ def roleplay_persona(
     allowed_tools: frozenset[str] = ROLEPLAY_TOOLS,
     provider_override: str | None = "deepseek",
     tier_override: str | None = None,
+    admin_only: bool = False,
 ) -> PersonaSpec:
     """Build a roleplay character persona with the shared search-only scaffolding.
 
@@ -231,8 +237,63 @@ def roleplay_persona(
         allowed_tools=allowed_tools,
         provider_override=provider_override,
         tier_override=tier_override,
+        admin_only=admin_only,
         sections=sections,
     )
+
+
+def _verbatim_persona(
+    *,
+    id: str,
+    display_name: str,
+    body: str,
+    description: str = "",
+    allowed_tools: frozenset[str] = ROLEPLAY_TOOLS,
+    provider_override: str | None = "deepseek",
+    admin_only: bool = False,
+) -> PersonaSpec:
+    """Build a persona whose system prompt is `body` verbatim (no extra scaffolding).
+
+    Used for characters that already ship a complete, self-contained system
+    prompt (e.g. the standalone roleplay bot's persona file), so the web prompt
+    matches that proven definition exactly.
+    """
+    return PersonaSpec(
+        id=id,
+        display_name=display_name,
+        description=description,
+        identity=body,
+        interface_line="",
+        inherits_political_line=False,
+        allowed_tools=allowed_tools,
+        provider_override=provider_override,
+        admin_only=admin_only,
+        sections=(),
+    )
+
+
+# Nikolai Yezhov — adult historical roleplay character, reused from the standalone
+# roleplay bot's persona file so there is a single source of truth. Admin-only:
+# surfaced and usable only by authenticated admins (for testing / gated access).
+def _load_roleplay_md() -> str:
+    try:
+        path = Path(__file__).resolve().parent / "identity" / "roleplay_persona.md"
+        return path.read_text(encoding="utf-8").strip()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Yezhov persona file unreadable: %s", exc)
+        return ""
+
+
+_YEZHOV_BODY = _load_roleplay_md()
+YEZHOV = _verbatim_persona(
+    id="yezhov",
+    display_name="니콜라이 예조프",
+    description="역사 인물 역할극 — NKVD 수장 니콜라이 예조프 (성인·관리자 전용).",
+    body=_YEZHOV_BODY,
+    allowed_tools=frozenset({"vector_search", "web_search", "fetch_url", "knowledge_graph_search"}),
+    provider_override="deepseek",
+    admin_only=True,
+)
 
 
 # ── Registry ─────────────────────────────────────────────────────────
@@ -246,6 +307,7 @@ def roleplay_persona(
 #   ))
 _REGISTRY_LIST: list[PersonaSpec] = [
     CYBER_LENIN,
+    YEZHOV,
 ]
 
 _REGISTRY: dict[str, PersonaSpec] = {p.id: p for p in _REGISTRY_LIST}
@@ -267,14 +329,20 @@ def get_persona(persona_id: str | None) -> PersonaSpec:
     return _REGISTRY[DEFAULT_PERSONA_ID]
 
 
-def list_personas() -> list[dict]:
-    """Public catalog for the frontend persona picker."""
+def list_personas(include_admin: bool = False) -> list[dict]:
+    """Catalog for the frontend persona picker.
+
+    Admin-only personas are omitted unless `include_admin` is True (caller has
+    verified admin authentication).
+    """
     return [
         {
             "id": p.id,
             "display_name": p.display_name,
             "description": p.description,
             "default": p.is_default,
+            "admin_only": p.admin_only,
         }
         for p in _REGISTRY.values()
+        if include_admin or not p.admin_only
     ]

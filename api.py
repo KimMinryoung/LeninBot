@@ -70,6 +70,15 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
         raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
 
 
+def _is_admin_request(http_req: Request) -> bool:
+    """Non-raising admin check for endpoints that are public but expose extra
+    capability (e.g. admin-only personas) when a valid X-Admin-Key is present."""
+    if not _ADMIN_API_KEY:
+        return False
+    key = http_req.headers.get("x-admin-key", "")
+    return bool(key) and key == _ADMIN_API_KEY
+
+
 class PrivateReportRequest(BaseModel):
     title: str
     slug: str
@@ -647,16 +656,28 @@ async def chat(request: ChatRequest, http_req: Request):
     Uses claude_loop via web_chat module.
     """
     from web_chat import handle_web_chat
+    from web_personas import get_persona
 
     user_agent = http_req.headers.get("user-agent", "")
     ip_address = _client_ip(http_req)
     user_fingerprints = _parse_user_fingerprints(http_req)
     rate_key = _webchat_rate_key(request, http_req, ip_address)
 
+    # Admin-only personas (e.g. adult roleplay) require a valid X-Admin-Key.
+    persona_spec = get_persona(request.persona)
+    persona_blocked = persona_spec.admin_only and not _is_admin_request(http_req)
+
     lock = _get_session_lock(request.session_id)
 
     async def event_generator():
         global _webchat_active_count
+        if persona_blocked:
+            logger.warning(
+                "web chat blocked admin-only persona=%s session=%s",
+                request.persona, request.session_id,
+            )
+            yield format_sse({"type": "error", "content": "이 대화 상대는 관리자만 이용할 수 있습니다."})
+            return
         if not _check_webchat_rate_limit(rate_key):
             logger.warning("web chat rate limited key=%s session=%s", rate_key[:24], request.session_id)
             yield format_sse({"type": "error", "content": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
@@ -698,11 +719,16 @@ async def chat(request: ChatRequest, http_req: Request):
 
 
 @app.get("/personas")
-async def list_chat_personas():
-    """Public catalog of selectable chat personas for the frontend picker."""
+async def list_chat_personas(http_req: Request):
+    """Catalog of selectable chat personas for the frontend picker.
+
+    Admin-only personas are included only when the request carries a valid
+    X-Admin-Key header.
+    """
     from web_personas import list_personas, DEFAULT_PERSONA_ID
 
-    return {"personas": list_personas(), "default": DEFAULT_PERSONA_ID}
+    is_admin = _is_admin_request(http_req)
+    return {"personas": list_personas(include_admin=is_admin), "default": DEFAULT_PERSONA_ID}
 
 
 @app.get("/logs", dependencies=[Depends(require_admin)])
