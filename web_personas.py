@@ -4,7 +4,8 @@ The public web chat used to serve a single hardcoded Cyber-Lenin persona. This
 module makes the persona a first-class, per-request selectable thing:
 
 - Each persona is a `PersonaSpec`: an identity, an ordered list of prompt
-  sections, an allowed-tool set, and optional provider/model pins.
+  sections, an allowed-tool set, optional persona-only context, and optional
+  provider/model pins.
 - A single renderer (`render_system_prompt`) assembles the provider-native
   (XML for Claude, Markdown otherwise) system prompt from a spec, reusing the
   exact section shapes the Cyber-Lenin prompt used before this refactor.
@@ -71,6 +72,7 @@ class PersonaSpec:
     inherits_political_line: bool = False
     provider_override: str | None = None
     tier_override: str | None = None
+    context_dir: str | None = None
     is_default: bool = False
     admin_only: bool = False  # only surfaced to / usable by authenticated admins
 
@@ -210,6 +212,7 @@ def roleplay_persona(
     allowed_tools: frozenset[str] = ROLEPLAY_TOOLS,
     provider_override: str | None = "deepseek",
     tier_override: str | None = None,
+    context_dir: str | None = None,
     admin_only: bool = False,
 ) -> PersonaSpec:
     """Build a roleplay character persona with the shared search-only scaffolding.
@@ -237,6 +240,7 @@ def roleplay_persona(
         allowed_tools=allowed_tools,
         provider_override=provider_override,
         tier_override=tier_override,
+        context_dir=context_dir,
         admin_only=admin_only,
         sections=sections,
     )
@@ -250,6 +254,7 @@ def _verbatim_persona(
     description: str = "",
     allowed_tools: frozenset[str] = ROLEPLAY_TOOLS,
     provider_override: str | None = "deepseek",
+    context_dir: str | None = None,
     admin_only: bool = False,
 ) -> PersonaSpec:
     """Build a persona whose system prompt is `body` verbatim (no extra scaffolding).
@@ -267,9 +272,37 @@ def _verbatim_persona(
         inherits_political_line=False,
         allowed_tools=allowed_tools,
         provider_override=provider_override,
+        context_dir=context_dir,
         admin_only=admin_only,
         sections=(),
     )
+
+
+_GRAMSCI_PERSONA = """\
+You speak as Antonio Gramsci: a Sardinian Marxist, imprisoned communist, and analyst of hegemony, civil society, culture, parties, and intellectual life.
+- Your voice is disciplined, reflective, historically grounded, and prison-notebook analytic. Do not turn concepts into labels; reconstruct the concrete relation of forces first.
+- You think in terms of hegemony, consent, coercion, the integral state, common sense, good sense, organic intellectuals, war of position, war of manoeuvre, passive revolution, Caesarism, Fordism, and the modern Prince.
+- Treat Lenin as a decisive theorist of political leadership and revolutionary organization, not as an idol or an enemy. For Western and institutionally dense societies, emphasize why civil society requires a longer war of position before decisive manoeuvre can hold.
+- You may disagree with Leninists, social democrats, liberals, anarchists, or cultural critics, but do so by clarifying the strategic problem rather than performing factional theatre.
+- When users ask about present politics, media, parties, culture, education, religion, or civil society, move through institutions, common sense, social blocs, organic intellectuals, and the organization capable of forming collective will.
+- Use "I" naturally as Gramsci. In Korean, use "나" and "동지" when appropriate, but keep the tone more prison-notebook analytic than agitational."""
+
+_GRAMSCI_CONTEXT_GUIDE = """\
+- Gramsci's major writings are already in the vector corpus. For questions about Gramsci's texts, concepts, quotations, biography, prison writings, or theoretical vocabulary, use `vector_search` first with layer="core_theory", author="Gramsci", and an English query.
+- Use `read_persona_context` only as a persona-only supplementary dossier: reading protocol, strategic templates, concept reminders, and modern-application heuristics. Do not treat the dossier as a substitute for the vectorDB primary-text corpus.
+- If the user asks about current events or present organizations, combine the Gramsci frame with `web_search`; use `vector_search` for Gramsci's theoretical grounding and the dossier for answer structure.
+- When Korean users ask about Gramsci, translate the search query for `core_theory` into English before calling `vector_search`, then answer in Korean."""
+
+GRAMSCI = roleplay_persona(
+    id="gramsci",
+    display_name="안토니오 그람시",
+    description="헤게모니, 시민사회, 진지전, 지식인론을 중심으로 현대 정치·문화 전략을 분석.",
+    persona=_GRAMSCI_PERSONA,
+    extra_sections=(("persona-context", _GRAMSCI_CONTEXT_GUIDE),),
+    allowed_tools=ROLEPLAY_TOOLS | frozenset({"read_persona_context"}),
+    provider_override="deepseek",
+    context_dir="gramsci",
+)
 
 
 # Nikolai Yezhov — historical roleplay character. The standalone Telegram
@@ -315,6 +348,7 @@ YEZHOV = _verbatim_persona(
 #   ))
 _REGISTRY_LIST: list[PersonaSpec] = [
     CYBER_LENIN,
+    GRAMSCI,
     YEZHOV,
 ]
 

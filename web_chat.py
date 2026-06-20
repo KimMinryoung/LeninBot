@@ -62,6 +62,9 @@ def _build_web_model_context(profile, provider: str = "claude") -> str:
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
+PERSONA_CONTEXT_ROOT = Path(__file__).resolve().parent / "identity" / "web_personas"
+
+
 WEB_READ_SELF_TOOL = {
     "name": "read_self",
     "description": (
@@ -137,11 +140,190 @@ WEB_READ_SELF_TOOL = {
 }
 
 
+WEB_PERSONA_CONTEXT_TOOL = {
+    "name": "read_persona_context",
+    "description": (
+        "Read this selected persona's private dossier. The server binds the "
+        "lookup to the active persona, so one persona cannot read another "
+        "persona's notes. Use it for that persona's concepts, biography, "
+        "strategic vocabulary, and prepared background details."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "read", "search"],
+                "description": "List available topics, read one topic, or search the persona dossier.",
+                "default": "list",
+            },
+            "topic": {
+                "type": "string",
+                "description": "Topic slug returned by action='list', for example concepts or biography.",
+            },
+            "query": {
+                "type": "string",
+                "description": "Search query for action='search'.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum search results or list items.",
+                "default": 5,
+            },
+            "max_chars": {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                "description": "Maximum body characters for long topic reads.",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Character offset for paginating long topic reads.",
+                "default": 0,
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
 def _public_excerpt(text: str, limit: int = 280) -> str:
     text = " ".join(str(text or "").split())
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+_PERSONA_CONTEXT_TOPIC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}(?:\.md)?$")
+
+
+def _persona_context_path(spec) -> Path | None:
+    context_dir = str(getattr(spec, "context_dir", "") or "").strip()
+    if not context_dir or not _PERSONA_CONTEXT_TOPIC_RE.match(context_dir):
+        return None
+    base = PERSONA_CONTEXT_ROOT.resolve()
+    path = (base / context_dir / "knowledge").resolve()
+    try:
+        path.relative_to(base)
+    except ValueError:
+        logger.warning("Rejected persona context path outside base persona=%s", getattr(spec, "id", "?"))
+        return None
+    if not path.is_dir():
+        return None
+    return path
+
+
+def _persona_context_files(spec) -> list[Path]:
+    path = _persona_context_path(spec)
+    if not path:
+        return []
+    return sorted(p for p in path.glob("*.md") if p.is_file())
+
+
+def _persona_context_title(path: Path, body: str | None = None) -> str:
+    if body is None:
+        try:
+            body = path.read_text(encoding="utf-8")
+        except Exception:
+            body = ""
+    for line in body.splitlines():
+        line = line.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
+    return path.stem.replace("_", " ").replace("-", " ").title()
+
+
+def _persona_topic_file(spec, topic: str | None) -> Path | None:
+    raw = str(topic or "").strip()
+    if not raw or "/" in raw or "\\" in raw:
+        return None
+    if not _PERSONA_CONTEXT_TOPIC_RE.match(raw):
+        return None
+    if raw.endswith(".md"):
+        raw = raw[:-3]
+    path = _persona_context_path(spec)
+    if not path:
+        return None
+    candidate = (path / f"{raw}.md").resolve()
+    try:
+        candidate.relative_to(path.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+async def _exec_persona_context_for(
+    spec,
+    action: str = "list",
+    topic: str | None = None,
+    query: str | None = None,
+    limit: int = 5,
+    max_chars: int | None = None,
+    offset: int = 0,
+) -> str:
+    """Read the active persona's own dossier; never crosses persona dirs."""
+    action = str(action or "list").strip().lower()
+    if action not in {"list", "read", "search"}:
+        action = "list"
+    files = _persona_context_files(spec)
+    persona_name = getattr(spec, "display_name", getattr(spec, "id", "this persona"))
+    if not files:
+        return f"No persona dossier is configured for {persona_name}."
+
+    try:
+        limit = int(limit or 5)
+    except Exception:
+        limit = 5
+    limit = max(1, min(limit, 20))
+    if action == "list":
+        lines = [f"Available persona dossier topics for {persona_name}:"]
+        for file_path in files[:limit]:
+            body = file_path.read_text(encoding="utf-8")
+            excerpt = _public_excerpt(body.replace("#", ""), 180)
+            lines.append(f"- {file_path.stem}: {_persona_context_title(file_path, body)}" + (f" -- {excerpt}" if excerpt else ""))
+        return "\n".join(lines)
+
+    if action == "read":
+        file_path = _persona_topic_file(spec, topic)
+        if not file_path:
+            return "Topic not found in this persona dossier. Call action='list' for available topic slugs."
+        body = file_path.read_text(encoding="utf-8")
+        try:
+            offset = int(offset or 0)
+        except Exception:
+            offset = 0
+        try:
+            max_chars = int(max_chars or 6000)
+        except Exception:
+            max_chars = 6000
+        offset = max(0, offset)
+        max_chars = max(500, min(max_chars, 12000))
+        chunk = body[offset: offset + max_chars]
+        next_offset = offset + len(chunk)
+        suffix = f"\n\n[next_offset={next_offset}]" if next_offset < len(body) else ""
+        return f"Persona dossier topic: {file_path.stem} ({_persona_context_title(file_path, body)})\n\n{chunk}{suffix}"
+
+    needle = str(query or "").strip().lower()
+    if not needle:
+        return "Search query is required for action='search'."
+    results: list[str] = []
+    for file_path in files:
+        body = file_path.read_text(encoding="utf-8")
+        lower = body.lower()
+        idx = lower.find(needle)
+        if idx < 0:
+            continue
+        start = max(0, idx - 260)
+        end = min(len(body), idx + len(needle) + 520)
+        excerpt = body[start:end].strip()
+        if start > 0:
+            excerpt = "..." + excerpt
+        if end < len(body):
+            excerpt += "..."
+        results.append(f"- {file_path.stem}: {_persona_context_title(file_path, body)}\n  {excerpt}")
+        if len(results) >= limit:
+            break
+    if not results:
+        return f"No matches for {query!r} in {persona_name}'s persona dossier."
+    return f"Persona dossier search results for {persona_name}:\n" + "\n".join(results)
 
 
 async def _exec_web_read_self(
@@ -449,7 +631,7 @@ async def _format_public_model_config() -> str:
     return "\n".join(lines)
 
 
-def _build_persona_tools(allowed_tools) -> tuple[list[dict], dict]:
+def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
     """Build the (tools, handlers) pair for a persona's allowed-tool set.
 
     `read_self` is special: the shared TOOLS registry also defines a read_self,
@@ -457,17 +639,26 @@ def _build_persona_tools(allowed_tools) -> tuple[list[dict], dict]:
     _exec_web_read_self pair. So the registry read_self is always excluded here
     and the web-safe one is injected when the persona allows read_self.
     """
+    spec = persona_or_allowed_tools if hasattr(persona_or_allowed_tools, "allowed_tools") else None
+    allowed_tools = spec.allowed_tools if spec is not None else persona_or_allowed_tools
+    web_only_tools = {"read_self", "read_persona_context"}
     tools = [
         t for t in TOOLS
-        if t.get("name") in allowed_tools and t.get("name") != "read_self"
+        if t.get("name") in allowed_tools and t.get("name") not in web_only_tools
     ]
     handlers = {
         k: v for k, v in TOOL_HANDLERS.items()
-        if k in allowed_tools and k != "read_self"
+        if k in allowed_tools and k not in web_only_tools
     }
     if "read_self" in allowed_tools:
         tools = tools + [WEB_READ_SELF_TOOL]
         handlers = {**handlers, "read_self": _exec_web_read_self}
+    if "read_persona_context" in allowed_tools and spec is not None and spec.context_dir:
+        async def _bound_persona_context(**kwargs):
+            return await _exec_persona_context_for(spec, **kwargs)
+
+        tools = tools + [WEB_PERSONA_CONTEXT_TOOL]
+        handlers = {**handlers, "read_persona_context": _bound_persona_context}
     return tools, handlers
 
 
@@ -475,7 +666,7 @@ def _build_persona_tools(allowed_tools) -> tuple[list[dict], dict]:
 # only registry-backed tools (read_self lives outside TOOLS); per-persona tool
 # resolution happens in handle_web_chat via _build_persona_tools.
 _WEB_ALLOWED_TOOLS = set(CYBER_LENIN_TOOLS) - {"read_self"}
-_web_tools, _web_handlers = _build_persona_tools(CYBER_LENIN_TOOLS)
+_web_tools, _web_handlers = _build_persona_tools(get_persona(DEFAULT_PERSONA_ID))
 
 
 # ── Chat history from chat_logs table ────────────────────────────────
@@ -900,6 +1091,7 @@ _WEB_TOOL_LABELS = {
     "get_finance_data": "시장 데이터 조회",
     "check_wallet": "지갑 정보 확인",
     "read_self": "공개 자기 정보 조회",
+    "read_persona_context": "페르소나 자료 조회",
 }
 
 _TOOL_PROGRESS_RE = re.compile(r"\]\s*(?:[^\w\s]+)?\s*([A-Za-z_][A-Za-z0-9_]*)\((.*)\)\s*$")
@@ -949,7 +1141,7 @@ async def handle_web_chat(
     # Resolve the requested persona (unknown ids fall back to the default).
     spec = get_persona(persona)
     persona = spec.id
-    web_tools, web_handlers = _build_persona_tools(spec.allowed_tools)
+    web_tools, web_handlers = _build_persona_tools(spec)
 
     # Authenticated users bring all their bound fingerprints; anonymous users
     # have just the one from localStorage. Deduplicate.

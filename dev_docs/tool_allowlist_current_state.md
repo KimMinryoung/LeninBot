@@ -12,7 +12,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Telegram orchestrator | `runtime_tools/allowlists.py` | tools visible to the top-level Telegram orchestrator |
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
-| Public web chat | `web_chat.py` | `_WEB_ALLOWED_TOOLS` plus `WEB_READ_SELF_TOOL` |
+| Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
 | Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 
@@ -67,11 +67,15 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 
 ## Public Web Chat
 
-Public web chat is not the Telegram orchestrator. `web_chat.py` builds `_web_tools` from `_WEB_ALLOWED_TOOLS` and adds `WEB_READ_SELF_TOOL`. This keeps anonymous public users away from Telegram-only, email, code, filesystem, and broad operational tools.
+Public web chat is not the Telegram orchestrator. `web_chat.py` builds tools from the active `PersonaSpec.allowed_tools`, excluding shared registry `read_self` and injecting web-only handlers where allowed. `WEB_READ_SELF_TOOL` is the public-safe Cyber-Lenin self-inspection surface. `WEB_PERSONA_CONTEXT_TOOL` is a persona-bound dossier reader: the handler closes over the active persona and resolves reads only under `identity/web_personas/<context_dir>/knowledge`, so one persona cannot request another persona's notes. This keeps anonymous public users away from Telegram-only, email, code, filesystem, and broad operational tools.
 
 `check_wallet` is intentionally exposed to public web chat as a read-only wallet visibility tool. It can show public wallet address/balance information, but it must not expose private keys, credential paths, signing, transfer, swap, or payment capabilities. Payment tools such as `pay_and_fetch`, code execution tools, filesystem write tools, email/A2A send tools, and publishing tools must remain absent from the web-chat allow-list.
 
-When changing public web tools, review `scripts/smoke_webchat_security.py` and the frontend caller behavior.
+When changing public web tools, review `scripts/smoke_webchat_security.py`, persona-specific tool labels in `web_chat.py`, and the frontend caller behavior.
+
+Current public persona-specific additions:
+
+- `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; the persona dossier is supplemental reading protocol and strategy scaffolding.
 
 ## Roleplay Bot
 

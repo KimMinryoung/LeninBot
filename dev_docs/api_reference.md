@@ -27,6 +27,7 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `GET`, `HEAD` | `/api/health` | health check alias |
 | `POST` | `/chat` | public web chat SSE stream |
 | `POST` | `/chat/feedback` | store rating/tone feedback for a web chat answer |
+| `GET` | `/personas` | selectable public web-chat persona catalog |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
 | `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
@@ -49,7 +50,9 @@ Request:
 }
 ```
 
-Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
+Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. Unknown persona IDs fall back server-side to `cyber-lenin`. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
+
+Selectable personas are defined in `web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; his persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
 
 Response is `text/event-stream`. Event payloads are JSON:
 
@@ -64,6 +67,22 @@ Concurrency and rate controls:
 - one active request per `session_id`
 - per-client sliding window from `WEBCHAT_RATE_LIMIT` and `WEBCHAT_RATE_WINDOW_SECONDS`
 - global active request cap from `WEBCHAT_GLOBAL_ACTIVE_LIMIT`
+
+### `GET /personas`
+
+Returns the persona picker catalog for web chat:
+
+```json
+{
+  "personas": [
+    {"id": "cyber-lenin", "display_name": "사이버-레닌", "description": "...", "default": true, "admin_only": false},
+    {"id": "gramsci", "display_name": "안토니오 그람시", "description": "...", "default": false, "admin_only": false}
+  ],
+  "default": "cyber-lenin"
+}
+```
+
+Admin-only personas are included only for valid admin requests.
 
 ### `POST /chat/feedback`
 
