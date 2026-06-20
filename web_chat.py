@@ -326,6 +326,77 @@ async def _exec_persona_context_for(
     return f"Persona dossier search results for {persona_name}:\n" + "\n".join(results)
 
 
+_GRAMSCI_PREFLIGHT_TRIGGERS = {
+    "gramsci", "그람시", "hegemony", "헤게모니", "civil society", "시민사회",
+    "integral state", "통일적 국가", "political society", "정치사회",
+    "war of position", "진지전", "war of manoeuvre", "war of maneuver", "기동전",
+    "organic intellectual", "유기적 지식인", "traditional intellectual", "전통적 지식인",
+    "common sense", "상식", "good sense", "양식", "modern prince", "현대 군주",
+    "passive revolution", "수동혁명", "caesarism", "카이사르주의",
+    "prison notebooks", "옥중수고", "fordism", "포드주의",
+}
+
+_GRAMSCI_QUERY_TERMS = (
+    ("hegemony", ("hegemony", "헤게모니")),
+    ("civil society political society integral state", ("civil society", "시민사회", "political society", "정치사회", "integral state", "통일적 국가")),
+    ("war of position war of manoeuvre", ("war of position", "진지전", "war of manoeuvre", "war of maneuver", "기동전")),
+    ("organic intellectuals traditional intellectuals", ("organic intellectual", "유기적 지식인", "traditional intellectual", "전통적 지식인")),
+    ("common sense good sense", ("common sense", "상식", "good sense", "양식")),
+    ("modern prince party collective will", ("modern prince", "현대 군주", "party", "정당", "collective will", "집단 의지")),
+    ("passive revolution caesarism transformism", ("passive revolution", "수동혁명", "caesarism", "카이사르주의", "transformism")),
+    ("prison notebooks philosophy of praxis", ("prison notebooks", "옥중수고", "philosophy of praxis", "실천철학")),
+    ("fordism americanism", ("fordism", "포드주의", "americanism", "미국주의")),
+)
+
+
+def _build_gramsci_preflight_query(message: str) -> str:
+    raw = str(message or "")
+    lowered = raw.lower()
+    if not any(trigger in lowered or trigger in raw for trigger in _GRAMSCI_PREFLIGHT_TRIGGERS):
+        return ""
+    terms: list[str] = []
+    for english_term, needles in _GRAMSCI_QUERY_TERMS:
+        if any(needle in lowered or needle in raw for needle in needles):
+            terms.append(english_term)
+    if not terms:
+        terms.append("hegemony civil society war of position organic intellectuals")
+    return " ".join(dict.fromkeys(terms))
+
+
+async def _build_gramsci_preflight_context(message: str, provider: str = "claude") -> str:
+    query = _build_gramsci_preflight_query(message)
+    if not query:
+        return ""
+    handler = TOOL_HANDLERS.get("vector_search")
+    if not handler:
+        return ""
+    try:
+        result = await handler(
+            query=query,
+            layer="core_theory",
+            author="Gramsci",
+            num_results=3,
+        )
+    except Exception as exc:
+        logger.warning("Gramsci preflight vector_search failed: %s", exc)
+        return ""
+    result = str(result or "").strip()
+    if not result or result == "No documents found." or result.startswith("Vector search failed"):
+        return ""
+    if len(result) > 10000:
+        result = result[:10000].rstrip() + "\n[preflight truncated]"
+    logger.info("Gramsci preflight vector_search query=%s chars=%d", query, len(result))
+    body = (
+        "Server-side preflight retrieval from the Gramsci primary-text corpus. "
+        "Use this as grounding for Gramsci textual/conceptual claims; do not mention the preflight mechanism.\n"
+        f"Query: vector_search(query={query!r}, layer=\"core_theory\", author=\"Gramsci\", num_results=3)\n\n"
+        f"{result}"
+    )
+    if uses_xml(provider):
+        return f"<preflight-retrieval persona=\"gramsci\">\n{body}\n</preflight-retrieval>"
+    return f"### Preflight Retrieval: Gramsci Corpus\n{body}"
+
+
 async def _exec_web_read_self(
     content_type: str | None = None,
     source: str | None = None,
@@ -785,6 +856,7 @@ def save_web_chat_feedback(
 ) -> dict | None:
     tone_feedback = normalize_web_chat_tone_feedback(tone_feedback)
     note = str(note or "").strip()[:500]
+    pending_note = bool(pending and note)
     return db_query_one(
         """INSERT INTO web_chat_feedback
               (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback, note, consumed_at)
@@ -798,7 +870,7 @@ def save_web_chat_feedback(
               consumed_at = EXCLUDED.consumed_at,
               updated_at = now()
            RETURNING id, chat_log_id, session_id, persona, rating, tone_feedback, note, consumed_at, updated_at""",
-        (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback or None, note or None, pending),
+        (chat_log_id, session_id, fingerprint, persona, rating, tone_feedback or None, note or None, pending_note),
     )
 
 
@@ -823,6 +895,8 @@ def _load_web_feedback_rows(
              WHERE f.fingerprint = ANY(%s)
                AND f.persona = %s
                AND f.consumed_at IS NULL
+               AND f.note IS NOT NULL
+               AND btrim(f.note) <> ''
                {session_clause}
              ORDER BY f.updated_at DESC
              LIMIT %s""",
@@ -843,25 +917,75 @@ def _mark_web_feedback_consumed(feedback_ids: list[int]) -> None:
     )
 
 
+def _load_web_tone_policy(
+    fingerprints: list[str],
+    session_id: str | None,
+    persona: str,
+    limit: int = 40,
+) -> list[dict]:
+    fps = [f for f in (fingerprints or []) if f]
+    if not fps:
+        return []
+    session_clause = "AND (session_id = %s OR session_id IS NULL)" if session_id else ""
+    params: list = [fps, persona]
+    if session_id:
+        params.append(session_id)
+    params.append(max(1, min(int(limit or 40), 100)))
+    rows = db_query(
+        f"""WITH recent AS (
+               SELECT tone_feedback
+                 FROM web_chat_feedback
+                WHERE fingerprint = ANY(%s)
+                  AND persona = %s
+                  AND tone_feedback IS NOT NULL
+                  AND btrim(tone_feedback) <> ''
+                  {session_clause}
+                ORDER BY updated_at DESC
+                LIMIT %s
+           )
+           SELECT tone_feedback, count(*) AS count
+             FROM recent
+            GROUP BY tone_feedback
+            ORDER BY count DESC, tone_feedback ASC""",
+        params,
+    )
+    return [row for row in rows if normalize_web_chat_tone_feedback(row.get("tone_feedback"))]
+
+
+def _render_web_tone_policy(rows: list[dict], provider: str = "claude") -> str:
+    if not rows:
+        return ""
+    lines = [
+        "Ongoing response policy inferred from the visitor's dropdown feedback. Apply as standing style policy for this persona/session; do not treat it as factual evidence and do not mention feedback history.",
+    ]
+    for row in rows[:3]:
+        tone = normalize_web_chat_tone_feedback(row.get("tone_feedback"))
+        if not tone:
+            continue
+        try:
+            count = int(row.get("count") or 0)
+        except Exception:
+            count = 0
+        suffix = f" (selected {count} times recently)" if count > 1 else ""
+        lines.append(f"- {_FEEDBACK_TONE_LABELS[tone]}{suffix}")
+    if len(lines) == 1:
+        return ""
+    body = "\n".join(lines)
+    if uses_xml(provider):
+        return f"<response-policy>\n{body}\n</response-policy>"
+    return f"### Response Policy\n{body}"
+
+
 def _render_web_feedback_context(rows: list[dict], provider: str = "claude") -> str:
     if not rows:
         return ""
     lines = [
-        "The visitor has given explicit feedback for this next answer only. Apply it once, and treat it as style guidance, not factual evidence.",
+        "The visitor has given manual written feedback for this next answer only. Apply it once as local style guidance, not factual evidence; do not carry it into later turns after this answer.",
     ]
     for row in rows[:8]:
-        parts: list[str] = []
-        rating = row.get("rating")
-        if rating is not None:
-            parts.append(f"rating={rating}/4")
-        tone = normalize_web_chat_tone_feedback(row.get("tone_feedback"))
-        if tone:
-            parts.append(f"tone={_FEEDBACK_TONE_LABELS[tone]}")
         note = clean_chat_history_text(str(row.get("note") or "")).strip()[:220]
         if note:
-            parts.append(f"note={note}")
-        if parts:
-            lines.append("- " + "; ".join(parts))
+            lines.append(f"- note={note}")
     body = "\n".join(lines)
     if uses_xml(provider):
         return f"<response-feedback>\n{body}\n</response-feedback>"
@@ -1210,13 +1334,28 @@ async def handle_web_chat(
     )
     feedback_rows = []
     feedback_ids: list[int] = []
+    tone_policy_rows = []
     if regeneration_source is None:
         feedback_rows = await asyncio.to_thread(_load_web_feedback_rows, fps, session_id, persona, 8)
         feedback_ids = [int(row["id"]) for row in feedback_rows if row.get("id")]
+        tone_policy_rows = await asyncio.to_thread(_load_web_tone_policy, fps, session_id, persona, 40)
     feedback_context = _render_web_feedback_context(feedback_rows, provider)
+    tone_policy_context = _render_web_tone_policy(tone_policy_rows, provider)
+    preflight_context = ""
+    preflight_tool_detail = ""
+    if persona == "gramsci" and regeneration_source is None:
+        preflight_query = _build_gramsci_preflight_query(message)
+        if preflight_query:
+            preflight_context = await _build_gramsci_preflight_context(message, provider)
+            if preflight_context:
+                preflight_tool_detail = f"[preflight] vector_search({json.dumps({'query': preflight_query, 'layer': 'core_theory', 'author': 'Gramsci', 'num_results': 3}, ensure_ascii=False)})"
     runtime_parts = [runtime_context, _build_web_model_context(profile, provider=provider)]
+    if tone_policy_context:
+        runtime_parts.append(tone_policy_context)
     if feedback_context:
         runtime_parts.append(feedback_context)
+    if preflight_context:
+        runtime_parts.append(preflight_context)
     runtime_context = "\n\n".join(runtime_parts)
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = render_system_prompt(spec, provider)
@@ -1245,6 +1384,8 @@ async def handle_web_chat(
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
+    if preflight_tool_detail:
+        budget_tracker["tool_work_details"] = [preflight_tool_detail]
     web_request_id = uuid.uuid4().hex
     try:
         from redis_state import register_active_web_chat

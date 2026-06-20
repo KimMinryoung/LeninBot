@@ -52,7 +52,7 @@ Request:
 
 Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. Unknown persona IDs fall back server-side to `cyber-lenin`. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
 
-Selectable personas are defined in `web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; his persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
+Selectable personas are defined in `web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; for Gramsci theory/concept triggers the server also performs a preflight vector lookup and injects a bounded grounding block into the current turn. His persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
 
 Response is `text/event-stream`. Event payloads are JSON:
 
@@ -86,7 +86,7 @@ Admin-only personas are included only for valid admin requests.
 
 ### `POST /chat/feedback`
 
-Stores explicit feedback for a completed web-chat answer. The frontend should use `message_id` from the final `/chat` SSE `answer` event. Feedback is scoped by fingerprint/session/persona and is folded into the next normal `/chat` turn once, then marked consumed so specific correction notes do not keep reappearing. Feedback passed inline with `regenerate_from_id` is applied only to that regeneration request.
+Stores explicit feedback for a completed web-chat answer. The frontend should use `message_id` from the final `/chat` SSE `answer` event. Feedback is scoped by fingerprint/session/persona. Manual `note` text is folded into the next normal `/chat` turn once, then marked consumed so free-form corrections do not keep reappearing. Dropdown `tone_feedback` is not injected as per-turn chat context; recent dropdown selections are aggregated into a standing response policy for that persona/session. Feedback passed inline with `regenerate_from_id` is applied only to that regeneration request, while any saved dropdown value still contributes to the ongoing policy aggregate.
 
 Request:
 

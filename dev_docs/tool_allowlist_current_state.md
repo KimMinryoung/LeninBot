@@ -75,7 +75,7 @@ When changing public web tools, review `scripts/smoke_webchat_security.py`, pers
 
 Current public persona-specific additions:
 
-- `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; the persona dossier is supplemental reading protocol and strategy scaffolding.
+- `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; `web_chat.py` also performs a bounded server-side preflight vector lookup for Gramsci theory/concept triggers. The persona dossier is supplemental reading protocol and strategy scaffolding.
 
 ## Roleplay Bot
 
