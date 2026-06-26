@@ -1383,7 +1383,7 @@ async def _exec_check_inbox(
     except (TypeError, ValueError):
         body_offset = 0
     uid = str(uid or "").strip()
-    folder = "Junk" if str(folder or "").lower() == "junk" else "INBOX"
+    selected_folder = "Junk" if str(folder or "").lower() == "junk" else "INBOX"
 
     def _fetch():
         conn = _imap_connect()
@@ -1393,12 +1393,12 @@ async def _exec_check_inbox(
         results = []
         try:
             if uid:
-                status, _ = conn.select(folder, readonly=True)
+                status, _ = conn.select(selected_folder, readonly=True)
                 if status != "OK":
-                    return f"Error: could not select folder {folder}"
+                    return f"Error: could not select folder {selected_folder}"
                 fetch_status, msg_data = conn.uid("fetch", uid, "(FLAGS BODY.PEEK[])")
                 if fetch_status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
-                    return f"Email not found: folder={folder} uid={uid}"
+                    return f"Email not found: folder={selected_folder} uid={uid}"
                 flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
                 raw = msg_data[0][1]
                 parsed = _parse_email_message(
@@ -1407,32 +1407,36 @@ async def _exec_check_inbox(
                     body_max_chars=body_max_chars,
                     body_offset=body_offset,
                 )
-                parsed["folder"] = folder
+                parsed["folder"] = selected_folder
                 parsed["uid"] = uid
                 parsed["is_read"] = b"\\Seen" in flags_raw
                 return [parsed]
 
-            for folder in ["INBOX", "Junk"]:
+            for mailbox_folder in ["INBOX", "Junk"]:
                 try:
-                    status, _ = conn.select(folder, readonly=True)
+                    status, _ = conn.select(mailbox_folder, readonly=True)
                     if status != "OK":
                         continue
                 except Exception:
                     continue
 
                 search_criteria = "UNSEEN" if unread_only else "ALL"
-                _, data = conn.search(None, search_criteria)
-                all_ids = data[0].split()
-                if not all_ids:
+                search_status, data = conn.uid("search", None, search_criteria)
+                if search_status != "OK":
+                    continue
+                all_uids = data[0].split() if data and data[0] else []
+                if not all_uids:
                     continue
 
-                candidate_ids = all_ids[-(limit * 5):]
-                candidate_ids.reverse()
+                candidate_uids = all_uids[-(limit * 5):]
+                candidate_uids.reverse()
 
-                for mid in candidate_ids:
+                for candidate_uid in candidate_uids:
                     if len(results) >= limit:
                         break
-                    _, msg_data = conn.fetch(mid, "(FLAGS UID BODY.PEEK[])")
+                    fetch_status, msg_data = conn.uid("fetch", candidate_uid, "(FLAGS BODY.PEEK[])")
+                    if fetch_status != "OK":
+                        continue
                     if not msg_data or not isinstance(msg_data[0], tuple):
                         continue
                     flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
@@ -1453,8 +1457,12 @@ async def _exec_check_inbox(
                     if subject_filter and subject_filter.lower() not in parsed["subject"].lower():
                         continue
 
-                    parsed["folder"] = folder
-                    parsed["uid"] = uid_match.group(1).decode("ascii") if uid_match else mid.decode("ascii", errors="replace")
+                    parsed["folder"] = mailbox_folder
+                    parsed["uid"] = (
+                        uid_match.group(1).decode("ascii")
+                        if uid_match
+                        else candidate_uid.decode("ascii", errors="replace")
+                    )
                     parsed["is_read"] = is_read
                     results.append(parsed)
         finally:

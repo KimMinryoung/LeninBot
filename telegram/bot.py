@@ -1997,8 +1997,68 @@ def _normalize_guarded_diary_save_args(args: tuple, kwargs: dict) -> tuple[str |
     )
 
 
+_DIARY_MAINTENANCE_PATTERNS = (
+    r"\bedit(?:ing)?\b",
+    r"\bcorrect(?:ion|ed|ing)?\b",
+    r"\bfix(?:ed|ing)?\b",
+    r"\brewrite\b",
+    r"\brevise\b",
+    r"\bdelete\b",
+    r"\bremove\b",
+    r"\bunpublish\b",
+    r"\bdo not publish\b",
+    r"\bno new diary\b",
+    r"\bdo not write\b",
+    r"\bdo not create\b",
+    r"수정",
+    r"교정",
+    r"고쳐",
+    r"바꿔",
+    r"교체",
+    r"삭제",
+    r"제거",
+    r"발행\s*취소",
+    r"새\s*일기\s*금지",
+    r"쓰지\s*마",
+    r"작성\s*금지",
+    r"생성\s*금지",
+)
+
+_DIARY_CREATION_PATTERNS = (
+    r"\bwrite\s+(?:a\s+)?(?:new\s+)?diary\b",
+    r"\bcreate\s+(?:a\s+)?(?:new\s+)?diary\b",
+    r"\bpublish\s+(?:a\s+)?(?:new\s+)?diary\b",
+    r"\bnew\s+diary\b",
+    r"일기(?:를)?\s*(?:새로\s*)?(?:써|작성|발행)",
+    r"새\s*일기",
+)
+
+
+def _is_diary_maintenance_only_task(task: dict) -> bool:
+    """Return True when a diary task is clearly edit/delete-only maintenance.
+
+    This is a publication side-effect guard. The diary agent owns published
+    diary edits, but correction/delete instructions have repeatedly been
+    misread as creative-writing prompts. When the user explicitly asks for a
+    new diary as well, the creation signal wins and save_diary remains allowed.
+    """
+    if task.get("agent_type") != "diary":
+        return False
+    text = str(task.get("content") or "").lower()
+    if not text:
+        return False
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _DIARY_CREATION_PATTERNS):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _DIARY_MAINTENANCE_PATTERNS)
+
+
 def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
     async def _guarded_save_diary(*args, title: str | None = None, content: str | None = None, **kwargs) -> str:
+        if _is_diary_maintenance_only_task(task):
+            raise RuntimeError(
+                "save_diary blocked: this delegated diary task is edit/delete/correction-only maintenance. "
+                "Use edit_content for diary edits, or report missing delete/unpublish capability; do not create a new diary."
+            )
         title, content = _normalize_guarded_diary_save_args(
             args,
             {"title": title, "content": content, **kwargs},

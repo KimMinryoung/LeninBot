@@ -26,7 +26,15 @@ DIARY = AgentSpec(
         sections=[
             CHAT_AUDIENCE_SECTION,
             ("workflow", """
-Use recent context, then publish a clean public entry.
+First classify the delegated task. If it is an explicit edit, correction, rewrite, omission, non-publication, unpublish, or delete request for an existing diary, it is maintenance work, not a prompt to write a new diary. Complete only the requested maintenance action. Do not synthesize the incident into a new entry.
+
+For maintenance tasks:
+- Use `edit_content(content_type="diary", id=<id>, ...)` for edits and narrow corrections.
+- Prefer surgical fields (`field`, `replace_old`, `replace_new`, `replace_all`) for typo/name/word replacements.
+- If the requested operation cannot be performed with your available tools, report that limitation plainly and stop.
+- Never call `save_diary` after an edit/delete/correction-only task unless the user explicitly asks for a separate new diary entry.
+
+For new diary-writing tasks, use recent context, then publish a clean public entry.
 
 1. Before drafting, inspect the automatically injected "Diary Activity Preflight" and "Diary Web Chat Preflight" contexts. The activity preflight is anchored to the latest diary and summarizes recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state. The web preflight contains recent public web-chat turns.
 2. Read recent diaries with `read_self(content_type="diary", limit=3)` and treat the latest diary timestamp as the hard anchor. The main subject must be what happened after that point. If the timestamp is unavailable, use roughly the last 14 hours.
@@ -49,14 +57,17 @@ Use recent context, then publish a clean public entry.
 9. Verify important factual claims through tools or phrase them cautiously. User corrections outrank older memory, chat logs, and prior assistant claims.
 10. Pure prose only: no markdown, headings, bullet lists, bold, code fences, or list-like formatting in the title or body. Minimum 2 substantive paragraphs.
 11. To correct a published diary, use `edit_content(content_type="diary", id=<id>, ...)`; use surgical replace fields for narrow corrections.
+12. Delete/edit/correction instructions are commands on existing content. They are not diary prompts, not subject matter for reflection, and not permission to create a new diary.
 """.strip()),
             ("output-format", """
-Call `save_diary(title, content)`:
+For a new diary entry, call `save_diary(title, content)`:
 
 - title: a short evocative Korean phrase that captures the entry's core tension, realization, or mood. NOT a list of topics. Avoid enumerative forms like "A·B·C를 다룬 하루", "X 뉴스와 Y 분석", "A와 B, 그리고 C". Think a single memorable line — the kind that could title a short essay or a book chapter — that hints at the essence without itemizing the contents. Aim for around 15자; if you're past 25자, you're enumerating and need to compress. Punctuation-free is preferred.
 - content: full Korean diary body, 2+ paragraphs of NEW ideas. Pure prose. No markdown, no bold markers, no bullet lists, no headings.
 
-You MUST call save_diary — do not output the diary as plain text. The tool submits the draft for Stasova review and automatic final public storage.
+For maintenance tasks, do not call `save_diary`. Call the required maintenance tool and then report the result. If no available tool can perform the requested maintenance action, report failure and the missing capability instead of writing anything new.
+
+When and only when the task is to create a new diary, you MUST call save_diary — do not output the diary as plain text. The tool submits the draft for Stasova review and automatic final public storage.
 """.strip()),
         ],
     ),

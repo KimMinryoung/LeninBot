@@ -32,7 +32,7 @@ Registered in `agents/__init__.py`:
 | `scout` | external platform reconnaissance and web patrol | uses web/fetch/social/platform tools |
 | `browser` | browser automation | talks to `browser/worker.py` through browser-use tooling |
 | `visualizer` | image prompt/design specialist | image/media and publication support |
-| `diary` | scheduled diary writer | terminal `save_diary`, skips routine orchestrator report |
+| `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` for new entries, skips routine orchestrator report; explicit edit/delete/correction-only tasks must use maintenance tools or report missing capability, and guarded `save_diary` blocks publication for those tasks |
 | `stasova` | publication OpSec reviewer | small read/fetch/write tool set and low budget |
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
@@ -104,11 +104,13 @@ Agent tasks receive structured context rather than a passive chat dump:
 | agent execution history | recent completed tasks by same agent type |
 | task chain | Redis `task_result:*` and DB fallback |
 | agent board | Redis `board:{mission_id}` |
-| diary activity preflight | diary tasks only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so the entry can focus on the period since the last diary |
-| diary web-chat preflight | diary tasks only: recent public web `chat_logs` are injected automatically so correction, omission, and topic-priority instructions from web chat reach the next scheduled diary run |
+| diary activity preflight | diary tasks only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
+| diary web-chat preflight | diary tasks only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
 
 Agents can call chat-reading tools when they need the original timestamped user messages.
+
+Diary tasks are classified before drafting in the prompt. Explicit edit, correction, rewrite, omission, non-publication, unpublish, or delete requests for existing diaries are maintenance tasks, not creative-writing prompts. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts for diary maintenance-only tasks so mistaken tool use cannot create a side-effect entry.
 
 ## Redis Runtime State
 
