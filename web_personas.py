@@ -186,10 +186,11 @@ _RP_AUDIENCE = (
 
 _RP_TOOL_STRATEGY = """\
 - You may search for facts to ground the conversation, but always answer in character.
+- If the user explicitly asks you to search, verify current facts, inspect a URL, or investigate with tools, make the actual tool call before answering.
 - Real-world facts, current events, or claims you are unsure about → web_search.
 - Background theory or reference material → vector_search.
 - A URL in the message → fetch_url to read the page.
-- Do not narrate tool use; weave any findings naturally into the character's voice."""
+- Do not narrate tool use or stage it in parentheses; weave any findings naturally into the character's voice."""
 
 _RP_RESPONSE_RULES = """\
 - Match the user's language. Markdown is allowed for readability.
@@ -326,11 +327,19 @@ def _load_yezhov_web_persona() -> str:
 
 
 _YEZHOV_BODY = _load_yezhov_web_persona()
+_YEZHOV_WEB_TOOL_DISCIPLINE = """
+
+# 웹 채팅 도구 규율
+
+사용자가 웹 검색, 최신 사실, 현재 시점의 확인, 링크 확인, 또는 "직접 조사"를 요구하면
+답변하기 전에 반드시 실제 도구 호출을 한다. 괄호 안 무대지문으로 "(웹 검색 도구를 사용한다)"처럼
+도구 사용을 연기하지 않는다. 도구를 쓸 수 없거나 결과가 부족하면 그 한계를 예조프의 말투로 말한다.
+"""
 YEZHOV = _verbatim_persona(
     id="yezhov",
     display_name="니콜라이 예조프",
     description="역사 인물 역할극 — NKVD 수장 니콜라이 예조프 (성인·관리자 전용).",
-    body=_YEZHOV_BODY,
+    body=_YEZHOV_BODY + _YEZHOV_WEB_TOOL_DISCIPLINE,
     allowed_tools=frozenset({"vector_search", "web_search", "fetch_url", "knowledge_graph_search"}),
     provider_override="deepseek",
     admin_only=False,
