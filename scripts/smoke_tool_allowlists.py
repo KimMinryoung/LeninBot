@@ -61,6 +61,16 @@ REQUIRED_COMPAT_HANDLERS = {
 # (the tool-call gateway enforces and audits against it). Imported here so the
 # allow-list smoke checks validate the same map the runtime gateway uses.
 from security_gateway.policy import TOOL_RISK_CLASS  # noqa: E402
+from tool_gateway.profiles import (  # noqa: E402
+    MCP_GATEWAY_LOCAL_TOOLS,
+    MCP_INSPECT_PROFILE,
+    MCP_OPERATOR_PROFILE,
+    TELEGRAM_ORCHESTRATOR_TOOLS,
+    WEB_CYBER_LENIN_TOOLS,
+    WEB_ROLEPLAY_TOOLS,
+    iter_tool_profiles,
+    profile_tool_names,
+)
 
 WEB_FORBIDDEN_RISK_CLASSES = {
     "admin",
@@ -109,10 +119,29 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
     return tool_names, handler_names
 
 
+def _assert_tool_profiles(tool_names: set[str]) -> None:
+    for profile in iter_tool_profiles():
+        assert profile.tool_names, f"{profile.id} has empty fail-closed tool profile"
+        unknown = sorted(set(profile.tool_names) - tool_names - MCP_GATEWAY_LOCAL_TOOLS)
+        assert not unknown, f"{profile.id} references unknown tools: {unknown}"
+        if profile.surface == "webchat":
+            forbidden = sorted(
+                name for name in profile.tool_names
+                if _risk_class(name) in WEB_FORBIDDEN_RISK_CLASSES
+            )
+            assert not forbidden, f"{profile.id} exposes forbidden web risk classes: {forbidden}"
+            unexpected = sorted(
+                name for name in profile.tool_names
+                if _risk_class(name) not in WEB_ALLOWED_RISK_CLASSES
+            )
+            assert not unexpected, f"{profile.id} exposes unexpected web risk classes: {unexpected}"
+
+
 def _assert_orchestrator(tool_names: set[str]) -> None:
     from runtime_tools.allowlists import ORCHESTRATOR_TOOL_NAMES, select_orchestrator_tools
     from runtime_tools.registry import TOOLS
 
+    assert set(ORCHESTRATOR_TOOL_NAMES) == set(TELEGRAM_ORCHESTRATOR_TOOLS)
     missing = sorted(set(ORCHESTRATOR_TOOL_NAMES) - tool_names)
     assert not missing, f"orchestrator allowlist references unknown tools: {missing}"
     selected = select_orchestrator_tools(TOOLS)
@@ -158,7 +187,11 @@ def _assert_agents(tool_names: set[str]) -> None:
 
 def _assert_web_chat(tool_names: set[str]) -> None:
     from web_chat import _WEB_ALLOWED_TOOLS, _web_handlers, _web_tools
+    from web_personas import CYBER_LENIN_TOOLS, ROLEPLAY_TOOLS
 
+    assert set(CYBER_LENIN_TOOLS) == set(WEB_CYBER_LENIN_TOOLS)
+    assert set(ROLEPLAY_TOOLS) == set(WEB_ROLEPLAY_TOOLS)
+    assert set(_WEB_ALLOWED_TOOLS) == set(WEB_CYBER_LENIN_TOOLS) - {"read_self"}
     missing = sorted(set(_WEB_ALLOWED_TOOLS) - tool_names)
     assert not missing, f"web chat allowlist references unknown tools: {missing}"
     web_tool_names = _tool_names(_web_tools)
@@ -180,6 +213,14 @@ def _assert_web_chat(tool_names: set[str]) -> None:
     assert "check_wallet" in _WEB_ALLOWED_TOOLS
 
 
+def _assert_mcp_profiles() -> None:
+    from mcp_gateway.policy import allowed_tool_names
+
+    assert allowed_tool_names("inspect") == profile_tool_names(MCP_INSPECT_PROFILE)
+    assert allowed_tool_names("readonly") == profile_tool_names(MCP_INSPECT_PROFILE)
+    assert allowed_tool_names("operator") == profile_tool_names(MCP_OPERATOR_PROFILE)
+
+
 def _assert_delegation_enums() -> None:
     from runtime_tools.registry import TOOLS
 
@@ -194,9 +235,11 @@ def _assert_delegation_enums() -> None:
 
 def main() -> int:
     tool_names, _handler_names = _assert_global_registry()
+    _assert_tool_profiles(tool_names)
     _assert_orchestrator(tool_names)
     _assert_agents(tool_names)
     _assert_web_chat(tool_names)
+    _assert_mcp_profiles()
     _assert_delegation_enums()
     print("tool allowlist smoke ok")
     return 0

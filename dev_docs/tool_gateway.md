@@ -4,7 +4,7 @@
 
 `tool_gateway` is the runtime facade for LeninBot tool visibility and dispatch. It is separate from `mcp_gateway`: MCP is an inbound developer/operator server, while `tool_gateway` is the internal control-plane boundary used when Cyber-Lenin, specialist agents, web chat, or A2A model loops call runtime tools.
 
-This first integration is intentionally behavior-preserving. Existing source-of-truth modules remain in place, but runtime callers now route through named gateway helpers so capability selection, batching, security authorization, and audit have one obvious entrypoint.
+The gateway now owns reusable surface profiles for orchestrator, web persona, A2A, roleplay, and MCP tool sets. Specialist agents still keep role-specific `AgentSpec.tools` next to their prompts; the gateway reads those through `AgentSpec.filter_tools()`. Runtime callers route through named gateway helpers so capability selection, batching, security authorization, and audit have one obvious entrypoint.
 
 ## Runtime Flow
 
@@ -26,6 +26,7 @@ Read-only/idempotent tools in consecutive batches may run concurrently through t
 
 | Module | Role |
 |---|---|
+| `tool_gateway.profiles` | Named source-of-truth tool profiles for orchestrator, web persona, A2A, roleplay, and MCP surfaces |
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
 | `tool_gateway.dispatcher` | Runtime dispatch implementation for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
 | `tool_gateway.security` | Runtime adapter/re-export for `security_gateway` caller context, authorization, and audit |
@@ -37,16 +38,18 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Concern | Current owner | Gateway usage |
 |---|---|---|
 | Global tool definitions and handlers | `runtime_tools/registry.py` | Inputs to selection helpers |
-| Telegram orchestrator allow-list | `runtime_tools/allowlists.py` | Uses `tool_gateway.selection.select_tools_by_name` |
+| Telegram orchestrator allow-list | `tool_gateway.profiles.TELEGRAM_ORCHESTRATOR_TOOLS` | `runtime_tools/allowlists.py` keeps a compatibility alias and uses `tool_gateway.selection.select_tools_by_name` |
 | Specialist agent allow-lists | `agents/*.py` `AgentSpec.tools` | `AgentSpec.filter_tools()` delegates to `tool_gateway.selection.filter_agent_tools` |
-| Web chat persona tool set | `web_chat.py` | Uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
-| A2A skill tool sets | `a2a_handler.py` | Uses `tool_gateway.selection.build_toolset` |
-| MCP profile allow-lists | `mcp_gateway/policy.py` | MCP catalog/handler building uses `tool_gateway.selection.build_toolset`; MCP remains a separate inbound surface |
+| Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `web_personas.py` aliases profile values; `web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
+| A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
+| Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
+| MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface |
 | Execution authorization and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` for every executed tool |
 
 ## Invariants
 
 - Tool visibility remains fail-closed: callers only see explicitly allowed tools.
+- Reusable surface allow-lists should be added to `tool_gateway.profiles`; keep agent-specific `AgentSpec.tools` beside agent definitions unless there is a concrete reuse reason.
 - A visible tool must still have a registered handler to execute.
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.

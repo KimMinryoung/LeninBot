@@ -25,30 +25,24 @@ from bot_config import (
 )
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from tool_gateway.profiles import (
+    A2A_GENERAL_TOOLS,
+    A2A_GEOPOLITICAL_TOOLS,
+    A2A_RESEARCH_TOOLS,
+)
 from tool_gateway.selection import build_toolset
 
 logger = logging.getLogger(__name__)
 
 # ── Tool sets per skill ──────────────────────────────────────────────
 
-_GENERAL_TOOLS = {
-    "knowledge_graph_search", "vector_search",
-    "web_search", "fetch_url",
-    "get_finance_data", "check_wallet",
-}
-
-_GEOPOLITICAL_TOOLS = {
-    "knowledge_graph_search", "vector_search",
-    "web_search", "write_kg_structured",
-}
-
-_RESEARCH_TOOLS = {
-    "web_search", "knowledge_graph_search", "vector_search",
-    "fetch_url",
-}
+# Backward-compatible local names; source of truth lives in tool_gateway.profiles.
+_GENERAL_TOOLS = A2A_GENERAL_TOOLS
+_GEOPOLITICAL_TOOLS = A2A_GEOPOLITICAL_TOOLS
+_RESEARCH_TOOLS = A2A_RESEARCH_TOOLS
 
 
-def _build_toolset(allowed: set[str]):
+def _build_toolset(allowed: set[str] | frozenset[str]):
     return build_toolset(TOOLS, TOOL_HANDLERS, allowed)
 
 

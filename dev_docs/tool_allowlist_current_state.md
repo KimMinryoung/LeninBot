@@ -15,7 +15,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
 | Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
-| Runtime tool gateway | `tool_gateway/` | shared facade for visibility filtering, batch dispatch, and security/audit integration |
+| Runtime tool gateway | `tool_gateway/` | named surface profiles, shared visibility filtering, batch dispatch, and security/audit integration |
 
 ## Global Registry
 
@@ -97,7 +97,7 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 
 ## Runtime Tool Gateway
 
-`tool_gateway` is the internal runtime facade for tool selection and dispatch. `runtime_tools/allowlists.py`, `AgentSpec.filter_tools()`, web chat persona tool construction, A2A skill tool construction, and MCP catalog construction now use `tool_gateway.selection` helpers for schema/handler filtering. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. `runtime_tools/allowlists.py`, `web_personas.py`, `a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
 
 This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 

@@ -29,6 +29,7 @@ from pathlib import Path
 from identity.prompts import CORE_IDENTITY
 from prompt_context import uses_xml
 from agents.base import load_political_line_body
+from tool_gateway.profiles import WEB_CYBER_LENIN_TOOLS, WEB_ROLEPLAY_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +40,13 @@ POLITICAL_LINE_TAG = "political-line"
 DEFAULT_PERSONA_ID = "cyber-lenin"
 
 # Reduced tool set for roleplay characters: information retrieval only, no
-# wallet / finance / KG-write / self-introspection.
-ROLEPLAY_TOOLS = frozenset({"vector_search", "web_search", "fetch_url"})
+# wallet / finance / KG-write / self-introspection. Values live in
+# tool_gateway.profiles and are aliased here for persona readability.
+ROLEPLAY_TOOLS = WEB_ROLEPLAY_TOOLS
 
-# Full retrieval tool set the Cyber-Lenin web persona has always used. Mirrors
-# the prior `_WEB_ALLOWED_TOOLS` plus the web-only `read_self` tool that
-# web_chat injects for public self-inspection.
-CYBER_LENIN_TOOLS = frozenset({
-    "knowledge_graph_search", "vector_search",
-    "web_search", "fetch_url",
-    "get_finance_data", "check_wallet",
-    "read_self",
-})
+# Full retrieval tool set the Cyber-Lenin web persona has always used. Includes
+# the web-only `read_self` tool that web_chat injects for public self-inspection.
+CYBER_LENIN_TOOLS = WEB_CYBER_LENIN_TOOLS
 
 
 @dataclass(frozen=True)

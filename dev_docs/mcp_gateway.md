@@ -94,7 +94,7 @@ Human quick checks:
 | `inspect` | Developer context, docs, task/report/corpus status, selected runtime search/fetch | No raw SQL and no writes |
 | `operator` | Local operator diagnostics and bounded maintenance | Adds `readonly_query_db`, `bounded_query_db`, and `kg_maintenance_run` |
 
-Both profiles use explicit allow-lists in `mcp_gateway/policy.py`. The gateway never exports `runtime_tools.registry.TOOLS` wholesale.
+Both profiles use explicit allow-lists sourced from `tool_gateway.profiles` and exposed through compatibility names in `mcp_gateway/policy.py`. The gateway never exports `runtime_tools.registry.TOOLS` wholesale.
 
 ## Exposed Tool Families
 

@@ -29,6 +29,9 @@ from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from claude_loop import chat_with_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
+from tool_gateway.security import CallerContext, caller_scope
+from tool_gateway.selection import build_toolset
 from identity.prompts import EXTERNAL_SOURCE_RULE
 
 logging.basicConfig(
@@ -60,14 +63,15 @@ ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "8"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
 HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context
 
-# Curated read-only toolset (no task execution, no KG writes).
-_TOOL_NAMES = ["vector_search", "knowledge_graph_search", "web_search", "fetch_url"]
+# Curated read-only toolset (no task execution, no KG writes). The profile
+# value lives in tool_gateway.profiles so all surface allow-lists are visible in
+# one place.
+_TOOL_NAMES = ROLEPLAY_TELEGRAM_TOOLS
 
 
 def _select_tools() -> tuple[list[dict], dict]:
-    tools = [t for t in TOOLS if t.get("name") in _TOOL_NAMES]
-    missing = set(_TOOL_NAMES) - {t["name"] for t in tools}
-    handlers = {n: TOOL_HANDLERS[n] for n in _TOOL_NAMES if n in TOOL_HANDLERS}
+    tools, handlers = build_toolset(TOOLS, TOOL_HANDLERS, _TOOL_NAMES)
+    missing = set(_TOOL_NAMES) - {str(t.get("name") or "") for t in tools}
     missing |= set(_TOOL_NAMES) - set(handlers)
     if missing:
         logger.warning("roleplay toolset missing definitions/handlers: %s", sorted(missing))
@@ -255,21 +259,28 @@ async def handle_message(message: Message) -> None:
     # Stream reasoning/tool steps as separate messages; keep the final reply clean.
     progress_cb = _make_progress_callback(message.bot, message.chat.id)
     try:
-        reply = await chat_with_tools(
-            history,
-            client=_deepseek_anthropic_client,
-            model=ROLEPLAY_MODEL,
-            tools=RP_TOOLS,
-            tool_handlers=RP_HANDLERS,
-            system_prompt=build_system_prompt(),
-            max_rounds=ROLEPLAY_MAX_ROUNDS,
-            max_tokens=ROLEPLAY_MAX_TOKENS,
-            budget_usd=ROLEPLAY_BUDGET_USD,
-            on_progress=progress_cb,
+        ctx = CallerContext(
+            interface="telegram",
             agent_name="roleplay",
-            thinking={"type": "enabled"},
-            output_config={"effort": "high"},
+            user_id=str(user_id),
+            is_owner=True,
         )
+        with caller_scope(ctx):
+            reply = await chat_with_tools(
+                history,
+                client=_deepseek_anthropic_client,
+                model=ROLEPLAY_MODEL,
+                tools=RP_TOOLS,
+                tool_handlers=RP_HANDLERS,
+                system_prompt=build_system_prompt(),
+                max_rounds=ROLEPLAY_MAX_ROUNDS,
+                max_tokens=ROLEPLAY_MAX_TOKENS,
+                budget_usd=ROLEPLAY_BUDGET_USD,
+                on_progress=progress_cb,
+                agent_name="roleplay",
+                thinking={"type": "enabled"},
+                output_config={"effort": "high"},
+            )
     except Exception as e:
         logger.exception("roleplay turn failed: %s", e)
         await message.answer("…(잠깐 말이 막혔어. 다시 한 번 말해줄래?)")
