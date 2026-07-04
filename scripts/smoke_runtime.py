@@ -1684,29 +1684,44 @@ async def _assert_stage_public_records_autonomous_staged_draft_event() -> None:
 
 def _assert_diary_web_context_injection() -> None:
     import telegram.tasks as tasks
+    from telegram.diary_mode import DEFAULT_DIARY_WRITING_PROMPT
 
-    original_formatter = tasks._format_diary_web_chat_context
+    original_web_formatter = tasks._format_diary_web_chat_context
+    original_activity_formatter = tasks._format_diary_activity_context
     try:
         tasks._format_diary_web_chat_context = (
             lambda provider: "### Diary Web Chat Preflight\n\nWeb user: 일기에서 이 수정 지시를 반영해"
         )
+        tasks._format_diary_activity_context = (
+            lambda provider: "### Diary Activity Preflight\n\nAnchor: scheduled test"
+        )
         content = tasks._build_task_context_content(
-            {"id": 900, "user_id": 0, "agent_type": "diary", "content": "write diary"},
-            "write diary",
+            {"id": 900, "user_id": 0, "agent_type": "diary", "content": DEFAULT_DIARY_WRITING_PROMPT},
+            DEFAULT_DIARY_WRITING_PROMPT,
             context_provider="deepseek",
         )
+        assert "### Diary Activity Preflight" in content
         assert "### Diary Web Chat Preflight" in content
         assert "Web user: 일기에서 이 수정 지시를 반영해" in content
         assert content.index("### Diary Web Chat Preflight") < content.index("### Task")
 
+        maintenance = tasks._build_task_context_content(
+            {"id": 901, "user_id": 0, "agent_type": "diary", "content": "일기 335번 삭제해줘"},
+            "일기 335번 삭제해줘",
+            context_provider="deepseek",
+        )
+        assert "Diary Activity Preflight" not in maintenance
+        assert "Diary Web Chat Preflight" not in maintenance
+
         non_diary = tasks._build_task_context_content(
-            {"id": 901, "user_id": 0, "agent_type": "analyst", "content": "analyze"},
+            {"id": 902, "user_id": 0, "agent_type": "analyst", "content": "analyze"},
             "analyze",
             context_provider="deepseek",
         )
         assert "Diary Web Chat Preflight" not in non_diary
     finally:
-        tasks._format_diary_web_chat_context = original_formatter
+        tasks._format_diary_web_chat_context = original_web_formatter
+        tasks._format_diary_activity_context = original_activity_formatter
 
 
 async def _assert_diary_runtime_route_fallbacks() -> None:
@@ -1733,6 +1748,7 @@ async def _assert_diary_runtime_route_fallbacks() -> None:
 async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
     import telegram.bot as bot
     import telegram.diary_publication as publication
+    from telegram.diary_mode import DEFAULT_DIARY_WRITING_PROMPT
     from tool_loop_common import execute_tool
 
     original_review = bot._run_stasova_diary_review
@@ -1758,7 +1774,10 @@ async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
         bot._apply_stasova_diary_review = fake_apply
         publication.publish_reviewed_diary_entry = fake_publish
 
-        handler = bot._make_guarded_diary_save_handler(None, {"id": 900})
+        handler = bot._make_guarded_diary_save_handler(
+            None,
+            {"id": 900, "agent_type": "diary", "content": DEFAULT_DIARY_WRITING_PROMPT},
+        )
         result, is_error = await execute_tool(
             "save_diary",
             {"title": "제목", "content": "본문"},
@@ -1773,12 +1792,67 @@ async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
         assert "Diary reviewed by Stasova" in positional_result
         assert seen[-1] == ("딕셔너리 제목", "딕셔너리 본문")
 
+        blocked_handler = bot._make_guarded_diary_save_handler(
+            None,
+            {"id": 901, "agent_type": "diary", "content": "일기 335번 삭제해줘"},
+        )
+        blocked_result, blocked_is_error = await execute_tool(
+            "save_diary",
+            {"title": "제목", "content": "본문"},
+            {"save_diary": blocked_handler},
+            log_event=None,
+        )
+        assert blocked_is_error
+        assert "allowed only for the configured scheduled diary-writing prompt" in blocked_result
+
         missing_title = await handler(content="본문")
         assert "missing required argument: title" in missing_title
     finally:
         bot._run_stasova_diary_review = original_review
         bot._apply_stasova_diary_review = original_apply
         publication.publish_reviewed_diary_entry = original_publish
+
+
+async def _assert_diary_unpublish_action() -> None:
+    import runtime_tools.post_edit as post_edit
+
+    original_delete = post_edit._delete_diary_sync
+    original_cache = post_edit._invalidate_cache_sync
+    original_cf = post_edit._purge_cloudflare_sync
+    try:
+        post_edit._delete_diary_sync = lambda target: ({"id": target, "title": "비공개 대상"}, 2, 1)
+        post_edit._invalidate_cache_sync = lambda kind, target: {"ok": True, "deleted": 3}
+        post_edit._purge_cloudflare_sync = lambda kind, target: {"ok": True, "purged": 7, "urls": []}
+
+        missing_confirm = await post_edit._exec_edit_content(
+            content_type="diary",
+            id=335,
+            action="unpublish",
+        )
+        assert "requires confirm=true" in missing_confirm
+
+        result = await post_edit._exec_edit_content(
+            content_type="diary",
+            id=335,
+            action="unpublish",
+            confirm=True,
+        )
+        assert "Unpublished diary id=335" in result
+        assert "cleared 2 publication audit link" in result
+        assert "public ai_diary storage" in result
+
+        combined = await post_edit._exec_edit_content(
+            content_type="diary",
+            id=335,
+            action="delete",
+            confirm=True,
+            title="새 제목",
+        )
+        assert "cannot be combined with edit fields" in combined
+    finally:
+        post_edit._delete_diary_sync = original_delete
+        post_edit._invalidate_cache_sync = original_cache
+        post_edit._purge_cloudflare_sync = original_cf
 
 
 async def main() -> None:
@@ -1812,6 +1886,7 @@ async def main() -> None:
     _assert_diary_web_context_injection()
     await _assert_diary_runtime_route_fallbacks()
     await _assert_guarded_diary_save_handler_accepts_tool_payloads()
+    await _assert_diary_unpublish_action()
     print("runtime smoke ok")
 
 

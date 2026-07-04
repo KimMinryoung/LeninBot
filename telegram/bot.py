@@ -774,11 +774,11 @@ You have specialized agents. Use the `delegate` tool to dispatch tasks:
 - scout: Moltbook and mersoom.com activity (posting/commenting/patrol), routine patrols, large-scale platform crawling
 - browser: AI browser automation — login, form input, multi-page navigation, dynamic site data extraction
 - visualizer: image generation, visual concepts
-- diary: writes a new diary entry in your own (Cyber-Lenin's) first-person voice. Runs automatically from `telegram_schedules` — only delegate when the user explicitly asks for a new diary entry right now.
+- diary: writes scheduled diary entries and maintains published diary entries. For a new diary entry, delegate exactly `[diary] Write a periodic diary entry`; arbitrary diary-agent task text is treated as autonomous maintenance/inspection and cannot call `save_diary`.
 Stasova is not a general delegation target. It is reserved for internal publication-review flows and is intentionally absent from delegate/multi_delegate.
 
 Content-type routing:
-- Diary entry → diary for writing/editing; use diary id when supplied
+- Diary entry → diary for writing/editing/deleting/unpublishing; use diary id when supplied. For new diary writing, use the exact scheduled prompt `[diary] Write a periodic diary entry`.
 - Task report / completed Telegram report → analyst with edit_content(content_type="task_report"); use task_id when supplied
 - Public research document → analyst with research_document; use research slug when supplied
 - Private research document → analyst with research_document(action="save_private"|"publish_private"); read it with read_self(content_type="private_research_document")
@@ -1997,67 +1997,20 @@ def _normalize_guarded_diary_save_args(args: tuple, kwargs: dict) -> tuple[str |
     )
 
 
-_DIARY_MAINTENANCE_PATTERNS = (
-    r"\bedit(?:ing)?\b",
-    r"\bcorrect(?:ion|ed|ing)?\b",
-    r"\bfix(?:ed|ing)?\b",
-    r"\brewrite\b",
-    r"\brevise\b",
-    r"\bdelete\b",
-    r"\bremove\b",
-    r"\bunpublish\b",
-    r"\bdo not publish\b",
-    r"\bno new diary\b",
-    r"\bdo not write\b",
-    r"\bdo not create\b",
-    r"수정",
-    r"교정",
-    r"고쳐",
-    r"바꿔",
-    r"교체",
-    r"삭제",
-    r"제거",
-    r"발행\s*취소",
-    r"새\s*일기\s*금지",
-    r"쓰지\s*마",
-    r"작성\s*금지",
-    r"생성\s*금지",
-)
+def _is_diary_writing_task(task: dict) -> bool:
+    """Return True only for the configured scheduled diary-writing prompt."""
+    from telegram.diary_mode import is_diary_writing_task
 
-_DIARY_CREATION_PATTERNS = (
-    r"\bwrite\s+(?:a\s+)?(?:new\s+)?diary\b",
-    r"\bcreate\s+(?:a\s+)?(?:new\s+)?diary\b",
-    r"\bpublish\s+(?:a\s+)?(?:new\s+)?diary\b",
-    r"\bnew\s+diary\b",
-    r"일기(?:를)?\s*(?:새로\s*)?(?:써|작성|발행)",
-    r"새\s*일기",
-)
-
-
-def _is_diary_maintenance_only_task(task: dict) -> bool:
-    """Return True when a diary task is clearly edit/delete-only maintenance.
-
-    This is a publication side-effect guard. The diary agent owns published
-    diary edits, but correction/delete instructions have repeatedly been
-    misread as creative-writing prompts. When the user explicitly asks for a
-    new diary as well, the creation signal wins and save_diary remains allowed.
-    """
-    if task.get("agent_type") != "diary":
-        return False
-    text = str(task.get("content") or "").lower()
-    if not text:
-        return False
-    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _DIARY_CREATION_PATTERNS):
-        return False
-    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _DIARY_MAINTENANCE_PATTERNS)
+    return is_diary_writing_task(task)
 
 
 def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
     async def _guarded_save_diary(*args, title: str | None = None, content: str | None = None, **kwargs) -> str:
-        if _is_diary_maintenance_only_task(task):
+        if task.get("agent_type") == "diary" and not _is_diary_writing_task(task):
             raise RuntimeError(
-                "save_diary blocked: this delegated diary task is edit/delete/correction-only maintenance. "
-                "Use edit_content for diary edits, or report missing delete/unpublish capability; do not create a new diary."
+                "save_diary blocked: diary publication is allowed only for the configured scheduled "
+                "diary-writing prompt. For all other diary-agent tasks, act autonomously with the "
+                "appropriate maintenance tool such as edit_content; do not create a new diary."
             )
         title, content = _normalize_guarded_diary_save_args(
             args,

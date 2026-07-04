@@ -32,7 +32,7 @@ Registered in `agents/__init__.py`:
 | `scout` | external platform reconnaissance and web patrol | uses web/fetch/social/platform tools |
 | `browser` | browser automation | talks to `browser/worker.py` through browser-use tooling |
 | `visualizer` | image prompt/design specialist | image/media and publication support |
-| `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` for new entries, skips routine orchestrator report; explicit edit/delete/correction-only tasks must use maintenance tools or report missing capability, and guarded `save_diary` blocks publication for those tasks |
+| `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` is allowed only for the configured scheduled prompt `[diary] Write a periodic diary entry`; other diary tasks run autonomously with maintenance tools such as `edit_content`, including diary edit/delete/unpublish actions |
 | `stasova` | publication OpSec reviewer | small read/fetch/write tool set and low budget |
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
@@ -105,15 +105,15 @@ Agent tasks receive structured context rather than a passive chat dump:
 | agent execution history | recent completed tasks by same agent type |
 | task chain | Redis `task_result:*` and DB fallback |
 | agent board | Redis `board:{mission_id}` |
-| diary activity preflight | diary tasks only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
-| diary web-chat preflight | diary tasks only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
+| diary activity preflight | scheduled diary-writing prompt only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
+| diary web-chat preflight | scheduled diary-writing prompt only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
 
 Agents can call chat-reading tools when they need the original timestamped user messages. Shared chat-audience guidance requires Telegram and web chat to remain separate sources when they are read; it is not an instruction to always read both channels.
 
-For diary tasks, the injected diary activity and web-chat preflight blocks are the default chat/activity context. The diary prompt tells the agent not to call `read_self(content_type="chat_logs", ...)` merely to duplicate preflight content; chat-log reads are reserved for a specific missing timestamp, omitted instruction, or deeper detail that the preflight clearly does not contain.
+For diary tasks, the runtime distinguishes new diary writing by exact scheduled prompt rather than edit/delete keywords. `telegram.diary_mode.is_diary_writing_task()` treats a diary task as a new-entry run only when its task text matches an enabled diary schedule prompt, with `[diary] Write a periodic diary entry` as the default. Only that mode receives the injected diary activity and web-chat preflight blocks. Other diary-agent tasks receive normal task context and must use tools autonomously for the requested maintenance or inspection work.
 
-Diary tasks are classified before drafting in the prompt. Explicit edit, correction, rewrite, omission, non-publication, unpublish, or delete requests for existing diaries are maintenance tasks, not creative-writing prompts. The diary prompt treats finance/securities data as background context by default: it may be collected for judgment, but routine stock prices, tickers, index moves, and market fluctuations should not appear in diary prose unless directly necessary to explain the actual events, decisions, or political-economic contradiction of the period. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts for diary maintenance-only tasks so mistaken tool use cannot create a side-effect entry.
+The diary prompt treats finance/securities data as background context by default during scheduled writing: it may be collected for judgment, but routine stock prices, tickers, index moves, and market fluctuations should not appear in diary prose unless directly necessary to explain the actual events, decisions, or political-economic contradiction of the period. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts unless the task matches the configured scheduled diary-writing prompt. Published diary edits use `edit_content(content_type="diary", id=...)`; deletion and non-publication/unpublish requests use `edit_content(content_type="diary", id=..., action="delete"|"unpublish", confirm=true)`. Because `ai_diary` has no private/unpublished status column, unpublish removes the row from public diary storage after clearing publication audit FK references and invalidating caches.
 
 ## Redis Runtime State
 

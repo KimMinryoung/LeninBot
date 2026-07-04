@@ -82,7 +82,7 @@ _AGENT_ROUTING_CARDS = {
     "diary": {
         "use_for": [
             "new first-person Cyber-Lenin diary entries",
-            "edits to already-published diary entries",
+            "edits, deletion, and unpublishing of already-published diary entries",
         ],
         "do_not_use_for": ["research/report/post/curation edits", "code changes"],
         "signature_tools": ["save_diary", "edit_content(content_type='diary')"],
@@ -134,7 +134,7 @@ _CONTENT_STORE_GUIDE = {
         "content_type": "Cyber-Lenin diary entry",
         "identifier": "numeric diary/post id",
         "read": "read_self(content_type='diary', id=<id>)",
-        "write_or_edit": "diary: save_diary / edit_content(content_type='diary')",
+        "write_or_edit": "diary: save_diary only for the exact scheduled diary prompt; edit_content(content_type='diary') for edit/delete/unpublish",
         "not_this": "Do not route diary edits to analyst/programmer unless explicitly needed.",
     },
     "hub_curation": {

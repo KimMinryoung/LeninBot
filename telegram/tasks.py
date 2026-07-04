@@ -997,8 +997,11 @@ def _build_task_context_content(
     diary_web_ctx = ""
     diary_activity_ctx = ""
     if agent_type == "diary":
-        diary_activity_ctx = _format_diary_activity_context(context_provider)
-        diary_web_ctx = _format_diary_web_chat_context(context_provider)
+        from telegram.diary_mode import is_diary_writing_task
+
+        if is_diary_writing_task(task, content):
+            diary_activity_ctx = _format_diary_activity_context(context_provider)
+            diary_web_ctx = _format_diary_web_chat_context(context_provider)
 
     context_parts = [
         part for part in (

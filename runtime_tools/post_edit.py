@@ -7,12 +7,12 @@ until the cache TTL (which, for per-entry keys, is never). Tasks 587/588 hit
 exactly this trap — DB was edited, readers kept seeing the old text.
 
 This tool bundles the cache-busting steps so they cannot drift:
-  1. UPDATE the target row (ai_diary / telegram_tasks / posts)
+  1. UPDATE or remove the target row (ai_diary / telegram_tasks / posts)
   2. DEL the per-entry cache key + the list/nav caches that embed entry content
   3. Purge the affected public URLs from Cloudflare via the frontend script
 
-Kept programmer-only (same blast-radius class as query_db) — the diary agent
-writes new entries via save_diary; only maintenance flows need to *edit*.
+The diary agent writes new entries via save_diary; maintenance flows use this
+tool for edits and, for diary rows only, explicit delete/unpublish actions.
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ import re
 import subprocess
 from typing import Any
 
-from db import execute_returning_rowcount as db_exec, query_one as db_query_one
+from db import execute_returning_rowcount as db_exec, get_conn, query_one as db_query_one
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ EDIT_CONTENT_TOOL = {
     "name": "edit_content",
     "description": (
         "Edit an already-published diary, task report, blog post, hub curation, "
-        "or static/custom HTML page AND "
+        "or static/custom HTML page, and delete/unpublish diary entries, AND "
         "invalidate Redis plus Cloudflare caches in one step. "
         "Use this instead of query_db when correcting already-published content; "
         "a raw UPDATE leaves readers seeing stale cached content. "
@@ -101,7 +102,10 @@ EDIT_CONTENT_TOOL = {
         "plus at least one field for the chosen kind. For a narrow correction, pass "
         "`field`, `replace_old`, and `replace_new`; the tool reads the current field, "
         "shows matching snippets with about 10 characters of surrounding context, and "
-        "updates only when the match is unambiguous unless `replace_all=true`."
+        "updates only when the match is unambiguous unless `replace_all=true`. "
+        "For diary deletion or unpublishing, pass action=delete or action=unpublish, "
+        "id, and confirm=true; because ai_diary has no private status column, "
+        "unpublish removes the row from the public diary table."
     ),
     "input_schema": {
         "type": "object",
@@ -118,6 +122,18 @@ EDIT_CONTENT_TOOL = {
             "slug": {
                 "type": "string",
                 "description": "Slug. Required when content_type='hub_curation' or content_type='static_page'.",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["edit", "delete", "unpublish"],
+                "description": (
+                    "Default edit. delete/unpublish are supported only for content_type='diary' "
+                    "and remove the diary row from public ai_diary storage."
+                ),
+            },
+            "confirm": {
+                "type": "boolean",
+                "description": "Required true for destructive diary delete/unpublish actions.",
             },
             "title": {
                 "type": "string",
@@ -419,6 +435,55 @@ def _format_invalidation_note(
     return f"{cache_note}; {cf_note}"
 
 
+def _delete_diary_sync(target: int) -> tuple[dict[str, Any] | None, int, int]:
+    """Remove a diary row after clearing publication-audit FK references."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, title, created_at FROM ai_diary WHERE id = %s FOR UPDATE",
+                (target,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None, 0, 0
+            cur.execute(
+                "UPDATE diary_publication_audits SET diary_id = NULL WHERE diary_id = %s",
+                (target,),
+            )
+            audit_links_cleared = cur.rowcount
+            cur.execute("DELETE FROM ai_diary WHERE id = %s", (target,))
+            deleted = cur.rowcount
+            return dict(row), audit_links_cleared, deleted
+
+
+async def _exec_diary_remove_action(
+    *,
+    action: str,
+    target: int,
+    cfg: dict[str, Any],
+) -> str:
+    row, audit_links_cleared, deleted = await asyncio.to_thread(_delete_diary_sync, target)
+    if not row or not deleted:
+        return f"Error: no diary row found with id={target!r} — nothing removed."
+
+    cache = await asyncio.to_thread(_invalidate_cache_sync, "diary", target)
+    cf = await asyncio.to_thread(_purge_cloudflare_sync, "diary", target)
+    invalidation_note = _format_invalidation_note(cache, cf, cfg, target)
+    verb = "Unpublished" if action == "unpublish" else "Deleted"
+    title = row.get("title") or "(untitled)"
+    extra = (
+        " Removed from public ai_diary storage because diary entries do not have "
+        "a private/unpublished status column."
+        if action == "unpublish"
+        else ""
+    )
+    return (
+        f"{verb} diary id={target!r}: {title}; "
+        f"cleared {audit_links_cleared} publication audit link(s); {invalidation_note}."
+        f"{extra}"
+    )
+
+
 async def _exec_edit_public_post(
     kind: str,
     post_id: int | None = None,
@@ -443,6 +508,8 @@ async def _exec_edit_public_post(
     replace_old: str | None = None,
     replace_new: str | None = None,
     replace_all: bool = False,
+    action: str | None = None,
+    confirm: bool = False,
 ) -> str:
     kind = (kind or "").strip().lower()
     if kind not in _KIND_CONFIG:
@@ -464,6 +531,15 @@ async def _exec_edit_public_post(
         except (TypeError, ValueError):
             return "Error: post_id must be an integer."
 
+    action_name = (action or "edit").strip().lower()
+    if action_name not in {"edit", "delete", "unpublish"}:
+        return "Error: action must be one of edit, delete, unpublish."
+    if action_name in {"delete", "unpublish"}:
+        if kind != "diary":
+            return "Error: delete/unpublish actions are currently supported only for content_type='diary'."
+        if confirm is not True:
+            return "Error: destructive diary delete/unpublish requires confirm=true."
+
     provided = {
         "title": title,
         "content": content,
@@ -484,6 +560,11 @@ async def _exec_edit_public_post(
     }
     surgical_requested = any(v is not None for v in (field, replace_old, replace_new)) or replace_all is True
     direct_updates = [(f, v) for f, v in provided.items() if v is not None]
+
+    if action_name in {"delete", "unpublish"}:
+        if surgical_requested or direct_updates:
+            return "Error: delete/unpublish cannot be combined with edit fields."
+        return await _exec_diary_remove_action(action=action_name, target=target, cfg=cfg)
 
     if surgical_requested:
         if direct_updates:

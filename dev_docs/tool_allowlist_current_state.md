@@ -61,6 +61,8 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
 
+`edit_content` includes diary maintenance actions in addition to field edits. For `content_type="diary"`, `action="delete"` and `action="unpublish"` are destructive public-removal operations and require `confirm=true`; unpublish removes the row from `ai_diary` because the diary table has no private status field. The diary and analyst agents can see `edit_content`, but routine diary ownership remains with the diary agent.
+
 `finalization_tools` and `terminal_tools` are special execution controls, not general allow-list replacements:
 
 - `finalization_tools` remain callable after budget/round exhaustion so an agent can persist work.
