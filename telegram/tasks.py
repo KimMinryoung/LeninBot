@@ -1069,8 +1069,15 @@ async def _persist_task_success(
         try:
             await asyncio.to_thread(
                 _execute,
-                "UPDATE telegram_tasks SET tool_log = %s WHERE id = %s",
-                (tool_log_text, task_id),
+                """
+                UPDATE telegram_tasks
+                   SET tool_log = CASE
+                       WHEN COALESCE(tool_log, '') = '' THEN %s
+                       ELSE tool_log || E'\n\n--- subsequent tool log ---\n' || %s
+                   END
+                 WHERE id = %s
+                """,
+                (tool_log_text, tool_log_text, task_id),
             )
         except Exception as e:
             logger.debug("Failed to save tool_log for task %d: %s", task_id, e)

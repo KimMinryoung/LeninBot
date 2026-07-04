@@ -14,6 +14,57 @@ from db import execute as _execute, query as _query
 _summary_table_ready = False
 
 
+_TASK_TOOL_LOG_IMMUTABILITY_DDL = """
+CREATE OR REPLACE FUNCTION prevent_telegram_task_tool_log_loss()
+RETURNS trigger AS $$
+DECLARE
+    old_log text;
+    new_log text;
+BEGIN
+    IF current_setting($setting$leninbot.task_tool_log_mutation_approved$setting$, true) = $setting$on$setting$ THEN
+        IF TG_OP = $setting$DELETE$setting$ THEN
+            RETURN OLD;
+        ELSIF TG_OP = $setting$TRUNCATE$setting$ THEN
+            RETURN NULL;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = $setting$TRUNCATE$setting$ THEN
+        RAISE EXCEPTION $message$telegram_tasks.tool_log is append-only; set leninbot.task_tool_log_mutation_approved=on in an explicit admin maintenance transaction to truncate telegram_tasks$message$;
+    ELSIF TG_OP = $setting$DELETE$setting$ THEN
+        IF COALESCE(OLD.tool_log, '') <> '' THEN
+            RAISE EXCEPTION $message$telegram_tasks rows with tool_log are protected; set leninbot.task_tool_log_mutation_approved=on in an explicit admin maintenance transaction to delete them$message$;
+        END IF;
+        RETURN OLD;
+    ELSIF TG_OP = $setting$UPDATE$setting$ THEN
+        old_log := COALESCE(OLD.tool_log, '');
+        new_log := COALESCE(NEW.tool_log, '');
+        IF old_log = '' THEN
+            RETURN NEW;
+        END IF;
+        IF new_log = old_log OR (length(new_log) >= length(old_log) AND left(new_log, length(old_log)) = old_log) THEN
+            RETURN NEW;
+        END IF;
+        RAISE EXCEPTION $message$telegram_tasks.tool_log is append-only; set leninbot.task_tool_log_mutation_approved=on in an explicit admin maintenance transaction to replace or clear it$message$;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS telegram_tasks_tool_log_no_loss ON telegram_tasks;
+CREATE TRIGGER telegram_tasks_tool_log_no_loss
+BEFORE UPDATE OR DELETE ON telegram_tasks
+FOR EACH ROW EXECUTE FUNCTION prevent_telegram_task_tool_log_loss();
+
+DROP TRIGGER IF EXISTS telegram_tasks_tool_log_no_truncate ON telegram_tasks;
+CREATE TRIGGER telegram_tasks_tool_log_no_truncate
+BEFORE TRUNCATE ON telegram_tasks
+FOR EACH STATEMENT EXECUTE FUNCTION prevent_telegram_task_tool_log_loss();
+"""
+
+
 def ensure_telegram_tables() -> None:
     """Create and update tables owned by the Telegram service."""
     _execute("""
@@ -82,6 +133,7 @@ def ensure_telegram_tables() -> None:
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS mission_id INTEGER")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS tool_log TEXT DEFAULT ''")
+    _execute(_TASK_TOOL_LOG_IMMUTABILITY_DDL)
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS metadata JSONB")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) DEFAULT 'pending'")
     _execute("ALTER TABLE telegram_tasks ADD COLUMN IF NOT EXISTS restart_initiated BOOLEAN DEFAULT FALSE")

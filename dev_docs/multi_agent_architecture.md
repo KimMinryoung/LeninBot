@@ -126,6 +126,8 @@ Diary tasks are classified before drafting in the prompt. Explicit edit, correct
 
 Redis failures are intended to degrade live continuity, not crash task execution.
 
+`telegram_tasks.tool_log` is treated as append-only execution evidence once populated. The task success path sets it initially and appends later retry/resume logs instead of replacing it. A Telegram schema trigger blocks clearing, replacing, deleting rows with non-empty tool logs, or truncating `telegram_tasks` unless an administrator explicitly sets `SET LOCAL leninbot.task_tool_log_mutation_approved = on` in a maintenance transaction.
+
 ## Restart Handoff
 
 If a service restart interrupts a processing task, startup recovery marks the parent as `handed_off` and creates a child task with the saved Redis progress and restart metadata. Guards prevent infinite handoff loops by age, attempt count, and depth.
