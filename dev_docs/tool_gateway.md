@@ -14,7 +14,7 @@ interface / agent context
   -> provider loop receives compacted tool schemas
   -> model emits tool_use / tool_calls
   -> tool_gateway.dispatcher.execute_tools_batch
-      -> tool_loop_common.execute_tool
+      -> tool_gateway.dispatcher.execute_tool
           -> security_gateway.authorize
           -> selected TOOL_HANDLERS[name](**args)
           -> security_gateway.audit
@@ -27,7 +27,7 @@ Read-only/idempotent tools in consecutive batches may run concurrently through t
 | Module | Role |
 |---|---|
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
-| `tool_gateway.dispatcher` | Runtime dispatch facade for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
+| `tool_gateway.dispatcher` | Runtime dispatch implementation for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
 | `tool_gateway.security` | Adapter/re-export for `security_gateway` caller context, authorization, and audit |
 
 ## Current Sources Of Truth
@@ -42,7 +42,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Web chat persona tool set | `web_chat.py` | Uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
 | A2A skill tool sets | `a2a_handler.py` | Uses `tool_gateway.selection.build_toolset` |
 | MCP profile allow-lists | `mcp_gateway/policy.py` | MCP catalog/handler building uses `tool_gateway.selection.build_toolset`; MCP remains a separate inbound surface |
-| Execution authorization and audit | `security_gateway/` | Called from `tool_loop_common.execute_tool()` beneath `tool_gateway.dispatcher` |
+| Execution authorization and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` for every executed tool |
 
 ## Invariants
 
@@ -50,7 +50,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 - A visible tool must still have a registered handler to execute.
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.
-- Behavior-preserving refactors should keep `tool_loop_common.execute_tool()` semantics stable until tests cover a deeper move into `tool_gateway.dispatcher`.
+- `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
 
 ## Verification
 

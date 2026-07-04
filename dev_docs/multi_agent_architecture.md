@@ -65,7 +65,7 @@ Tool visibility is filtered at dispatch:
 2. `runtime_tools/allowlists.py` selects the Telegram orchestrator tools through `tool_gateway.selection`.
 3. `AgentSpec.tools` selects specialist tools through `AgentSpec.filter_tools()` and `tool_gateway.selection`.
 4. `web_chat.py` defines a separate public web-chat allow-list and uses `tool_gateway.selection` before injecting web-only safe handlers.
-5. Provider loops dispatch model-emitted tool calls through `tool_gateway.dispatcher`, which preserves the `security_gateway` authorization/audit check in `tool_loop_common.execute_tool()`.
+5. Provider loops dispatch model-emitted tool calls through `tool_gateway.dispatcher`, whose `execute_tool()` implementation preserves the `security_gateway` authorization/audit check.
 
 Empty `AgentSpec.tools` is fail-closed. A tool must be present in the global registry and the relevant allow-list to be callable.
 

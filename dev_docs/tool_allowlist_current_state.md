@@ -97,7 +97,7 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 
 ## Runtime Tool Gateway
 
-`tool_gateway` is the internal runtime facade for tool selection and dispatch. `runtime_tools/allowlists.py`, `AgentSpec.filter_tools()`, web chat persona tool construction, A2A skill tool construction, and MCP catalog construction now use `tool_gateway.selection` helpers for schema/handler filtering. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, which delegates to the existing `tool_loop_common` execution path and therefore still runs `security_gateway.authorize()` and audit per call.
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `runtime_tools/allowlists.py`, `AgentSpec.filter_tools()`, web chat persona tool construction, A2A skill tool construction, and MCP catalog construction now use `tool_gateway.selection` helpers for schema/handler filtering. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
 
 This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 
