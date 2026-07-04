@@ -108,9 +108,11 @@ Agent tasks receive structured context rather than a passive chat dump:
 | diary web-chat preflight | diary tasks only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
 
-Agents can call chat-reading tools when they need the original timestamped user messages.
+Agents can call chat-reading tools when they need the original timestamped user messages. Shared chat-audience guidance requires Telegram and web chat to remain separate sources when they are read; it is not an instruction to always read both channels.
 
-Diary tasks are classified before drafting in the prompt. Explicit edit, correction, rewrite, omission, non-publication, unpublish, or delete requests for existing diaries are maintenance tasks, not creative-writing prompts. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts for diary maintenance-only tasks so mistaken tool use cannot create a side-effect entry.
+For diary tasks, the injected diary activity and web-chat preflight blocks are the default chat/activity context. The diary prompt tells the agent not to call `read_self(content_type="chat_logs", ...)` merely to duplicate preflight content; chat-log reads are reserved for a specific missing timestamp, omitted instruction, or deeper detail that the preflight clearly does not contain.
+
+Diary tasks are classified before drafting in the prompt. Explicit edit, correction, rewrite, omission, non-publication, unpublish, or delete requests for existing diaries are maintenance tasks, not creative-writing prompts. The diary prompt treats finance/securities data as background context by default: it may be collected for judgment, but routine stock prices, tickers, index moves, and market fluctuations should not appear in diary prose unless directly necessary to explain the actual events, decisions, or political-economic contradiction of the period. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts for diary maintenance-only tasks so mistaken tool use cannot create a side-effect entry.
 
 ## Redis Runtime State
 
