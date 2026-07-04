@@ -72,9 +72,9 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 
 | Interface | Where set | is_owner |
 |---|---|---|
-| `telegram` / `agent` | `telegram/bot._chat_with_tools` (one seam for orchestrator, agents, tasks, autonomous-via-telegram) | `True` (owner's gated channel) |
-| `webchat` | `web_chat._run_llm` (own task) | `False` |
-| `a2a` | `a2a_handler._run_llm` (per-request task) | `False` |
+| `telegram` / `agent` | `telegram/bot._chat_with_tools` via `tool_gateway.security` | `True` (owner's gated channel) |
+| `webchat` | `web_chat._run_llm` via `tool_gateway.security` | `False` |
+| `a2a` | `a2a_handler._run_llm` via `tool_gateway.security` | `False` |
 | `unknown` | unannotated direct callers | `False` |
 
 Unannotated callers fall to `unknown`/fail-open and are still audited — they can be

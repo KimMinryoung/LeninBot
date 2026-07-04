@@ -1392,7 +1392,7 @@ async def handle_web_chat(
         try:
             # Security gateway: public, untrusted, non-owner caller. Runs in its
             # own task (create_task below), so the contextvar is isolated.
-            from security_gateway import set_caller, CallerContext
+            from tool_gateway.security import set_caller, CallerContext
             set_caller(CallerContext(
                 interface="webchat",
                 user_id=fingerprint or None,

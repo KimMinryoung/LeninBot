@@ -362,7 +362,7 @@ async def _run_llm(
     # Security gateway: inbound A2A is an external, non-owner peer. Runs in the
     # per-request handler task, so the contextvar is isolated to this request.
     try:
-        from security_gateway import set_caller, CallerContext
+        from tool_gateway.security import set_caller, CallerContext
         set_caller(CallerContext(interface="a2a", is_owner=False))
     except Exception:
         pass

@@ -1536,7 +1536,7 @@ async def _chat_with_tools(
     # so calls here are trusted. Orchestrator vs delegated-agent is distinguished
     # for audit attribution; caller_scope restores the parent on exit so a nested
     # run_agent sub-call doesn't leak its agent identity back to the orchestrator.
-    from security_gateway import CallerContext, caller_scope
+    from tool_gateway.security import CallerContext, caller_scope
     _gw_ctx = CallerContext(
         interface="telegram" if is_orchestrator else "agent",
         agent_name=None if is_orchestrator else _agent_name,

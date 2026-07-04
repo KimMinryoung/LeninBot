@@ -28,7 +28,7 @@ Read-only/idempotent tools in consecutive batches may run concurrently through t
 |---|---|
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
 | `tool_gateway.dispatcher` | Runtime dispatch implementation for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
-| `tool_gateway.security` | Adapter/re-export for `security_gateway` caller context, authorization, and audit |
+| `tool_gateway.security` | Runtime adapter/re-export for `security_gateway` caller context, authorization, and audit |
 
 ## Current Sources Of Truth
 
