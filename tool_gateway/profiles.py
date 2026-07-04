@@ -102,6 +102,7 @@ MCP_SAFE_RUNTIME_TOOLS = frozenset({
 MCP_GATEWAY_INSPECT_TOOLS = frozenset({
     "gateway_status",
     "list_mcp_tools",
+    "list_runtime_tool_profiles",
     "search_dev_docs",
     "get_project_runtime_summary",
     "list_recent_tasks",

@@ -102,6 +102,7 @@ Gateway-local inspection tools:
 
 - `gateway_status`
 - `list_mcp_tools`
+- `list_runtime_tool_profiles` — lists runtime subjects and their allowed tools, including orchestrator, specialist agents, web/A2A/roleplay surfaces, and optionally MCP profiles
 - `search_dev_docs`
 - `get_project_runtime_summary`
 - `list_recent_tasks`
@@ -153,4 +154,4 @@ Run:
 venv/bin/python scripts/smoke_mcp_gateway.py
 ```
 
-The smoke test verifies profile separation, the `readonly` compatibility alias, KG maintenance visibility, forbidden tool absence, MCP schema conversion, CLI help/list output, and the stdio `initialize`/`tools/list`/`tools/call` path.
+The smoke test verifies profile separation, the `readonly` compatibility alias, runtime tool-profile listing, KG maintenance visibility, forbidden tool absence, MCP schema conversion, CLI help/list output, and the stdio `initialize`/`tools/list`/`tools/call` path.

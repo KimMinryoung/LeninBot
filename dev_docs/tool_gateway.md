@@ -43,7 +43,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `web_personas.py` aliases profile values; `web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
 | A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
 | Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
-| MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface |
+| MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface; `list_runtime_tool_profiles` exposes runtime allow-list inspection through MCP |
 | Execution authorization and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` for every executed tool |
 
 ## Invariants

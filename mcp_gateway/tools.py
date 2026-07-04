@@ -39,6 +39,26 @@ GATEWAY_TOOLS: list[dict[str, Any]] = [
         "input_schema": _schema({}),
     },
     {
+        "name": "list_runtime_tool_profiles",
+        "description": "List LeninBot runtime subjects and their allowed tools: orchestrator, specialist agents, web/A2A/roleplay surfaces, and optionally MCP profiles.",
+        "input_schema": _schema(
+            {
+                "subject": {
+                    "type": "string",
+                    "description": "Optional exact subject id filter, e.g. agent.diary or telegram.orchestrator.",
+                },
+                "surface": {
+                    "type": "string",
+                    "description": "Optional surface filter: orchestrator, agent, telegram, webchat, a2a, or mcp.",
+                },
+                "include_mcp": {
+                    "type": "boolean",
+                    "description": "Include MCP gateway profiles in addition to LeninBot runtime subjects. Default false.",
+                },
+            }
+        ),
+    },
+    {
         "name": "search_dev_docs",
         "description": "Search current developer documentation under dev_docs/ without reading legacy handoff notes.",
         "input_schema": _schema(
@@ -271,6 +291,63 @@ async def list_mcp_tools(*, profile: str = "inspect", **_: Any) -> str:
         }
         for tool in catalog
     ])
+
+
+async def list_runtime_tool_profiles(
+    subject: str = "",
+    surface: str = "",
+    include_mcp: bool = False,
+    **_: Any,
+) -> str:
+    """Return runtime subject/tool allow-lists for developer inspection."""
+    from agents import list_agents
+    from runtime_tools.allowlists import ORCHESTRATOR_TOOL_NAMES
+    from tool_gateway.profiles import iter_tool_profiles
+
+    wanted_subject = (subject or "").strip()
+    wanted_surface = (surface or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+
+    def add_row(row: dict[str, Any]) -> None:
+        row_surface = str(row.get("surface") or "")
+        row_subject = str(row.get("subject") or "")
+        if wanted_subject and row_subject != wanted_subject:
+            return
+        if wanted_surface and row_surface != wanted_surface:
+            return
+        tools = sorted(str(name) for name in row.get("tools", []))
+        row["tools"] = tools
+        row["tool_count"] = len(tools)
+        rows.append(row)
+
+    add_row({
+        "subject": "telegram.orchestrator",
+        "surface": "orchestrator",
+        "source": "tool_gateway.profiles.TELEGRAM_ORCHESTRATOR_TOOLS",
+        "tools": sorted(ORCHESTRATOR_TOOL_NAMES),
+    })
+    for spec in sorted(list_agents(), key=lambda s: s.name):
+        add_row({
+            "subject": f"agent.{spec.name}",
+            "surface": "agent",
+            "source": f"agents.{spec.name}.AgentSpec.tools",
+            "tools": sorted(spec.tools),
+            "description": spec.description,
+        })
+    for profile in iter_tool_profiles():
+        if profile.id == "telegram.orchestrator":
+            continue
+        if profile.surface == "mcp" and not include_mcp:
+            continue
+        add_row({
+            "subject": profile.id,
+            "surface": profile.surface,
+            "source": "tool_gateway.profiles.TOOL_PROFILES",
+            "tools": sorted(profile.tool_names),
+            "description": profile.description,
+        })
+
+    return _json_text(rows)
 
 
 async def search_dev_docs(query: str, limit: int = 20, **_: Any) -> str:
@@ -617,6 +694,7 @@ async def readonly_query_db(sql: str, timeout_seconds: int = 30, **_: Any) -> st
 GATEWAY_HANDLERS: dict[str, ToolHandler] = {
     "gateway_status": gateway_status,
     "list_mcp_tools": list_mcp_tools,
+    "list_runtime_tool_profiles": list_runtime_tool_profiles,
     "search_dev_docs": search_dev_docs,
     "get_project_runtime_summary": get_project_runtime_summary,
     "list_recent_tasks": list_recent_tasks,

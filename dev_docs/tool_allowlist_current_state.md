@@ -97,7 +97,7 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 
 ## Runtime Tool Gateway
 
-`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. `runtime_tools/allowlists.py`, `web_personas.py`, `a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `web_personas.py`, `a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
 
 This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 

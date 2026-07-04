@@ -32,6 +32,7 @@ def _assert_policy() -> None:
     assert "search_dev_docs" in inspect
     assert "corpus_metadata_audit" in inspect
     assert "kg_integrity_check" in inspect
+    assert "list_runtime_tool_profiles" in inspect
     assert "readonly_query_db" not in inspect
     assert "bounded_query_db" not in inspect
     assert "kg_maintenance_run" not in inspect
@@ -88,6 +89,12 @@ def _assert_stdio_protocol() -> None:
             "method": "tools/call",
             "params": {"name": "gateway_status", "arguments": {}},
         }),
+        _frame({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "list_runtime_tool_profiles", "arguments": {"subject": "agent.diary"}},
+        }),
     ])
     env = {**os.environ, "MCP_GATEWAY_PROFILE": "inspect"}
     proc = subprocess.run(
@@ -100,10 +107,11 @@ def _assert_stdio_protocol() -> None:
     )
     assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
     lines = _read_framed_messages(proc.stdout)
-    assert len(lines) == 3, proc.stdout
+    assert len(lines) == 4, proc.stdout
     assert lines[0]["result"]["serverInfo"]["name"] == "leninbot-mcp-gateway"
     listed = {tool["name"] for tool in lines[1]["result"]["tools"]}
     assert "gateway_status" in listed
+    assert "list_runtime_tool_profiles" in listed
     assert "readonly_query_db" not in listed
     assert "bounded_query_db" not in listed
     assert "kg_maintenance_run" not in listed
@@ -112,6 +120,10 @@ def _assert_stdio_protocol() -> None:
     assert status["status"] == "ok"
     assert status["profile"] == "inspect"
     assert status["write_tools_exposed"] is False
+    runtime_profiles = json.loads(lines[3]["result"]["content"][0]["text"])
+    assert len(runtime_profiles) == 1
+    assert runtime_profiles[0]["subject"] == "agent.diary"
+    assert "save_diary" in runtime_profiles[0]["tools"]
 
 
 def _assert_cli_help() -> None:
@@ -135,6 +147,7 @@ def _assert_cli_help() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert "gateway_status" in proc.stdout
+    assert "list_runtime_tool_profiles" in proc.stdout
     assert "readonly_query_db" not in proc.stdout
     assert "bounded_query_db" not in proc.stdout
     assert "kg_maintenance_run" not in proc.stdout
