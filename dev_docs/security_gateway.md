@@ -17,14 +17,12 @@ policy, no enforcement at execution time, and no security audit trail.
 
 ## The seam
 
-Every interface (Telegram, web chat, agents, autonomous, A2A) funnels tool calls
-through `tool_loop_common.execute_tool()`, via `execute_tools_batch` from the only
-two loops (`claude_loop.py`, `openai_tool_loop.py`). That one function is where the
-gateway is mounted.
+Every interface (Telegram, web chat, agents, autonomous, A2A) funnels model-emitted tool calls through `tool_gateway.dispatcher.execute_tools_batch()`, which delegates to `tool_loop_common.execute_tool()`. That one execution function is where the security gateway is mounted.
 
 ```
 interface boundary  →  installs CallerContext (contextvar) for its run
-   chat loop        →  execute_tools_batch → execute_tool()         ← GATEWAY
+   chat loop        →  tool_gateway.dispatcher.execute_tools_batch
+                     →  tool_loop_common.execute_tool()           ← SECURITY GATEWAY
                           authorize(ctx, tool, args) → Decision
                           enforced-deny → skip handler, return denial
                           run handler (unchanged)

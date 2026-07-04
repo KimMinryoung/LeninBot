@@ -25,6 +25,7 @@ from bot_config import (
 )
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from tool_gateway.selection import build_toolset
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,7 @@ _RESEARCH_TOOLS = {
 
 
 def _build_toolset(allowed: set[str]):
-    tools = [t for t in TOOLS if t.get("name") in allowed]
-    handlers = {k: v for k, v in TOOL_HANDLERS.items() if k in allowed}
-    return tools, handlers
+    return build_toolset(TOOLS, TOOL_HANDLERS, allowed)
 
 
 # ── System prompt IR builders ────────────────────────────────────────

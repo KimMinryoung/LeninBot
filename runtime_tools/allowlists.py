@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tool_gateway.selection import select_tools_by_name
+
 ORCHESTRATOR_TOOL_NAMES: frozenset[str] = frozenset({
     "delegate",
     "multi_delegate",
@@ -21,18 +23,6 @@ ORCHESTRATOR_TOOL_NAMES: frozenset[str] = frozenset({
     "list_agent_tools",
     "run_agent",
 })
-
-
-def select_tools_by_name(tools: list[dict], allowed_names: set[str] | frozenset[str]) -> list[dict]:
-    """Return tools matching allowed_names, preserving registry order and deduping names."""
-    selected: list[dict] = []
-    seen: set[str] = set()
-    for tool in tools:
-        name = str(tool.get("name") or "")
-        if name in allowed_names and name not in seen:
-            seen.add(name)
-            selected.append(tool)
-    return selected
 
 
 def select_orchestrator_tools(tools: list[dict]) -> list[dict]:

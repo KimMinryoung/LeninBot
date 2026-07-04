@@ -15,6 +15,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
 | Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
+| Runtime tool gateway | `tool_gateway/` | shared facade for visibility filtering, batch dispatch, and security/audit integration |
 
 ## Global Registry
 
@@ -58,7 +59,7 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 - `diplomat`
 - `autonomous_project`
 
-`AgentSpec.filter_tools()` is fail-closed. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
+`AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
 
 `finalization_tools` and `terminal_tools` are special execution controls, not general allow-list replacements:
 
@@ -92,7 +93,13 @@ The gateway is fail-closed by profile. The old `readonly` profile name is accept
 
 The gateway must not export the global registry wholesale. High-risk runtime tools such as filesystem writes, arbitrary Python execution, service restart, email/A2A send, publishing, payment/signing, arbitrary KG writes/Cypher, and broad or unguarded DB mutation remain absent from MCP profiles.
 
-When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scripts/smoke_mcp_gateway.py`.
+When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scripts/smoke_mcp_gateway.py`. MCP catalog/handler filtering uses `tool_gateway.selection`, but MCP remains a separate inbound surface rather than the runtime agent gateway.
+
+## Runtime Tool Gateway
+
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `runtime_tools/allowlists.py`, `AgentSpec.filter_tools()`, web chat persona tool construction, A2A skill tool construction, and MCP catalog construction now use `tool_gateway.selection` helpers for schema/handler filtering. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, which delegates to the existing `tool_loop_common` execution path and therefore still runs `security_gateway.authorize()` and audit per call.
+
+This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 
 ## Agent Runtime Config Is Not the Tool Registry
 

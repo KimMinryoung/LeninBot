@@ -25,12 +25,12 @@ from types import SimpleNamespace
 
 from tool_loop_common import (
     validate_budget, build_budget_tracker, emit_progress,
-    update_redis_state, save_redis_progress, execute_tool, compact_tool_definitions,
-    execute_tools_batch,
+    update_redis_state, save_redis_progress,
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
 )
+from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
 
 logger = logging.getLogger(__name__)
 

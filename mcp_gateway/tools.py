@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from mcp_gateway.policy import allowed_tool_names
+from tool_gateway.selection import build_toolset
 
 ROOT = Path(__file__).resolve().parents[1]
 DEV_DOCS_DIR = ROOT / "dev_docs"
@@ -639,11 +640,8 @@ def build_tool_catalog(profile: str = "inspect") -> list[dict[str, Any]]:
     from runtime_tools.registry import TOOL_HANDLERS, TOOLS
 
     allowed = allowed_tool_names(profile)
-    runtime = [
-        _mcp_tool(tool)
-        for tool in TOOLS
-        if str(tool.get("name") or "") in allowed and str(tool.get("name") or "") in TOOL_HANDLERS
-    ]
+    runtime_tools, _runtime_handlers = build_toolset(TOOLS, TOOL_HANDLERS, allowed)
+    runtime = [_mcp_tool(tool) for tool in runtime_tools]
     gateway = [_mcp_tool(tool) for tool in GATEWAY_TOOLS if str(tool.get("name") or "") in allowed]
     seen: set[str] = set()
     merged: list[dict[str, Any]] = []
@@ -660,11 +658,7 @@ def build_handlers(profile: str = "inspect") -> dict[str, ToolHandler]:
     from runtime_tools.registry import TOOL_HANDLERS
 
     allowed = allowed_tool_names(profile)
-    handlers: dict[str, ToolHandler] = {
-        name: handler
-        for name, handler in TOOL_HANDLERS.items()
-        if name in allowed
-    }
+    handlers: dict[str, ToolHandler] = build_toolset([], TOOL_HANDLERS, allowed)[1]
     handlers.update({
         name: handler
         for name, handler in GATEWAY_HANDLERS.items()

@@ -62,9 +62,10 @@ System prompts are rendered from provider-aware prompt IR and kept as stable as 
 Tool visibility is filtered at dispatch:
 
 1. `runtime_tools/registry.py` builds the global tool definitions and handlers.
-2. `runtime_tools/allowlists.py` selects the Telegram orchestrator tools.
-3. `AgentSpec.tools` selects specialist tools.
-4. `web_chat.py` defines a separate public web-chat allow-list.
+2. `runtime_tools/allowlists.py` selects the Telegram orchestrator tools through `tool_gateway.selection`.
+3. `AgentSpec.tools` selects specialist tools through `AgentSpec.filter_tools()` and `tool_gateway.selection`.
+4. `web_chat.py` defines a separate public web-chat allow-list and uses `tool_gateway.selection` before injecting web-only safe handlers.
+5. Provider loops dispatch model-emitted tool calls through `tool_gateway.dispatcher`, which preserves the `security_gateway` authorization/audit check in `tool_loop_common.execute_tool()`.
 
 Empty `AgentSpec.tools` is fail-closed. A tool must be present in the global registry and the relevant allow-list to be callable.
 

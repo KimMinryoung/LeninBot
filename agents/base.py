@@ -242,9 +242,6 @@ class AgentSpec:
         declare each tool explicitly so config mistakes do not silently expose
         the global registry.
         """
-        if not self.tools:
-            return [], {}
-        allowed = set(self.tools)
-        filtered_t = [t for t in all_tools if t.get("name") in allowed]
-        filtered_h = {k: v for k, v in all_handlers.items() if k in allowed}
-        return filtered_t, filtered_h
+        from tool_gateway.selection import filter_agent_tools
+
+        return filter_agent_tools(self, all_tools, all_handlers)

@@ -24,6 +24,7 @@ from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from tool_gateway.selection import build_toolset
 from claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one, execute as db_execute
 from web_personas import (
@@ -713,14 +714,8 @@ def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
     spec = persona_or_allowed_tools if hasattr(persona_or_allowed_tools, "allowed_tools") else None
     allowed_tools = spec.allowed_tools if spec is not None else persona_or_allowed_tools
     web_only_tools = {"read_self", "read_persona_context"}
-    tools = [
-        t for t in TOOLS
-        if t.get("name") in allowed_tools and t.get("name") not in web_only_tools
-    ]
-    handlers = {
-        k: v for k, v in TOOL_HANDLERS.items()
-        if k in allowed_tools and k not in web_only_tools
-    }
+    registry_allowed = set(allowed_tools) - web_only_tools
+    tools, handlers = build_toolset(TOOLS, TOOL_HANDLERS, registry_allowed)
     if "read_self" in allowed_tools:
         tools = tools + [WEB_READ_SELF_TOOL]
         handlers = {**handlers, "read_self": _exec_web_read_self}
