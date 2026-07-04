@@ -160,8 +160,8 @@ _CONFIG_META = {
 
 _MODEL_ALIAS_MAP = {
     "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
-    "sonnet": ("claude-sonnet-4-6", "claude-sonnet-4-6"),
-    "opus":   ("claude-opus-4-7", "claude-opus-4-7"),
+    "sonnet": ("claude-sonnet-5", "claude-sonnet-5"),
+    "opus":   ("claude-opus-4-8", "claude-opus-4-8"),
 }
 
 _OPENAI_MODEL_MAP = {
@@ -177,13 +177,13 @@ _DEEPSEEK_MODEL_MAP = {
 
 # Human-readable display names keyed by API model ID. Used when injecting
 # "current model" context into the orchestrator prompt so the model sees its
-# own official product name ("Claude Opus 4.7") rather than the internal API
-# slug ("claude-opus-4-7"). Match by prefix: pinned date suffixes (e.g.
+# own official product name ("Claude Opus 4.8") rather than the internal API
+# slug ("claude-opus-4-8"). Match by prefix: pinned date suffixes (e.g.
 # "-20251001") share the display name of the base family.
 _MODEL_DISPLAY_NAMES = {
     # Anthropic
-    "claude-opus-4-7":   "Claude Opus 4.7",
-    "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    "claude-opus-4-8":   "Claude Opus 4.8",
+    "claude-sonnet-5":   "Claude Sonnet 5",
     "claude-haiku-4-5":  "Claude Haiku 4.5",
     # OpenAI
     "gpt-5.5":      "GPT-5.5 Pro",
@@ -292,7 +292,7 @@ async def _get_model_by_alias(alias: str) -> str:
     """Resolve a model short name (haiku/sonnet/opus) to its full ID, with caching."""
     if alias in _resolved_models:
         return _resolved_models[alias]
-    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-4-6", "claude-sonnet-4-6"))
+    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-5", "claude-sonnet-5"))
     resolved = await _resolve_model(model_alias, fallback)
     _resolved_models[alias] = resolved
     return resolved

@@ -68,13 +68,13 @@ _CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 # (matches what this loop writes). cache_read is identical across TTL tiers.
 # Prefix-match picks by base model name so pinned-date variants reuse the row.
 PRICING_TABLE = {
-    "claude-opus-4-7": {
-        "input":          15.00 / 1_000_000,
-        "output":         75.00 / 1_000_000,
-        "cache_creation": 30.00 / 1_000_000,   # 2.0× input (1h TTL)
-        "cache_read":      1.50 / 1_000_000,
+    "claude-opus-4-8": {
+        "input":           5.00 / 1_000_000,
+        "output":         25.00 / 1_000_000,
+        "cache_creation": 10.00 / 1_000_000,   # 2.0× input (1h TTL)
+        "cache_read":      0.50 / 1_000_000,
     },
-    "claude-sonnet-4-6": {
+    "claude-sonnet-5": {
         "input":           3.00 / 1_000_000,
         "output":         15.00 / 1_000_000,
         "cache_creation":  6.00 / 1_000_000,   # 2.0× input (1h TTL)
@@ -90,19 +90,19 @@ PRICING_TABLE = {
         "input":           0.14 / 1_000_000,
         "output":          0.28 / 1_000_000,
         "cache_creation":  0.14 / 1_000_000,
-        "cache_read":      0.028 / 1_000_000,
+        "cache_read":      0.0028 / 1_000_000,
     },
     "deepseek-v4-pro": {
-        "input":           1.74 / 1_000_000,
-        "output":          3.48 / 1_000_000,
-        "cache_creation":  1.74 / 1_000_000,
-        "cache_read":      0.145 / 1_000_000,
+        "input":           0.435 / 1_000_000,
+        "output":          0.87 / 1_000_000,
+        "cache_creation":  0.435 / 1_000_000,
+        "cache_read":      0.003625 / 1_000_000,
     },
 }
 
 # Fallback when the model string doesn't match any known family — use Sonnet
 # (middle tier) so we don't wildly under- or over-report on unknown variants.
-PRICING = PRICING_TABLE["claude-sonnet-4-6"]
+PRICING = PRICING_TABLE["claude-sonnet-5"]
 
 
 def _pricing_for(model: str) -> dict:

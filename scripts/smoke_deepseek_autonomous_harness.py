@@ -99,9 +99,10 @@ def test_thinking_blocks_are_replayed_not_coerced_to_text() -> None:
 def test_deepseek_pricing_uses_deepseek_rows() -> None:
     pro = _pricing_for("deepseek-v4-pro")
     flash = _pricing_for("deepseek-v4-flash")
-    assert pro["input"] == 1.74 / 1_000_000
-    assert pro["output"] == 3.48 / 1_000_000
-    assert flash["cache_read"] == 0.028 / 1_000_000
+    assert pro["input"] == 0.435 / 1_000_000
+    assert pro["output"] == 0.87 / 1_000_000
+    assert pro["cache_read"] == 0.003625 / 1_000_000
+    assert flash["cache_read"] == 0.0028 / 1_000_000
 
     usage = SimpleNamespace(
         input_tokens=1_000_000,
@@ -109,7 +110,7 @@ def test_deepseek_pricing_uses_deepseek_rows() -> None:
         cache_creation_input_tokens=0,
         cache_read_input_tokens=0,
     )
-    assert round(_calculate_cost(usage, "deepseek-v4-pro"), 2) == 5.22
+    assert round(_calculate_cost(usage, "deepseek-v4-pro"), 3) == 1.305
 
 
 if __name__ == "__main__":

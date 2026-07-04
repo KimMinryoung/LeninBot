@@ -1,6 +1,6 @@
 # LLM Provider Architecture
 
-최종 확인 기준: 2026-05-09 코드 트리.
+최종 확인 기준: 2026-07-04 코드 트리.
 
 LeninBot은 provider와 모델 티어를 런타임 설정으로 해석한다. Telegram chat, background task, autonomous loop, public web chat은 서로 다른 provider 설정을 가질 수 있다.
 
@@ -90,8 +90,8 @@ DeepSeek Anthropic-compatible thinking is controlled by environment variables:
 
 | Tier | Claude | OpenAI | DeepSeek | Local |
 |---|---|---|---|---|
-| `high` | `claude-opus-4-7` alias | `gpt-5.5` | `deepseek-v4-pro` | local backend model |
-| `medium` | `claude-sonnet-4-6` alias | `gpt-5.5-mini` | `deepseek-v4-flash` | local backend model |
+| `high` | `claude-opus-4-8` alias | `gpt-5.5` | `deepseek-v4-pro` | local backend model |
+| `medium` | `claude-sonnet-5` alias | `gpt-5.5-mini` | `deepseek-v4-flash` | local backend model |
 | `low` | `claude-haiku-4-5` alias | `gpt-5.5-nano` | `deepseek-v4-flash` | local backend model |
 
 Claude aliases are resolved lazily through Anthropic Models API and cached in-process. OpenAI, DeepSeek, and local model IDs resolve synchronously from maps or local backend config.

@@ -21,7 +21,6 @@ import logging
 import re
 import uuid
 import httpx
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from tool_loop_common import (
@@ -102,27 +101,15 @@ OPENAI_PRICING = {
         "cached_input": 0.0028 / 1_000_000,
     },
     "deepseek-v4-pro": {
-        "input": 1.74 / 1_000_000,
-        "output": 3.48 / 1_000_000,
-        "cached_input": 0.0145 / 1_000_000,
+        "input": 0.435 / 1_000_000,
+        "output": 0.87 / 1_000_000,
+        "cached_input": 0.003625 / 1_000_000,
     },
 }
 _DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
 
-_DEEPSEEK_V4_PRO_DISCOUNT_END_UTC = datetime(2026, 5, 5, 15, 59, tzinfo=timezone.utc)
-_DEEPSEEK_V4_PRO_DISCOUNT_PRICING = {
-    "input": 0.435 / 1_000_000,
-    "output": 0.87 / 1_000_000,
-    "cached_input": 0.003625 / 1_000_000,
-}
-
 
 def _pricing_for_model(model: str) -> dict[str, float]:
-    if (
-        model == "deepseek-v4-pro"
-        and datetime.now(timezone.utc) < _DEEPSEEK_V4_PRO_DISCOUNT_END_UTC
-    ):
-        return _DEEPSEEK_V4_PRO_DISCOUNT_PRICING
     return OPENAI_PRICING.get(model, _DEFAULT_PRICING)
 
 
