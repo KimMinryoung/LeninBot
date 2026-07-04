@@ -41,7 +41,7 @@ def _force_mode(mode: str):
 
 def main() -> int:
     from security_gateway import CallerContext, authorize, policy
-    from security_gateway.audit import redact_args
+    from security_gateway.audit import _IMMUTABILITY_DDL, redact_args
 
     print("== registry: every tool has a risk class ==")
     from runtime_tools.registry import TOOLS
@@ -116,6 +116,11 @@ def main() -> int:
     check("password redacted", "hunter2" not in summary, summary)
     check("private_key redacted", "0xdead" not in summary, summary)
     check("non-secret kept", "lenin" in summary, summary)
+
+    print("== audit table immutability DDL ==")
+    check("blocks update/delete", "BEFORE UPDATE OR DELETE ON tool_audit_log" in _IMMUTABILITY_DDL)
+    check("blocks truncate", "BEFORE TRUNCATE ON tool_audit_log" in _IMMUTABILITY_DDL)
+    check("requires explicit admin approval setting", "leninbot.audit_log_mutation_approved" in _IMMUTABILITY_DDL)
 
     print("== gateway fails open on internal error ==")
     # Passing a context missing attributes shouldn't raise; authorize catches all.

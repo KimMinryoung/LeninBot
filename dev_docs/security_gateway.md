@@ -90,6 +90,12 @@ risk_class, decision, enforced, deny_reason, args_summary (redacted+truncated),
 result_status (ok|error|denied), latency_ms, error_excerpt`. Indexed on `ts`,
 `(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`.
 
+The table is append-only at the database layer. The migration installs triggers that
+block `UPDATE`, `DELETE`, and `TRUNCATE`. A direct administrator maintenance
+transaction can override this only by explicitly setting
+`SET LOCAL leninbot.audit_log_mutation_approved = on`; normal runtime paths do not
+set that flag.
+
 ## Operator CLI
 
 ```

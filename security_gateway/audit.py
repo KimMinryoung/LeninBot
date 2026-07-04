@@ -66,6 +66,34 @@ VALUES (%(interface)s, %(agent_name)s, %(user_id)s, %(is_owner)s, %(task_id)s,
         %(args_summary)s, %(result_status)s, %(latency_ms)s, %(error_excerpt)s)
 """
 
+_IMMUTABILITY_DDL = """
+CREATE OR REPLACE FUNCTION prevent_tool_audit_log_mutation()
+RETURNS trigger AS $$
+BEGIN
+    IF current_setting($setting$leninbot.audit_log_mutation_approved$setting$, true) = $setting$on$setting$ THEN
+        IF TG_OP = $setting$DELETE$setting$ THEN
+            RETURN OLD;
+        ELSIF TG_OP = $setting$TRUNCATE$setting$ THEN
+            RETURN NULL;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION $message$tool_audit_log is append-only; set leninbot.audit_log_mutation_approved=on in an explicit admin maintenance transaction to modify it$message$;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tool_audit_log_no_update_delete ON tool_audit_log;
+CREATE TRIGGER tool_audit_log_no_update_delete
+BEFORE UPDATE OR DELETE ON tool_audit_log
+FOR EACH ROW EXECUTE FUNCTION prevent_tool_audit_log_mutation();
+
+DROP TRIGGER IF EXISTS tool_audit_log_no_truncate ON tool_audit_log;
+CREATE TRIGGER tool_audit_log_no_truncate
+BEFORE TRUNCATE ON tool_audit_log
+FOR EACH STATEMENT EXECUTE FUNCTION prevent_tool_audit_log_mutation();
+"""
+
 
 def ensure_tool_audit_log_table() -> None:
     """Create the tool_audit_log table and indexes. Applied via schema_migrations."""
@@ -76,6 +104,7 @@ def ensure_tool_audit_log_table() -> None:
             cur.execute(_DDL)
             for stmt in _INDEXES:
                 cur.execute(stmt)
+            cur.execute(_IMMUTABILITY_DDL)
         conn.commit()
 
 
