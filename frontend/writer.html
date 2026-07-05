@@ -213,8 +213,6 @@
         <div class="row">
           <button id="send" class="primary" type="button">Send</button>
           <button id="stop" type="button" disabled>Stop</button>
-          <button id="appendAssistant" type="button" disabled>Append</button>
-          <button id="replaceSelection" type="button" disabled>Replace Selection</button>
         </div>
         <div id="status" class="status"></div>
       </section>
@@ -352,10 +350,15 @@
     }
 
     function updateAssistantButtons() {
+      // Manual apply was removed — the model now edits the manuscript directly
+      // via tools. Kept as a guarded no-op for the callers that still invoke it.
+      const append = $('appendAssistant');
+      const replace = $('replaceSelection');
+      if (!append && !replace) return;
       const hasAssistant = Boolean(state.lastAssistant.trim());
       const hasSelection = $('manuscript').selectionStart !== $('manuscript').selectionEnd;
-      $('appendAssistant').disabled = !state.current || !hasAssistant;
-      $('replaceSelection').disabled = !state.current || !hasAssistant || !hasSelection;
+      if (append) append.disabled = !state.current || !hasAssistant;
+      if (replace) replace.disabled = !state.current || !hasAssistant || !hasSelection;
     }
 
     async function loadProjects() {
@@ -522,6 +525,21 @@
           return;
         }
       }
+      // Persist unsaved manuscript edits so the model edits exactly what you see,
+      // and the post-turn reload doesn't discard them.
+      if ($('manuscript').value !== (state.manuscript || '')) {
+        try {
+          const mr = await api(`/writer/projects/${cur.id}/manuscript`, {
+            method: 'PUT',
+            body: JSON.stringify({ body: $('manuscript').value, note: 'autosave before generate' })
+          });
+          const md = await mr.json();
+          state.manuscript = (md.manuscript && md.manuscript.body) || $('manuscript').value;
+        } catch (err) {
+          setStatus('Could not save manuscript: ' + (err.message || err));
+          return;
+        }
+      }
       const promptText = $('prompt').value.trim();
       const start = $('manuscript').selectionStart;
       const end = $('manuscript').selectionEnd;
@@ -531,8 +549,6 @@
       const assistantBody = addMessage('assistant', '', { model: selModel ? selModel.id : null });
       $('send').disabled = true;
       $('stop').disabled = false;
-      $('appendAssistant').disabled = true;
-      $('replaceSelection').disabled = true;
       state.abort = new AbortController();
       state.lastAssistant = '';
       setStatus('Streaming...');
@@ -602,8 +618,6 @@
     $('deleteProject').onclick = deleteProject;
     $('saveManuscript').onclick = () => saveManuscript();
     $('search').onclick = searchManuscript;
-    $('appendAssistant').onclick = appendAssistant;
-    $('replaceSelection').onclick = replaceSelection;
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
     $('prompt').addEventListener('keydown', (event) => {

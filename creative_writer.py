@@ -485,6 +485,28 @@ def replace_manuscript_range(
     return _write_manuscript(project_id, updated, action="replace", note=note)
 
 
+def replace_manuscript_text(project_id: int, find: str, replacement: str, note: str = "") -> dict:
+    """Find one exact passage and replace it. Safe for LLM tool use: fails
+    (ok=False) if the passage is absent or appears more than once, so the model
+    can never silently edit the wrong location. Revision history is preserved by
+    _write_manuscript. Returns {ok, message, char_count?}."""
+    if not find:
+        return {"ok": False, "message": "Empty 'find' text."}
+    manuscript = get_manuscript(project_id)
+    if not manuscript:
+        return {"ok": False, "message": "Manuscript not found."}
+    current = str(manuscript.get("body") or "")
+    count = current.count(find)
+    if count == 0:
+        return {"ok": False, "message": "Passage not found verbatim — copy the exact text (use search_manuscript first)."}
+    if count > 1:
+        return {"ok": False, "message": f"Passage appears {count} times; include more surrounding text so it is unique."}
+    idx = current.find(find)
+    updated = current[:idx] + replacement + current[idx + len(find):]
+    result = _write_manuscript(project_id, updated, action="replace", note=note or "tool replace")
+    return {"ok": True, "message": "Replaced.", "char_count": (result or {}).get("char_count")}
+
+
 def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict]:
     needle = query.strip()
     if not needle:
@@ -571,15 +593,19 @@ def _touch_project(project_id: int) -> None:
     db_execute("UPDATE writer_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
 
 
-def _research_tools_section() -> str:
-    """The '# Research & continuity tools' prompt block, gated to the tools that
-    are actually wired (see _build_writer_tools). Advertising a tool the model
-    can't call would just make it hallucinate calls."""
+def _tools_prompt_section() -> str:
+    """The '# Tools' prompt block, gated to the tools that are actually wired
+    (see _build_writer_tools). Advertising a tool the model can't call would
+    just make it hallucinate calls."""
     lines = [
-        "# Research & continuity tools\n",
-        "You have tools; use them silently and on your own initiative before writing, then produce the response below.\n",
-        "- search_manuscript: search the FULL manuscript (names, facts, earlier scenes) beyond the recent tail you were given. "
-        "Use it to verify continuity before introducing or contradicting an established detail.\n",
+        "# Tools — you edit the manuscript yourself\n",
+        "You act on the manuscript directly through tools; the writer never copies text by hand. "
+        "Use tools silently and on your own initiative, then give a short commentary.\n",
+        "- search_manuscript: search the FULL manuscript (names, facts, earlier scenes) beyond the recent tail. "
+        "Use it to locate a passage and to verify continuity before you write or revise.\n",
+        "- append_to_manuscript(text): add prose to the END of the manuscript — for continuing the story.\n",
+        "- replace_in_manuscript(find, replacement): revise a specific part — find an exact existing passage and swap it. "
+        "Copy 'find' verbatim (locate it with search_manuscript first); it must be unique.\n",
     ]
     if _WRITER_WEB_SEARCH_ENABLED:
         lines.append(
@@ -587,8 +613,8 @@ def _research_tools_section() -> str:
             "Do not over-research or let it flatten the prose into an encyclopedia; use it only to get concrete details right.\n"
         )
     lines.append(
-        "Tool calls are invisible to the reader — never narrate that you searched. "
-        "Fold what you learn directly into the prose or commentary.\n\n"
+        "Every manuscript change MUST go through append_to_manuscript or replace_in_manuscript — never paste manuscript "
+        "prose into your text reply. Tool calls are invisible to the reader; never narrate that you searched or edited.\n\n"
     )
     return "".join(lines)
 
@@ -615,19 +641,18 @@ def _build_base_system_prompt(project: dict) -> str:
         "reflexive over-explaining, neatly moralized endings, purple padding).\n"
         "- Honor continuity absolutely: names, timeline, established facts, and what each character can plausibly know. "
         "If the request conflicts with the established draft, follow continuity and flag the conflict in commentary.\n\n"
-        + _research_tools_section()
-        + "# Manuscript delta discipline\n"
-        "- The manuscript context is the authoritative draft.\n"
-        "- To continue the story, write prose that flows seamlessly from the manuscript tail — never repeat existing text.\n"
-        "- When the user has selected a range to revise, return ONLY the replacement text for that range.\n"
-        "- Put nothing but publishable manuscript prose inside <manuscript_delta>: no headings, labels, or meta-notes.\n\n"
-        "# Response format — use exactly these tags:\n"
-        "<manuscript_delta>\n"
-        "Manuscript-ready prose to append, or the replacement for the selected range. "
-        "Leave empty if this turn needs no manuscript text.\n"
-        "</manuscript_delta>\n"
+        + _tools_prompt_section()
+        + "# Editing discipline\n"
+        "- The saved manuscript is the authoritative draft; your tools edit it in place (every change is reversible).\n"
+        "- Continue the story with append_to_manuscript; revise a specific part with replace_in_manuscript.\n"
+        "- Make each edit flow seamlessly with the surrounding prose; never duplicate text that already exists.\n"
+        "- If the writer selected a range to revise, replace exactly that range (use its text as 'find').\n"
+        "- If the request is ambiguous or would break continuity, make NO edit and ask in commentary instead.\n\n"
+        "# Response format\n"
+        "After applying your edits with the tools, reply with ONLY a commentary block:\n"
         "<commentary>\n"
-        "Concise working notes: choices made, continuity assumptions, risks, and any genuine question for the writer. "
+        "A brief note: what you changed (appended vs revised, and which part), key choices, continuity assumptions, "
+        "and any genuine question for the writer. Do NOT paste the manuscript prose here. "
         "No praise, no filler, no boilerplate caveats.\n"
         "</commentary>"
     )
@@ -753,6 +778,40 @@ _SEARCH_MANUSCRIPT_TOOL = {
     },
 }
 
+_APPEND_MANUSCRIPT_TOOL = {
+    "name": "append_to_manuscript",
+    "description": (
+        "Append new prose to the END of the manuscript — use this to continue the story. "
+        "The text is added after the current ending; do not repeat existing text. "
+        "This edits the saved manuscript directly."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "Manuscript-ready prose to append."},
+        },
+        "required": ["text"],
+    },
+}
+
+_REPLACE_MANUSCRIPT_TOOL = {
+    "name": "replace_in_manuscript",
+    "description": (
+        "Revise a specific part of the manuscript: find an exact existing passage and replace it with new prose. "
+        "This edits the saved manuscript directly. 'find' must be copied VERBATIM from the manuscript and be unique "
+        "— call search_manuscript first to locate and copy the exact text. Fails if 'find' is missing or not unique; "
+        "then include more surrounding text and retry."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "find": {"type": "string", "description": "The exact existing passage to replace (verbatim, unique in the manuscript)."},
+            "replacement": {"type": "string", "description": "The new prose to put in its place."},
+        },
+        "required": ["find", "replacement"],
+    },
+}
+
 
 def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
     """Build the (tools, handlers) pair for a writer turn, bound to one project.
@@ -781,8 +840,26 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
             )
         return "\n\n".join(blocks)
 
-    tools: list[dict] = [_SEARCH_MANUSCRIPT_TOOL]
-    handlers: dict = {"search_manuscript": _handle_search_manuscript}
+    async def _handle_append(text: str) -> str:
+        if not text or not text.strip():
+            return "No text provided; nothing appended."
+        result = await asyncio.to_thread(append_manuscript, project_id, text, "tool append")
+        if not result:
+            return "Append failed: manuscript not found."
+        return f"Appended. Manuscript is now {result.get('char_count')} characters."
+
+    async def _handle_replace(find: str, replacement: str) -> str:
+        result = await asyncio.to_thread(replace_manuscript_text, project_id, find, replacement, "tool replace")
+        if result.get("ok"):
+            return f"Replaced. Manuscript is now {result.get('char_count')} characters."
+        return "Replace failed: " + result.get("message", "unknown error")
+
+    tools: list[dict] = [_SEARCH_MANUSCRIPT_TOOL, _APPEND_MANUSCRIPT_TOOL, _REPLACE_MANUSCRIPT_TOOL]
+    handlers: dict = {
+        "search_manuscript": _handle_search_manuscript,
+        "append_to_manuscript": _handle_append,
+        "replace_in_manuscript": _handle_replace,
+    }
 
     # Web search is disabled by default (see _WRITER_WEB_SEARCH_ENABLED). When on,
     # reuse the main runtime's web_search (schema + Tavily handler).
