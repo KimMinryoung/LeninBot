@@ -63,9 +63,9 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
 WRITER_DEFAULT_CHOICE = "fable"
 
 WRITER_DEFAULT_MAX_TOKENS = 12000
-# Tool-use rounds: allow a few research/continuity searches before the model
-# writes. 1 = no tools (legacy). Each round is a Fable-priced model call.
-_WRITER_MAX_ROUNDS = 6
+# Tool-use rounds: allow extended continuity searches and edit retries before
+# the model writes. 1 = no tools (legacy). Each round is a Fable-priced model call.
+_WRITER_MAX_ROUNDS = 16
 # Web search is disabled by design: Fable 5's internal knowledge is strong and
 # the writer prefers reference material supplied directly by the user. Flip to
 # True to re-enable the Tavily-backed web_search tool (and its prompt guidance).
