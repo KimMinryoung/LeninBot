@@ -224,7 +224,26 @@
     const setStatus = (text) => { $('status').textContent = text || ''; };
     const setManuscriptStatus = (text) => { $('manuscriptStatus').textContent = text || ''; };
     const fmtCost = (value) => value == null ? '' : ` · $${Number(value).toFixed(4)}`;
+    const fmtUsage = (usage = {}) => {
+      const read = Number(usage.cache_read_input_tokens || 0);
+      const write = Number(usage.cache_creation_input_tokens || 0);
+      if (!read && !write) return '';
+      return ` · cache read ${read.toLocaleString()} / write ${write.toLocaleString()}`;
+    };
     const charMeta = (count) => `${Number(count || 0).toLocaleString()} chars`;
+
+    function parseWriterContent(content) {
+      const raw = content || '';
+      const manuscriptMatch = raw.match(/<manuscript_delta>\s*([\s\S]*?)\s*<\/manuscript_delta>/i);
+      const commentaryMatch = raw.match(/<commentary>\s*([\s\S]*?)\s*<\/commentary>/i);
+      const manuscript = manuscriptMatch ? manuscriptMatch[1].trim() : '';
+      const commentary = commentaryMatch ? commentaryMatch[1].trim() : '';
+      if (!manuscriptMatch && !commentaryMatch) return { manuscript: raw.trim(), commentary: '', display: raw };
+      const parts = [];
+      if (manuscript) parts.push(`Manuscript\n${manuscript}`);
+      if (commentary) parts.push(`Notes\n${commentary}`);
+      return { manuscript, commentary, display: parts.join('\n\n') || raw };
+    }
 
     function renderProjects() {
       $('projectList').innerHTML = '';
@@ -267,7 +286,7 @@
       } else {
         for (const message of messages) {
           addMessage(message.role, message.content, message);
-          if (message.role === 'assistant') latestAssistant = message.content || '';
+          if (message.role === 'assistant') latestAssistant = parseWriterContent(message.content).manuscript || '';
         }
       }
       if (!state.lastAssistant && latestAssistant) state.lastAssistant = latestAssistant;
@@ -286,7 +305,8 @@
         ? `Claude Fable 5${meta.stop_reason ? ' · ' + meta.stop_reason : ''}${fmtCost(meta.cost_usd)}`
         : 'You';
       const body = document.createElement('div');
-      body.textContent = content || '';
+      const parsed = role === 'assistant' ? parseWriterContent(content) : { display: content || '' };
+      body.textContent = parsed.display || '';
       box.append(label, body);
       $('conversation').appendChild(box);
       $('conversation').scrollTop = $('conversation').scrollHeight;
@@ -462,7 +482,11 @@
               assistantBody.textContent += event.content;
               state.lastAssistant += event.content;
             }
-            if (event.type === 'done') setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}`);
+            if (event.type === 'done') {
+              if (event.display_text) assistantBody.textContent = event.display_text;
+              state.lastAssistant = event.manuscript_text || state.lastAssistant;
+              setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
+            }
             if (event.type === 'error') setStatus(event.content || 'Request failed.');
             $('conversation').scrollTop = $('conversation').scrollHeight;
           }

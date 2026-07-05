@@ -345,7 +345,7 @@ async def chat_with_tools(
     model: str,
     tools: list[dict],
     tool_handlers: dict,
-    system_prompt: str,
+    system_prompt: str | list[dict],
     max_rounds: int = 50,
     max_tokens: int = 4096,
     log_event=None,
@@ -370,7 +370,7 @@ async def chat_with_tools(
         model: Model ID string.
         tools: Tool definitions (Anthropic API format).
         tool_handlers: Dict mapping tool name → async handler function.
-        system_prompt: System prompt text.
+        system_prompt: System prompt text or Anthropic system content blocks.
         max_rounds: Max tool-use rounds before forcing response.
         max_tokens: Max tokens for response.
         log_event: Optional callable(level, source, message, detail=None, task_id=None)
@@ -397,8 +397,13 @@ async def chat_with_tools(
     length_continuations = 0
 
     # Prompt caching: mark system prompt and tools as cacheable with the
-    # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above).
-    cached_system = [{"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}]
+    # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above). Most callers use
+    # a single text prompt; writer can pass multiple cacheable system blocks so
+    # stable project instructions and manuscript context can hit independently.
+    if isinstance(system_prompt, list):
+        cached_system = [dict(block) for block in system_prompt]
+    else:
+        cached_system = [{"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}]
 
     # Compact verbose tool/schema descriptions before sending them to the model.
     # Names, parameter types, required keys, enums, and defaults are preserved.

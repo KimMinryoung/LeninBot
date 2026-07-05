@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
@@ -32,6 +33,7 @@ WRITER_MODEL_DISPLAY = "Claude Fable 5"
 WRITER_INPUT_PRICE_PER_MTOK = 10.0
 WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 WRITER_DEFAULT_MAX_TOKENS = 12000
+_WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 _MAX_CONTEXT_MESSAGES = 80
 _MANUSCRIPT_CHUNK_SIZE = 3500
 _MANUSCRIPT_CHUNK_OVERLAP = 300
@@ -483,7 +485,7 @@ def _touch_project(project_id: int) -> None:
     db_execute("UPDATE writer_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
 
 
-def _build_system_prompt(project: dict) -> str:
+def _build_base_system_prompt(project: dict) -> str:
     premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
     style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
     title = str(project.get("title") or "Untitled").strip()
@@ -492,12 +494,17 @@ def _build_system_prompt(project: dict) -> str:
         f"Project title: {title}\n"
         f"Premise:\n{premise}\n\n"
         f"Style and continuity notes:\n{style_notes}\n\n"
-        "Treat the manuscript text supplied in each turn as the authoritative draft. "
-        "When revising or extending it, preserve continuity and answer with usable prose or "
-        "specific edit text unless the user asks for analysis. Avoid boilerplate caveats or "
-        "process commentary."
+        "Treat the manuscript context as the authoritative draft. Preserve continuity. "
+        "When drafting or revising, return manuscript-ready text separately from your working notes. "
+        "Use exactly this response shape:\n"
+        "<manuscript_delta>\n"
+        "Text to append to or replace in the manuscript. Leave empty if no manuscript text is needed.\n"
+        "</manuscript_delta>\n"
+        "<commentary>\n"
+        "Briefly explain important choices, continuity assumptions, and any questions for the user.\n"
+        "</commentary>\n"
+        "Avoid boilerplate caveats."
     )
-
 
 def _manuscript_context(project_id: int, selection_start: int | None, selection_end: int | None) -> str:
     manuscript = get_manuscript(project_id) or {}
@@ -516,6 +523,29 @@ def _manuscript_context(project_id: int, selection_start: int | None, selection_
             parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
     return "\n\n".join(parts)
 
+
+
+
+def _build_system_blocks(
+    project: dict,
+    project_id: int,
+    selection_start: int | None,
+    selection_end: int | None,
+) -> list[dict]:
+    return [
+        {
+            "type": "text",
+            "text": _build_base_system_prompt(project),
+            "cache_control": _WRITER_CACHE_CONTROL_1H,
+        },
+        {
+            "type": "text",
+            "text": "<manuscript_context>\n"
+            + _manuscript_context(project_id, selection_start, selection_end)
+            + "\n</manuscript_context>",
+            "cache_control": _WRITER_CACHE_CONTROL_1H,
+        },
+    ]
 
 def _messages_for_model(
     project_id: int,
@@ -537,20 +567,47 @@ def _messages_for_model(
         for row in ordered
         if row.get("role") in {"user", "assistant"} and str(row.get("content") or "").strip()
     ]
-    current_turn = (
-        "<manuscript_context>\n"
-        + _manuscript_context(project_id, selection_start, selection_end)
-        + "\n</manuscript_context>\n\n"
-        + "<user_request>\n"
-        + user_prompt.strip()
-        + "\n</user_request>"
-    )
+    current_turn = "<user_request>\n" + user_prompt.strip() + "\n</user_request>"
     messages.append({"role": "user", "content": current_turn})
     return messages
 
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+_MANUSCRIPT_DELTA_RE = re.compile(
+    r"<manuscript_delta>\s*(.*?)\s*</manuscript_delta>",
+    re.IGNORECASE | re.DOTALL,
+)
+_COMMENTARY_RE = re.compile(
+    r"<commentary>\s*(.*?)\s*</commentary>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_writer_response(text: str) -> dict[str, str]:
+    manuscript_match = _MANUSCRIPT_DELTA_RE.search(text)
+    commentary_match = _COMMENTARY_RE.search(text)
+    manuscript_text = manuscript_match.group(1).strip() if manuscript_match else ""
+    commentary_text = commentary_match.group(1).strip() if commentary_match else ""
+    if manuscript_match or commentary_match:
+        remaining = _MANUSCRIPT_DELTA_RE.sub("", text)
+        remaining = _COMMENTARY_RE.sub("", remaining).strip()
+        if remaining and not commentary_text:
+            commentary_text = remaining
+    else:
+        manuscript_text = text.strip()
+    display_parts = []
+    if manuscript_text:
+        display_parts.append("Manuscript\n" + manuscript_text)
+    if commentary_text:
+        display_parts.append("Notes\n" + commentary_text)
+    return {
+        "manuscript_text": manuscript_text,
+        "commentary_text": commentary_text,
+        "display_text": "\n\n".join(display_parts) or text.strip(),
+    }
 
 
 async def stream_writer_reply(
@@ -594,7 +651,7 @@ async def stream_writer_reply(
                 model=WRITER_MODEL,
                 tools=[],
                 tool_handlers={},
-                system_prompt=_build_system_prompt(project),
+                system_prompt=_build_system_blocks(project, project_id, selection_start, selection_end),
                 max_rounds=1,
                 max_tokens=WRITER_DEFAULT_MAX_TOKENS,
                 budget_usd=100.0,
@@ -626,6 +683,7 @@ async def stream_writer_reply(
         return
 
     final_text = (answer_holder[0] if answer_holder else "").strip()
+    parsed_response = _parse_writer_response(final_text)
     usage = budget_tracker.get("usage") or {}
     cost = budget_tracker.get("total_cost")
     stop_reason = str(budget_tracker.get("stop_reason") or "")
@@ -649,6 +707,9 @@ async def stream_writer_reply(
             "stop_reason": stop_reason,
             "usage": usage,
             "cost_usd": cost,
+            "manuscript_text": parsed_response["manuscript_text"],
+            "commentary_text": parsed_response["commentary_text"],
+            "display_text": parsed_response["display_text"],
             "created_at": datetime.utcnow().isoformat() + "Z",
         }
     )
