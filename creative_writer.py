@@ -32,7 +32,44 @@ WRITER_MODEL = "claude-fable-5"
 WRITER_MODEL_DISPLAY = "Claude Fable 5"
 WRITER_INPUT_PRICE_PER_MTOK = 10.0
 WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
+
+# Selectable models. Fable is the default; DeepSeek options route through the
+# same chat_with_tools loop via bot_config's Anthropic-compatible DeepSeek
+# client. Prices are display hints only — authoritative cost comes from
+# claude_loop.PRICING_TABLE (keyed by model id) at runtime.
+WRITER_MODEL_CHOICES: dict[str, dict] = {
+    "fable": {
+        "provider": "anthropic",
+        "model": "claude-fable-5",
+        "display": "Claude Fable 5",
+        "input_price_per_mtok": 10.0,
+        "output_price_per_mtok": 50.0,
+    },
+    "deepseek_pro": {
+        "provider": "deepseek",
+        "model": "deepseek-v4-pro",
+        "display": "DeepSeek V4 Pro",
+        "input_price_per_mtok": 0.435,
+        "output_price_per_mtok": 0.87,
+    },
+    "deepseek_flash": {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "display": "DeepSeek V4 Flash",
+        "input_price_per_mtok": 0.14,
+        "output_price_per_mtok": 0.28,
+    },
+}
+WRITER_DEFAULT_CHOICE = "fable"
+
 WRITER_DEFAULT_MAX_TOKENS = 12000
+# Tool-use rounds: allow a few research/continuity searches before the model
+# writes. 1 = no tools (legacy). Each round is a Fable-priced model call.
+_WRITER_MAX_ROUNDS = 6
+# Web search is disabled by design: Fable 5's internal knowledge is strong and
+# the writer prefers reference material supplied directly by the user. Flip to
+# True to re-enable the Tavily-backed web_search tool (and its prompt guidance).
+_WRITER_WEB_SEARCH_ENABLED = False
 _WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 _MAX_CONTEXT_MESSAGES = 80
 _MANUSCRIPT_CHUNK_SIZE = 3500
@@ -51,6 +88,55 @@ def _client() -> anthropic.AsyncAnthropic:
             raise RuntimeError("WRITER_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY is required")
         _writer_client = anthropic.AsyncAnthropic(api_key=api_key)
     return _writer_client
+
+
+def _deepseek_available() -> bool:
+    try:
+        import bot_config
+        return bot_config._deepseek_anthropic_client is not None
+    except Exception:
+        return False
+
+
+def list_writer_models() -> list[dict]:
+    """Public metadata for the model picker: keys, display names, prices, availability."""
+    out: list[dict] = []
+    for key, spec in WRITER_MODEL_CHOICES.items():
+        available = True if spec["provider"] == "anthropic" else _deepseek_available()
+        out.append({
+            "key": key,
+            "id": spec["model"],
+            "display_name": spec["display"],
+            "provider": spec["provider"],
+            "input_price_per_mtok": spec["input_price_per_mtok"],
+            "output_price_per_mtok": spec["output_price_per_mtok"],
+            "available": available,
+            "default": key == WRITER_DEFAULT_CHOICE,
+        })
+    return out
+
+
+def _resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
+    """Resolve a model choice key to (client, model_id, display_name, extra_kwargs).
+
+    extra_kwargs carries provider-specific chat_with_tools kwargs (e.g. DeepSeek
+    thinking/output_config). Raises ValueError for an unknown key and
+    RuntimeError if the chosen provider is not configured.
+    """
+    key = (choice or "").strip() or WRITER_DEFAULT_CHOICE
+    spec = WRITER_MODEL_CHOICES.get(key)
+    if spec is None:
+        raise ValueError(f"Unknown writer model choice: {choice!r}")
+    if spec["provider"] == "deepseek":
+        import bot_config
+        client = bot_config._deepseek_anthropic_client
+        if client is None:
+            raise RuntimeError("DeepSeek is not configured (DEEPSEEK_API_KEY missing).")
+        # Thinking-on, effort-high by default (same as other non-web DeepSeek
+        # agents). The writer never forces tool_choice, so thinking is stable.
+        extra = bot_config._get_deepseek_thinking_params()
+        return client, spec["model"], spec["display"], extra
+    return _client(), spec["model"], spec["display"], {}
 
 
 def ensure_writer_tables() -> None:
@@ -485,25 +571,65 @@ def _touch_project(project_id: int) -> None:
     db_execute("UPDATE writer_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
 
 
+def _research_tools_section() -> str:
+    """The '# Research & continuity tools' prompt block, gated to the tools that
+    are actually wired (see _build_writer_tools). Advertising a tool the model
+    can't call would just make it hallucinate calls."""
+    lines = [
+        "# Research & continuity tools\n",
+        "You have tools; use them silently and on your own initiative before writing, then produce the response below.\n",
+        "- search_manuscript: search the FULL manuscript (names, facts, earlier scenes) beyond the recent tail you were given. "
+        "Use it to verify continuity before introducing or contradicting an established detail.\n",
+    ]
+    if _WRITER_WEB_SEARCH_ENABLED:
+        lines.append(
+            "- web_search: look up real-world facts (history, geography, technical or domain detail) when accuracy would ground the fiction. "
+            "Do not over-research or let it flatten the prose into an encyclopedia; use it only to get concrete details right.\n"
+        )
+    lines.append(
+        "Tool calls are invisible to the reader — never narrate that you searched. "
+        "Fold what you learn directly into the prose or commentary.\n\n"
+    )
+    return "".join(lines)
+
+
 def _build_base_system_prompt(project: dict) -> str:
     premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
     style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
     title = str(project.get("title") or "Untitled").strip()
     return (
-        "You are a private fiction-writing collaborator for one user's personal novel project.\n"
+        "You are an elite fiction-writing collaborator on one writer's personal novel. "
+        "You are not a chatbot or an assistant persona — you are a craftsperson serving this manuscript, "
+        "and prose quality is the only thing that matters.\n\n"
         f"Project title: {title}\n"
         f"Premise:\n{premise}\n\n"
         f"Style and continuity notes:\n{style_notes}\n\n"
-        "Treat the manuscript context as the authoritative draft. Preserve continuity. "
-        "When drafting or revising, return manuscript-ready text separately from your working notes. "
-        "Use exactly this response shape:\n"
+        "# Craft standards\n"
+        "- Write in the language, voice, point of view, and tense already established in the manuscript context. "
+        "Match its prose rhythm and diction; never reset to a generic default voice.\n"
+        "- Dramatize through concrete action, sensory detail, and subtext. Do not summarize emotion, "
+        "explain the subtext, or state the theme outright — trust the reader.\n"
+        "- Vary sentence length and structure. Favor strong verbs and specific nouns over adverbs and abstraction.\n"
+        "- Write dialogue that carries character, tension, and information indirectly; avoid on-the-nose exposition.\n"
+        "- Cut clichés, filler, and AI tells (e.g. 'little did they know', 'a testament to', "
+        "reflexive over-explaining, neatly moralized endings, purple padding).\n"
+        "- Honor continuity absolutely: names, timeline, established facts, and what each character can plausibly know. "
+        "If the request conflicts with the established draft, follow continuity and flag the conflict in commentary.\n\n"
+        + _research_tools_section()
+        + "# Manuscript delta discipline\n"
+        "- The manuscript context is the authoritative draft.\n"
+        "- To continue the story, write prose that flows seamlessly from the manuscript tail — never repeat existing text.\n"
+        "- When the user has selected a range to revise, return ONLY the replacement text for that range.\n"
+        "- Put nothing but publishable manuscript prose inside <manuscript_delta>: no headings, labels, or meta-notes.\n\n"
+        "# Response format — use exactly these tags:\n"
         "<manuscript_delta>\n"
-        "Text to append to or replace in the manuscript. Leave empty if no manuscript text is needed.\n"
+        "Manuscript-ready prose to append, or the replacement for the selected range. "
+        "Leave empty if this turn needs no manuscript text.\n"
         "</manuscript_delta>\n"
         "<commentary>\n"
-        "Briefly explain important choices, continuity assumptions, and any questions for the user.\n"
-        "</commentary>\n"
-        "Avoid boilerplate caveats."
+        "Concise working notes: choices made, continuity assumptions, risks, and any genuine question for the writer. "
+        "No praise, no filler, no boilerplate caveats.\n"
+        "</commentary>"
     )
 
 def _manuscript_context(project_id: int, selection_start: int | None, selection_end: int | None) -> str:
@@ -610,16 +736,88 @@ def _parse_writer_response(text: str) -> dict[str, str]:
     }
 
 
+_SEARCH_MANUSCRIPT_TOOL = {
+    "name": "search_manuscript",
+    "description": (
+        "Search the full manuscript for a phrase (a character name, an established fact, an earlier scene) "
+        "beyond the recent tail you were given in context. Returns matching passages with their character "
+        "offsets. Use before introducing or contradicting an established detail to keep continuity."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Substring or phrase to find in the manuscript."},
+            "limit": {"type": "integer", "description": "Max passages to return (1-20).", "default": 8},
+        },
+        "required": ["query"],
+    },
+}
+
+
+def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Build the (tools, handlers) pair for a writer turn, bound to one project.
+
+    - search_manuscript: closure over project_id so the model never supplies it.
+    - web_search: reuse the main runtime's Tavily-backed tool as-is.
+    Both are read-only and pass the security gateway (uncategorized / fetch).
+    """
+
+    async def _handle_search_manuscript(query: str, limit: int = 8) -> str:
+        try:
+            n = max(1, min(int(limit), 20))
+        except (TypeError, ValueError):
+            n = 8
+        rows = await asyncio.to_thread(search_manuscript, project_id, query, n)
+        if not rows:
+            return f"No manuscript matches for: {query}"
+        blocks = []
+        for r in rows:
+            heading = str(r.get("heading") or "").strip()
+            label = f"[{heading}] " if heading else ""
+            snippet = str(r.get("snippet") or "").strip()
+            blocks.append(
+                f"{label}chars {r.get('start_offset')}–{r.get('end_offset')} "
+                f"(match {r.get('match_start')}:{r.get('match_end')}):\n…{snippet}…"
+            )
+        return "\n\n".join(blocks)
+
+    tools: list[dict] = [_SEARCH_MANUSCRIPT_TOOL]
+    handlers: dict = {"search_manuscript": _handle_search_manuscript}
+
+    # Web search is disabled by default (see _WRITER_WEB_SEARCH_ENABLED). When on,
+    # reuse the main runtime's web_search (schema + Tavily handler).
+    if _WRITER_WEB_SEARCH_ENABLED:
+        try:
+            from runtime_tools.registry import TOOLS as _RT_TOOLS, TOOL_HANDLERS as _RT_HANDLERS
+
+            web_spec = next((t for t in _RT_TOOLS if t.get("name") == "web_search"), None)
+            web_handler = _RT_HANDLERS.get("web_search")
+            if web_spec and web_handler:
+                tools.append(web_spec)
+                handlers["web_search"] = web_handler
+        except Exception:
+            logger.exception("writer: web_search tool unavailable; continuing with manuscript search only")
+
+    return tools, handlers
+
+
 async def stream_writer_reply(
     *,
     project_id: int,
     prompt: str,
     selection_start: int | None = None,
     selection_end: int | None = None,
+    model_choice: str | None = None,
 ) -> AsyncIterator[str]:
     project = get_project(project_id)
     if not project:
         yield _sse({"type": "error", "content": "Project not found."})
+        return
+
+    try:
+        writer_client, writer_model, writer_display, model_extra = _resolve_writer_model(model_choice)
+    except (ValueError, RuntimeError) as exc:
+        yield _sse({"type": "error", "content": str(exc)})
         return
 
     request_kind = ""
@@ -637,27 +835,32 @@ async def stream_writer_reply(
     error_holder: list[str] = []
     budget_tracker: dict = {}
 
+    writer_tools, writer_handlers = _build_writer_tools(project_id)
+
     async def on_progress(event: str, detail: str):
         if event == "text_delta" and detail:
             await queue.put(_sse({"type": "text_delta", "content": detail}))
         elif event == "budget" and detail:
             await queue.put(_sse({"type": "budget", "content": detail}))
+        elif event in ("tool_call", "tool_result") and detail:
+            await queue.put(_sse({"type": "tool", "content": detail}))
 
     async def run_llm() -> None:
         try:
             result = await chat_with_tools(
                 model_messages,
-                client=_client(),
-                model=WRITER_MODEL,
-                tools=[],
-                tool_handlers={},
+                client=writer_client,
+                model=writer_model,
+                tools=writer_tools,
+                tool_handlers=writer_handlers,
                 system_prompt=_build_system_blocks(project, project_id, selection_start, selection_end),
-                max_rounds=1,
+                max_rounds=_WRITER_MAX_ROUNDS,
                 max_tokens=WRITER_DEFAULT_MAX_TOKENS,
                 budget_usd=100.0,
                 budget_tracker=budget_tracker,
                 on_progress=on_progress,
                 agent_name="writer",
+                **model_extra,
             )
             answer_holder.append(result)
         except Exception as exc:
@@ -679,7 +882,7 @@ async def stream_writer_reply(
             task.cancel()
 
     if error_holder:
-        yield _sse({"type": "error", "content": f"Claude Fable 5 request failed: {error_holder[0]}"})
+        yield _sse({"type": "error", "content": f"{writer_display} request failed: {error_holder[0]}"})
         return
 
     final_text = (answer_holder[0] if answer_holder else "").strip()
@@ -692,7 +895,7 @@ async def stream_writer_reply(
         role="assistant",
         content=final_text,
         request_kind=request_kind,
-        model=WRITER_MODEL,
+        model=writer_model,
         stop_reason=stop_reason,
         usage=usage,
         cost_usd=cost,
@@ -702,8 +905,8 @@ async def stream_writer_reply(
         {
             "type": "done",
             "message_id": assistant_row.get("id"),
-            "model": WRITER_MODEL,
-            "model_display": WRITER_MODEL_DISPLAY,
+            "model": writer_model,
+            "model_display": writer_display,
             "stop_reason": stop_reason,
             "usage": usage,
             "cost_usd": cost,

@@ -207,6 +207,10 @@
       <section class="composer stack">
         <textarea id="prompt" class="prompt" placeholder="Request"></textarea>
         <div class="row">
+          <label for="modelSelect" class="meta">Model</label>
+          <select id="modelSelect"></select>
+        </div>
+        <div class="row">
           <button id="send" class="primary" type="button">Send</button>
           <button id="stop" type="button" disabled>Stop</button>
           <button id="appendAssistant" type="button" disabled>Append</button>
@@ -218,7 +222,7 @@
   </div>
 
   <script>
-    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '', model: null, lastCost: null };
+    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '', model: null, models: [], modelChoice: null, lastCost: null };
     const $ = (id) => document.getElementById(id);
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
@@ -353,8 +357,32 @@
       const data = await res.json();
       state.projects = data.projects || [];
       state.model = data.model || state.model;
+      state.models = data.models || [];
+      renderModels();
       renderProjects();
       renderCost();
+    }
+
+    function renderModels() {
+      const sel = $('modelSelect');
+      if (!sel) return;
+      const models = state.models || [];
+      if (!models.length) { sel.innerHTML = ''; return; }
+      if (!state.modelChoice || !models.some((m) => m.key === state.modelChoice && m.available)) {
+        const def = models.find((m) => m.default && m.available) || models.find((m) => m.available) || models[0];
+        state.modelChoice = def ? def.key : null;
+      }
+      sel.innerHTML = '';
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m.key;
+        const price = m.output_price_per_mtok != null ? ` ($${m.output_price_per_mtok}/Mtok out)` : '';
+        opt.textContent = m.display_name + price + (m.available ? '' : ' — unavailable');
+        opt.disabled = !m.available;
+        if (m.key === state.modelChoice) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      sel.onchange = () => { state.modelChoice = sel.value; };
     }
 
     async function loadProject(id) {
@@ -485,6 +513,7 @@
       state.lastAssistant = '';
       setStatus('Streaming...');
       const payload = { prompt: promptText };
+      if (state.modelChoice) payload.model = state.modelChoice;
       if (start !== end) {
         payload.selection_start = start;
         payload.selection_end = end;
@@ -524,6 +553,7 @@
               renderCost();
               setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
             }
+            if (event.type === 'tool') setStatus(event.content);
             if (event.type === 'error') setStatus(event.content || 'Request failed.');
             $('conversation').scrollTop = $('conversation').scrollHeight;
           }

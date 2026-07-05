@@ -246,6 +246,7 @@ class WriterMessageRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=30000)
     selection_start: int | None = Field(default=None, ge=0)
     selection_end: int | None = Field(default=None, ge=0)
+    model: str | None = Field(default=None, max_length=64)
 
 
 class WriterManuscriptRequest(BaseModel):
@@ -673,6 +674,7 @@ async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
         WRITER_MODEL_DISPLAY,
         WRITER_OUTPUT_PRICE_PER_MTOK,
         list_projects,
+        list_writer_models,
     )
 
     projects = await asyncio.to_thread(list_projects, limit)
@@ -684,6 +686,7 @@ async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
             "input_price_per_mtok": WRITER_INPUT_PRICE_PER_MTOK,
             "output_price_per_mtok": WRITER_OUTPUT_PRICE_PER_MTOK,
         },
+        "models": list_writer_models(),
     }
 
 
@@ -825,6 +828,7 @@ async def writer_message(project_id: int, request: WriterMessageRequest):
             prompt=request.prompt,
             selection_start=request.selection_start,
             selection_end=request.selection_end,
+            model_choice=request.model,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store"},
