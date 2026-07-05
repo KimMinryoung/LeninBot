@@ -193,6 +193,13 @@
         <div id="searchResults" class="search-results"></div>
       </section>
 
+      <section class="stack cost-panel">
+        <h2>Cost</h2>
+        <div id="costSummary" class="meta">No completed Fable call yet.</div>
+        <div id="costUsage" class="meta"></div>
+        <div id="costPricing" class="meta"></div>
+      </section>
+
       <section id="conversation" class="conversation">
         <div class="empty">No messages yet.</div>
       </section>
@@ -211,7 +218,7 @@
   </div>
 
   <script>
-    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '' };
+    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '', model: null, lastCost: null };
     const $ = (id) => document.getElementById(id);
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
@@ -223,14 +230,35 @@
     };
     const setStatus = (text) => { $('status').textContent = text || ''; };
     const setManuscriptStatus = (text) => { $('manuscriptStatus').textContent = text || ''; };
-    const fmtCost = (value) => value == null ? '' : ` · $${Number(value).toFixed(4)}`;
+    const fmtMoney = (value) => value == null ? '' : `$${Number(value).toFixed(4)}`;
+    const fmtCost = (value) => value == null ? '' : ` · ${fmtMoney(value)}`;
     const fmtUsage = (usage = {}) => {
       const read = Number(usage.cache_read_input_tokens || 0);
       const write = Number(usage.cache_creation_input_tokens || 0);
       if (!read && !write) return '';
       return ` · cache read ${read.toLocaleString()} / write ${write.toLocaleString()}`;
     };
+    const tokenMeta = (usage = {}) => {
+      const input = Number(usage.input_tokens || 0);
+      const output = Number(usage.output_tokens || 0);
+      const read = Number(usage.cache_read_input_tokens || 0);
+      const write = Number(usage.cache_creation_input_tokens || 0);
+      return `input ${input.toLocaleString()} · output ${output.toLocaleString()} · cache read ${read.toLocaleString()} · cache write ${write.toLocaleString()}`;
+    };
     const charMeta = (count) => `${Number(count || 0).toLocaleString()} chars`;
+
+    function renderCost() {
+      if (state.lastCost) {
+        $('costSummary').textContent = `${state.lastCost.model || 'Claude Fable 5'} · ${state.lastCost.stop || 'complete'} · ${fmtMoney(state.lastCost.cost) || 'cost unavailable'}`;
+        $('costUsage').textContent = tokenMeta(state.lastCost.usage || {});
+      } else {
+        $('costSummary').textContent = 'No completed Fable call yet.';
+        $('costUsage').textContent = '';
+      }
+      if (state.model) {
+        $('costPricing').textContent = `pricing input $${Number(state.model.input_price_per_mtok || 0).toFixed(2)}/MTok · output $${Number(state.model.output_price_per_mtok || 0).toFixed(2)}/MTok`;
+      }
+    }
 
     function parseWriterContent(content) {
       const raw = content || '';
@@ -324,7 +352,9 @@
       const res = await api('/writer/projects');
       const data = await res.json();
       state.projects = data.projects || [];
+      state.model = data.model || state.model;
       renderProjects();
+      renderCost();
     }
 
     async function loadProject(id) {
@@ -485,6 +515,13 @@
             if (event.type === 'done') {
               if (event.display_text) assistantBody.textContent = event.display_text;
               state.lastAssistant = event.manuscript_text || state.lastAssistant;
+              state.lastCost = {
+                model: event.model_display || event.model,
+                stop: event.stop_reason || 'complete',
+                cost: event.cost_usd,
+                usage: event.usage || {}
+              };
+              renderCost();
               setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
             }
             if (event.type === 'error') setStatus(event.content || 'Request failed.');
