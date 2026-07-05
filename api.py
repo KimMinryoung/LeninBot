@@ -244,8 +244,25 @@ class WriterProjectRequest(BaseModel):
 
 class WriterMessageRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=30000)
-    request_kind: str = Field(default="draft", max_length=32)
-    max_tokens: int = Field(default=4096, ge=256, le=16000)
+    selection_start: int | None = Field(default=None, ge=0)
+    selection_end: int | None = Field(default=None, ge=0)
+
+
+class WriterManuscriptRequest(BaseModel):
+    body: str = Field(default="", max_length=5_000_000)
+    note: str = Field(default="", max_length=500)
+
+
+class WriterManuscriptAppendRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=500_000)
+    note: str = Field(default="", max_length=500)
+
+
+class WriterManuscriptReplaceRequest(BaseModel):
+    start: int = Field(..., ge=0)
+    end: int = Field(..., ge=0)
+    replacement: str = Field(default="", max_length=500_000)
+    note: str = Field(default="", max_length=500)
 
 
 class EmailDraftRequest(BaseModel):
@@ -719,6 +736,85 @@ async def delete_writer_project(project_id: int):
     return {"deleted": True}
 
 
+@app.get("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
+async def get_writer_manuscript(project_id: int):
+    from creative_writer import get_manuscript
+
+    manuscript = await asyncio.to_thread(get_manuscript, project_id)
+    if not manuscript:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"manuscript": manuscript}
+
+
+@app.put("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
+async def save_writer_manuscript(project_id: int, request: WriterManuscriptRequest):
+    from creative_writer import save_manuscript
+
+    manuscript = await asyncio.to_thread(save_manuscript, project_id, request.body, request.note)
+    if not manuscript:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"manuscript": manuscript}
+
+
+@app.get("/writer/projects/{project_id}/manuscript/search", dependencies=[Depends(require_writer_access)])
+async def search_writer_manuscript(
+    project_id: int,
+    q: str = Query(..., min_length=1, max_length=500),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    from creative_writer import get_project, search_manuscript
+
+    project = await asyncio.to_thread(get_project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    results = await asyncio.to_thread(search_manuscript, project_id, q, limit)
+    return {"results": results}
+
+
+@app.post("/writer/projects/{project_id}/manuscript/append", dependencies=[Depends(require_writer_access)])
+async def append_writer_manuscript(project_id: int, request: WriterManuscriptAppendRequest):
+    from creative_writer import append_manuscript
+
+    manuscript = await asyncio.to_thread(append_manuscript, project_id, request.text, request.note)
+    if not manuscript:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"manuscript": manuscript}
+
+
+@app.post("/writer/projects/{project_id}/manuscript/replace", dependencies=[Depends(require_writer_access)])
+async def replace_writer_manuscript(project_id: int, request: WriterManuscriptReplaceRequest):
+    from creative_writer import replace_manuscript_range
+
+    try:
+        manuscript = await asyncio.to_thread(
+            replace_manuscript_range,
+            project_id,
+            request.start,
+            request.end,
+            request.replacement,
+            request.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not manuscript:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"manuscript": manuscript}
+
+
+@app.get("/writer/projects/{project_id}/manuscript/revisions", dependencies=[Depends(require_writer_access)])
+async def list_writer_manuscript_revisions(
+    project_id: int,
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    from creative_writer import get_project, list_manuscript_revisions
+
+    project = await asyncio.to_thread(get_project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    revisions = await asyncio.to_thread(list_manuscript_revisions, project_id, limit)
+    return {"revisions": revisions}
+
+
 @app.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])
 async def writer_message(project_id: int, request: WriterMessageRequest):
     from creative_writer import stream_writer_reply
@@ -727,8 +823,8 @@ async def writer_message(project_id: int, request: WriterMessageRequest):
         stream_writer_reply(
             project_id=project_id,
             prompt=request.prompt,
-            request_kind=request.request_kind,
-            max_tokens=request.max_tokens,
+            selection_start=request.selection_start,
+            selection_end=request.selection_end,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store"},

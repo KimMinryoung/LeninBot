@@ -1,8 +1,9 @@
 """Personal fiction-writing workspace backed by Claude Fable 5.
 
-This module is intentionally separate from the Cyber-Lenin web chat/provider
-configuration. It reuses the shared Anthropic Messages loop for API calls while
-storing its own project sessions in writer-specific tables.
+This module keeps personal fiction projects separate from the public web chat.
+It reuses the shared Anthropic Messages loop for API calls while storing its own
+project sessions, canonical manuscript text, searchable chunks, and revisions in
+writer-specific tables.
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from datetime import datetime
 from typing import Any
 
 import anthropic
+from psycopg2.extras import RealDictCursor, execute_values
 
+from db import get_conn
 from db import execute as db_execute
 from db import query as db_query
 from db import query_one as db_query_one
@@ -28,7 +31,12 @@ WRITER_MODEL = "claude-fable-5"
 WRITER_MODEL_DISPLAY = "Claude Fable 5"
 WRITER_INPUT_PRICE_PER_MTOK = 10.0
 WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
+WRITER_DEFAULT_MAX_TOKENS = 12000
 _MAX_CONTEXT_MESSAGES = 80
+_MANUSCRIPT_CHUNK_SIZE = 3500
+_MANUSCRIPT_CHUNK_OVERLAP = 300
+_MANUSCRIPT_TAIL_CHARS = 7000
+_MANUSCRIPT_SELECTION_LIMIT = 20000
 
 _writer_client: anthropic.AsyncAnthropic | None = None
 
@@ -71,6 +79,38 @@ def ensure_writer_tables() -> None:
            )"""
     )
     db_execute(
+        """CREATE TABLE IF NOT EXISTS writer_manuscripts (
+               project_id BIGINT PRIMARY KEY REFERENCES writer_projects(id) ON DELETE CASCADE,
+               body TEXT NOT NULL DEFAULT '',
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           )"""
+    )
+    db_execute(
+        """CREATE TABLE IF NOT EXISTS writer_manuscript_chunks (
+               id BIGSERIAL PRIMARY KEY,
+               project_id BIGINT NOT NULL REFERENCES writer_projects(id) ON DELETE CASCADE,
+               chunk_index INTEGER NOT NULL,
+               start_offset INTEGER NOT NULL,
+               end_offset INTEGER NOT NULL,
+               heading TEXT NOT NULL DEFAULT '',
+               excerpt TEXT NOT NULL,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+               UNIQUE(project_id, chunk_index)
+           )"""
+    )
+    db_execute(
+        """CREATE TABLE IF NOT EXISTS writer_manuscript_revisions (
+               id BIGSERIAL PRIMARY KEY,
+               project_id BIGINT NOT NULL REFERENCES writer_projects(id) ON DELETE CASCADE,
+               action TEXT NOT NULL,
+               before_body TEXT NOT NULL DEFAULT '',
+               after_body TEXT NOT NULL DEFAULT '',
+               note TEXT NOT NULL DEFAULT '',
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           )"""
+    )
+    db_execute(
         "CREATE INDEX IF NOT EXISTS writer_messages_project_created_idx "
         "ON writer_messages(project_id, created_at ASC, id ASC)"
     )
@@ -78,19 +118,30 @@ def ensure_writer_tables() -> None:
         "CREATE INDEX IF NOT EXISTS writer_projects_updated_idx "
         "ON writer_projects(updated_at DESC, id DESC)"
     )
+    db_execute(
+        "CREATE INDEX IF NOT EXISTS writer_manuscript_chunks_project_idx "
+        "ON writer_manuscript_chunks(project_id, chunk_index ASC)"
+    )
+    db_execute(
+        "CREATE INDEX IF NOT EXISTS writer_manuscript_revisions_project_idx "
+        "ON writer_manuscript_revisions(project_id, created_at DESC, id DESC)"
+    )
 
 
 def list_projects(limit: int = 100) -> list[dict]:
     return db_query(
         """SELECT p.id, p.title, p.premise, p.style_notes, p.status,
                   p.created_at, p.updated_at,
-                  COALESCE(m.message_count, 0)::int AS message_count
+                  COALESCE(m.message_count, 0)::int AS message_count,
+                  COALESCE(length(w.body), 0)::int AS manuscript_char_count,
+                  w.updated_at AS manuscript_updated_at
              FROM writer_projects p
         LEFT JOIN (
                   SELECT project_id, COUNT(*) AS message_count
                     FROM writer_messages
                    GROUP BY project_id
              ) m ON m.project_id = p.id
+        LEFT JOIN writer_manuscripts w ON w.project_id = p.id
             ORDER BY p.updated_at DESC, p.id DESC
             LIMIT %s""",
         (limit,),
@@ -98,12 +149,15 @@ def list_projects(limit: int = 100) -> list[dict]:
 
 
 def create_project(title: str, premise: str = "", style_notes: str = "") -> dict:
-    return db_query_one(
+    project = db_query_one(
         """INSERT INTO writer_projects (title, premise, style_notes)
              VALUES (%s, %s, %s)
           RETURNING id, title, premise, style_notes, status, created_at, updated_at""",
         (title.strip(), premise.strip(), style_notes.strip()),
     ) or {}
+    if project.get("id"):
+        _ensure_manuscript_row(int(project["id"]))
+    return project
 
 
 def update_project(project_id: int, title: str, premise: str, style_notes: str) -> dict | None:
@@ -120,12 +174,19 @@ def update_project(project_id: int, title: str, premise: str, style_notes: str) 
 
 
 def get_project(project_id: int) -> dict | None:
-    return db_query_one(
-        """SELECT id, title, premise, style_notes, status, created_at, updated_at
-             FROM writer_projects
-            WHERE id = %s""",
+    project = db_query_one(
+        """SELECT p.id, p.title, p.premise, p.style_notes, p.status,
+                  p.created_at, p.updated_at,
+                  COALESCE(length(w.body), 0)::int AS manuscript_char_count,
+                  w.updated_at AS manuscript_updated_at
+             FROM writer_projects p
+        LEFT JOIN writer_manuscripts w ON w.project_id = p.id
+            WHERE p.id = %s""",
         (project_id,),
     )
+    if project:
+        _ensure_manuscript_row(project_id)
+    return project
 
 
 def get_project_with_messages(project_id: int) -> dict | None:
@@ -150,6 +211,242 @@ def delete_project(project_id: int) -> bool:
         (project_id,),
     )
     return bool(row)
+
+
+def _ensure_manuscript_row(project_id: int) -> None:
+    db_execute(
+        """INSERT INTO writer_manuscripts (project_id, body)
+             SELECT %s, ''
+              WHERE EXISTS (SELECT 1 FROM writer_projects WHERE id = %s)
+         ON CONFLICT (project_id) DO NOTHING""",
+        (project_id, project_id),
+    )
+
+
+def _chunk_manuscript(body: str) -> list[dict[str, Any]]:
+    if not body:
+        return []
+    chunks: list[dict[str, Any]] = []
+    start = 0
+    index = 0
+    length = len(body)
+    while start < length:
+        hard_end = min(length, start + _MANUSCRIPT_CHUNK_SIZE)
+        end = hard_end
+        if hard_end < length:
+            window = body[start:hard_end]
+            split_at = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(". "))
+            if split_at >= int(_MANUSCRIPT_CHUNK_SIZE * 0.55):
+                end = start + split_at + (2 if window[split_at:split_at + 2] == "\n\n" else 1)
+        excerpt = body[start:end]
+        chunks.append(
+            {
+                "chunk_index": index,
+                "start_offset": start,
+                "end_offset": end,
+                "heading": _heading_for_offset(body, start),
+                "excerpt": excerpt,
+            }
+        )
+        if end >= length:
+            break
+        start = max(end - _MANUSCRIPT_CHUNK_OVERLAP, start + 1)
+        index += 1
+    return chunks
+
+
+def _heading_for_offset(body: str, offset: int) -> str:
+    prefix = body[max(0, offset - 1400):offset]
+    for line in reversed(prefix.splitlines()):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped[:160]
+    for line in body[offset:offset + 500].splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:160]
+    return ""
+
+
+def _reindex_manuscript(project_id: int, body: str) -> None:
+    db_execute("DELETE FROM writer_manuscript_chunks WHERE project_id = %s", (project_id,))
+    for chunk in _chunk_manuscript(body):
+        db_execute(
+            """INSERT INTO writer_manuscript_chunks
+                      (project_id, chunk_index, start_offset, end_offset, heading, excerpt)
+                 VALUES (%s, %s, %s, %s, %s, %s)""",
+            (
+                project_id,
+                chunk["chunk_index"],
+                chunk["start_offset"],
+                chunk["end_offset"],
+                chunk["heading"],
+                chunk["excerpt"],
+            ),
+        )
+
+
+def get_manuscript(project_id: int) -> dict | None:
+    if not get_project(project_id):
+        return None
+    _ensure_manuscript_row(project_id)
+    row = db_query_one(
+        """SELECT project_id, body, length(body)::int AS char_count,
+                  created_at, updated_at
+             FROM writer_manuscripts
+            WHERE project_id = %s""",
+        (project_id,),
+    )
+    return row
+
+
+def _write_manuscript(project_id: int, body: str, *, action: str, note: str = "") -> dict | None:
+    chunks = _chunk_manuscript(body)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT p.id, w.body
+                     FROM writer_projects p
+                LEFT JOIN writer_manuscripts w ON w.project_id = p.id
+                    WHERE p.id = %s""",
+                (project_id,),
+            )
+            previous = cur.fetchone()
+            if not previous:
+                return None
+            before_body = str(previous.get("body") or "")
+            cur.execute(
+                """INSERT INTO writer_manuscripts (project_id, body)
+                     VALUES (%s, '')
+                ON CONFLICT (project_id) DO NOTHING""",
+                (project_id,),
+            )
+            cur.execute(
+                """INSERT INTO writer_manuscript_revisions
+                          (project_id, action, before_body, after_body, note)
+                     VALUES (%s, %s, %s, %s, %s)""",
+                (project_id, action, before_body, body, note.strip()),
+            )
+            cur.execute(
+                """UPDATE writer_manuscripts
+                      SET body = %s,
+                          updated_at = NOW()
+                    WHERE project_id = %s""",
+                (body, project_id),
+            )
+            cur.execute("DELETE FROM writer_manuscript_chunks WHERE project_id = %s", (project_id,))
+            if chunks:
+                execute_values(
+                    cur,
+                    """INSERT INTO writer_manuscript_chunks
+                              (project_id, chunk_index, start_offset, end_offset, heading, excerpt)
+                         VALUES %s""",
+                    [
+                        (
+                            project_id,
+                            chunk["chunk_index"],
+                            chunk["start_offset"],
+                            chunk["end_offset"],
+                            chunk["heading"],
+                            chunk["excerpt"],
+                        )
+                        for chunk in chunks
+                    ],
+                )
+            cur.execute("UPDATE writer_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
+            cur.execute(
+                """SELECT project_id, body, length(body)::int AS char_count,
+                          created_at, updated_at
+                     FROM writer_manuscripts
+                    WHERE project_id = %s""",
+                (project_id,),
+            )
+            return dict(cur.fetchone())
+
+
+def save_manuscript(project_id: int, body: str, note: str = "") -> dict | None:
+    return _write_manuscript(project_id, body, action="save", note=note)
+
+
+def append_manuscript(project_id: int, text: str, note: str = "") -> dict | None:
+    manuscript = get_manuscript(project_id)
+    if not manuscript:
+        return None
+    current = str(manuscript.get("body") or "")
+    addition = text.strip("\n")
+    if not addition:
+        return manuscript
+    separator = "\n\n" if current and not current.endswith("\n\n") else ""
+    return _write_manuscript(project_id, current + separator + addition, action="append", note=note)
+
+
+def replace_manuscript_range(
+    project_id: int,
+    start: int,
+    end: int,
+    replacement: str,
+    note: str = "",
+) -> dict | None:
+    manuscript = get_manuscript(project_id)
+    if not manuscript:
+        return None
+    current = str(manuscript.get("body") or "")
+    if start < 0 or end < start or end > len(current):
+        raise ValueError("invalid manuscript range")
+    updated = current[:start] + replacement + current[end:]
+    return _write_manuscript(project_id, updated, action="replace", note=note)
+
+
+def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict]:
+    needle = query.strip()
+    if not needle:
+        return []
+    _ensure_manuscript_row(project_id)
+    rows = db_query(
+        """SELECT id, chunk_index, start_offset, end_offset, heading, excerpt
+             FROM writer_manuscript_chunks
+            WHERE project_id = %s
+              AND excerpt ILIKE %s
+            ORDER BY chunk_index ASC
+            LIMIT %s""",
+        (project_id, f"%{needle}%", limit),
+    )
+    results: list[dict] = []
+    lowered = needle.lower()
+    for row in rows:
+        excerpt = str(row.get("excerpt") or "")
+        found = excerpt.lower().find(lowered)
+        if found < 0:
+            found = 0
+        snippet_start = max(0, found - 180)
+        snippet_end = min(len(excerpt), found + len(needle) + 220)
+        results.append(
+            {
+                "id": row.get("id"),
+                "chunk_index": row.get("chunk_index"),
+                "start_offset": row.get("start_offset"),
+                "end_offset": row.get("end_offset"),
+                "match_start": int(row.get("start_offset") or 0) + found,
+                "match_end": int(row.get("start_offset") or 0) + found + len(needle),
+                "heading": row.get("heading") or "",
+                "snippet": excerpt[snippet_start:snippet_end],
+            }
+        )
+    return results
+
+
+def list_manuscript_revisions(project_id: int, limit: int = 30) -> list[dict]:
+    return db_query(
+        """SELECT id, project_id, action, note,
+                  length(before_body)::int AS before_char_count,
+                  length(after_body)::int AS after_char_count,
+                  created_at
+             FROM writer_manuscript_revisions
+            WHERE project_id = %s
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s""",
+        (project_id, limit),
+    )
 
 
 def _insert_message(
@@ -186,34 +483,46 @@ def _touch_project(project_id: int) -> None:
     db_execute("UPDATE writer_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
 
 
-def _build_system_prompt(project: dict, request_kind: str) -> str:
-    kind_guidance = {
-        "draft": "Write polished prose for the requested scene or chapter.",
-        "continue": "Continue from the latest established scene without summarizing unless asked.",
-        "revise": "Revise the supplied passage while preserving the user's intent and continuity.",
-        "plan": "Produce structural planning, scene beats, or continuity notes.",
-        "critique": "Give precise editorial critique and actionable revision notes.",
-    }.get(request_kind, "Help with the fiction project according to the user's request.")
-
+def _build_system_prompt(project: dict) -> str:
     premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
     style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
     title = str(project.get("title") or "Untitled").strip()
     return (
         "You are a private fiction-writing collaborator for one user's personal novel project.\n"
-        "This workspace is separate from Cyber-Lenin. Do not adopt Cyber-Lenin's identity, "
-        "political persona, tools, memory, or public-chat behavior.\n\n"
         f"Project title: {title}\n"
         f"Premise:\n{premise}\n\n"
         f"Style and continuity notes:\n{style_notes}\n\n"
-        f"Current task mode: {request_kind or 'draft'}\n"
-        f"Task guidance: {kind_guidance}\n\n"
-        "Default to substantial, publication-minded prose when drafting. Preserve continuity, "
-        "avoid generic disclaimers, and ask at most one concise clarification only when the "
-        "request is impossible to fulfill responsibly without it."
+        "Treat the manuscript text supplied in each turn as the authoritative draft. "
+        "When revising or extending it, preserve continuity and answer with usable prose or "
+        "specific edit text unless the user asks for analysis. Avoid boilerplate caveats or "
+        "process commentary."
     )
 
 
-def _messages_for_model(project_id: int, user_prompt: str, request_kind: str) -> list[dict]:
+def _manuscript_context(project_id: int, selection_start: int | None, selection_end: int | None) -> str:
+    manuscript = get_manuscript(project_id) or {}
+    body = str(manuscript.get("body") or "")
+    parts = [f"Manuscript character count: {len(body)}"]
+    if body:
+        tail = body[-_MANUSCRIPT_TAIL_CHARS:]
+        parts.append("Recent manuscript tail:\n" + tail)
+    if selection_start is not None and selection_end is not None and body:
+        start = max(0, min(selection_start, len(body)))
+        end = max(start, min(selection_end, len(body)))
+        selected = body[start:end]
+        if selected:
+            if len(selected) > _MANUSCRIPT_SELECTION_LIMIT:
+                selected = selected[:_MANUSCRIPT_SELECTION_LIMIT] + "\n[selection truncated]"
+            parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
+    return "\n\n".join(parts)
+
+
+def _messages_for_model(
+    project_id: int,
+    user_prompt: str,
+    selection_start: int | None = None,
+    selection_end: int | None = None,
+) -> list[dict]:
     rows = db_query(
         """SELECT role, content
              FROM writer_messages
@@ -228,8 +537,15 @@ def _messages_for_model(project_id: int, user_prompt: str, request_kind: str) ->
         for row in ordered
         if row.get("role") in {"user", "assistant"} and str(row.get("content") or "").strip()
     ]
-    prefix = f"[mode: {request_kind}]\n" if request_kind else ""
-    messages.append({"role": "user", "content": prefix + user_prompt.strip()})
+    current_turn = (
+        "<manuscript_context>\n"
+        + _manuscript_context(project_id, selection_start, selection_end)
+        + "\n</manuscript_context>\n\n"
+        + "<user_request>\n"
+        + user_prompt.strip()
+        + "\n</user_request>"
+    )
+    messages.append({"role": "user", "content": current_turn})
     return messages
 
 
@@ -241,16 +557,16 @@ async def stream_writer_reply(
     *,
     project_id: int,
     prompt: str,
-    request_kind: str,
-    max_tokens: int,
+    selection_start: int | None = None,
+    selection_end: int | None = None,
 ) -> AsyncIterator[str]:
     project = get_project(project_id)
     if not project:
         yield _sse({"type": "error", "content": "Project not found."})
         return
 
-    request_kind = request_kind if request_kind in {"draft", "continue", "revise", "plan", "critique"} else "draft"
-    model_messages = _messages_for_model(project_id, prompt, request_kind)
+    request_kind = ""
+    model_messages = _messages_for_model(project_id, prompt, selection_start, selection_end)
     user_row = _insert_message(
         project_id=project_id,
         role="user",
@@ -278,9 +594,9 @@ async def stream_writer_reply(
                 model=WRITER_MODEL,
                 tools=[],
                 tool_handlers={},
-                system_prompt=_build_system_prompt(project, request_kind),
+                system_prompt=_build_system_prompt(project),
                 max_rounds=1,
-                max_tokens=max(256, min(int(max_tokens or 4096), 16000)),
+                max_tokens=WRITER_DEFAULT_MAX_TOKENS,
                 budget_usd=100.0,
                 budget_tracker=budget_tracker,
                 on_progress=on_progress,

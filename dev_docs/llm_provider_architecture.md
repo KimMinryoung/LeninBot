@@ -45,7 +45,7 @@ DeepSeek roleplay bot (leninbot-roleplay.service)
 Personal fiction writer (/writer)
   creative_writer._client()
   -> claude_loop.chat_with_tools(client=..., model="claude-fable-5", tools=[])
-  -> Anthropic Messages API, no Cyber-Lenin provider tier
+  -> Anthropic Messages API, no shared provider tier
 
 Local
   llm.client backend
@@ -58,7 +58,7 @@ Telegram chat, background tasks, A2A, public web chat, browser worker tasks, bro
 
 The roleplay bot (`leninbot-roleplay.service`, `telegram/roleplay_bot.py`) is a separate runtime, not the Cyber-Lenin orchestrator, and does not read `config.json`'s `provider`/`chat_model` keys. It pins DeepSeek directly: `_deepseek_anthropic_client` + `claude_loop.chat_with_tools`, model `deepseek-v4-flash` (via `_resolve_deepseek_model("deepseek_flash")`), with thinking **enabled** (`output_config.effort=high`). Thinking is on for answer quality; because it goes through `claude_loop`, the reasoning stays in replay-only `thinking` blocks and never appears in the user-facing reply — which is why the roleplay bot uses the Anthropic-compatible path rather than the OpenAI-compatible loop (the latter prepends reasoning to the reply). The bot ignores the global `DEEPSEEK_THINKING_MODE` env and sets its thinking inline.
 
-The personal fiction writer (`/writer`, `creative_writer.py`) is also separate from Cyber-Lenin provider routing. It is not exposed through Telegram `/config`, `webchat_provider`, `webchat_model`, personas, tools, or the task/autonomous tiers. It uses the shared Anthropic `claude_loop.chat_with_tools` path with `model="claude-fable-5"` and `tools=[]`, stores isolated project state in `writer_projects` and `writer_messages`, and requires writer access authentication on its API routes. The public frontend path uses the existing admin login session and injects the backend admin key server-side; direct API callers may use `X-Writer-Key` (falling back to `ADMIN_API_KEY` when `WRITER_ACCESS_KEY` is unset). `WRITER_ANTHROPIC_API_KEY` can provide a separate paid Anthropic key; if absent, it falls back to `ANTHROPIC_API_KEY`.
+The personal fiction writer (`/writer`, `creative_writer.py`) is separate from normal provider routing. It is not exposed through Telegram `/config`, `webchat_provider`, `webchat_model`, personas, tools, or the task/autonomous tiers. It uses the shared Anthropic `claude_loop.chat_with_tools` path with `model="claude-fable-5"` and `tools=[]`, stores isolated project state in `writer_projects`, `writer_messages`, `writer_manuscripts`, searchable manuscript chunks, and revision metadata, and requires writer access authentication on its API routes. The public frontend path uses the existing admin login session and injects the backend admin key server-side; direct API callers may use `X-Writer-Key` (falling back to `ADMIN_API_KEY` when `WRITER_ACCESS_KEY` is unset). `WRITER_ANTHROPIC_API_KEY` can provide a separate paid Anthropic key; if absent, it falls back to `ANTHROPIC_API_KEY`.
 
 ## Runtime Config Keys
 

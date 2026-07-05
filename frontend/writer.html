@@ -8,137 +8,137 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f4f2ec;
-      --surface: #fffefa;
-      --panel: #e9ece7;
-      --text: #171814;
-      --muted: #64685f;
-      --line: #d5d9d1;
+      --bg: #f5f3ee;
+      --surface: #fffdf8;
+      --panel: #ecefed;
+      --ink: #171814;
+      --muted: #60665f;
+      --line: #d6d9d4;
       --accent: #235c55;
-      --accent-2: #8a3d3d;
-      --focus: #c7953d;
-      --shadow: 0 14px 40px rgba(21, 24, 18, 0.11);
+      --accent-soft: #e7f0ec;
+      --warn: #8a3d3d;
+      --gold: #b8832f;
+      --shadow: 0 10px 28px rgba(24, 26, 22, .08);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
       background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      font: 14px/1.48 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, textarea, select { font: inherit; }
+    button, input, textarea { font: inherit; }
     button {
       border: 1px solid var(--line);
-      background: var(--surface);
-      color: var(--text);
       border-radius: 6px;
-      min-height: 36px;
-      padding: 0 12px;
+      min-height: 34px;
+      padding: 0 11px;
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
+      white-space: nowrap;
     }
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); border-color: var(--accent); color: white; }
-    button.danger { color: var(--accent-2); }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    input, textarea, select {
+    button.danger { color: var(--warn); }
+    button:disabled { opacity: .52; cursor: not-allowed; }
+    input, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--surface);
-      color: var(--text);
+      color: var(--ink);
       padding: 9px 10px;
       outline: none;
     }
-    textarea { min-height: 92px; resize: vertical; }
-    input:focus, textarea:focus, select:focus { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(199, 149, 61, .18); }
+    input:focus, textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184, 131, 47, .18); }
+    textarea { resize: vertical; }
     .app {
       display: grid;
-      grid-template-columns: 290px minmax(420px, 1fr) 340px;
+      grid-template-columns: 280px minmax(520px, 1fr) 390px;
       min-height: 100vh;
     }
-    .sidebar, .notes {
-      background: var(--panel);
-      border-right: 1px solid var(--line);
-      padding: 16px;
+    .sidebar, .assistant {
       min-width: 0;
+      background: var(--panel);
+      padding: 15px;
     }
-    .notes { border-right: 0; border-left: 1px solid var(--line); }
-    .main {
+    .sidebar { border-right: 1px solid var(--line); }
+    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto minmax(160px, 1fr) auto; gap: 12px; }
+    .editor {
+      min-width: 0;
       display: grid;
       grid-template-rows: auto 1fr auto;
-      min-width: 0;
       background: var(--surface);
     }
-    .topbar {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 12px;
-      align-items: center;
-      padding: 14px 18px;
+    .topbar, .editor-actions, .composer {
+      padding: 13px 16px;
       border-bottom: 1px solid var(--line);
     }
+    .editor-actions { border-top: 1px solid var(--line); border-bottom: 0; background: #faf8f2; }
+    .composer { border: 0; padding: 0; }
     h1, h2 { margin: 0; letter-spacing: 0; }
     h1 { font-size: 18px; font-weight: 700; }
-    h2 { font-size: 13px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
-    .meta { color: var(--muted); font-size: 12px; }
+    h2 { font-size: 12px; color: var(--muted); font-weight: 800; text-transform: uppercase; }
+    label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .meta, .status { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .stack { display: grid; gap: 10px; }
-    .row { display: flex; gap: 8px; align-items: center; }
-    .row > * { min-width: 0; }
+    .row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+    .row.grow > :first-child { flex: 1; }
     .project-list { display: grid; gap: 8px; margin-top: 14px; }
     .project {
-      text-align: left;
-      min-height: 54px;
       display: grid;
-      align-content: center;
       gap: 2px;
-      background: rgba(255,255,255,.62);
+      align-content: center;
+      min-height: 56px;
+      width: 100%;
+      text-align: left;
+      background: rgba(255, 255, 255, .66);
     }
     .project.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-    .project strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .messages {
+    .project strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .manuscript {
+      height: 100%;
+      min-height: 520px;
+      border: 0;
+      border-radius: 0;
+      padding: 22px 26px;
+      font: 16px/1.72 ui-serif, Georgia, "Times New Roman", serif;
+      background: var(--surface);
+      box-shadow: none;
+    }
+    .project-fields textarea { min-height: 86px; }
+    .conversation {
+      min-height: 0;
       overflow: auto;
-      padding: 18px;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 10px;
+      padding-right: 2px;
     }
     .message {
-      max-width: 900px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 13px 14px;
+      padding: 10px 11px;
       background: #fbfaf6;
-      box-shadow: 0 1px 0 rgba(0,0,0,.03);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+      box-shadow: 0 1px 0 rgba(0,0,0,.03);
     }
-    .message.user { align-self: flex-end; background: #eef3ef; width: min(760px, 90%); }
-    .message.assistant { align-self: flex-start; width: min(900px, 96%); }
-    .message .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-    .composer {
-      border-top: 1px solid var(--line);
-      padding: 14px 18px 18px;
-      background: #f8f7f2;
-    }
-    .composer textarea { min-height: 116px; }
-    .fields { display: grid; gap: 12px; margin-top: 14px; }
-    .status {
-      min-height: 22px;
-      color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .empty {
-      margin: auto;
-      max-width: 460px;
-      color: var(--muted);
-      text-align: center;
-    }
-    @media (max-width: 980px) {
+    .message.user { background: var(--accent-soft); }
+    .message .label { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+    .prompt { min-height: 112px; }
+    .search-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
+    .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; }
+    .result span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
+    .empty { color: var(--muted); text-align: center; padding: 28px 12px; }
+    @media (max-width: 1120px) {
       .app { grid-template-columns: 1fr; }
-      .sidebar, .notes { border: 0; border-bottom: 1px solid var(--line); }
-      .main { min-height: 70vh; }
+      .sidebar, .assistant { border: 0; border-bottom: 1px solid var(--line); }
+      .assistant { grid-template-rows: auto; }
+      .editor { min-height: 72vh; }
+      .manuscript { min-height: 460px; }
     }
   </style>
 </head>
@@ -148,7 +148,7 @@
       <div class="stack">
         <div>
           <h1>Fable Writer</h1>
-          <div class="meta">Claude Fable 5 · private sessions</div>
+          <div class="meta">Claude Fable 5 · one manuscript per project</div>
         </div>
         <div class="row">
           <button id="newProject" class="primary" type="button">New</button>
@@ -158,59 +158,60 @@
       <div id="projectList" class="project-list"></div>
     </aside>
 
-    <main class="main">
+    <main class="editor">
       <header class="topbar">
-        <div>
-          <h1 id="projectTitle">No project selected</h1>
-          <div id="projectMeta" class="meta">Create or select a writing project.</div>
-        </div>
-        <div class="row">
-          <select id="mode" title="Mode">
-            <option value="draft">Draft</option>
-            <option value="continue">Continue</option>
-            <option value="revise">Revise</option>
-            <option value="plan">Plan</option>
-            <option value="critique">Critique</option>
-          </select>
-          <select id="maxTokens" title="Max output">
-            <option value="2048">2K</option>
-            <option value="4096" selected>4K</option>
-            <option value="8192">8K</option>
-            <option value="16000">16K</option>
-          </select>
-        </div>
+        <h1 id="projectTitle">No project selected</h1>
+        <div id="projectMeta" class="meta">Create or select a project.</div>
       </header>
-      <section id="messages" class="messages">
-        <div class="empty">Select a project to begin.</div>
-      </section>
-      <section class="composer">
-        <div class="stack">
-          <textarea id="prompt" placeholder="Write the next request..."></textarea>
-          <div class="row">
-            <button id="send" class="primary" type="button">Send</button>
-            <button id="stop" type="button" disabled>Stop</button>
-            <div id="status" class="status"></div>
-          </div>
+      <textarea id="manuscript" class="manuscript" spellcheck="true" placeholder="Manuscript"></textarea>
+      <footer class="editor-actions">
+        <div class="row grow">
+          <div id="manuscriptStatus" class="status"></div>
+          <button id="saveManuscript" class="primary" type="button">Save Manuscript</button>
         </div>
-      </section>
+      </footer>
     </main>
 
-    <aside class="notes">
-      <div class="stack">
+    <aside class="assistant">
+      <section class="stack project-fields">
         <h2>Project</h2>
         <label>Title<input id="title" type="text" placeholder="Novel title"></label>
-        <label>Premise<textarea id="premise" placeholder="Core situation, characters, stakes"></textarea></label>
-        <label>Style Notes<textarea id="styleNotes" placeholder="Voice, POV, tense, continuity rules"></textarea></label>
+        <label>Premise<textarea id="premise" placeholder="Premise"></textarea></label>
+        <label>Style Notes<textarea id="styleNotes" placeholder="Style, POV, continuity"></textarea></label>
         <div class="row">
           <button id="saveProject" class="primary" type="button">Save</button>
           <button id="deleteProject" class="danger" type="button">Delete</button>
         </div>
-      </div>
+      </section>
+
+      <section class="stack">
+        <h2>Search</h2>
+        <div class="row grow">
+          <input id="searchQuery" type="search" placeholder="Search manuscript">
+          <button id="search" type="button">Search</button>
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </section>
+
+      <section id="conversation" class="conversation">
+        <div class="empty">No messages yet.</div>
+      </section>
+
+      <section class="composer stack">
+        <textarea id="prompt" class="prompt" placeholder="Request"></textarea>
+        <div class="row">
+          <button id="send" class="primary" type="button">Send</button>
+          <button id="stop" type="button" disabled>Stop</button>
+          <button id="appendAssistant" type="button" disabled>Append</button>
+          <button id="replaceSelection" type="button" disabled>Replace Selection</button>
+        </div>
+        <div id="status" class="status"></div>
+      </section>
     </aside>
   </div>
 
   <script>
-    const state = { projects: [], current: null, abort: null };
+    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '' };
     const $ = (id) => document.getElementById(id);
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
@@ -221,16 +222,18 @@
       return res;
     };
     const setStatus = (text) => { $('status').textContent = text || ''; };
+    const setManuscriptStatus = (text) => { $('manuscriptStatus').textContent = text || ''; };
     const fmtCost = (value) => value == null ? '' : ` · $${Number(value).toFixed(4)}`;
+    const charMeta = (count) => `${Number(count || 0).toLocaleString()} chars`;
 
     function renderProjects() {
       $('projectList').innerHTML = '';
       for (const project of state.projects) {
         const button = document.createElement('button');
         button.className = 'project' + (state.current && state.current.id === project.id ? ' active' : '');
-        button.innerHTML = `<strong></strong><span class="meta"></span>`;
+        button.innerHTML = '<strong></strong><span class="meta"></span>';
         button.querySelector('strong').textContent = project.title;
-        button.querySelector('span').textContent = `${project.message_count || 0} messages`;
+        button.querySelector('span').textContent = `${charMeta(project.manuscript_char_count)} · ${project.message_count || 0} messages`;
         button.onclick = () => loadProject(project.id);
         $('projectList').appendChild(button);
       }
@@ -238,11 +241,16 @@
 
     function renderCurrent() {
       const project = state.current;
-      $('messages').innerHTML = '';
+      $('conversation').innerHTML = '';
       if (!project) {
         $('projectTitle').textContent = 'No project selected';
-        $('projectMeta').textContent = 'Create or select a writing project.';
-        $('messages').innerHTML = '<div class="empty">Select a project to begin.</div>';
+        $('projectMeta').textContent = 'Create or select a project.';
+        $('manuscript').value = '';
+        $('title').value = '';
+        $('premise').value = '';
+        $('styleNotes').value = '';
+        $('conversation').innerHTML = '<div class="empty">No messages yet.</div>';
+        setManuscriptStatus('');
         return;
       }
       $('projectTitle').textContent = project.title;
@@ -250,17 +258,26 @@
       $('title').value = project.title || '';
       $('premise').value = project.premise || '';
       $('styleNotes').value = project.style_notes || '';
+      $('manuscript').value = state.manuscript || '';
+      setManuscriptStatus(charMeta(state.manuscript.length));
       const messages = project.messages || [];
+      let latestAssistant = '';
       if (!messages.length) {
-        $('messages').innerHTML = '<div class="empty">No messages yet.</div>';
+        $('conversation').innerHTML = '<div class="empty">No messages yet.</div>';
       } else {
-        for (const message of messages) addMessage(message.role, message.content, message);
+        for (const message of messages) {
+          addMessage(message.role, message.content, message);
+          if (message.role === 'assistant') latestAssistant = message.content || '';
+        }
       }
+      if (!state.lastAssistant && latestAssistant) state.lastAssistant = latestAssistant;
       renderProjects();
-      $('messages').scrollTop = $('messages').scrollHeight;
+      updateAssistantButtons();
+      $('conversation').scrollTop = $('conversation').scrollHeight;
     }
 
     function addMessage(role, content, meta = {}) {
+      if ($('conversation').querySelector('.empty')) $('conversation').innerHTML = '';
       const box = document.createElement('article');
       box.className = `message ${role}`;
       const label = document.createElement('div');
@@ -271,9 +288,16 @@
       const body = document.createElement('div');
       body.textContent = content || '';
       box.append(label, body);
-      $('messages').appendChild(box);
-      $('messages').scrollTop = $('messages').scrollHeight;
+      $('conversation').appendChild(box);
+      $('conversation').scrollTop = $('conversation').scrollHeight;
       return body;
+    }
+
+    function updateAssistantButtons() {
+      const hasAssistant = Boolean(state.lastAssistant.trim());
+      const hasSelection = $('manuscript').selectionStart !== $('manuscript').selectionEnd;
+      $('appendAssistant').disabled = !state.current || !hasAssistant;
+      $('replaceSelection').disabled = !state.current || !hasAssistant || !hasSelection;
     }
 
     async function loadProjects() {
@@ -284,8 +308,15 @@
     }
 
     async function loadProject(id) {
-      const res = await api(`/writer/projects/${id}`);
-      state.current = await res.json();
+      const [projectRes, manuscriptRes] = await Promise.all([
+        api(`/writer/projects/${id}`),
+        api(`/writer/projects/${id}/manuscript`)
+      ]);
+      state.current = await projectRes.json();
+      const manuscriptData = await manuscriptRes.json();
+      state.manuscript = (manuscriptData.manuscript && manuscriptData.manuscript.body) || '';
+      state.lastAssistant = '';
+      $('searchResults').innerHTML = '';
       renderCurrent();
     }
 
@@ -305,34 +336,114 @@
       state.current = await res.json();
       await loadProjects();
       renderCurrent();
-      setStatus('Saved.');
+      setStatus('Project saved.');
     }
 
     async function deleteProject() {
-      if (!state.current || !confirm('Delete this project and all messages?')) return;
+      if (!state.current || !confirm('Delete this project?')) return;
       await api(`/writer/projects/${state.current.id}`, { method: 'DELETE' });
       state.current = null;
+      state.manuscript = '';
+      state.lastAssistant = '';
       await loadProjects();
       renderCurrent();
       setStatus('Deleted.');
     }
 
+    async function saveManuscript(note = 'manual save') {
+      if (!state.current) return;
+      const body = $('manuscript').value;
+      const res = await api(`/writer/projects/${state.current.id}/manuscript`, {
+        method: 'PUT',
+        body: JSON.stringify({ body, note })
+      });
+      const data = await res.json();
+      state.manuscript = data.manuscript.body || '';
+      $('manuscript').value = state.manuscript;
+      await loadProjects();
+      setManuscriptStatus(`${charMeta(state.manuscript.length)} · saved`);
+    }
+
+    async function searchManuscript() {
+      if (!state.current || !$('searchQuery').value.trim()) return;
+      const q = $('searchQuery').value.trim();
+      const res = await api(`/writer/projects/${state.current.id}/manuscript/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      $('searchResults').innerHTML = '';
+      for (const item of data.results || []) {
+        const button = document.createElement('button');
+        button.className = 'result';
+        button.type = 'button';
+        button.innerHTML = '<strong></strong><span></span>';
+        button.querySelector('strong').textContent = item.heading || `Chunk ${item.chunk_index}`;
+        button.querySelector('span').textContent = item.snippet || '';
+        button.onclick = () => {
+          $('manuscript').focus();
+          $('manuscript').setSelectionRange(item.match_start || item.start_offset || 0, item.match_end || item.end_offset || 0);
+          updateAssistantButtons();
+        };
+        $('searchResults').appendChild(button);
+      }
+      if (!$('searchResults').children.length) $('searchResults').innerHTML = '<div class="meta">No results.</div>';
+    }
+
+    async function appendAssistant() {
+      if (!state.current || !state.lastAssistant.trim()) return;
+      const res = await api(`/writer/projects/${state.current.id}/manuscript/append`, {
+        method: 'POST',
+        body: JSON.stringify({ text: state.lastAssistant, note: 'append assistant reply' })
+      });
+      const data = await res.json();
+      state.manuscript = data.manuscript.body || '';
+      $('manuscript').value = state.manuscript;
+      await loadProjects();
+      setManuscriptStatus(`${charMeta(state.manuscript.length)} · appended`);
+    }
+
+    async function replaceSelection() {
+      if (!state.current || !state.lastAssistant.trim()) return;
+      const start = $('manuscript').selectionStart;
+      const end = $('manuscript').selectionEnd;
+      if (start === end) return;
+      const res = await api(`/writer/projects/${state.current.id}/manuscript/replace`, {
+        method: 'POST',
+        body: JSON.stringify({ start, end, replacement: state.lastAssistant, note: 'replace selection with assistant reply' })
+      });
+      const data = await res.json();
+      state.manuscript = data.manuscript.body || '';
+      $('manuscript').value = state.manuscript;
+      $('manuscript').focus();
+      $('manuscript').setSelectionRange(start, start + state.lastAssistant.length);
+      await loadProjects();
+      setManuscriptStatus(`${charMeta(state.manuscript.length)} · replaced`);
+      updateAssistantButtons();
+    }
+
     async function sendPrompt() {
       if (!state.current || !$('prompt').value.trim()) return;
       const promptText = $('prompt').value.trim();
+      const start = $('manuscript').selectionStart;
+      const end = $('manuscript').selectionEnd;
       $('prompt').value = '';
-      if ($('messages').querySelector('.empty')) $('messages').innerHTML = '';
       addMessage('user', promptText);
       const assistantBody = addMessage('assistant', '');
       $('send').disabled = true;
       $('stop').disabled = false;
+      $('appendAssistant').disabled = true;
+      $('replaceSelection').disabled = true;
       state.abort = new AbortController();
+      state.lastAssistant = '';
       setStatus('Streaming...');
+      const payload = { prompt: promptText };
+      if (start !== end) {
+        payload.selection_start = start;
+        payload.selection_end = end;
+      }
       try {
         const res = await api(`/writer/projects/${state.current.id}/messages`, {
           method: 'POST',
           signal: state.abort.signal,
-          body: JSON.stringify({ prompt: promptText, request_kind: $('mode').value, max_tokens: Number($('maxTokens').value) })
+          body: JSON.stringify(payload)
         });
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -347,19 +458,26 @@
             const line = part.split('\n').find((l) => l.startsWith('data: '));
             if (!line) continue;
             const event = JSON.parse(line.slice(6));
-            if (event.type === 'text_delta') assistantBody.textContent += event.content;
+            if (event.type === 'text_delta') {
+              assistantBody.textContent += event.content;
+              state.lastAssistant += event.content;
+            }
             if (event.type === 'done') setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}`);
             if (event.type === 'error') setStatus(event.content || 'Request failed.');
-            $('messages').scrollTop = $('messages').scrollHeight;
+            $('conversation').scrollTop = $('conversation').scrollHeight;
           }
         }
+        const assistantText = state.lastAssistant;
         await loadProject(state.current.id);
+        state.lastAssistant = assistantText;
+        updateAssistantButtons();
       } catch (err) {
         if (err.name !== 'AbortError') setStatus(String(err.message || err));
       } finally {
         $('send').disabled = false;
         $('stop').disabled = true;
         state.abort = null;
+        updateAssistantButtons();
       }
     }
 
@@ -367,11 +485,21 @@
     $('refresh').onclick = loadProjects;
     $('saveProject').onclick = saveProject;
     $('deleteProject').onclick = deleteProject;
+    $('saveManuscript').onclick = () => saveManuscript();
+    $('search').onclick = searchManuscript;
+    $('appendAssistant').onclick = appendAssistant;
+    $('replaceSelection').onclick = replaceSelection;
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
     $('prompt').addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') sendPrompt();
     });
+    $('searchQuery').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') searchManuscript();
+    });
+    $('manuscript').addEventListener('input', () => setManuscriptStatus(`${charMeta($('manuscript').value.length)} · unsaved`));
+    $('manuscript').addEventListener('select', updateAssistantButtons);
+    $('manuscript').addEventListener('keyup', updateAssistantButtons);
     loadProjects().catch((err) => setStatus(String(err.message || err)));
   </script>
 </body>

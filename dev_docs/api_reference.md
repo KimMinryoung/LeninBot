@@ -130,9 +130,9 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 ## Personal Writer Endpoints
 
-`/writer` serves a noindex HTML shell. Through the public frontend, use `/writer`; the frontend requires the existing admin login and redirects to `/api/proxy/writer`, where it injects the backend admin credential server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is deliberately separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses `creative_writer.py`, stores state in `writer_projects` and `writer_messages`, and calls Anthropic Messages API with `model="claude-fable-5"`.
+`/writer` serves a noindex HTML shell. Through the public frontend, use `/writer`; the frontend requires the existing admin login and redirects to `/api/proxy/writer`, where it injects the backend admin credential server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses `creative_writer.py`, stores writer state in writer-specific PostgreSQL tables, and calls Anthropic Messages API with `model="claude-fable-5"`.
 
-Apply the explicit migration before first use:
+Apply the explicit migration before first use or after schema changes:
 
 ```bash
 venv/bin/python scripts/schema_migrations.py --only writer-tables
@@ -140,11 +140,17 @@ venv/bin/python scripts/schema_migrations.py --only writer-tables
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/writer/projects` | list writer projects plus Fable pricing metadata |
-| `POST` | `/writer/projects` | create a writer project |
-| `GET` | `/writer/projects/{project_id}` | project metadata and ordered messages |
+| `GET` | `/writer/projects` | list writer projects plus Fable pricing metadata and manuscript character counts |
+| `POST` | `/writer/projects` | create a writer project and its empty manuscript |
+| `GET` | `/writer/projects/{project_id}` | project metadata and ordered message log |
 | `PATCH` | `/writer/projects/{project_id}` | update title, premise, and style notes |
-| `DELETE` | `/writer/projects/{project_id}` | delete a project and its messages |
+| `DELETE` | `/writer/projects/{project_id}` | delete a project, manuscript, chunks, revisions, and messages |
+| `GET` | `/writer/projects/{project_id}/manuscript` | fetch the canonical manuscript body |
+| `PUT` | `/writer/projects/{project_id}/manuscript` | replace the canonical manuscript body and rebuild searchable chunks |
+| `GET` | `/writer/projects/{project_id}/manuscript/search` | search indexed manuscript chunks with `q` and optional `limit` |
+| `POST` | `/writer/projects/{project_id}/manuscript/append` | append text to the manuscript and rebuild chunks |
+| `POST` | `/writer/projects/{project_id}/manuscript/replace` | replace a character range in the manuscript and rebuild chunks |
+| `GET` | `/writer/projects/{project_id}/manuscript/revisions` | list manuscript revision metadata |
 | `POST` | `/writer/projects/{project_id}/messages` | stream a Claude Fable 5 answer as SSE |
 
 Project request:
@@ -157,17 +163,46 @@ Project request:
 }
 ```
 
+Manuscript save request:
+
+```json
+{
+  "body": "Full manuscript text...",
+  "note": "manual save"
+}
+```
+
+Manuscript append request:
+
+```json
+{
+  "text": "New scene text...",
+  "note": "append assistant reply"
+}
+```
+
+Manuscript replace request:
+
+```json
+{
+  "start": 1200,
+  "end": 1840,
+  "replacement": "Revised passage...",
+  "note": "replace selected passage"
+}
+```
+
 Message request:
 
 ```json
 {
-  "prompt": "Write the next scene...",
-  "request_kind": "draft",
-  "max_tokens": 4096
+  "prompt": "Revise the selected passage so the narrator sounds colder.",
+  "selection_start": 1200,
+  "selection_end": 1840
 }
 ```
 
-`request_kind` accepts `draft`, `continue`, `revise`, `plan`, or `critique`; invalid values are normalized to `draft`. The message route streams `text/event-stream` payloads: `user_saved`, `text_delta`, `done`, and `error`. `done` includes `model`, `stop_reason`, token usage when provided by Anthropic, and estimated USD cost using Claude Fable 5 base input/output pricing. Fable refusals arrive as successful streams whose final `stop_reason` can be `refusal`.
+`selection_start` and `selection_end` are optional character offsets into the canonical manuscript. When present, the selected range is supplied to the model alongside a bounded recent manuscript tail. The visible UI does not expose `max_tokens`; `creative_writer.py` owns the server-side default. The message route streams `text/event-stream` payloads: `user_saved`, `text_delta`, `budget`, `done`, and `error`. `done` includes `model`, `stop_reason`, token usage when provided by Anthropic, and estimated USD cost using Claude Fable 5 base input/output pricing. Fable refusals arrive as successful streams whose final `stop_reason` can be `refusal`.
 
 ## Admin Endpoints
 
