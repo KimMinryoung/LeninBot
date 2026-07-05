@@ -44,7 +44,7 @@ DeepSeek roleplay bot (leninbot-roleplay.service)
 
 Personal fiction writer (/writer)
   creative_writer._client()
-  -> claude_loop.chat_with_tools(client=..., model="claude-fable-5", tools=[])
+  -> claude_loop.chat_with_tools(client=..., model="claude-fable-5", writer tools)
   -> Anthropic Messages API, no shared provider tier
 
 Local
@@ -138,3 +138,5 @@ Provider-facing tool definitions are compacted before API calls: long human-read
 - forced final response after budget/round exhaustion
 
 `claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and non-web DeepSeek agent-harness calls. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.
+
+Both Anthropic-native Claude calls and Anthropic-compatible DeepSeek calls retry transient provider failures at the API-call boundary: connection/timeouts, 408/409/429, 5xx, and 529 are retried up to three attempts with a short backoff. Non-transient protocol/auth/schema errors are not retried. For streaming callers such as `/writer`, retry progress can be surfaced as `provider_retry`; final `done` still comes from the successful response, and already-executed local tools are not duplicated because retries happen before each model response is processed.

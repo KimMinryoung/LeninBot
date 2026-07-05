@@ -25,6 +25,7 @@ from db import query as db_query
 from db import query_one as db_query_one
 from claude_loop import chat_with_tools
 from secrets_loader import get_secret
+from tool_gateway.security import CallerContext, caller_scope
 
 logger = logging.getLogger(__name__)
 
@@ -931,21 +932,22 @@ async def stream_writer_reply(
 
     async def run_llm() -> None:
         try:
-            result = await chat_with_tools(
-                model_messages,
-                client=writer_client,
-                model=writer_model,
-                tools=writer_tools,
-                tool_handlers=writer_handlers,
-                system_prompt=_build_system_blocks(project, project_id, selection_start, selection_end),
-                max_rounds=_WRITER_MAX_ROUNDS,
-                max_tokens=WRITER_DEFAULT_MAX_TOKENS,
-                budget_usd=100.0,
-                budget_tracker=budget_tracker,
-                on_progress=on_progress,
-                agent_name="writer",
-                **model_extra,
-            )
+            with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
+                result = await chat_with_tools(
+                    model_messages,
+                    client=writer_client,
+                    model=writer_model,
+                    tools=writer_tools,
+                    tool_handlers=writer_handlers,
+                    system_prompt=_build_system_blocks(project, project_id, selection_start, selection_end),
+                    max_rounds=_WRITER_MAX_ROUNDS,
+                    max_tokens=WRITER_DEFAULT_MAX_TOKENS,
+                    budget_usd=100.0,
+                    budget_tracker=budget_tracker,
+                    on_progress=on_progress,
+                    agent_name="writer",
+                    **model_extra,
+                )
             answer_holder.append(result)
         except Exception as exc:
             logger.exception("writer Fable request failed project_id=%s", project_id)

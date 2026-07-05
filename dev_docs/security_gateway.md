@@ -75,10 +75,16 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 | `telegram` / `agent` | `telegram/bot._chat_with_tools` via `tool_gateway.security`; standalone roleplay bot also uses `tool_gateway.security` with `agent_name=roleplay` | `True` (owner's gated channel) |
 | `webchat` | `web_chat._run_llm` via `tool_gateway.security` | `False` |
 | `a2a` | `a2a_handler._run_llm` via `tool_gateway.security` | `False` |
+| `system:writer` | `creative_writer.stream_writer_reply` around the `/writer` model loop | `True` |
 | `unknown` | unannotated direct callers | `False` |
 
 Unannotated callers fall to `unknown`/fail-open and are still audited — they can be
 annotated incrementally.
+
+Writer-specific local tools are included in the taxonomy even though they are not
+part of the global runtime registry: `search_manuscript` is `read`, while
+`append_to_manuscript` and `replace_in_manuscript` are `write`. This keeps audit
+rows policy-stable for the personal fiction workspace.
 
 ## Audit table
 

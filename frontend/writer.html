@@ -594,6 +594,7 @@
               setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
             }
             if (event.type === 'tool') setStatus(event.content);
+            if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
             if (event.type === 'error') setStatus(event.content || 'Request failed.');
             $('conversation').scrollTop = $('conversation').scrollHeight;
           }

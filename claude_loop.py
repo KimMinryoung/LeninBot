@@ -26,6 +26,36 @@ from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_t
 logger = logging.getLogger(__name__)
 
 _REPLAY_ONLY_BLOCK_TYPES = {"thinking", "redacted_thinking"}
+_TRANSIENT_PROVIDER_STATUSES = {408, 409, 429, 500, 502, 503, 504, 529}
+_TRANSIENT_PROVIDER_ERROR_TOKENS = (
+    "timeout",
+    "connection",
+    "network",
+    "connecterror",
+    "readerror",
+    "remoteprotocolerror",
+    "pooltimeout",
+    "apierror",
+    "apiconnectionerror",
+    "apitimeouterror",
+)
+
+
+def _provider_status_code(exc: Exception) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_transient_provider_error(exc: Exception) -> bool:
+    status = _provider_status_code(exc)
+    if status in _TRANSIENT_PROVIDER_STATUSES:
+        return True
+    name = exc.__class__.__name__.lower()
+    return any(token in name for token in _TRANSIENT_PROVIDER_ERROR_TOKENS)
 
 
 def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
@@ -415,7 +445,7 @@ async def chat_with_tools(
     # interface so text deltas flow to the caller as they're generated.
     # Callers that don't care about text_delta (e.g. Telegram) simply drop
     # the event — the final Message object is identical either way.
-    async def _claude_call(**kwargs):
+    async def _claude_call_once(**kwargs):
         if thinking is not None:
             kwargs["thinking"] = thinking
         if output_config is not None:
@@ -427,6 +457,30 @@ async def chat_with_tools(
                 if text:
                     await emit_progress(on_progress, "text_delta", text)
             return await stream.get_final_message()
+
+    async def _claude_call(**kwargs):
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await _claude_call_once(**kwargs)
+            except Exception as exc:
+                if attempt >= max_attempts or not _is_transient_provider_error(exc):
+                    raise
+                delay = min(8.0, 1.5 * attempt)
+                logger.warning(
+                    "Transient provider error on %s attempt %d/%d; retrying in %.1fs: %s",
+                    model,
+                    attempt,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                await emit_progress(
+                    on_progress,
+                    "provider_retry",
+                    f"Provider connection failed; retrying ({attempt}/{max_attempts}).",
+                )
+                await asyncio.sleep(delay)
 
     response = None
     round_num = 0
