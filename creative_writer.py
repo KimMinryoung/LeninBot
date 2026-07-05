@@ -647,6 +647,8 @@ def _build_base_system_prompt(project: dict) -> str:
         "- Continue the story with append_to_manuscript; revise a specific part with replace_in_manuscript.\n"
         "- Make each edit flow seamlessly with the surrounding prose; never duplicate text that already exists.\n"
         "- If the writer selected a range to revise, replace exactly that range (use its text as 'find').\n"
+        "- If the writer asks a question, asks for diagnosis, asks for options, or brainstorms without requesting a manuscript edit, "
+        "make NO edit and answer directly in commentary.\n"
         "- If the request is ambiguous or would break continuity, make NO edit and ask in commentary instead.\n\n"
         "# Response format\n"
         "After applying your edits with the tools, reply with ONLY a commentary block:\n"
@@ -949,7 +951,11 @@ async def stream_writer_reply(
     task = asyncio.create_task(run_llm())
     try:
         while True:
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield _sse({"type": "ping"})
+                continue
             if item is None:
                 break
             yield item
