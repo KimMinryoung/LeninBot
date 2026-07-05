@@ -327,6 +327,12 @@
       $('conversation').scrollTop = $('conversation').scrollHeight;
     }
 
+    function modelDisplayName(id) {
+      if (!id) return (state.model && state.model.display_name) || 'Model';
+      const m = (state.models || []).find((x) => x.id === id);
+      return m ? m.display_name : id;
+    }
+
     function addMessage(role, content, meta = {}) {
       if ($('conversation').querySelector('.empty')) $('conversation').innerHTML = '';
       const box = document.createElement('article');
@@ -334,7 +340,7 @@
       const label = document.createElement('div');
       label.className = 'label';
       label.textContent = role === 'assistant'
-        ? `Claude Fable 5${meta.stop_reason ? ' · ' + meta.stop_reason : ''}${fmtCost(meta.cost_usd)}`
+        ? `${modelDisplayName(meta.model)}${meta.stop_reason ? ' · ' + meta.stop_reason : ''}${fmtCost(meta.cost_usd)}`
         : 'You';
       const body = document.createElement('div');
       const parsed = role === 'assistant' ? parseWriterContent(content) : { display: content || '' };
@@ -498,13 +504,31 @@
     }
 
     async function sendPrompt() {
-      if (!state.current || !$('prompt').value.trim()) return;
+      if (!state.current) { setStatus('Create or select a project first.'); return; }
+      if (!$('prompt').value.trim()) return;
+      // Persist unsaved title/premise/style before generating: the model reads
+      // these from the saved project, and the post-send reload would otherwise
+      // discard unsaved field text.
+      const cur = state.current;
+      if ($('title').value !== (cur.title || '') || $('premise').value !== (cur.premise || '') || $('styleNotes').value !== (cur.style_notes || '')) {
+        try {
+          const saved = await api(`/writer/projects/${cur.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ title: $('title').value, premise: $('premise').value, style_notes: $('styleNotes').value })
+          });
+          state.current = await saved.json();
+        } catch (err) {
+          setStatus('Could not save project settings: ' + (err.message || err));
+          return;
+        }
+      }
       const promptText = $('prompt').value.trim();
       const start = $('manuscript').selectionStart;
       const end = $('manuscript').selectionEnd;
       $('prompt').value = '';
       addMessage('user', promptText);
-      const assistantBody = addMessage('assistant', '');
+      const selModel = (state.models || []).find((m) => m.key === state.modelChoice);
+      const assistantBody = addMessage('assistant', '', { model: selModel ? selModel.id : null });
       $('send').disabled = true;
       $('stop').disabled = false;
       $('appendAssistant').disabled = true;
