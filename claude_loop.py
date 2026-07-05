@@ -391,6 +391,7 @@ async def chat_with_tools(
     max_length_continuations: int = 1,
     thinking: dict | None = None,
     output_config: dict | None = None,
+    provider_idle_timeout_sec: float | None = None,
 ) -> str:
     """Call Claude with tools, execute tool calls, loop until text response.
 
@@ -451,8 +452,38 @@ async def chat_with_tools(
         if output_config is not None:
             kwargs["output_config"] = output_config
         if on_progress is None:
-            return await client.messages.create(**kwargs)
+            call = client.messages.create(**kwargs)
+            if provider_idle_timeout_sec:
+                return await asyncio.wait_for(call, timeout=provider_idle_timeout_sec)
+            return await call
         async with client.messages.stream(**kwargs) as stream:
+            if provider_idle_timeout_sec:
+                text_iter = stream.text_stream.__aiter__()
+                while True:
+                    try:
+                        text = await asyncio.wait_for(
+                            text_iter.__anext__(),
+                            timeout=provider_idle_timeout_sec,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise TimeoutError(
+                            f"Provider stream produced no text/final event for "
+                            f"{int(provider_idle_timeout_sec)}s"
+                        ) from exc
+                    if text:
+                        await emit_progress(on_progress, "text_delta", text)
+                try:
+                    return await asyncio.wait_for(
+                        stream.get_final_message(),
+                        timeout=provider_idle_timeout_sec,
+                    )
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"Provider stream did not finalize within "
+                        f"{int(provider_idle_timeout_sec)}s after text stream ended"
+                    ) from exc
             async for text in stream.text_stream:
                 if text:
                     await emit_progress(on_progress, "text_delta", text)
@@ -478,7 +509,11 @@ async def chat_with_tools(
                 await emit_progress(
                     on_progress,
                     "provider_retry",
-                    f"Provider connection failed; retrying ({attempt}/{max_attempts}).",
+                    (
+                        f"Provider stream stalled; retrying ({attempt}/{max_attempts})."
+                        if "stream" in str(exc).lower()
+                        else f"Provider connection failed; retrying ({attempt}/{max_attempts})."
+                    ),
                 )
                 await asyncio.sleep(delay)
 

@@ -67,7 +67,8 @@ WRITER_DEFAULT_MAX_TOKENS = 12000
 # Tool-use rounds: allow extended continuity searches and edit retries before
 # the model writes. 1 = no tools (legacy). Each round is a Fable-priced model call.
 _WRITER_MAX_ROUNDS = 16
-_WRITER_IDLE_TIMEOUT_SEC = 600
+_WRITER_IDLE_TIMEOUT_SEC = 240
+_WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 70
 # Web search is disabled by design: Fable 5's internal knowledge is strong and
 # the writer prefers reference material supplied directly by the user. Flip to
 # True to re-enable the Tavily-backed web_search tool (and its prompt guidance).
@@ -731,6 +732,28 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _writer_error_message(provider_display: str, raw_error: str) -> str:
+    text = str(raw_error or "").strip()
+    lowered = text.lower()
+    if "provider stream produced no text/final event" in lowered:
+        return (
+            f"{provider_display} opened the request but then produced no stream data for "
+            f"{_WRITER_PROVIDER_IDLE_TIMEOUT_SEC}s. The provider connection stalled before "
+            "any answer or tool call completed; nothing was written to the manuscript."
+        )
+    if "provider stream did not finalize" in lowered:
+        return (
+            f"{provider_display} stream sent partial data but did not finalize cleanly. "
+            "The request was stopped before a complete answer could be saved."
+        )
+    if any(token in lowered for token in ("timeout", "connection", "network", "remoteprotocol", "readerror", "apierror")):
+        return (
+            f"{provider_display} connection failed while generating. This was a provider/network "
+            "stream failure, not a manuscript tool failure; no assistant result was saved."
+        )
+    return f"{provider_display} request failed before completion: {text}"
+
+
 _MANUSCRIPT_DELTA_RE = re.compile(
     r"<manuscript_delta>\s*(.*?)\s*</manuscript_delta>",
     re.IGNORECASE | re.DOTALL,
@@ -917,8 +940,75 @@ async def stream_writer_reply(
     error_holder: list[str] = []
     budget_tracker: dict = {}
     last_progress = asyncio.get_running_loop().time()
+    persisted = False
+    detached_for_finalization = False
 
     writer_tools, writer_handlers = _build_writer_tools(project_id)
+
+    def persist_result() -> dict:
+        nonlocal persisted
+        if persisted:
+            return {"type": "error", "content": "Writer result was already persisted."}
+        persisted = True
+        if error_holder:
+            error_text = _writer_error_message(writer_display, error_holder[0])
+            assistant_row = _insert_message(
+                project_id=project_id,
+                role="assistant",
+                content=f"<commentary>\n{error_text}\n</commentary>",
+                request_kind=request_kind,
+                model=writer_model,
+                stop_reason="error",
+                usage=budget_tracker.get("usage") or {},
+                cost_usd=budget_tracker.get("total_cost"),
+            )
+            _touch_project(project_id)
+            return {"type": "error", "message_id": assistant_row.get("id"), "content": error_text}
+
+        final_text = (answer_holder[0] if answer_holder else "").strip()
+        parsed_response = _parse_writer_response(final_text)
+        usage = budget_tracker.get("usage") or {}
+        cost = budget_tracker.get("total_cost")
+        stop_reason = str(budget_tracker.get("stop_reason") or "")
+        assistant_row = _insert_message(
+            project_id=project_id,
+            role="assistant",
+            content=final_text,
+            request_kind=request_kind,
+            model=writer_model,
+            stop_reason=stop_reason,
+            usage=usage,
+            cost_usd=cost,
+        )
+        _touch_project(project_id)
+        return {
+            "type": "done",
+            "message_id": assistant_row.get("id"),
+            "model": writer_model,
+            "model_display": writer_display,
+            "stop_reason": stop_reason,
+            "usage": usage,
+            "cost_usd": cost,
+            "manuscript_text": parsed_response["manuscript_text"],
+            "commentary_text": parsed_response["commentary_text"],
+            "display_text": parsed_response["display_text"],
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    async def finish_after_disconnect() -> None:
+        try:
+            await asyncio.shield(task)
+            event = persist_result()
+            logger.info(
+                "writer finalized after client disconnect project_id=%s event=%s message_id=%s",
+                project_id,
+                event.get("type"),
+                event.get("message_id"),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("writer failed to finalize after client disconnect project_id=%s", project_id)
 
     async def on_progress(event: str, detail: str):
         nonlocal last_progress
@@ -929,6 +1019,8 @@ async def stream_writer_reply(
             await queue.put(_sse({"type": "budget", "content": detail}))
         elif event in ("tool_call", "tool_result") and detail:
             await queue.put(_sse({"type": "tool", "content": detail}))
+        elif event == "provider_retry" and detail:
+            await queue.put(_sse({"type": "provider_retry", "content": detail}))
 
     async def run_llm() -> None:
         try:
@@ -946,11 +1038,12 @@ async def stream_writer_reply(
                     budget_tracker=budget_tracker,
                     on_progress=on_progress,
                     agent_name="writer",
+                    provider_idle_timeout_sec=_WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
                     **model_extra,
                 )
             answer_holder.append(result)
         except Exception as exc:
-            logger.exception("writer Fable request failed project_id=%s", project_id)
+            logger.exception("writer model request failed project_id=%s", project_id)
             error_holder.append(str(exc))
         finally:
             await queue.put(None)
@@ -962,15 +1055,20 @@ async def stream_writer_reply(
                 item = await asyncio.wait_for(queue.get(), timeout=15)
             except asyncio.TimeoutError:
                 if client_disconnected is not None and await client_disconnected():
-                    task.cancel()
+                    logger.warning(
+                        "writer client disconnected; keeping model task for DB finalization project_id=%s",
+                        project_id,
+                    )
+                    detached_for_finalization = True
+                    asyncio.create_task(finish_after_disconnect())
                     return
                 idle_for = asyncio.get_running_loop().time() - last_progress
                 if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
                     task.cancel()
-                    yield _sse({
-                        "type": "error",
-                        "content": f"{writer_display} request timed out after {int(idle_for)}s without model progress.",
-                    })
+                    error_holder.append(
+                        f"{writer_display} request timed out after {int(idle_for)}s without model progress."
+                    )
+                    yield _sse(persist_result())
                     return
                 yield _sse({"type": "ping"})
                 continue
@@ -979,41 +1077,7 @@ async def stream_writer_reply(
             yield item
         await task
     finally:
-        if not task.done():
+        if not task.done() and not persisted and not detached_for_finalization:
             task.cancel()
 
-    if error_holder:
-        yield _sse({"type": "error", "content": f"{writer_display} request failed: {error_holder[0]}"})
-        return
-
-    final_text = (answer_holder[0] if answer_holder else "").strip()
-    parsed_response = _parse_writer_response(final_text)
-    usage = budget_tracker.get("usage") or {}
-    cost = budget_tracker.get("total_cost")
-    stop_reason = str(budget_tracker.get("stop_reason") or "")
-    assistant_row = _insert_message(
-        project_id=project_id,
-        role="assistant",
-        content=final_text,
-        request_kind=request_kind,
-        model=writer_model,
-        stop_reason=stop_reason,
-        usage=usage,
-        cost_usd=cost,
-    )
-    _touch_project(project_id)
-    yield _sse(
-        {
-            "type": "done",
-            "message_id": assistant_row.get("id"),
-            "model": writer_model,
-            "model_display": writer_display,
-            "stop_reason": stop_reason,
-            "usage": usage,
-            "cost_usd": cost,
-            "manuscript_text": parsed_response["manuscript_text"],
-            "commentary_text": parsed_response["commentary_text"],
-            "display_text": parsed_response["display_text"],
-            "created_at": datetime.utcnow().isoformat() + "Z",
-        }
-    )
+    yield _sse(persist_result())

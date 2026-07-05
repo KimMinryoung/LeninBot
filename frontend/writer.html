@@ -796,7 +796,15 @@
         state.lastAssistant = assistantText;
         updateAssistantButtons();
       } catch (err) {
-        if (err.name !== 'AbortError') setStatus(String(err.message || err));
+        if (err.name !== 'AbortError') {
+          setStatus('Stream connection closed before a final event; reloading saved writer state...');
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          try {
+            await loadProject(state.current.id);
+          } catch (reloadErr) {
+            setStatus(`Stream connection closed: ${err.message || err}`);
+          }
+        }
       } finally {
         $('send').disabled = false;
         $('stop').disabled = true;
