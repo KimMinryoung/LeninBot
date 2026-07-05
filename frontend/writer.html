@@ -65,7 +65,7 @@
       padding: 15px;
     }
     .sidebar { border-right: 1px solid var(--line); }
-    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto minmax(160px, 1fr) auto; gap: 12px; }
+    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto minmax(180px, 1fr) auto; gap: 12px; }
     .editor {
       min-width: 0;
       display: grid;
@@ -100,7 +100,7 @@
     .project strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .manuscript {
       height: 100%;
-      min-height: 520px;
+      min-height: 680px;
       border: 0;
       border-radius: 0;
       padding: 22px 26px;
@@ -108,6 +108,15 @@
       background: var(--surface);
       box-shadow: none;
     }
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .pager .row { flex: 0 0 auto; }
+    .pager-label { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .project-fields textarea { min-height: 86px; }
     .conversation {
       min-height: 0;
@@ -138,7 +147,7 @@
       .sidebar, .assistant { border: 0; border-bottom: 1px solid var(--line); }
       .assistant { grid-template-rows: auto; }
       .editor { min-height: 72vh; }
-      .manuscript { min-height: 460px; }
+      .manuscript { min-height: 560px; }
     }
   </style>
 </head>
@@ -148,7 +157,7 @@
       <div class="stack">
         <div>
           <h1>Novel Writer</h1>
-          <div class="meta">Claude Fable 5 · one manuscript per project</div>
+          <div class="meta">DeepSeek Flash default · one manuscript per project</div>
         </div>
         <div class="row">
           <button id="newProject" class="primary" type="button">New</button>
@@ -165,9 +174,13 @@
       </header>
       <textarea id="manuscript" class="manuscript" spellcheck="true" placeholder="Manuscript"></textarea>
       <footer class="editor-actions">
-        <div class="row grow">
-          <div id="manuscriptStatus" class="status"></div>
-          <button id="saveManuscript" class="primary" type="button">Save Manuscript</button>
+        <div class="pager">
+          <div id="manuscriptStatus" class="status pager-label"></div>
+          <div class="row">
+            <button id="manuscriptPrev" type="button">Prev</button>
+            <button id="manuscriptNext" type="button">Next</button>
+            <button id="saveManuscript" class="primary" type="button">Save Manuscript</button>
+          </div>
         </div>
       </footer>
     </main>
@@ -195,13 +208,20 @@
 
       <section class="stack cost-panel">
         <h2>Cost</h2>
-        <div id="costSummary" class="meta">No completed Fable call yet.</div>
+        <div id="costSummary" class="meta">No completed model call yet.</div>
         <div id="costUsage" class="meta"></div>
         <div id="costPricing" class="meta"></div>
       </section>
 
       <section id="conversation" class="conversation">
         <div class="empty">No messages yet.</div>
+      </section>
+      <section class="pager">
+        <div id="conversationStatus" class="pager-label">No messages</div>
+        <div class="row">
+          <button id="conversationPrev" type="button">Prev</button>
+          <button id="conversationNext" type="button">Next</button>
+        </div>
       </section>
 
       <section class="composer stack">
@@ -220,7 +240,25 @@
   </div>
 
   <script>
-    const state = { projects: [], current: null, manuscript: '', abort: null, lastAssistant: '', model: null, models: [], modelChoice: null, lastCost: null };
+    const MANUSCRIPT_PAGE_CHARS = 12000;
+    const CONVERSATION_PAGE_SIZE = 8;
+    const state = {
+      projects: [],
+      current: null,
+      manuscript: '',
+      savedManuscript: '',
+      manuscriptPage: 0,
+      manuscriptPageStart: 0,
+      manuscriptPageEnd: 0,
+      conversationMessages: [],
+      conversationPage: 0,
+      abort: null,
+      lastAssistant: '',
+      model: null,
+      models: [],
+      modelChoice: null,
+      lastCost: null,
+    };
     const $ = (id) => document.getElementById(id);
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
@@ -248,18 +286,129 @@
       return `input ${input.toLocaleString()} · output ${output.toLocaleString()} · cache read ${read.toLocaleString()} · cache write ${write.toLocaleString()}`;
     };
     const charMeta = (count) => `${Number(count || 0).toLocaleString()} chars`;
+    const pageCount = (length, size) => Math.max(1, Math.ceil(Number(length || 0) / size));
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+    function manuscriptPageBounds(page = state.manuscriptPage) {
+      const start = page * MANUSCRIPT_PAGE_CHARS;
+      const end = Math.min(state.manuscript.length, start + MANUSCRIPT_PAGE_CHARS);
+      return { start, end };
+    }
+
+    function commitVisibleManuscriptPage() {
+      if (!state.current) return;
+      const bounds = {
+        start: state.manuscriptPageStart,
+        end: state.manuscriptPageEnd,
+      };
+      const visible = $('manuscript').value;
+      state.manuscript = state.manuscript.slice(0, bounds.start) + visible + state.manuscript.slice(bounds.end);
+      state.manuscriptPageStart = bounds.start;
+      state.manuscriptPageEnd = bounds.start + visible.length;
+      state.manuscriptPage = clamp(state.manuscriptPage, 0, pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1);
+    }
+
+    function renderManuscriptPage() {
+      const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
+      state.manuscriptPage = clamp(state.manuscriptPage, 0, total - 1);
+      const bounds = manuscriptPageBounds();
+      state.manuscriptPageStart = bounds.start;
+      state.manuscriptPageEnd = bounds.end;
+      $('manuscript').value = state.manuscript.slice(bounds.start, bounds.end);
+      updateManuscriptStatus();
+    }
+
+    function updateManuscriptStatus(label = '') {
+      if (!state.current) {
+        setManuscriptStatus('');
+        return;
+      }
+      const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
+      const dirty = state.manuscript !== state.savedManuscript;
+      const suffix = label || (dirty ? 'unsaved' : 'saved');
+      setManuscriptStatus(
+        `${charMeta(state.manuscript.length)} · page ${state.manuscriptPage + 1}/${total} · chars ${state.manuscriptPageStart.toLocaleString()}-${state.manuscriptPageEnd.toLocaleString()} · ${suffix}`
+      );
+      $('manuscriptPrev').disabled = !state.current || state.manuscriptPage <= 0;
+      $('manuscriptNext').disabled = !state.current || state.manuscriptPage >= total - 1;
+    }
+
+    function goManuscriptPage(delta) {
+      if (!state.current) return;
+      commitVisibleManuscriptPage();
+      const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
+      state.manuscriptPage = clamp(state.manuscriptPage + delta, 0, total - 1);
+      renderManuscriptPage();
+      $('manuscript').focus();
+    }
+
+    function selectManuscriptRange(globalStart, globalEnd, options = {}) {
+      if (options.commit !== false) commitVisibleManuscriptPage();
+      const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
+      state.manuscriptPage = clamp(Math.floor(Math.max(0, globalStart) / MANUSCRIPT_PAGE_CHARS), 0, total - 1);
+      renderManuscriptPage();
+      const bounds = manuscriptPageBounds();
+      const localStart = clamp(globalStart - bounds.start, 0, $('manuscript').value.length);
+      const localEnd = clamp(globalEnd - bounds.start, localStart, $('manuscript').value.length);
+      $('manuscript').focus();
+      $('manuscript').setSelectionRange(localStart, localEnd);
+    }
+
+    function selectedManuscriptRange() {
+      return {
+        start: state.manuscriptPageStart + $('manuscript').selectionStart,
+        end: state.manuscriptPageStart + $('manuscript').selectionEnd,
+      };
+    }
 
     function renderCost() {
       if (state.lastCost) {
         $('costSummary').textContent = `${state.lastCost.model || 'Claude Fable 5'} · ${state.lastCost.stop || 'complete'} · ${fmtMoney(state.lastCost.cost) || 'cost unavailable'}`;
         $('costUsage').textContent = tokenMeta(state.lastCost.usage || {});
       } else {
-        $('costSummary').textContent = 'No completed Fable call yet.';
+        $('costSummary').textContent = 'No completed model call yet.';
         $('costUsage').textContent = '';
       }
       if (state.model) {
         $('costPricing').textContent = `pricing input $${Number(state.model.input_price_per_mtok || 0).toFixed(2)}/MTok · output $${Number(state.model.output_price_per_mtok || 0).toFixed(2)}/MTok`;
       }
+    }
+
+    function conversationPageTotal() {
+      return pageCount(state.conversationMessages.length, CONVERSATION_PAGE_SIZE);
+    }
+
+    function renderConversationPage() {
+      const conversation = $('conversation');
+      conversation.innerHTML = '';
+      const totalMessages = state.conversationMessages.length;
+      const totalPages = conversationPageTotal();
+      state.conversationPage = clamp(state.conversationPage, 0, totalPages - 1);
+      if (!totalMessages) {
+        conversation.innerHTML = '<div class="empty">No messages yet.</div>';
+        $('conversationStatus').textContent = 'No messages';
+        $('conversationPrev').disabled = true;
+        $('conversationNext').disabled = true;
+        return null;
+      }
+
+      const start = state.conversationPage * CONVERSATION_PAGE_SIZE;
+      const pageMessages = state.conversationMessages.slice(start, start + CONVERSATION_PAGE_SIZE);
+      let lastBody = null;
+      for (const message of pageMessages) {
+        lastBody = renderMessageElement(message);
+      }
+      $('conversationStatus').textContent =
+        `Messages ${start + 1}-${start + pageMessages.length} of ${totalMessages} · page ${state.conversationPage + 1}/${totalPages}`;
+      $('conversationPrev').disabled = state.conversationPage <= 0;
+      $('conversationNext').disabled = state.conversationPage >= totalPages - 1;
+      conversation.scrollTop = conversation.scrollHeight;
+      return lastBody;
+    }
+
+    function goConversationPage(delta) {
+      state.conversationPage = clamp(state.conversationPage + delta, 0, conversationPageTotal() - 1);
+      renderConversationPage();
     }
 
     function parseWriterContent(content) {
@@ -290,16 +439,22 @@
 
     function renderCurrent() {
       const project = state.current;
-      $('conversation').innerHTML = '';
       if (!project) {
         $('projectTitle').textContent = 'No project selected';
         $('projectMeta').textContent = 'Create or select a project.';
         $('manuscript').value = '';
+        state.manuscript = '';
+        state.savedManuscript = '';
+        state.manuscriptPage = 0;
+        state.manuscriptPageStart = 0;
+        state.manuscriptPageEnd = 0;
+        state.conversationMessages = [];
+        state.conversationPage = 0;
         $('title').value = '';
         $('premise').value = '';
         $('styleNotes').value = '';
-        $('conversation').innerHTML = '<div class="empty">No messages yet.</div>';
-        setManuscriptStatus('');
+        renderConversationPage();
+        updateManuscriptStatus();
         return;
       }
       $('projectTitle').textContent = project.title;
@@ -307,22 +462,22 @@
       $('title').value = project.title || '';
       $('premise').value = project.premise || '';
       $('styleNotes').value = project.style_notes || '';
-      $('manuscript').value = state.manuscript || '';
-      setManuscriptStatus(charMeta(state.manuscript.length));
+      renderManuscriptPage();
       const messages = project.messages || [];
       let latestAssistant = '';
-      if (!messages.length) {
-        $('conversation').innerHTML = '<div class="empty">No messages yet.</div>';
-      } else {
-        for (const message of messages) {
-          addMessage(message.role, message.content, message);
-          if (message.role === 'assistant') latestAssistant = parseWriterContent(message.content).manuscript || '';
-        }
+      state.conversationMessages = messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        meta: message,
+      }));
+      state.conversationPage = conversationPageTotal() - 1;
+      for (const message of messages) {
+        if (message.role === 'assistant') latestAssistant = parseWriterContent(message.content).manuscript || '';
       }
+      renderConversationPage();
       if (!state.lastAssistant && latestAssistant) state.lastAssistant = latestAssistant;
       renderProjects();
       updateAssistantButtons();
-      $('conversation').scrollTop = $('conversation').scrollHeight;
     }
 
     function modelDisplayName(id) {
@@ -331,22 +486,42 @@
       return m ? m.display_name : id;
     }
 
-    function addMessage(role, content, meta = {}) {
-      if ($('conversation').querySelector('.empty')) $('conversation').innerHTML = '';
+    function renderMessageElement(message) {
       const box = document.createElement('article');
-      box.className = `message ${role}`;
+      box.className = `message ${message.role}`;
       const label = document.createElement('div');
       label.className = 'label';
-      label.textContent = role === 'assistant'
-        ? `${modelDisplayName(meta.model)}${meta.stop_reason ? ' · ' + meta.stop_reason : ''}${fmtCost(meta.cost_usd)}`
+      label.textContent = message.role === 'assistant'
+        ? `${modelDisplayName(message.meta && message.meta.model)}${message.meta && message.meta.stop_reason ? ' · ' + message.meta.stop_reason : ''}${fmtCost(message.meta && message.meta.cost_usd)}`
         : 'You';
       const body = document.createElement('div');
-      const parsed = role === 'assistant' ? parseWriterContent(content) : { display: content || '' };
+      const parsed = message.role === 'assistant' ? parseWriterContent(message.content) : { display: message.content || '' };
       body.textContent = parsed.display || '';
       box.append(label, body);
       $('conversation').appendChild(box);
-      $('conversation').scrollTop = $('conversation').scrollHeight;
       return body;
+    }
+
+    function addMessage(role, content, meta = {}) {
+      const message = { role, content: content || '', meta };
+      state.conversationMessages.push(message);
+      state.conversationPage = conversationPageTotal() - 1;
+      renderConversationPage();
+      return {
+        message,
+        setText(text) {
+          message.content = text || '';
+          const bodies = $('conversation').querySelectorAll('.message > div:last-child');
+          const body = bodies[bodies.length - 1];
+          if (body) body.textContent = text || '';
+        },
+        appendText(text) {
+          message.content += text || '';
+          const bodies = $('conversation').querySelectorAll('.message > div:last-child');
+          const body = bodies[bodies.length - 1];
+          if (body) body.textContent += text || '';
+        },
+      };
     }
 
     function updateAssistantButtons() {
@@ -378,9 +553,13 @@
       const models = state.models || [];
       if (!models.length) { sel.innerHTML = ''; return; }
       if (!state.modelChoice || !models.some((m) => m.key === state.modelChoice && m.available)) {
-        const def = models.find((m) => m.default && m.available) || models.find((m) => m.available) || models[0];
+        const def = models.find((m) => m.key === 'deepseek_flash' && m.available)
+          || models.find((m) => m.default && m.available)
+          || models.find((m) => m.available)
+          || models[0];
         state.modelChoice = def ? def.key : null;
       }
+      state.model = models.find((m) => m.key === state.modelChoice) || state.model;
       sel.innerHTML = '';
       for (const m of models) {
         const opt = document.createElement('option');
@@ -391,7 +570,11 @@
         if (m.key === state.modelChoice) opt.selected = true;
         sel.appendChild(opt);
       }
-      sel.onchange = () => { state.modelChoice = sel.value; };
+      sel.onchange = () => {
+        state.modelChoice = sel.value;
+        state.model = models.find((m) => m.key === state.modelChoice) || state.model;
+        renderCost();
+      };
     }
 
     async function loadProject(id) {
@@ -402,6 +585,10 @@
       state.current = await projectRes.json();
       const manuscriptData = await manuscriptRes.json();
       state.manuscript = (manuscriptData.manuscript && manuscriptData.manuscript.body) || '';
+      state.savedManuscript = state.manuscript;
+      state.manuscriptPage = 0;
+      state.manuscriptPageStart = 0;
+      state.manuscriptPageEnd = 0;
       state.lastAssistant = '';
       $('searchResults').innerHTML = '';
       renderCurrent();
@@ -431,6 +618,8 @@
       await api(`/writer/projects/${state.current.id}`, { method: 'DELETE' });
       state.current = null;
       state.manuscript = '';
+      state.savedManuscript = '';
+      state.manuscriptPage = 0;
       state.lastAssistant = '';
       await loadProjects();
       renderCurrent();
@@ -439,16 +628,18 @@
 
     async function saveManuscript(note = 'manual save') {
       if (!state.current) return;
-      const body = $('manuscript').value;
+      commitVisibleManuscriptPage();
+      const body = state.manuscript;
       const res = await api(`/writer/projects/${state.current.id}/manuscript`, {
         method: 'PUT',
         body: JSON.stringify({ body, note })
       });
       const data = await res.json();
       state.manuscript = data.manuscript.body || '';
-      $('manuscript').value = state.manuscript;
+      state.savedManuscript = state.manuscript;
+      renderManuscriptPage();
       await loadProjects();
-      setManuscriptStatus(`${charMeta(state.manuscript.length)} · saved`);
+      updateManuscriptStatus('saved');
     }
 
     async function searchManuscript() {
@@ -465,8 +656,7 @@
         button.querySelector('strong').textContent = item.heading || `Chunk ${item.chunk_index}`;
         button.querySelector('span').textContent = item.snippet || '';
         button.onclick = () => {
-          $('manuscript').focus();
-          $('manuscript').setSelectionRange(item.match_start || item.start_offset || 0, item.match_end || item.end_offset || 0);
+          selectManuscriptRange(item.match_start || item.start_offset || 0, item.match_end || item.end_offset || 0);
           updateAssistantButtons();
         };
         $('searchResults').appendChild(button);
@@ -482,15 +672,17 @@
       });
       const data = await res.json();
       state.manuscript = data.manuscript.body || '';
-      $('manuscript').value = state.manuscript;
+      state.savedManuscript = state.manuscript;
+      state.manuscriptPage = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1;
+      renderManuscriptPage();
       await loadProjects();
-      setManuscriptStatus(`${charMeta(state.manuscript.length)} · appended`);
+      updateManuscriptStatus('appended');
     }
 
     async function replaceSelection() {
       if (!state.current || !state.lastAssistant.trim()) return;
-      const start = $('manuscript').selectionStart;
-      const end = $('manuscript').selectionEnd;
+      commitVisibleManuscriptPage();
+      const { start, end } = selectedManuscriptRange();
       if (start === end) return;
       const res = await api(`/writer/projects/${state.current.id}/manuscript/replace`, {
         method: 'POST',
@@ -498,11 +690,10 @@
       });
       const data = await res.json();
       state.manuscript = data.manuscript.body || '';
-      $('manuscript').value = state.manuscript;
-      $('manuscript').focus();
-      $('manuscript').setSelectionRange(start, start + state.lastAssistant.length);
+      state.savedManuscript = state.manuscript;
+      selectManuscriptRange(start, start + state.lastAssistant.length, { commit: false });
       await loadProjects();
-      setManuscriptStatus(`${charMeta(state.manuscript.length)} · replaced`);
+      updateManuscriptStatus('replaced');
       updateAssistantButtons();
     }
 
@@ -527,26 +718,27 @@
       }
       // Persist unsaved manuscript edits so the model edits exactly what you see,
       // and the post-turn reload doesn't discard them.
-      if ($('manuscript').value !== (state.manuscript || '')) {
+      commitVisibleManuscriptPage();
+      if (state.manuscript !== (state.savedManuscript || '')) {
         try {
           const mr = await api(`/writer/projects/${cur.id}/manuscript`, {
             method: 'PUT',
-            body: JSON.stringify({ body: $('manuscript').value, note: 'autosave before generate' })
+            body: JSON.stringify({ body: state.manuscript, note: 'autosave before generate' })
           });
           const md = await mr.json();
-          state.manuscript = (md.manuscript && md.manuscript.body) || $('manuscript').value;
+          state.manuscript = (md.manuscript && md.manuscript.body) || state.manuscript;
+          state.savedManuscript = state.manuscript;
         } catch (err) {
           setStatus('Could not save manuscript: ' + (err.message || err));
           return;
         }
       }
       const promptText = $('prompt').value.trim();
-      const start = $('manuscript').selectionStart;
-      const end = $('manuscript').selectionEnd;
+      const { start, end } = selectedManuscriptRange();
       $('prompt').value = '';
       addMessage('user', promptText);
       const selModel = (state.models || []).find((m) => m.key === state.modelChoice);
-      const assistantBody = addMessage('assistant', '', { model: selModel ? selModel.id : null });
+      const assistantMessage = addMessage('assistant', '', { model: selModel ? selModel.id : null });
       $('send').disabled = true;
       $('stop').disabled = false;
       state.abort = new AbortController();
@@ -578,11 +770,11 @@
             if (!line) continue;
             const event = JSON.parse(line.slice(6));
             if (event.type === 'text_delta') {
-              assistantBody.textContent += event.content;
+              assistantMessage.appendText(event.content);
               state.lastAssistant += event.content;
             }
             if (event.type === 'done') {
-              if (event.display_text) assistantBody.textContent = event.display_text;
+              if (event.display_text) assistantMessage.setText(event.display_text);
               state.lastAssistant = event.manuscript_text || state.lastAssistant;
               state.lastCost = {
                 model: event.model_display || event.model,
@@ -618,6 +810,10 @@
     $('saveProject').onclick = saveProject;
     $('deleteProject').onclick = deleteProject;
     $('saveManuscript').onclick = () => saveManuscript();
+    $('manuscriptPrev').onclick = () => goManuscriptPage(-1);
+    $('manuscriptNext').onclick = () => goManuscriptPage(1);
+    $('conversationPrev').onclick = () => goConversationPage(-1);
+    $('conversationNext').onclick = () => goConversationPage(1);
     $('search').onclick = searchManuscript;
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
@@ -627,7 +823,10 @@
     $('searchQuery').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') searchManuscript();
     });
-    $('manuscript').addEventListener('input', () => setManuscriptStatus(`${charMeta($('manuscript').value.length)} · unsaved`));
+    $('manuscript').addEventListener('input', () => {
+      commitVisibleManuscriptPage();
+      updateManuscriptStatus('unsaved');
+    });
     $('manuscript').addEventListener('select', updateAssistantButtons);
     $('manuscript').addEventListener('keyup', updateAssistantButtons);
     loadProjects().catch((err) => setStatus(String(err.message || err)));
