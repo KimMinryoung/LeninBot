@@ -819,7 +819,7 @@ async def list_writer_manuscript_revisions(
 
 
 @app.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])
-async def writer_message(project_id: int, request: WriterMessageRequest):
+async def writer_message(project_id: int, request: WriterMessageRequest, http_req: Request):
     from creative_writer import stream_writer_reply
 
     return StreamingResponse(
@@ -829,6 +829,7 @@ async def writer_message(project_id: int, request: WriterMessageRequest):
             selection_start=request.selection_start,
             selection_end=request.selection_end,
             model_choice=request.model,
+            client_disconnected=http_req.is_disconnected,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store"},

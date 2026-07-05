@@ -14,7 +14,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import anthropic
 from psycopg2.extras import RealDictCursor, execute_values
@@ -66,6 +66,7 @@ WRITER_DEFAULT_MAX_TOKENS = 12000
 # Tool-use rounds: allow extended continuity searches and edit retries before
 # the model writes. 1 = no tools (legacy). Each round is a Fable-priced model call.
 _WRITER_MAX_ROUNDS = 16
+_WRITER_IDLE_TIMEOUT_SEC = 600
 # Web search is disabled by design: Fable 5's internal knowledge is strong and
 # the writer prefers reference material supplied directly by the user. Flip to
 # True to re-enable the Tavily-backed web_search tool (and its prompt guidance).
@@ -887,6 +888,7 @@ async def stream_writer_reply(
     selection_start: int | None = None,
     selection_end: int | None = None,
     model_choice: str | None = None,
+    client_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     project = get_project(project_id)
     if not project:
@@ -913,10 +915,13 @@ async def stream_writer_reply(
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
+    last_progress = asyncio.get_running_loop().time()
 
     writer_tools, writer_handlers = _build_writer_tools(project_id)
 
     async def on_progress(event: str, detail: str):
+        nonlocal last_progress
+        last_progress = asyncio.get_running_loop().time()
         if event == "text_delta" and detail:
             await queue.put(_sse({"type": "text_delta", "content": detail}))
         elif event == "budget" and detail:
@@ -954,6 +959,17 @@ async def stream_writer_reply(
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=15)
             except asyncio.TimeoutError:
+                if client_disconnected is not None and await client_disconnected():
+                    task.cancel()
+                    return
+                idle_for = asyncio.get_running_loop().time() - last_progress
+                if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
+                    task.cancel()
+                    yield _sse({
+                        "type": "error",
+                        "content": f"{writer_display} request timed out after {int(idle_for)}s without model progress.",
+                    })
+                    return
                 yield _sse({"type": "ping"})
                 continue
             if item is None:
