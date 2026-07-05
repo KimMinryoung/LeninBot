@@ -92,6 +92,12 @@ def _web_chat_feedback() -> None:
     ensure_web_chat_feedback_table()
 
 
+def _writer_tables() -> None:
+    from creative_writer import ensure_writer_tables
+
+    ensure_writer_tables()
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
@@ -105,6 +111,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("tool-audit-log", _tool_audit_log),
     ("chat-logs-persona", _chat_logs_persona),
     ("web-chat-feedback", _web_chat_feedback),
+    ("writer-tables", _writer_tables),
 ]
 
 

@@ -68,6 +68,12 @@ _CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 # (matches what this loop writes). cache_read is identical across TTL tiers.
 # Prefix-match picks by base model name so pinned-date variants reuse the row.
 PRICING_TABLE = {
+    "claude-fable-5": {
+        "input":          10.00 / 1_000_000,
+        "output":         50.00 / 1_000_000,
+        "cache_creation": 20.00 / 1_000_000,   # 2.0x input (1h TTL)
+        "cache_read":      1.00 / 1_000_000,
+    },
     "claude-opus-4-8": {
         "input":           5.00 / 1_000_000,
         "output":         25.00 / 1_000_000,
@@ -128,6 +134,41 @@ def _calculate_cost(usage, model: str | None = None) -> float:
     cost += getattr(usage, "cache_creation_input_tokens", 0) * p["cache_creation"]
     cost += getattr(usage, "cache_read_input_tokens", 0) * p["cache_read"]
     return cost
+
+
+def _usage_to_dict(usage) -> dict:
+    """Return stable token usage metadata for API callers that persist costs."""
+    if not usage:
+        return {}
+    keys = (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    )
+    return {key: int(getattr(usage, key, 0) or 0) for key in keys}
+
+
+def _update_budget_tracker(
+    budget_tracker: dict | None,
+    *,
+    total_cost: float,
+    rounds_used: int,
+    was_interrupted: bool,
+    tool_work_details: list,
+    response=None,
+    model: str | None = None,
+) -> None:
+    if budget_tracker is None:
+        return
+    metadata = build_budget_tracker(total_cost, rounds_used, was_interrupted, tool_work_details)
+    if response is not None:
+        metadata.update({
+            "model": model or "",
+            "stop_reason": str(getattr(response, "stop_reason", "") or ""),
+            "usage": _usage_to_dict(getattr(response, "usage", None)),
+        })
+    budget_tracker.update(metadata)
 
 
 # ── Content helpers ──────────────────────────────────────────────────
@@ -389,13 +430,15 @@ async def chat_with_tools(
         # ── Cancel check ──
         check_cancelled(task_id)
 
-        response = await _claude_call(
-            model=model,
-            max_tokens=max_tokens,
-            system=cached_system,
-            tools=cached_tools,
-            messages=_with_message_cache_breakpoint(working_msgs),
-        )
+        create_kwargs = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": cached_system,
+            "messages": _with_message_cache_breakpoint(working_msgs),
+        }
+        if cached_tools:
+            create_kwargs["tools"] = cached_tools
+        response = await _claude_call(**create_kwargs)
 
         # Track cost. Log cache-token breakdown at INFO so prompt-caching
         # effectiveness is visible in journald without a debug rebuild — if
@@ -444,8 +487,15 @@ async def chat_with_tools(
                     continue
             # Combine accumulated text from tool_use rounds with final response
             all_text = accumulated_text_parts + text_parts
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+            _update_budget_tracker(
+                budget_tracker,
+                total_cost=total_cost,
+                rounds_used=round_num,
+                was_interrupted=False,
+                tool_work_details=tool_work_details,
+                response=response,
+                model=model,
+            )
             return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK
 
         # Budget exceeded → process this response's tool calls, then break
@@ -575,8 +625,15 @@ async def chat_with_tools(
             )
             if terminal_hit:
                 _tname, _tresult = terminal_hit
-                if budget_tracker is not None:
-                    budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
+                _update_budget_tracker(
+                    budget_tracker,
+                    total_cost=total_cost,
+                    rounds_used=round_num,
+                    was_interrupted=False,
+                    tool_work_details=tool_work_details,
+                    response=response,
+                    model=model,
+                )
                 terminal_report = str(_tresult).strip() or f"{_tname} completed"
                 all_text = accumulated_text_parts + [terminal_report]
                 return "\n".join(p for p in all_text if p)
@@ -744,7 +801,14 @@ async def chat_with_tools(
         text_parts = [b.text for b in final.content if b.type == "text"]
 
     all_text = accumulated_text_parts + text_parts
-    if budget_tracker is not None:
-        budget_tracker.update(build_budget_tracker(
-            total_cost, round_num if response else 0, was_still_working, tool_work_details))
+    tracker_response = locals().get("followup") or final
+    _update_budget_tracker(
+        budget_tracker,
+        total_cost=total_cost,
+        rounds_used=round_num if response else 0,
+        was_interrupted=was_still_working,
+        tool_work_details=tool_work_details,
+        response=tracker_response,
+        model=model,
+    )
     return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK

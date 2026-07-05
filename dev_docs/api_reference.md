@@ -30,6 +30,7 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `GET` | `/personas` | selectable public web-chat persona catalog |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
+| `GET` | `/writer` | noindex browser shell for the admin-gated personal fiction workspace |
 | `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
 | `POST` | `/a2a` | A2A JSON-RPC endpoint |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
@@ -126,6 +127,47 @@ Query:
 | `limit` | no | 1-200, default 50 |
 
 Returns session IDs, first/last timestamps, message count, and a first-message preview.
+
+## Personal Writer Endpoints
+
+`/writer` serves a noindex HTML shell. Through the public frontend, use `/writer`; the frontend requires the existing admin login and redirects to `/api/proxy/writer`, where it injects the backend admin credential server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is deliberately separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses `creative_writer.py`, stores state in `writer_projects` and `writer_messages`, and calls Anthropic Messages API with `model="claude-fable-5"`.
+
+Apply the explicit migration before first use:
+
+```bash
+venv/bin/python scripts/schema_migrations.py --only writer-tables
+```
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/writer/projects` | list writer projects plus Fable pricing metadata |
+| `POST` | `/writer/projects` | create a writer project |
+| `GET` | `/writer/projects/{project_id}` | project metadata and ordered messages |
+| `PATCH` | `/writer/projects/{project_id}` | update title, premise, and style notes |
+| `DELETE` | `/writer/projects/{project_id}` | delete a project and its messages |
+| `POST` | `/writer/projects/{project_id}/messages` | stream a Claude Fable 5 answer as SSE |
+
+Project request:
+
+```json
+{
+  "title": "Novel title",
+  "premise": "Core situation and continuity",
+  "style_notes": "Voice, POV, tense, constraints"
+}
+```
+
+Message request:
+
+```json
+{
+  "prompt": "Write the next scene...",
+  "request_kind": "draft",
+  "max_tokens": 4096
+}
+```
+
+`request_kind` accepts `draft`, `continue`, `revise`, `plan`, or `critique`; invalid values are normalized to `draft`. The message route streams `text/event-stream` payloads: `user_saved`, `text_delta`, `done`, and `error`. `done` includes `model`, `stop_reason`, token usage when provided by Anthropic, and estimated USD cost using Claude Fable 5 base input/output pricing. Fable refusals arrive as successful streams whose final `stop_reason` can be `refusal`.
 
 ## Admin Endpoints
 

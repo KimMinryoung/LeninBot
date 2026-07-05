@@ -58,8 +58,10 @@ def _clean_chat_history_rows(rows: list[dict]) -> list[dict]:
 
 # ── Admin API key authentication ──────────────────────────────────
 _ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
+_WRITER_ACCESS_KEY = get_secret("WRITER_ACCESS_KEY", "") or _ADMIN_API_KEY
 _WEBCHAT_PROXY_SECRET = get_secret("WEBCHAT_PROXY_SECRET", "") or ""
 _admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
+_writer_key_header = APIKeyHeader(name="X-Writer-Key", auto_error=False)
 
 
 async def require_admin(api_key: str = Security(_admin_key_header)):
@@ -68,6 +70,20 @@ async def require_admin(api_key: str = Security(_admin_key_header)):
         raise HTTPException(status_code=503, detail="Admin API key not configured on server")
     if not api_key or api_key != _ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
+
+
+async def require_writer_access(
+    writer_key: str = Security(_writer_key_header),
+    admin_key: str = Security(_admin_key_header),
+):
+    """Allow the writer UI through frontend proxies that strip X-Admin-Key."""
+    if not _WRITER_ACCESS_KEY and not _ADMIN_API_KEY:
+        raise HTTPException(status_code=503, detail="Writer access key not configured on server")
+    if writer_key and writer_key == _WRITER_ACCESS_KEY:
+        return
+    if _ADMIN_API_KEY and admin_key and admin_key == _ADMIN_API_KEY:
+        return
+    raise HTTPException(status_code=403, detail="Invalid or missing writer access key")
 
 
 def _is_admin_request(http_req: Request) -> bool:
@@ -218,6 +234,18 @@ class ChatFeedbackRequest(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=4)
     tone_feedback: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=500)
+
+
+class WriterProjectRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    premise: str = Field(default="", max_length=20000)
+    style_notes: str = Field(default="", max_length=20000)
+
+
+class WriterMessageRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=30000)
+    request_kind: str = Field(default="draft", max_length=32)
+    max_tokens: int = Field(default=4096, ge=256, le=16000)
 
 
 class EmailDraftRequest(BaseModel):
@@ -607,6 +635,103 @@ async def private_reports_admin_page():
         content=_PRIVATE_REPORTS_ADMIN_HTML,
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
+@app.get("/writer")
+async def writer_page():
+    html_path = Path(__file__).resolve().parent / "frontend" / "writer.html"
+    return Response(
+        content=html_path.read_text(encoding="utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
+@app.get("/writer/projects", dependencies=[Depends(require_writer_access)])
+async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
+    from creative_writer import (
+        WRITER_INPUT_PRICE_PER_MTOK,
+        WRITER_MODEL,
+        WRITER_MODEL_DISPLAY,
+        WRITER_OUTPUT_PRICE_PER_MTOK,
+        list_projects,
+    )
+
+    projects = await asyncio.to_thread(list_projects, limit)
+    return {
+        "projects": projects,
+        "model": {
+            "id": WRITER_MODEL,
+            "display_name": WRITER_MODEL_DISPLAY,
+            "input_price_per_mtok": WRITER_INPUT_PRICE_PER_MTOK,
+            "output_price_per_mtok": WRITER_OUTPUT_PRICE_PER_MTOK,
+        },
+    }
+
+
+@app.post("/writer/projects", dependencies=[Depends(require_writer_access)])
+async def create_writer_project(request: WriterProjectRequest):
+    from creative_writer import create_project
+
+    project = await asyncio.to_thread(
+        create_project,
+        request.title,
+        request.premise,
+        request.style_notes,
+    )
+    return {"project": project}
+
+
+@app.get("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
+async def get_writer_project(project_id: int):
+    from creative_writer import get_project_with_messages
+
+    project = await asyncio.to_thread(get_project_with_messages, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return project
+
+
+@app.patch("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
+async def update_writer_project(project_id: int, request: WriterProjectRequest):
+    from creative_writer import get_project_with_messages, update_project
+
+    project = await asyncio.to_thread(
+        update_project,
+        project_id,
+        request.title,
+        request.premise,
+        request.style_notes,
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return await asyncio.to_thread(get_project_with_messages, project_id)
+
+
+@app.delete("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
+async def delete_writer_project(project_id: int):
+    from creative_writer import delete_project
+
+    deleted = await asyncio.to_thread(delete_project, project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"deleted": True}
+
+
+@app.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])
+async def writer_message(project_id: int, request: WriterMessageRequest):
+    from creative_writer import stream_writer_reply
+
+    return StreamingResponse(
+        stream_writer_reply(
+            project_id=project_id,
+            prompt=request.prompt,
+            request_kind=request.request_kind,
+            max_tokens=request.max_tokens,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
     )
 
 

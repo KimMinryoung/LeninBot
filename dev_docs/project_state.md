@@ -12,6 +12,7 @@ cyber-lenin.com frontend
         v
 leninbot-api (:8000, FastAPI)
         |-- /chat -> web_chat.py
+        |-- /writer -> creative_writer.py (admin-gated personal fiction workspace)
         |-- admin APIs -> chat logs, task reports, private reports, email bridge
         |-- /.well-known/agent-card.json + /a2a
         |
@@ -66,7 +67,7 @@ Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/
 
 | Store | Owner modules | Stored state |
 |---|---|---|
-| PostgreSQL/Supabase | `db.py`, `task_store.py`, `memory_store/*`, `autonomous_project.py`, `email_bridge.py`, `security_gateway/audit.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata, `tool_audit_log` (per-call security audit) |
+| PostgreSQL/Supabase | `db.py`, `task_store.py`, `memory_store/*`, `autonomous_project.py`, `email_bridge.py`, `security_gateway/audit.py`, `creative_writer.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata, writer projects/messages, `tool_audit_log` (per-call security audit) |
 | pgvector | `corpus/*`, `memory_store/experiential.py` | core theory, modern analysis, self-produced analysis, experience memory vectors |
 | Neo4j | `graph_memory/*`, `kg_runtime/*` | typed KG entities, relations, Graphiti episodes |
 | Redis | `redis_state.py` | live task progress/state, active task registry, mission board, task-chain summaries |
@@ -90,6 +91,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 |---|---|
 | Identity and prompt rendering | `identity/prompts.py`, `identity/agent_prompts/*.md`, `llm/prompt_renderer.py`, `agents/base.py` |
 | LLM provider config | `bot_config.py`, `claude_loop.py`, `openai_tool_loop.py`, `llm/client.py` |
+| Personal fiction workspace | `creative_writer.py`, `frontend/writer.html`, `/writer/*` routes in `api.py` |
 | Agents | `agents/*.py`, `config/agent_runtime.json` |
 | Tools | `runtime_tools/*`, `self_runtime/tools.py`, `crypto_wallet/*` |
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
@@ -122,6 +124,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - `config.json` stores mutable runtime config. `config/agent_runtime.json` overlays per-agent execution settings.
 - Prompt text under `identity/agent_prompts/` hot-reloads on the next prompt render. Python code, tool definitions, and systemd credentials require service restart.
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.
+- `/writer` is an admin-gated personal fiction workspace, not a Cyber-Lenin persona or model tier. It stores separate `writer_projects`/`writer_messages` rows and calls Claude Fable 5 directly through `creative_writer.py`. Apply `venv/bin/python scripts/schema_migrations.py --only writer-tables` before first use.
 - Inbound MCP is an on-demand stdio gateway for developer/operator clients, not a public API route. `MCP_GATEWAY_PROFILE=inspect` is the default. `operator` adds `readonly_query_db`, `bounded_query_db`, and `kg_maintenance_run`, each delegated to existing guarded project scripts/tools.
 - Services do not run startup DDL. Apply `scripts/schema_migrations.py` before deploying code that depends on new tables, columns, indexes, or constraints. The roleplay bot's tables are the `roleplay-tables` migration (`ensure_roleplay_tables` in `telegram/schema.py`).
 - Every tool call from every interface funnels through `tool_loop_common.execute_tool`, where the **tool security gateway** (`security_gateway/*`) authorizes the call against one unified policy and writes a `tool_audit_log` row + structured journal line. The gateway is fail-open on internal error. New rules (owner-gating, rate limits) ship in **shadow** mode by default (`gateway_enforce_mode` in `config.json`); web-chat interface restriction is always enforced (it already mirrors the pre-filter). Inspect with `scripts/security_gateway.py {policy,check,audit}`. Full design: `dev_docs/security_gateway.md`.
