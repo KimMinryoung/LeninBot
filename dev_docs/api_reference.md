@@ -157,6 +157,7 @@ venv/bin/python scripts/schema_migrations.py --only writer-tables
 | `PUT` | `/writer/projects/{project_id}/documents/{document_id}` | update title, kind, and content of a document |
 | `DELETE` | `/writer/projects/{project_id}/documents/{document_id}` | delete a background document |
 | `GET` | `/writer/projects/{project_id}/stream` | reattach SSE to a live background writer run (`no_active_run` when idle) |
+| `PUT` | `/writer/settings` | persist the admin's model choice (`{"model": "<choice key>"}`); returned as `selected_model` on the project list |
 | `POST` | `/writer/projects/{project_id}/messages` | stream a Claude Fable 5 answer as SSE |
 
 Project request:
@@ -208,7 +209,9 @@ Background document request (`POST`/`PUT`):
 }
 ```
 
-Documents are per-project reference material (worldbuilding, character sheets, outline, research) stored in `writer_documents`, unique by `(project_id, title)`; `POST` upserts by title. A document inventory (titles, kinds, sizes) is injected into the model's manuscript-context system block, and the model reads them with the `read_document`/`search_documents` tools and maintains them with `save_document`.
+Documents are per-project reference material (worldbuilding, character sheets, outline, research) stored in `writer_documents`, unique by `(project_id, title)`; `POST` upserts by title. A document inventory (titles, kinds, sizes) is injected into the model's manuscript-context system block, and the model reads them with the `read_document`/`search_documents` tools and maintains them with `save_document`. Documents with kind `pinned` (up to 2, 6000 chars each) are injected in full every turn; the prompt instructs the model to maintain a pinned 'Story so far' synopsis so long-novel continuity does not require re-reading the manuscript.
+
+Model selection: the admin's choice persists server-side in `writer_settings` (`PUT /writer/settings`, loaded as `selected_model` on the project list) and is used when a message request omits `model`. Choices: `fable` (Claude Fable 5, adaptive thinking, effort high), `fable_fast` (effort low), `deepseek_pro`, `deepseek_flash`. Conversation history sent to the model is budgeted to ~30k chars (newest first, minimum 8 messages).
 
 Message request:
 
