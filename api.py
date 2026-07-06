@@ -249,6 +249,10 @@ class WriterMessageRequest(BaseModel):
     model: str | None = Field(default=None, max_length=64)
 
 
+class WriterSettingsRequest(BaseModel):
+    model: str = Field(..., min_length=1, max_length=64)
+
+
 class WriterDocumentRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     kind: str = Field(default="note", max_length=50)
@@ -679,11 +683,13 @@ async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
         WRITER_MODEL,
         WRITER_MODEL_DISPLAY,
         WRITER_OUTPUT_PRICE_PER_MTOK,
+        get_selected_model_choice,
         list_projects,
         list_writer_models,
     )
 
     projects = await asyncio.to_thread(list_projects, limit)
+    selected = await asyncio.to_thread(get_selected_model_choice)
     return {
         "projects": projects,
         "model": {
@@ -693,7 +699,19 @@ async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
             "output_price_per_mtok": WRITER_OUTPUT_PRICE_PER_MTOK,
         },
         "models": list_writer_models(),
+        "selected_model": selected,
     }
+
+
+@app.put("/writer/settings", dependencies=[Depends(require_writer_access)])
+async def save_writer_settings(request: WriterSettingsRequest):
+    from creative_writer import set_selected_model_choice
+
+    try:
+        saved = await asyncio.to_thread(set_selected_model_choice, request.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"selected_model": saved}
 
 
 @app.post("/writer/projects", dependencies=[Depends(require_writer_access)])

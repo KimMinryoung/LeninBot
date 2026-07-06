@@ -39,11 +39,23 @@ WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 # same chat_with_tools loop via bot_config's Anthropic-compatible DeepSeek
 # client. Prices are display hints only — authoritative cost comes from
 # claude_loop.PRICING_TABLE (keyed by model id) at runtime.
+# "extra" carries provider kwargs passed straight to chat_with_tools.
 WRITER_MODEL_CHOICES: dict[str, dict] = {
     "fable": {
         "provider": "anthropic",
         "model": "claude-fable-5",
         "display": "Claude Fable 5",
+        "input_price_per_mtok": 10.0,
+        "output_price_per_mtok": 50.0,
+        # Extended thinking for scene planning (structure, beats, imagery)
+        # before prose lands in the manuscript. Thinking tokens bill as
+        # output; the budget below caps that at ~$0.20/turn worst case.
+        "extra": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
+    },
+    "fable_fast": {
+        "provider": "anthropic",
+        "model": "claude-fable-5",
+        "display": "Claude Fable 5 (no thinking)",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,
     },
@@ -76,10 +88,22 @@ _WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 70
 _WRITER_WEB_SEARCH_ENABLED = False
 _WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 _MAX_CONTEXT_MESSAGES = 80
+# Character budget for conversation history sent to the model (~10k tokens).
+# 80 messages of long legacy replies could reach 6-figure token counts; with
+# Fable-tier input pricing the history is the dominant per-turn cost, and old
+# commentary adds little craft value. Newest messages win; at least the last
+# _MIN_CONTEXT_MESSAGES survive the budget so short-term context never drops.
+_CONTEXT_CHAR_BUDGET = 30000
+_MIN_CONTEXT_MESSAGES = 8
 _MANUSCRIPT_CHUNK_SIZE = 3500
 _MANUSCRIPT_CHUNK_OVERLAP = 300
 _MANUSCRIPT_TAIL_CHARS = 7000
 _MANUSCRIPT_SELECTION_LIMIT = 20000
+# Documents with kind 'pinned' (e.g. an agent-maintained 'Story so far'
+# synopsis) are injected in full into the manuscript context block.
+_PINNED_DOC_KIND = "pinned"
+_PINNED_DOC_CHAR_LIMIT = 6000
+_PINNED_DOC_MAX_COUNT = 2
 
 _writer_client: anthropic.AsyncAnthropic | None = None
 _writer_background_tasks: set[asyncio.Task] = set()
@@ -121,14 +145,49 @@ def list_writer_models() -> list[dict]:
     return out
 
 
+def get_writer_setting(key: str, default: Any = None) -> Any:
+    row = db_query_one("SELECT value FROM writer_settings WHERE key = %s", (key,))
+    if not row:
+        return default
+    return row.get("value", default)
+
+
+def set_writer_setting(key: str, value: Any) -> None:
+    db_execute(
+        """INSERT INTO writer_settings (key, value)
+             VALUES (%s, %s::jsonb)
+        ON CONFLICT (key)
+          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()""",
+        (key, json.dumps(value, ensure_ascii=False)),
+    )
+
+
+def get_selected_model_choice() -> str:
+    """The admin's persisted model choice; falls back to the built-in default
+    when unset or when the saved key no longer exists."""
+    saved = get_writer_setting("model_choice")
+    if isinstance(saved, str) and saved in WRITER_MODEL_CHOICES:
+        return saved
+    return WRITER_DEFAULT_CHOICE
+
+
+def set_selected_model_choice(choice: str) -> str:
+    key = (choice or "").strip()
+    if key not in WRITER_MODEL_CHOICES:
+        raise ValueError(f"Unknown writer model choice: {choice!r}")
+    set_writer_setting("model_choice", key)
+    return key
+
+
 def _resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
     """Resolve a model choice key to (client, model_id, display_name, extra_kwargs).
 
     extra_kwargs carries provider-specific chat_with_tools kwargs (e.g. DeepSeek
-    thinking/output_config). Raises ValueError for an unknown key and
-    RuntimeError if the chosen provider is not configured.
+    thinking/output_config). When no explicit choice is given, the admin's
+    persisted selection wins over the built-in default. Raises ValueError for
+    an unknown key and RuntimeError if the chosen provider is not configured.
     """
-    key = (choice or "").strip() or WRITER_DEFAULT_CHOICE
+    key = (choice or "").strip() or get_selected_model_choice()
     spec = WRITER_MODEL_CHOICES.get(key)
     if spec is None:
         raise ValueError(f"Unknown writer model choice: {choice!r}")
@@ -141,7 +200,7 @@ def _resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
         # agents). The writer never forces tool_choice, so thinking is stable.
         extra = bot_config._get_deepseek_thinking_params()
         return client, spec["model"], spec["display"], extra
-    return _client(), spec["model"], spec["display"], {}
+    return _client(), spec["model"], spec["display"], dict(spec.get("extra") or {})
 
 
 def ensure_writer_tables() -> None:
@@ -201,6 +260,13 @@ def ensure_writer_tables() -> None:
                after_body TEXT NOT NULL DEFAULT '',
                note TEXT NOT NULL DEFAULT '',
                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           )"""
+    )
+    db_execute(
+        """CREATE TABLE IF NOT EXISTS writer_settings (
+               key TEXT PRIMARY KEY,
+               value JSONB NOT NULL DEFAULT '{}'::jsonb,
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
            )"""
     )
     db_execute(
@@ -809,6 +875,10 @@ def _tools_prompt_section() -> str:
         "- save_document(title, content, kind): create or fully overwrite a background document. Use when the "
         "writer asks you to record notes, or to keep an agreed story bible current. Never store manuscript "
         "prose in documents.\n",
+        "- Maintain a document titled 'Story so far' with kind 'pinned': a compact synopsis (under 4000 chars) "
+        "of events, character states, open threads, and planted setups. Pinned documents are placed in your "
+        "context automatically every turn, so keeping it current replaces expensive re-reading of the "
+        "manuscript. Update it after any scene that changes the situation; keep it factual and dense.\n",
     ]
     if _WRITER_WEB_SEARCH_ENABLED:
         lines.append(
@@ -847,6 +917,13 @@ def _build_base_system_prompt(project: dict) -> str:
         "reflexive over-explaining, neatly moralized endings, purple padding).\n"
         "- Honor continuity absolutely: names, timeline, established facts, and what each character can plausibly know. "
         "If the request conflicts with the established draft, follow continuity and flag the conflict in commentary.\n\n"
+        "# Working method\n"
+        "- Before drafting a substantial scene, plan it privately: what the scene must accomplish, where the tension "
+        "lives, what image or gesture carries the subtext, where it should end. Never put the plan in your reply.\n"
+        "- Draft a scene as one coherent whole (one append), not as fragments.\n"
+        "- After appending a major scene, reread it once with fresh eyes (read_manuscript on the new range) and repair "
+        "the weakest lines with replace_in_manuscript — flat verbs, over-explained emotion, rhythm that sags. "
+        "One targeted polish pass, not endless fiddling.\n\n"
         + _tools_prompt_section()
         + "# Editing discipline\n"
         "- The saved manuscript is the authoritative draft; your tools edit it in place (every change is reversible).\n"
@@ -889,6 +966,18 @@ def _manuscript_context(project_id: int, selection_start: int | None, selection_
             for d in documents
         )
         parts.append("Background documents (read with read_document(title)):\n" + listing)
+        # Pinned documents (the agent-maintained story synopsis and similar)
+        # ride along in full so long-novel continuity doesn't depend on the
+        # model choosing to re-read the manuscript every turn.
+        pinned = [d for d in documents if str(d.get("kind") or "") == _PINNED_DOC_KIND]
+        for d in pinned[:_PINNED_DOC_MAX_COUNT]:
+            doc = get_document(project_id, int(d["id"]))
+            content = str((doc or {}).get("content") or "").strip()
+            if not content:
+                continue
+            if len(content) > _PINNED_DOC_CHAR_LIMIT:
+                content = content[:_PINNED_DOC_CHAR_LIMIT] + "\n[pinned document truncated]"
+            parts.append(f"Pinned document {str(d.get('title'))!r}:\n{content}")
     return "\n\n".join(parts)
 
 
@@ -929,12 +1018,21 @@ def _messages_for_model(
             LIMIT %s""",
         (project_id, _MAX_CONTEXT_MESSAGES),
     )
-    ordered = list(reversed(rows))
-    messages = [
-        {"role": row["role"], "content": str(row["content"])}
-        for row in ordered
-        if row.get("role") in {"user", "assistant"} and str(row.get("content") or "").strip()
-    ]
+    # rows are newest-first: apply the char budget from the newest backwards,
+    # then restore chronological order.
+    kept: list[dict] = []
+    spent = 0
+    for row in rows:
+        if row.get("role") not in {"user", "assistant"}:
+            continue
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        if len(kept) >= _MIN_CONTEXT_MESSAGES and spent + len(content) > _CONTEXT_CHAR_BUDGET:
+            break
+        kept.append({"role": row["role"], "content": content})
+        spent += len(content)
+    messages = list(reversed(kept))
     current_turn = "<user_request>\n" + user_prompt.strip() + "\n</user_request>"
     messages.append({"role": "user", "content": current_turn})
     return messages

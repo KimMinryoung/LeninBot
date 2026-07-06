@@ -159,7 +159,7 @@
       <div class="stack">
         <div>
           <h1>Novel Writer</h1>
-          <div class="meta">DeepSeek Flash default · one manuscript per project</div>
+          <div class="meta">Model choice persists across sessions · one manuscript per project</div>
         </div>
         <div class="row">
           <button id="newProject" class="primary" type="button">New</button>
@@ -698,6 +698,7 @@
       state.projects = data.projects || [];
       state.model = data.model || state.model;
       state.models = data.models || [];
+      if (data.selected_model) state.modelChoice = data.selected_model;
       renderModels();
       renderProjects();
       renderCost();
@@ -709,8 +710,7 @@
       const models = state.models || [];
       if (!models.length) { sel.innerHTML = ''; return; }
       if (!state.modelChoice || !models.some((m) => m.key === state.modelChoice && m.available)) {
-        const def = models.find((m) => m.key === 'deepseek_flash' && m.available)
-          || models.find((m) => m.default && m.available)
+        const def = models.find((m) => m.default && m.available)
           || models.find((m) => m.available)
           || models[0];
         state.modelChoice = def ? def.key : null;
@@ -726,10 +726,15 @@
         if (m.key === state.modelChoice) opt.selected = true;
         sel.appendChild(opt);
       }
-      sel.onchange = () => {
+      sel.onchange = async () => {
         state.modelChoice = sel.value;
         state.model = models.find((m) => m.key === state.modelChoice) || state.model;
         renderCost();
+        try {
+          await api('/writer/settings', { method: 'PUT', body: JSON.stringify({ model: state.modelChoice }) });
+        } catch (err) {
+          setStatus(`Could not save model choice: ${err.message || err}`);
+        }
       };
     }
 
