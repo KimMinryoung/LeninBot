@@ -341,6 +341,9 @@
         <div class="row">
           <label for="modelSelect" class="meta">Model</label>
           <select id="modelSelect"></select>
+          <label for="criticToggle" class="meta" title="After the main pass, run a second line-edit model pass over what changed">
+            <input type="checkbox" id="criticToggle"> 퇴고
+          </label>
         </div>
         <div class="row">
           <button id="send" class="primary" type="button">Send</button>
@@ -855,6 +858,7 @@
         setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
       }
       if (event.type === 'tool') setStatus(event.content);
+      if (event.type === 'critic_start') setStatus('Line-edit pass (퇴고)…');
       if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
       if (event.type === 'error') {
         ctx.finalSeen = true;
@@ -1363,6 +1367,7 @@
       setStatus('Streaming...');
       const payload = { prompt: promptText };
       if (state.modelChoice) payload.model = state.modelChoice;
+      if ($('criticToggle').checked) payload.critic = true;
       if (start !== end) {
         payload.selection_start = start;
         payload.selection_end = end;
@@ -1497,6 +1502,10 @@
     $('manuscript').addEventListener('keyup', onManuscriptSelectionChange);
     $('manuscript').addEventListener('mouseup', onManuscriptSelectionChange);
     $('manuscript').addEventListener('blur', updateSelectionInfo);
+    $('criticToggle').checked = localStorage.getItem('writerCriticPass') === '1';
+    $('criticToggle').addEventListener('change', () => {
+      localStorage.setItem('writerCriticPass', $('criticToggle').checked ? '1' : '0');
+    });
     renderDocuments();
     loadProjects().catch((err) => setStatus(String(err.message || err)));
   </script>

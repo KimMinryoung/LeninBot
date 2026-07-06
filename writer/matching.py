@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import re
 
-# Straight and curly single/double quotes drift between what the model
-# remembers and what the manuscript stores; treat them as interchangeable
-# when locating a passage.
-_QUOTE_CHARS = "\"'‘’“”"
+# Straight and curly single/double quotes (plus the corner brackets used in
+# Korean/Japanese typography) drift between what the model remembers and what
+# the manuscript stores; treat them as interchangeable when locating a passage.
+_QUOTE_CHARS = "\"'‘’“”「」『』"
 _QUOTE_CLASS = f"[{_QUOTE_CHARS}]"
 
 

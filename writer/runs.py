@@ -41,6 +41,10 @@ class WriterRun:
                 if edit["start"] >= start:
                     edit["start"] += delta
                     edit["end"] += delta
+                elif edit["end"] > start:
+                    # The new edit lands inside this recorded span (e.g. a
+                    # critic replace within a fresh append): its end moves too.
+                    edit["end"] += delta
         self.edits.append({"action": action, "start": start, "end": end})
 
     async def broadcast(self, item: str | None) -> None:

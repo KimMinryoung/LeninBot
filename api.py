@@ -247,6 +247,7 @@ class WriterMessageRequest(BaseModel):
     selection_start: int | None = Field(default=None, ge=0)
     selection_end: int | None = Field(default=None, ge=0)
     model: str | None = Field(default=None, max_length=64)
+    critic: bool = Field(default=False)
 
 
 class WriterSettingsRequest(BaseModel):
@@ -942,6 +943,7 @@ async def writer_message(project_id: int, request: WriterMessageRequest, http_re
             selection_start=request.selection_start,
             selection_end=request.selection_end,
             model_choice=request.model,
+            critic=request.critic,
             client_disconnected=http_req.is_disconnected,
         ),
         media_type="text/event-stream",

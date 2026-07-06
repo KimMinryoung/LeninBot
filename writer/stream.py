@@ -18,6 +18,8 @@ from claude_loop import chat_with_tools
 from tool_gateway.security import CallerContext, caller_scope
 
 from writer.config import (
+    WRITER_CRITIC_MAX_ROUNDS,
+    WRITER_CRITIC_MAX_TOKENS,
     WRITER_DEFAULT_MAX_TOKENS,
     WRITER_IDLE_TIMEOUT_SEC,
     WRITER_MAX_ROUNDS,
@@ -25,14 +27,16 @@ from writer.config import (
 )
 from writer.models import resolve_writer_model
 from writer.prompts import (
+    build_critic_system_blocks,
     build_system_blocks,
+    critic_user_message,
     messages_for_model,
     parse_writer_response,
     writer_error_message,
 )
 from writer.runs import WriterRun, get_active_run, register_run, unregister_run
-from writer.store import get_project, insert_message, touch_project
-from writer.tools import build_writer_tools
+from writer.store import get_manuscript, get_project, insert_message, touch_project
+from writer.tools import build_critic_tools, build_writer_tools
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,7 @@ async def stream_writer_reply(
     selection_start: int | None = None,
     selection_end: int | None = None,
     model_choice: str | None = None,
+    critic: bool = False,
     client_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     project = get_project(project_id)
@@ -161,6 +166,9 @@ async def stream_writer_reply(
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
+    critic_holder: list[str] = []
+    critic_budget_tracker: dict = {}
+    critic_edit_count = 0
     persisted = False
 
     writer_tools, writer_handlers = build_writer_tools(project_id)
@@ -191,10 +199,28 @@ async def stream_writer_reply(
             }
 
         final_text = (answer_holder[0] if answer_holder else "").strip()
+        critic_ran = bool(critic_holder)
+        if critic_ran:
+            main_parsed = parse_writer_response(final_text)
+            critic_parsed = parse_writer_response(critic_holder[0].strip())
+            commentary = main_parsed["commentary_text"] or main_parsed["manuscript_text"]
+            critic_note = critic_parsed["commentary_text"] or critic_parsed["manuscript_text"]
+            if critic_note:
+                commentary = (commentary + "\n\n" if commentary else "") + "[퇴고] " + critic_note
+            final_text = "<commentary>\n" + commentary + "\n</commentary>"
         parsed_response = parse_writer_response(final_text)
-        usage = budget_tracker.get("usage") or {}
+        usage = dict(budget_tracker.get("usage") or {})
         cost = budget_tracker.get("total_cost")
         stop_reason = str(budget_tracker.get("stop_reason") or "")
+        if critic_ran:
+            for key, value in (critic_budget_tracker.get("usage") or {}).items():
+                if isinstance(value, (int, float)) and isinstance(usage.get(key, 0), (int, float)):
+                    usage[key] = usage.get(key, 0) + value
+                elif key not in usage:
+                    usage[key] = value
+            critic_cost = critic_budget_tracker.get("total_cost")
+            if critic_cost is not None:
+                cost = (cost or 0.0) + critic_cost
         assistant_row = insert_message(
             project_id=project_id,
             role="assistant",
@@ -206,7 +232,7 @@ async def stream_writer_reply(
             cost_usd=cost,
         )
         touch_project(project_id)
-        return {
+        event = {
             "type": "done",
             "message_id": assistant_row.get("id"),
             "model": writer_model,
@@ -220,6 +246,13 @@ async def stream_writer_reply(
             "edits": [dict(edit) for edit in run.edits],
             "created_at": datetime.utcnow().isoformat() + "Z",
         }
+        if critic_ran:
+            event["critic"] = {
+                "ran": True,
+                "cost_usd": critic_budget_tracker.get("total_cost"),
+                "edit_count": critic_edit_count,
+            }
+        return event
 
     async def on_progress(event: str, detail: str):
         run.last_progress = asyncio.get_running_loop().time()
@@ -232,6 +265,47 @@ async def stream_writer_reply(
             await run.broadcast(_sse({"type": "tool", "content": detail}))
         elif event == "provider_retry" and detail:
             await run.broadcast(_sse({"type": "provider_retry", "content": detail}))
+
+    async def run_critic_pass() -> None:
+        """Optional second-pass line editor (퇴고) over this turn's changed
+        spans. Failures are isolated: the main result always persists."""
+        nonlocal critic_edit_count
+        edits_snapshot = [dict(edit) for edit in run.edits]
+        body = str((get_manuscript(project_id) or {}).get("body") or "")
+        critic_msg = critic_user_message(body, edits_snapshot)
+        if not critic_msg:
+            return
+        await run.broadcast(_sse({"type": "critic_start"}))
+        await run.broadcast(_sse({"type": "tool", "content": "Line-edit pass (퇴고)…"}))
+        edits_before = len(run.edits)
+        try:
+            critic_tools, critic_handlers = build_critic_tools(project_id)
+            critic_system = await asyncio.to_thread(build_critic_system_blocks, project)
+            with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
+                critic_text = await chat_with_tools(
+                    [{"role": "user", "content": critic_msg}],
+                    client=writer_client,
+                    model=writer_model,
+                    tools=critic_tools,
+                    tool_handlers=critic_handlers,
+                    system_prompt=critic_system,
+                    max_rounds=WRITER_CRITIC_MAX_ROUNDS,
+                    max_tokens=WRITER_CRITIC_MAX_TOKENS,
+                    budget_usd=100.0,
+                    budget_tracker=critic_budget_tracker,
+                    on_progress=on_progress,
+                    agent_name="writer_critic",
+                    provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+                    **model_extra,
+                )
+            critic_holder.append(critic_text)
+        except Exception:
+            logger.exception("writer critic pass failed project_id=%s", project_id)
+            critic_holder.append(
+                "<commentary>\n퇴고 패스가 실패했습니다 — 본문 초안과 그 편집 내용은 저장되어 있습니다.\n</commentary>"
+            )
+        finally:
+            critic_edit_count = len(run.edits) - edits_before
 
     async def run_llm() -> None:
         try:
@@ -256,6 +330,8 @@ async def stream_writer_reply(
                     **model_extra,
                 )
             answer_holder.append(result)
+            if critic:
+                await run_critic_pass()
         except asyncio.CancelledError:
             # Server shutdown/restart while the run was in flight. Persist an
             # explanatory message in the finally block, then re-raise.

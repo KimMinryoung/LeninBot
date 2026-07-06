@@ -13,7 +13,7 @@ import logging
 
 from tool_gateway.profiles import WRITER_PROFILE, profile_tool_names
 
-from writer.config import WRITER_WEB_SEARCH_ENABLED
+from writer.config import WRITER_CRITIC_TOOL_NAMES, WRITER_WEB_SEARCH_ENABLED
 from writer.documents import get_document, list_documents, save_document, search_documents
 from writer.runs import record_run_edit
 from writer.store import (
@@ -291,3 +291,16 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
 
     _writer_tools_cache[project_id] = (tools, handlers)
     return tools, handlers
+
+
+def build_critic_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Read/replace-only tool surface for the optional line-edit pass.
+
+    Filters the memoized build_writer_tools output so handler identities are
+    shared with the main pass (keeps the dispatcher's id-cache warm) and the
+    subset stays inside the system.writer gateway profile."""
+    tools, handlers = build_writer_tools(project_id)
+    return (
+        [t for t in tools if t["name"] in WRITER_CRITIC_TOOL_NAMES],
+        {name: fn for name, fn in handlers.items() if name in WRITER_CRITIC_TOOL_NAMES},
+    )

@@ -7,6 +7,7 @@ import re
 
 from writer.config import (
     CONTEXT_CHAR_BUDGET,
+    MANUSCRIPT_OPENING_CHARS,
     MANUSCRIPT_SELECTION_LIMIT,
     MANUSCRIPT_TAIL_CHARS,
     MAX_CONTEXT_MESSAGES,
@@ -15,6 +16,9 @@ from writer.config import (
     PINNED_DOC_KIND,
     PINNED_DOC_MAX_COUNT,
     WRITER_CACHE_CONTROL_1H,
+    WRITER_CRITIC_MIN_CHANGED_CHARS,
+    WRITER_CRITIC_SPAN_BUDGET_CHARS,
+    WRITER_CRITIC_SPAN_CONTEXT_CHARS,
     WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
     WRITER_WEB_SEARCH_ENABLED,
 )
@@ -49,6 +53,8 @@ def _tools_prompt_section() -> str:
         "of events, character states, open threads, and planted setups. Pinned documents are placed in your "
         "context automatically every turn, so keeping it current replaces expensive re-reading of the "
         "manuscript. Update it after any scene that changes the situation; keep it factual and dense.\n",
+        "- A pinned document may also contain a style exemplar (passages whose prose the writer wants matched). "
+        "Absorb its rhythm and diction as calibration — never copy its sentences into the manuscript.\n",
     ]
     if WRITER_WEB_SEARCH_ENABLED:
         lines.append(
@@ -79,21 +85,55 @@ def build_base_system_prompt(project: dict) -> str:
         "# Craft standards\n"
         "- Write in the language, voice, point of view, and tense already established in the manuscript context. "
         "Match its prose rhythm and diction; never reset to a generic default voice.\n"
+        "- Specificity is the engine of prose: one exact, surprising detail beats three generic ones. Prefer the "
+        "particular noun, the observed gesture, the sensory fact this character would actually notice. "
+        "If a description could appear in anyone's novel, cut it.\n"
         "- Dramatize through concrete action, sensory detail, and subtext. Do not summarize emotion, "
         "explain the subtext, or state the theme outright — trust the reader.\n"
-        "- Vary sentence length and structure. Favor strong verbs and specific nouns over adverbs and abstraction.\n"
+        "- Vary sentence length and shape deliberately: short sentences hit, long sentences carry. Read for rhythm — "
+        "a paragraph whose sentences all share one shape is flat. Favor strong verbs and specific nouns over "
+        "adverbs and abstraction.\n"
         "- Write dialogue that carries character, tension, and information indirectly; avoid on-the-nose exposition.\n"
-        "- Cut clichés, filler, and AI tells (e.g. 'little did they know', 'a testament to', "
-        "reflexive over-explaining, neatly moralized endings, purple padding).\n"
+        "- Cut clichés, filler, and AI tells: 'little did they know', 'a testament to', 'couldn't help but', "
+        "trailing triads ('X, Y, and something Z'), breath/heartbeat clichés for emotion, over-explained subtext, "
+        "every paragraph ending on a mini-epiphany, repeated 'not X but Y' constructions, neatly moralized endings, "
+        "purple padding.\n"
         "- Honor continuity absolutely: names, timeline, established facts, and what each character can plausibly know. "
         "If the request conflicts with the established draft, follow continuity and flag the conflict in commentary.\n\n"
+        "# Writing in Korean\n"
+        "The manuscript is primarily written in Korean. Write Korean literary fiction, not translated English:\n"
+        "- 문체: establish and hold a consistent register; match the draft's existing 문체 exactly.\n"
+        "- 어미 variation: never let narration fall into monotonous -었다/-했다 chains. Vary sentence endings and "
+        "structures — -ㄴ다 present, 명사형/체언 마침, inversion, an occasional fragment — while keeping tense "
+        "discipline. Korean rhythm lives in the endings.\n"
+        "- Dialogue: speech level (반말/존댓말/하오체 등) and 호칭 must stay consistent per relationship and shift "
+        "only when the relationship shifts — such shifts are dramatic events; use them deliberately.\n"
+        "- Kill 번역투: no 것이다 crutch, no long ~의 chains, no 되어지다-style double passives, no overused "
+        "그/그녀/그것 — Korean drops known subjects; let it. Prefer native verbs over 한자어+하다 when the "
+        "register allows.\n"
+        "- 의성어/의태어 are a scalpel, not a garnish: one precise 의태어 can carry a whole gesture; three in a "
+        "paragraph are noise.\n"
+        "- Match the draft's punctuation and quote style exactly (this also keeps replace_in_manuscript "
+        "matches reliable).\n\n"
+        "# Scene craft\n"
+        "- A scene is a unit of change: someone wants something, meets resistance, and the situation turns. "
+        "Know the turn before you draft. Enter late, leave early.\n"
+        "- End scenes and chapters on a concrete image, gesture, or line of dialogue that carries the aftertaste — "
+        "never on summary or stated feeling. Open chapters inside motion or tension, not with weather or waking up "
+        "(unless the draft's style demands it).\n"
+        "- Interiority: render thought as free indirect discourse in the character's own diction, woven into "
+        "narration — not as tagged 'she thought' blocks, and not as explanation of feelings the scene already shows.\n"
+        "- Pacing: expand time at the moments of highest pressure (beat-by-beat perception), compress ruthlessly "
+        "between them. Vary paragraph length with the pulse of the scene.\n\n"
         "# Working method\n"
         "- Before drafting a substantial scene, plan it privately: what the scene must accomplish, where the tension "
         "lives, what image or gesture carries the subtext, where it should end. Never put the plan in your reply.\n"
         "- Draft a scene as one coherent whole (one append), not as fragments.\n"
         "- After appending a major scene, reread it once with fresh eyes (read_manuscript on the new range) and repair "
         "the weakest lines with replace_in_manuscript — flat verbs, over-explained emotion, rhythm that sags. "
-        "One targeted polish pass, not endless fiddling.\n\n"
+        "One targeted polish pass, not endless fiddling.\n"
+        "- These standards are instincts, not a checklist. Never sacrifice the life of a sentence, or the voice of "
+        "this particular novel, to satisfy a rule mechanically.\n\n"
         + _tools_prompt_section()
         + "# Editing discipline\n"
         "- The saved manuscript is the authoritative draft; your tools edit it in place (every change is reversible).\n"
@@ -117,6 +157,13 @@ def manuscript_context(project_id: int, selection_start: int | None, selection_e
     manuscript = get_manuscript(project_id) or {}
     body = str(manuscript.get("body") or "")
     parts = [f"Manuscript character count: {len(body)}"]
+    # Opening excerpt for voice/style calibration — only when the opening
+    # cannot overlap the tail, so the two blocks never duplicate text.
+    if len(body) > MANUSCRIPT_TAIL_CHARS + MANUSCRIPT_OPENING_CHARS:
+        parts.append(
+            f"Manuscript opening (chars 0–{MANUSCRIPT_OPENING_CHARS}, for voice/style calibration only — "
+            "already saved):\n" + body[:MANUSCRIPT_OPENING_CHARS]
+        )
     if body:
         tail = body[-MANUSCRIPT_TAIL_CHARS:]
         parts.append(
@@ -172,6 +219,97 @@ def build_system_blocks(
             "cache_control": WRITER_CACHE_CONTROL_1H,
         },
     ]
+
+
+def build_critic_system_blocks(project: dict) -> list[dict]:
+    """System blocks for the optional line-edit (퇴고) pass. Block 1 is stable
+    across projects and turns; block 2 carries the project header. Both cached."""
+    premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
+    style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
+    title = str(project.get("title") or "Untitled").strip()
+    base = (
+        "You are a ruthless, taste-perfect line editor (퇴고 담당) for one writer's novel. "
+        "Another pass just drafted or revised the passages shown to you; your only job is to make those "
+        "passages read like finished literary prose. You do not add scenes, do not restructure plot, "
+        "and you never append — you only refine what exists.\n\n"
+        "# Method\n"
+        "- Read each changed passage in its excerpt; call read_manuscript around the given offsets when you "
+        "need more surrounding context, and read_document when a background fact needs checking.\n"
+        "- Fix only what is weak: flat or approximate verbs; monotonous -었다/-했다 chains and repeated sentence "
+        "shapes; 번역투 (것이다 crutch, ~의 chains, double passives, overused 그/그녀); over-explained emotion "
+        "or subtext; word and image echoes within or near a passage; dialogue register slips (반말/존댓말, 호칭); "
+        "rhythm that sags; continuity slips against the excerpt context.\n"
+        "- Each fix is one surgical replace_in_manuscript: copy 'find' exactly from the saved text shown to you, "
+        "keep it unique, and replace the minimum span that fixes the problem. Typically 3–10 replacements per pass.\n"
+        "- If a passage is already strong, leave it alone — restraint is part of taste.\n"
+        "- Preserve the author's voice absolutely. You polish; you do not rewrite into your own style.\n\n"
+        "# Response format\n"
+        "After your replacements, reply with ONLY:\n"
+        "<commentary>\n"
+        "One short paragraph: what you tightened and why. No praise, no filler.\n"
+        "</commentary>"
+    )
+    header = (
+        f"Project title: {title}\n"
+        f"Premise:\n{premise}\n\n"
+        f"Style and continuity notes:\n{style_notes}"
+    )
+    return [
+        {"type": "text", "text": base, "cache_control": WRITER_CACHE_CONTROL_1H},
+        {"type": "text", "text": header, "cache_control": WRITER_CACHE_CONTROL_1H},
+    ]
+
+
+def critic_user_message(body: str, edits: list[dict]) -> str | None:
+    """Render this turn's changed spans as offset-labeled excerpts for the
+    critic pass. Returns None when the turn changed too little to justify a
+    second model call."""
+    spans = []
+    changed_total = 0
+    for edit in edits:
+        try:
+            start = max(0, min(int(edit["start"]), len(body)))
+            end = max(start, min(int(edit["end"]), len(body)))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end > start:
+            spans.append((start, end))
+            changed_total += end - start
+    if not spans or changed_total < WRITER_CRITIC_MIN_CHANGED_CHARS:
+        return None
+    # Expand each span into a context window, then merge overlaps.
+    windows = sorted(
+        (max(0, s - WRITER_CRITIC_SPAN_CONTEXT_CHARS), min(len(body), e + WRITER_CRITIC_SPAN_CONTEXT_CHARS))
+        for s, e in spans
+    )
+    merged: list[list[int]] = []
+    for start, end in windows:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    # Enforce the total excerpt budget: keep the largest windows, then restore
+    # document order so the critic reads front to back.
+    kept: list[list[int]] = []
+    budget = WRITER_CRITIC_SPAN_BUDGET_CHARS
+    for window in sorted(merged, key=lambda w: w[1] - w[0], reverse=True):
+        size = window[1] - window[0]
+        if size <= budget:
+            kept.append(window)
+            budget -= size
+    if not kept:
+        return None
+    kept.sort()
+    parts = [
+        "Line-edit ONLY the changed passages below. Each excerpt is saved manuscript text; "
+        "copy 'find' arguments verbatim from it. Then reply with <commentary>."
+    ]
+    for i, (start, end) in enumerate(kept, 1):
+        parts.append(
+            f"Changed passage {i} (manuscript chars {start}–{end}; your edits must match this saved text):\n"
+            + body[start:end]
+        )
+    return "\n\n".join(parts)
 
 
 def messages_for_model(

@@ -56,7 +56,7 @@ from writer.store import (
     update_project,
 )
 from writer.stream import stream_active_run, stream_writer_reply
-from writer.tools import build_writer_tools
+from writer.tools import build_critic_tools, build_writer_tools
 
 __all__ = [
     "WRITER_DEFAULT_CHOICE",
@@ -67,6 +67,7 @@ __all__ = [
     "WRITER_OUTPUT_PRICE_PER_MTOK",
     "WriterRun",
     "append_manuscript",
+    "build_critic_tools",
     "build_writer_tools",
     "create_project",
     "delete_document",
