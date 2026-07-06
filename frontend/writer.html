@@ -112,10 +112,11 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 6px 8px;
       min-width: 0;
+      flex-wrap: wrap;
     }
-    .pager .row { flex: 0 0 auto; }
+    .pager .row { flex: 0 0 auto; flex-wrap: wrap; }
     .pager-label { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .page-input { width: 58px; text-align: center; padding: 6px 4px; }
     .page-input::-webkit-outer-spin-button, .page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -153,6 +154,13 @@
       .assistant { grid-template-rows: auto; }
       .editor { min-height: 72vh; }
       .manuscript { min-height: 560px; }
+    }
+    @media (max-width: 720px) {
+      .range-note { display: none; }
+      .pager-label { flex: 1 1 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .editor-actions { padding: 9px 10px; }
+      .editor-actions button { min-height: 32px; padding: 0 8px; }
+      .page-input { width: 48px; padding: 5px 2px; }
     }
   </style>
 </head>
@@ -362,9 +370,14 @@
       const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
       const dirty = state.manuscript !== state.savedManuscript;
       const suffix = label || (dirty ? 'unsaved' : 'saved');
-      setManuscriptStatus(
-        `${charMeta(state.manuscript.length)} · chars ${state.manuscriptPageStart.toLocaleString()}-${state.manuscriptPageEnd.toLocaleString()} · ${suffix}`
-      );
+      const status = $('manuscriptStatus');
+      status.innerHTML = '';
+      const main = document.createElement('span');
+      main.textContent = `${charMeta(state.manuscript.length)} · ${suffix}`;
+      const range = document.createElement('span');
+      range.className = 'range-note';
+      range.textContent = ` · chars ${state.manuscriptPageStart.toLocaleString()}-${state.manuscriptPageEnd.toLocaleString()}`;
+      status.append(main, range);
       if (document.activeElement !== pageInput) pageInput.value = String(state.manuscriptPage + 1);
       pageInput.max = String(total);
       pageInput.disabled = false;
