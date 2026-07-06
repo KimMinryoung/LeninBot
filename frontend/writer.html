@@ -255,8 +255,10 @@
       <section class="pager">
         <div id="conversationStatus" class="pager-label">No messages</div>
         <div class="row">
+          <button id="conversationFirst" type="button" title="First page">⏮</button>
           <button id="conversationPrev" type="button">Prev</button>
           <button id="conversationNext" type="button">Next</button>
+          <button id="conversationLast" type="button" title="Last page">⏭</button>
         </div>
       </section>
 
@@ -446,8 +448,10 @@
       if (!totalMessages) {
         conversation.innerHTML = '<div class="empty">No messages yet.</div>';
         $('conversationStatus').textContent = 'No messages';
+        $('conversationFirst').disabled = true;
         $('conversationPrev').disabled = true;
         $('conversationNext').disabled = true;
+        $('conversationLast').disabled = true;
         return null;
       }
 
@@ -459,8 +463,10 @@
       }
       $('conversationStatus').textContent =
         `Messages ${start + 1}-${start + pageMessages.length} of ${totalMessages} · page ${state.conversationPage + 1}/${totalPages}`;
+      $('conversationFirst').disabled = state.conversationPage <= 0;
       $('conversationPrev').disabled = state.conversationPage <= 0;
       $('conversationNext').disabled = state.conversationPage >= totalPages - 1;
+      $('conversationLast').disabled = state.conversationPage >= totalPages - 1;
       conversation.scrollTop = conversation.scrollHeight;
       return lastBody;
     }
@@ -1128,8 +1134,10 @@
       if (event.key === 'Enter') { event.preventDefault(); jumpToTypedPage(); }
     });
     $('manuscriptPageInput').addEventListener('blur', jumpToTypedPage);
+    $('conversationFirst').onclick = () => goConversationPage(-Number.MAX_SAFE_INTEGER);
     $('conversationPrev').onclick = () => goConversationPage(-1);
     $('conversationNext').onclick = () => goConversationPage(1);
+    $('conversationLast').onclick = () => goConversationPage(Number.MAX_SAFE_INTEGER);
     $('search').onclick = searchManuscript;
     $('newDoc').onclick = newDocument;
     $('saveDoc').onclick = saveDocumentEdit;
