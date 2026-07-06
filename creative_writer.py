@@ -81,6 +81,7 @@ _MANUSCRIPT_TAIL_CHARS = 7000
 _MANUSCRIPT_SELECTION_LIMIT = 20000
 
 _writer_client: anthropic.AsyncAnthropic | None = None
+_writer_background_tasks: set[asyncio.Task] = set()
 
 
 def _client() -> anthropic.AsyncAnthropic:
@@ -935,15 +936,26 @@ async def stream_writer_reply(
     )
     yield _sse({"type": "user_saved", "message_id": user_row.get("id")})
 
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    subscriber_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    subscribers: set[asyncio.Queue[str | None]] = {subscriber_queue}
+    task: asyncio.Task | None = None
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
     last_progress = asyncio.get_running_loop().time()
     persisted = False
-    detached_for_finalization = False
 
     writer_tools, writer_handlers = _build_writer_tools(project_id)
+
+    async def broadcast(item: str | None) -> None:
+        stale: list[asyncio.Queue[str | None]] = []
+        for queue in tuple(subscribers):
+            try:
+                queue.put_nowait(item)
+            except asyncio.QueueFull:
+                stale.append(queue)
+        for queue in stale:
+            subscribers.discard(queue)
 
     def persist_result() -> dict:
         nonlocal persisted
@@ -995,46 +1007,17 @@ async def stream_writer_reply(
             "created_at": datetime.utcnow().isoformat() + "Z",
         }
 
-    async def finish_after_disconnect() -> None:
-        try:
-            await asyncio.shield(task)
-            event = persist_result()
-            logger.info(
-                "writer finalized after client disconnect project_id=%s event=%s message_id=%s",
-                project_id,
-                event.get("type"),
-                event.get("message_id"),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("writer failed to finalize after client disconnect project_id=%s", project_id)
-
-    def detach_for_finalization(reason: str) -> None:
-        nonlocal detached_for_finalization
-        if detached_for_finalization or persisted:
-            return
-        detached_for_finalization = True
-        logger.warning(
-            "writer stream detached for DB finalization project_id=%s reason=%s",
-            project_id,
-            reason,
-        )
-        asyncio.create_task(finish_after_disconnect())
-
     async def on_progress(event: str, detail: str):
         nonlocal last_progress
         last_progress = asyncio.get_running_loop().time()
-        if detached_for_finalization:
-            return
         if event == "text_delta" and detail:
-            await queue.put(_sse({"type": "text_delta", "content": detail}))
+            await broadcast(_sse({"type": "text_delta", "content": detail}))
         elif event == "budget" and detail:
-            await queue.put(_sse({"type": "budget", "content": detail}))
+            await broadcast(_sse({"type": "budget", "content": detail}))
         elif event in ("tool_call", "tool_result") and detail:
-            await queue.put(_sse({"type": "tool", "content": detail}))
+            await broadcast(_sse({"type": "tool", "content": detail}))
         elif event == "provider_retry" and detail:
-            await queue.put(_sse({"type": "provider_retry", "content": detail}))
+            await broadcast(_sse({"type": "provider_retry", "content": detail}))
 
     async def run_llm() -> None:
         try:
@@ -1060,36 +1043,64 @@ async def stream_writer_reply(
             logger.exception("writer model request failed project_id=%s", project_id)
             error_holder.append(str(exc))
         finally:
-            await queue.put(None)
+            try:
+                event = persist_result()
+                await broadcast(_sse(event))
+                logger.info(
+                    "writer finalized background run project_id=%s event=%s message_id=%s connected_subscribers=%s",
+                    project_id,
+                    event.get("type"),
+                    event.get("message_id"),
+                    len(subscribers),
+                )
+            except Exception:
+                logger.exception("writer failed to persist background run project_id=%s", project_id)
+                await broadcast(_sse({
+                    "type": "error",
+                    "content": "Writer finished but failed to save the result. Check server logs.",
+                }))
+            finally:
+                await broadcast(None)
 
     task = asyncio.create_task(run_llm())
+    _writer_background_tasks.add(task)
+    task.add_done_callback(_writer_background_tasks.discard)
     try:
         while True:
             try:
-                item = await asyncio.wait_for(queue.get(), timeout=15)
+                item = await asyncio.wait_for(subscriber_queue.get(), timeout=15)
             except asyncio.TimeoutError:
                 if client_disconnected is not None and await client_disconnected():
-                    detach_for_finalization("request.is_disconnected")
+                    logger.warning(
+                        "writer stream subscriber disconnected project_id=%s reason=request.is_disconnected",
+                        project_id,
+                    )
                     return
                 idle_for = asyncio.get_running_loop().time() - last_progress
                 if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
-                    task.cancel()
-                    error_holder.append(
-                        f"{writer_display} request timed out after {int(idle_for)}s without model progress."
+                    logger.warning(
+                        "writer stream idle project_id=%s idle_for=%ss; background run remains active",
+                        project_id,
+                        int(idle_for),
                     )
-                    yield _sse(persist_result())
+                    yield _sse({
+                        "type": "error",
+                        "content": (
+                            f"The browser connection has not received model progress for {int(idle_for)}s. "
+                            "The server-side writer run is still active; this page will reload saved results."
+                        ),
+                    })
                     return
                 yield _sse({"type": "ping"})
                 continue
             if item is None:
-                break
+                return
             yield item
-        await task
     except asyncio.CancelledError:
-        detach_for_finalization("streaming_response_cancelled")
+        logger.warning(
+            "writer stream subscriber disconnected project_id=%s reason=streaming_response_cancelled",
+            project_id,
+        )
         return
     finally:
-        if not task.done() and not persisted and not detached_for_finalization:
-            task.cancel()
-
-    yield _sse(persist_result())
+        subscribers.discard(subscriber_queue)

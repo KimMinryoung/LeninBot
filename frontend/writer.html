@@ -524,6 +524,34 @@
       };
     }
 
+    async function waitForSavedAssistant(afterMessageId, timeoutMs = 240000) {
+      if (!state.current) return null;
+      const projectId = state.current.id;
+      const started = Date.now();
+      const afterId = Number(afterMessageId || 0);
+      while (Date.now() - started < timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 3500));
+        try {
+          const res = await api(`/writer/projects/${projectId}`);
+          const project = await res.json();
+          const messages = project.messages || [];
+          const assistant = messages.find((message) =>
+            message.role === 'assistant' && (!afterId || Number(message.id || 0) > afterId)
+          );
+          if (assistant) {
+            await loadProject(projectId);
+            return assistant;
+          }
+          const elapsed = Math.round((Date.now() - started) / 1000);
+          setStatus(`Browser stream closed; server writer run is still active. Waiting for saved result... ${elapsed}s`);
+        } catch (err) {
+          const elapsed = Math.round((Date.now() - started) / 1000);
+          setStatus(`Waiting for saved writer result after reconnect... ${elapsed}s`);
+        }
+      }
+      return null;
+    }
+
     function updateAssistantButtons() {
       // Manual apply was removed — the model now edits the manuscript directly
       // via tools. Kept as a guarded no-op for the callers that still invoke it.
@@ -735,6 +763,10 @@
       }
       const promptText = $('prompt').value.trim();
       const { start, end } = selectedManuscriptRange();
+      const baselineMessageId = Math.max(
+        0,
+        ...((state.current.messages || []).map((message) => Number(message.id || 0)))
+      );
       $('prompt').value = '';
       addMessage('user', promptText);
       const selModel = (state.models || []).find((m) => m.key === state.modelChoice);
@@ -743,6 +775,8 @@
       $('stop').disabled = false;
       state.abort = new AbortController();
       state.lastAssistant = '';
+      let savedUserId = null;
+      let finalSeen = false;
       setStatus('Streaming...');
       const payload = { prompt: promptText };
       if (state.modelChoice) payload.model = state.modelChoice;
@@ -769,11 +803,13 @@
             const line = part.split('\n').find((l) => l.startsWith('data: '));
             if (!line) continue;
             const event = JSON.parse(line.slice(6));
+            if (event.type === 'user_saved') savedUserId = event.message_id || savedUserId;
             if (event.type === 'text_delta') {
               assistantMessage.appendText(event.content);
               state.lastAssistant += event.content;
             }
             if (event.type === 'done') {
+              finalSeen = true;
               if (event.display_text) assistantMessage.setText(event.display_text);
               state.lastAssistant = event.manuscript_text || state.lastAssistant;
               state.lastCost = {
@@ -787,8 +823,19 @@
             }
             if (event.type === 'tool') setStatus(event.content);
             if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
-            if (event.type === 'error') setStatus(event.content || 'Request failed.');
+            if (event.type === 'error') {
+              finalSeen = true;
+              setStatus(event.content || 'Request failed.');
+            }
             $('conversation').scrollTop = $('conversation').scrollHeight;
+          }
+        }
+        if (!finalSeen) {
+          const saved = await waitForSavedAssistant(savedUserId || baselineMessageId);
+          if (saved) {
+            const parsed = parseWriterContent(saved.content);
+            state.lastAssistant = parsed.manuscript || state.lastAssistant;
+            setStatus('Recovered saved writer result after stream reconnect.');
           }
         }
         const assistantText = state.lastAssistant;
@@ -796,13 +843,21 @@
         state.lastAssistant = assistantText;
         updateAssistantButtons();
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          setStatus('Stream connection closed before a final event; reloading saved writer state...');
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          try {
-            await loadProject(state.current.id);
-          } catch (reloadErr) {
-            setStatus(`Stream connection closed: ${err.message || err}`);
+        if (err.name === 'AbortError') {
+          setStatus('Stopped watching this stream. The server-side writer run may still finish and save.');
+        } else {
+          const saved = await waitForSavedAssistant(savedUserId || baselineMessageId);
+          if (saved) {
+            const parsed = parseWriterContent(saved.content);
+            state.lastAssistant = parsed.manuscript || state.lastAssistant;
+            setStatus('Connection dropped, but the server finished and saved the writer result.');
+          } else {
+            try {
+              await loadProject(state.current.id);
+              setStatus('Connection dropped while the server was still writing. No saved result was found yet; refresh again in a moment.');
+            } catch (reloadErr) {
+              setStatus(`Connection dropped and saved state could not be reloaded: ${reloadErr.message || reloadErr}`);
+            }
           }
         }
       } finally {
