@@ -226,6 +226,7 @@
           <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
           <div class="row">
             <button id="saveDoc" class="primary" type="button">Save</button>
+            <button id="pinDoc" type="button" title="Pinned documents are given to the AI in full every turn">Pin</button>
             <button id="deleteDoc" class="danger" type="button">Delete</button>
             <button id="closeDoc" type="button">Close</button>
           </div>
@@ -263,6 +264,7 @@
       </section>
 
       <section class="composer stack">
+        <div id="selectionInfo" class="meta" style="display:none"></div>
         <textarea id="prompt" class="prompt" placeholder="Request"></textarea>
         <div class="row">
           <label for="modelSelect" class="meta">Model</label>
@@ -357,6 +359,7 @@
       state.manuscriptPageEnd = bounds.end;
       $('manuscript').value = state.manuscript.slice(bounds.start, bounds.end);
       updateManuscriptStatus();
+      updateSelectionInfo();
     }
 
     function updateManuscriptStatus(label = '') {
@@ -413,6 +416,7 @@
       const localEnd = clamp(globalEnd - bounds.start, localStart, $('manuscript').value.length);
       $('manuscript').focus();
       $('manuscript').setSelectionRange(localStart, localEnd);
+      updateSelectionInfo();
     }
 
     function selectedManuscriptRange() {
@@ -721,6 +725,27 @@
       return null;
     }
 
+    function updateSelectionInfo() {
+      const info = $('selectionInfo');
+      if (!state.current) { info.style.display = 'none'; delete info.dataset.range; return; }
+      const { start, end } = selectedManuscriptRange();
+      if (start === end) { info.style.display = 'none'; info.innerHTML = ''; delete info.dataset.range; return; }
+      const rangeKey = `${start}:${end}`;
+      // Skip the DOM rebuild when the range is unchanged: the textarea's blur
+      // fires before a click on the clear link lands, and replacing the anchor
+      // node mid-click would swallow the click.
+      if (info.dataset.range === rangeKey) return;
+      info.dataset.range = rangeKey;
+      info.innerHTML = '';
+      const note = document.createElement('span');
+      note.textContent = `Selected passage (chars ${start.toLocaleString()}–${end.toLocaleString()}) will be sent to the model as the revision target · `;
+      const clear = document.createElement('a');
+      clear.href = '#';
+      clear.textContent = 'clear selection';
+      info.append(note, clear);
+      info.style.display = '';
+    }
+
     function updateAssistantButtons() {
       // Manual apply was removed — the model now edits the manuscript directly
       // via tools. Kept as a guarded no-op for the callers that still invoke it.
@@ -872,7 +897,8 @@
         button.className = 'result';
         button.type = 'button';
         button.innerHTML = '<strong></strong><span></span>';
-        button.querySelector('strong').textContent = doc.title;
+        const pinned = (doc.kind || '') === 'pinned';
+        button.querySelector('strong').textContent = (pinned ? '📌 ' : '') + doc.title;
         button.querySelector('span').textContent = `${doc.kind || 'note'} · ${charMeta(doc.char_count)}`;
         button.onclick = () => openDocument(doc.id);
         list.appendChild(button);
@@ -901,6 +927,7 @@
       $('docKind').value = state.editingDoc.kind || 'note';
       $('docContent').value = state.editingDoc.content || '';
       $('docStatus').textContent = '';
+      updatePinButton();
       $('docEditor').style.display = '';
     }
 
@@ -911,6 +938,7 @@
       $('docKind').value = 'note';
       $('docContent').value = '';
       $('docStatus').textContent = '';
+      updatePinButton();
       $('docEditor').style.display = '';
       $('docTitle').focus();
     }
@@ -919,6 +947,17 @@
       state.editingDoc = null;
       $('docEditor').style.display = 'none';
       $('docStatus').textContent = '';
+    }
+
+    function updatePinButton() {
+      $('pinDoc').textContent = $('docKind').value.trim() === 'pinned' ? 'Unpin' : 'Pin';
+    }
+
+    async function togglePinDocument() {
+      if (!state.current) return;
+      $('docKind').value = $('docKind').value.trim() === 'pinned' ? 'note' : 'pinned';
+      updatePinButton();
+      await saveDocumentEdit();
     }
 
     async function saveDocumentEdit() {
@@ -1141,8 +1180,10 @@
     $('search').onclick = searchManuscript;
     $('newDoc').onclick = newDocument;
     $('saveDoc').onclick = saveDocumentEdit;
+    $('pinDoc').onclick = togglePinDocument;
     $('deleteDoc').onclick = deleteDocumentEdit;
     $('closeDoc').onclick = closeDocument;
+    $('docKind').addEventListener('input', updatePinButton);
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
     $('prompt').addEventListener('keydown', (event) => {
@@ -1155,8 +1196,22 @@
       commitVisibleManuscriptPage();
       updateManuscriptStatus('unsaved');
     });
-    $('manuscript').addEventListener('select', updateAssistantButtons);
-    $('manuscript').addEventListener('keyup', updateAssistantButtons);
+    $('selectionInfo').addEventListener('click', (event) => {
+      if (!event.target.closest('a')) return;
+      event.preventDefault();
+      // Focus BEFORE collapsing: Chromium restores an unfocused textarea's
+      // remembered selection on refocus, which would undo the collapse.
+      const manuscript = $('manuscript');
+      manuscript.focus();
+      manuscript.setSelectionRange(manuscript.selectionEnd, manuscript.selectionEnd);
+      updateSelectionInfo();
+      updateAssistantButtons();
+    });
+    const onManuscriptSelectionChange = () => { updateAssistantButtons(); updateSelectionInfo(); };
+    $('manuscript').addEventListener('select', onManuscriptSelectionChange);
+    $('manuscript').addEventListener('keyup', onManuscriptSelectionChange);
+    $('manuscript').addEventListener('mouseup', onManuscriptSelectionChange);
+    $('manuscript').addEventListener('blur', updateSelectionInfo);
     renderDocuments();
     loadProjects().catch((err) => setStatus(String(err.message || err)));
   </script>
