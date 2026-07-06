@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Awaitable, Callable
@@ -203,6 +204,18 @@ def ensure_writer_tables() -> None:
            )"""
     )
     db_execute(
+        """CREATE TABLE IF NOT EXISTS writer_documents (
+               id BIGSERIAL PRIMARY KEY,
+               project_id BIGINT NOT NULL REFERENCES writer_projects(id) ON DELETE CASCADE,
+               title TEXT NOT NULL,
+               kind TEXT NOT NULL DEFAULT 'note',
+               content TEXT NOT NULL DEFAULT '',
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+               UNIQUE(project_id, title)
+           )"""
+    )
+    db_execute(
         "CREATE INDEX IF NOT EXISTS writer_messages_project_created_idx "
         "ON writer_messages(project_id, created_at ASC, id ASC)"
     )
@@ -217,6 +230,10 @@ def ensure_writer_tables() -> None:
     db_execute(
         "CREATE INDEX IF NOT EXISTS writer_manuscript_revisions_project_idx "
         "ON writer_manuscript_revisions(project_id, created_at DESC, id DESC)"
+    )
+    db_execute(
+        "CREATE INDEX IF NOT EXISTS writer_documents_project_idx "
+        "ON writer_documents(project_id, updated_at DESC, id DESC)"
     )
 
 
@@ -302,6 +319,7 @@ def delete_project(project_id: int) -> bool:
         "DELETE FROM writer_projects WHERE id = %s RETURNING id",
         (project_id,),
     )
+    _writer_tools_cache.pop(project_id, None)
     return bool(row)
 
 
@@ -489,11 +507,47 @@ def replace_manuscript_range(
     return _write_manuscript(project_id, updated, action="replace", note=note)
 
 
+# Straight and curly single/double quotes drift between what the model
+# remembers and what the manuscript stores; treat them as interchangeable
+# when locating a passage.
+_QUOTE_CHARS = "\"'‘’“”"
+_QUOTE_CLASS = f"[{_QUOTE_CHARS}]"
+
+
+def _normalized_pattern(find: str) -> re.Pattern | None:
+    """Whitespace- and quote-insensitive pattern for locating a passage the
+    model quoted from memory. Returns None for degenerate input."""
+    tokens = find.split()
+    if not tokens or len(tokens) > 500:
+        return None
+    parts = []
+    for token in tokens:
+        escaped = re.sub(_QUOTE_CLASS, _QUOTE_CLASS, re.escape(token))
+        parts.append(escaped)
+    try:
+        return re.compile(r"\s+".join(parts))
+    except re.error:
+        return None
+
+
+def _find_normalized_matches(body: str, find: str, max_matches: int = 3) -> list[tuple[int, int]]:
+    pattern = _normalized_pattern(find)
+    if pattern is None:
+        return []
+    spans: list[tuple[int, int]] = []
+    for match in pattern.finditer(body):
+        spans.append((match.start(), match.end()))
+        if len(spans) >= max_matches:
+            break
+    return spans
+
+
 def replace_manuscript_text(project_id: int, find: str, replacement: str, note: str = "") -> dict:
     """Find one exact passage and replace it. Safe for LLM tool use: fails
     (ok=False) if the passage is absent or appears more than once, so the model
-    can never silently edit the wrong location. Revision history is preserved by
-    _write_manuscript. Returns {ok, message, char_count?}."""
+    can never silently edit the wrong location. Falls back to whitespace/quote-
+    normalized matching when the verbatim text is not found. Revision history is
+    preserved by _write_manuscript. Returns {ok, message, char_count?}."""
     if not find:
         return {"ok": False, "message": "Empty 'find' text."}
     manuscript = get_manuscript(project_id)
@@ -501,14 +555,30 @@ def replace_manuscript_text(project_id: int, find: str, replacement: str, note: 
         return {"ok": False, "message": "Manuscript not found."}
     current = str(manuscript.get("body") or "")
     count = current.count(find)
-    if count == 0:
-        return {"ok": False, "message": "Passage not found verbatim — copy the exact text (use search_manuscript first)."}
     if count > 1:
         return {"ok": False, "message": f"Passage appears {count} times; include more surrounding text so it is unique."}
-    idx = current.find(find)
-    updated = current[:idx] + replacement + current[idx + len(find):]
+    if count == 1:
+        idx = current.find(find)
+        span = (idx, idx + len(find))
+        matched_how = "verbatim"
+    else:
+        spans = _find_normalized_matches(current, find)
+        if not spans:
+            return {
+                "ok": False,
+                "message": (
+                    "Passage not found in the saved manuscript, even ignoring whitespace/quote differences. "
+                    "Copy the real saved text: locate it with search_manuscript (short distinctive phrase) "
+                    "or read_manuscript (character range), then retry."
+                ),
+            }
+        if len(spans) > 1:
+            return {"ok": False, "message": "Passage matches multiple places (whitespace-insensitive); include more surrounding text so it is unique."}
+        span = spans[0]
+        matched_how = "normalized whitespace/quotes"
+    updated = current[:span[0]] + replacement + current[span[1]:]
     result = _write_manuscript(project_id, updated, action="replace", note=note or "tool replace")
-    return {"ok": True, "message": "Replaced.", "char_count": (result or {}).get("char_count")}
+    return {"ok": True, "message": f"Replaced (matched {matched_how}).", "char_count": (result or {}).get("char_count")}
 
 
 def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict]:
@@ -546,6 +616,24 @@ def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict
                 "snippet": excerpt[snippet_start:snippet_end],
             }
         )
+    if not results and len(needle.split()) >= 2:
+        # A multi-word query that missed is usually the model quoting from
+        # memory with whitespace/quote drift; retry insensitive to both.
+        manuscript = get_manuscript(project_id) or {}
+        body = str(manuscript.get("body") or "")
+        for start, end in _find_normalized_matches(body, needle, max_matches=limit):
+            results.append(
+                {
+                    "id": None,
+                    "chunk_index": None,
+                    "start_offset": start,
+                    "end_offset": end,
+                    "match_start": start,
+                    "match_end": end,
+                    "heading": _heading_for_offset(body, start),
+                    "snippet": body[max(0, start - 180):min(len(body), end + 220)],
+                }
+            )
     return results
 
 
@@ -561,6 +649,104 @@ def list_manuscript_revisions(project_id: int, limit: int = 30) -> list[dict]:
             LIMIT %s""",
         (project_id, limit),
     )
+
+
+_DOCUMENT_COLUMNS = "id, project_id, title, kind, length(content)::int AS char_count, created_at, updated_at"
+
+
+def list_documents(project_id: int) -> list[dict]:
+    return db_query(
+        f"""SELECT {_DOCUMENT_COLUMNS}
+             FROM writer_documents
+            WHERE project_id = %s
+            ORDER BY updated_at DESC, id DESC""",
+        (project_id,),
+    )
+
+
+def get_document(project_id: int, document_id: int | None = None, title: str | None = None) -> dict | None:
+    if document_id is not None:
+        return db_query_one(
+            f"""SELECT {_DOCUMENT_COLUMNS}, content
+                 FROM writer_documents
+                WHERE project_id = %s AND id = %s""",
+            (project_id, document_id),
+        )
+    if title:
+        return db_query_one(
+            f"""SELECT {_DOCUMENT_COLUMNS}, content
+                 FROM writer_documents
+                WHERE project_id = %s AND lower(title) = lower(%s)""",
+            (project_id, title.strip()),
+        )
+    return None
+
+
+def save_document(project_id: int, title: str, content: str, kind: str = "note") -> dict | None:
+    """Create or overwrite a background document, addressed by title (upsert)."""
+    if not get_project(project_id):
+        return None
+    return db_query_one(
+        f"""INSERT INTO writer_documents (project_id, title, kind, content)
+             VALUES (%s, %s, %s, %s)
+        ON CONFLICT (project_id, title)
+          DO UPDATE SET kind = EXCLUDED.kind,
+                        content = EXCLUDED.content,
+                        updated_at = NOW()
+          RETURNING {_DOCUMENT_COLUMNS}""",
+        (project_id, title.strip(), kind.strip() or "note", content),
+    )
+
+
+def update_document(project_id: int, document_id: int, title: str, kind: str, content: str) -> dict | None:
+    return db_query_one(
+        f"""UPDATE writer_documents
+               SET title = %s, kind = %s, content = %s, updated_at = NOW()
+             WHERE project_id = %s AND id = %s
+         RETURNING {_DOCUMENT_COLUMNS}""",
+        (title.strip(), kind.strip() or "note", content, project_id, document_id),
+    )
+
+
+def delete_document(project_id: int, document_id: int) -> bool:
+    row = db_query_one(
+        "DELETE FROM writer_documents WHERE project_id = %s AND id = %s RETURNING id",
+        (project_id, document_id),
+    )
+    return bool(row)
+
+
+def search_documents(project_id: int, query: str, limit: int = 8) -> list[dict]:
+    needle = query.strip()
+    if not needle:
+        return []
+    rows = db_query(
+        """SELECT id, title, kind, content
+             FROM writer_documents
+            WHERE project_id = %s
+              AND (title ILIKE %s OR content ILIKE %s)
+            ORDER BY updated_at DESC
+            LIMIT %s""",
+        (project_id, f"%{needle}%", f"%{needle}%", limit),
+    )
+    results: list[dict] = []
+    lowered = needle.lower()
+    for row in rows:
+        content = str(row.get("content") or "")
+        found = content.lower().find(lowered)
+        if found < 0:
+            snippet = content[:400]
+        else:
+            snippet = content[max(0, found - 180):found + len(needle) + 220]
+        results.append(
+            {
+                "id": row.get("id"),
+                "title": row.get("title"),
+                "kind": row.get("kind"),
+                "snippet": snippet,
+            }
+        )
+    return results
 
 
 def _insert_message(
@@ -605,11 +791,21 @@ def _tools_prompt_section() -> str:
         "# Tools — you edit the manuscript yourself\n",
         "You act on the manuscript directly through tools; the writer never copies text by hand. "
         "Use tools silently and on your own initiative, then give a short commentary.\n",
-        "- search_manuscript: search the FULL manuscript (names, facts, earlier scenes) beyond the recent tail. "
-        "Use it to locate a passage and to verify continuity before you write or revise.\n",
+        "- search_manuscript(query): exact-substring search of the FULL saved manuscript. Use SHORT distinctive "
+        "queries (a name, a 2-6 word phrase) to check continuity or locate an earlier scene. Long quoted "
+        "paragraphs rarely match.\n",
+        "- read_manuscript(start, end): read any region of the saved manuscript by character offsets "
+        "(no arguments = the last 5000 chars). Prefer this over repeated searching when you need context.\n",
         "- append_to_manuscript(text): add prose to the END of the manuscript — for continuing the story.\n",
-        "- replace_in_manuscript(find, replacement): revise a specific part — find an exact existing passage and swap it. "
-        "Copy 'find' verbatim (locate it with search_manuscript first); it must be unique.\n",
+        "- replace_in_manuscript(find, replacement): revise a specific part — 'find' must match saved text "
+        "(whitespace/quote drift tolerated) and be unique. Take 'find' from read_manuscript or search_manuscript "
+        "results, or from the context tail.\n",
+        "- read_document(title) / search_documents(query): consult the project's background documents "
+        "(character sheets, worldbuilding, outline, research). They are the authoritative reference for "
+        "setting and plot facts — check them before inventing or contradicting a detail.\n",
+        "- save_document(title, content, kind): create or fully overwrite a background document. Use when the "
+        "writer asks you to record notes, or to keep an agreed story bible current. Never store manuscript "
+        "prose in documents.\n",
     ]
     if _WRITER_WEB_SEARCH_ENABLED:
         lines.append(
@@ -618,7 +814,10 @@ def _tools_prompt_section() -> str:
         )
     lines.append(
         "Every manuscript change MUST go through append_to_manuscript or replace_in_manuscript — never paste manuscript "
-        "prose into your text reply. Tool calls are invisible to the reader; never narrate that you searched or edited.\n\n"
+        "prose into your text reply. Tool calls are invisible to the reader; never narrate that you searched or edited.\n"
+        "Tool economy: the manuscript tail in your context IS the current saved draft — do not re-search or re-read text "
+        "you can already see, and never search for prose you wrote earlier in this same turn (a successful tool result "
+        "already confirms it was saved). One or two well-chosen lookups beat a chain of guesses.\n\n"
     )
     return "".join(lines)
 
@@ -669,7 +868,9 @@ def _manuscript_context(project_id: int, selection_start: int | None, selection_
     parts = [f"Manuscript character count: {len(body)}"]
     if body:
         tail = body[-_MANUSCRIPT_TAIL_CHARS:]
-        parts.append("Recent manuscript tail:\n" + tail)
+        parts.append(
+            f"Recent manuscript tail (chars {len(body) - len(tail)}–{len(body)}, already saved):\n" + tail
+        )
     if selection_start is not None and selection_end is not None and body:
         start = max(0, min(selection_start, len(body)))
         end = max(start, min(selection_end, len(body)))
@@ -678,6 +879,13 @@ def _manuscript_context(project_id: int, selection_start: int | None, selection_
             if len(selected) > _MANUSCRIPT_SELECTION_LIMIT:
                 selected = selected[:_MANUSCRIPT_SELECTION_LIMIT] + "\n[selection truncated]"
             parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
+    documents = list_documents(project_id)
+    if documents:
+        listing = "\n".join(
+            f"- {str(d.get('title'))!r} (kind: {d.get('kind')}, {d.get('char_count')} chars)"
+            for d in documents
+        )
+        parts.append("Background documents (read with read_document(title)):\n" + listing)
     return "\n\n".join(parts)
 
 
@@ -736,6 +944,12 @@ def _sse(data: dict) -> str:
 def _writer_error_message(provider_display: str, raw_error: str) -> str:
     text = str(raw_error or "").strip()
     lowered = text.lower()
+    if "cancelled by server shutdown" in lowered:
+        return (
+            "The server restarted while this request was running, so the model run was cancelled. "
+            "Manuscript edits the tools had already applied before the restart are saved; "
+            "send the request again to continue from there."
+        )
     if "provider stream produced no text/final event" in lowered:
         return (
             f"{provider_display} opened the request but then produced no stream data for "
@@ -792,17 +1006,87 @@ def _parse_writer_response(text: str) -> dict[str, str]:
 _SEARCH_MANUSCRIPT_TOOL = {
     "name": "search_manuscript",
     "description": (
-        "Search the full manuscript for a phrase (a character name, an established fact, an earlier scene) "
-        "beyond the recent tail you were given in context. Returns matching passages with their character "
-        "offsets. Use before introducing or contradicting an established detail to keep continuity."
+        "Exact-substring search over the SAVED manuscript (whitespace/quote-insensitive fallback for multi-word "
+        "queries). Returns matching passages with character offsets. Use SHORT distinctive queries — a name, or a "
+        "2-6 word phrase; long quoted paragraphs usually fail. For continuity checks on earlier scenes beyond the "
+        "context tail. Never search for prose you wrote this same turn: the tail in context and tool confirmations "
+        "already reflect the saved draft. To pull broader context around a hit, follow up with read_manuscript."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Substring or phrase to find in the manuscript."},
+            "query": {"type": "string", "description": "Short substring or phrase to find (a name, 2-6 words)."},
             "limit": {"type": "integer", "description": "Max passages to return (1-20).", "default": 8},
         },
         "required": ["query"],
+    },
+}
+
+_READ_MANUSCRIPT_TOOL = {
+    "name": "read_manuscript",
+    "description": (
+        "Read an exact slice of the saved manuscript by character offsets (offsets appear in search_manuscript "
+        "results and the manuscript context header). Use it to pull full surrounding context before revising a "
+        "passage, or to re-read an earlier scene. With no arguments it returns the last 5000 characters. "
+        "Max 20000 characters per call."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "start": {"type": "integer", "description": "Start character offset (0-based). Omit to read the tail."},
+            "end": {"type": "integer", "description": "End character offset (exclusive). Defaults to start + 5000."},
+        },
+    },
+}
+
+_READ_DOCUMENT_TOOL = {
+    "name": "read_document",
+    "description": (
+        "Read one background document (worldbuilding, character sheets, outline, research notes) in full by its "
+        "title. The available documents are listed in your context. Use these as the authoritative reference for "
+        "setting, character, and plot facts."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Exact document title (case-insensitive)."},
+        },
+        "required": ["title"],
+    },
+}
+
+_SEARCH_DOCUMENTS_TOOL = {
+    "name": "search_documents",
+    "description": (
+        "Substring search across all background documents of this project (titles and contents). Returns document "
+        "titles with matching snippets. Use short distinctive queries; then read_document for the full text."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Short substring to find (a name, a term)."},
+            "limit": {"type": "integer", "description": "Max documents to return (1-20).", "default": 8},
+        },
+        "required": ["query"],
+    },
+}
+
+_SAVE_DOCUMENT_TOOL = {
+    "name": "save_document",
+    "description": (
+        "Create or fully overwrite a background document by title (worldbuilding notes, character sheet, outline, "
+        "timeline). This does NOT touch the manuscript. Use it when the writer asks you to record or update notes, "
+        "or to keep an agreed story bible current after major developments. Overwrites the whole document — read it "
+        "first if you are updating."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Document title. Reusing an existing title overwrites that document."},
+            "content": {"type": "string", "description": "Full document content (replaces any previous content)."},
+            "kind": {"type": "string", "description": "Category label, e.g. character/setting/outline/research/note.", "default": "note"},
+        },
+        "required": ["title", "content"],
     },
 }
 
@@ -825,9 +1109,10 @@ _APPEND_MANUSCRIPT_TOOL = {
 _REPLACE_MANUSCRIPT_TOOL = {
     "name": "replace_in_manuscript",
     "description": (
-        "Revise a specific part of the manuscript: find an exact existing passage and replace it with new prose. "
-        "This edits the saved manuscript directly. 'find' must be copied VERBATIM from the manuscript and be unique "
-        "— call search_manuscript first to locate and copy the exact text. Fails if 'find' is missing or not unique; "
+        "Revise a specific part of the manuscript: find an existing passage and replace it with new prose. "
+        "This edits the saved manuscript directly. Copy 'find' from the saved manuscript (whitespace and quote-style "
+        "differences are tolerated, wording is not) and make it unique — if you don't have the real text at hand, "
+        "read_manuscript or search_manuscript gives it to you. Fails safely if 'find' is missing or ambiguous; "
         "then include more surrounding text and retry."
     ),
     "input_schema": {
@@ -841,13 +1126,21 @@ _REPLACE_MANUSCRIPT_TOOL = {
 }
 
 
+_writer_tools_cache: dict[int, tuple[list[dict], dict]] = {}
+
+
 def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
     """Build the (tools, handlers) pair for a writer turn, bound to one project.
 
-    - search_manuscript: closure over project_id so the model never supplies it.
-    - web_search: reuse the main runtime's Tavily-backed tool as-is.
-    Both are read-only and pass the security gateway (uncategorized / fetch).
+    - Handlers are closures over project_id so the model never supplies it.
+    - Memoized per project: the tool dispatcher caches handler signatures by
+      object identity, and per-request closures whose ids get recycled poisoned
+      that cache (observed as spurious 'unexpected keyword argument' tool
+      failures). Keeping one long-lived handler set per project avoids id reuse.
     """
+    cached = _writer_tools_cache.get(project_id)
+    if cached is not None:
+        return cached
 
     async def _handle_search_manuscript(query: str, limit: int = 8) -> str:
         try:
@@ -856,7 +1149,12 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
             n = 8
         rows = await asyncio.to_thread(search_manuscript, project_id, query, n)
         if not rows:
-            return f"No manuscript matches for: {query}"
+            return (
+                f"No manuscript matches for: {query}\n"
+                "Search is exact-substring (with a whitespace/quote-insensitive fallback). "
+                "Try a SHORTER distinctive phrase (a name, 2-4 words), or read_manuscript to read a region directly. "
+                "Do not search for text you wrote this turn — it is already saved as confirmed by the tool results."
+            )
         blocks = []
         for r in rows:
             heading = str(r.get("heading") or "").strip()
@@ -867,6 +1165,69 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
                 f"(match {r.get('match_start')}:{r.get('match_end')}):\n…{snippet}…"
             )
         return "\n\n".join(blocks)
+
+    def _read_manuscript_slice(start: int | None, end: int | None) -> str:
+        row = db_query_one(
+            "SELECT length(body)::int AS total FROM writer_manuscripts WHERE project_id = %s",
+            (project_id,),
+        )
+        total = int((row or {}).get("total") or 0)
+        if total == 0:
+            return "The manuscript is empty."
+        try:
+            if start is None:
+                lo = max(0, total - 5000)
+            else:
+                lo = max(0, min(int(start), total))
+            hi = total if end is None and start is None else min(int(end) if end is not None else lo + 5000, total)
+        except (TypeError, ValueError):
+            return "Invalid offsets: 'start' and 'end' must be integers."
+        hi = max(lo, min(hi, lo + 20000))
+        # substring is 1-based; slice in SQL so the full body never leaves Postgres.
+        slice_row = db_query_one(
+            "SELECT substring(body FROM %s FOR %s) AS piece FROM writer_manuscripts WHERE project_id = %s",
+            (lo + 1, hi - lo, project_id),
+        )
+        piece = str((slice_row or {}).get("piece") or "")
+        return f"Manuscript chars {lo}–{hi} of {total}:\n{piece}"
+
+    async def _handle_read_manuscript(start: int | None = None, end: int | None = None) -> str:
+        return await asyncio.to_thread(_read_manuscript_slice, start, end)
+
+    async def _handle_read_document(title: str) -> str:
+        doc = await asyncio.to_thread(get_document, project_id, None, title)
+        if not doc:
+            titles = [str(d.get("title")) for d in await asyncio.to_thread(list_documents, project_id)]
+            listing = "; ".join(titles) if titles else "(no documents exist yet)"
+            return f"No document titled {title!r}. Available documents: {listing}"
+        content = str(doc.get("content") or "")
+        suffix = ""
+        if len(content) > 30000:
+            content = content[:30000]
+            suffix = "\n[truncated at 30000 chars]"
+        return f"Document {doc.get('title')!r} (kind: {doc.get('kind')}, {doc.get('char_count')} chars):\n{content}{suffix}"
+
+    async def _handle_search_documents(query: str, limit: int = 8) -> str:
+        try:
+            n = max(1, min(int(limit), 20))
+        except (TypeError, ValueError):
+            n = 8
+        rows = await asyncio.to_thread(search_documents, project_id, query, n)
+        if not rows:
+            return f"No document matches for: {query}. Use short distinctive terms, or read_document by title."
+        blocks = [
+            f"{r.get('title')!r} (kind: {r.get('kind')}):\n…{str(r.get('snippet') or '').strip()}…"
+            for r in rows
+        ]
+        return "\n\n".join(blocks)
+
+    async def _handle_save_document(title: str, content: str, kind: str = "note") -> str:
+        if not title or not title.strip():
+            return "No title provided; nothing saved."
+        doc = await asyncio.to_thread(save_document, project_id, title, content or "", kind or "note")
+        if not doc:
+            return "Save failed: project not found."
+        return f"Saved document {doc.get('title')!r} (kind: {doc.get('kind')}, {doc.get('char_count')} chars)."
 
     async def _handle_append(text: str) -> str:
         if not text or not text.strip():
@@ -882,11 +1243,23 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
             return f"Replaced. Manuscript is now {result.get('char_count')} characters."
         return "Replace failed: " + result.get("message", "unknown error")
 
-    tools: list[dict] = [_SEARCH_MANUSCRIPT_TOOL, _APPEND_MANUSCRIPT_TOOL, _REPLACE_MANUSCRIPT_TOOL]
+    tools: list[dict] = [
+        _SEARCH_MANUSCRIPT_TOOL,
+        _READ_MANUSCRIPT_TOOL,
+        _APPEND_MANUSCRIPT_TOOL,
+        _REPLACE_MANUSCRIPT_TOOL,
+        _READ_DOCUMENT_TOOL,
+        _SEARCH_DOCUMENTS_TOOL,
+        _SAVE_DOCUMENT_TOOL,
+    ]
     handlers: dict = {
         "search_manuscript": _handle_search_manuscript,
+        "read_manuscript": _handle_read_manuscript,
         "append_to_manuscript": _handle_append,
         "replace_in_manuscript": _handle_replace,
+        "read_document": _handle_read_document,
+        "search_documents": _handle_search_documents,
+        "save_document": _handle_save_document,
     }
 
     # Web search is disabled by default (see _WRITER_WEB_SEARCH_ENABLED). When on,
@@ -903,7 +1276,126 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
         except Exception:
             logger.exception("writer: web_search tool unavailable; continuing with manuscript search only")
 
+    _writer_tools_cache[project_id] = (tools, handlers)
     return tools, handlers
+
+
+class _WriterRun:
+    """Server-side state of one background writer run, kept in _active_runs so a
+    browser can detach and reattach to the live stream (page reload, network
+    blip) without losing the run."""
+
+    def __init__(self, *, project_id: int, run_id: str, user_message_id: int | None,
+                 model: str, model_display: str) -> None:
+        self.project_id = project_id
+        self.run_id = run_id
+        self.user_message_id = user_message_id
+        self.model = model
+        self.model_display = model_display
+        self.subscribers: set[asyncio.Queue[str | None]] = set()
+        self._text_parts: list[str] = []
+        self.final_event: dict | None = None
+        self.last_progress = asyncio.get_running_loop().time()
+
+    def append_text(self, chunk: str) -> None:
+        self._text_parts.append(chunk)
+
+    def text_snapshot(self) -> str:
+        return "".join(self._text_parts)
+
+    async def broadcast(self, item: str | None) -> None:
+        stale: list[asyncio.Queue[str | None]] = []
+        for queue in tuple(self.subscribers):
+            try:
+                queue.put_nowait(item)
+            except asyncio.QueueFull:
+                stale.append(queue)
+        for queue in stale:
+            self.subscribers.discard(queue)
+
+
+_active_runs: dict[int, _WriterRun] = {}
+
+
+def get_active_run(project_id: int) -> _WriterRun | None:
+    return _active_runs.get(project_id)
+
+
+async def _consume_run(
+    run: _WriterRun,
+    queue: asyncio.Queue[str | None],
+    client_disconnected: Callable[[], Awaitable[bool]] | None,
+) -> AsyncIterator[str]:
+    """Relay a run's broadcast queue to one SSE consumer, with keepalive pings
+    and idle cutoff. The background run outlives any consumer."""
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                if client_disconnected is not None and await client_disconnected():
+                    logger.warning(
+                        "writer stream subscriber disconnected project_id=%s reason=request.is_disconnected",
+                        run.project_id,
+                    )
+                    return
+                idle_for = asyncio.get_running_loop().time() - run.last_progress
+                if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
+                    logger.warning(
+                        "writer stream idle project_id=%s idle_for=%ss; background run remains active",
+                        run.project_id,
+                        int(idle_for),
+                    )
+                    yield _sse({
+                        "type": "error",
+                        "content": (
+                            f"The browser connection has not received model progress for {int(idle_for)}s. "
+                            "The server-side writer run is still active; this page will reload saved results."
+                        ),
+                    })
+                    return
+                yield _sse({"type": "ping"})
+                continue
+            if item is None:
+                return
+            yield item
+    except asyncio.CancelledError:
+        logger.warning(
+            "writer stream subscriber disconnected project_id=%s reason=streaming_response_cancelled",
+            run.project_id,
+        )
+        return
+    finally:
+        run.subscribers.discard(queue)
+
+
+async def stream_active_run(
+    *,
+    project_id: int,
+    client_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    """Reattach to a live background writer run (e.g. after a page reload or a
+    dropped stream). Replays the text streamed so far, then follows live."""
+    run = _active_runs.get(project_id)
+    if run is None:
+        yield _sse({"type": "no_active_run"})
+        return
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    run.subscribers.add(queue)
+    yield _sse({
+        "type": "run_status",
+        "run_id": run.run_id,
+        "user_message_id": run.user_message_id,
+        "model": run.model,
+        "model_display": run.model_display,
+        "text_snapshot": run.text_snapshot(),
+    })
+    if run.final_event is not None:
+        run.subscribers.discard(queue)
+        yield _sse(run.final_event)
+        return
+    async for item in _consume_run(run, queue, client_disconnected):
+        yield item
 
 
 async def stream_writer_reply(
@@ -934,28 +1426,22 @@ async def stream_writer_reply(
         content=prompt.strip(),
         request_kind=request_kind,
     )
-    yield _sse({"type": "user_saved", "message_id": user_row.get("id")})
 
+    run = _WriterRun(
+        project_id=project_id,
+        run_id=uuid.uuid4().hex,
+        user_message_id=user_row.get("id"),
+        model=writer_model,
+        model_display=writer_display,
+    )
     subscriber_queue: asyncio.Queue[str | None] = asyncio.Queue()
-    subscribers: set[asyncio.Queue[str | None]] = {subscriber_queue}
-    task: asyncio.Task | None = None
+    run.subscribers.add(subscriber_queue)
     answer_holder: list[str] = []
     error_holder: list[str] = []
     budget_tracker: dict = {}
-    last_progress = asyncio.get_running_loop().time()
     persisted = False
 
     writer_tools, writer_handlers = _build_writer_tools(project_id)
-
-    async def broadcast(item: str | None) -> None:
-        stale: list[asyncio.Queue[str | None]] = []
-        for queue in tuple(subscribers):
-            try:
-                queue.put_nowait(item)
-            except asyncio.QueueFull:
-                stale.append(queue)
-        for queue in stale:
-            subscribers.discard(queue)
 
     def persist_result() -> dict:
         nonlocal persisted
@@ -1008,19 +1494,22 @@ async def stream_writer_reply(
         }
 
     async def on_progress(event: str, detail: str):
-        nonlocal last_progress
-        last_progress = asyncio.get_running_loop().time()
+        run.last_progress = asyncio.get_running_loop().time()
         if event == "text_delta" and detail:
-            await broadcast(_sse({"type": "text_delta", "content": detail}))
+            run.append_text(detail)
+            await run.broadcast(_sse({"type": "text_delta", "content": detail}))
         elif event == "budget" and detail:
-            await broadcast(_sse({"type": "budget", "content": detail}))
+            await run.broadcast(_sse({"type": "budget", "content": detail}))
         elif event in ("tool_call", "tool_result") and detail:
-            await broadcast(_sse({"type": "tool", "content": detail}))
+            await run.broadcast(_sse({"type": "tool", "content": detail}))
         elif event == "provider_retry" and detail:
-            await broadcast(_sse({"type": "provider_retry", "content": detail}))
+            await run.broadcast(_sse({"type": "provider_retry", "content": detail}))
 
     async def run_llm() -> None:
         try:
+            system_blocks = await asyncio.to_thread(
+                _build_system_blocks, project, project_id, selection_start, selection_end
+            )
             with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
                 result = await chat_with_tools(
                     model_messages,
@@ -1028,7 +1517,7 @@ async def stream_writer_reply(
                     model=writer_model,
                     tools=writer_tools,
                     tool_handlers=writer_handlers,
-                    system_prompt=_build_system_blocks(project, project_id, selection_start, selection_end),
+                    system_prompt=system_blocks,
                     max_rounds=_WRITER_MAX_ROUNDS,
                     max_tokens=WRITER_DEFAULT_MAX_TOKENS,
                     budget_usd=100.0,
@@ -1039,68 +1528,43 @@ async def stream_writer_reply(
                     **model_extra,
                 )
             answer_holder.append(result)
+        except asyncio.CancelledError:
+            # Server shutdown/restart while the run was in flight. Persist an
+            # explanatory message in the finally block, then re-raise.
+            error_holder.append("writer run cancelled by server shutdown")
+            raise
         except Exception as exc:
             logger.exception("writer model request failed project_id=%s", project_id)
             error_holder.append(str(exc))
         finally:
             try:
                 event = persist_result()
-                await broadcast(_sse(event))
+                run.final_event = event
+                await run.broadcast(_sse(event))
                 logger.info(
                     "writer finalized background run project_id=%s event=%s message_id=%s connected_subscribers=%s",
                     project_id,
                     event.get("type"),
                     event.get("message_id"),
-                    len(subscribers),
+                    len(run.subscribers),
                 )
             except Exception:
                 logger.exception("writer failed to persist background run project_id=%s", project_id)
-                await broadcast(_sse({
+                await run.broadcast(_sse({
                     "type": "error",
                     "content": "Writer finished but failed to save the result. Check server logs.",
                 }))
             finally:
-                await broadcast(None)
+                await run.broadcast(None)
+                if _active_runs.get(project_id) is run:
+                    del _active_runs[project_id]
 
+    # Register and start the run BEFORE the first yield: a client that drops
+    # right after connecting must not prevent the background run from starting.
+    _active_runs[project_id] = run
     task = asyncio.create_task(run_llm())
     _writer_background_tasks.add(task)
     task.add_done_callback(_writer_background_tasks.discard)
-    try:
-        while True:
-            try:
-                item = await asyncio.wait_for(subscriber_queue.get(), timeout=15)
-            except asyncio.TimeoutError:
-                if client_disconnected is not None and await client_disconnected():
-                    logger.warning(
-                        "writer stream subscriber disconnected project_id=%s reason=request.is_disconnected",
-                        project_id,
-                    )
-                    return
-                idle_for = asyncio.get_running_loop().time() - last_progress
-                if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
-                    logger.warning(
-                        "writer stream idle project_id=%s idle_for=%ss; background run remains active",
-                        project_id,
-                        int(idle_for),
-                    )
-                    yield _sse({
-                        "type": "error",
-                        "content": (
-                            f"The browser connection has not received model progress for {int(idle_for)}s. "
-                            "The server-side writer run is still active; this page will reload saved results."
-                        ),
-                    })
-                    return
-                yield _sse({"type": "ping"})
-                continue
-            if item is None:
-                return
-            yield item
-    except asyncio.CancelledError:
-        logger.warning(
-            "writer stream subscriber disconnected project_id=%s reason=streaming_response_cancelled",
-            project_id,
-        )
-        return
-    finally:
-        subscribers.discard(subscriber_queue)
+    yield _sse({"type": "user_saved", "message_id": user_row.get("id"), "run_id": run.run_id})
+    async for item in _consume_run(run, subscriber_queue, client_disconnected):
+        yield item

@@ -151,6 +151,12 @@ venv/bin/python scripts/schema_migrations.py --only writer-tables
 | `POST` | `/writer/projects/{project_id}/manuscript/append` | append text to the manuscript and rebuild chunks |
 | `POST` | `/writer/projects/{project_id}/manuscript/replace` | replace a character range in the manuscript and rebuild chunks |
 | `GET` | `/writer/projects/{project_id}/manuscript/revisions` | list manuscript revision metadata |
+| `GET` | `/writer/projects/{project_id}/documents` | list background documents (id, title, kind, char count) |
+| `POST` | `/writer/projects/{project_id}/documents` | create or overwrite a background document by title (upsert) |
+| `GET` | `/writer/projects/{project_id}/documents/{document_id}` | fetch one background document with content |
+| `PUT` | `/writer/projects/{project_id}/documents/{document_id}` | update title, kind, and content of a document |
+| `DELETE` | `/writer/projects/{project_id}/documents/{document_id}` | delete a background document |
+| `GET` | `/writer/projects/{project_id}/stream` | reattach SSE to a live background writer run (`no_active_run` when idle) |
 | `POST` | `/writer/projects/{project_id}/messages` | stream a Claude Fable 5 answer as SSE |
 
 Project request:
@@ -192,6 +198,18 @@ Manuscript replace request:
 }
 ```
 
+Background document request (`POST`/`PUT`):
+
+```json
+{
+  "title": "Characters",
+  "kind": "character",
+  "content": "Reference notes kept separate from the manuscript..."
+}
+```
+
+Documents are per-project reference material (worldbuilding, character sheets, outline, research) stored in `writer_documents`, unique by `(project_id, title)`; `POST` upserts by title. A document inventory (titles, kinds, sizes) is injected into the model's manuscript-context system block, and the model reads them with the `read_document`/`search_documents` tools and maintains them with `save_document`.
+
 Message request:
 
 ```json
@@ -202,7 +220,7 @@ Message request:
 }
 ```
 
-`selection_start` and `selection_end` are optional character offsets into the canonical manuscript. When present, the selected range is supplied to the model alongside a bounded recent manuscript tail. Writer sends project instructions and manuscript context as separate 1-hour prompt-cache system blocks so repeated turns against unchanged context can produce `cache_read_input_tokens`; the UI shows cache read/write token counts from the final usage metadata. The visible UI does not expose `max_tokens`; `creative_writer.py` owns the server-side default. The writer loop allows up to 16 model/tool rounds for continuity searches, edit retries, and final append/replace calls. The message route streams `text/event-stream` payloads: `user_saved`, `text_delta`, `budget`, `tool`, `provider_retry`, `ping`, `done`, and `error`. `provider_retry` reports a transient Anthropic/DeepSeek connection retry; `ping` is an empty keepalive event emitted while waiting on long model/tool calls. Writer generation is owned by a server-side background task; the browser SSE connection is only an observer. If the browser/proxy disconnects before the final event, the background task continues and persists successful manuscript edits plus final assistant/error metadata, and the UI polls project messages to recover the saved result instead of reporting a generic network failure. For writer calls, a provider stream that accepts the request but produces no text/final event for 70 seconds is treated as a transient provider stall and retried by the server before surfacing an `error`; if no model/tool progress reaches the browser for 240 seconds, the stream returns an explanatory `error` event while the server-side writer run remains active. Writer tool calls run under the `system:writer` security-gateway caller and use explicit risk classes: `search_manuscript` is `read`, while `append_to_manuscript` and `replace_in_manuscript` are `write`. `done` includes `model`, `stop_reason`, token usage when provided by Anthropic, estimated USD cost, `manuscript_text`, `commentary_text`, and `display_text`. The model is instructed to edit the manuscript through writer tools when the request asks for an edit, and to use `<commentary>` only for questions, rationale, continuity notes, and clarification questions. Fable refusals arrive as successful streams whose final `stop_reason` can be `refusal`.
+`selection_start` and `selection_end` are optional character offsets into the canonical manuscript. When present, the selected range is supplied to the model alongside a bounded recent manuscript tail. Writer sends project instructions and manuscript context as separate 1-hour prompt-cache system blocks so repeated turns against unchanged context can produce `cache_read_input_tokens`; the UI shows cache read/write token counts from the final usage metadata. The visible UI does not expose `max_tokens`; `creative_writer.py` owns the server-side default. The writer loop allows up to 16 model/tool rounds for continuity searches, edit retries, and final append/replace calls. The message route streams `text/event-stream` payloads: `user_saved`, `text_delta`, `budget`, `tool`, `provider_retry`, `ping`, `done`, and `error`. `provider_retry` reports a transient Anthropic/DeepSeek connection retry; `ping` is an empty keepalive event emitted while waiting on long model/tool calls. Writer generation is owned by a server-side background task registered in an in-process run registry; the browser SSE connection is only an observer. The run starts before the first SSE byte is sent, so an immediate client drop cannot prevent it. If the browser/proxy disconnects before the final event, the background task continues and persists successful manuscript edits plus final assistant/error metadata; the UI first reattaches to the live run via `GET /writer/projects/{project_id}/stream` (which replays a `run_status` event carrying `text_snapshot` — everything streamed so far — then follows live), and only falls back to polling project messages when no active run exists. A page reload also auto-reattaches to a still-running generation. If the server restarts mid-run, the cancelled run persists an explanatory assistant `error` message noting that tool edits applied before the restart are saved. For writer calls, a provider stream that accepts the request but produces no text/final event for 70 seconds is treated as a transient provider stall and retried by the server before surfacing an `error`; if no model/tool progress reaches the browser for 240 seconds, the stream returns an explanatory `error` event while the server-side writer run remains active. Writer tool calls run under the `system:writer` security-gateway caller and use explicit risk classes: `search_manuscript`, `read_manuscript`, `read_document`, and `search_documents` are `read`, while `append_to_manuscript`, `replace_in_manuscript`, and `save_document` are `write`. `read_manuscript` returns any character-offset slice of the saved manuscript (default: last 5000 chars, max 20000 per call). `search_manuscript` and `replace_in_manuscript` fall back to whitespace/quote-insensitive matching when a verbatim match fails, and their failure messages steer the model toward short distinctive queries instead of long quoted paragraphs. `done` includes `model`, `stop_reason`, token usage when provided by Anthropic, estimated USD cost, `manuscript_text`, `commentary_text`, and `display_text`. The model is instructed to edit the manuscript through writer tools when the request asks for an edit, and to use `<commentary>` only for questions, rationale, continuity notes, and clarification questions. Fable refusals arrive as successful streams whose final `stop_reason` can be `refusal`.
 
 ## Admin Endpoints
 

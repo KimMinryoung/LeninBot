@@ -249,6 +249,12 @@ class WriterMessageRequest(BaseModel):
     model: str | None = Field(default=None, max_length=64)
 
 
+class WriterDocumentRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    kind: str = Field(default="note", max_length=50)
+    content: str = Field(default="", max_length=500_000)
+
+
 class WriterManuscriptRequest(BaseModel):
     body: str = Field(default="", max_length=5_000_000)
     note: str = Field(default="", max_length=500)
@@ -816,6 +822,77 @@ async def list_writer_manuscript_revisions(
         raise HTTPException(status_code=404, detail="writer project not found")
     revisions = await asyncio.to_thread(list_manuscript_revisions, project_id, limit)
     return {"revisions": revisions}
+
+
+@app.get("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
+async def list_writer_documents(project_id: int):
+    from creative_writer import get_project, list_documents
+
+    project = await asyncio.to_thread(get_project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    documents = await asyncio.to_thread(list_documents, project_id)
+    return {"documents": documents}
+
+
+@app.post("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
+async def save_writer_document(project_id: int, request: WriterDocumentRequest):
+    from creative_writer import save_document
+
+    document = await asyncio.to_thread(
+        save_document, project_id, request.title, request.content, request.kind
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"document": document}
+
+
+@app.get("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def get_writer_document(project_id: int, document_id: int):
+    from creative_writer import get_document
+
+    document = await asyncio.to_thread(get_document, project_id, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="writer document not found")
+    return {"document": document}
+
+
+@app.put("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def update_writer_document(project_id: int, document_id: int, request: WriterDocumentRequest):
+    from creative_writer import update_document
+
+    document = await asyncio.to_thread(
+        update_document, project_id, document_id, request.title, request.kind, request.content
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="writer document not found")
+    return {"document": document}
+
+
+@app.delete("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def delete_writer_document(project_id: int, document_id: int):
+    from creative_writer import delete_document
+
+    deleted = await asyncio.to_thread(delete_document, project_id, document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="writer document not found")
+    return {"deleted": True}
+
+
+@app.get("/writer/projects/{project_id}/stream", dependencies=[Depends(require_writer_access)])
+async def writer_stream(project_id: int, http_req: Request):
+    """Reattach to a live background writer run (page reload / dropped stream).
+    Emits no_active_run immediately when there is nothing to attach to."""
+    from creative_writer import stream_active_run
+
+    return StreamingResponse(
+        stream_active_run(
+            project_id=project_id,
+            client_disconnected=http_req.is_disconnected,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])

@@ -65,7 +65,7 @@
       padding: 15px;
     }
     .sidebar { border-right: 1px solid var(--line); }
-    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto minmax(180px, 1fr) auto; gap: 12px; }
+    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto auto; gap: 12px; }
     .editor {
       min-width: 0;
       display: grid;
@@ -139,6 +139,8 @@
     .message .label { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
     .prompt { min-height: 112px; }
     .search-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
+    .doc-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+    .doc-content { min-height: 150px; }
     .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; }
     .result span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
     .empty { color: var(--muted); text-align: center; padding: 28px 12px; }
@@ -198,6 +200,25 @@
       </section>
 
       <section class="stack">
+        <h2>Documents</h2>
+        <div id="docList" class="doc-list"></div>
+        <div class="row">
+          <button id="newDoc" type="button">New Document</button>
+        </div>
+        <div id="docEditor" class="stack" style="display:none">
+          <label>Title<input id="docTitle" type="text" placeholder="Document title"></label>
+          <label>Kind<input id="docKind" type="text" placeholder="character / setting / outline / research / note"></label>
+          <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
+          <div class="row">
+            <button id="saveDoc" class="primary" type="button">Save</button>
+            <button id="deleteDoc" class="danger" type="button">Delete</button>
+            <button id="closeDoc" type="button">Close</button>
+          </div>
+          <div id="docStatus" class="meta"></div>
+        </div>
+      </section>
+
+      <section class="stack">
         <h2>Search</h2>
         <div class="row grow">
           <input id="searchQuery" type="search" placeholder="Search manuscript">
@@ -252,7 +273,10 @@
       manuscriptPageEnd: 0,
       conversationMessages: [],
       conversationPage: 0,
+      documents: [],
+      editingDoc: null,
       abort: null,
+      resuming: false,
       lastAssistant: '',
       model: null,
       models: [],
@@ -524,6 +548,110 @@
       };
     }
 
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    async function readSse(res, onEvent) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          onEvent(JSON.parse(line.slice(6)));
+        }
+      }
+    }
+
+    function handleWriterEvent(event, ctx) {
+      if (event.type === 'user_saved') ctx.savedUserId = event.message_id || ctx.savedUserId;
+      if (event.type === 'no_active_run') ctx.noActiveRun = true;
+      if (event.type === 'run_status') {
+        ctx.savedUserId = ctx.savedUserId || event.user_message_id || null;
+        if (typeof event.text_snapshot === 'string' && event.text_snapshot) {
+          ctx.assistantMessage.setText(event.text_snapshot);
+          state.lastAssistant = event.text_snapshot;
+        }
+      }
+      if (event.type === 'text_delta') {
+        ctx.assistantMessage.appendText(event.content);
+        state.lastAssistant += event.content;
+      }
+      if (event.type === 'done') {
+        ctx.finalSeen = true;
+        if (event.display_text) ctx.assistantMessage.setText(event.display_text);
+        state.lastAssistant = event.manuscript_text || state.lastAssistant;
+        state.lastCost = {
+          model: event.model_display || event.model,
+          stop: event.stop_reason || 'complete',
+          cost: event.cost_usd,
+          usage: event.usage || {}
+        };
+        renderCost();
+        setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
+      }
+      if (event.type === 'tool') setStatus(event.content);
+      if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
+      if (event.type === 'error') {
+        ctx.finalSeen = true;
+        setStatus(event.content || 'Request failed.');
+      }
+      $('conversation').scrollTop = $('conversation').scrollHeight;
+    }
+
+    async function reattachToRun(ctx, attempts = 4) {
+      if (!state.current) return false;
+      const projectId = state.current.id;
+      for (let attempt = 0; attempt < attempts && !ctx.finalSeen; attempt++) {
+        await sleep(1500 * (attempt + 1));
+        if (!state.current || state.current.id !== projectId) return false;
+        try {
+          setStatus(`Stream interrupted; reattaching to the running writer (attempt ${attempt + 1})...`);
+          ctx.noActiveRun = false;
+          const res = await api(`/writer/projects/${projectId}/stream`);
+          await readSse(res, (event) => handleWriterEvent(event, ctx));
+          if (ctx.noActiveRun) return false;
+        } catch (err) {
+          // transient; retry with backoff
+        }
+      }
+      return ctx.finalSeen;
+    }
+
+    async function maybeResumeActiveRun() {
+      // After a page reload, pick up a writer run that is still generating.
+      if (!state.current || state.abort || state.resuming) return;
+      state.resuming = true;
+      const projectId = state.current.id;
+      try {
+        const res = await api(`/writer/projects/${projectId}/stream`);
+        const ctx = { finalSeen: false, savedUserId: null, noActiveRun: false, assistantMessage: null };
+        await readSse(res, (event) => {
+          if (event.type === 'no_active_run') { ctx.noActiveRun = true; return; }
+          if (!ctx.assistantMessage) {
+            setStatus('Reattached to a writer run still in progress...');
+            ctx.assistantMessage = addMessage('assistant', '', { model: event.model || null });
+          }
+          handleWriterEvent(event, ctx);
+        });
+        if (ctx.assistantMessage && !ctx.finalSeen) {
+          await reattachToRun(ctx);
+        }
+        if (ctx.assistantMessage && ctx.finalSeen && state.current && state.current.id === projectId) {
+          await loadProject(projectId);
+        }
+      } catch (err) {
+        // no active run or transient failure; the saved state is already shown
+      } finally {
+        state.resuming = false;
+      }
+    }
+
     async function waitForSavedAssistant(afterMessageId, timeoutMs = 240000) {
       if (!state.current) return null;
       const projectId = state.current.id;
@@ -619,7 +747,10 @@
       state.manuscriptPageEnd = 0;
       state.lastAssistant = '';
       $('searchResults').innerHTML = '';
+      closeDocument();
       renderCurrent();
+      await loadDocuments();
+      maybeResumeActiveRun();
     }
 
     async function createProject() {
@@ -649,8 +780,10 @@
       state.savedManuscript = '';
       state.manuscriptPage = 0;
       state.lastAssistant = '';
+      closeDocument();
       await loadProjects();
       renderCurrent();
+      await loadDocuments();
       setStatus('Deleted.');
     }
 
@@ -670,6 +803,91 @@
       updateManuscriptStatus('saved');
     }
 
+    function renderDocuments() {
+      const list = $('docList');
+      list.innerHTML = '';
+      for (const doc of state.documents) {
+        const button = document.createElement('button');
+        button.className = 'result';
+        button.type = 'button';
+        button.innerHTML = '<strong></strong><span></span>';
+        button.querySelector('strong').textContent = doc.title;
+        button.querySelector('span').textContent = `${doc.kind || 'note'} · ${charMeta(doc.char_count)}`;
+        button.onclick = () => openDocument(doc.id);
+        list.appendChild(button);
+      }
+      if (!state.documents.length) list.innerHTML = '<div class="meta">No background documents.</div>';
+      $('newDoc').disabled = !state.current;
+    }
+
+    async function loadDocuments() {
+      if (!state.current) {
+        state.documents = [];
+        renderDocuments();
+        return;
+      }
+      const res = await api(`/writer/projects/${state.current.id}/documents`);
+      const data = await res.json();
+      state.documents = data.documents || [];
+      renderDocuments();
+    }
+
+    async function openDocument(id) {
+      if (!state.current) return;
+      const res = await api(`/writer/projects/${state.current.id}/documents/${id}`);
+      state.editingDoc = (await res.json()).document;
+      $('docTitle').value = state.editingDoc.title || '';
+      $('docKind').value = state.editingDoc.kind || 'note';
+      $('docContent').value = state.editingDoc.content || '';
+      $('docStatus').textContent = '';
+      $('docEditor').style.display = '';
+    }
+
+    function newDocument() {
+      if (!state.current) return;
+      state.editingDoc = null;
+      $('docTitle').value = '';
+      $('docKind').value = 'note';
+      $('docContent').value = '';
+      $('docStatus').textContent = '';
+      $('docEditor').style.display = '';
+      $('docTitle').focus();
+    }
+
+    function closeDocument() {
+      state.editingDoc = null;
+      $('docEditor').style.display = 'none';
+      $('docStatus').textContent = '';
+    }
+
+    async function saveDocumentEdit() {
+      if (!state.current) return;
+      const payload = {
+        title: $('docTitle').value.trim(),
+        kind: $('docKind').value.trim() || 'note',
+        content: $('docContent').value
+      };
+      if (!payload.title) { $('docStatus').textContent = 'Title is required.'; return; }
+      try {
+        const path = state.editingDoc
+          ? `/writer/projects/${state.current.id}/documents/${state.editingDoc.id}`
+          : `/writer/projects/${state.current.id}/documents`;
+        const res = await api(path, { method: state.editingDoc ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+        state.editingDoc = (await res.json()).document;
+        $('docStatus').textContent = 'Saved.';
+        await loadDocuments();
+      } catch (err) {
+        $('docStatus').textContent = `Save failed: ${err.message || err}`;
+      }
+    }
+
+    async function deleteDocumentEdit() {
+      if (!state.current || !state.editingDoc || !confirm('Delete this document?')) return;
+      await api(`/writer/projects/${state.current.id}/documents/${state.editingDoc.id}`, { method: 'DELETE' });
+      closeDocument();
+      await loadDocuments();
+    }
+
     async function searchManuscript() {
       if (!state.current || !$('searchQuery').value.trim()) return;
       const q = $('searchQuery').value.trim();
@@ -681,7 +899,7 @@
         button.className = 'result';
         button.type = 'button';
         button.innerHTML = '<strong></strong><span></span>';
-        button.querySelector('strong').textContent = item.heading || `Chunk ${item.chunk_index}`;
+        button.querySelector('strong').textContent = item.heading || (item.chunk_index != null ? `Chunk ${item.chunk_index}` : 'Match');
         button.querySelector('span').textContent = item.snippet || '';
         button.onclick = () => {
           selectManuscriptRange(item.match_start || item.start_offset || 0, item.match_end || item.end_offset || 0);
@@ -775,8 +993,7 @@
       $('stop').disabled = false;
       state.abort = new AbortController();
       state.lastAssistant = '';
-      let savedUserId = null;
-      let finalSeen = false;
+      const ctx = { finalSeen: false, savedUserId: null, noActiveRun: false, assistantMessage };
       setStatus('Streaming...');
       const payload = { prompt: promptText };
       if (state.modelChoice) payload.model = state.modelChoice;
@@ -790,52 +1007,16 @@
           signal: state.abort.signal,
           body: JSON.stringify(payload)
         });
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split('\n\n');
-          buffer = parts.pop() || '';
-          for (const part of parts) {
-            const line = part.split('\n').find((l) => l.startsWith('data: '));
-            if (!line) continue;
-            const event = JSON.parse(line.slice(6));
-            if (event.type === 'user_saved') savedUserId = event.message_id || savedUserId;
-            if (event.type === 'text_delta') {
-              assistantMessage.appendText(event.content);
-              state.lastAssistant += event.content;
+        await readSse(res, (event) => handleWriterEvent(event, ctx));
+        if (!ctx.finalSeen) {
+          const recovered = await reattachToRun(ctx);
+          if (!recovered) {
+            const saved = await waitForSavedAssistant(ctx.savedUserId || baselineMessageId);
+            if (saved) {
+              const parsed = parseWriterContent(saved.content);
+              state.lastAssistant = parsed.manuscript || state.lastAssistant;
+              setStatus('Recovered saved writer result after stream reconnect.');
             }
-            if (event.type === 'done') {
-              finalSeen = true;
-              if (event.display_text) assistantMessage.setText(event.display_text);
-              state.lastAssistant = event.manuscript_text || state.lastAssistant;
-              state.lastCost = {
-                model: event.model_display || event.model,
-                stop: event.stop_reason || 'complete',
-                cost: event.cost_usd,
-                usage: event.usage || {}
-              };
-              renderCost();
-              setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
-            }
-            if (event.type === 'tool') setStatus(event.content);
-            if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
-            if (event.type === 'error') {
-              finalSeen = true;
-              setStatus(event.content || 'Request failed.');
-            }
-            $('conversation').scrollTop = $('conversation').scrollHeight;
-          }
-        }
-        if (!finalSeen) {
-          const saved = await waitForSavedAssistant(savedUserId || baselineMessageId);
-          if (saved) {
-            const parsed = parseWriterContent(saved.content);
-            state.lastAssistant = parsed.manuscript || state.lastAssistant;
-            setStatus('Recovered saved writer result after stream reconnect.');
           }
         }
         const assistantText = state.lastAssistant;
@@ -846,17 +1027,24 @@
         if (err.name === 'AbortError') {
           setStatus('Stopped watching this stream. The server-side writer run may still finish and save.');
         } else {
-          const saved = await waitForSavedAssistant(savedUserId || baselineMessageId);
-          if (saved) {
-            const parsed = parseWriterContent(saved.content);
-            state.lastAssistant = parsed.manuscript || state.lastAssistant;
-            setStatus('Connection dropped, but the server finished and saved the writer result.');
+          const recovered = await reattachToRun(ctx);
+          if (recovered) {
+            const assistantText = state.lastAssistant;
+            await loadProject(state.current.id);
+            state.lastAssistant = assistantText;
           } else {
-            try {
-              await loadProject(state.current.id);
-              setStatus('Connection dropped while the server was still writing. No saved result was found yet; refresh again in a moment.');
-            } catch (reloadErr) {
-              setStatus(`Connection dropped and saved state could not be reloaded: ${reloadErr.message || reloadErr}`);
+            const saved = await waitForSavedAssistant(ctx.savedUserId || baselineMessageId);
+            if (saved) {
+              const parsed = parseWriterContent(saved.content);
+              state.lastAssistant = parsed.manuscript || state.lastAssistant;
+              setStatus('Connection dropped, but the server finished and saved the writer result.');
+            } else {
+              try {
+                await loadProject(state.current.id);
+                setStatus('Connection dropped while the server was still writing. No saved result was found yet; refresh again in a moment.');
+              } catch (reloadErr) {
+                setStatus(`Connection dropped and saved state could not be reloaded: ${reloadErr.message || reloadErr}`);
+              }
             }
           }
         }
@@ -878,6 +1066,10 @@
     $('conversationPrev').onclick = () => goConversationPage(-1);
     $('conversationNext').onclick = () => goConversationPage(1);
     $('search').onclick = searchManuscript;
+    $('newDoc').onclick = newDocument;
+    $('saveDoc').onclick = saveDocumentEdit;
+    $('deleteDoc').onclick = deleteDocumentEdit;
+    $('closeDoc').onclick = closeDocument;
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
     $('prompt').addEventListener('keydown', (event) => {
@@ -892,6 +1084,7 @@
     });
     $('manuscript').addEventListener('select', updateAssistantButtons);
     $('manuscript').addEventListener('keyup', updateAssistantButtons);
+    renderDocuments();
     loadProjects().catch((err) => setStatus(String(err.message || err)));
   </script>
 </body>
