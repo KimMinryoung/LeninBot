@@ -483,7 +483,10 @@ def append_manuscript(project_id: int, text: str, note: str = "") -> dict | None
     if not manuscript:
         return None
     current = str(manuscript.get("body") or "")
-    addition = text.strip("\n")
+    # Full strip, not just newlines: models often send a leading space or
+    # trailing blank padding, which survives verbatim into the draft. The
+    # paragraph break is owned by the separator below, not by the input.
+    addition = text.strip()
     if not addition:
         return manuscript
     separator = "\n\n" if current and not current.endswith("\n\n") else ""
