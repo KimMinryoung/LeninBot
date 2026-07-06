@@ -7,6 +7,7 @@ import re
 
 from writer.config import (
     CONTEXT_CHAR_BUDGET,
+    DOC_STALENESS_NOTE_CHARS,
     MANUSCRIPT_OPENING_CHARS,
     MANUSCRIPT_SELECTION_LIMIT,
     MANUSCRIPT_TAIL_CHARS,
@@ -46,15 +47,8 @@ def _tools_prompt_section() -> str:
         "- read_document(title) / search_documents(query): consult the project's background documents "
         "(character sheets, worldbuilding, outline, research). They are the authoritative reference for "
         "setting and plot facts — check them before inventing or contradicting a detail.\n",
-        "- save_document(title, content, kind): create or fully overwrite a background document. Use when the "
-        "writer asks you to record notes, or to keep an agreed story bible current. Never store manuscript "
-        "prose in documents.\n",
-        "- Maintain a document titled 'Story so far' with kind 'pinned': a compact synopsis (under 4000 chars) "
-        "of events, character states, open threads, and planted setups. Pinned documents are placed in your "
-        "context automatically every turn, so keeping it current replaces expensive re-reading of the "
-        "manuscript. Update it after any scene that changes the situation; keep it factual and dense.\n",
-        "- A pinned document may also contain a style exemplar (passages whose prose the writer wants matched). "
-        "Absorb its rhythm and diction as calibration — never copy its sentences into the manuscript.\n",
+        "- save_document(title, content, kind): create or fully overwrite a background document. "
+        "Never store manuscript prose in documents.\n",
     ]
     if WRITER_WEB_SEARCH_ENABLED:
         lines.append(
@@ -67,6 +61,31 @@ def _tools_prompt_section() -> str:
         "Tool economy: the manuscript tail in your context IS the current saved draft — do not re-search or re-read text "
         "you can already see, and never search for prose you wrote earlier in this same turn (a successful tool result "
         "already confirms it was saved). One or two well-chosen lookups beat a chain of guesses.\n\n"
+        "# Memory & research — the documents are your long-term memory\n"
+        "Only pinned documents and the manuscript's opening and tail are in your context automatically; everything "
+        "else you know only if you wrote it down or look it up. Maintain the documents on your own initiative:\n"
+        "- Before drafting a scene, consult the documents it depends on — the characters present, the location, the "
+        "open threads — unless their contents are already in context. Check facts instead of guessing them.\n"
+        "- Record durable story facts in the SAME turn they enter the story: a new or changed character, place, "
+        "object, relationship, revealed backstory, or timeline anchor goes into the matching document "
+        "('Characters', 'Places', 'Timeline', 'Threads & setups' — create each the first time it is needed, with a "
+        "fitting kind such as character/setting/outline). Write them as dense factual notes, never as prose.\n"
+        "- Maintain a document titled 'Story so far' with kind 'pinned': a compact synopsis (under 4000 chars) of "
+        "events, character states, open threads, and planted setups. It is placed in your context every turn, so "
+        "keeping it current replaces expensive re-reading of the manuscript.\n"
+        "- The document listing shows when a document was last updated relative to the manuscript's growth. When "
+        "'Story so far' or another living document lags behind, bring it up to date this turn, after the "
+        "manuscript work.\n"
+    )
+    if WRITER_WEB_SEARCH_ENABLED:
+        lines.append(
+            "- When you research real-world specifics with web_search, distill what the story will reuse into a "
+            "'Research — <topic>' document (kind 'research') in the same turn: facts once verified should never "
+            "need a second search.\n"
+        )
+    lines.append(
+        "- A pinned document may also contain a style exemplar (passages whose prose the writer wants matched). "
+        "Absorb its rhythm and diction as calibration — never copy its sentences into the manuscript.\n\n"
     )
     return "".join(lines)
 
@@ -179,11 +198,18 @@ def manuscript_context(project_id: int, selection_start: int | None, selection_e
             parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
     documents = list_documents(project_id)
     if documents:
-        listing = "\n".join(
-            f"- {str(d.get('title'))!r} (kind: {d.get('kind')}, {d.get('char_count')} chars)"
-            for d in documents
-        )
-        parts.append("Background documents (read with read_document(title)):\n" + listing)
+        lines = []
+        for d in documents:
+            line = f"- {str(d.get('title'))!r} (kind: {d.get('kind')}, {d.get('char_count')} chars"
+            mark = d.get("manuscript_chars_at_update")
+            if mark is not None and len(body) - int(mark) >= DOC_STALENESS_NOTE_CHARS:
+                line += (
+                    f"; STALE: last updated when the manuscript was {int(mark)} chars, "
+                    f"it has since grown to {len(body)}"
+                )
+            line += ")"
+            lines.append(line)
+        parts.append("Background documents (read with read_document(title)):\n" + "\n".join(lines))
         # Pinned documents (the agent-maintained story synopsis and similar)
         # ride along in full so long-novel continuity doesn't depend on the
         # model choosing to re-read the manuscript every turn.

@@ -8,10 +8,10 @@ WRITER_DEFAULT_MAX_TOKENS = 20000
 WRITER_MAX_ROUNDS = 16
 WRITER_IDLE_TIMEOUT_SEC = 240
 WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 70
-# Web search is disabled by design: Fable 5's internal knowledge is strong and
-# the writer prefers reference material supplied directly by the user. Flip to
-# True to re-enable the Tavily-backed web_search tool (and its prompt guidance).
-WRITER_WEB_SEARCH_ENABLED = False
+# Tavily-backed web_search: enabled so the agent can actively research
+# real-world specifics (period detail, geography, terminology) and distill the
+# findings into background documents instead of guessing or re-searching.
+WRITER_WEB_SEARCH_ENABLED = True
 WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 
 MAX_CONTEXT_MESSAGES = 80
@@ -28,6 +28,11 @@ MANUSCRIPT_SELECTION_LIMIT = 20000
 # Opening excerpt for voice/style calibration, injected only when the
 # manuscript is long enough that it cannot overlap the tail.
 MANUSCRIPT_OPENING_CHARS = 3500
+
+# The document listing flags a document as lagging when the manuscript has
+# grown at least this many chars since the document was last saved — the
+# in-context nudge that keeps the agent's story bible current.
+DOC_STALENESS_NOTE_CHARS = 2000
 
 # Documents with kind 'pinned' (e.g. an agent-maintained 'Story so far'
 # synopsis) are injected in full into the manuscript context block.

@@ -12,8 +12,18 @@ _DOCUMENT_COLUMNS = "id, project_id, title, kind, length(content)::int AS char_c
 
 
 def list_documents(project_id: int) -> list[dict]:
+    # manuscript_chars_at_update: how long the manuscript was when the document
+    # was last saved (via the revision log). The prompt renders the gap as a
+    # staleness nudge so the agent keeps its story bible current. NULL when the
+    # document predates every manuscript revision.
     return db_query(
-        f"""SELECT {_DOCUMENT_COLUMNS}
+        f"""SELECT {_DOCUMENT_COLUMNS},
+                   (SELECT length(r.after_body)::int
+                      FROM writer_manuscript_revisions r
+                     WHERE r.project_id = writer_documents.project_id
+                       AND r.created_at <= writer_documents.updated_at
+                     ORDER BY r.created_at DESC, r.id DESC
+                     LIMIT 1) AS manuscript_chars_at_update
              FROM writer_documents
             WHERE project_id = %s
             ORDER BY updated_at DESC, id DESC""",
