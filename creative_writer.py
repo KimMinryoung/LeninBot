@@ -558,7 +558,12 @@ def append_manuscript(project_id: int, text: str, note: str = "") -> dict | None
     if not addition:
         return manuscript
     separator = "\n\n" if current and not current.endswith("\n\n") else ""
-    return _write_manuscript(project_id, current + separator + addition, action="append", note=note)
+    result = _write_manuscript(project_id, current + separator + addition, action="append", note=note)
+    if result:
+        result = dict(result)
+        result["edit_start"] = len(current) + len(separator)
+        result["edit_end"] = len(current) + len(separator) + len(addition)
+    return result
 
 
 def replace_manuscript_range(
@@ -649,7 +654,14 @@ def replace_manuscript_text(project_id: int, find: str, replacement: str, note: 
         matched_how = "normalized whitespace/quotes"
     updated = current[:span[0]] + replacement + current[span[1]:]
     result = _write_manuscript(project_id, updated, action="replace", note=note or "tool replace")
-    return {"ok": True, "message": f"Replaced (matched {matched_how}).", "char_count": (result or {}).get("char_count")}
+    return {
+        "ok": True,
+        "message": f"Replaced (matched {matched_how}).",
+        "char_count": (result or {}).get("char_count"),
+        "edit_start": span[0],
+        "edit_end": span[0] + len(replacement),
+        "delta": len(replacement) - (span[1] - span[0]),
+    }
 
 
 def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict]:
@@ -1338,11 +1350,13 @@ def _build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
         result = await asyncio.to_thread(append_manuscript, project_id, text, "tool append")
         if not result:
             return "Append failed: manuscript not found."
+        _record_run_edit(project_id, "append", result.get("edit_start"), result.get("edit_end"), 0)
         return f"Appended. Manuscript is now {result.get('char_count')} characters."
 
     async def _handle_replace(find: str, replacement: str) -> str:
         result = await asyncio.to_thread(replace_manuscript_text, project_id, find, replacement, "tool replace")
         if result.get("ok"):
+            _record_run_edit(project_id, "replace", result.get("edit_start"), result.get("edit_end"), result.get("delta"))
             return f"Replaced. Manuscript is now {result.get('char_count')} characters."
         return "Replace failed: " + result.get("message", "unknown error")
 
@@ -1399,12 +1413,24 @@ class _WriterRun:
         self._text_parts: list[str] = []
         self.final_event: dict | None = None
         self.last_progress = asyncio.get_running_loop().time()
+        self.edits: list[dict] = []
 
     def append_text(self, chunk: str) -> None:
         self._text_parts.append(chunk)
 
     def text_snapshot(self) -> str:
         return "".join(self._text_parts)
+
+    def record_edit(self, action: str, start: int, end: int, delta: int) -> None:
+        """Track a manuscript edit span in final-body coordinates: later edits
+        that grow/shrink the body shift every previously recorded span that
+        sits at or after their position."""
+        if delta:
+            for edit in self.edits:
+                if edit["start"] >= start:
+                    edit["start"] += delta
+                    edit["end"] += delta
+        self.edits.append({"action": action, "start": start, "end": end})
 
     async def broadcast(self, item: str | None) -> None:
         stale: list[asyncio.Queue[str | None]] = []
@@ -1415,6 +1441,13 @@ class _WriterRun:
                 stale.append(queue)
         for queue in stale:
             self.subscribers.discard(queue)
+
+
+def _record_run_edit(project_id: int, action: str, start, end, delta) -> None:
+    run = _active_runs.get(project_id)
+    if run is None or start is None or end is None:
+        return
+    run.record_edit(action, int(start), int(end), int(delta or 0))
 
 
 _active_runs: dict[int, _WriterRun] = {}
@@ -1564,7 +1597,12 @@ async def stream_writer_reply(
                 cost_usd=budget_tracker.get("total_cost"),
             )
             _touch_project(project_id)
-            return {"type": "error", "message_id": assistant_row.get("id"), "content": error_text}
+            return {
+                "type": "error",
+                "message_id": assistant_row.get("id"),
+                "content": error_text,
+                "edits": [dict(edit) for edit in run.edits],
+            }
 
         final_text = (answer_holder[0] if answer_holder else "").strip()
         parsed_response = _parse_writer_response(final_text)
@@ -1593,6 +1631,7 @@ async def stream_writer_reply(
             "manuscript_text": parsed_response["manuscript_text"],
             "commentary_text": parsed_response["commentary_text"],
             "display_text": parsed_response["display_text"],
+            "edits": [dict(edit) for edit in run.edits],
             "created_at": datetime.utcnow().isoformat() + "Z",
         }
 

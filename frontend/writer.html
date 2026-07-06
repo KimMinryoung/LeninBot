@@ -98,15 +98,45 @@
     }
     .project.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .project strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .manuscript {
-      height: 100%;
+    .manuscript-shell {
+      position: relative;
       min-height: 680px;
-      border: 0;
-      border-radius: 0;
+      min-width: 0;
+      background: var(--surface);
+    }
+    /* The backdrop mirrors the textarea's text metrics exactly so <mark>
+       rectangles line up with the (transparent-backgrounded) textarea text. */
+    .manuscript, .manuscript-backdrop {
       padding: 22px 26px;
       font: 16px/1.72 ui-serif, Georgia, "Times New Roman", serif;
-      background: var(--surface);
+      letter-spacing: normal;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .manuscript {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
       box-shadow: none;
+      resize: none;
+    }
+    .manuscript-backdrop {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      scrollbar-width: none;
+      color: transparent;
+      pointer-events: none;
+    }
+    .manuscript-backdrop::-webkit-scrollbar { display: none; }
+    .manuscript-backdrop mark {
+      background: rgba(184, 131, 47, .30);
+      color: transparent;
+      border-radius: 2px;
     }
     .pager {
       display: flex;
@@ -153,7 +183,7 @@
       .sidebar, .assistant { border: 0; border-bottom: 1px solid var(--line); }
       .assistant { grid-template-rows: auto; }
       .editor { min-height: 72vh; }
-      .manuscript { min-height: 560px; }
+      .manuscript-shell { min-height: 560px; }
     }
     @media (max-width: 720px) {
       .range-note { display: none; }
@@ -185,7 +215,10 @@
         <h1 id="projectTitle">No project selected</h1>
         <div id="projectMeta" class="meta">Create or select a project.</div>
       </header>
-      <textarea id="manuscript" class="manuscript" spellcheck="true" placeholder="Manuscript"></textarea>
+      <div class="manuscript-shell">
+        <div id="manuscriptBackdrop" class="manuscript-backdrop" aria-hidden="true"></div>
+        <textarea id="manuscript" class="manuscript" spellcheck="true" placeholder="Manuscript"></textarea>
+      </div>
       <footer class="editor-actions">
         <div class="pager">
           <div id="manuscriptStatus" class="status pager-label"></div>
@@ -294,6 +327,7 @@
       conversationPage: 0,
       documents: [],
       editingDoc: null,
+      aiEdits: [],
       abort: null,
       resuming: false,
       lastAssistant: '',
@@ -360,6 +394,82 @@
       $('manuscript').value = state.manuscript.slice(bounds.start, bounds.end);
       updateManuscriptStatus();
       updateSelectionInfo();
+      renderManuscriptBackdrop();
+    }
+
+    const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    function renderManuscriptBackdrop() {
+      const backdrop = $('manuscriptBackdrop');
+      const text = $('manuscript').value;
+      const pageStart = state.manuscriptPageStart;
+      const ranges = (state.aiEdits || [])
+        .map((edit) => ({
+          start: clamp(edit.start - pageStart, 0, text.length),
+          end: clamp(edit.end - pageStart, 0, text.length),
+        }))
+        .filter((edit) => edit.end > edit.start)
+        .sort((a, b) => a.start - b.start);
+      if (!ranges.length) { backdrop.innerHTML = ''; return; }
+      let html = '';
+      let pos = 0;
+      for (const range of ranges) {
+        const start = Math.max(range.start, pos);
+        if (range.end <= start) continue;
+        html += escapeHtml(text.slice(pos, start)) + '<mark>' + escapeHtml(text.slice(start, range.end)) + '</mark>';
+        pos = range.end;
+      }
+      html += escapeHtml(text.slice(pos));
+      backdrop.innerHTML = html;
+      backdrop.scrollTop = $('manuscript').scrollTop;
+    }
+
+    function clearAiEdits() {
+      if (!state.aiEdits.length) return;
+      state.aiEdits = [];
+      renderManuscriptBackdrop();
+    }
+
+    function jumpToAiEdits() {
+      if (!state.current || !state.aiEdits.length) return;
+      // Same page move as goManuscriptPageTo, but without stealing focus —
+      // the user may already be typing the next request.
+      const first = state.aiEdits.reduce((a, b) => (a.start <= b.start ? a : b));
+      commitVisibleManuscriptPage();
+      const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
+      state.manuscriptPage = clamp(Math.floor(Math.max(0, first.start) / MANUSCRIPT_PAGE_CHARS), 0, total - 1);
+      renderManuscriptPage();
+      const backdrop = $('manuscriptBackdrop');
+      const mark = backdrop.querySelector('mark');
+      if (mark) {
+        const manuscript = $('manuscript');
+        manuscript.scrollTop = Math.max(0, mark.offsetTop - manuscript.clientHeight / 3);
+        backdrop.scrollTop = manuscript.scrollTop;
+      }
+      updateManuscriptStatus(`AI edited ${state.aiEdits.length} range${state.aiEdits.length > 1 ? 's' : ''} (highlighted)`);
+    }
+
+    function changedEnvelope(oldText, newText) {
+      if (oldText === newText) return null;
+      const minLen = Math.min(oldText.length, newText.length);
+      let prefix = 0;
+      while (prefix < minLen && oldText[prefix] === newText[prefix]) prefix++;
+      let suffix = 0;
+      while (suffix < minLen - prefix && oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]) suffix++;
+      return { start: prefix, end: Math.max(prefix, newText.length - suffix) };
+    }
+
+    function applyTurnEdits(ctx, preSendBody) {
+      let edits = Array.isArray(ctx.edits) ? ctx.edits : [];
+      if (!edits.length && typeof preSendBody === 'string' && preSendBody !== state.manuscript) {
+        // Recovered without a final event (polling path): approximate with the
+        // changed envelope between the pre-send and reloaded manuscript.
+        const envelope = changedEnvelope(preSendBody, state.manuscript);
+        if (envelope) edits = [{ action: 'edit', start: envelope.start, end: envelope.end }];
+      }
+      state.aiEdits = edits.filter((edit) => edit.end > edit.start);
+      if (state.aiEdits.length) jumpToAiEdits();
+      else renderManuscriptBackdrop();
     }
 
     function updateManuscriptStatus(label = '') {
@@ -627,6 +737,9 @@
         ctx.assistantMessage.appendText(event.content);
         state.lastAssistant += event.content;
       }
+      if ((event.type === 'done' || event.type === 'error') && Array.isArray(event.edits)) {
+        ctx.edits = event.edits;
+      }
       if (event.type === 'done') {
         ctx.finalSeen = true;
         if (event.display_text) ctx.assistantMessage.setText(event.display_text);
@@ -689,6 +802,7 @@
         }
         if (ctx.assistantMessage && ctx.finalSeen && state.current && state.current.id === projectId) {
           await loadProject(projectId);
+          applyTurnEdits(ctx, null);
         }
       } catch (err) {
         // no active run or transient failure; the saved state is already shown
@@ -815,6 +929,7 @@
             wasLastPage: state.manuscriptPage >= pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1,
           }
         : null;
+      if (!prev) state.aiEdits = [];
       const [projectRes, manuscriptRes] = await Promise.all([
         api(`/writer/projects/${id}`),
         api(`/writer/projects/${id}/manuscript`)
@@ -1080,6 +1195,8 @@
         }
       }
       const promptText = $('prompt').value.trim();
+      clearAiEdits();
+      const preSendBody = state.manuscript;
       const { start, end } = selectedManuscriptRange();
       const baselineMessageId = Math.max(
         0,
@@ -1122,6 +1239,7 @@
         const assistantText = state.lastAssistant;
         await loadProject(state.current.id);
         state.lastAssistant = assistantText;
+        applyTurnEdits(ctx, preSendBody);
         updateAssistantButtons();
       } catch (err) {
         if (err.name === 'AbortError') {
@@ -1132,11 +1250,13 @@
             const assistantText = state.lastAssistant;
             await loadProject(state.current.id);
             state.lastAssistant = assistantText;
+            applyTurnEdits(ctx, preSendBody);
           } else {
             const saved = await waitForSavedAssistant(ctx.savedUserId || baselineMessageId);
             if (saved) {
               const parsed = parseWriterContent(saved.content);
               state.lastAssistant = parsed.manuscript || state.lastAssistant;
+              applyTurnEdits(ctx, preSendBody);
               setStatus('Connection dropped, but the server finished and saved the writer result.');
             } else {
               try {
@@ -1195,6 +1315,10 @@
     $('manuscript').addEventListener('input', () => {
       commitVisibleManuscriptPage();
       updateManuscriptStatus('unsaved');
+      clearAiEdits();
+    });
+    $('manuscript').addEventListener('scroll', () => {
+      $('manuscriptBackdrop').scrollTop = $('manuscript').scrollTop;
     });
     $('selectionInfo').addEventListener('click', (event) => {
       if (!event.target.closest('a')) return;
