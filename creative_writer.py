@@ -305,7 +305,7 @@ def ensure_writer_tables() -> None:
     )
 
 
-def list_projects(limit: int = 100) -> list[dict]:
+def list_projects(limit: int = 100, status: str = "active") -> list[dict]:
     return db_query(
         """SELECT p.id, p.title, p.premise, p.style_notes, p.status,
                   p.created_at, p.updated_at,
@@ -319,9 +319,10 @@ def list_projects(limit: int = 100) -> list[dict]:
                    GROUP BY project_id
              ) m ON m.project_id = p.id
         LEFT JOIN writer_manuscripts w ON w.project_id = p.id
+            WHERE p.status = %s
             ORDER BY p.updated_at DESC, p.id DESC
             LIMIT %s""",
-        (limit,),
+        (status, limit),
     )
 
 
@@ -382,7 +383,30 @@ def get_project_with_messages(project_id: int) -> dict | None:
     return project
 
 
+def trash_project(project_id: int) -> bool:
+    """Soft delete: the project moves to the trash (status='deleted') with all
+    its data intact, and disappears from the active list. Reversible via
+    restore_project; permanently removed only by delete_project."""
+    row = db_query_one(
+        """UPDATE writer_projects SET status = 'deleted', updated_at = NOW()
+            WHERE id = %s AND status <> 'deleted' RETURNING id""",
+        (project_id,),
+    )
+    return bool(row)
+
+
+def restore_project(project_id: int) -> bool:
+    row = db_query_one(
+        """UPDATE writer_projects SET status = 'active', updated_at = NOW()
+            WHERE id = %s AND status = 'deleted' RETURNING id""",
+        (project_id,),
+    )
+    return bool(row)
+
+
 def delete_project(project_id: int) -> bool:
+    """Hard delete: permanently removes the project and (via FK cascade) its
+    manuscript, chunks, revisions, messages, and documents."""
     row = db_query_one(
         "DELETE FROM writer_projects WHERE id = %s RETURNING id",
         (project_id,),

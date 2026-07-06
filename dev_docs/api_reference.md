@@ -140,11 +140,12 @@ venv/bin/python scripts/schema_migrations.py --only writer-tables
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/writer/projects` | list writer projects plus Fable pricing metadata and manuscript character counts |
+| `GET` | `/writer/projects` | list writer projects plus Fable pricing metadata and manuscript character counts; `?status=deleted` lists the trash |
 | `POST` | `/writer/projects` | create a writer project and its empty manuscript |
 | `GET` | `/writer/projects/{project_id}` | project metadata and ordered message log |
 | `PATCH` | `/writer/projects/{project_id}` | update title, premise, and style notes |
-| `DELETE` | `/writer/projects/{project_id}` | delete a project, manuscript, chunks, revisions, and messages |
+| `DELETE` | `/writer/projects/{project_id}` | soft delete: moves the project to trash (`status='deleted'`, data intact); `?permanent=true` hard-deletes the project, manuscript, chunks, revisions, messages, and documents |
+| `POST` | `/writer/projects/{project_id}/restore` | restore a trashed project to active |
 | `GET` | `/writer/projects/{project_id}/manuscript` | fetch the canonical manuscript body |
 | `PUT` | `/writer/projects/{project_id}/manuscript` | replace the canonical manuscript body and rebuild searchable chunks |
 | `GET` | `/writer/projects/{project_id}/manuscript/search` | search indexed manuscript chunks with `q` and optional `limit` |

@@ -677,7 +677,10 @@ async def writer_page():
 
 
 @app.get("/writer/projects", dependencies=[Depends(require_writer_access)])
-async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
+async def list_writer_projects(
+    limit: int = Query(default=100, ge=1, le=200),
+    status: str = Query(default="active", pattern="^(active|deleted)$"),
+):
     from creative_writer import (
         WRITER_INPUT_PRICE_PER_MTOK,
         WRITER_MODEL,
@@ -688,7 +691,7 @@ async def list_writer_projects(limit: int = Query(default=100, ge=1, le=200)):
         list_writer_models,
     )
 
-    projects = await asyncio.to_thread(list_projects, limit)
+    projects = await asyncio.to_thread(list_projects, limit, status)
     selected = await asyncio.to_thread(get_selected_model_choice)
     return {
         "projects": projects,
@@ -754,13 +757,28 @@ async def update_writer_project(project_id: int, request: WriterProjectRequest):
 
 
 @app.delete("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
-async def delete_writer_project(project_id: int):
-    from creative_writer import delete_project
+async def delete_writer_project(project_id: int, permanent: bool = Query(default=False)):
+    from creative_writer import delete_project, trash_project
 
-    deleted = await asyncio.to_thread(delete_project, project_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"deleted": True}
+    if permanent:
+        deleted = await asyncio.to_thread(delete_project, project_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="writer project not found")
+        return {"deleted": True, "permanent": True}
+    trashed = await asyncio.to_thread(trash_project, project_id)
+    if not trashed:
+        raise HTTPException(status_code=404, detail="writer project not found or already trashed")
+    return {"deleted": True, "permanent": False}
+
+
+@app.post("/writer/projects/{project_id}/restore", dependencies=[Depends(require_writer_access)])
+async def restore_writer_project(project_id: int):
+    from creative_writer import restore_project
+
+    restored = await asyncio.to_thread(restore_project, project_id)
+    if not restored:
+        raise HTTPException(status_code=404, detail="writer project not found in trash")
+    return {"restored": True}
 
 
 @app.get("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])

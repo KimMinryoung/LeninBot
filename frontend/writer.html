@@ -98,6 +98,9 @@
     }
     .project.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .project strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project.trash-item { border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; cursor: default; }
+    .project.trash-item .row { margin-top: 6px; }
+    .project.trash-item .danger { border-color: var(--warn); }
     .manuscript-shell {
       position: relative;
       min-height: 680px;
@@ -240,6 +243,7 @@
         <div class="row">
           <button id="newProject" class="primary" type="button">New</button>
           <button id="refresh" type="button">Refresh</button>
+          <button id="trashToggle" type="button">Trash</button>
         </div>
       </div>
       <div id="projectList" class="project-list"></div>
@@ -363,6 +367,9 @@
       documents: [],
       editingDoc: null,
       aiEdits: [],
+      view: 'active',
+      trashedProjects: [],
+      pendingDelete: null,
       abort: null,
       resuming: false,
       lastAssistant: '',
@@ -639,7 +646,41 @@
     }
 
     function renderProjects() {
-      $('projectList').innerHTML = '';
+      const list = $('projectList');
+      list.innerHTML = '';
+      if (state.view === 'trash') {
+        for (const project of state.trashedProjects) {
+          const box = document.createElement('div');
+          box.className = 'project trash-item';
+          const title = document.createElement('strong');
+          title.textContent = project.title;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = `${charMeta(project.manuscript_char_count)} · ${project.message_count || 0} messages`;
+          const actions = document.createElement('div');
+          actions.className = 'row';
+          const restore = document.createElement('button');
+          restore.type = 'button';
+          restore.textContent = 'Restore';
+          restore.onclick = () => restoreProject(project.id);
+          const purge = document.createElement('button');
+          purge.type = 'button';
+          purge.className = 'danger';
+          purge.textContent = 'Delete forever';
+          purge.onclick = () => openDeleteModal({
+            id: project.id,
+            title: project.title,
+            permanent: true,
+            chars: project.manuscript_char_count,
+            messages: project.message_count || 0,
+          });
+          actions.append(restore, purge);
+          box.append(title, meta, actions);
+          list.appendChild(box);
+        }
+        if (!state.trashedProjects.length) list.innerHTML = '<div class="empty">Trash is empty.</div>';
+        return;
+      }
       for (const project of state.projects) {
         const button = document.createElement('button');
         button.className = 'project' + (state.current && state.current.id === project.id ? ' active' : '');
@@ -647,8 +688,33 @@
         button.querySelector('strong').textContent = project.title;
         button.querySelector('span').textContent = `${charMeta(project.manuscript_char_count)} · ${project.message_count || 0} messages`;
         button.onclick = () => loadProject(project.id);
-        $('projectList').appendChild(button);
+        list.appendChild(button);
       }
+    }
+
+    async function loadTrash() {
+      const res = await api('/writer/projects?status=deleted');
+      state.trashedProjects = (await res.json()).projects || [];
+    }
+
+    async function toggleTrashView() {
+      state.view = state.view === 'trash' ? 'active' : 'trash';
+      $('trashToggle').textContent = state.view === 'trash' ? 'Back' : 'Trash';
+      if (state.view === 'trash') {
+        try {
+          await loadTrash();
+        } catch (err) {
+          setStatus(`Could not load trash: ${err.message || err}`);
+        }
+      }
+      renderProjects();
+    }
+
+    async function restoreProject(id) {
+      await api(`/writer/projects/${id}/restore`, { method: 'POST' });
+      await Promise.all([loadTrash(), loadProjects()]);
+      renderProjects();
+      setStatus('Project restored.');
     }
 
     function renderCurrent() {
@@ -1008,23 +1074,30 @@
       setStatus('Project saved.');
     }
 
-    function openDeleteModal() {
-      if (!state.current) return;
-      const project = state.current;
-      const messageCount = (project.messages || []).length;
+    function openDeleteModal(target) {
+      state.pendingDelete = target;
       const body = $('deleteModalBody');
       body.innerHTML = '';
-      const title = document.createElement('div');
+      const titleLine = document.createElement('div');
       const strong = document.createElement('strong');
-      strong.textContent = project.title || 'Untitled';
-      title.append('Project: ', strong);
+      strong.textContent = target.title || 'Untitled';
+      titleLine.append('Project: ', strong);
       const detail = document.createElement('div');
-      detail.textContent =
-        `This permanently deletes the manuscript (${charMeta(state.manuscript.length)}), ` +
-        `${messageCount} conversation message${messageCount === 1 ? '' : 's'}, ` +
-        `${state.documents.length} background document${state.documents.length === 1 ? '' : 's'}, ` +
-        'and all revision history. This cannot be undone.';
-      body.append(title, detail);
+      if (target.permanent) {
+        $('deleteModalTitle').textContent = 'Delete permanently?';
+        detail.textContent =
+          `This permanently deletes the manuscript (${charMeta(target.chars)}), ` +
+          `${target.messages || 0} conversation message${(target.messages || 0) === 1 ? '' : 's'}, ` +
+          'all background documents, and all revision history. This cannot be undone.';
+        $('deleteModalConfirm').textContent = 'Delete permanently';
+      } else {
+        $('deleteModalTitle').textContent = 'Move to Trash?';
+        detail.textContent =
+          'Everything is kept — the manuscript, conversation, documents, and revision history. '
+          + 'You can restore the project from Trash at any time.';
+        $('deleteModalConfirm').textContent = 'Move to Trash';
+      }
+      body.append(titleLine, detail);
       $('deleteModalConfirm').disabled = false;
       $('deleteModal').classList.add('open');
       $('deleteModalCancel').focus();
@@ -1032,30 +1105,36 @@
 
     function closeDeleteModal() {
       $('deleteModal').classList.remove('open');
+      state.pendingDelete = null;
     }
 
     async function confirmDeleteProject() {
-      if (!state.current) { closeDeleteModal(); return; }
+      const target = state.pendingDelete;
+      if (!target) { closeDeleteModal(); return; }
       $('deleteModalConfirm').disabled = true;
       try {
-        await api(`/writer/projects/${state.current.id}`, { method: 'DELETE' });
+        await api(`/writer/projects/${target.id}${target.permanent ? '?permanent=true' : ''}`, { method: 'DELETE' });
       } catch (err) {
         $('deleteModalConfirm').disabled = false;
         setStatus(`Delete failed: ${err.message || err}`);
         return;
       }
       closeDeleteModal();
-      state.current = null;
-      state.manuscript = '';
-      state.savedManuscript = '';
-      state.manuscriptPage = 0;
-      state.lastAssistant = '';
-      state.aiEdits = [];
-      closeDocument();
+      if (state.current && state.current.id === target.id) {
+        state.current = null;
+        state.manuscript = '';
+        state.savedManuscript = '';
+        state.manuscriptPage = 0;
+        state.lastAssistant = '';
+        state.aiEdits = [];
+        closeDocument();
+        renderCurrent();
+        await loadDocuments();
+      }
       await loadProjects();
-      renderCurrent();
-      await loadDocuments();
-      setStatus('Project deleted.');
+      if (state.view === 'trash') await loadTrash();
+      renderProjects();
+      setStatus(target.permanent ? 'Project permanently deleted.' : 'Project moved to Trash. Restore it from the Trash view if needed.');
     }
 
     async function saveManuscript(note = 'manual save') {
@@ -1349,7 +1428,11 @@
     $('newProject').onclick = createProject;
     $('refresh').onclick = loadProjects;
     $('saveProject').onclick = saveProject;
-    $('deleteProject').onclick = openDeleteModal;
+    $('deleteProject').onclick = () => {
+      if (!state.current) return;
+      openDeleteModal({ id: state.current.id, title: state.current.title, permanent: false });
+    };
+    $('trashToggle').onclick = toggleTrashView;
     $('deleteModalCancel').onclick = closeDeleteModal;
     $('deleteModalConfirm').onclick = confirmDeleteProject;
     $('deleteModal').addEventListener('click', (event) => {
