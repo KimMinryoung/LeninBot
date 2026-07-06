@@ -47,17 +47,19 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
         "display": "Claude Fable 5",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,
-        # Extended thinking for scene planning (structure, beats, imagery)
-        # before prose lands in the manuscript. Thinking tokens bill as
-        # output; the budget below caps that at ~$0.20/turn worst case.
-        "extra": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
+        # Fable 5 uses adaptive thinking: the model decides when and how much
+        # to think, scaled by output_config.effort. High effort buys scene
+        # planning (structure, beats, imagery) on turns that warrant it;
+        # trivial turns stay cheap because thinking is adaptive, not forced.
+        "extra": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}},
     },
     "fable_fast": {
         "provider": "anthropic",
         "model": "claude-fable-5",
-        "display": "Claude Fable 5 (no thinking)",
+        "display": "Claude Fable 5 (low effort)",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,
+        "extra": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}},
     },
     "deepseek_pro": {
         "provider": "deepseek",
