@@ -1010,9 +1010,23 @@ async def stream_writer_reply(
         except Exception:
             logger.exception("writer failed to finalize after client disconnect project_id=%s", project_id)
 
+    def detach_for_finalization(reason: str) -> None:
+        nonlocal detached_for_finalization
+        if detached_for_finalization or persisted:
+            return
+        detached_for_finalization = True
+        logger.warning(
+            "writer stream detached for DB finalization project_id=%s reason=%s",
+            project_id,
+            reason,
+        )
+        asyncio.create_task(finish_after_disconnect())
+
     async def on_progress(event: str, detail: str):
         nonlocal last_progress
         last_progress = asyncio.get_running_loop().time()
+        if detached_for_finalization:
+            return
         if event == "text_delta" and detail:
             await queue.put(_sse({"type": "text_delta", "content": detail}))
         elif event == "budget" and detail:
@@ -1055,12 +1069,7 @@ async def stream_writer_reply(
                 item = await asyncio.wait_for(queue.get(), timeout=15)
             except asyncio.TimeoutError:
                 if client_disconnected is not None and await client_disconnected():
-                    logger.warning(
-                        "writer client disconnected; keeping model task for DB finalization project_id=%s",
-                        project_id,
-                    )
-                    detached_for_finalization = True
-                    asyncio.create_task(finish_after_disconnect())
+                    detach_for_finalization("request.is_disconnected")
                     return
                 idle_for = asyncio.get_running_loop().time() - last_progress
                 if idle_for >= _WRITER_IDLE_TIMEOUT_SEC:
@@ -1076,6 +1085,9 @@ async def stream_writer_reply(
                 break
             yield item
         await task
+    except asyncio.CancelledError:
+        detach_for_finalization("streaming_response_cancelled")
+        return
     finally:
         if not task.done() and not persisted and not detached_for_finalization:
             task.cancel()
