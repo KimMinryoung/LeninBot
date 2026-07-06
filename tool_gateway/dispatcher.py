@@ -101,20 +101,27 @@ _HANDLER_KWARGS_CACHE: dict[int, tuple[set[str] | None, frozenset[str]]] = {}
 
 def _inspect_handler_kwargs(handler: Any) -> tuple[set[str] | None, frozenset[str]]:
     """Return (accepted_names, required_names) for a handler."""
-    cache_key = id(handler)
-    hit = _HANDLER_KWARGS_CACHE.get(cache_key)
-    if hit is not None:
-        return hit
-
     target = handler
     if not inspect.isfunction(target) and not inspect.ismethod(target):
         target = getattr(handler, "__wrapped__", handler)
+
+    # Cache by the code object, not the handler instance: per-request closures
+    # (e.g. writer tools) are freed and their id() reused by other handlers,
+    # which poisoned an id(handler)-keyed cache with the wrong signature. Code
+    # objects are module-lifetime constants shared by every closure instance.
+    code = getattr(target, "__code__", None)
+    cache_key = id(code) if code is not None else None
+    if cache_key is not None:
+        hit = _HANDLER_KWARGS_CACHE.get(cache_key)
+        if hit is not None:
+            return hit
 
     try:
         sig = inspect.signature(target)
     except (TypeError, ValueError):
         result: tuple[set[str] | None, frozenset[str]] = (None, frozenset())
-        _HANDLER_KWARGS_CACHE[cache_key] = result
+        if cache_key is not None:
+            _HANDLER_KWARGS_CACHE[cache_key] = result
         return result
 
     accepts_var_kw = False
@@ -133,7 +140,8 @@ def _inspect_handler_kwargs(handler: Any) -> tuple[set[str] | None, frozenset[st
                 required.add(pname)
 
     result = (None if accepts_var_kw else names, frozenset(required))
-    _HANDLER_KWARGS_CACHE[cache_key] = result
+    if cache_key is not None:
+        _HANDLER_KWARGS_CACHE[cache_key] = result
     return result
 
 
