@@ -56,6 +56,22 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
 ROLEPLAY_TELEGRAM_PROFILE = "telegram.roleplay"
 ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS
 
+# -- Writer workspace profile ---------------------------------------------
+
+WRITER_PROFILE = "system.writer"
+WRITER_TOOLS = frozenset({
+    "search_manuscript",
+    "read_manuscript",
+    "append_to_manuscript",
+    "replace_in_manuscript",
+    "read_document",
+    "search_documents",
+    "save_document",
+    # Off by default (writer.config.WRITER_WEB_SEARCH_ENABLED); listed so the
+    # profile stays the authoritative maximum surface when it is enabled.
+    "web_search",
+})
+
 # -- Public web chat profiles --------------------------------------------
 
 WEB_CYBER_LENIN_PROFILE = "web.cyber-lenin"
@@ -164,6 +180,12 @@ TOOL_PROFILES: dict[str, ToolProfile] = {
         tool_names=ROLEPLAY_TELEGRAM_TOOLS,
         surface="telegram",
         description="Standalone roleplay bot read-only retrieval tools.",
+    ),
+    WRITER_PROFILE: ToolProfile(
+        id=WRITER_PROFILE,
+        tool_names=WRITER_TOOLS,
+        surface="writer",
+        description="Personal fiction workspace: manuscript and background-document tools bound to one project.",
     ),
     WEB_CYBER_LENIN_PROFILE: ToolProfile(
         id=WEB_CYBER_LENIN_PROFILE,

@@ -1,0 +1,297 @@
+"""Writer generation runs and their SSE streams.
+
+A run is a detached background task registered in writer.runs; the HTTP stream
+is only an observer. Clients reattach via stream_active_run after drops or
+page reloads, and the final event always persists even with no subscriber."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import uuid
+from collections.abc import AsyncIterator
+from datetime import datetime
+from typing import Awaitable, Callable
+
+from claude_loop import chat_with_tools
+from tool_gateway.security import CallerContext, caller_scope
+
+from writer.config import (
+    WRITER_DEFAULT_MAX_TOKENS,
+    WRITER_IDLE_TIMEOUT_SEC,
+    WRITER_MAX_ROUNDS,
+    WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+)
+from writer.models import resolve_writer_model
+from writer.prompts import (
+    build_system_blocks,
+    messages_for_model,
+    parse_writer_response,
+    writer_error_message,
+)
+from writer.runs import WriterRun, get_active_run, register_run, unregister_run
+from writer.store import get_project, insert_message, touch_project
+from writer.tools import build_writer_tools
+
+logger = logging.getLogger(__name__)
+
+_writer_background_tasks: set[asyncio.Task] = set()
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _consume_run(
+    run: WriterRun,
+    queue: asyncio.Queue[str | None],
+    client_disconnected: Callable[[], Awaitable[bool]] | None,
+) -> AsyncIterator[str]:
+    """Relay a run's broadcast queue to one SSE consumer, with keepalive pings
+    and idle cutoff. The background run outlives any consumer."""
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                if client_disconnected is not None and await client_disconnected():
+                    logger.warning(
+                        "writer stream subscriber disconnected project_id=%s reason=request.is_disconnected",
+                        run.project_id,
+                    )
+                    return
+                idle_for = asyncio.get_running_loop().time() - run.last_progress
+                if idle_for >= WRITER_IDLE_TIMEOUT_SEC:
+                    logger.warning(
+                        "writer stream idle project_id=%s idle_for=%ss; background run remains active",
+                        run.project_id,
+                        int(idle_for),
+                    )
+                    yield _sse({
+                        "type": "error",
+                        "content": (
+                            f"The browser connection has not received model progress for {int(idle_for)}s. "
+                            "The server-side writer run is still active; this page will reload saved results."
+                        ),
+                    })
+                    return
+                yield _sse({"type": "ping"})
+                continue
+            if item is None:
+                return
+            yield item
+    except asyncio.CancelledError:
+        logger.warning(
+            "writer stream subscriber disconnected project_id=%s reason=streaming_response_cancelled",
+            run.project_id,
+        )
+        return
+    finally:
+        run.subscribers.discard(queue)
+
+
+async def stream_active_run(
+    *,
+    project_id: int,
+    client_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    """Reattach to a live background writer run (e.g. after a page reload or a
+    dropped stream). Replays the text streamed so far, then follows live."""
+    run = get_active_run(project_id)
+    if run is None:
+        yield _sse({"type": "no_active_run"})
+        return
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    run.subscribers.add(queue)
+    yield _sse({
+        "type": "run_status",
+        "run_id": run.run_id,
+        "user_message_id": run.user_message_id,
+        "model": run.model,
+        "model_display": run.model_display,
+        "text_snapshot": run.text_snapshot(),
+    })
+    if run.final_event is not None:
+        run.subscribers.discard(queue)
+        yield _sse(run.final_event)
+        return
+    async for item in _consume_run(run, queue, client_disconnected):
+        yield item
+
+
+async def stream_writer_reply(
+    *,
+    project_id: int,
+    prompt: str,
+    selection_start: int | None = None,
+    selection_end: int | None = None,
+    model_choice: str | None = None,
+    client_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    project = get_project(project_id)
+    if not project:
+        yield _sse({"type": "error", "content": "Project not found."})
+        return
+
+    try:
+        writer_client, writer_model, writer_display, model_extra = resolve_writer_model(model_choice)
+    except (ValueError, RuntimeError) as exc:
+        yield _sse({"type": "error", "content": str(exc)})
+        return
+
+    request_kind = ""
+    model_messages = messages_for_model(project_id, prompt, selection_start, selection_end)
+    user_row = insert_message(
+        project_id=project_id,
+        role="user",
+        content=prompt.strip(),
+        request_kind=request_kind,
+    )
+
+    run = WriterRun(
+        project_id=project_id,
+        run_id=uuid.uuid4().hex,
+        user_message_id=user_row.get("id"),
+        model=writer_model,
+        model_display=writer_display,
+    )
+    subscriber_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    run.subscribers.add(subscriber_queue)
+    answer_holder: list[str] = []
+    error_holder: list[str] = []
+    budget_tracker: dict = {}
+    persisted = False
+
+    writer_tools, writer_handlers = build_writer_tools(project_id)
+
+    def persist_result() -> dict:
+        nonlocal persisted
+        if persisted:
+            return {"type": "error", "content": "Writer result was already persisted."}
+        persisted = True
+        if error_holder:
+            error_text = writer_error_message(writer_display, error_holder[0])
+            assistant_row = insert_message(
+                project_id=project_id,
+                role="assistant",
+                content=f"<commentary>\n{error_text}\n</commentary>",
+                request_kind=request_kind,
+                model=writer_model,
+                stop_reason="error",
+                usage=budget_tracker.get("usage") or {},
+                cost_usd=budget_tracker.get("total_cost"),
+            )
+            touch_project(project_id)
+            return {
+                "type": "error",
+                "message_id": assistant_row.get("id"),
+                "content": error_text,
+                "edits": [dict(edit) for edit in run.edits],
+            }
+
+        final_text = (answer_holder[0] if answer_holder else "").strip()
+        parsed_response = parse_writer_response(final_text)
+        usage = budget_tracker.get("usage") or {}
+        cost = budget_tracker.get("total_cost")
+        stop_reason = str(budget_tracker.get("stop_reason") or "")
+        assistant_row = insert_message(
+            project_id=project_id,
+            role="assistant",
+            content=final_text,
+            request_kind=request_kind,
+            model=writer_model,
+            stop_reason=stop_reason,
+            usage=usage,
+            cost_usd=cost,
+        )
+        touch_project(project_id)
+        return {
+            "type": "done",
+            "message_id": assistant_row.get("id"),
+            "model": writer_model,
+            "model_display": writer_display,
+            "stop_reason": stop_reason,
+            "usage": usage,
+            "cost_usd": cost,
+            "manuscript_text": parsed_response["manuscript_text"],
+            "commentary_text": parsed_response["commentary_text"],
+            "display_text": parsed_response["display_text"],
+            "edits": [dict(edit) for edit in run.edits],
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    async def on_progress(event: str, detail: str):
+        run.last_progress = asyncio.get_running_loop().time()
+        if event == "text_delta" and detail:
+            run.append_text(detail)
+            await run.broadcast(_sse({"type": "text_delta", "content": detail}))
+        elif event == "budget" and detail:
+            await run.broadcast(_sse({"type": "budget", "content": detail}))
+        elif event in ("tool_call", "tool_result") and detail:
+            await run.broadcast(_sse({"type": "tool", "content": detail}))
+        elif event == "provider_retry" and detail:
+            await run.broadcast(_sse({"type": "provider_retry", "content": detail}))
+
+    async def run_llm() -> None:
+        try:
+            system_blocks = await asyncio.to_thread(
+                build_system_blocks, project, project_id, selection_start, selection_end
+            )
+            with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
+                result = await chat_with_tools(
+                    model_messages,
+                    client=writer_client,
+                    model=writer_model,
+                    tools=writer_tools,
+                    tool_handlers=writer_handlers,
+                    system_prompt=system_blocks,
+                    max_rounds=WRITER_MAX_ROUNDS,
+                    max_tokens=WRITER_DEFAULT_MAX_TOKENS,
+                    budget_usd=100.0,
+                    budget_tracker=budget_tracker,
+                    on_progress=on_progress,
+                    agent_name="writer",
+                    provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+                    **model_extra,
+                )
+            answer_holder.append(result)
+        except asyncio.CancelledError:
+            # Server shutdown/restart while the run was in flight. Persist an
+            # explanatory message in the finally block, then re-raise.
+            error_holder.append("writer run cancelled by server shutdown")
+            raise
+        except Exception as exc:
+            logger.exception("writer model request failed project_id=%s", project_id)
+            error_holder.append(str(exc))
+        finally:
+            try:
+                event = persist_result()
+                run.final_event = event
+                await run.broadcast(_sse(event))
+                logger.info(
+                    "writer finalized background run project_id=%s event=%s message_id=%s connected_subscribers=%s",
+                    project_id,
+                    event.get("type"),
+                    event.get("message_id"),
+                    len(run.subscribers),
+                )
+            except Exception:
+                logger.exception("writer failed to persist background run project_id=%s", project_id)
+                await run.broadcast(_sse({
+                    "type": "error",
+                    "content": "Writer finished but failed to save the result. Check server logs.",
+                }))
+            finally:
+                await run.broadcast(None)
+                unregister_run(run)
+
+    # Register and start the run BEFORE the first yield: a client that drops
+    # right after connecting must not prevent the background run from starting.
+    register_run(run)
+    task = asyncio.create_task(run_llm())
+    _writer_background_tasks.add(task)
+    task.add_done_callback(_writer_background_tasks.discard)
+    yield _sse({"type": "user_saved", "message_id": user_row.get("id"), "run_id": run.run_id})
+    async for item in _consume_run(run, subscriber_queue, client_disconnected):
+        yield item
