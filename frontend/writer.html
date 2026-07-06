@@ -117,6 +117,9 @@
     }
     .pager .row { flex: 0 0 auto; }
     .pager-label { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .page-input { width: 58px; text-align: center; padding: 6px 4px; }
+    .page-input::-webkit-outer-spin-button, .page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .page-input[type=number] { -moz-appearance: textfield; appearance: textfield; }
     .project-fields textarea { min-height: 86px; }
     .conversation {
       min-height: 0;
@@ -179,8 +182,12 @@
         <div class="pager">
           <div id="manuscriptStatus" class="status pager-label"></div>
           <div class="row">
+            <button id="manuscriptFirst" type="button" title="First page">⏮</button>
             <button id="manuscriptPrev" type="button">Prev</button>
+            <input id="manuscriptPageInput" class="page-input" type="number" min="1" inputmode="numeric" title="Go to page">
+            <span id="manuscriptPageTotal" class="meta"></span>
             <button id="manuscriptNext" type="button">Next</button>
+            <button id="manuscriptLast" type="button" title="Last page">⏭</button>
             <button id="saveManuscript" class="primary" type="button">Save Manuscript</button>
           </div>
         </div>
@@ -343,27 +350,42 @@
     }
 
     function updateManuscriptStatus(label = '') {
+      const pageInput = $('manuscriptPageInput');
       if (!state.current) {
         setManuscriptStatus('');
+        pageInput.value = '';
+        $('manuscriptPageTotal').textContent = '';
+        for (const id of ['manuscriptFirst', 'manuscriptPrev', 'manuscriptNext', 'manuscriptLast']) $(id).disabled = true;
+        pageInput.disabled = true;
         return;
       }
       const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
       const dirty = state.manuscript !== state.savedManuscript;
       const suffix = label || (dirty ? 'unsaved' : 'saved');
       setManuscriptStatus(
-        `${charMeta(state.manuscript.length)} · page ${state.manuscriptPage + 1}/${total} · chars ${state.manuscriptPageStart.toLocaleString()}-${state.manuscriptPageEnd.toLocaleString()} · ${suffix}`
+        `${charMeta(state.manuscript.length)} · chars ${state.manuscriptPageStart.toLocaleString()}-${state.manuscriptPageEnd.toLocaleString()} · ${suffix}`
       );
-      $('manuscriptPrev').disabled = !state.current || state.manuscriptPage <= 0;
-      $('manuscriptNext').disabled = !state.current || state.manuscriptPage >= total - 1;
+      if (document.activeElement !== pageInput) pageInput.value = String(state.manuscriptPage + 1);
+      pageInput.max = String(total);
+      pageInput.disabled = false;
+      $('manuscriptPageTotal').textContent = `/ ${total}`;
+      $('manuscriptFirst').disabled = state.manuscriptPage <= 0;
+      $('manuscriptPrev').disabled = state.manuscriptPage <= 0;
+      $('manuscriptNext').disabled = state.manuscriptPage >= total - 1;
+      $('manuscriptLast').disabled = state.manuscriptPage >= total - 1;
     }
 
-    function goManuscriptPage(delta) {
+    function goManuscriptPageTo(page) {
       if (!state.current) return;
       commitVisibleManuscriptPage();
       const total = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS);
-      state.manuscriptPage = clamp(state.manuscriptPage + delta, 0, total - 1);
+      state.manuscriptPage = clamp(page, 0, total - 1);
       renderManuscriptPage();
       $('manuscript').focus();
+    }
+
+    function goManuscriptPage(delta) {
+      goManuscriptPageTo(state.manuscriptPage + delta);
     }
 
     function selectManuscriptRange(globalStart, globalEnd, options = {}) {
@@ -739,6 +761,16 @@
     }
 
     async function loadProject(id) {
+      // Remember where the reader was so a reload (post-run refresh, recovery)
+      // doesn't dump them back to page 1. Same project: stick to the last page
+      // if they were on it (follow appended text), else hold the char offset.
+      // Fresh project open: land on the last page, where writing continues.
+      const prev = state.current && state.current.id === id
+        ? {
+            offset: state.manuscriptPageStart,
+            wasLastPage: state.manuscriptPage >= pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1,
+          }
+        : null;
       const [projectRes, manuscriptRes] = await Promise.all([
         api(`/writer/projects/${id}`),
         api(`/writer/projects/${id}/manuscript`)
@@ -747,7 +779,12 @@
       const manuscriptData = await manuscriptRes.json();
       state.manuscript = (manuscriptData.manuscript && manuscriptData.manuscript.body) || '';
       state.savedManuscript = state.manuscript;
-      state.manuscriptPage = 0;
+      const lastPage = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1;
+      if (!prev || prev.wasLastPage) {
+        state.manuscriptPage = lastPage;
+      } else {
+        state.manuscriptPage = clamp(Math.floor(prev.offset / MANUSCRIPT_PAGE_CHARS), 0, lastPage);
+      }
       state.manuscriptPageStart = 0;
       state.manuscriptPageEnd = 0;
       state.lastAssistant = '';
@@ -1066,8 +1103,18 @@
     $('saveProject').onclick = saveProject;
     $('deleteProject').onclick = deleteProject;
     $('saveManuscript').onclick = () => saveManuscript();
+    $('manuscriptFirst').onclick = () => goManuscriptPageTo(0);
     $('manuscriptPrev').onclick = () => goManuscriptPage(-1);
     $('manuscriptNext').onclick = () => goManuscriptPage(1);
+    $('manuscriptLast').onclick = () => goManuscriptPageTo(Number.MAX_SAFE_INTEGER);
+    const jumpToTypedPage = () => {
+      const page = parseInt($('manuscriptPageInput').value, 10);
+      if (Number.isFinite(page)) goManuscriptPageTo(page - 1);
+    };
+    $('manuscriptPageInput').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); jumpToTypedPage(); }
+    });
+    $('manuscriptPageInput').addEventListener('blur', jumpToTypedPage);
     $('conversationPrev').onclick = () => goConversationPage(-1);
     $('conversationNext').onclick = () => goConversationPage(1);
     $('search').onclick = searchManuscript;
