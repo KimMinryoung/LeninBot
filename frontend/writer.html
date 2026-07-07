@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>Novel Writer</title>
   <style>
@@ -19,6 +19,9 @@
       --warn: #8a3d3d;
       --gold: #b8832f;
       --shadow: 0 10px 28px rgba(24, 26, 22, .08);
+      /* Manuscript text size — adjustable via the A−/A+ controls; shared by the
+         textarea and its highlight backdrop so <mark> alignment never drifts. */
+      --ms-font: 16px;
     }
     * { box-sizing: border-box; }
     body {
@@ -111,7 +114,9 @@
        rectangles line up with the (transparent-backgrounded) textarea text. */
     .manuscript, .manuscript-backdrop {
       padding: 22px 26px;
-      font: 16px/1.72 ui-serif, Georgia, "Times New Roman", serif;
+      font-family: ui-serif, Georgia, "Times New Roman", serif;
+      font-size: var(--ms-font, 16px);
+      line-height: 1.72;
       letter-spacing: normal;
       white-space: pre-wrap;
       word-wrap: break-word;
@@ -181,6 +186,27 @@
     .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; }
     .result span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
     .empty { color: var(--muted); text-align: center; padding: 28px 12px; }
+    details.panel > summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      user-select: none;
+      -webkit-user-select: none;
+      min-height: 24px;
+    }
+    details.panel > summary::-webkit-details-marker { display: none; }
+    details.panel > summary::before { content: '▸'; font-size: 10px; transition: transform .15s; }
+    details.panel[open] > summary::before { transform: rotate(90deg); }
+    details.panel > .stack { margin-top: 10px; }
+    .font-controls { display: flex; align-items: center; gap: 4px; }
+    .font-controls button { min-height: 32px; padding: 0 9px; font-weight: 700; }
+    .font-size-label { color: var(--muted); font-size: 12px; min-width: 36px; text-align: center; }
     @media (max-width: 1120px) {
       .app { grid-template-columns: 1fr; }
       .sidebar, .assistant { border: 0; border-bottom: 1px solid var(--line); }
@@ -214,11 +240,17 @@
     .modal .row { justify-content: flex-end; }
     .modal .danger { border-color: var(--warn); }
     @media (max-width: 720px) {
+      body { font-size: 13px; }
       .range-note { display: none; }
       .pager-label { flex: 1 1 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .editor-actions { padding: 9px 10px; }
       .editor-actions button { min-height: 32px; padding: 0 8px; }
       .page-input { width: 48px; padding: 5px 2px; }
+      .sidebar, .assistant { padding: 12px; }
+      .topbar { padding: 10px 12px; }
+      .manuscript, .manuscript-backdrop { padding: 14px 14px; }
+      .prompt { min-height: 88px; }
+      .message { padding: 8px 9px; }
     }
   </style>
 </head>
@@ -268,6 +300,11 @@
             <span id="manuscriptPageTotal" class="meta"></span>
             <button id="manuscriptNext" type="button">Next</button>
             <button id="manuscriptLast" type="button" title="Last page">⏭</button>
+            <span class="font-controls">
+              <button id="fontSmaller" type="button" title="Smaller manuscript text">A−</button>
+              <span id="fontSizeLabel" class="font-size-label">16px</span>
+              <button id="fontLarger" type="button" title="Larger manuscript text">A＋</button>
+            </span>
             <button id="saveManuscript" class="primary" type="button">Save Manuscript</button>
           </div>
         </div>
@@ -275,52 +312,60 @@
     </main>
 
     <aside class="assistant">
-      <section class="stack project-fields">
-        <h2>Project</h2>
-        <label>Title<input id="title" type="text" placeholder="Novel title"></label>
-        <label>Premise<textarea id="premise" placeholder="Premise"></textarea></label>
-        <label>Style Notes<textarea id="styleNotes" placeholder="Style, POV, continuity"></textarea></label>
-        <div class="row">
-          <button id="saveProject" class="primary" type="button">Save</button>
-          <button id="deleteProject" class="danger" type="button">Delete</button>
-        </div>
-      </section>
-
-      <section class="stack">
-        <h2>Documents</h2>
-        <div id="docList" class="doc-list"></div>
-        <div class="row">
-          <button id="newDoc" type="button">New Document</button>
-        </div>
-        <div id="docEditor" class="stack" style="display:none">
-          <label>Title<input id="docTitle" type="text" placeholder="Document title"></label>
-          <label>Kind<input id="docKind" type="text" placeholder="character / setting / outline / research / note"></label>
-          <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
+      <details id="projectPanel" class="panel project-fields" open>
+        <summary>Project</summary>
+        <div class="stack">
+          <label>Title<input id="title" type="text" placeholder="Novel title"></label>
+          <label>Premise<textarea id="premise" placeholder="Premise"></textarea></label>
+          <label>Style Notes<textarea id="styleNotes" placeholder="Style, POV, continuity"></textarea></label>
           <div class="row">
-            <button id="saveDoc" class="primary" type="button">Save</button>
-            <button id="pinDoc" type="button" title="Pinned documents are given to the AI in full every turn">Pin</button>
-            <button id="deleteDoc" class="danger" type="button">Delete</button>
-            <button id="closeDoc" type="button">Close</button>
+            <button id="saveProject" class="primary" type="button">Save</button>
+            <button id="deleteProject" class="danger" type="button">Delete</button>
           </div>
-          <div id="docStatus" class="meta"></div>
         </div>
-      </section>
+      </details>
 
-      <section class="stack">
-        <h2>Search</h2>
-        <div class="row grow">
-          <input id="searchQuery" type="search" placeholder="Search manuscript">
-          <button id="search" type="button">Search</button>
+      <details id="docPanel" class="panel" open>
+        <summary>Documents</summary>
+        <div class="stack">
+          <div id="docList" class="doc-list"></div>
+          <div class="row">
+            <button id="newDoc" type="button">New Document</button>
+          </div>
+          <div id="docEditor" class="stack" style="display:none">
+            <label>Title<input id="docTitle" type="text" placeholder="Document title"></label>
+            <label>Kind<input id="docKind" type="text" placeholder="character / setting / outline / research / note"></label>
+            <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
+            <div class="row">
+              <button id="saveDoc" class="primary" type="button">Save</button>
+              <button id="pinDoc" type="button" title="Pinned documents are given to the AI in full every turn">Pin</button>
+              <button id="deleteDoc" class="danger" type="button">Delete</button>
+              <button id="closeDoc" type="button">Close</button>
+            </div>
+            <div id="docStatus" class="meta"></div>
+          </div>
         </div>
-        <div id="searchResults" class="search-results"></div>
-      </section>
+      </details>
 
-      <section class="stack cost-panel">
-        <h2>Cost</h2>
-        <div id="costSummary" class="meta">No completed model call yet.</div>
-        <div id="costUsage" class="meta"></div>
-        <div id="costPricing" class="meta"></div>
-      </section>
+      <details id="searchPanel" class="panel" open>
+        <summary>Search</summary>
+        <div class="stack">
+          <div class="row grow">
+            <input id="searchQuery" type="search" placeholder="Search manuscript">
+            <button id="search" type="button">Search</button>
+          </div>
+          <div id="searchResults" class="search-results"></div>
+        </div>
+      </details>
+
+      <details id="costPanel" class="panel" open>
+        <summary>Cost</summary>
+        <div class="stack">
+          <div id="costSummary" class="meta">No completed model call yet.</div>
+          <div id="costUsage" class="meta"></div>
+          <div id="costPricing" class="meta"></div>
+        </div>
+      </details>
 
       <section id="conversation" class="conversation">
         <div class="empty">No messages yet.</div>
@@ -1196,6 +1241,7 @@
       $('docContent').value = state.editingDoc.content || '';
       $('docStatus').textContent = '';
       updatePinButton();
+      $('docPanel').open = true;
       $('docEditor').style.display = '';
     }
 
@@ -1207,6 +1253,7 @@
       $('docContent').value = '';
       $('docStatus').textContent = '';
       updatePinButton();
+      $('docPanel').open = true;
       $('docEditor').style.display = '';
       $('docTitle').focus();
     }
@@ -1506,6 +1553,24 @@
     $('criticToggle').addEventListener('change', () => {
       localStorage.setItem('writerCriticPass', $('criticToggle').checked ? '1' : '0');
     });
+    // Manuscript font size: a shared CSS variable sizes both the textarea and
+    // its highlight backdrop, so <mark> alignment survives any size change.
+    const FONT_KEY = 'writerFontSize';
+    function applyManuscriptFontSize(px) {
+      const size = Math.max(12, Math.min(22, Number(px) || 16));
+      document.documentElement.style.setProperty('--ms-font', size + 'px');
+      $('fontSizeLabel').textContent = size + 'px';
+      localStorage.setItem(FONT_KEY, String(size));
+      return size;
+    }
+    let manuscriptFontSize = applyManuscriptFontSize(parseInt(localStorage.getItem(FONT_KEY) || '16', 10));
+    $('fontSmaller').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize - 1); });
+    $('fontLarger').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize + 1); });
+    // On small screens, start with the utility panels collapsed so the
+    // conversation and composer are reachable without a long scroll.
+    if (window.innerWidth <= 1120) {
+      for (const id of ['projectPanel', 'docPanel', 'searchPanel', 'costPanel']) $(id).open = false;
+    }
     renderDocuments();
     loadProjects().catch((err) => setStatus(String(err.message || err)));
   </script>
