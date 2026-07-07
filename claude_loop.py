@@ -291,7 +291,7 @@ def _normalize_initial_messages(msgs: list[dict]) -> list[dict]:
     return clean
 
 
-def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
+def _with_message_cache_breakpoint(msgs: list[dict], max_marks: int = 2) -> list[dict]:
     """Return a shallow copy of `msgs` with cache breakpoints on stable turns.
 
     Prompt caching on the Messages API requires explicit breakpoints. The most
@@ -300,10 +300,17 @@ def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
     well preserves a stable early anchor instead of reducing hits to only
     system/tools.
 
-    No-op when there is no assistant message yet (first turn). Leaves the input
-    list and its inner dicts untouched.
+    `max_marks` caps how many messages get marked: the Messages API allows at
+    most 4 cache_control blocks per request, and system blocks + the tools
+    block already consume some (the writer passes 2 cached system blocks, so
+    only 1 slot remains for messages — exceeding the cap is a hard 400 on the
+    Anthropic endpoint; DeepSeek's compatible endpoint doesn't enforce it,
+    which is why this stayed latent until a multi-round Fable writer call).
+
+    No-op when there is no assistant message yet (first turn) or no slots
+    remain. Leaves the input list and its inner dicts untouched.
     """
-    if not msgs:
+    if not msgs or max_marks <= 0:
         return msgs
     result = list(msgs)
 
@@ -315,7 +322,7 @@ def _with_message_cache_breakpoint(msgs: list[dict]) -> list[dict]:
         return result
 
     breakpoint_indexes = [assistant_indexes[-1]]
-    if len(assistant_indexes) > 1:
+    if max_marks > 1 and len(assistant_indexes) > 1:
         breakpoint_indexes.insert(0, assistant_indexes[0])
 
     def _mark_message(i: int) -> None:
@@ -525,6 +532,15 @@ async def chat_with_tools(
                 )
                 await asyncio.sleep(delay)
 
+    # The Messages API allows at most 4 cache_control blocks per request;
+    # system blocks and the tools block already consume their share, so
+    # message-level breakpoints only get whatever slots remain.
+    _system_cache_blocks = sum(
+        1 for b in cached_system if isinstance(b, dict) and b.get("cache_control")
+    )
+    _tools_cache_blocks = 1 if cached_tools else 0
+    message_cache_marks = max(0, 4 - _system_cache_blocks - _tools_cache_blocks)
+
     response = None
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
@@ -536,7 +552,7 @@ async def chat_with_tools(
             "model": model,
             "max_tokens": max_tokens,
             "system": cached_system,
-            "messages": _with_message_cache_breakpoint(working_msgs),
+            "messages": _with_message_cache_breakpoint(working_msgs, message_cache_marks),
         }
         if cached_tools:
             create_kwargs["tools"] = cached_tools
@@ -784,7 +800,7 @@ async def chat_with_tools(
         "model": model,
         "max_tokens": max_tokens,
         "system": cached_system,
-        "messages": _with_message_cache_breakpoint(working_msgs),
+        "messages": _with_message_cache_breakpoint(working_msgs, message_cache_marks),
     }
     if final_tools:
         create_kwargs["tools"] = final_tools
@@ -883,7 +899,7 @@ async def chat_with_tools(
                 model=model,
                 max_tokens=min(max_tokens, 2048),
                 system=cached_system,
-                messages=_with_message_cache_breakpoint(working_msgs),  # no tools — force text
+                messages=_with_message_cache_breakpoint(working_msgs, message_cache_marks),  # no tools — force text
             )
             if hasattr(followup, "usage") and followup.usage:
                 usage = followup.usage
