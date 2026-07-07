@@ -7,7 +7,13 @@ WRITER_DEFAULT_MAX_TOKENS = 20000
 # the model writes. 1 = no tools (legacy). Each round is a priced model call.
 WRITER_MAX_ROUNDS = 16
 WRITER_IDLE_TIMEOUT_SEC = 240
-WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 70
+# Max zero-event silence on a provider stream before the call is treated as
+# stalled and retried. Fable's adaptive thinking emits NO stream events while
+# it thinks (measured 2026-07-07: a 29.7s silent gap on a trivial 173-token
+# prompt; heavy writer turns scale with thinking depth) — at 70s the watchdog
+# deterministically killed hard effort-high turns three retries in a row.
+# True dead connections still fail via the SDK's own network timeout.
+WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 240
 # Web research: enabled so the agent can actively research real-world
 # specifics (period detail, geography, terminology) and distill the findings
 # into background documents instead of guessing or re-searching. The main
