@@ -54,6 +54,7 @@ async def _consume_run(
 ) -> AsyncIterator[str]:
     """Relay a run's broadcast queue to one SSE consumer, with keepalive pings
     and idle cutoff. The background run outlives any consumer."""
+    subscribed_at = asyncio.get_running_loop().time()
     try:
         while True:
             try:
@@ -65,18 +66,22 @@ async def _consume_run(
                         run.project_id,
                     )
                     return
-                idle_for = asyncio.get_running_loop().time() - run.last_progress
+                # Idle is measured against this subscriber's own attach time as
+                # well, so every reconnect gets a full fresh grace window.
+                idle_for = asyncio.get_running_loop().time() - max(run.last_progress, subscribed_at)
                 if idle_for >= WRITER_IDLE_TIMEOUT_SEC:
                     logger.warning(
                         "writer stream idle project_id=%s idle_for=%ss; background run remains active",
                         run.project_id,
                         int(idle_for),
                     )
+                    # Not an error: the run is alive but silent. The client
+                    # treats this as a cue to reattach, not as a final event.
                     yield _sse({
-                        "type": "error",
+                        "type": "stream_idle",
                         "content": (
-                            f"The browser connection has not received model progress for {int(idle_for)}s. "
-                            "The server-side writer run is still active; this page will reload saved results."
+                            f"No model progress for {int(idle_for)}s. The server-side writer run "
+                            "is still active; reconnecting to it."
                         ),
                     })
                     return

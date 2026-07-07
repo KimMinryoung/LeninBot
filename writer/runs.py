@@ -83,6 +83,15 @@ def record_run_edit(project_id: int, action: str, start, end, delta) -> None:
     if run is None or start is None or end is None:
         return
     run.record_edit(action, int(start), int(end), int(delta or 0))
+    # Nudge attached browsers to refresh the manuscript pane right after the
+    # DB write instead of waiting for the run's final event.
+    payload = {"type": "manuscript_edit", "action": action, "start": int(start), "end": int(end)}
+    try:
+        asyncio.get_running_loop().create_task(
+            run.broadcast(f"data: {json.dumps(payload, ensure_ascii=False)}\n\n")
+        )
+    except RuntimeError:
+        pass
 
 
 def record_run_cost(project_id: int, label: str, cost_usd) -> None:

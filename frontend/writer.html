@@ -179,6 +179,27 @@
     }
     .message.user { background: var(--accent-soft); }
     .message .label { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+    .progress-log {
+      margin: 2px 0 8px;
+      padding: 5px 8px;
+      border-left: 2px solid var(--line);
+      background: rgba(0,0,0,.025);
+      border-radius: 0 6px 6px 0;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: normal;
+    }
+    .progress-log summary { cursor: pointer; user-select: none; font-size: 12px; }
+    .progress-log .progress-steps { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
+    .progress-log .progress-step {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .progress-log .progress-step.latest { color: var(--ink, inherit); }
     .prompt { min-height: 112px; }
     .search-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
     .doc-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
@@ -425,6 +446,7 @@
       models: [],
       modelChoice: null,
       lastCost: null,
+      composing: false,
     };
     const $ = (id) => document.getElementById(id);
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
@@ -560,6 +582,63 @@
       state.aiEdits = edits.filter((edit) => edit.end > edit.start);
       if (state.aiEdits.length) jumpToAiEdits();
       else renderManuscriptBackdrop();
+    }
+
+    // Live manuscript refresh: the server broadcasts a manuscript_edit event
+    // right after each tool write hits the DB; refetch (debounced) and update
+    // the pane mid-run instead of waiting for the final event. Never clobbers
+    // local typing or an active IME composition.
+    const liveManuscript = { timer: null, busy: false, rerun: false };
+
+    function manuscriptViewClean() {
+      return !state.composing
+        && state.manuscript === state.savedManuscript
+        && $('manuscript').value === state.manuscript.slice(state.manuscriptPageStart, state.manuscriptPageEnd);
+    }
+
+    function scheduleLiveManuscriptRefresh() {
+      if (liveManuscript.timer) return;
+      liveManuscript.timer = setTimeout(() => {
+        liveManuscript.timer = null;
+        refreshManuscriptFromServer();
+      }, 700);
+    }
+
+    async function refreshManuscriptFromServer() {
+      if (!state.current) return;
+      if (liveManuscript.busy) { liveManuscript.rerun = true; return; }
+      liveManuscript.busy = true;
+      const projectId = state.current.id;
+      try {
+        if (!manuscriptViewClean()) return;
+        const res = await api(`/writer/projects/${projectId}/manuscript`);
+        const data = await res.json();
+        const body = (data.manuscript && data.manuscript.body) || '';
+        if (!state.current || state.current.id !== projectId) return;
+        if (!manuscriptViewClean()) return;
+        if (body === state.manuscript) return;
+        const envelope = changedEnvelope(state.manuscript, body);
+        const wasLastPage = state.manuscriptPage >= pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1;
+        const scrollTop = $('manuscript').scrollTop;
+        state.manuscript = body;
+        state.savedManuscript = body;
+        if (envelope && envelope.end > envelope.start) {
+          // Approximate live highlight; the final event replaces it with the
+          // authoritative edit spans.
+          state.aiEdits = [...(state.aiEdits || []), envelope];
+        }
+        if (wasLastPage) state.manuscriptPage = pageCount(body.length, MANUSCRIPT_PAGE_CHARS) - 1;
+        renderManuscriptPage();
+        const pane = $('manuscript');
+        pane.scrollTop = wasLastPage ? pane.scrollHeight : scrollTop;
+        $('manuscriptBackdrop').scrollTop = pane.scrollTop;
+        updateManuscriptStatus('AI editing…');
+      } catch (err) {
+        // transient; the next manuscript_edit event retries
+      } finally {
+        liveManuscript.busy = false;
+        if (liveManuscript.rerun) { liveManuscript.rerun = false; scheduleLiveManuscriptRefresh(); }
+      }
     }
 
     function updateManuscriptStatus(label = '') {
@@ -814,6 +893,65 @@
       return m ? m.display_name : id;
     }
 
+    // Stacked per-run process log (tool calls, 퇴고, retries) shown inside the
+    // assistant message. Steps accumulate one by one while streaming and
+    // collapse to a summary once the run finishes.
+    function renderProgressLog(message, box) {
+      const steps = message.progress || [];
+      let details = box.querySelector(':scope > details.progress-log');
+      if (!steps.length) {
+        if (details) details.remove();
+        return;
+      }
+      if (!details) {
+        details = document.createElement('details');
+        details.className = 'progress-log';
+        details.open = message.progressOpen !== undefined ? message.progressOpen : !message.progressDone;
+        const summary = document.createElement('summary');
+        const list = document.createElement('div');
+        list.className = 'progress-steps';
+        details.append(summary, list);
+        const label = box.querySelector(':scope > .label');
+        if (label) label.after(details); else box.prepend(details);
+        details.addEventListener('toggle', () => { message.progressOpen = details.open; });
+      }
+      details.querySelector('summary').textContent =
+        `${message.progressDone ? 'Process' : 'Working'} · ${steps.length} step${steps.length === 1 ? '' : 's'}`;
+      const list = details.querySelector('.progress-steps');
+      while (list.children.length > steps.length) list.lastChild.remove();
+      for (let i = list.children.length; i < steps.length; i++) {
+        const div = document.createElement('div');
+        div.className = 'progress-step';
+        const text = steps[i];
+        div.textContent = text.length > 240 ? text.slice(0, 240) + '…' : text;
+        div.title = text.length > 600 ? text.slice(0, 600) + '…' : text;
+        list.appendChild(div);
+      }
+      for (const child of list.children) child.classList.remove('latest');
+      if (!message.progressDone && list.lastChild) list.lastChild.classList.add('latest');
+    }
+
+    function lastMessageBox() {
+      const boxes = $('conversation').querySelectorAll('.message');
+      return boxes[boxes.length - 1] || null;
+    }
+
+    // After a finished run is reloaded from the DB, carry the live-run process
+    // log over to the persisted assistant message so it doesn't vanish.
+    function transferProgressToLastAssistant(sourceMessage) {
+      if (!sourceMessage || !sourceMessage.progress || !sourceMessage.progress.length) return;
+      const msgs = state.conversationMessages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          msgs[i].progress = sourceMessage.progress;
+          msgs[i].progressDone = true;
+          msgs[i].progressOpen = sourceMessage.progressOpen === true;
+          break;
+        }
+      }
+      renderConversationPage();
+    }
+
     function renderMessageElement(message) {
       const box = document.createElement('article');
       box.className = `message ${message.role}`;
@@ -826,6 +964,7 @@
       const parsed = message.role === 'assistant' ? parseWriterContent(message.content) : { display: message.content || '' };
       body.textContent = parsed.display || '';
       box.append(label, body);
+      renderProgressLog(message, box);
       $('conversation').appendChild(box);
       return body;
     }
@@ -849,17 +988,53 @@
           const body = bodies[bodies.length - 1];
           if (body) body.textContent += text || '';
         },
+        addProgress(text) {
+          if (!text) return;
+          if (!message.progress) message.progress = [];
+          message.progress.push(String(text));
+          const box = lastMessageBox();
+          if (box) renderProgressLog(message, box);
+        },
+        finishProgress() {
+          if (!message.progress || !message.progress.length || message.progressDone) return;
+          message.progressDone = true;
+          message.progressOpen = false;
+          const box = lastMessageBox();
+          if (box) {
+            const details = box.querySelector(':scope > details.progress-log');
+            if (details) details.open = false;
+            renderProgressLog(message, box);
+          }
+        },
       };
     }
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    async function readSse(res, onEvent) {
+    // The server pings every 15s, so a stream that stays silent for longer is
+    // a dead connection (mobile network switch, proxy timeout without FIN) —
+    // fail fast and let the reattach loop reconnect instead of hanging.
+    const SSE_STALL_MS = 45000;
+
+    async function readSse(res, onEvent, stallMs = SSE_STALL_MS) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       while (true) {
-        const { value, done } = await reader.read();
+        let timer;
+        let chunk;
+        try {
+          chunk = await Promise.race([
+            reader.read(),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('sse stalled')), stallMs); }),
+          ]);
+        } catch (err) {
+          try { await reader.cancel(); } catch (cancelErr) { /* already closed */ }
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+        const { value, done } = chunk;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
@@ -891,6 +1066,7 @@
       }
       if (event.type === 'done') {
         ctx.finalSeen = true;
+        if (ctx.assistantMessage) ctx.assistantMessage.finishProgress();
         if (event.display_text) ctx.assistantMessage.setText(event.display_text);
         state.lastAssistant = event.manuscript_text || state.lastAssistant;
         state.lastCost = {
@@ -902,26 +1078,47 @@
         renderCost();
         setStatus(`${event.model_display || event.model} · ${event.stop_reason || 'complete'}${fmtCost(event.cost_usd)}${fmtUsage(event.usage)}`);
       }
-      if (event.type === 'tool') setStatus(event.content);
-      if (event.type === 'critic_start') setStatus('Line-edit pass (퇴고)…');
-      if (event.type === 'provider_retry') setStatus(event.content || 'Provider connection failed; retrying...');
+      if (event.type === 'tool' && ctx.assistantMessage) ctx.assistantMessage.addProgress(event.content);
+      if (event.type === 'budget') setStatus(`Writing… ${event.content}`);
+      if (event.type === 'critic_start') {
+        setStatus('Line-edit pass (퇴고)…');
+        if (ctx.assistantMessage) ctx.assistantMessage.addProgress('— 퇴고 line-edit pass —');
+      }
+      if (event.type === 'provider_retry') {
+        setStatus(event.content || 'Provider connection failed; retrying...');
+        if (ctx.assistantMessage) ctx.assistantMessage.addProgress(event.content || 'provider retry');
+      }
+      // The server closes idle streams while the run keeps going; the reattach
+      // loop reconnects because finalSeen stays false.
+      if (event.type === 'stream_idle') setStatus(event.content || 'Waiting for model progress…');
+      if (event.type === 'manuscript_edit') scheduleLiveManuscriptRefresh();
       if (event.type === 'error') {
         ctx.finalSeen = true;
+        if (ctx.assistantMessage) ctx.assistantMessage.finishProgress();
         setStatus(event.content || 'Request failed.');
       }
       $('conversation').scrollTop = $('conversation').scrollHeight;
     }
 
-    async function reattachToRun(ctx, attempts = 4) {
+    async function reattachToRun(ctx, maxMs = 15 * 60 * 1000) {
+      // Keep reconnecting for as long as the server reports an active run:
+      // consecutive failures back off (capped), a successful connect resets
+      // the backoff, and only "no_active_run" or the final event ends the loop.
       if (!state.current) return false;
       const projectId = state.current.id;
-      for (let attempt = 0; attempt < attempts && !ctx.finalSeen; attempt++) {
-        await sleep(1500 * (attempt + 1));
+      const startedAt = Date.now();
+      let attempt = 0;
+      while (!ctx.finalSeen && Date.now() - startedAt < maxMs) {
+        attempt += 1;
+        await sleep(Math.min(1200 * attempt, 6000));
         if (!state.current || state.current.id !== projectId) return false;
         try {
-          setStatus(`Stream interrupted; reattaching to the running writer (attempt ${attempt + 1})...`);
+          setStatus(attempt > 1
+            ? `Stream interrupted; reconnecting to the running writer (attempt ${attempt})...`
+            : 'Stream interrupted; reconnecting to the running writer...');
           ctx.noActiveRun = false;
           const res = await api(`/writer/projects/${projectId}/stream`);
+          attempt = 0;
           await readSse(res, (event) => handleWriterEvent(event, ctx));
           if (ctx.noActiveRun) return false;
         } catch (err) {
@@ -936,22 +1133,27 @@
       if (!state.current || state.abort || state.resuming) return;
       state.resuming = true;
       const projectId = state.current.id;
+      const ctx = { finalSeen: false, savedUserId: null, noActiveRun: false, assistantMessage: null };
       try {
-        const res = await api(`/writer/projects/${projectId}/stream`);
-        const ctx = { finalSeen: false, savedUserId: null, noActiveRun: false, assistantMessage: null };
-        await readSse(res, (event) => {
-          if (event.type === 'no_active_run') { ctx.noActiveRun = true; return; }
-          if (!ctx.assistantMessage) {
-            setStatus('Reattached to a writer run still in progress...');
-            ctx.assistantMessage = addMessage('assistant', '', { model: event.model || null });
-          }
-          handleWriterEvent(event, ctx);
-        });
-        if (ctx.assistantMessage && !ctx.finalSeen) {
+        try {
+          const res = await api(`/writer/projects/${projectId}/stream`);
+          await readSse(res, (event) => {
+            if (event.type === 'no_active_run') { ctx.noActiveRun = true; return; }
+            if (!ctx.assistantMessage) {
+              setStatus('Reattached to a writer run still in progress...');
+              ctx.assistantMessage = addMessage('assistant', '', { model: event.model || null });
+            }
+            handleWriterEvent(event, ctx);
+          });
+        } catch (err) {
+          // dropped mid-resume; the reattach loop below picks the run back up
+        }
+        if (ctx.assistantMessage && !ctx.finalSeen && !ctx.noActiveRun) {
           await reattachToRun(ctx);
         }
         if (ctx.assistantMessage && ctx.finalSeen && state.current && state.current.id === projectId) {
           await loadProject(projectId);
+          transferProgressToLastAssistant(ctx.assistantMessage.message);
           applyTurnEdits(ctx, null);
         }
       } catch (err) {
@@ -1440,6 +1642,7 @@
         const assistantText = state.lastAssistant;
         await loadProject(state.current.id);
         state.lastAssistant = assistantText;
+        transferProgressToLastAssistant(ctx.assistantMessage.message);
         applyTurnEdits(ctx, preSendBody);
         updateAssistantButtons();
       } catch (err) {
@@ -1451,6 +1654,7 @@
             const assistantText = state.lastAssistant;
             await loadProject(state.current.id);
             state.lastAssistant = assistantText;
+            transferProgressToLastAssistant(ctx.assistantMessage.message);
             applyTurnEdits(ctx, preSendBody);
           } else {
             const saved = await waitForSavedAssistant(ctx.savedUserId || baselineMessageId);
@@ -1530,6 +1734,8 @@
       updateManuscriptStatus('unsaved');
       clearAiEdits();
     });
+    $('manuscript').addEventListener('compositionstart', () => { state.composing = true; });
+    $('manuscript').addEventListener('compositionend', () => { state.composing = false; });
     $('manuscript').addEventListener('scroll', () => {
       $('manuscriptBackdrop').scrollTop = $('manuscript').scrollTop;
     });
