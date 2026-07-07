@@ -31,7 +31,15 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
         # to think, scaled by output_config.effort. High effort buys scene
         # planning (structure, beats, imagery) on turns that warrant it;
         # trivial turns stay cheap because thinking is adaptive, not forced.
-        "extra": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}},
+        # display="summarized": the default ("omitted") streams NO events
+        # while the model thinks — long thinking reads as a dead stream and
+        # trips the provider idle watchdog (observed 2026-07-07, 3 retries in
+        # a row on one heavy turn). Summarized thinking deltas keep the event
+        # stream alive; billing is identical under every display setting.
+        "extra": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
     },
     "fable_fast": {
         "provider": "anthropic",
@@ -39,7 +47,10 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
         "display": "Claude Fable 5 (low effort)",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,
-        "extra": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}},
+        "extra": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "low"},
+        },
     },
     "deepseek_pro": {
         "provider": "deepseek",
