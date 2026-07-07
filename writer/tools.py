@@ -13,7 +13,11 @@ import logging
 
 from tool_gateway.profiles import WRITER_PROFILE, profile_tool_names
 
-from writer.config import WRITER_CRITIC_TOOL_NAMES, WRITER_WEB_SEARCH_ENABLED
+from writer.config import (
+    WRITER_CRITIC_TOOL_NAMES,
+    WRITER_DIAGNOSIS_TOOL_NAMES,
+    WRITER_WEB_SEARCH_ENABLED,
+)
 from writer.documents import get_document, list_documents, save_document, search_documents
 from writer.runs import record_run_edit
 from writer.store import (
@@ -295,14 +299,23 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
     return tools, handlers
 
 
-def build_critic_tools(project_id: int) -> tuple[list[dict], dict]:
-    """Read/replace-only tool surface for the optional line-edit pass.
-
-    Filters the memoized build_writer_tools output so handler identities are
+def _tool_subset(project_id: int, names: frozenset[str]) -> tuple[list[dict], dict]:
+    """Filter the memoized build_writer_tools output so handler identities are
     shared with the main pass (keeps the dispatcher's id-cache warm) and the
     subset stays inside the system.writer gateway profile."""
     tools, handlers = build_writer_tools(project_id)
     return (
-        [t for t in tools if t["name"] in WRITER_CRITIC_TOOL_NAMES],
-        {name: fn for name, fn in handlers.items() if name in WRITER_CRITIC_TOOL_NAMES},
+        [t for t in tools if t["name"] in names],
+        {name: fn for name, fn in handlers.items() if name in names},
     )
+
+
+def build_critic_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Read/replace-only surface: the legacy line-edit pass and the author-
+    revision stage of the diagnose→revise 퇴고 (refine, never append)."""
+    return _tool_subset(project_id, WRITER_CRITIC_TOOL_NAMES)
+
+
+def build_diagnosis_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Read-only surface for the diagnosis stage: it reports, it never edits."""
+    return _tool_subset(project_id, WRITER_DIAGNOSIS_TOOL_NAMES)

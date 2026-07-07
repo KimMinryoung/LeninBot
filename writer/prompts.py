@@ -16,6 +16,9 @@ from writer.config import (
     PINNED_DOC_CHAR_LIMIT,
     PINNED_DOC_KIND,
     PINNED_DOC_MAX_COUNT,
+    STYLE_DOC_CHAR_LIMIT,
+    STYLE_DOC_KIND,
+    STYLE_DOC_MAX_COUNT,
     WRITER_CACHE_CONTROL_1H,
     WRITER_CRITIC_MIN_CHANGED_CHARS,
     WRITER_CRITIC_SPAN_BUDGET_CHARS,
@@ -87,8 +90,11 @@ def _tools_prompt_section() -> str:
             "need a second search.\n"
         )
     lines.append(
-        "- A pinned document may also contain a style exemplar (passages whose prose the writer wants matched). "
-        "Absorb its rhythm and diction as calibration — never copy its sentences into the manuscript.\n\n"
+        "- The style guide is a living document you co-maintain. When the writer gives style feedback in chat "
+        "('이런 식으로 쓰지 마', a manual rewrite of your prose, a passage they praise), distill it into the "
+        "style guide document (kind 'style') in the same turn — as a contrast pair (금지: their disliked shape → "
+        "지향: the shape they chose) or a new exemplar. Style feedback that lives only in chat history is "
+        "forgotten; the style guide is how you actually learn this writer's taste.\n\n"
     )
     return "".join(lines)
 
@@ -137,6 +143,16 @@ def build_base_system_prompt(project: dict) -> str:
         "paragraph are noise.\n"
         "- Match the draft's punctuation and quote style exactly (this also keeps replace_in_manuscript "
         "matches reliable).\n\n"
+        "# Style guide (when present)\n"
+        "A document of kind 'style' in your context is the binding calibration target for this project's prose. "
+        "Read it as a musician reads a key signature:\n"
+        "- Exemplar passages: absorb their rhythm, sentence-length distribution, 어미 habits, image density, and "
+        "emotional temperature, then write NEW sentences in that key — never copy or lightly paraphrase them.\n"
+        "- Contrast pairs (금지 → 지향): these are the writer's own corrections; they outrank every generic craft "
+        "rule above. Generalize the principle behind each pair, don't just avoid the literal example.\n"
+        "- Operational rules (문장 길이, 한자어 비율, 비유 빈도, 감정 처리 등): treat as hard constraints.\n"
+        "When the style guide and the manuscript's existing voice disagree, the style guide wins for NEW prose; "
+        "flag the tension in commentary rather than silently mixing registers.\n\n"
         "# Scene craft\n"
         "- A scene is a unit of change: someone wants something, meets resistance, and the situation turns. "
         "Know the turn before you draft. Enter late, leave early.\n"
@@ -225,7 +241,29 @@ def manuscript_context(project_id: int, selection_start: int | None, selection_e
             if len(content) > PINNED_DOC_CHAR_LIMIT:
                 content = content[:PINNED_DOC_CHAR_LIMIT] + "\n[pinned document truncated]"
             parts.append(f"Pinned document {str(d.get('title'))!r}:\n{content}")
+        parts.extend(style_guide_parts(project_id, documents))
     return "\n\n".join(parts)
+
+
+def style_guide_parts(project_id: int, documents: list[dict] | None = None) -> list[str]:
+    """Full-text style-guide blocks (documents of kind 'style'), rendered for
+    injection into the writer, diagnosis, and line-edit contexts."""
+    if documents is None:
+        documents = list_documents(project_id)
+    parts: list[str] = []
+    style_docs = [d for d in documents if str(d.get("kind") or "") == STYLE_DOC_KIND]
+    for d in style_docs[:STYLE_DOC_MAX_COUNT]:
+        doc = get_document(project_id, int(d["id"]))
+        content = str((doc or {}).get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > STYLE_DOC_CHAR_LIMIT:
+            content = content[:STYLE_DOC_CHAR_LIMIT] + "\n[style guide truncated]"
+        parts.append(
+            f"Style guide {str(d.get('title'))!r} (binding prose calibration for this project — "
+            "absorb its rhythm and rules, never copy its sentences):\n" + content
+        )
+    return parts
 
 
 def build_system_blocks(
@@ -251,11 +289,8 @@ def build_system_blocks(
 
 
 def build_critic_system_blocks(project: dict) -> list[dict]:
-    """System blocks for the optional line-edit (퇴고) pass. Block 1 is stable
+    """System blocks for the legacy line-edit (퇴고) mode. Block 1 is stable
     across projects and turns; block 2 carries the project header. Both cached."""
-    premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
-    style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
-    title = str(project.get("title") or "Untitled").strip()
     base = (
         "You are a ruthless, taste-perfect line editor (퇴고 담당) for one writer's novel. "
         "Another pass just drafted or revised the passages shown to you; your only job is to make those "
@@ -278,21 +313,39 @@ def build_critic_system_blocks(project: dict) -> list[dict]:
         "One short paragraph: what you tightened and why. No praise, no filler.\n"
         "</commentary>"
     )
-    header = (
-        f"Project title: {title}\n"
-        f"Premise:\n{premise}\n\n"
-        f"Style and continuity notes:\n{style_notes}"
-    )
+    header = _project_header_with_style_guide(project)
     return [
         {"type": "text", "text": base, "cache_control": WRITER_CACHE_CONTROL_1H},
         {"type": "text", "text": header, "cache_control": WRITER_CACHE_CONTROL_1H},
     ]
 
 
-def critic_user_message(body: str, edits: list[dict]) -> str | None:
-    """Render this turn's changed spans as offset-labeled excerpts for the
-    critic pass. Returns None when the turn changed too little to justify a
-    second model call."""
+def _project_header_with_style_guide(project: dict) -> str:
+    """Project header block for second-pass prompts, with the style guide
+    appended so 문체 fidelity is checkable outside the main writer context."""
+    premise = str(project.get("premise") or "").strip() or "(No premise recorded yet.)"
+    style_notes = str(project.get("style_notes") or "").strip() or "(No style notes recorded yet.)"
+    title = str(project.get("title") or "Untitled").strip()
+    header = (
+        f"Project title: {title}\n"
+        f"Premise:\n{premise}\n\n"
+        f"Style and continuity notes:\n{style_notes}"
+    )
+    try:
+        pid = int(project.get("id"))
+    except (TypeError, ValueError):
+        pid = None
+    if pid is not None:
+        guide = style_guide_parts(pid)
+        if guide:
+            header += "\n\n" + "\n\n".join(guide)
+    return header
+
+
+def changed_windows(body: str, edits: list[dict]) -> list[tuple[int, int]]:
+    """Merge this turn's edit spans into context-expanded excerpt windows,
+    ordered front to back and capped by the total excerpt budget. Empty when
+    the turn changed too little to justify a second model call."""
     spans = []
     changed_total = 0
     for edit in edits:
@@ -305,7 +358,7 @@ def critic_user_message(body: str, edits: list[dict]) -> str | None:
             spans.append((start, end))
             changed_total += end - start
     if not spans or changed_total < WRITER_CRITIC_MIN_CHANGED_CHARS:
-        return None
+        return []
     # Expand each span into a context window, then merge overlaps.
     windows = sorted(
         (max(0, s - WRITER_CRITIC_SPAN_CONTEXT_CHARS), min(len(body), e + WRITER_CRITIC_SPAN_CONTEXT_CHARS))
@@ -318,7 +371,7 @@ def critic_user_message(body: str, edits: list[dict]) -> str | None:
         else:
             merged.append([start, end])
     # Enforce the total excerpt budget: keep the largest windows, then restore
-    # document order so the critic reads front to back.
+    # document order so the second pass reads front to back.
     kept: list[list[int]] = []
     budget = WRITER_CRITIC_SPAN_BUDGET_CHARS
     for window in sorted(merged, key=lambda w: w[1] - w[0], reverse=True):
@@ -326,18 +379,138 @@ def critic_user_message(body: str, edits: list[dict]) -> str | None:
         if size <= budget:
             kept.append(window)
             budget -= size
-    if not kept:
-        return None
     kept.sort()
+    return [(int(s), int(e)) for s, e in kept]
+
+
+def _changed_passage_blocks(body: str, windows: list[tuple[int, int]], suffix: str) -> list[str]:
+    return [
+        f"Changed passage {i} (manuscript chars {start}–{end}; {suffix}):\n" + body[start:end]
+        for i, (start, end) in enumerate(windows, 1)
+    ]
+
+
+def critic_user_message(body: str, edits: list[dict]) -> str | None:
+    """Render this turn's changed spans as offset-labeled excerpts for the
+    legacy line-edit pass. Returns None when the turn changed too little to
+    justify a second model call."""
+    windows = changed_windows(body, edits)
+    if not windows:
+        return None
     parts = [
         "Line-edit ONLY the changed passages below. Each excerpt is saved manuscript text; "
         "copy 'find' arguments verbatim from it. Then reply with <commentary>."
     ]
-    for i, (start, end) in enumerate(kept, 1):
-        parts.append(
-            f"Changed passage {i} (manuscript chars {start}–{end}; your edits must match this saved text):\n"
-            + body[start:end]
+    parts.extend(_changed_passage_blocks(body, windows, "your edits must match this saved text"))
+    return "\n\n".join(parts)
+
+
+# Exact full-reply marker the diagnosis stage uses to say "nothing worth a
+# note" — it short-circuits the author-revision call entirely.
+DIAGNOSIS_PASS_MARKER = "PASS"
+
+
+def build_diagnosis_system_blocks(project: dict) -> list[dict]:
+    """System blocks for stage 1 of the diagnose→revise 퇴고: a read-only
+    literary editor whose notes go back to the (stronger) author model."""
+    base = (
+        "You are a senior literary editor (문학 편집자) reviewing the passages a novelist drafted or revised "
+        "in one working session. You DIAGNOSE; you never rewrite. Your notes go straight back to the author — "
+        "a stronger prose stylist than you — who does the actual revising. Your value is a fresh, unsparing "
+        "outside eye, not fixes.\n\n"
+        "# What to check, in order of leverage\n"
+        "1. 구조 — does the scene TURN? Someone wants something, meets resistance, and the situation is "
+        "different by the end; a scene that ends where it began is the deepest flaw. Check the entry (late "
+        "enough?) and the exit (a resonant concrete image, gesture, or line — or does it sag into summary and "
+        "stated feeling?).\n"
+        "2. 극화 — emotion told instead of dramatized; subtext explained; generic detail where one exact, "
+        "surprising, character-filtered detail belongs; missed sensory opportunities at the highest-pressure "
+        "beats.\n"
+        "3. 리듬 — monotonous -었다/-했다 chains; sentences of one repeated shape; paragraphs that don't move "
+        "with the scene's pulse; inverted pacing (rushed climax, dawdling transition).\n"
+        "4. 문장 — 번역투 (것이다 crutch, ~의 chains, double passives, overused 그/그녀), clichés and AI tells, "
+        "word/image echoes, flat or approximate verbs, dialogue register slips (반말/존댓말, 호칭).\n"
+        "5. 문체 — when a style guide is provided below, judge the passages against it: rhythm, 어미 habits, "
+        "image density, emotional temperature, and its 금지→지향 pairs.\n"
+        "6. 연속성 — contradictions with the excerpt context or the background documents (verify with "
+        "read_document when suspicious).\n\n"
+        "# Method\n"
+        "- Judge only the changed passages shown; call read_manuscript around the given offsets when you need "
+        "more surrounding context.\n"
+        "- Be concrete and severe. Praise is useless to the author; a missed real weakness is your only "
+        "failure mode.\n"
+        "- Never write replacement sentences — name the problem and the direction of repair "
+        "('결말이 요약으로 끝남 — 마지막 동작이나 이미지로 끝나야 함'), not the wording.\n\n"
+        "# Response format\n"
+        "Reply with ONLY a numbered diagnosis, most damaging problem first, at most 8 items:\n"
+        '1. [구조|극화|리듬|문장|문체|연속성] "short verbatim quote locating the spot" — the problem, then the '
+        "direction of repair (no rewritten text).\n"
+        "After the list, one line — 남길 것: what is genuinely working and must survive revision.\n"
+        f"If nothing rises to a real note, reply exactly {DIAGNOSIS_PASS_MARKER} — "
+        "invented weak notes waste the author's judgment."
+    )
+    return [
+        {"type": "text", "text": base, "cache_control": WRITER_CACHE_CONTROL_1H},
+        {"type": "text", "text": _project_header_with_style_guide(project), "cache_control": WRITER_CACHE_CONTROL_1H},
+    ]
+
+
+def diagnosis_user_message(body: str, edits: list[dict]) -> str | None:
+    """Stage-1 user message: the changed excerpts to diagnose. None when the
+    turn changed too little for a 퇴고 pass."""
+    windows = changed_windows(body, edits)
+    if not windows:
+        return None
+    parts = [
+        "Diagnose the changed passages below (this session's new or revised prose). "
+        f"Reply with the numbered diagnosis, or exactly {DIAGNOSIS_PASS_MARKER}."
+    ]
+    parts.extend(_changed_passage_blocks(body, windows, "read_manuscript nearby for more context"))
+    return "\n\n".join(parts)
+
+
+def revision_user_message(body: str, edits: list[dict], diagnosis_notes: str | None) -> str | None:
+    """Stage-2 user message for the MAIN model: revise this turn's passages as
+    the author, guided by (but not subordinate to) the editor's diagnosis.
+    With diagnosis_notes=None (stage 1 failed) it asks for self-diagnosis."""
+    windows = changed_windows(body, edits)
+    if not windows:
+        return None
+    notes = (diagnosis_notes or "").strip()
+    if notes:
+        notes_block = "[Editor's diagnosis]\n" + notes
+        opening = (
+            "An outside editor has diagnosed the passages you drafted this session (notes below). "
+            "Now revise them as the author."
         )
+    else:
+        notes_block = (
+            "[Editor's diagnosis]\n(The editor pass failed this turn. Diagnose the passages yourself, with an "
+            "editor's severity, before revising: 구조 — does the scene turn, and does it end on an image or on "
+            "summary; 극화 — told emotion, explained subtext, generic detail; 리듬 — 어미 monotony, repeated "
+            "sentence shapes; 문장 — 번역투, clichés, echoes, flat verbs; 문체 — fidelity to the style guide.)"
+        )
+        opening = "Reread the passages you drafted this session with fresh, hostile eyes, then revise them as the author."
+    parts = [
+        "<revision_request>\n" + opening + "\n"
+        "- Judge each note: apply what is right, and REJECT what would flatten the voice or misread the "
+        "intent — obedience is not revision. Account for rejections in commentary.\n"
+        "- A structural note (scene turn, ending, pacing) may deserve rewriting that whole passage in one "
+        "replace_in_manuscript — never patch a structural flaw with word swaps. Line notes take the minimum span.\n"
+        "- This pass refines what exists: replace_in_manuscript only; never append new story content, and "
+        "never expand the scene's scope.\n"
+        "- Hold this novel's voice and the style guide absolutely. The notes point at weaknesses; they are "
+        "not an invitation to a more generic register.\n\n"
+        + notes_block
+    ]
+    parts.extend(
+        _changed_passage_blocks(body, windows, "saved manuscript text — copy 'find' arguments verbatim from here")
+    )
+    parts.append(
+        "</revision_request>\n\n"
+        "After your replacements, reply with ONLY <commentary>: one short paragraph — what you accepted, "
+        "what you rejected and why. No praise, no filler."
+    )
     return "\n\n".join(parts)
 
 

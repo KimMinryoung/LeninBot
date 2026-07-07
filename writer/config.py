@@ -50,8 +50,33 @@ PINNED_DOC_KIND = "pinned"
 PINNED_DOC_CHAR_LIMIT = 8000
 PINNED_DOC_MAX_COUNT = 3
 
-# Optional critic/line-edit pass (퇴고): a second model call after the main
-# pass that line-edits only the spans this turn changed. Opt-in per request.
+# Style guide documents (kind 'style'): the project's prose calibration
+# target — exemplar passages, contrast pairs (금지→지향), operational rules.
+# Injected in full into the writer, diagnosis, and line-edit contexts and
+# treated as binding calibration (absorb rhythm/diction, never copy).
+STYLE_DOC_KIND = "style"
+STYLE_DOC_CHAR_LIMIT = 12000
+STYLE_DOC_MAX_COUNT = 2
+
+# Optional 퇴고 pass, opt-in per request. Two modes:
+# - 'diagnose_revise' (default): a light editor model DIAGNOSES the changed
+#   passages (scene structure, dramatization, rhythm, language, style
+#   fidelity) without touching the text, then the MAIN model revises as the
+#   author — free to reject notes that would hurt the voice. Critique flows
+#   to the strongest model instead of a weaker model rewriting its prose.
+# - 'line_edit': legacy single light-model line edit of the changed spans.
+WRITER_REVISION_MODE = "diagnose_revise"
+WRITER_DIAGNOSIS_MAX_TOKENS = 4000
+WRITER_DIAGNOSIS_MAX_ROUNDS = 5
+# Read-only surface for the diagnosis stage: it reports, it never edits.
+WRITER_DIAGNOSIS_TOOL_NAMES = frozenset({
+    "read_manuscript",
+    "search_manuscript",
+    "read_document",
+})
+WRITER_REVISION_MAX_TOKENS = 16000
+WRITER_REVISION_MAX_ROUNDS = 10
+
 WRITER_CRITIC_MAX_TOKENS = 8000
 WRITER_CRITIC_MAX_ROUNDS = 8
 # Skip the critic when the main pass changed fewer characters than this.

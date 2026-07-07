@@ -21,23 +21,32 @@ from writer.config import (
     WRITER_CRITIC_MAX_ROUNDS,
     WRITER_CRITIC_MAX_TOKENS,
     WRITER_DEFAULT_MAX_TOKENS,
+    WRITER_DIAGNOSIS_MAX_ROUNDS,
+    WRITER_DIAGNOSIS_MAX_TOKENS,
     WRITER_IDLE_TIMEOUT_SEC,
     WRITER_MAX_ROUNDS,
     WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+    WRITER_REVISION_MAX_ROUNDS,
+    WRITER_REVISION_MAX_TOKENS,
+    WRITER_REVISION_MODE,
 )
 from writer.models import WRITER_CRITIC_CHOICE, resolve_light_model, resolve_writer_model
 from writer.prompts import (
+    DIAGNOSIS_PASS_MARKER,
     build_critic_system_blocks,
+    build_diagnosis_system_blocks,
     build_system_blocks,
     critic_user_message,
+    diagnosis_user_message,
     messages_for_model,
     parse_writer_response,
+    revision_user_message,
     with_tool_discipline_reminder,
     writer_error_message,
 )
 from writer.runs import WriterRun, get_active_run, register_run, unregister_run
 from writer.store import get_manuscript, get_project, insert_message, touch_project
-from writer.tools import build_critic_tools, build_writer_tools
+from writer.tools import build_critic_tools, build_diagnosis_tools, build_writer_tools
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +55,132 @@ _writer_background_tasks: set[asyncio.Task] = set()
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _writer_scope():
+    return caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True))
+
+
+def diagnosis_is_pass(notes: str) -> bool:
+    """True when the diagnosis stage found nothing worth an author revision."""
+    stripped = notes.strip()
+    head = stripped.splitlines()[0].strip() if stripped else ""
+    return head.upper().startswith(DIAGNOSIS_PASS_MARKER)
+
+
+async def run_line_edit_pass(
+    *,
+    project_id: int,
+    project: dict,
+    body: str,
+    edits: list[dict],
+    light_model: tuple,
+    on_progress,
+    tracker: dict,
+) -> str | None:
+    """Legacy 퇴고 mode: one light-model line edit over this turn's changed
+    spans. Returns the pass's reply text, or None when the turn is too small."""
+    critic_msg = critic_user_message(body, edits)
+    if not critic_msg:
+        return None
+    client, model, display, extra = light_model
+    tools, handlers = build_critic_tools(project_id)
+    system = await asyncio.to_thread(build_critic_system_blocks, project)
+    with _writer_scope():
+        return await chat_with_tools(
+            [{"role": "user", "content": critic_msg}],
+            client=client,
+            model=model,
+            tools=tools,
+            tool_handlers=handlers,
+            system_prompt=system,
+            max_rounds=WRITER_CRITIC_MAX_ROUNDS,
+            max_tokens=WRITER_CRITIC_MAX_TOKENS,
+            budget_usd=100.0,
+            budget_tracker=tracker,
+            on_progress=on_progress,
+            agent_name="writer_critic",
+            provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+            **extra,
+        )
+
+
+async def run_diagnose_revise_pass(
+    *,
+    project_id: int,
+    project: dict,
+    body: str,
+    edits: list[dict],
+    main_model: tuple,
+    light_model: tuple,
+    on_progress,
+    announce,
+    diagnosis_tracker: dict,
+    revision_tracker: dict,
+) -> str | None:
+    """Upgraded 퇴고: a light editor model DIAGNOSES this turn's passages
+    (stage 1, read-only tools), then the MAIN model revises them as the
+    author (stage 2) — the critique flows to the strongest prose model
+    instead of a weaker model rewriting its sentences. A failed diagnosis
+    degrades to author self-diagnosis; a PASS diagnosis skips stage 2."""
+    diag_msg = diagnosis_user_message(body, edits)
+    if not diag_msg:
+        return None
+    d_client, d_model, d_display, d_extra = light_model
+    notes: str | None = None
+    await announce(f"퇴고 1/2 — 편집자 진단 ({d_display})…")
+    try:
+        diag_tools, diag_handlers = build_diagnosis_tools(project_id)
+        diag_system = await asyncio.to_thread(build_diagnosis_system_blocks, project)
+        with _writer_scope():
+            notes = await chat_with_tools(
+                [{"role": "user", "content": diag_msg}],
+                client=d_client,
+                model=d_model,
+                tools=diag_tools,
+                tool_handlers=diag_handlers,
+                system_prompt=diag_system,
+                max_rounds=WRITER_DIAGNOSIS_MAX_ROUNDS,
+                max_tokens=WRITER_DIAGNOSIS_MAX_TOKENS,
+                budget_usd=100.0,
+                budget_tracker=diagnosis_tracker,
+                on_progress=on_progress,
+                agent_name="writer_diagnosis",
+                provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+                **d_extra,
+            )
+        notes = (notes or "").strip() or None
+    except Exception:
+        logger.exception(
+            "writer diagnosis stage failed project_id=%s; author revision will self-diagnose", project_id
+        )
+        notes = None
+    if notes is not None and diagnosis_is_pass(notes):
+        return "<commentary>\n편집자 진단: 지적 사항 없음 — 원문을 그대로 둡니다.\n</commentary>"
+    rev_msg = revision_user_message(body, edits, notes)
+    if not rev_msg:
+        return None
+    m_client, m_model, m_display, m_extra = main_model
+    await announce(f"퇴고 2/2 — 저자 수정 ({m_display})…")
+    rev_tools, rev_handlers = build_critic_tools(project_id)
+    rev_system = await asyncio.to_thread(build_system_blocks, project, project_id, None, None)
+    with _writer_scope():
+        return await chat_with_tools(
+            [{"role": "user", "content": rev_msg}],
+            client=m_client,
+            model=m_model,
+            tools=rev_tools,
+            tool_handlers=rev_handlers,
+            system_prompt=rev_system,
+            max_rounds=WRITER_REVISION_MAX_ROUNDS,
+            max_tokens=WRITER_REVISION_MAX_TOKENS,
+            budget_usd=100.0,
+            budget_tracker=revision_tracker,
+            on_progress=on_progress,
+            agent_name="writer_revision",
+            provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+            **m_extra,
+        )
 
 
 async def _consume_run(
@@ -179,9 +314,15 @@ async def stream_writer_reply(
     budget_tracker: dict = {}
     critic_holder: list[str] = []
     critic_budget_tracker: dict = {}
+    revision_budget_tracker: dict = {}
     critic_edit_count = 0
-    # The critic (퇴고) is easy work: it runs on the light DeepSeek tier, not
-    # the heavy main model, falling back to the main model when unconfigured.
+    # 퇴고 mode is captured once per run so a mid-run config change (or a test
+    # patching the module attribute) can't split the pass and its done-event.
+    revision_mode = WRITER_REVISION_MODE
+    # The editor role of the 퇴고 (line edit in legacy mode, diagnosis in
+    # diagnose_revise mode) is light work: it runs on the cheap DeepSeek tier,
+    # falling back to the main model when unconfigured. The author-revision
+    # stage of diagnose_revise runs on the MAIN model — that's the point.
     critic_client, critic_model, critic_display, critic_extra = resolve_light_model(
         WRITER_CRITIC_CHOICE, (writer_client, writer_model, writer_display, model_extra)
     )
@@ -228,15 +369,19 @@ async def stream_writer_reply(
         usage = dict(budget_tracker.get("usage") or {})
         cost = budget_tracker.get("total_cost")
         stop_reason = str(budget_tracker.get("stop_reason") or "")
+        critic_cost_total: float | None = None
         if critic_ran:
-            for key, value in (critic_budget_tracker.get("usage") or {}).items():
-                if isinstance(value, (int, float)) and isinstance(usage.get(key, 0), (int, float)):
-                    usage[key] = usage.get(key, 0) + value
-                elif key not in usage:
-                    usage[key] = value
-            critic_cost = critic_budget_tracker.get("total_cost")
-            if critic_cost is not None:
-                cost = (cost or 0.0) + critic_cost
+            for tracker in (critic_budget_tracker, revision_budget_tracker):
+                for key, value in (tracker.get("usage") or {}).items():
+                    if isinstance(value, (int, float)) and isinstance(usage.get(key, 0), (int, float)):
+                        usage[key] = usage.get(key, 0) + value
+                    elif key not in usage:
+                        usage[key] = value
+                tracker_cost = tracker.get("total_cost")
+                if tracker_cost is not None:
+                    critic_cost_total = (critic_cost_total or 0.0) + tracker_cost
+            if critic_cost_total is not None:
+                cost = (cost or 0.0) + critic_cost_total
         # Delegated light-agent sub-runs (research_web) recorded on the run.
         for extra_cost in run.extra_costs:
             cost = (cost or 0.0) + extra_cost["cost_usd"]
@@ -266,11 +411,15 @@ async def stream_writer_reply(
             "created_at": datetime.utcnow().isoformat() + "Z",
         }
         if critic_ran:
+            revised_by_main = bool(revision_budget_tracker)
             event["critic"] = {
                 "ran": True,
-                "model": critic_model,
-                "model_display": critic_display,
-                "cost_usd": critic_budget_tracker.get("total_cost"),
+                "mode": revision_mode,
+                "model": writer_model if revised_by_main else critic_model,
+                "model_display": (
+                    f"{critic_display} 진단 → {writer_display} 수정" if revised_by_main else critic_display
+                ),
+                "cost_usd": critic_cost_total,
                 "edit_count": critic_edit_count,
             }
         return event
@@ -288,43 +437,59 @@ async def stream_writer_reply(
             await run.broadcast(_sse({"type": "provider_retry", "content": detail}))
 
     async def run_critic_pass() -> None:
-        """Optional second-pass line editor (퇴고) over this turn's changed
-        spans. Failures are isolated: the main result always persists."""
+        """Optional second-pass 퇴고 over this turn's changed spans, in the
+        configured mode. Failures are isolated: the main result always persists."""
         nonlocal critic_edit_count
         edits_snapshot = [dict(edit) for edit in run.edits]
         body = str((get_manuscript(project_id) or {}).get("body") or "")
-        critic_msg = critic_user_message(body, edits_snapshot)
-        if not critic_msg:
-            return
-        await run.broadcast(_sse({"type": "critic_start"}))
-        await run.broadcast(_sse({"type": "tool", "content": f"Line-edit pass (퇴고, {critic_display})…"}))
+
+        async def announce(text: str) -> None:
+            run.last_progress = asyncio.get_running_loop().time()
+            await run.broadcast(_sse({"type": "tool", "content": text}))
+
+        started = False
         edits_before = len(run.edits)
         try:
-            critic_tools, critic_handlers = build_critic_tools(project_id)
-            critic_system = await asyncio.to_thread(build_critic_system_blocks, project)
-            with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
-                critic_text = await chat_with_tools(
-                    [{"role": "user", "content": critic_msg}],
-                    client=critic_client,
-                    model=critic_model,
-                    tools=critic_tools,
-                    tool_handlers=critic_handlers,
-                    system_prompt=critic_system,
-                    max_rounds=WRITER_CRITIC_MAX_ROUNDS,
-                    max_tokens=WRITER_CRITIC_MAX_TOKENS,
-                    budget_usd=100.0,
-                    budget_tracker=critic_budget_tracker,
+            if revision_mode == "diagnose_revise":
+                if not diagnosis_user_message(body, edits_snapshot):
+                    return
+                started = True
+                await run.broadcast(_sse({"type": "critic_start"}))
+                critic_text = await run_diagnose_revise_pass(
+                    project_id=project_id,
+                    project=project,
+                    body=body,
+                    edits=edits_snapshot,
+                    main_model=(writer_client, writer_model, writer_display, model_extra),
+                    light_model=(critic_client, critic_model, critic_display, critic_extra),
                     on_progress=on_progress,
-                    agent_name="writer_critic",
-                    provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-                    **critic_extra,
+                    announce=announce,
+                    diagnosis_tracker=critic_budget_tracker,
+                    revision_tracker=revision_budget_tracker,
                 )
-            critic_holder.append(critic_text)
+            else:
+                if not critic_user_message(body, edits_snapshot):
+                    return
+                started = True
+                await run.broadcast(_sse({"type": "critic_start"}))
+                await announce(f"Line-edit pass (퇴고, {critic_display})…")
+                critic_text = await run_line_edit_pass(
+                    project_id=project_id,
+                    project=project,
+                    body=body,
+                    edits=edits_snapshot,
+                    light_model=(critic_client, critic_model, critic_display, critic_extra),
+                    on_progress=on_progress,
+                    tracker=critic_budget_tracker,
+                )
+            if critic_text is not None:
+                critic_holder.append(critic_text)
         except Exception:
-            logger.exception("writer critic pass failed project_id=%s", project_id)
-            critic_holder.append(
-                "<commentary>\n퇴고 패스가 실패했습니다 — 본문 초안과 그 편집 내용은 저장되어 있습니다.\n</commentary>"
-            )
+            logger.exception("writer 퇴고 pass failed project_id=%s mode=%s", project_id, revision_mode)
+            if started:
+                critic_holder.append(
+                    "<commentary>\n퇴고 패스가 실패했습니다 — 본문 초안과 그 편집 내용은 저장되어 있습니다.\n</commentary>"
+                )
         finally:
             critic_edit_count = len(run.edits) - edits_before
 
