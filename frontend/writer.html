@@ -366,6 +366,10 @@
               <option value="pinned">pinned — 상시 주입 (Story so far 등)</option>
             </select></label>
             <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
+            <label class="row" style="align-items:center;gap:6px" title="공유 문서는 모든 프로젝트의 AI 컨텍스트에 노출됩니다. 같은 제목의 프로젝트 문서가 있으면 그 프로젝트에서는 프로젝트 문서가 우선합니다.">
+              <input id="docShared" type="checkbox" style="width:auto">
+              <span>🌐 Shared across all projects</span>
+            </label>
             <div class="row">
               <button id="saveDoc" class="primary" type="button">Save</button>
               <button id="pinDoc" type="button" title="Pinned documents are given to the AI in full every turn">Pin</button>
@@ -1432,16 +1436,27 @@
     function renderDocuments() {
       const list = $('docList');
       list.innerHTML = '';
-      for (const doc of state.documents) {
+      const projectDocs = state.documents.filter((d) => !d.shared);
+      const sharedDocs = state.documents.filter((d) => d.shared);
+      const addDoc = (doc) => {
         const button = document.createElement('button');
         button.className = 'result';
         button.type = 'button';
         button.innerHTML = '<strong></strong><span></span>';
         const pinned = (doc.kind || '') === 'pinned';
-        button.querySelector('strong').textContent = (pinned ? '📌 ' : '') + doc.title;
+        button.querySelector('strong').textContent =
+          (pinned ? '📌 ' : '') + (doc.shared ? '🌐 ' : '') + doc.title;
         button.querySelector('span').textContent = `${doc.kind || 'note'} · ${charMeta(doc.char_count)}`;
-        button.onclick = () => openDocument(doc.id);
+        button.onclick = () => openDocument(doc);
         list.appendChild(button);
+      };
+      projectDocs.forEach(addDoc);
+      if (sharedDocs.length) {
+        const header = document.createElement('div');
+        header.className = 'meta';
+        header.textContent = 'Shared (all projects)';
+        list.appendChild(header);
+        sharedDocs.forEach(addDoc);
       }
       if (!state.documents.length) list.innerHTML = '<div class="meta">No background documents.</div>';
       $('newDoc').disabled = !state.current;
@@ -1474,13 +1489,17 @@
       sel.value = v;
     }
 
-    async function openDocument(id) {
+    async function openDocument(docRef) {
       if (!state.current) return;
-      const res = await api(`/writer/projects/${state.current.id}/documents/${id}`);
+      const path = docRef.shared
+        ? `/writer/documents/${docRef.id}`
+        : `/writer/projects/${state.current.id}/documents/${docRef.id}`;
+      const res = await api(path);
       state.editingDoc = (await res.json()).document;
       $('docTitle').value = state.editingDoc.title || '';
       setDocKind(state.editingDoc.kind);
       $('docContent').value = state.editingDoc.content || '';
+      $('docShared').checked = !!state.editingDoc.shared;
       $('docStatus').textContent = '';
       updatePinButton();
       $('docPanel').open = true;
@@ -1493,6 +1512,7 @@
       $('docTitle').value = '';
       setDocKind('note');
       $('docContent').value = '';
+      $('docShared').checked = false;
       $('docStatus').textContent = '';
       updatePinButton();
       $('docPanel').open = true;
@@ -1517,6 +1537,13 @@
       await saveDocumentEdit();
     }
 
+    function docPaths(shared, id) {
+      return {
+        collection: shared ? '/writer/documents' : `/writer/projects/${state.current.id}/documents`,
+        item: shared ? `/writer/documents/${id}` : `/writer/projects/${state.current.id}/documents/${id}`
+      };
+    }
+
     async function saveDocumentEdit() {
       if (!state.current) return;
       const payload = {
@@ -1525,13 +1552,25 @@
         content: $('docContent').value
       };
       if (!payload.title) { $('docStatus').textContent = 'Title is required.'; return; }
+      const wantShared = $('docShared').checked;
       try {
-        const path = state.editingDoc
-          ? `/writer/projects/${state.current.id}/documents/${state.editingDoc.id}`
-          : `/writer/projects/${state.current.id}/documents`;
-        const res = await api(path, { method: state.editingDoc ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+        let res;
+        if (state.editingDoc && !!state.editingDoc.shared === wantShared) {
+          res = await api(docPaths(wantShared, state.editingDoc.id).item, {
+            method: 'PUT', body: JSON.stringify(payload)
+          });
+        } else {
+          // New document, or scope changed: upsert into the target scope,
+          // then remove the original from the old scope on a move.
+          res = await api(docPaths(wantShared).collection, {
+            method: 'POST', body: JSON.stringify(payload)
+          });
+          if (state.editingDoc) {
+            await api(docPaths(!!state.editingDoc.shared, state.editingDoc.id).item, { method: 'DELETE' });
+          }
+        }
         state.editingDoc = (await res.json()).document;
-        $('docStatus').textContent = 'Saved.';
+        $('docStatus').textContent = wantShared ? 'Saved (shared across all projects).' : 'Saved.';
         await loadDocuments();
       } catch (err) {
         $('docStatus').textContent = `Save failed: ${err.message || err}`;
@@ -1539,8 +1578,12 @@
     }
 
     async function deleteDocumentEdit() {
-      if (!state.current || !state.editingDoc || !confirm('Delete this document?')) return;
-      await api(`/writer/projects/${state.current.id}/documents/${state.editingDoc.id}`, { method: 'DELETE' });
+      if (!state.current || !state.editingDoc) return;
+      const label = state.editingDoc.shared
+        ? 'Delete this SHARED document? It disappears from every project.'
+        : 'Delete this document?';
+      if (!confirm(label)) return;
+      await api(docPaths(!!state.editingDoc.shared, state.editingDoc.id).item, { method: 'DELETE' });
       closeDocument();
       await loadDocuments();
     }

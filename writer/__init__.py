@@ -17,8 +17,11 @@ creative_writer.py is a compatibility shim re-exporting this API.
 from writer.documents import (
     delete_document,
     get_document,
+    get_shared_document,
     list_documents,
+    list_shared_documents,
     save_document,
+    save_shared_document,
     search_documents,
     update_document,
 )
@@ -80,7 +83,10 @@ __all__ = [
     "get_project_with_messages",
     "get_selected_model_choice",
     "get_writer_setting",
+    "get_shared_document",
     "list_documents",
+    "list_shared_documents",
+    "save_shared_document",
     "list_manuscript_revisions",
     "list_projects",
     "list_writer_models",

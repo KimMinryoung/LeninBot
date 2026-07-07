@@ -861,6 +861,59 @@ async def list_writer_manuscript_revisions(
     return {"revisions": revisions}
 
 
+@app.get("/writer/documents", dependencies=[Depends(require_writer_access)])
+async def list_writer_shared_documents():
+    """Shared background documents — visible to every writer project."""
+    from creative_writer import list_shared_documents
+
+    documents = await asyncio.to_thread(list_shared_documents)
+    return {"documents": documents}
+
+
+@app.post("/writer/documents", dependencies=[Depends(require_writer_access)])
+async def save_writer_shared_document(request: WriterDocumentRequest):
+    from creative_writer import save_shared_document
+
+    document = await asyncio.to_thread(
+        save_shared_document, request.title, request.content, request.kind
+    )
+    if not document:
+        raise HTTPException(status_code=500, detail="failed to save shared document")
+    return {"document": document}
+
+
+@app.get("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def get_writer_shared_document(document_id: int):
+    from creative_writer import get_shared_document
+
+    document = await asyncio.to_thread(get_shared_document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="shared document not found")
+    return {"document": document}
+
+
+@app.put("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def update_writer_shared_document(document_id: int, request: WriterDocumentRequest):
+    from creative_writer import update_document
+
+    document = await asyncio.to_thread(
+        update_document, None, document_id, request.title, request.kind, request.content
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="shared document not found")
+    return {"document": document}
+
+
+@app.delete("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
+async def delete_writer_shared_document(document_id: int):
+    from creative_writer import delete_document
+
+    deleted = await asyncio.to_thread(delete_document, None, document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="shared document not found")
+    return {"deleted": True}
+
+
 @app.get("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
 async def list_writer_documents(project_id: int):
     from creative_writer import get_project, list_documents

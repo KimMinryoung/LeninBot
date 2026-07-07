@@ -69,8 +69,9 @@ _READ_DOCUMENT_TOOL = {
     "name": "read_document",
     "description": (
         "Read one background document (worldbuilding, character sheets, outline, research notes) in full by its "
-        "title. The available documents are listed in your context. Use these as the authoritative reference for "
-        "setting, character, and plot facts."
+        "title. The available documents — project-specific and shared (common to all projects) — are listed in "
+        "your context. Use these as the authoritative reference for setting, character, and plot facts. A project "
+        "document shadows a shared one with the same title."
     ),
     "input_schema": {
         "type": "object",
@@ -84,8 +85,9 @@ _READ_DOCUMENT_TOOL = {
 _SEARCH_DOCUMENTS_TOOL = {
     "name": "search_documents",
     "description": (
-        "Substring search across all background documents of this project (titles and contents). Returns document "
-        "titles with matching snippets. Use short distinctive queries; then read_document for the full text."
+        "Substring search across this project's background documents AND the shared documents (titles and "
+        "contents). Returns document titles with matching snippets. Use short distinctive queries; then "
+        "read_document for the full text."
     ),
     "input_schema": {
         "type": "object",
@@ -100,10 +102,11 @@ _SEARCH_DOCUMENTS_TOOL = {
 _SAVE_DOCUMENT_TOOL = {
     "name": "save_document",
     "description": (
-        "Create or fully overwrite a background document by title (worldbuilding notes, character sheet, outline, "
-        "timeline). This does NOT touch the manuscript. Use it when the writer asks you to record or update notes, "
-        "or to keep an agreed story bible current after major developments. Overwrites the whole document — read it "
-        "first if you are updating."
+        "Create or fully overwrite a background document of THIS project by title (worldbuilding notes, character "
+        "sheet, outline, timeline). This does NOT touch the manuscript, and it can never modify a shared document — "
+        "reusing a shared document's title creates a project-local override of it. Use it when the writer asks you "
+        "to record or update notes, or to keep an agreed story bible current after major developments. Overwrites "
+        "the whole document — read it first if you are updating."
     ),
     "input_schema": {
         "type": "object",

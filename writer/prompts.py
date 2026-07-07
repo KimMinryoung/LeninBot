@@ -201,8 +201,9 @@ def manuscript_context(
                 parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
     documents = list_documents(project_id)
     if documents:
+        project_docs, shared_docs = split_visible_documents(documents)
         lines = []
-        for d in documents:
+        for d in project_docs:
             line = f"- {str(d.get('title'))!r} (kind: {d.get('kind')}, {d.get('char_count')} chars"
             mark = d.get("manuscript_chars_at_update")
             if mark is not None and len(body) - int(mark) >= DOC_STALENESS_NOTE_CHARS:
@@ -212,11 +213,25 @@ def manuscript_context(
                 )
             line += ")"
             lines.append(line)
-        parts.append("Background documents (read with read_document(title)):\n" + "\n".join(lines))
+        if lines:
+            parts.append("Background documents (read with read_document(title)):\n" + "\n".join(lines))
+        if shared_docs:
+            shared_lines = [
+                f"- {str(d.get('title'))!r} (kind: {d.get('kind')}, {d.get('char_count')} chars)"
+                for d in shared_docs
+            ]
+            parts.append(
+                "Shared reference documents (common to ALL projects, read with read_document(title); "
+                "save_document with the same title creates a project-local override instead of "
+                "editing the shared original):\n" + "\n".join(shared_lines)
+            )
         # Pinned documents (the agent-maintained story synopsis and similar)
         # ride along in full so long-novel continuity doesn't depend on the
-        # model choosing to re-read the manuscript every turn.
-        pinned = [d for d in documents if str(d.get("kind") or "") == PINNED_DOC_KIND]
+        # model choosing to re-read the manuscript every turn. Project pinned
+        # docs come first; shared pinned docs follow within the same cap.
+        pinned = [
+            d for d in project_docs + shared_docs if str(d.get("kind") or "") == PINNED_DOC_KIND
+        ]
         for d in pinned[:PINNED_DOC_MAX_COUNT]:
             doc = get_document(project_id, int(d["id"]))
             content = str((doc or {}).get("content") or "").strip()
@@ -224,8 +239,23 @@ def manuscript_context(
                 continue
             if len(content) > PINNED_DOC_CHAR_LIMIT:
                 content = content[:PINNED_DOC_CHAR_LIMIT] + "\n[pinned document truncated]"
-            parts.append(f"Pinned document {str(d.get('title'))!r}:\n{content}")
+            label = "Pinned shared document" if d.get("shared") else "Pinned document"
+            parts.append(f"{label} {str(d.get('title'))!r}:\n{content}")
     return "\n\n".join(parts)
+
+
+def split_visible_documents(documents: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(project_docs, shared_docs) as the agent should see them: a shared
+    document shadowed by a project document with the same title is dropped —
+    read_document(title) would resolve to the project one anyway."""
+    project_docs = [d for d in documents if not d.get("shared")]
+    shadowed = {str(d.get("title") or "").strip().lower() for d in project_docs}
+    shared_docs = [
+        d
+        for d in documents
+        if d.get("shared") and str(d.get("title") or "").strip().lower() not in shadowed
+    ]
+    return project_docs, shared_docs
 
 
 def manuscript_state_block(
@@ -248,7 +278,11 @@ def style_guide_parts(project_id: int, documents: list[dict] | None = None) -> l
     if documents is None:
         documents = list_documents(project_id)
     parts: list[str] = []
-    style_docs = [d for d in documents if str(d.get("kind") or "") == STYLE_DOC_KIND]
+    project_docs, shared_docs = split_visible_documents(documents)
+    # Project style guides first (most specific wins the cap), shared after.
+    style_docs = [
+        d for d in project_docs + shared_docs if str(d.get("kind") or "") == STYLE_DOC_KIND
+    ]
     for d in style_docs[:STYLE_DOC_MAX_COUNT]:
         doc = get_document(project_id, int(d["id"]))
         content = str((doc or {}).get("content") or "").strip()
@@ -256,8 +290,9 @@ def style_guide_parts(project_id: int, documents: list[dict] | None = None) -> l
             continue
         if len(content) > STYLE_DOC_CHAR_LIMIT:
             content = content[:STYLE_DOC_CHAR_LIMIT] + "\n[style guide truncated]"
+        scope = "shared across all projects" if d.get("shared") else "for this project"
         parts.append(
-            f"Style guide {str(d.get('title'))!r} (binding prose calibration for this project — "
+            f"Style guide {str(d.get('title'))!r} (binding prose calibration, {scope} — "
             "absorb its rhythm and rules, never copy its sentences):\n" + content
         )
     return parts

@@ -99,7 +99,8 @@ def ensure_writer_tables() -> None:
     db_execute(
         """CREATE TABLE IF NOT EXISTS writer_documents (
                id BIGSERIAL PRIMARY KEY,
-               project_id BIGINT NOT NULL REFERENCES writer_projects(id) ON DELETE CASCADE,
+               -- NULL project_id = shared document, visible to every project.
+               project_id BIGINT REFERENCES writer_projects(id) ON DELETE CASCADE,
                title TEXT NOT NULL,
                kind TEXT NOT NULL DEFAULT 'note',
                content TEXT NOT NULL DEFAULT '',
@@ -107,6 +108,16 @@ def ensure_writer_tables() -> None:
                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                UNIQUE(project_id, title)
            )"""
+    )
+    # Existing installs created project_id as NOT NULL; shared documents need
+    # it nullable. DROP NOT NULL is idempotent (no-op when already nullable).
+    db_execute("ALTER TABLE writer_documents ALTER COLUMN project_id DROP NOT NULL")
+    # Shared documents (project_id IS NULL) need their own title uniqueness:
+    # the UNIQUE(project_id, title) constraint treats NULLs as distinct. This
+    # partial index is also the ON CONFLICT arbiter for the shared upsert.
+    db_execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS writer_documents_shared_title_key "
+        "ON writer_documents(title) WHERE project_id IS NULL"
     )
     db_execute(
         "CREATE INDEX IF NOT EXISTS writer_messages_project_created_idx "
