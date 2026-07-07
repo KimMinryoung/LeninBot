@@ -38,6 +38,7 @@ from writer.prompts import (
     build_system_blocks,
     critic_user_message,
     diagnosis_user_message,
+    manuscript_state_block,
     messages_for_model,
     parse_writer_response,
     revision_user_message,
@@ -49,7 +50,6 @@ from writer.store import get_manuscript, get_project, insert_message, touch_proj
 from writer.tools import (
     build_critic_tools,
     build_diagnosis_tools,
-    build_revision_tools,
     build_writer_tools,
 )
 
@@ -183,13 +183,20 @@ async def run_diagnose_revise_pass(
         notes = None
     if notes is not None and diagnosis_is_pass(notes):
         return "<commentary>\n편집자 진단: 지적 사항 없음 — 원문을 그대로 둡니다.\n</commentary>"
-    rev_msg = revision_user_message(body, edits, notes)
+    # Fresh POST-edit document state (listing with STALE markers + pinned
+    # docs, no excerpts — the changed-passage windows carry the working text):
+    # this stage owns the story-bible refresh.
+    state = await asyncio.to_thread(manuscript_state_block, project_id, None, None, False)
+    rev_msg = revision_user_message(body, edits, notes, state)
     if not rev_msg:
         return None
     m_client, m_model, m_display, m_extra = main_model
     await announce(f"퇴고 2/2 — 저자 수정 ({m_display})…")
-    rev_tools, rev_handlers = build_revision_tools(project_id)
-    rev_system = await asyncio.to_thread(build_system_blocks, project, project_id, None, None)
+    # Deliberately the FULL writer surface and the SAME system blocks as the
+    # main pass: an identical (tools, system) prefix reads the prompt cache
+    # the main pass just wrote. The revision request forbids appending.
+    rev_tools, rev_handlers = build_writer_tools(project_id)
+    rev_system = await asyncio.to_thread(build_system_blocks, project, project_id)
     with _writer_scope():
         return await chat_with_tools(
             [{"role": "user", "content": rev_msg}],
@@ -527,9 +534,7 @@ async def stream_writer_reply(
 
     async def run_llm() -> None:
         try:
-            system_blocks = await asyncio.to_thread(
-                build_system_blocks, project, project_id, selection_start, selection_end
-            )
+            system_blocks = await asyncio.to_thread(build_system_blocks, project, project_id)
             with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
                 result = await chat_with_tools(
                     model_messages,

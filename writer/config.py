@@ -38,6 +38,13 @@ MAX_CONTEXT_MESSAGES = 80
 # MIN_CONTEXT_MESSAGES survive the budget so short-term context never drops.
 CONTEXT_CHAR_BUDGET = 30000
 MIN_CONTEXT_MESSAGES = 8
+# The history window advances in quantized jumps of this many chars instead of
+# sliding every turn: a sliding window shifts the message prefix each request,
+# which defeats prompt caching for the whole history block (observed 2026-07-07:
+# Fable turns re-wrote ~60k cache tokens per turn at 2x input price and read
+# back ~0). With the quantum, the window start stays byte-identical across
+# many turns and only jumps once the conversation has grown another quantum.
+CONTEXT_WINDOW_QUANTUM_CHARS = 15000
 
 MANUSCRIPT_TAIL_CHARS = 16000
 MANUSCRIPT_SELECTION_LIMIT = 20000
@@ -99,9 +106,10 @@ WRITER_CRITIC_TOOL_NAMES = frozenset({
     "replace_in_manuscript",
     "read_document",
 })
-# The author-revision stage of diagnose_revise additionally maintains the
-# story bible: it is the turn's last writer-model touchpoint and its context
-# is built AFTER the draft's edits, so it is the stage that actually sees the
-# STALE markers. Without save_document it could only apologize for them
-# (observed in production 2026-07-07, message 819). Still no append.
-WRITER_REVISION_TOOL_NAMES = WRITER_CRITIC_TOOL_NAMES | {"save_document", "search_documents"}
+# The author-revision stage of diagnose_revise gets the FULL writer tool
+# surface: its request must share the exact (tools, system) prefix with the
+# main pass so it reads the prompt cache the main pass just wrote instead of
+# re-writing ~10k tokens at 2x input price. Appending is forbidden by the
+# revision request itself; save_document stays available because this stage
+# is the turn's last writer-model touchpoint and the one that sees post-edit
+# STALE markers (observed in production 2026-07-07, message 819).

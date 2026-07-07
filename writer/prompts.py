@@ -7,6 +7,7 @@ import re
 
 from writer.config import (
     CONTEXT_CHAR_BUDGET,
+    CONTEXT_WINDOW_QUANTUM_CHARS,
     DOC_STALENESS_NOTE_CHARS,
     MANUSCRIPT_OPENING_CHARS,
     MANUSCRIPT_SELECTION_LIMIT,
@@ -27,7 +28,7 @@ from writer.config import (
     WRITER_WEB_SEARCH_ENABLED,
 )
 from writer.documents import get_document, list_documents
-from writer.store import get_manuscript, recent_messages
+from writer.store import get_manuscript, recent_messages, total_message_chars
 
 
 def _tools_prompt_section() -> str:
@@ -45,8 +46,9 @@ def _tools_prompt_section() -> str:
     return (
         "# Tools — you edit the manuscript yourself\n"
         "Every manuscript change goes through append_to_manuscript or replace_in_manuscript. Reply text is "
-        "never saved; manuscript prose never belongs in your reply; never narrate tool use. The context "
-        "tail IS the current saved draft — don't re-read or re-search what you can already see, and never "
+        "never saved; manuscript prose never belongs in your reply; never narrate tool use. The "
+        "<manuscript_state> block in the latest request IS the current saved draft (opening/tail excerpts, "
+        "document listing, pinned documents) — don't re-read or re-search what you can already see, and never "
         "search for text you wrote this same turn. One or two well-chosen lookups beat a chain of guesses. "
         "The background documents are the authoritative reference for setting and plot facts — check them "
         "before inventing or contradicting a detail; never store manuscript prose in them.\n\n"
@@ -154,30 +156,49 @@ def build_base_system_prompt(project: dict) -> str:
     )
 
 
-def manuscript_context(project_id: int, selection_start: int | None, selection_end: int | None) -> str:
+def manuscript_context(
+    project_id: int,
+    selection_start: int | None,
+    selection_end: int | None,
+    include_excerpts: bool = True,
+) -> str:
+    """The VOLATILE manuscript state: counts, opening/tail excerpts, selection,
+    document listing (with STALE nudges), and pinned documents in full.
+
+    This changes on almost every turn (any edit moves the tail and the doc
+    listing's char counts), so it is deliberately kept OUT of the cached
+    system blocks and injected into the current turn's user message instead —
+    a change here must never invalidate the cached prompt prefix. The style
+    guide lives in build_system_blocks, not here, for the same reason.
+
+    include_excerpts=False drops the opening/tail/selection excerpts — the
+    author-revision pass gets its working text as changed-passage windows and
+    only needs the document state around it.
+    """
     manuscript = get_manuscript(project_id) or {}
     body = str(manuscript.get("body") or "")
     parts = [f"Manuscript character count: {len(body)}"]
-    # Opening excerpt for voice/style calibration — only when the opening
-    # cannot overlap the tail, so the two blocks never duplicate text.
-    if len(body) > MANUSCRIPT_TAIL_CHARS + MANUSCRIPT_OPENING_CHARS:
-        parts.append(
-            f"Manuscript opening (chars 0–{MANUSCRIPT_OPENING_CHARS}, for voice/style calibration only — "
-            "already saved):\n" + body[:MANUSCRIPT_OPENING_CHARS]
-        )
-    if body:
-        tail = body[-MANUSCRIPT_TAIL_CHARS:]
-        parts.append(
-            f"Recent manuscript tail (chars {len(body) - len(tail)}–{len(body)}, already saved):\n" + tail
-        )
-    if selection_start is not None and selection_end is not None and body:
-        start = max(0, min(selection_start, len(body)))
-        end = max(start, min(selection_end, len(body)))
-        selected = body[start:end]
-        if selected:
-            if len(selected) > MANUSCRIPT_SELECTION_LIMIT:
-                selected = selected[:MANUSCRIPT_SELECTION_LIMIT] + "\n[selection truncated]"
-            parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
+    if include_excerpts:
+        # Opening excerpt for voice/style calibration — only when the opening
+        # cannot overlap the tail, so the two blocks never duplicate text.
+        if len(body) > MANUSCRIPT_TAIL_CHARS + MANUSCRIPT_OPENING_CHARS:
+            parts.append(
+                f"Manuscript opening (chars 0–{MANUSCRIPT_OPENING_CHARS}, for voice/style calibration only — "
+                "already saved):\n" + body[:MANUSCRIPT_OPENING_CHARS]
+            )
+        if body:
+            tail = body[-MANUSCRIPT_TAIL_CHARS:]
+            parts.append(
+                f"Recent manuscript tail (chars {len(body) - len(tail)}–{len(body)}, already saved):\n" + tail
+            )
+        if selection_start is not None and selection_end is not None and body:
+            start = max(0, min(selection_start, len(body)))
+            end = max(start, min(selection_end, len(body)))
+            selected = body[start:end]
+            if selected:
+                if len(selected) > MANUSCRIPT_SELECTION_LIMIT:
+                    selected = selected[:MANUSCRIPT_SELECTION_LIMIT] + "\n[selection truncated]"
+                parts.append(f"Selected manuscript range {start}:{end}:\n{selected}")
     documents = list_documents(project_id)
     if documents:
         lines = []
@@ -204,8 +225,21 @@ def manuscript_context(project_id: int, selection_start: int | None, selection_e
             if len(content) > PINNED_DOC_CHAR_LIMIT:
                 content = content[:PINNED_DOC_CHAR_LIMIT] + "\n[pinned document truncated]"
             parts.append(f"Pinned document {str(d.get('title'))!r}:\n{content}")
-        parts.extend(style_guide_parts(project_id, documents))
     return "\n\n".join(parts)
+
+
+def manuscript_state_block(
+    project_id: int,
+    selection_start: int | None = None,
+    selection_end: int | None = None,
+    include_excerpts: bool = True,
+) -> str:
+    """manuscript_context wrapped for injection into a user message."""
+    return (
+        "<manuscript_state>\n"
+        + manuscript_context(project_id, selection_start, selection_end, include_excerpts)
+        + "\n</manuscript_state>"
+    )
 
 
 def style_guide_parts(project_id: int, documents: list[dict] | None = None) -> list[str]:
@@ -229,26 +263,29 @@ def style_guide_parts(project_id: int, documents: list[dict] | None = None) -> l
     return parts
 
 
-def build_system_blocks(
-    project: dict,
-    project_id: int,
-    selection_start: int | None,
-    selection_end: int | None,
-) -> list[dict]:
-    return [
+def build_system_blocks(project: dict, project_id: int) -> list[dict]:
+    """Cached system blocks for the writer and author-revision passes: ONLY
+    content that is stable across turns (the craft prompt and the style guide),
+    so the 1h-TTL prefix cache actually hits between turns. The per-turn
+    manuscript state travels in the current user message instead (see
+    messages_for_model); putting it here re-wrote the whole prefix at 2x input
+    price every turn and read back nothing (2026-07-07: ~$1.17 of every $1.30
+    Fable turn was dead cache writes)."""
+    blocks = [
         {
             "type": "text",
             "text": build_base_system_prompt(project),
             "cache_control": WRITER_CACHE_CONTROL_1H,
-        },
-        {
-            "type": "text",
-            "text": "<manuscript_context>\n"
-            + manuscript_context(project_id, selection_start, selection_end)
-            + "\n</manuscript_context>",
-            "cache_control": WRITER_CACHE_CONTROL_1H,
-        },
+        }
     ]
+    guide = style_guide_parts(project_id)
+    if guide:
+        blocks.append({
+            "type": "text",
+            "text": "\n\n".join(guide),
+            "cache_control": WRITER_CACHE_CONTROL_1H,
+        })
+    return blocks
 
 
 def build_critic_system_blocks(project: dict) -> list[dict]:
@@ -426,10 +463,17 @@ def diagnosis_user_message(body: str, edits: list[dict]) -> str | None:
     return "\n\n".join(parts)
 
 
-def revision_user_message(body: str, edits: list[dict], diagnosis_notes: str | None) -> str | None:
+def revision_user_message(
+    body: str,
+    edits: list[dict],
+    diagnosis_notes: str | None,
+    manuscript_state: str | None = None,
+) -> str | None:
     """Stage-2 user message for the MAIN model: revise this turn's passages as
     the author, guided by (but not subordinate to) the editor's diagnosis.
-    With diagnosis_notes=None (stage 1 failed) it asks for self-diagnosis."""
+    With diagnosis_notes=None (stage 1 failed) it asks for self-diagnosis.
+    manuscript_state carries the POST-edit document state (listing with STALE
+    markers, pinned docs) — this stage owns the story-bible refresh."""
     windows = changed_windows(body, edits)
     if not windows:
         return None
@@ -448,7 +492,10 @@ def revision_user_message(body: str, edits: list[dict], diagnosis_notes: str | N
             "sentence shapes; 문장 — 번역투, clichés, echoes, flat verbs; 문체 — fidelity to the style guide.)"
         )
         opening = "Reread the passages you drafted this session with fresh, hostile eyes, then revise them as the author."
-    parts = [
+    parts = []
+    if manuscript_state:
+        parts.append(manuscript_state)
+    parts += [
         "<revision_request>\n" + opening + "\n"
         "- Judge each note: apply what is right, REJECT what would flatten the voice or misread the intent — "
         "obedience is not revision. Account for rejections in commentary.\n"
@@ -504,22 +551,41 @@ def messages_for_model(
     selection_end: int | None = None,
 ) -> list[dict]:
     rows = recent_messages(project_id, MAX_CONTEXT_MESSAGES)
-    # rows are newest-first: apply the char budget from the newest backwards,
-    # then restore chronological order.
+    # Quantized history window: the window start is anchored to absolute char
+    # positions in the whole conversation and advances only in
+    # CONTEXT_WINDOW_QUANTUM_CHARS jumps. A plain per-turn char budget slides
+    # the window every turn, changing the message prefix on every request and
+    # defeating prompt caching for the entire history block. With the quantum,
+    # the kept history spans (budget - quantum, budget] chars and its start
+    # stays byte-identical until the conversation grows another quantum.
+    total = total_message_chars(project_id)
+    threshold = 0
+    over = total - CONTEXT_CHAR_BUDGET
+    if over > 0:
+        threshold = -(-over // CONTEXT_WINDOW_QUANTUM_CHARS) * CONTEXT_WINDOW_QUANTUM_CHARS
+    # rows are newest-first: keep every message that starts at or after the
+    # threshold position, with a minimum-message floor, then restore
+    # chronological order.
     kept: list[dict] = []
-    spent = 0
+    suffix = 0
     for row in rows:
         if row.get("role") not in {"user", "assistant"}:
             continue
         content = str(row.get("content") or "").strip()
         if not content:
             continue
-        if len(kept) >= MIN_CONTEXT_MESSAGES and spent + len(content) > CONTEXT_CHAR_BUDGET:
+        suffix += len(content)
+        if len(kept) >= MIN_CONTEXT_MESSAGES and total - suffix < threshold:
             break
         kept.append({"role": row["role"], "content": content})
-        spent += len(content)
     messages = list(reversed(kept))
-    current_turn = "<user_request>\n" + user_prompt.strip() + "\n</user_request>"
+    # The volatile manuscript state rides in the CURRENT turn only. It is
+    # never persisted with the prompt (store keeps the bare prompt), so past
+    # turns replay byte-identically and the history prefix stays cacheable.
+    current_turn = (
+        manuscript_state_block(project_id, selection_start, selection_end)
+        + "\n\n<user_request>\n" + user_prompt.strip() + "\n</user_request>"
+    )
     messages.append({"role": "user", "content": current_turn})
     return messages
 

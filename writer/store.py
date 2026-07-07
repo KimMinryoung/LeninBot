@@ -631,3 +631,15 @@ def recent_messages(project_id: int, limit: int) -> list[dict]:
             LIMIT %s""",
         (project_id, limit),
     )
+
+
+def total_message_chars(project_id: int) -> int:
+    """Total content chars across the project's whole conversation — the
+    anchor for the quantized history window (writer.prompts.messages_for_model)."""
+    row = db_query_one(
+        """SELECT COALESCE(SUM(CHAR_LENGTH(content)), 0) AS n
+             FROM writer_messages
+            WHERE project_id = %s AND role IN ('user', 'assistant')""",
+        (project_id,),
+    )
+    return int(row["n"]) if row else 0
