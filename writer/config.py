@@ -99,3 +99,9 @@ WRITER_CRITIC_TOOL_NAMES = frozenset({
     "replace_in_manuscript",
     "read_document",
 })
+# The author-revision stage of diagnose_revise additionally maintains the
+# story bible: it is the turn's last writer-model touchpoint and its context
+# is built AFTER the draft's edits, so it is the stage that actually sees the
+# STALE markers. Without save_document it could only apologize for them
+# (observed in production 2026-07-07, message 819). Still no append.
+WRITER_REVISION_TOOL_NAMES = WRITER_CRITIC_TOOL_NAMES | {"save_document", "search_documents"}

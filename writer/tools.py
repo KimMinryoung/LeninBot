@@ -16,6 +16,7 @@ from tool_gateway.profiles import WRITER_PROFILE, profile_tool_names
 from writer.config import (
     WRITER_CRITIC_TOOL_NAMES,
     WRITER_DIAGNOSIS_TOOL_NAMES,
+    WRITER_REVISION_TOOL_NAMES,
     WRITER_WEB_SEARCH_ENABLED,
 )
 from writer.documents import get_document, list_documents, save_document, search_documents
@@ -319,3 +320,10 @@ def build_critic_tools(project_id: int) -> tuple[list[dict], dict]:
 def build_diagnosis_tools(project_id: int) -> tuple[list[dict], dict]:
     """Read-only surface for the diagnosis stage: it reports, it never edits."""
     return _tool_subset(project_id, WRITER_DIAGNOSIS_TOOL_NAMES)
+
+
+def build_revision_tools(project_id: int) -> tuple[list[dict], dict]:
+    """Author-revision surface: read/replace on the manuscript plus document
+    upkeep (save_document) — the stage sees post-edit STALE markers and is
+    responsible for refreshing the story bible. Never append."""
+    return _tool_subset(project_id, WRITER_REVISION_TOOL_NAMES)

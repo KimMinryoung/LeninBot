@@ -46,7 +46,12 @@ from writer.prompts import (
 )
 from writer.runs import WriterRun, get_active_run, register_run, unregister_run
 from writer.store import get_manuscript, get_project, insert_message, touch_project
-from writer.tools import build_critic_tools, build_diagnosis_tools, build_writer_tools
+from writer.tools import (
+    build_critic_tools,
+    build_diagnosis_tools,
+    build_revision_tools,
+    build_writer_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +167,7 @@ async def run_diagnose_revise_pass(
         return None
     m_client, m_model, m_display, m_extra = main_model
     await announce(f"퇴고 2/2 — 저자 수정 ({m_display})…")
-    rev_tools, rev_handlers = build_critic_tools(project_id)
+    rev_tools, rev_handlers = build_revision_tools(project_id)
     rev_system = await asyncio.to_thread(build_system_blocks, project, project_id, None, None)
     with _writer_scope():
         return await chat_with_tools(

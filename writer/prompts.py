@@ -454,8 +454,10 @@ def revision_user_message(body: str, edits: list[dict], diagnosis_notes: str | N
         "obedience is not revision. Account for rejections in commentary.\n"
         "- A structural note (scene turn, emotional line, ending, pacing) may deserve rewriting the whole "
         "passage in one replace — never patch a structural flaw with word swaps. Line notes take the minimum "
-        "span. This pass refines what exists: replace_in_manuscript only; never append or expand the scene's "
-        "scope.\n"
+        "span. Manuscript changes are replace_in_manuscript only; never append or expand the scene's scope.\n"
+        "- After your revisions, if the turn's changes left 'Story so far' or another living document STALE "
+        "(or your rewrites changed facts they record), refresh them with save_document — dense factual "
+        "notes, never prose.\n"
         "- Hold this novel's voice and the style guide absolutely; the notes point at weaknesses, not toward "
         "a more generic register.\n\n"
         + notes_block
@@ -550,6 +552,12 @@ def writer_error_message(provider_display: str, raw_error: str) -> str:
     return f"{provider_display} request failed before completion: {text}"
 
 
+# DeepSeek models occasionally leak raw DSML wrapper tokens (e.g.
+# "<｜｜DSML｜｜commentary>") into their reply text; strip them before parsing
+# so they never reach the persisted commentary (observed in production
+# 2026-07-07, message 819).
+_DSML_TOKEN_RE = re.compile(r"</?｜｜DSML｜｜[^>\n]*>")
+
 _MANUSCRIPT_DELTA_RE = re.compile(
     r"<manuscript_delta>\s*(.*?)\s*</manuscript_delta>",
     re.IGNORECASE | re.DOTALL,
@@ -561,6 +569,7 @@ _COMMENTARY_RE = re.compile(
 
 
 def parse_writer_response(text: str) -> dict[str, str]:
+    text = _DSML_TOKEN_RE.sub("", text or "")
     manuscript_match = _MANUSCRIPT_DELTA_RE.search(text)
     commentary_match = _COMMENTARY_RE.search(text)
     manuscript_text = manuscript_match.group(1).strip() if manuscript_match else ""
