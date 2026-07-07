@@ -341,6 +341,30 @@ def critic_user_message(body: str, edits: list[dict]) -> str | None:
     return "\n\n".join(parts)
 
 
+# Light main models (observed: DeepSeek V4 Flash, 2026-07-07) sometimes "write"
+# a scene only in their reasoning, then reply claiming the edit — a phantom
+# edit that saves nothing. A per-turn reminder at the end of the current
+# request keeps the tool contract in the model's most recent context.
+TOOL_DISCIPLINE_REMINDER = (
+    "<turn_reminder>Reply text is NEVER saved to the manuscript. If this request asks for story "
+    "text to be added or revised, you MUST apply it with append_to_manuscript / "
+    "replace_in_manuscript tool calls BEFORE replying, then describe what you did in "
+    "<commentary>. Claiming an edit without having made the tool call means nothing was "
+    "written.</turn_reminder>"
+)
+
+
+def with_tool_discipline_reminder(messages: list[dict]) -> list[dict]:
+    """Append the tool-discipline reminder to the current turn's user message."""
+    if not messages:
+        return messages
+    out = list(messages)
+    last = dict(out[-1])
+    last["content"] = str(last.get("content") or "") + "\n\n" + TOOL_DISCIPLINE_REMINDER
+    out[-1] = last
+    return out
+
+
 def messages_for_model(
     project_id: int,
     user_prompt: str,

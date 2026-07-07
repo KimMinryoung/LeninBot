@@ -32,6 +32,7 @@ from writer.prompts import (
     critic_user_message,
     messages_for_model,
     parse_writer_response,
+    with_tool_discipline_reminder,
     writer_error_message,
 )
 from writer.runs import WriterRun, get_active_run, register_run, unregister_run
@@ -152,6 +153,11 @@ async def stream_writer_reply(
 
     request_kind = ""
     model_messages = messages_for_model(project_id, prompt, selection_start, selection_end)
+    # DeepSeek main models have produced phantom edits (a reply claiming a
+    # scene was added, zero tool calls, nothing saved — 2026-07-07). Pin the
+    # tool contract to the end of the current turn for those models.
+    if writer_model.startswith("deepseek"):
+        model_messages = with_tool_discipline_reminder(model_messages)
     user_row = insert_message(
         project_id=project_id,
         role="user",

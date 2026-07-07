@@ -588,7 +588,12 @@
     // right after each tool write hits the DB; refetch (debounced) and update
     // the pane mid-run instead of waiting for the final event. Never clobbers
     // local typing or an active IME composition.
-    const liveManuscript = { timer: null, busy: false, rerun: false };
+    // epoch orders manuscript state writers: any code that sets
+    // state.manuscript from the server bumps it, and an in-flight live refresh
+    // whose fetch started under an older epoch discards its (stale) response
+    // instead of overwriting newer state. Without this, a mid-run refresh
+    // response landing after the post-run loadProject rolled the pane back.
+    const liveManuscript = { timer: null, busy: false, rerun: false, epoch: 0 };
 
     function manuscriptViewClean() {
       return !state.composing
@@ -609,14 +614,17 @@
       if (liveManuscript.busy) { liveManuscript.rerun = true; return; }
       liveManuscript.busy = true;
       const projectId = state.current.id;
+      const epoch = liveManuscript.epoch;
       try {
         if (!manuscriptViewClean()) return;
         const res = await api(`/writer/projects/${projectId}/manuscript`);
         const data = await res.json();
         const body = (data.manuscript && data.manuscript.body) || '';
         if (!state.current || state.current.id !== projectId) return;
+        if (epoch !== liveManuscript.epoch) return; // newer state landed while we fetched
         if (!manuscriptViewClean()) return;
         if (body === state.manuscript) return;
+        liveManuscript.epoch += 1;
         const envelope = changedEnvelope(state.manuscript, body);
         const wasLastPage = state.manuscriptPage >= pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1;
         const scrollTop = $('manuscript').scrollTop;
@@ -1066,6 +1074,12 @@
       }
       if (event.type === 'done') {
         ctx.finalSeen = true;
+        // Make zero-edit turns unmissable: light models have replied claiming
+        // an edit without ever calling the manuscript tools (phantom edit) —
+        // if nothing changed, say so instead of letting the claim stand.
+        if (ctx.assistantMessage && Array.isArray(event.edits) && !event.edits.length) {
+          ctx.assistantMessage.addProgress('⚠ 원고 변경 없음 — 이 턴은 원고를 수정하지 않았습니다');
+        }
         if (ctx.assistantMessage) ctx.assistantMessage.finishProgress();
         if (event.display_text) ctx.assistantMessage.setText(event.display_text);
         state.lastAssistant = event.manuscript_text || state.lastAssistant;
@@ -1290,6 +1304,7 @@
       const manuscriptData = await manuscriptRes.json();
       state.manuscript = (manuscriptData.manuscript && manuscriptData.manuscript.body) || '';
       state.savedManuscript = state.manuscript;
+      liveManuscript.epoch += 1; // invalidate any in-flight live refresh
       const lastPage = pageCount(state.manuscript.length, MANUSCRIPT_PAGE_CHARS) - 1;
       if (!prev || prev.wasLastPage) {
         state.manuscriptPage = lastPage;
@@ -1399,6 +1414,7 @@
       const data = await res.json();
       state.manuscript = data.manuscript.body || '';
       state.savedManuscript = state.manuscript;
+      liveManuscript.epoch += 1;
       renderManuscriptPage();
       await loadProjects();
       updateManuscriptStatus('saved');
@@ -1554,6 +1570,7 @@
       const data = await res.json();
       state.manuscript = data.manuscript.body || '';
       state.savedManuscript = state.manuscript;
+      liveManuscript.epoch += 1;
       selectManuscriptRange(start, start + state.lastAssistant.length, { commit: false });
       await loadProjects();
       updateManuscriptStatus('replaced');
