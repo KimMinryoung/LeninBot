@@ -401,7 +401,7 @@ def writer_error_message(provider_display: str, raw_error: str) -> str:
             "Manuscript edits the tools had already applied before the restart are saved; "
             "send the request again to continue from there."
         )
-    if "provider stream produced no text/final event" in lowered:
+    if "provider stream produced no text/final event" in lowered or "provider stream produced no events" in lowered:
         return (
             f"{provider_display} opened the request but then produced no stream data for "
             f"{WRITER_PROVIDER_IDLE_TIMEOUT_SEC}s. The provider connection stalled before "

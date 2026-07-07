@@ -368,6 +368,37 @@ def estimate_tokens(text: str) -> int:
 
 # ── Chat with Tools Loop ─────────────────────────────────────────────
 
+async def _drain_stream_with_idle_guard(stream, idle_timeout_sec: float, on_progress):
+    """Consume a MessageStream with an inactivity watchdog, return the final message.
+
+    Liveness is measured on the FULL event stream, not text_stream: a round
+    that answers with pure tool calls (or a long silent think) emits thinking/
+    input_json deltas but zero text deltas, and the old text-only watchdog
+    killed such streams as idle — observed 2026-07-07 when the writer critic
+    (deepseek-v4-pro, tool-only responses) stalled out three times in a row.
+    Only genuine event silence for idle_timeout_sec now trips the timeout.
+    """
+    event_iter = stream.__aiter__()
+    while True:
+        try:
+            event = await asyncio.wait_for(event_iter.__anext__(), timeout=idle_timeout_sec)
+        except StopAsyncIteration:
+            break
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Provider stream produced no events for {int(idle_timeout_sec)}s"
+            ) from exc
+        if getattr(event, "type", "") == "text" and getattr(event, "text", ""):
+            await emit_progress(on_progress, "text_delta", event.text)
+    try:
+        return await asyncio.wait_for(stream.get_final_message(), timeout=idle_timeout_sec)
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"Provider stream did not finalize within "
+            f"{int(idle_timeout_sec)}s after event stream ended"
+        ) from exc
+
+
 async def chat_with_tools(
     messages: list[dict],
     *,
@@ -458,32 +489,9 @@ async def chat_with_tools(
             return await call
         async with client.messages.stream(**kwargs) as stream:
             if provider_idle_timeout_sec:
-                text_iter = stream.text_stream.__aiter__()
-                while True:
-                    try:
-                        text = await asyncio.wait_for(
-                            text_iter.__anext__(),
-                            timeout=provider_idle_timeout_sec,
-                        )
-                    except StopAsyncIteration:
-                        break
-                    except TimeoutError as exc:
-                        raise TimeoutError(
-                            f"Provider stream produced no text/final event for "
-                            f"{int(provider_idle_timeout_sec)}s"
-                        ) from exc
-                    if text:
-                        await emit_progress(on_progress, "text_delta", text)
-                try:
-                    return await asyncio.wait_for(
-                        stream.get_final_message(),
-                        timeout=provider_idle_timeout_sec,
-                    )
-                except TimeoutError as exc:
-                    raise TimeoutError(
-                        f"Provider stream did not finalize within "
-                        f"{int(provider_idle_timeout_sec)}s after text stream ended"
-                    ) from exc
+                return await _drain_stream_with_idle_guard(
+                    stream, provider_idle_timeout_sec, on_progress
+                )
             async for text in stream.text_stream:
                 if text:
                     await emit_progress(on_progress, "text_delta", text)
