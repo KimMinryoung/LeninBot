@@ -25,7 +25,7 @@ from writer.config import (
     WRITER_MAX_ROUNDS,
     WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
 )
-from writer.models import resolve_writer_model
+from writer.models import WRITER_CRITIC_CHOICE, resolve_light_model, resolve_writer_model
 from writer.prompts import (
     build_critic_system_blocks,
     build_system_blocks,
@@ -169,6 +169,11 @@ async def stream_writer_reply(
     critic_holder: list[str] = []
     critic_budget_tracker: dict = {}
     critic_edit_count = 0
+    # The critic (퇴고) is easy work: it runs on the light DeepSeek tier, not
+    # the heavy main model, falling back to the main model when unconfigured.
+    critic_client, critic_model, critic_display, critic_extra = resolve_light_model(
+        WRITER_CRITIC_CHOICE, (writer_client, writer_model, writer_display, model_extra)
+    )
     persisted = False
 
     writer_tools, writer_handlers = build_writer_tools(project_id)
@@ -221,6 +226,9 @@ async def stream_writer_reply(
             critic_cost = critic_budget_tracker.get("total_cost")
             if critic_cost is not None:
                 cost = (cost or 0.0) + critic_cost
+        # Delegated light-agent sub-runs (research_web) recorded on the run.
+        for extra_cost in run.extra_costs:
+            cost = (cost or 0.0) + extra_cost["cost_usd"]
         assistant_row = insert_message(
             project_id=project_id,
             role="assistant",
@@ -249,6 +257,8 @@ async def stream_writer_reply(
         if critic_ran:
             event["critic"] = {
                 "ran": True,
+                "model": critic_model,
+                "model_display": critic_display,
                 "cost_usd": critic_budget_tracker.get("total_cost"),
                 "edit_count": critic_edit_count,
             }
@@ -276,7 +286,7 @@ async def stream_writer_reply(
         if not critic_msg:
             return
         await run.broadcast(_sse({"type": "critic_start"}))
-        await run.broadcast(_sse({"type": "tool", "content": "Line-edit pass (퇴고)…"}))
+        await run.broadcast(_sse({"type": "tool", "content": f"Line-edit pass (퇴고, {critic_display})…"}))
         edits_before = len(run.edits)
         try:
             critic_tools, critic_handlers = build_critic_tools(project_id)
@@ -284,8 +294,8 @@ async def stream_writer_reply(
             with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
                 critic_text = await chat_with_tools(
                     [{"role": "user", "content": critic_msg}],
-                    client=writer_client,
-                    model=writer_model,
+                    client=critic_client,
+                    model=critic_model,
                     tools=critic_tools,
                     tool_handlers=critic_handlers,
                     system_prompt=critic_system,
@@ -296,7 +306,7 @@ async def stream_writer_reply(
                     on_progress=on_progress,
                     agent_name="writer_critic",
                     provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-                    **model_extra,
+                    **critic_extra,
                 )
             critic_holder.append(critic_text)
         except Exception:

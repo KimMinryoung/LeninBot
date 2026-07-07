@@ -67,8 +67,10 @@ WRITER_TOOLS = frozenset({
     "read_document",
     "search_documents",
     "save_document",
-    # Off by default (writer.config.WRITER_WEB_SEARCH_ENABLED); listed so the
-    # profile stays the authoritative maximum surface when it is enabled.
+    # Web research (gated by writer.config.WRITER_WEB_SEARCH_ENABLED): the
+    # main model calls research_web, which delegates to a light sub-agent
+    # that uses web_search internally — both belong to the writer surface.
+    "research_web",
     "web_search",
 })
 

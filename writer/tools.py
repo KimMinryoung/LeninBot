@@ -267,19 +267,21 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
         "save_document": _handle_save_document,
     }
 
-    # Web search is disabled by default (see WRITER_WEB_SEARCH_ENABLED). When on,
-    # reuse the main runtime's web_search (schema + Tavily handler).
+    # Web research (see WRITER_WEB_SEARCH_ENABLED): the main model gets the
+    # research_web delegation tool, not raw web_search — a light DeepSeek
+    # sub-agent runs the searches and only its distilled brief enters
+    # heavy-model context (writer.research).
     if WRITER_WEB_SEARCH_ENABLED:
         try:
-            from runtime_tools.registry import TOOLS as _RT_TOOLS, TOOL_HANDLERS as _RT_HANDLERS
+            from writer.models import resolve_writer_model
+            from writer.research import RESEARCH_TOOL_SPEC, build_research_handler
 
-            web_spec = next((t for t in _RT_TOOLS if t.get("name") == "web_search"), None)
-            web_handler = _RT_HANDLERS.get("web_search")
-            if web_spec and web_handler:
-                tools.append(web_spec)
-                handlers["web_search"] = web_handler
+            tools.append(RESEARCH_TOOL_SPEC)
+            handlers["research_web"] = build_research_handler(
+                project_id, lambda: resolve_writer_model(None)
+            )
         except Exception:
-            logger.exception("writer: web_search tool unavailable; continuing with manuscript search only")
+            logger.exception("writer: research_web tool unavailable; continuing with manuscript search only")
 
     # Enforce the gateway profile: the declared allow-list is authoritative.
     allowed = profile_tool_names(WRITER_PROFILE)

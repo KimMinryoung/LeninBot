@@ -58,6 +58,13 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
 }
 WRITER_DEFAULT_CHOICE = "fable"
 
+# Light-agent tiers for delegated subtasks. Easy work runs on cheap DeepSeek
+# regardless of the (usually heavy) main writer model: the line-edit critic
+# gets the pro tier for craft, web research digestion gets flash. Both fall
+# back to the main model when DeepSeek is unconfigured.
+WRITER_CRITIC_CHOICE = "deepseek_pro"
+WRITER_RESEARCH_CHOICE = "deepseek_flash"
+
 _writer_client: anthropic.AsyncAnthropic | None = None
 
 
@@ -136,6 +143,18 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
         extra = bot_config._get_deepseek_thinking_params()
         return client, spec["model"], spec["display"], extra
     return _client(), spec["model"], spec["display"], dict(spec.get("extra") or {})
+
+
+def resolve_light_model(
+    choice: str, fallback: tuple[Any, str, str, dict]
+) -> tuple[Any, str, str, dict]:
+    """Resolve a light-agent choice (critic/research delegation), falling back
+    to the caller's already-resolved main model when the light provider is
+    unavailable — delegation must never break a run."""
+    try:
+        return resolve_writer_model(choice)
+    except (ValueError, RuntimeError):
+        return fallback
 
 
 # Backwards-compatible private alias (older call sites and tests).

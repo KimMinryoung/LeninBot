@@ -52,8 +52,11 @@ def _tools_prompt_section() -> str:
     ]
     if WRITER_WEB_SEARCH_ENABLED:
         lines.append(
-            "- web_search: look up real-world facts (history, geography, technical or domain detail) when accuracy would ground the fiction. "
-            "Do not over-research or let it flatten the prose into an encyclopedia; use it only to get concrete details right.\n"
+            "- research_web(question): delegate a real-world question (history, geography, technical or domain "
+            "detail) to a fast research assistant that searches the web and returns a distilled factual brief. "
+            "Ask one specific question per call and say what the story needs it for; treat the brief as leads, "
+            "not gospel. Do not over-research or let it flatten the prose into an encyclopedia; use it only to "
+            "get concrete details right.\n"
         )
     lines.append(
         "Every manuscript change MUST go through append_to_manuscript or replace_in_manuscript — never paste manuscript "
@@ -79,7 +82,7 @@ def _tools_prompt_section() -> str:
     )
     if WRITER_WEB_SEARCH_ENABLED:
         lines.append(
-            "- When you research real-world specifics with web_search, distill what the story will reuse into a "
+            "- When you research real-world specifics with research_web, save what the story will reuse into a "
             "'Research — <topic>' document (kind 'research') in the same turn: facts once verified should never "
             "need a second search.\n"
         )

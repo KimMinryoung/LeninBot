@@ -8,6 +8,7 @@ changed."""
 from __future__ import annotations
 
 import asyncio
+import json
 
 
 class WriterRun:
@@ -25,6 +26,9 @@ class WriterRun:
         self.final_event: dict | None = None
         self.last_progress = asyncio.get_running_loop().time()
         self.edits: list[dict] = []
+        # Costs of delegated light-agent sub-runs (e.g. research_web), folded
+        # into the persisted message cost at finalization.
+        self.extra_costs: list[dict] = []
 
     def append_text(self, chunk: str) -> None:
         self._text_parts.append(chunk)
@@ -79,3 +83,23 @@ def record_run_edit(project_id: int, action: str, start, end, delta) -> None:
     if run is None or start is None or end is None:
         return
     run.record_edit(action, int(start), int(end), int(delta or 0))
+
+
+def record_run_cost(project_id: int, label: str, cost_usd) -> None:
+    """Record the cost of a delegated light-agent sub-run on the active run."""
+    run = _active_runs.get(project_id)
+    if run is None or not cost_usd:
+        return
+    run.extra_costs.append({"label": label, "cost_usd": float(cost_usd)})
+
+
+async def broadcast_run_event(project_id: int, payload: dict) -> None:
+    """Broadcast an SSE event on the active run and bump its progress clock.
+
+    Lets tool handlers (which outlive any single run) stream sub-agent progress
+    without importing writer.stream."""
+    run = _active_runs.get(project_id)
+    if run is None:
+        return
+    run.last_progress = asyncio.get_running_loop().time()
+    await run.broadcast(f"data: {json.dumps(payload, ensure_ascii=False)}\n\n")

@@ -8,10 +8,20 @@ WRITER_DEFAULT_MAX_TOKENS = 20000
 WRITER_MAX_ROUNDS = 16
 WRITER_IDLE_TIMEOUT_SEC = 240
 WRITER_PROVIDER_IDLE_TIMEOUT_SEC = 70
-# Tavily-backed web_search: enabled so the agent can actively research
-# real-world specifics (period detail, geography, terminology) and distill the
-# findings into background documents instead of guessing or re-searching.
+# Web research: enabled so the agent can actively research real-world
+# specifics (period detail, geography, terminology) and distill the findings
+# into background documents instead of guessing or re-searching. The main
+# model does not call Tavily directly — it delegates through the research_web
+# tool to a light DeepSeek sub-agent that searches and returns a digest
+# (raw search snippets never enter heavy-model context).
 WRITER_WEB_SEARCH_ENABLED = True
+
+# Delegated research sub-agent (research_web): light model, few rounds, and a
+# hard wall-clock cap so a stuck sub-run can never hang the main writer turn.
+WRITER_RESEARCH_MAX_ROUNDS = 6
+WRITER_RESEARCH_MAX_TOKENS = 3000
+WRITER_RESEARCH_BUDGET_USD = 1.0
+WRITER_RESEARCH_TIMEOUT_SEC = 240
 WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 
 MAX_CONTEXT_MESSAGES = 80
