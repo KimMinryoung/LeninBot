@@ -66,6 +66,27 @@ def _writer_scope():
     return caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True))
 
 
+def _refusal_commentary(stop_details: dict | None) -> str:
+    """Human-readable note for a refusal turn, built from the API's structured
+    stop_details so the writer sees WHY instead of a bare 'refusal'."""
+    lines = [
+        "Claude가 안전 정책상 이 요청의 생성을 거부했습니다 (stop_reason: refusal). "
+        "원고는 변경되지 않았습니다."
+    ]
+    if stop_details:
+        category = stop_details.get("category")
+        explanation = str(stop_details.get("explanation") or "").strip()
+        if category:
+            lines.append(f"분류: {category}")
+        if explanation:
+            lines.append(f"사유: {explanation}")
+    lines.append(
+        "경계선 거부는 비결정적이라 같은 요청 재시도가 통과할 수 있습니다. "
+        "그 외에는 표현 수위를 조정하거나 이 턴만 모델을 DeepSeek으로 바꿔 보세요."
+    )
+    return "\n".join(lines)
+
+
 def diagnosis_is_pass(notes: str) -> bool:
     """True when the diagnosis stage found nothing worth an author revision."""
     stripped = notes.strip()
@@ -370,10 +391,15 @@ async def stream_writer_reply(
             if critic_note:
                 commentary = (commentary + "\n\n" if commentary else "") + "[퇴고] " + critic_note
             final_text = "<commentary>\n" + commentary + "\n</commentary>"
+        stop_reason = str(budget_tracker.get("stop_reason") or "")
+        if stop_reason == "refusal":
+            existing = parse_writer_response(final_text)["commentary_text"] if final_text else ""
+            note = _refusal_commentary(budget_tracker.get("stop_details"))
+            merged = (existing + "\n\n" if existing else "") + note
+            final_text = "<commentary>\n" + merged + "\n</commentary>"
         parsed_response = parse_writer_response(final_text)
         usage = dict(budget_tracker.get("usage") or {})
         cost = budget_tracker.get("total_cost")
-        stop_reason = str(budget_tracker.get("stop_reason") or "")
         critic_cost_total: float | None = None
         if critic_ran:
             for tracker in (critic_budget_tracker, revision_budget_tracker):
@@ -407,6 +433,7 @@ async def stream_writer_reply(
             "model": writer_model,
             "model_display": writer_display,
             "stop_reason": stop_reason,
+            "stop_details": budget_tracker.get("stop_details"),
             "usage": usage,
             "cost_usd": cost,
             "manuscript_text": parsed_response["manuscript_text"],

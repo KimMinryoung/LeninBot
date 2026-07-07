@@ -198,6 +198,15 @@ def _update_budget_tracker(
             "stop_reason": str(getattr(response, "stop_reason", "") or ""),
             "usage": _usage_to_dict(getattr(response, "usage", None)),
         })
+        # Refusals carry a structured stop_details (category + explanation) —
+        # surface it so callers can tell the user WHY instead of a bare
+        # "refusal". stop_details is None for every other stop_reason.
+        details = getattr(response, "stop_details", None)
+        if metadata.get("stop_reason") == "refusal" and details is not None:
+            metadata["stop_details"] = {
+                "category": getattr(details, "category", None),
+                "explanation": getattr(details, "explanation", None),
+            }
     budget_tracker.update(metadata)
 
 
