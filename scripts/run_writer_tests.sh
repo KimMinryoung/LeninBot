@@ -16,9 +16,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRED=/etc/credstore.encrypted/db_password.cred
 LOG="$ROOT/temp_dev/test_writer_improvements_$(date +%Y%m%d_%H%M%S).log"
 
-# Source DB_* from .env without polluting the environment further.
+# Source DB_* and WRITER_DB_* from .env without polluting the environment
+# further. WRITER_DB_* is required since the writer tables moved to the local
+# Docker Postgres (leninbot-writer-pg) on 2026-07-07.
 set -a
-source <(grep -E '^DB_' "$ROOT/.env" 2>/dev/null || true)
+source <(grep -E '^(WRITER_)?DB_' "$ROOT/.env" 2>/dev/null || true)
 set +a
 
 if [[ -z "${DB_PASSWORD:-}" ]] && docker info >/dev/null 2>&1; then
