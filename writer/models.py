@@ -156,16 +156,34 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
     return _client(), spec["model"], spec["display"], dict(spec.get("extra") or {})
 
 
+def light_effort_extra(model: str, extra: dict) -> dict:
+    """Effort for cheap delegated work (critic diagnosis, line edits, research
+    digestion) that lands on the Claude writer model: high effort is reserved
+    for prose-writing calls (main turn, author revision), so downgrade
+    output_config.effort to "low" here. Non-Claude extras (DeepSeek — already
+    the cheap tier, params shared with other agents) pass through untouched."""
+    if not model.startswith("claude") or "output_config" not in extra:
+        return extra
+    out = dict(extra)
+    out["output_config"] = {**out["output_config"], "effort": "low"}
+    return out
+
+
 def resolve_light_model(
     choice: str, fallback: tuple[Any, str, str, dict]
 ) -> tuple[Any, str, str, dict]:
     """Resolve a light-agent choice (critic/research delegation), falling back
     to the caller's already-resolved main model when the light provider is
-    unavailable — delegation must never break a run."""
+    unavailable — delegation must never break a run. The fallback runs at low
+    effort: it inherits the main model, not the main turn's prose-grade depth."""
     try:
         return resolve_writer_model(choice)
     except (ValueError, RuntimeError):
-        return fallback
+        client, model, display, extra = fallback
+        light = light_effort_extra(model, extra)
+        if light is extra:
+            return fallback
+        return client, model, display, light
 
 
 # Backwards-compatible private alias (older call sites and tests).

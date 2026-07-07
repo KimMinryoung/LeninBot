@@ -18,7 +18,7 @@ from writer.config import (
     WRITER_RESEARCH_MAX_TOKENS,
     WRITER_RESEARCH_TIMEOUT_SEC,
 )
-from writer.models import WRITER_RESEARCH_CHOICE, resolve_writer_model
+from writer.models import WRITER_RESEARCH_CHOICE, light_effort_extra, resolve_writer_model
 from writer.runs import broadcast_run_event, record_run_cost
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,8 @@ def build_research_handler(project_id: int, resolve_fallback):
         except (ValueError, RuntimeError):
             try:
                 client, model, display, extra = resolve_fallback()
+                # Research digestion is cheap work — never at prose-grade effort.
+                extra = light_effort_extra(model, extra)
             except Exception as exc:
                 logger.exception("writer research: no model provider available project_id=%s", project_id)
                 return f"Research failed: model provider unavailable ({exc})."
