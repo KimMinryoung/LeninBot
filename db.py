@@ -15,6 +15,7 @@ from psycopg2.extras import RealDictCursor
 from secrets_loader import get_secret
 
 _pool: pool.ThreadedConnectionPool | None = None
+_writer_pool: pool.ThreadedConnectionPool | None = None
 
 
 def _application_name() -> str:
@@ -67,14 +68,56 @@ def _get_pool() -> pool.ThreadedConnectionPool:
     return _pool
 
 
+def writer_db_configured() -> bool:
+    """True when the dedicated local writer database is configured."""
+    return bool(os.getenv("WRITER_DB_HOST"))
+
+
+def _get_writer_pool() -> pool.ThreadedConnectionPool:
+    """Pool for the local writer database (Docker leninbot-writer-pg).
+
+    The writer workspace moved off the remote Supabase instance because its
+    ~560ms RTT made every manuscript operation cost seconds; see
+    dev_docs/project_state.md. Falls back to the main pool when unconfigured.
+    """
+    global _writer_pool
+    if _writer_pool is None:
+        _writer_pool = pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=int(os.getenv("WRITER_DB_POOL_MAX", "5")),
+            host=os.getenv("WRITER_DB_HOST"),
+            port=int(os.getenv("WRITER_DB_PORT", "5432")),
+            dbname=os.getenv("WRITER_DB_NAME", "writer"),
+            user=os.getenv("WRITER_DB_USER", "writer"),
+            password=get_secret("WRITER_DB_PASSWORD"),
+            sslmode=os.getenv("WRITER_DB_SSLMODE", "disable"),
+            application_name=_application_name(),
+        )
+    return _writer_pool
+
+
+@contextmanager
+def get_writer_conn():
+    """get_conn against the writer pool; the main pool when unconfigured."""
+    p = _get_writer_pool() if writer_db_configured() else _get_pool()
+    with _conn_from_pool(p) as conn:
+        yield conn
+
+
 @contextmanager
 def get_conn():
-    """Get a connection from the pool. Auto-returns on exit.
+    """Get a connection from the main pool. Auto-returns on exit."""
+    with _conn_from_pool(_get_pool()) as conn:
+        yield conn
+
+
+@contextmanager
+def _conn_from_pool(p: pool.ThreadedConnectionPool):
+    """Get a connection from a pool. Auto-returns on exit.
 
     Detects stale connections (closed by server after idle timeout)
     and transparently replaces them with fresh ones.
     """
-    p = _get_pool()
     conn = p.getconn()
     try:
         # Detect stale connections (Supabase/cloud DB closes idle connections)
@@ -134,6 +177,29 @@ def execute_returning_rowcount(sql: str, params: tuple | list = None) -> int:
 def query_one(sql: str, params: tuple | list = None) -> dict | None:
     """Execute SQL and return a single row dict, or None."""
     with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+# ── Writer-pool variants (fiction workspace tables live in the local DB) ──
+
+def writer_query(sql: str, params: tuple | list = None) -> list[dict]:
+    with get_writer_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+
+def writer_execute(sql: str, params: tuple | list = None) -> None:
+    with get_writer_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+
+
+def writer_query_one(sql: str, params: tuple | list = None) -> dict | None:
+    with get_writer_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             row = cur.fetchone()

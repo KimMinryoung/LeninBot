@@ -1,0 +1,9 @@
+[Unit]
+Description=LeninBot Writer DB Backup Timer (daily 03:20 KST)
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

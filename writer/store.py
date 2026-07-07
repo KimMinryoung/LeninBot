@@ -13,10 +13,12 @@ from typing import Any
 
 from psycopg2.extras import RealDictCursor, execute_values
 
-from db import get_conn
-from db import execute as db_execute
-from db import query as db_query
-from db import query_one as db_query_one
+# Writer tables live in the dedicated local database (db.get_writer_conn);
+# the remote main DB's ~560ms RTT made every manuscript operation cost seconds.
+from db import get_writer_conn as get_conn
+from db import writer_execute as db_execute
+from db import writer_query as db_query
+from db import writer_query_one as db_query_one
 
 from writer.matching import find_normalized_matches
 

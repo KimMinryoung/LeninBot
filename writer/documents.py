@@ -3,8 +3,8 @@ outlines, and research notes stored separately from the manuscript."""
 
 from __future__ import annotations
 
-from db import query as db_query
-from db import query_one as db_query_one
+from db import writer_query as db_query
+from db import writer_query_one as db_query_one
 
 from writer.store import get_project
 

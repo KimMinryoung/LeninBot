@@ -1,0 +1,12 @@
+[Unit]
+Description=LeninBot Writer DB Backup (daily dump to Cloudflare R2)
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+LoadCredentialEncrypted=r2_cf_api_token:/etc/credstore.encrypted/r2_cf_api_token.cred
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/backup_writer_db_to_r2.py
+TimeoutStartSec=900
