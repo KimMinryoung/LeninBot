@@ -46,7 +46,7 @@
     button.primary { background: var(--accent); border-color: var(--accent); color: white; }
     button.danger { color: var(--warn); }
     button:disabled { opacity: .52; cursor: not-allowed; }
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -55,7 +55,8 @@
       padding: 9px 10px;
       outline: none;
     }
-    input:focus, textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184, 131, 47, .18); }
+    input:focus, textarea:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184, 131, 47, .18); }
+    .row select { width: auto; }  /* inline selects (model picker) keep natural width */
     textarea { resize: vertical; }
     .app {
       display: grid;
@@ -355,7 +356,15 @@
           </div>
           <div id="docEditor" class="stack" style="display:none">
             <label>Title<input id="docTitle" type="text" placeholder="Document title"></label>
-            <label>Kind<input id="docKind" type="text" placeholder="character / setting / outline / research / style / pinned / note"></label>
+            <label>Kind<select id="docKind" title="Kind에 따라 문서의 동작이 달라집니다: style·pinned는 매 턴 AI 컨텍스트에 전체 주입">
+              <option value="note">note — 일반 노트</option>
+              <option value="character">character — 인물 시트</option>
+              <option value="setting">setting — 배경·세계관</option>
+              <option value="outline">outline — 줄거리·구성</option>
+              <option value="research">research — 리서치 노트</option>
+              <option value="style">style — 문체 가이드 (매 턴 주입, 문체 기준)</option>
+              <option value="pinned">pinned — 상시 주입 (Story so far 등)</option>
+            </select></label>
             <label>Content<textarea id="docContent" class="doc-content" placeholder="Background reference content (not part of the manuscript)"></textarea></label>
             <div class="row">
               <button id="saveDoc" class="primary" type="button">Save</button>
@@ -1450,12 +1459,27 @@
       renderDocuments();
     }
 
+    function setDocKind(value) {
+      // Legacy documents may carry free-text kinds (the field used to be a
+      // text input); surface them as a one-off option instead of silently
+      // snapping to 'note' and rewriting the kind on the next save.
+      const sel = $('docKind');
+      const v = (value || 'note').trim() || 'note';
+      if (![...sel.options].some((o) => o.value === v)) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = `${v} — (custom)`;
+        sel.appendChild(opt);
+      }
+      sel.value = v;
+    }
+
     async function openDocument(id) {
       if (!state.current) return;
       const res = await api(`/writer/projects/${state.current.id}/documents/${id}`);
       state.editingDoc = (await res.json()).document;
       $('docTitle').value = state.editingDoc.title || '';
-      $('docKind').value = state.editingDoc.kind || 'note';
+      setDocKind(state.editingDoc.kind);
       $('docContent').value = state.editingDoc.content || '';
       $('docStatus').textContent = '';
       updatePinButton();
@@ -1467,7 +1491,7 @@
       if (!state.current) return;
       state.editingDoc = null;
       $('docTitle').value = '';
-      $('docKind').value = 'note';
+      setDocKind('note');
       $('docContent').value = '';
       $('docStatus').textContent = '';
       updatePinButton();
@@ -1488,7 +1512,7 @@
 
     async function togglePinDocument() {
       if (!state.current) return;
-      $('docKind').value = $('docKind').value.trim() === 'pinned' ? 'note' : 'pinned';
+      setDocKind($('docKind').value.trim() === 'pinned' ? 'note' : 'pinned');
       updatePinButton();
       await saveDocumentEdit();
     }
@@ -1737,7 +1761,7 @@
     $('pinDoc').onclick = togglePinDocument;
     $('deleteDoc').onclick = deleteDocumentEdit;
     $('closeDoc').onclick = closeDocument;
-    $('docKind').addEventListener('input', updatePinButton);
+    $('docKind').addEventListener('change', updatePinButton);
     $('send').onclick = sendPrompt;
     $('stop').onclick = () => state.abort && state.abort.abort();
     $('prompt').addEventListener('keydown', (event) => {
