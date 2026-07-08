@@ -2,7 +2,7 @@
 
 최종 확인 기준: 2026-06-19 `api.py`.
 
-`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary. The personal fiction writer routes are implemented in `api_routes/writer.py` and are also exposed by `novel_writer_api.py` on port `8001`; `api.py` includes them as a temporary compatibility path during the frontend proxy migration.
+`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary. The personal fiction writer routes are implemented in `api_routes/writer.py` and are also exposed by `novel_writer_api.py` on port `8001`; `api.py` includes them as a temporary compatibility fallback during rollout.
 
 ## Authentication
 
@@ -130,7 +130,7 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 ## Personal Writer Endpoints
 
-`/writer` is owned by `api_routes/writer.py`. `novel_writer_api.py` serves the dedicated writer process (`novel-writer-api.service`, port 8001), while `api.py` still includes the same routes temporarily for compatibility. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
+`/writer` is owned by `api_routes/writer.py`. `novel_writer_api.py` serves the dedicated writer process (`novel-writer-api.service`, port 8001), while `api.py` still includes the same routes temporarily for compatibility. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` to the dedicated writer service with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
 
 Apply the explicit migration before first use or after schema changes:
 
