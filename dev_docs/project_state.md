@@ -1,6 +1,6 @@
 # Project State
 
-최종 확인 기준: 2026-05-25 코드 트리.
+최종 확인 기준: 2026-07-08 코드 트리.
 
 Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 PostgreSQL/Supabase와 Neo4j에 저장하고, Redis는 실행 중인 task 상태와 mission board 같은 단기 공유 상태를 맡는다.
 
@@ -11,9 +11,9 @@ cyber-lenin.com frontend
         |
         v
 leninbot-api (:8000, FastAPI)
-        |-- /chat -> web_chat.py
-        |-- admin APIs -> chat logs, task reports, private reports, email bridge
-        |-- /.well-known/agent-card.json + /a2a
+        |-- /chat, /chat/feedback, /personas -> api.py + web_chat.py
+        |-- admin/chat-history/report/email/private-report JSON -> api_routes/* modules
+        |-- /.well-known/agent-card.json + /a2a -> api.py
         |
         +--> PostgreSQL/Supabase
         +--> Neo4j KG via kg_runtime/
@@ -60,7 +60,7 @@ developer MCP clients
 | `leninbot-embedding.service` | `embedding_server.py` | local embedding HTTP service |
 | `leninbot-telegram.service` | `telegram/bot.py` | Telegram orchestrator and task worker |
 | `leninbot-roleplay.service` | `telegram/roleplay_bot.py` | standalone roleplay companion bot, independent of Cyber-Lenin |
-| `leninbot-api.service` | `uvicorn api:app` | web chat, chat history, admin API, A2A, email bridge routes, private reports |
+| `leninbot-api.service` | `uvicorn api:app` | web chat, chat history, admin API, A2A, email bridge routes, private report JSON; `api_routes/*` here are code modules in this same process |
 | `novel-writer-api.service` | `uvicorn novel_writer_api:app` | isolated personal fiction writer API and writer SSE runs |
 | `leninbot-browser.service` | `browser/worker.py` | browser automation worker over Unix socket |
 | `leninbot-autonomous.service` | `venv/bin/python -m autonomous_project` | one autonomous project tick |
@@ -68,6 +68,22 @@ developer MCP clients
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
 
 Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
+
+## API Boundary Status
+
+`api_routes/*` does not automatically mean a separate service. As of 2026-07-08, only the personal writer has been split into its own API service. Other extracted route modules are code-ownership boundaries inside `leninbot-api.service` and still share one Uvicorn process, one port (`:8000`), and the same systemd credentials/runtime.
+
+| Surface | Runtime boundary | Code owner | Notes |
+|---|---|---|---|
+| Writer workspace `/writer/*` | separate `novel-writer-api.service` on `:8001` | `novel_writer_api.py`, `api_routes/writer.py`, `writer/` | frontend `/api/proxy/writer` targets this service; `leninbot-api.service` no longer includes writer compatibility routes |
+| Public web chat `/chat`, `/chat/feedback`, `/personas` | same `leninbot-api.service` process | `api.py`, `web_chat.py`, `web_personas.py` | kept in the main API because it shares session locks, fingerprint/proxy identity, persona visibility, feedback/regeneration, and rate limiting |
+| A2A discovery/JSON-RPC | same `leninbot-api.service` process | `api.py`, `a2a_handler.py` | route-module extraction is possible, but it is not a separate service |
+| Admin users `/admin/users*` | same `leninbot-api.service` process | `api_routes/admin_users.py` | code moved out of `api.py`; URLs/auth unchanged |
+| Chat logs/history `/logs`, `/history`, `/sessions`, `/session/{id}` | same `leninbot-api.service` process | `api_routes/chat_history.py` | code moved out of `api.py`; frontend may serve some history from its local DB first |
+| Task reports `/reports*` | same `leninbot-api.service` process | `api_routes/task_reports.py` | code moved out of `api.py`; URLs/auth unchanged |
+| Private report JSON `/private-reports*` | same `leninbot-api.service` process | `api_routes/private_reports.py` | browser shell moved to frontend `/admin/private-reports`; FastAPI only serves JSON |
+| Email bridge `/email/*` | same `leninbot-api.service` process | `api_routes/email.py`, `email_bridge.py` | code moved out of `api.py`; not yet a worker/API split |
+
 
 ## Main Data Stores
 
@@ -110,7 +126,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | Inbound MCP gateway | `mcp_gateway/*`, `scripts/smoke_mcp_gateway.py` |
 | Tool security gateway | `security_gateway/*`, `tool_loop_common.execute_tool` (seam), `scripts/security_gateway.py`, `scripts/smoke_security_gateway.py` |
 
-`shared.py` is now a compatibility facade plus a small set of shared helpers. New implementation should import from the domain modules above instead of growing `shared.py`.
+`shared.py` is now a compatibility facade plus a small set of shared helpers. New implementation should import from the domain modules above instead of growing `shared.py`. Except for `api_routes/writer.py`, route modules listed above are not service boundaries; they are imported into `api.py` and run inside `leninbot-api.service`.
 
 ## Operational Entry Points
 
