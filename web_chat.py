@@ -1019,12 +1019,13 @@ def _load_web_history(
     History is scoped to `persona` so different characters keep separate
     conversation threads even under the same fingerprint/session.
 
-    If `session_id` is provided AND that session has prior turns for any of the
-    given fingerprints, only that session's history is returned (= resume a
-    specific conversation). For long sessions we keep a small stable anchor from
-    the beginning plus recent turns; this preserves continuity and improves
-    provider prompt-cache hits instead of letting a pure sliding window rewrite
-    the entire prefix after every turn.
+    Sessions are independent conversations: when `session_id` is provided,
+    only that session's own prior turns are returned, and a session with no
+    prior turns starts with NO history (never another session's context).
+    For long sessions we keep a small stable anchor from the beginning plus
+    recent turns; this preserves continuity and improves provider
+    prompt-cache hits instead of letting a pure sliding window rewrite the
+    entire prefix after every turn.
     """
     fps = [f for f in (fingerprints or []) if f]
     if not fps:
@@ -1075,12 +1076,10 @@ def _load_web_history(
             by_id = {row["id"]: row for row in anchor_rows + recent_rows}
             rows = sorted(by_id.values(), key=lambda r: r["created_at"])
         else:
-            rows = db_query(
-                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-                   WHERE fingerprint = ANY(%s) AND persona = %s
-                   ORDER BY created_at DESC LIMIT %s""",
-                (fps, persona, limit),
-            )
+            # Brand-new session: start clean. This used to fall back to the
+            # fingerprint's recent turns across ALL sessions, which injected a
+            # previous conversation's context into every fresh session.
+            return []
     else:
         rows = db_query(
             """SELECT id, user_query, bot_answer, created_at FROM chat_logs
