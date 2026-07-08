@@ -687,6 +687,26 @@ def _build_verifier_toolset(mode: str) -> tuple[list, dict]:
     return tools, handlers
 
 
+def _record_failure_experience(content: str, source_type: str) -> None:
+    """Event-driven lesson write-back to experiential_memory. Deduped against
+    the last 30 days so a recurring failure writes one lesson, not N. Never
+    raises — memory write-back must not affect task outcomes."""
+    try:
+        from memory_store.experiential import save_experiential_memory
+        save_experiential_memory(content[:1000], "mistake", source_type, dedupe=True)
+    except Exception as e:
+        logger.debug("Failure experience write skipped: %s", e)
+
+
+def _verifier_reason_head(details: str) -> str:
+    """Pull the most informative line (LLM verdict reason if present) out of
+    verification details for the lesson text."""
+    for line in (details or "").splitlines():
+        if line.startswith("llm_verification:"):
+            return line[:300]
+    return (details or "").splitlines()[0][:300] if details else "(no details)"
+
+
 # ── Reflexion pass (diagnose → author-revise) on task reports ───────
 
 _REFLEXION_REPORT_AGENTS = ("analyst", "scout")
@@ -1109,6 +1129,16 @@ def _build_task_context_content(
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
 
+    # Past experiences relevant to this task (local embeddings, k=3) — the
+    # same auto-recall the chat loop has, extended to the surface doing the
+    # actual work. Lessons written by the failure hooks resurface here.
+    experiences_ctx = ""
+    try:
+        from memory_store.experiential import recall_experiences_block
+        experiences_ctx = recall_experiences_block(content[:1500], context_provider, 3)
+    except Exception as e:
+        logger.debug("Experience recall for task %d failed: %s", task_id, e)
+
     diary_web_ctx = ""
     diary_activity_ctx = ""
     if agent_type == "diary":
@@ -1121,6 +1151,7 @@ def _build_task_context_content(
     context_parts = [
         part for part in (
             state_ctx,
+            experiences_ctx,
             diary_activity_ctx,
             diary_web_ctx,
             mission_ctx,
@@ -1475,6 +1506,17 @@ async def process_task(
                         "Task %d verification (%s mode): %s",
                         task_id, verification_mode, verification.get("status"),
                     )
+                    if verification.get("status") == "failed":
+                        # Lesson write-back: similar future tasks recall this
+                        # via the <past-experiences> block.
+                        agent_label = str(task.get("agent_type") or "task")
+                        await asyncio.to_thread(
+                            _record_failure_experience,
+                            f"[{agent_label}] Task failed independent verification. "
+                            f"Task: {str(task.get('content') or '')[:300]} | "
+                            f"Verifier: {_verifier_reason_head(verification.get('details') or '')}",
+                            "task_verification",
+                        )
                     if verification_mode == "enforce" and verification.get("status") == "failed":
                         verification_retry = await _maybe_redelegate_after_verification_failure(
                             bot, task, verification,

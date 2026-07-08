@@ -100,7 +100,7 @@ Every completed task passes through `_run_verification()` (`telegram/tasks.py`),
 
 - **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `passed` so `verification_status` never rots at `pending`.
 - **Verifier runtime.** The critic runs on the **low tier** of the executor's provider (codex/moon executors are verified by the task provider — an independent judge), budget-capped at $0.15, with a read-only tool surface (`read_self`, `read_file`, `search_files`, `list_directory`, `fetch_url`). `restart_service` is added only in enforce mode.
-- **Verdict flow.** The verdict + details persist to `telegram_tasks.verification_status`/`verification_details`; a FAIL is surfaced in the orchestrator report callback (in shadow mode as an advisory caveat for the user) and in the system alert.
+- **Verdict flow.** The verdict + details persist to `telegram_tasks.verification_status`/`verification_details`; a FAIL is surfaced in the orchestrator report callback (in shadow mode as an advisory caveat for the user) and in the system alert. A FAIL also writes a deduped `mistake` lesson to `experiential_memory` (`source_type=task_verification`) so similar future tasks recall it via their `<past-experiences>` block.
 - **Enforce mode** additionally feeds a FAIL into `_maybe_redelegate_after_verification_failure()`: bounded auto-retry (`retry_limit`, chain-depth guard) that re-delegates with a "take a DIFFERENT approach" instruction, or the restart-handoff path when the verifier determines a telegram restart is required.
 
 Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM + captured SQL).
@@ -116,6 +116,7 @@ Agent tasks receive structured context rather than a passive chat dump:
 | Section | Source |
 |---|---|
 | current state | recent completed/in-progress/pending tasks |
+| past experiences | `experiential_memory` vector recall keyed on task content (k=3, local BGE-M3, similarity > 0.5) — same auto-recall as the chat loop; includes lessons written by the verification/tick failure hooks |
 | mission context | `telegram_mission_events` |
 | agent execution history | recent completed tasks by same agent type |
 | task chain | Redis `task_result:*` and DB fallback |

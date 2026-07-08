@@ -320,23 +320,9 @@ def _loads_json_array(text: str) -> list:
 
 
 # ── Deduplication ───────────────────────────────────────────────
-
-def _is_duplicate(embedding_str: str, threshold: float = 0.85) -> bool:
-    """Check if a semantically similar entry already exists (last 30 days)."""
-    try:
-        rows = db_query(
-            """SELECT 1 - (embedding <=> %s::vector) AS similarity
-               FROM experiential_memory
-               WHERE created_at > NOW() - INTERVAL '30 days'
-               ORDER BY embedding <=> %s::vector
-               LIMIT 1""",
-            (embedding_str, embedding_str),
-        )
-        if rows and rows[0].get("similarity", 0) > threshold:
-            return True
-    except Exception:
-        pass
-    return False
+# Canonical implementation lives in memory_store.experiential so event-driven
+# writers (verification/tick failure hooks) share the same 30-day threshold.
+from memory_store.experiential import is_duplicate_experience as _is_duplicate
 
 
 # ── Storage ─────────────────────────────────────────────────────

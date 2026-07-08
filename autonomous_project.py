@@ -1215,6 +1215,16 @@ def _format_tick_objective_block(objective: str, provider: str) -> str:
     return f"### Tick Objective\n\n{guidance}\n\n{objective}"
 
 
+def _record_tick_experience(text: str) -> None:
+    """Event-driven lesson write-back for tick failures/no-ops. Deduped over
+    30 days; never raises."""
+    try:
+        from memory_store.experiential import save_experiential_memory
+        save_experiential_memory(text[:1000], "mistake", "autonomous_tick", dedupe=True)
+    except Exception as e:
+        logger.debug("Tick experience write skipped: %s", e)
+
+
 def _summarize_tick_actions_for_review(actions: dict) -> str:
     parts = []
     for note in (actions.get("notes") or [])[:5]:
@@ -1299,6 +1309,18 @@ def _build_task_prompt(
     staged_drafts_text = _format_staged_research_drafts(_recent_staged_research_drafts(project["id"]))
     tick_attention_text = _format_tick_attention_events(_recent_tick_attention_events(project["id"]))
     synthesis_block, synthesis_due = _synthesis_context(project["id"])
+    # Past experiences relevant to this project (local embeddings, k=3):
+    # lessons from failed verifications, no-op ticks, and daily reflection
+    # resurface where the work happens.
+    experiences_block = ""
+    try:
+        from memory_store.experiential import recall_experiences_block
+        experiences_block = recall_experiences_block(
+            f"{project.get('title') or ''} {project.get('topic') or ''} {project.get('goal') or ''}"[:1500],
+            provider, 3,
+        )
+    except Exception as e:
+        logger.debug("Experience recall for project %s failed: %s", project.get("id"), e)
     if not uses_xml(provider):
         parts = [
             f"### Project\n- **id**: {project['id']}\n- **title**: {project['title']}\n- **topic**: {project['topic']}",
@@ -1330,6 +1352,8 @@ def _build_task_prompt(
         )
         if synthesis_due:
             parts.append(f"### Synthesis Due\n\n{synthesis_due}")
+        if experiences_block:
+            parts.append(experiences_block)
         parts.extend([
             f"### Recent Tick Warnings\n\n{tick_attention_text}",
             f"### Staged Research Drafts\n\n{staged_drafts_text}",
@@ -1405,6 +1429,8 @@ def _build_task_prompt(
     )
     if synthesis_due:
         parts.append(f"<synthesis-due>\n{synthesis_due}\n</synthesis-due>")
+    if experiences_block:
+        parts.append(experiences_block)
     parts.extend([
         f"<recent-tick-warnings>\n{tick_attention_text}\n</recent-tick-warnings>",
         f"<staged-research-drafts>\n{staged_drafts_text}\n</staged-research-drafts>",
@@ -1564,6 +1590,10 @@ async def _run_one_tick(project: dict) -> dict:
     except Exception as e:
         logger.exception("Tick failed for project %s", project["id"])
         _log_event(project["id"], "tick_error", str(e)[:2000])
+        await asyncio.to_thread(
+            _record_tick_experience,
+            f"[autonomous] Project '{project.get('title') or project['id']}' tick failed: {str(e)[:300]}",
+        )
         # Treat a failed wake as an attempted run for scheduling purposes, but
         # do not increment turn_count. This prevents one broken project from
         # monopolizing every timer tick while preserving the failure in events.
@@ -1621,7 +1651,22 @@ async def _run_one_tick(project: dict) -> dict:
     # the objective. Durable across ticks — partial/no-op verdicts feed the
     # next tick's warnings, unlike the self-critique paragraph that dies with
     # the chat text.
-    await _review_tick_outcome(project, tick_objective, actions, provider, _chat_with_tools)
+    tick_review = await _review_tick_outcome(project, tick_objective, actions, provider, _chat_with_tools)
+    if tick_review and tick_review.get("verdict") == "no-op":
+        # Lesson write-back: future ticks on similar objectives recall this
+        # via the past-experiences block.
+        reason = ""
+        for line in (tick_review.get("review") or "").splitlines():
+            if line.upper().startswith("REASON:"):
+                reason = line[len("REASON:"):].strip()[:300]
+                break
+        objective_head = (tick_objective or "the project goal").splitlines()[0][:200]
+        await asyncio.to_thread(
+            _record_tick_experience,
+            f"[autonomous] Project '{project.get('title') or project['id']}': tick aimed at "
+            f"'{objective_head}' but produced no real progress"
+            + (f" — {reason}" if reason else ""),
+        )
 
     # Persist this tick's tool-call trace so the next tick can see WHAT this
     # tick actually ran and WHAT came back. Curated research_notes only capture

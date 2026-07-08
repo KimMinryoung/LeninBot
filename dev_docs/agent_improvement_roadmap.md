@@ -109,6 +109,8 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 5 (P1) — Memory into task & autonomous contexts + failure write-back
 
+**Status: SHIPPED (2026-07-08).** `recall_experiences_block` + `is_duplicate_experience` + `save_experiential_memory(dedupe=)` now live in `memory_store/experiential.py`; chat's `_fetch_relevant_experiences` and `experience_writer._is_duplicate` are thin delegates. Task worker injects `<past-experiences>` keyed on task content (`_build_task_context_content`); autonomous tick injects it keyed on title+topic+goal (`_build_task_prompt`, before the warnings block). Write-back hooks: verification FAIL (`_record_failure_experience`, `source_type=task_verification`), tick_error and no-op `tick_review` (`_record_tick_experience`, `source_type=autonomous_tick`) — all `category=mistake`, deduped over 30 days, never raise. KG auto-recall deliberately excluded as designed. Smoke: `scripts/smoke_experience_recall.py` (20/20).
+
 **Goal**: extend the already-live chat auto-recall to the surfaces doing real work, and close the loop by writing structured lessons from failures.
 
 **Design**:
