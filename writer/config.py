@@ -37,6 +37,11 @@ MAX_CONTEXT_MESSAGES = 80
 # commentary adds little craft value. Newest messages win; at least the last
 # MIN_CONTEXT_MESSAGES survive the budget so short-term context never drops.
 CONTEXT_CHAR_BUDGET = 30000
+# Heavy-tier (Claude) turns carry more history and a longer manuscript tail:
+# the extra input costs cents per turn at Fable pricing while cutting
+# exploratory tool rounds and stabilizing voice/continuity. Cheap-tier models
+# (DeepSeek) keep the lean defaults.
+CONTEXT_CHAR_BUDGET_HEAVY = 50000
 MIN_CONTEXT_MESSAGES = 8
 # The history window advances in quantized jumps of this many chars instead of
 # sliding every turn: a sliding window shifts the message prefix each request,
@@ -47,6 +52,9 @@ MIN_CONTEXT_MESSAGES = 8
 CONTEXT_WINDOW_QUANTUM_CHARS = 15000
 
 MANUSCRIPT_TAIL_CHARS = 16000
+# See CONTEXT_CHAR_BUDGET_HEAVY: the tail is uncached per-turn input, so the
+# heavy tier reads roughly double for a few extra cents.
+MANUSCRIPT_TAIL_CHARS_HEAVY = 30000
 MANUSCRIPT_SELECTION_LIMIT = 20000
 # Opening excerpt for voice/style calibration, injected only when the
 # manuscript is long enough that it cannot overlap the tail.

@@ -7,11 +7,13 @@ import re
 
 from writer.config import (
     CONTEXT_CHAR_BUDGET,
+    CONTEXT_CHAR_BUDGET_HEAVY,
     CONTEXT_WINDOW_QUANTUM_CHARS,
     DOC_STALENESS_NOTE_CHARS,
     MANUSCRIPT_OPENING_CHARS,
     MANUSCRIPT_SELECTION_LIMIT,
     MANUSCRIPT_TAIL_CHARS,
+    MANUSCRIPT_TAIL_CHARS_HEAVY,
     MAX_CONTEXT_MESSAGES,
     MIN_CONTEXT_MESSAGES,
     PINNED_DOC_CHAR_LIMIT,
@@ -144,6 +146,9 @@ def build_base_system_prompt(project: dict) -> str:
         + "# Editing discipline\n"
         "- Continue the story with append_to_manuscript; revise with replace_in_manuscript. Each edit flows "
         "seamlessly with the surrounding prose; never duplicate existing text.\n"
+        "- Every new scene starts with a heading line of its own: follow the manuscript's existing heading "
+        "convention, or `# N` (continuing the numbering) when none exists yet. The scene index in "
+        "<manuscript_state> is built from these `#` lines — an unheaded scene is invisible to navigation.\n"
         "- If the writer selected a range, replace exactly that range (use its text as 'find').\n"
         "- If the writer asks a question, wants diagnosis or options, or brainstorms — or the request is "
         "ambiguous or would break continuity — make NO edit; answer or ask in commentary.\n\n"
@@ -156,11 +161,45 @@ def build_base_system_prompt(project: dict) -> str:
     )
 
 
+_SCENE_HEADING_RE = re.compile(r"(?m)^[ \t]*#.+$")
+_SCENE_INDEX_MAX_ENTRIES = 80
+
+
+def scene_index(body: str) -> str:
+    """Compact navigation map of the manuscript: every `#` heading line with
+    its char offset and the scene's opening words. Lets the model jump straight
+    to a scene with read_manuscript(start, end) instead of exploratory
+    searches. Empty string when the manuscript uses no headings."""
+    entries = []
+    for m in _SCENE_HEADING_RE.finditer(body):
+        heading = m.group(0).strip()[:80]
+        after = body[m.end():m.end() + 400]
+        opener = next((ln.strip() for ln in after.splitlines() if ln.strip()), "")[:48]
+        entries.append((m.start(), heading, opener))
+    if not entries:
+        return ""
+    if len(entries) > _SCENE_INDEX_MAX_ENTRIES:
+        keep_tail = _SCENE_INDEX_MAX_ENTRIES - 8
+        entries = entries[:8] + [None] + entries[-keep_tail:]
+    lines = []
+    for entry in entries:
+        if entry is None:
+            lines.append("  … (older scenes omitted)")
+            continue
+        offset, heading, opener = entry
+        lines.append(f"- {heading} — char {offset}" + (f" — {opener}…" if opener else ""))
+    return (
+        "Scene index (heading — start char offset — opening words; jump with "
+        "read_manuscript(start, end), anchor replace_in_manuscript nearby):\n" + "\n".join(lines)
+    )
+
+
 def manuscript_context(
     project_id: int,
     selection_start: int | None,
     selection_end: int | None,
     include_excerpts: bool = True,
+    tail_chars: int = MANUSCRIPT_TAIL_CHARS,
 ) -> str:
     """The VOLATILE manuscript state: counts, opening/tail excerpts, selection,
     document listing (with STALE nudges), and pinned documents in full.
@@ -178,16 +217,19 @@ def manuscript_context(
     manuscript = get_manuscript(project_id) or {}
     body = str(manuscript.get("body") or "")
     parts = [f"Manuscript character count: {len(body)}"]
+    index = scene_index(body)
+    if index:
+        parts.append(index)
     if include_excerpts:
         # Opening excerpt for voice/style calibration — only when the opening
         # cannot overlap the tail, so the two blocks never duplicate text.
-        if len(body) > MANUSCRIPT_TAIL_CHARS + MANUSCRIPT_OPENING_CHARS:
+        if len(body) > tail_chars + MANUSCRIPT_OPENING_CHARS:
             parts.append(
                 f"Manuscript opening (chars 0–{MANUSCRIPT_OPENING_CHARS}, for voice/style calibration only — "
                 "already saved):\n" + body[:MANUSCRIPT_OPENING_CHARS]
             )
         if body:
-            tail = body[-MANUSCRIPT_TAIL_CHARS:]
+            tail = body[-tail_chars:]
             parts.append(
                 f"Recent manuscript tail (chars {len(body) - len(tail)}–{len(body)}, already saved):\n" + tail
             )
@@ -263,11 +305,12 @@ def manuscript_state_block(
     selection_start: int | None = None,
     selection_end: int | None = None,
     include_excerpts: bool = True,
+    tail_chars: int = MANUSCRIPT_TAIL_CHARS,
 ) -> str:
     """manuscript_context wrapped for injection into a user message."""
     return (
         "<manuscript_state>\n"
-        + manuscript_context(project_id, selection_start, selection_end, include_excerpts)
+        + manuscript_context(project_id, selection_start, selection_end, include_excerpts, tail_chars)
         + "\n</manuscript_state>"
     )
 
@@ -584,7 +627,12 @@ def messages_for_model(
     user_prompt: str,
     selection_start: int | None = None,
     selection_end: int | None = None,
+    heavy: bool = False,
 ) -> list[dict]:
+    """heavy=True (Claude-tier turns) doubles the history budget and the
+    manuscript tail — see CONTEXT_CHAR_BUDGET_HEAVY in writer.config."""
+    context_budget = CONTEXT_CHAR_BUDGET_HEAVY if heavy else CONTEXT_CHAR_BUDGET
+    tail_chars = MANUSCRIPT_TAIL_CHARS_HEAVY if heavy else MANUSCRIPT_TAIL_CHARS
     rows = recent_messages(project_id, MAX_CONTEXT_MESSAGES)
     # Quantized history window: the window start is anchored to absolute char
     # positions in the whole conversation and advances only in
@@ -595,7 +643,7 @@ def messages_for_model(
     # stays byte-identical until the conversation grows another quantum.
     total = total_message_chars(project_id)
     threshold = 0
-    over = total - CONTEXT_CHAR_BUDGET
+    over = total - context_budget
     if over > 0:
         threshold = -(-over // CONTEXT_WINDOW_QUANTUM_CHARS) * CONTEXT_WINDOW_QUANTUM_CHARS
     # rows are newest-first: keep every message that starts at or after the
@@ -618,7 +666,7 @@ def messages_for_model(
     # never persisted with the prompt (store keeps the bare prompt), so past
     # turns replay byte-identically and the history prefix stays cacheable.
     current_turn = (
-        manuscript_state_block(project_id, selection_start, selection_end)
+        manuscript_state_block(project_id, selection_start, selection_end, tail_chars=tail_chars)
         + "\n\n<user_request>\n" + user_prompt.strip() + "\n</user_request>"
     )
     messages.append({"role": "user", "content": current_turn})

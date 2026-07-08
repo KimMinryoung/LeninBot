@@ -320,7 +320,12 @@ async def stream_writer_reply(
         return
 
     request_kind = ""
-    model_messages = messages_for_model(project_id, prompt, selection_start, selection_end)
+    # Claude-tier turns get the heavy context budget (longer tail + history);
+    # cheap tiers keep the lean defaults. See writer.config.
+    heavy_context = writer_model.startswith("claude")
+    model_messages = messages_for_model(
+        project_id, prompt, selection_start, selection_end, heavy=heavy_context
+    )
     # DeepSeek main models have produced phantom edits (a reply claiming a
     # scene was added, zero tool calls, nothing saved — 2026-07-07). Pin the
     # tool contract to the end of the current turn for those models.
