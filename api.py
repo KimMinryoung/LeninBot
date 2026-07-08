@@ -8,12 +8,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Query, Request, Depends, HTTPException, Security
+from fastapi import FastAPI, Query, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, JSONResponse
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from api_routes.x402_demo import router as x402_demo_router
+from api_routes.writer import router as writer_router
+from api_security import (
+    require_admin,
+    is_admin_request as _is_admin_request,
+    trusted_proxy_request as _trusted_proxy_request,
+)
 from db import query as db_query, query_one as db_query_one
 from chat_history_sanitize import clean_chat_history_text
 from email_bridge import (
@@ -36,8 +41,6 @@ from runtime_tools.private_reports import (
     save_private_report_sync,
 )
 
-from secrets_loader import get_secret
-
 _LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
 logging.basicConfig(level=_LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -55,44 +58,6 @@ def _clean_chat_history_rows(rows: list[dict]) -> list[dict]:
         cleaned.append(item)
     return cleaned
 
-
-# ── Admin API key authentication ──────────────────────────────────
-_ADMIN_API_KEY = get_secret("ADMIN_API_KEY", "") or ""
-_WRITER_ACCESS_KEY = get_secret("WRITER_ACCESS_KEY", "") or _ADMIN_API_KEY
-_WEBCHAT_PROXY_SECRET = get_secret("WEBCHAT_PROXY_SECRET", "") or ""
-_admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
-_writer_key_header = APIKeyHeader(name="X-Writer-Key", auto_error=False)
-
-
-async def require_admin(api_key: str = Security(_admin_key_header)):
-    """Dependency that enforces admin API key for sensitive endpoints."""
-    if not _ADMIN_API_KEY:
-        raise HTTPException(status_code=503, detail="Admin API key not configured on server")
-    if not api_key or api_key != _ADMIN_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
-
-
-async def require_writer_access(
-    writer_key: str = Security(_writer_key_header),
-    admin_key: str = Security(_admin_key_header),
-):
-    """Allow the writer UI through frontend proxies that strip X-Admin-Key."""
-    if not _WRITER_ACCESS_KEY and not _ADMIN_API_KEY:
-        raise HTTPException(status_code=503, detail="Writer access key not configured on server")
-    if writer_key and writer_key == _WRITER_ACCESS_KEY:
-        return
-    if _ADMIN_API_KEY and admin_key and admin_key == _ADMIN_API_KEY:
-        return
-    raise HTTPException(status_code=403, detail="Invalid or missing writer access key")
-
-
-def _is_admin_request(http_req: Request) -> bool:
-    """Non-raising admin check for endpoints that are public but expose extra
-    capability (e.g. admin-only personas) when a valid X-Admin-Key is present."""
-    if not _ADMIN_API_KEY:
-        return False
-    key = http_req.headers.get("x-admin-key", "")
-    return bool(key) and key == _ADMIN_API_KEY
 
 
 def _normalize_account_username(raw: str) -> str:
@@ -163,6 +128,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 app.include_router(x402_demo_router)
+app.include_router(writer_router)
 
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
@@ -253,47 +219,6 @@ class ChatFeedbackRequest(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=4)
     tone_feedback: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=500)
-
-
-class WriterProjectRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    premise: str = Field(default="", max_length=20000)
-    style_notes: str = Field(default="", max_length=20000)
-
-
-class WriterMessageRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=30000)
-    selection_start: int | None = Field(default=None, ge=0)
-    selection_end: int | None = Field(default=None, ge=0)
-    model: str | None = Field(default=None, max_length=64)
-    critic: bool = Field(default=False)
-
-
-class WriterSettingsRequest(BaseModel):
-    model: str = Field(..., min_length=1, max_length=64)
-
-
-class WriterDocumentRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    kind: str = Field(default="note", max_length=50)
-    content: str = Field(default="", max_length=500_000)
-
-
-class WriterManuscriptRequest(BaseModel):
-    body: str = Field(default="", max_length=5_000_000)
-    note: str = Field(default="", max_length=500)
-
-
-class WriterManuscriptAppendRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=500_000)
-    note: str = Field(default="", max_length=500)
-
-
-class WriterManuscriptReplaceRequest(BaseModel):
-    start: int = Field(..., ge=0)
-    end: int = Field(..., ge=0)
-    replacement: str = Field(default="", max_length=500_000)
-    note: str = Field(default="", max_length=500)
 
 
 class EmailDraftRequest(BaseModel):
@@ -684,351 +609,6 @@ async def private_reports_admin_page():
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
     )
-
-
-@app.get("/writer")
-async def writer_page():
-    html_path = Path(__file__).resolve().parent / "frontend" / "writer.html"
-    return Response(
-        content=html_path.read_text(encoding="utf-8"),
-        media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
-    )
-
-
-@app.get("/writer/projects", dependencies=[Depends(require_writer_access)])
-async def list_writer_projects(
-    limit: int = Query(default=100, ge=1, le=200),
-    status: str = Query(default="active", pattern="^(active|deleted)$"),
-):
-    from creative_writer import (
-        WRITER_INPUT_PRICE_PER_MTOK,
-        WRITER_MODEL,
-        WRITER_MODEL_DISPLAY,
-        WRITER_OUTPUT_PRICE_PER_MTOK,
-        get_selected_model_choice,
-        list_projects,
-        list_writer_models,
-    )
-
-    projects = await asyncio.to_thread(list_projects, limit, status)
-    selected = await asyncio.to_thread(get_selected_model_choice)
-    return {
-        "projects": projects,
-        "model": {
-            "id": WRITER_MODEL,
-            "display_name": WRITER_MODEL_DISPLAY,
-            "input_price_per_mtok": WRITER_INPUT_PRICE_PER_MTOK,
-            "output_price_per_mtok": WRITER_OUTPUT_PRICE_PER_MTOK,
-        },
-        "models": list_writer_models(),
-        "selected_model": selected,
-    }
-
-
-@app.put("/writer/settings", dependencies=[Depends(require_writer_access)])
-async def save_writer_settings(request: WriterSettingsRequest):
-    from creative_writer import set_selected_model_choice
-
-    try:
-        saved = await asyncio.to_thread(set_selected_model_choice, request.model)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"selected_model": saved}
-
-
-@app.post("/writer/projects", dependencies=[Depends(require_writer_access)])
-async def create_writer_project(request: WriterProjectRequest):
-    from creative_writer import create_project
-
-    project = await asyncio.to_thread(
-        create_project,
-        request.title,
-        request.premise,
-        request.style_notes,
-    )
-    return {"project": project}
-
-
-@app.get("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
-async def get_writer_project(project_id: int):
-    from creative_writer import get_project_with_messages
-
-    project = await asyncio.to_thread(get_project_with_messages, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return project
-
-
-@app.patch("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
-async def update_writer_project(project_id: int, request: WriterProjectRequest):
-    from creative_writer import get_project_with_messages, update_project
-
-    project = await asyncio.to_thread(
-        update_project,
-        project_id,
-        request.title,
-        request.premise,
-        request.style_notes,
-    )
-    if not project:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return await asyncio.to_thread(get_project_with_messages, project_id)
-
-
-@app.delete("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
-async def delete_writer_project(project_id: int, permanent: bool = Query(default=False)):
-    from creative_writer import delete_project, trash_project
-
-    if permanent:
-        deleted = await asyncio.to_thread(delete_project, project_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="writer project not found")
-        return {"deleted": True, "permanent": True}
-    trashed = await asyncio.to_thread(trash_project, project_id)
-    if not trashed:
-        raise HTTPException(status_code=404, detail="writer project not found or already trashed")
-    return {"deleted": True, "permanent": False}
-
-
-@app.post("/writer/projects/{project_id}/restore", dependencies=[Depends(require_writer_access)])
-async def restore_writer_project(project_id: int):
-    from creative_writer import restore_project
-
-    restored = await asyncio.to_thread(restore_project, project_id)
-    if not restored:
-        raise HTTPException(status_code=404, detail="writer project not found in trash")
-    return {"restored": True}
-
-
-@app.get("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
-async def get_writer_manuscript(project_id: int):
-    from creative_writer import get_manuscript
-
-    manuscript = await asyncio.to_thread(get_manuscript, project_id)
-    if not manuscript:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"manuscript": manuscript}
-
-
-@app.put("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
-async def save_writer_manuscript(project_id: int, request: WriterManuscriptRequest):
-    from creative_writer import save_manuscript
-
-    manuscript = await asyncio.to_thread(save_manuscript, project_id, request.body, request.note)
-    if not manuscript:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"manuscript": manuscript}
-
-
-@app.get("/writer/projects/{project_id}/manuscript/search", dependencies=[Depends(require_writer_access)])
-async def search_writer_manuscript(
-    project_id: int,
-    q: str = Query(..., min_length=1, max_length=500),
-    limit: int = Query(default=20, ge=1, le=50),
-):
-    from creative_writer import get_project, search_manuscript
-
-    project = await asyncio.to_thread(get_project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    results = await asyncio.to_thread(search_manuscript, project_id, q, limit)
-    return {"results": results}
-
-
-@app.post("/writer/projects/{project_id}/manuscript/append", dependencies=[Depends(require_writer_access)])
-async def append_writer_manuscript(project_id: int, request: WriterManuscriptAppendRequest):
-    from creative_writer import append_manuscript
-
-    manuscript = await asyncio.to_thread(append_manuscript, project_id, request.text, request.note)
-    if not manuscript:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"manuscript": manuscript}
-
-
-@app.post("/writer/projects/{project_id}/manuscript/replace", dependencies=[Depends(require_writer_access)])
-async def replace_writer_manuscript(project_id: int, request: WriterManuscriptReplaceRequest):
-    from creative_writer import replace_manuscript_range
-
-    try:
-        manuscript = await asyncio.to_thread(
-            replace_manuscript_range,
-            project_id,
-            request.start,
-            request.end,
-            request.replacement,
-            request.note,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not manuscript:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"manuscript": manuscript}
-
-
-@app.get("/writer/projects/{project_id}/manuscript/revisions", dependencies=[Depends(require_writer_access)])
-async def list_writer_manuscript_revisions(
-    project_id: int,
-    limit: int = Query(default=30, ge=1, le=100),
-):
-    from creative_writer import get_project, list_manuscript_revisions
-
-    project = await asyncio.to_thread(get_project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    revisions = await asyncio.to_thread(list_manuscript_revisions, project_id, limit)
-    return {"revisions": revisions}
-
-
-@app.get("/writer/documents", dependencies=[Depends(require_writer_access)])
-async def list_writer_shared_documents():
-    """Shared background documents — visible to every writer project."""
-    from creative_writer import list_shared_documents
-
-    documents = await asyncio.to_thread(list_shared_documents)
-    return {"documents": documents}
-
-
-@app.post("/writer/documents", dependencies=[Depends(require_writer_access)])
-async def save_writer_shared_document(request: WriterDocumentRequest):
-    from creative_writer import save_shared_document
-
-    document = await asyncio.to_thread(
-        save_shared_document, request.title, request.content, request.kind
-    )
-    if not document:
-        raise HTTPException(status_code=500, detail="failed to save shared document")
-    return {"document": document}
-
-
-@app.get("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def get_writer_shared_document(document_id: int):
-    from creative_writer import get_shared_document
-
-    document = await asyncio.to_thread(get_shared_document, document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="shared document not found")
-    return {"document": document}
-
-
-@app.put("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def update_writer_shared_document(document_id: int, request: WriterDocumentRequest):
-    from creative_writer import update_document
-
-    document = await asyncio.to_thread(
-        update_document, None, document_id, request.title, request.kind, request.content
-    )
-    if not document:
-        raise HTTPException(status_code=404, detail="shared document not found")
-    return {"document": document}
-
-
-@app.delete("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def delete_writer_shared_document(document_id: int):
-    from creative_writer import delete_document
-
-    deleted = await asyncio.to_thread(delete_document, None, document_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="shared document not found")
-    return {"deleted": True}
-
-
-@app.get("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
-async def list_writer_documents(project_id: int):
-    from creative_writer import get_project, list_documents
-
-    project = await asyncio.to_thread(get_project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    documents = await asyncio.to_thread(list_documents, project_id)
-    return {"documents": documents}
-
-
-@app.post("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
-async def save_writer_document(project_id: int, request: WriterDocumentRequest):
-    from creative_writer import save_document
-
-    document = await asyncio.to_thread(
-        save_document, project_id, request.title, request.content, request.kind
-    )
-    if not document:
-        raise HTTPException(status_code=404, detail="writer project not found")
-    return {"document": document}
-
-
-@app.get("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def get_writer_document(project_id: int, document_id: int):
-    from creative_writer import get_document
-
-    document = await asyncio.to_thread(get_document, project_id, document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="writer document not found")
-    return {"document": document}
-
-
-@app.put("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def update_writer_document(project_id: int, document_id: int, request: WriterDocumentRequest):
-    from creative_writer import update_document
-
-    document = await asyncio.to_thread(
-        update_document, project_id, document_id, request.title, request.kind, request.content
-    )
-    if not document:
-        raise HTTPException(status_code=404, detail="writer document not found")
-    return {"document": document}
-
-
-@app.delete("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
-async def delete_writer_document(project_id: int, document_id: int):
-    from creative_writer import delete_document
-
-    deleted = await asyncio.to_thread(delete_document, project_id, document_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="writer document not found")
-    return {"deleted": True}
-
-
-@app.get("/writer/projects/{project_id}/stream", dependencies=[Depends(require_writer_access)])
-async def writer_stream(project_id: int, http_req: Request):
-    """Reattach to a live background writer run (page reload / dropped stream).
-    Emits no_active_run immediately when there is nothing to attach to."""
-    from creative_writer import stream_active_run
-
-    return StreamingResponse(
-        stream_active_run(
-            project_id=project_id,
-            client_disconnected=http_req.is_disconnected,
-        ),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@app.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])
-async def writer_message(project_id: int, request: WriterMessageRequest, http_req: Request):
-    from creative_writer import stream_writer_reply
-
-    return StreamingResponse(
-        stream_writer_reply(
-            project_id=project_id,
-            prompt=request.prompt,
-            selection_start=request.selection_start,
-            selection_end=request.selection_end,
-            model_choice=request.model,
-            critic=request.critic,
-            client_disconnected=http_req.is_disconnected,
-        ),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-def _trusted_proxy_request(http_req: Request) -> bool:
-    """Return True only for headers injected by the trusted frontend proxy."""
-    if not _WEBCHAT_PROXY_SECRET:
-        return False
-    supplied = http_req.headers.get("x-webchat-proxy-secret", "")
-    return bool(supplied and supplied == _WEBCHAT_PROXY_SECRET)
 
 
 def _parse_user_fingerprints(http_req: Request) -> list[str]:
