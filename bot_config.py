@@ -81,6 +81,13 @@ _CONFIG_DEFAULTS = {
     # diagnosis injected into the next tick prompt before publication.
     "reflexion_task_reports": True,
     "reflexion_autonomous_publish": True,
+    # CLAW pieces in the autonomous loop. autonomous_tick_planner: a cheap
+    # pre-tick call picks this tick's single objective (injected as
+    # <tick-objective>); autonomous_tick_critic: a cheap post-tick call judges
+    # whether the tick's durable actions served that objective (tick_review
+    # event, non-advanced verdicts feed the next tick's warnings).
+    "autonomous_tick_planner": True,
+    "autonomous_tick_critic": True,
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -171,6 +178,8 @@ _CONFIG_META = {
     "task_verification_mode": _config_meta("태스크 검증", "", ["off", "shadow", "enforce"], ["telegram-task"]),
     "reflexion_task_reports": _config_meta("리포트 퇴고", "", [True, False], ["telegram-task"]),
     "reflexion_autonomous_publish": _config_meta("자율 초안 진단", "", [True, False], ["autonomous-next-tick"]),
+    "autonomous_tick_planner": _config_meta("자율 틱 플래너", "", [True, False], ["autonomous-next-tick"]),
+    "autonomous_tick_critic": _config_meta("자율 틱 크리틱", "", [True, False], ["autonomous-next-tick"]),
 }
 
 _MODEL_ALIAS_MAP = {
@@ -415,6 +424,16 @@ def get_reflexion_task_reports() -> bool:
 def get_reflexion_autonomous_publish() -> bool:
     """Whether staged autonomous drafts get an editorial diagnosis before publish."""
     return bool(_config.get("reflexion_autonomous_publish", True))
+
+
+def get_autonomous_tick_planner() -> bool:
+    """Whether a cheap planner call picks each autonomous tick's objective."""
+    return bool(_config.get("autonomous_tick_planner", True))
+
+
+def get_autonomous_tick_critic() -> bool:
+    """Whether a cheap critic call reviews each autonomous tick's outcome."""
+    return bool(_config.get("autonomous_tick_critic", True))
 
 
 def get_current_model_selection(

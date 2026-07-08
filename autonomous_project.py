@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -193,7 +194,10 @@ def _log_event(
 
 
 _TICK_TOOL_LOG_EVENT_TYPE = "tick_tool_log"
-_TICK_ATTENTION_EVENT_TYPES = ("tick_error", "tick_no_durable_action", "advisories_retained_no_durable_action")
+# tick_review rows only warn on partial/no-op verdicts (filtered in the query);
+# advanced/inconclusive reviews stay in the event log without polluting the
+# next tick's warnings.
+_TICK_ATTENTION_EVENT_TYPES = ("tick_error", "tick_no_durable_action", "advisories_retained_no_durable_action", "tick_review")
 
 
 def _format_tick_tool_log(
@@ -250,6 +254,7 @@ def _recent_tick_attention_events(project_id: int, limit: int = 3) -> list[dict]
               FROM autonomous_project_events
              WHERE project_id = %s
                AND event_type = ANY(%s)
+               AND (event_type != 'tick_review' OR meta->>'verdict' IN ('partial', 'no-op'))
              ORDER BY created_at DESC, id DESC
              LIMIT %s
             """,
@@ -1054,14 +1059,27 @@ def _cached_editorial_diagnosis(project_id: int, slug: str, draft_updated_at) ->
     return None
 
 
+async def _cheap_reviewer_profile(provider: str) -> tuple[str, "object"]:
+    """Resolve the cheap model used by tick-side review calls (editorial
+    diagnosis, tick planner, tick critic): DeepSeek flash when available,
+    else the tick provider's own low tier."""
+    from bot_config import _deepseek_client
+    from runtime_profile import resolve_runtime_profile
+
+    cheap_provider = "deepseek" if _deepseek_client else provider
+    profile = await resolve_runtime_profile(
+        "autonomous", provider_override=cheap_provider, tier_override="low",
+    )
+    return cheap_provider, profile
+
+
 async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn) -> str | None:
     """Run (or reuse) an editorial diagnosis over this project's staged drafts.
     Returns the combined non-PASS notes for prompt injection, or None. Any
     failure degrades to no injection — the tick itself must never break."""
-    from bot_config import get_reflexion_autonomous_publish, _deepseek_client
+    from bot_config import get_reflexion_autonomous_publish
     from llm.reflexion import diagnose, diagnosis_is_pass
     from research_store import get_document
-    from runtime_profile import resolve_runtime_profile
 
     if not get_reflexion_autonomous_publish():
         return None
@@ -1072,12 +1090,7 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
     if not drafts:
         return None
 
-    # Cheap diagnoser: DeepSeek flash when available, else the tick provider's
-    # own low tier.
-    diag_provider = "deepseek" if _deepseek_client else provider
-    profile = await resolve_runtime_profile(
-        "autonomous", provider_override=diag_provider, tier_override="low",
-    )
+    diag_provider, profile = await _cheap_reviewer_profile(provider)
 
     blocks: list[str] = []
     for row in drafts:
@@ -1117,6 +1130,150 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
         if not diagnosis_is_pass(notes):
             blocks.append(f"[draft: {slug}]\n{notes}")
     return "\n\n".join(blocks) or None
+
+
+# ── Tick planner / critic (CLAW pieces around the main wake) ─────────
+
+_TICK_OBJECTIVE_EVENT_TYPE = "tick_objective"
+_TICK_REVIEW_EVENT_TYPE = "tick_review"
+_TICK_PLANNER_CONTEXT_CAP = 20000
+
+_TICK_PLANNER_SYSTEM = (
+    "You are the tick planner for an autonomous research agent that wakes once per hour and "
+    "can take exactly one concrete step per wake. From the project context the agent is about "
+    "to receive, choose THIS tick's single most valuable objective.\n\n"
+    "Priorities, in order: (1) pending operator advice; (2) staged drafts due for fact-check "
+    "and publication — including editorial-diagnosis notes to address; (3) a due synthesis "
+    "note; (4) the plan's next unfinished step; (5) the most valuable open research gap. "
+    "Recent tick warnings mean the previous approach stalled — choose a different angle, not "
+    "a repeat.\n\n"
+    "Pick ONE objective that ends in a durable artifact this tick. Reply in exactly this "
+    "format:\n"
+    "OBJECTIVE: <one imperative sentence naming the concrete action and its subject>\n"
+    "ARTIFACT: <research_note | synthesis_note | staged_draft | publication | plan_revision | state_change>\n"
+    "WHY: <one or two sentences>"
+)
+
+_TICK_CRITIC_SYSTEM = (
+    "You are the tick critic for an autonomous research agent. Judge whether this tick's "
+    "durable actions actually advanced its objective — or, absent an objective, the project "
+    "goal by one concrete step. Judge substance, not effort: a note that merely restates "
+    "already-known context is a no-op; a genuine new finding, a staged or published artifact, "
+    "or a meaningful plan/state change is progress.\n\n"
+    "Reply in exactly this format:\n"
+    "VERDICT: <advanced | partial | no-op>\n"
+    "REASON: <one line>"
+)
+
+
+async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, chat_fn) -> str | None:
+    """Pre-tick planner: one cheap call over the assembled tick context picks
+    the tick's single objective. Returns the planner text for prompt injection,
+    or None (disabled, malformed reply, or failure — never blocks the tick)."""
+    from bot_config import get_autonomous_tick_planner
+
+    if not get_autonomous_tick_planner():
+        return None
+    cheap_provider, profile = await _cheap_reviewer_profile(provider)
+    try:
+        objective = await chat_fn(
+            [{
+                "role": "user",
+                "content": (
+                    "Project context the agent will receive this tick:\n\n"
+                    + task_prompt[:_TICK_PLANNER_CONTEXT_CAP]
+                    + "\n\nChoose this tick's objective."
+                ),
+            }],
+            system_prompt=_TICK_PLANNER_SYSTEM,
+            model=profile.model_id,
+            max_tokens=400,
+            budget_usd=0.05,
+            provider_override=cheap_provider,
+            agent_name="tick_planner",
+            runtime_kind="autonomous",
+        )
+    except Exception as e:
+        logger.warning("tick planner failed for project %s: %s", project["id"], e)
+        return None
+    objective = (objective or "").strip()
+    if not objective or "OBJECTIVE:" not in objective.upper():
+        logger.warning("tick planner reply malformed for project %s: %r", project["id"], objective[:200])
+        return None
+    _log_event(project["id"], _TICK_OBJECTIVE_EVENT_TYPE, objective, {"model": profile.model_id})
+    return objective
+
+
+def _format_tick_objective_block(objective: str, provider: str) -> str:
+    guidance = (
+        "A pre-tick planner reviewed your project state and chose this tick's objective. "
+        "Pursue it unless the full context clearly shows it is stale or wrong — if you "
+        "deviate, say why in your self-critique."
+    )
+    if uses_xml(provider):
+        return f"<tick-objective>\n{guidance}\n\n{objective}\n</tick-objective>"
+    return f"### Tick Objective\n\n{guidance}\n\n{objective}"
+
+
+def _summarize_tick_actions_for_review(actions: dict) -> str:
+    parts = []
+    for note in (actions.get("notes") or [])[:5]:
+        parts.append(f"- research note: {str(note)[:300]}")
+    for draft in (actions.get("staged_drafts") or [])[:3]:
+        parts.append(f"- staged draft: {str(draft)[:300]}")
+    for pub in (actions.get("publications") or [])[:3]:
+        parts.append(f"- publication: {str(pub)[:300]}")
+    if actions.get("plan_rationale"):
+        parts.append(f"- plan revision: {str(actions['plan_rationale'])[:300]}")
+    if actions.get("state_change"):
+        parts.append(f"- state change: {str(actions['state_change'])[:200]}")
+    return "\n".join(parts) or "(no durable actions recorded)"
+
+
+async def _review_tick_outcome(
+    project: dict, objective: str | None, actions: dict, provider: str, chat_fn,
+) -> dict | None:
+    """Post-tick critic: one cheap call judges the tick's durable actions
+    against the pre-tick objective (or the one-concrete-step standard). The
+    verdict is logged as a tick_review event; partial/no-op verdicts surface
+    in the next tick's warnings. Never blocks the tick."""
+    from bot_config import get_autonomous_tick_critic
+
+    if not get_autonomous_tick_critic():
+        return None
+    cheap_provider, profile = await _cheap_reviewer_profile(provider)
+    parts = [f"Project goal: {project.get('goal') or ''}"]
+    if objective:
+        parts.append(f"Tick objective (chosen pre-tick):\n{objective}")
+    else:
+        parts.append(
+            "No pre-tick objective was set; judge against the project goal and the "
+            "one-concrete-step standard."
+        )
+    parts.append(f"Durable actions this tick:\n{_summarize_tick_actions_for_review(actions)}")
+    parts.append("Judge the tick.")
+    try:
+        review = await chat_fn(
+            [{"role": "user", "content": "\n\n".join(parts)}],
+            system_prompt=_TICK_CRITIC_SYSTEM,
+            model=profile.model_id,
+            max_tokens=200,
+            budget_usd=0.03,
+            provider_override=cheap_provider,
+            agent_name="tick_critic",
+            runtime_kind="autonomous",
+        )
+    except Exception as e:
+        logger.warning("tick critic failed for project %s: %s", project["id"], e)
+        return None
+    review = (review or "").strip()
+    match = re.search(r"VERDICT:\s*(advanced|partial|no-op)", review, re.IGNORECASE)
+    verdict = match.group(1).lower() if match else "inconclusive"
+    _log_event(
+        project["id"], _TICK_REVIEW_EVENT_TYPE, review,
+        {"verdict": verdict, "model": profile.model_id, "objective": (objective or "")[:300]},
+    )
+    return {"verdict": verdict, "review": review}
 
 
 _EDITORIAL_DIAGNOSIS_GUIDANCE = (
@@ -1347,6 +1504,14 @@ async def _run_one_tick(project: dict) -> dict:
         editorial_diagnosis=editorial_diagnosis,
     )
 
+    # Pre-tick planner (CLAW Planner): a cheap call over the assembled context
+    # turns "advance by exactly one concrete step" into a concrete, externally
+    # chosen step. Logged as tick_objective; the post-tick critic judges
+    # against it.
+    tick_objective = await _plan_tick_objective(project, user_content, provider, _chat_with_tools)
+    if tick_objective:
+        user_content = f"{user_content}\n\n{_format_tick_objective_block(tick_objective, provider)}"
+
     # Autonomous uses its own model tier, independent from chat/task settings.
     profile = await resolve_runtime_profile(
         "autonomous",
@@ -1451,6 +1616,12 @@ async def _run_one_tick(project: dict) -> dict:
         {"cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
          "rounds_used": budget_tracker.get("rounds_used", 0)},
     )
+
+    # Post-tick critic (CLAW Critic): judge the tick's durable actions against
+    # the objective. Durable across ticks — partial/no-op verdicts feed the
+    # next tick's warnings, unlike the self-critique paragraph that dies with
+    # the chat text.
+    await _review_tick_outcome(project, tick_objective, actions, provider, _chat_with_tools)
 
     # Persist this tick's tool-call trace so the next tick can see WHAT this
     # tick actually ran and WHAT came back. Curated research_notes only capture

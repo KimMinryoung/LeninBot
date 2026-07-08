@@ -91,6 +91,8 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 4 (P1) — CLAW in the autonomous loop: tick-objective Planner + durable tick Critic
 
+**Status: SHIPPED (2026-07-08).** `_plan_tick_objective` (OBJECTIVE/ARTIFACT/WHY over the assembled tick context, capped at 20k chars, `tick_objective` event, `<tick-objective>` injection) and `_review_tick_outcome` (VERDICT advanced/partial/no-op vs `_collect_tick_actions`, `tick_review` event; partial/no-op verdicts feed the next tick's warnings via `_recent_tick_attention_events`). Both use the shared `_cheap_reviewer_profile` (DeepSeek flash / provider low tier). Deviations from the sketch: flags are **config keys** (`autonomous_tick_planner`, `autonomous_tick_critic`, default on, /config panel) rather than env vars, matching the Phase 1/2 convention; the critic does not run on `tick_error` ticks; the N≥3-consecutive-no-op enforcement hook is not yet implemented. Smoke: `scripts/smoke_tick_planner_critic.py` (21/21). Success measurement: compare `tick_no_durable_action` + no-op `tick_review` rates over the two weeks after 2026-07-08 vs the two weeks before.
+
 **Goal**: attack the two known failure modes (`tick_error` loops, `tick_no_durable_action` no-op wakes) with a cheap planner before the wake and a cheap critic after it.
 
 **Design**:
