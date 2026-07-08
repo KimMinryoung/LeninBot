@@ -5,16 +5,14 @@ import os
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Query, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from api_routes.admin_users import router as admin_users_router
 from api_routes.chat_history import router as chat_history_router
-from api_routes.email import router as email_router
 from api_routes.private_reports import router as private_reports_router
 from api_routes.task_reports import router as task_reports_router
 from api_routes.x402_demo import router as x402_demo_router
@@ -73,7 +71,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 app.include_router(admin_users_router)
 app.include_router(chat_history_router)
-app.include_router(email_router)
 app.include_router(private_reports_router)
 app.include_router(task_reports_router)
 app.include_router(x402_demo_router)
@@ -89,18 +86,6 @@ _WEBCHAT_RATE_LIMIT = max(1, int(os.getenv("WEBCHAT_RATE_LIMIT", "20") or "20"))
 _WEBCHAT_RATE_WINDOW_SECONDS = max(10, int(os.getenv("WEBCHAT_RATE_WINDOW_SECONDS", "300") or "300"))
 _WEBCHAT_GLOBAL_ACTIVE_LIMIT = max(1, int(os.getenv("WEBCHAT_GLOBAL_ACTIVE_LIMIT", "8") or "8"))
 _DEFAULT_CORS_ORIGINS = "https://cyber-lenin.com,http://localhost:3000"
-
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _a2a_enabled() -> bool:
-    return _env_flag("A2A_ENABLED", default=True)
-
 
 def _parse_cors_origins() -> list[str]:
     """Read comma-separated CORS origins from env, preserving safe defaults."""
@@ -356,52 +341,6 @@ async def list_chat_personas(http_req: Request):
 
     is_admin = _is_admin_request(http_req)
     return {"personas": list_personas(include_admin=is_admin), "default": DEFAULT_PERSONA_ID}
-
-
-AGENT_CARD_DIR = Path(__file__).parent / "research"
-
-
-async def _serve_agent_card():
-    """Serve the public A2A Agent Card for discovery."""
-    if not _a2a_enabled():
-        raise HTTPException(status_code=503, detail="A2A is temporarily disabled")
-    filepath = AGENT_CARD_DIR / "cyber_lenin_a2a_agent_card.json"
-    if not filepath.is_file():
-        raise HTTPException(status_code=404, detail="Agent card not found")
-    return Response(content=filepath.read_text(encoding="utf-8"), media_type="application/json; charset=utf-8")
-
-
-@app.get("/.well-known/agent-card.json")
-async def a2a_agent_card_v1():
-    """v1.0 canonical discovery endpoint."""
-    return await _serve_agent_card()
-
-
-@app.post("/a2a")
-async def a2a_endpoint(request: Request):
-    """A2A JSON-RPC 2.0 endpoint (SendMessage)."""
-    try:
-        body = await request.json()
-    except Exception:
-        return Response(
-            content=json.dumps({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}),
-            media_type="application/json",
-            status_code=400,
-        )
-    if not _a2a_enabled():
-        return Response(
-            content=json.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": "A2A is temporarily disabled"},
-                "id": body.get("id"),
-            }, ensure_ascii=False),
-            media_type="application/json",
-            status_code=503,
-        )
-    from a2a_handler import handle_a2a_message
-    result = await handle_a2a_message(body)
-    status_code = 200 if "result" in result else 400
-    return Response(content=json.dumps(result, ensure_ascii=False), media_type="application/json", status_code=status_code)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run LeninBot Email Poller periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=leninbot-email-poller.service
+
+[Install]
+WantedBy=timers.target
