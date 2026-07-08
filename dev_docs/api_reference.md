@@ -232,6 +232,11 @@ Message request:
 |---|---|---|
 | `GET` | `/admin/private-reports` | noindex admin HTML shell; data actions still require `X-Admin-Key` through the JSON endpoints |
 | `GET` | `/logs` | raw chat log admin list |
+| `GET` | `/admin/users` | list public/admin web accounts with fingerprint/passkey/chat counts |
+| `GET` | `/admin/users/{user_id}` | one account detail with linked fingerprints and safe passkey metadata |
+| `PATCH` | `/admin/users/{user_id}` | rename an account |
+| `POST` | `/admin/users/{source_user_id}/merge` | merge a regular source account into a target account |
+| `DELETE` | `/admin/users/{user_id}` | delete a regular account after username confirmation; chat logs remain fingerprint-retained |
 | `GET` | `/reports` | completed non-programmer task reports |
 | `GET` | `/reports/{report_id}` | one completed task report |
 | `GET` | `/private-reports` | private report list |
