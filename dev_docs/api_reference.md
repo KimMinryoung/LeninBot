@@ -34,7 +34,7 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `POST` | `/a2a` | A2A JSON-RPC endpoint |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
-`api.py` includes small route modules for separated API surfaces: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/email.py` owns `/email/*`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`.
+`api.py` includes small route modules for separated API surfaces: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/email.py` owns `/email/*`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints.
 
 ### `POST /chat`
 
@@ -231,7 +231,6 @@ Message request:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/admin/private-reports` | noindex admin HTML shell; data actions still require `X-Admin-Key` through the JSON endpoints |
 | `GET` | `/logs` | raw chat log admin list |
 | `GET` | `/admin/users` | list public/admin web accounts with fingerprint/passkey/chat counts |
 | `GET` | `/admin/users/{user_id}` | one account detail with linked fingerprints and safe passkey metadata |
