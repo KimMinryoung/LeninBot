@@ -2,7 +2,7 @@
 
 최종 확인 기준: 2026-06-19 `api.py`.
 
-`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary. The personal fiction writer routes are implemented in `api_routes/writer.py` and are also exposed by `novel_writer_api.py` on port `8001`; `api.py` includes them as a temporary compatibility fallback during rollout.
+`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `127.0.0.1:8000` behind the frontend/Nginx boundary. The personal fiction writer routes are implemented in `api_routes/writer.py` and served only by `novel_writer_api.py` on port `8001`; the frontend reaches them through its `/api/proxy/writer` route.
 
 ## Authentication
 
@@ -30,7 +30,6 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `GET` | `/personas` | selectable public web-chat persona catalog |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
-| `GET` | `/writer` | noindex browser shell for the admin-gated personal fiction workspace |
 | `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
 | `POST` | `/a2a` | A2A JSON-RPC endpoint |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
@@ -130,7 +129,7 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 ## Personal Writer Endpoints
 
-`/writer` is owned by `api_routes/writer.py`. `novel_writer_api.py` serves the dedicated writer process (`novel-writer-api.service`, port 8001), while `api.py` still includes the same routes temporarily for compatibility. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` to the dedicated writer service with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
+`/writer` is owned by `api_routes/writer.py` and served by the dedicated writer process (`novel-writer-api.service`, port 8001). `api.py` does not include writer routes. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` to the dedicated writer service with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
 
 Apply the explicit migration before first use or after schema changes:
 

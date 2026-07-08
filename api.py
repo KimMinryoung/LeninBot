@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from pydantic import BaseModel, Field
 from api_routes.x402_demo import router as x402_demo_router
-from api_routes.writer import router as writer_router
 from api_security import (
     require_admin,
     is_admin_request as _is_admin_request,
@@ -128,7 +127,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 app.include_router(x402_demo_router)
-app.include_router(writer_router)
 
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
