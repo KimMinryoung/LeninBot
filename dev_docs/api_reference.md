@@ -34,7 +34,7 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `POST` | `/a2a` | A2A JSON-RPC endpoint |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
-`api.py` includes small route modules for separated API surfaces: `api_routes/private_reports.py` owns the `/private-reports*` JSON endpoints, and `api_routes/x402_demo.py` owns `/x402-demo/quote`.
+`api.py` includes small route modules for separated API surfaces: `api_routes/task_reports.py` owns `/reports*`, `api_routes/private_reports.py` owns `/private-reports*`, and `api_routes/x402_demo.py` owns `/x402-demo/quote`.
 
 ### `POST /chat`
 
