@@ -60,7 +60,7 @@ developer MCP clients
 | `leninbot-embedding.service` | `embedding_server.py` | local embedding HTTP service |
 | `leninbot-telegram.service` | `telegram/bot.py` | Telegram orchestrator and task worker |
 | `leninbot-roleplay.service` | `telegram/roleplay_bot.py` | standalone roleplay companion bot, independent of Cyber-Lenin |
-| `leninbot-api.service` | `uvicorn api:app` | web chat, admin API, email/A2A/private reports |
+| `leninbot-api.service` | `uvicorn api:app` | web chat, admin API, A2A, email bridge routes, private reports |
 | `novel-writer-api.service` | `uvicorn novel_writer_api:app` | isolated personal fiction writer API and writer SSE runs |
 | `leninbot-browser.service` | `browser/worker.py` | browser automation worker over Unix socket |
 | `leninbot-autonomous.service` | `venv/bin/python -m autonomous_project` | one autonomous project tick |
@@ -103,6 +103,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py`, `api_routes/private_reports.py` |
+| Email bridge | `email_bridge.py`, `api_routes/email.py` |
 | Fetch/browser | `content_fetch/*`, `browser/*`, `runtime_tools/fetch.py`, `runtime_tools/media.py` |
 | Inbound MCP gateway | `mcp_gateway/*`, `scripts/smoke_mcp_gateway.py` |
 | Tool security gateway | `security_gateway/*`, `tool_loop_common.execute_tool` (seam), `scripts/security_gateway.py`, `scripts/smoke_security_gateway.py` |
