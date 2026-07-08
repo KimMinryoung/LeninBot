@@ -1,8 +1,8 @@
 # API Reference
 
-최종 확인 기준: 2026-07-08 `api.py`.
+최종 확인 기준: 2026-07-08 코드 트리.
 
-`api.py` exposes the internal FastAPI service used by the frontend, admin tools, A2A, and email bridge. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Most extracted `api_routes/*` files are code-ownership modules imported into this same `leninbot-api.service` process; they are not separate services. The personal fiction writer is the exception: its routes are implemented in `api_routes/writer.py` and served only by `novel_writer_api.py` on port `8001`; the frontend reaches them through `/api/proxy/writer`.
+`api.py` exposes the main internal FastAPI service for public web chat and shared admin JSON routes. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Writer, email, and A2A now have dedicated FastAPI entrypoints and systemd services: `novel_writer_api.py` on `:8001`, `email_api.py` on `:8002`, and `a2a_api.py` on `:8003`. Extracted route modules are service boundaries only when included by one of those dedicated entrypoints; otherwise they are code-ownership modules inside `leninbot-api.service`.
 
 ## Authentication
 
@@ -16,14 +16,17 @@ Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admi
 
 Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `api.py`.
 
-Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call.
+Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call.
 
 ## Service vs Module Boundaries
 
 | Scope | Service/process | Port | Code owner | Boundary type |
 |---|---|---|---|---|
-| Main API | `leninbot-api.service` (`uvicorn api:app`) | `8000` | `api.py`, `api_routes/admin_users.py`, `api_routes/chat_history.py`, `api_routes/email.py`, `api_routes/private_reports.py`, `api_routes/task_reports.py`, `api_routes/x402_demo.py` | one service; route modules are code organization only |
+| Main API | `leninbot-api.service` (`uvicorn api:app`) | `8000` | `api.py`, `api_routes/admin_users.py`, `api_routes/chat_history.py`, `api_routes/private_reports.py`, `api_routes/task_reports.py`, `api_routes/x402_demo.py` | main web chat and shared JSON API |
 | Writer API | `novel-writer-api.service` (`uvicorn novel_writer_api:app`) | `8001` | `novel_writer_api.py`, `api_routes/writer.py`, `writer/` | separate service/process |
+| Email API | `leninbot-email-api.service` (`uvicorn email_api:app`) | `8002` | `email_api.py`, `api_routes/email.py`, `email_bridge.py` | separate admin email bridge API |
+| Email poller | `leninbot-email-poller.timer` -> `leninbot-email-poller.service` | n/a | `scripts/email_poll_once.py`, `email_bridge.py` | periodic IMAP polling worker |
+| A2A API | `leninbot-a2a-api.service` (`uvicorn a2a_api:app`) | `8003` | `a2a_api.py`, `a2a_handler.py` | separate public A2A service/process |
 | Frontend admin shell | frontend Express container | `3000` internally | `/home/grass/frontend/routes/admin.js`, `views/admin/private-reports.ejs` | UI shell; uses `/api/proxy/private-reports` for JSON |
 
 
@@ -39,11 +42,18 @@ Inbound A2A is controlled by non-secret env `A2A_ENABLED`. When false, `/.well-k
 | `GET` | `/personas` | selectable public web-chat persona catalog |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
-| `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
-| `POST` | `/a2a` | A2A JSON-RPC endpoint |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
-Route ownership inside `leninbot-api.service` is split by module, but still runs in one process on port `8000`: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/email.py` owns `/email/*`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. `api.py` itself still owns `/chat`, `/chat/feedback`, `/personas`, `/.well-known/agent-card.json`, and `/a2a`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints.
+Route ownership inside `leninbot-api.service` is split by module, but still runs in one process on port `8000`: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. `api.py` itself owns `/chat`, `/chat/feedback`, and `/personas`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints. `/email/*` is served by `leninbot-email-api.service`; `/.well-known/agent-card.json` and `/a2a` are served by `leninbot-a2a-api.service`.
+
+## Dedicated A2A Endpoints
+
+These routes are served by `leninbot-a2a-api.service` on `172.17.0.1:8003`. The public frontend proxies `/.well-known/agent-card.json` and `/a2a` to this service, preserving the external URL.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
+| `POST` | `/a2a` | A2A JSON-RPC endpoint |
 
 ### `POST /chat`
 
@@ -285,6 +295,10 @@ Message request:
 }
 ```
 
+## Email Bridge Endpoints
+
+`/email/*` routes are served by `leninbot-email-api.service` on `172.17.0.1:8002`. Through the public frontend, admin sessions continue to use `/api/proxy/email/*`; the frontend injects the backend admin key server-side. `POST /email/poll` remains as a manual admin action, while periodic polling is owned by `leninbot-email-poller.timer`.
+
 ## Email Approval Actions
 
 `POST /email/messages/{message_id}/approval` accepts:
@@ -297,7 +311,7 @@ Message request:
 
 ## CORS
 
-API CORS origins are read from `WEBCHAT_CORS_ORIGINS` as a comma-separated env value. `CORS_ALLOW_ORIGINS` is accepted as a compatibility alias. Default:
+Main API CORS origins are read from `WEBCHAT_CORS_ORIGINS` as a comma-separated env value. `EMAIL_CORS_ORIGINS` and `A2A_CORS_ORIGINS` can override the email and A2A service origins respectively; `CORS_ALLOW_ORIGINS` is accepted as a compatibility alias. Default:
 
 - `https://cyber-lenin.com`
 - `http://localhost:3000`

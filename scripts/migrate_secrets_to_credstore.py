@@ -64,6 +64,32 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-api": _FULL,
     "leninbot-telegram": _FULL,
 
+    # Email API handles admin review, outbound approval, and optional resend.
+    "leninbot-email-api": {
+        "ADMIN_API_KEY",
+        "DB_PASSWORD",
+        "EMAIL_IMAP_PASSWORD",
+        "EMAIL_SMTP_PASSWORD",
+        "RESEND_API_KEY",
+    },
+
+    # Timer-driven email polling only reads IMAP and stores inbound metadata.
+    "leninbot-email-poller": {
+        "DB_PASSWORD",
+        "EMAIL_IMAP_PASSWORD",
+    },
+
+    # Public A2A endpoint runs an LLM/tool surface separate from the main API.
+    "leninbot-a2a-api": {
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "NEO4J_PASSWORD",
+        "DB_PASSWORD",
+        "TAVILY_API_KEY",
+        "GITHUB_TOKEN",
+    },
+
     # Browser worker runs the task loop and writes task/log rows, so it needs DB.
     # browser-use itself can use Gemini/OpenAI/Anthropic depending on runtime env.
     "leninbot-browser": {
