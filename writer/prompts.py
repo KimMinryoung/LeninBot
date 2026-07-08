@@ -676,10 +676,12 @@ def parse_writer_response(text: str) -> dict[str, str]:
     manuscript_text = manuscript_match.group(1).strip() if manuscript_match else ""
     commentary_text = commentary_match.group(1).strip() if commentary_match else ""
     if manuscript_match or commentary_match:
+        # Keep text OUTSIDE the tags too: models sometimes emit a tagged note
+        # plus the real (untagged) answer, and dropping the remainder loses it.
         remaining = _MANUSCRIPT_DELTA_RE.sub("", text)
         remaining = _COMMENTARY_RE.sub("", remaining).strip()
-        if remaining and not commentary_text:
-            commentary_text = remaining
+        if remaining:
+            commentary_text = f"{commentary_text}\n\n{remaining}".strip() if commentary_text else remaining
     else:
         manuscript_text = text.strip()
     display_parts = []

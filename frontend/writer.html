@@ -782,11 +782,17 @@
 
     function parseWriterContent(content) {
       const raw = content || '';
+      const manuscriptRe = /<manuscript_delta>\s*([\s\S]*?)\s*<\/manuscript_delta>/gi;
+      const commentaryRe = /<commentary>\s*([\s\S]*?)\s*<\/commentary>/gi;
       const manuscriptMatch = raw.match(/<manuscript_delta>\s*([\s\S]*?)\s*<\/manuscript_delta>/i);
       const commentaryMatch = raw.match(/<commentary>\s*([\s\S]*?)\s*<\/commentary>/i);
       const manuscript = manuscriptMatch ? manuscriptMatch[1].trim() : '';
-      const commentary = commentaryMatch ? commentaryMatch[1].trim() : '';
+      let commentary = commentaryMatch ? commentaryMatch[1].trim() : '';
       if (!manuscriptMatch && !commentaryMatch) return { manuscript: raw.trim(), commentary: '', display: raw };
+      // Keep text OUTSIDE the tags too: models sometimes emit a tagged note
+      // plus the real (untagged) answer, and dropping the remainder loses it.
+      const remaining = raw.replace(manuscriptRe, '').replace(commentaryRe, '').trim();
+      if (remaining) commentary = commentary ? `${commentary}\n\n${remaining}` : remaining;
       const parts = [];
       if (manuscript) parts.push(`Manuscript\n${manuscript}`);
       if (commentary) parts.push(`Notes\n${commentary}`);
