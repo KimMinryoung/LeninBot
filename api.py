@@ -12,6 +12,7 @@ from fastapi import FastAPI, Query, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from pydantic import BaseModel, Field
+from api_routes.chat_history import router as chat_history_router
 from api_routes.email import router as email_router
 from api_routes.private_reports import router as private_reports_router
 from api_routes.task_reports import router as task_reports_router
@@ -22,7 +23,6 @@ from api_security import (
     trusted_proxy_request as _trusted_proxy_request,
 )
 from db import query as db_query, query_one as db_query_one
-from chat_history_sanitize import clean_chat_history_text
 
 _LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
@@ -31,16 +31,6 @@ logging.getLogger().setLevel(_LOG_LEVEL)
 logging.getLogger("neo4j").setLevel(logging.WARNING)
 logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
-def _clean_chat_history_rows(rows: list[dict]) -> list[dict]:
-    cleaned = []
-    for row in rows:
-        item = dict(row)
-        item["user_query"] = clean_chat_history_text(item.get("user_query", ""))
-        item["bot_answer"] = clean_chat_history_text(item.get("bot_answer", ""))
-        cleaned.append(item)
-    return cleaned
-
 
 
 def _normalize_account_username(raw: str) -> str:
@@ -98,6 +88,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
+app.include_router(chat_history_router)
 app.include_router(email_router)
 app.include_router(private_reports_router)
 app.include_router(task_reports_router)
@@ -747,22 +738,6 @@ async def list_chat_personas(http_req: Request):
     return {"personas": list_personas(include_admin=is_admin), "default": DEFAULT_PERSONA_ID}
 
 
-@app.get("/logs", dependencies=[Depends(require_admin)])
-async def get_logs(
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-):
-    """
-    Fetch chat logs (admin view — all fields, ordered by most recent first).
-    Requires X-Admin-Key header.
-    """
-    rows = db_query(
-        "SELECT * FROM chat_logs ORDER BY created_at DESC LIMIT %s OFFSET %s",
-        (limit, offset),
-    )
-    return {"logs": rows, "count": len(rows)}
-
-
 @app.get("/admin/users", dependencies=[Depends(require_admin)])
 async def list_admin_users(
     search: str | None = Query(default=None, max_length=80),
@@ -1049,114 +1024,7 @@ async def delete_admin_user(
     return {"deleted": True, "retained_chat_logs": result["retained_chat_logs"]}
 
 
-@app.get("/history")
-async def get_history(
-    http_req: Request,
-    fingerprint: str | None = Query(default=None, description="Browser fingerprint (anonymous visitors)"),
-    session_id: str | None = Query(default=None, description="Restrict to a single conversation session"),
-    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    """
-    Fetch conversation history.
-    - Anonymous: ?fingerprint=X — only that device's turns.
-    - Logged-in: frontend proxy sets X-User-Fingerprints header — union of all bound devices.
-      If `session_id` is given, only that session is returned.
-      If `persona` is given, only that persona's turns are returned.
-    """
-    fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
-    if not fps:
-        return {"history": []}
-
-    persona_clause = " AND persona = %s" if persona else ""
-    if session_id:
-        params = (session_id, fps) + ((persona,) if persona else ()) + (limit,)
-        rows = db_query(
-            f"""SELECT user_query, bot_answer, created_at
-               FROM chat_logs
-               WHERE session_id = %s AND fingerprint = ANY(%s){persona_clause}
-               ORDER BY created_at ASC
-               LIMIT %s""",
-            params,
-        )
-    else:
-        params = (fps,) + ((persona,) if persona else ()) + (limit,)
-        rows = db_query(
-            f"""SELECT user_query, bot_answer, created_at
-               FROM chat_logs
-               WHERE fingerprint = ANY(%s){persona_clause}
-               ORDER BY created_at ASC
-               LIMIT %s""",
-            params,
-        )
-    return {"history": _clean_chat_history_rows(rows)}
-
-
-@app.get("/sessions")
-async def list_sessions(
-    http_req: Request,
-    fingerprint: str | None = Query(default=None, description="Anonymous browser fingerprint"),
-    persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    """
-    List distinct chat sessions (session_id groups) visible to the caller, with a
-    preview of the first user message and timestamps. Ordered by most-recent activity.
-    Scoped to `persona` when provided so each character has its own session list.
-    """
-    fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
-    if not fps:
-        return {"sessions": []}
-
-    persona_clause = " AND persona = %s" if persona else ""
-    params = (fps,) + ((persona,) if persona else ()) + (limit,)
-    rows = db_query(
-        f"""WITH scoped AS (
-              SELECT id, session_id, fingerprint, user_query, created_at
-                FROM chat_logs
-               WHERE fingerprint = ANY(%s){persona_clause}
-            ),
-            agg AS (
-              SELECT session_id,
-                     MIN(created_at) AS first_at,
-                     MAX(created_at) AS last_at,
-                     COUNT(*)::int   AS message_count
-                FROM scoped
-               GROUP BY session_id
-            ),
-            first_msg AS (
-              SELECT DISTINCT ON (session_id)
-                     session_id, user_query AS first_query
-                FROM scoped
-               ORDER BY session_id, created_at ASC
-            )
-            SELECT agg.session_id, agg.first_at, agg.last_at, agg.message_count,
-                   first_msg.first_query
-              FROM agg
-              JOIN first_msg USING (session_id)
-             ORDER BY agg.last_at DESC
-             LIMIT %s""",
-        params,
-    )
-    # Truncate previews for transport
-    for r in rows:
-        q = r.get("first_query") or ""
-        r["first_query"] = q[:120]
-    return {"sessions": rows}
-
-
 AGENT_CARD_DIR = Path(__file__).parent / "research"
-
-
-@app.delete("/session/{session_id}", dependencies=[Depends(require_admin)])
-async def clear_session(session_id: str):
-    """Clear chat history for a session (deletes from chat_logs)."""
-    result = await asyncio.to_thread(
-        db_query,
-        "DELETE FROM chat_logs WHERE session_id = %s RETURNING id",
-        (session_id,),
-    )
-    return {"session_id": session_id, "cleared": len(result) if result else 0}
 
 
 async def _serve_agent_card():
