@@ -94,6 +94,17 @@ blocked -> pending  (synthesis task after parallel subtasks finish)
 
 `run_agent` runs a bounded in-turn specialist call for narrow analysis paths. It does not replace durable delegated tasks for work that needs continuity.
 
+### Post-Hoc Verification (Critic)
+
+Every completed task passes through `_run_verification()` (`telegram/tasks.py`), an independent LLM critic that re-checks the executor's report with its own tools before the orchestrator relays it. Rollout follows the standard shadow→enforce pattern via the `task_verification_mode` config key (`off | shadow | enforce`, default `shadow`, flips live without restart):
+
+- **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `passed` so `verification_status` never rots at `pending`.
+- **Verifier runtime.** The critic runs on the **low tier** of the executor's provider (codex/moon executors are verified by the task provider — an independent judge), budget-capped at $0.15, with a read-only tool surface (`read_self`, `read_file`, `search_files`, `list_directory`, `fetch_url`). `restart_service` is added only in enforce mode.
+- **Verdict flow.** The verdict + details persist to `telegram_tasks.verification_status`/`verification_details`; a FAIL is surfaced in the orchestrator report callback (in shadow mode as an advisory caveat for the user) and in the system alert.
+- **Enforce mode** additionally feeds a FAIL into `_maybe_redelegate_after_verification_failure()`: bounded auto-retry (`retry_limit`, chain-depth guard) that re-delegates with a "take a DIFFERENT approach" instruction, or the restart-handoff path when the verifier determines a telegram restart is required.
+
+Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM + captured SQL).
+
 ## Context Assembly
 
 Agent tasks receive structured context rather than a passive chat dump:

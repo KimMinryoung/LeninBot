@@ -13,6 +13,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/autonomous_project.md` — 자율 프로젝트 루프 (T0 pilot) — 티어 시스템, 상태기계, 스키마, 운영 CLI, 설계 결정
 - `dev_docs/secret_management.md` — systemd-creds 기반 시크릿 관리 — 3-tier 분류, 서비스별 최소권한, 로테이션 플로우, 운영 CLI
 - `dev_docs/security_gateway.md` — 툴 보안 게이트웨이 — execute_tool 단일 seam, 통합 정책/권한 통제, tool_audit_log 감사 로깅, shadow→enforce 롤아웃, 운영 CLI
+- `dev_docs/agent_improvement_roadmap.md` — 에이전트 지능(CLAW/Reflexion/Plan-and-Execute) + 메모리 개선 단계별 로드맵
 
 Update these documents as phases are completed.
 

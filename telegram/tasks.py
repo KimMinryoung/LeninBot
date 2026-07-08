@@ -456,13 +456,26 @@ def _format_diary_web_chat_context(provider: str | None) -> str:
     )
 
 
+# Agents whose reports get verified by default when the delegation carries no
+# explicit verification policy. Agents absent from this map (visualizer, diary,
+# browser, stasova, ...) skip verification unless a policy is set on the task.
+_DEFAULT_VERIFICATION_POLICIES = {
+    "programmer": {"checks": ["task_report", "server_logs"], "log_service": "telegram"},
+    "analyst": {"checks": ["task_report"]},
+    "scout": {"checks": ["task_report"]},
+    "diplomat": {"checks": ["task_report"]},
+}
+
+
 def _normalize_verification_policy(task: dict) -> dict | None:
     metadata = _load_task_metadata(task)
-    if not metadata:
-        return None
-    policy = metadata.get("verification")
+    policy = (metadata or {}).get("verification")
     if not isinstance(policy, dict):
-        return None
+        agent_type = str(task.get("agent_type") or "").strip().lower()
+        default = _DEFAULT_VERIFICATION_POLICIES.get(agent_type)
+        if default is None:
+            return None
+        policy = dict(default)
     checks = []
     for check in policy.get("checks") or []:
         if check in {"task_report", "url_access", "server_logs"} and check not in checks:
@@ -646,6 +659,32 @@ async def _run_verification(
         (status, details, task_id),
     )
     return {"status": status, "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1)}
+
+
+_VERIFIER_TOOL_NAMES = (
+    "read_self",
+    "read_file",
+    "search_files",
+    "list_directory",
+    "fetch_url",
+)
+_VERIFIER_ENFORCE_ONLY_TOOL_NAMES = ("restart_service",)
+
+
+def _build_verifier_toolset(mode: str) -> tuple[list, dict]:
+    """Read-only tool surface for the verification LLM.
+
+    Shadow mode must observe without side effects, so restart_service is
+    exposed only when verification can act on its verdict (enforce).
+    """
+    from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+
+    allowed = set(_VERIFIER_TOOL_NAMES)
+    if mode == "enforce":
+        allowed.update(_VERIFIER_ENFORCE_ONLY_TOOL_NAMES)
+    tools = [t for t in BASE_TOOLS if t.get("name") in allowed]
+    handlers = {name: BASE_HANDLERS[name] for name in allowed if name in BASE_HANDLERS}
+    return tools, handlers
 
 
 def _get_restart_state(task: dict | None) -> dict:
@@ -1246,6 +1285,9 @@ async def process_task(
     on_progress=None,
     on_complete=None,
     context_provider: str = "claude",
+    verification_mode: str = "off",
+    verify_chat_fn=None,
+    verify_model_fn=None,
 ):
     """Process a task: run tools, generate report, save to DB, send as file.
 
@@ -1265,6 +1307,14 @@ async def process_task(
         on_progress: Optional async callback for live progress updates.
         on_complete: Optional callback(task_id, status, summary) called after
             task finishes. Used to notify the orchestrator of completion.
+        verification_mode: "off" skips post-hoc verification (legacy),
+            "shadow" runs the verifier and records the verdict only,
+            "enforce" additionally auto-retries on FAIL via redelegation.
+        verify_chat_fn: Optional chat fn for the verifier (defaults to
+            chat_with_tools_fn). Lets the critic run on a cheaper/independent
+            provider than the executor.
+        verify_model_fn: Optional model fn for the verifier (defaults to
+            get_model_fn).
     """
     task_id = task["id"]
     user_id = task["user_id"]
@@ -1314,6 +1364,35 @@ async def process_task(
             summary = _extract_summary(final_report)
             was_interrupted = bt.get("was_interrupted", False)
 
+            # Post-hoc independent verification (Critic). Shadow records the
+            # verdict; enforce additionally redelegates on FAIL. Never lets a
+            # verifier error break an already-persisted successful task.
+            verification = None
+            verification_retry = None
+            if verification_mode in ("shadow", "enforce"):
+                try:
+                    v_tools, v_handlers = _build_verifier_toolset(verification_mode)
+                    verification = await _run_verification(
+                        bot, task, final_report,
+                        chat_with_tools_fn=verify_chat_fn or chat_with_tools_fn,
+                        get_model_fn=verify_model_fn or get_model_fn,
+                        extra_tools=v_tools,
+                        extra_handlers=v_handlers,
+                    )
+                    logger.info(
+                        "Task %d verification (%s mode): %s",
+                        task_id, verification_mode, verification.get("status"),
+                    )
+                    if verification_mode == "enforce" and verification.get("status") == "failed":
+                        verification_retry = await _maybe_redelegate_after_verification_failure(
+                            bot, task, verification,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Verification for task %d errored (mode=%s): %s",
+                        task_id, verification_mode, e,
+                    )
+
             # Visualizer: auto-send generated images as photos
             if task.get("agent_type") == "visualizer":
                 try:
@@ -1334,7 +1413,12 @@ async def process_task(
             if on_complete:
                 try:
                     agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
-                    cb_result = on_complete(task_id, "done", f"{agent_label} {summary}")
+                    cb_result = on_complete(
+                        task_id, "done", f"{agent_label} {summary}",
+                        verification_status=(verification or {}).get("status"),
+                        verification_summary=str((verification or {}).get("details") or "")[:300],
+                        retry_result=verification_retry,
+                    )
                     if asyncio.iscoroutine(cb_result):
                         await cb_result
                 except Exception:
@@ -1347,6 +1431,16 @@ async def process_task(
                 "report": final_report,
                 "is_subtask": is_subtask,
                 "was_interrupted": was_interrupted,
+                "verification": (
+                    {
+                        "mode": verification_mode,
+                        "status": verification.get("status"),
+                        "details": str(verification.get("details") or "")[:1000],
+                        "retry": verification_retry,
+                    }
+                    if verification
+                    else None
+                ),
             }
 
         except Exception as e:

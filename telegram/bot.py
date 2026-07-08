@@ -37,7 +37,7 @@ from bot_config import (
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
     _get_task_provider, _get_deepseek_thinking_params,
-    get_current_model_selection,
+    get_current_model_selection, get_task_verification_mode,
     _extract_text,
 )
 from runtime_profile import resolve_runtime_profile
@@ -2193,11 +2193,33 @@ async def bot_main():
                 if tool_log and (len(report) < 200 or was_interrupted):
                     tool_log_section = f"\n\nAgent work log (tool call history):\n{_truncate_for_prompt(tool_log, 5000)}"
 
+                # Independent verification verdict (Critic). A shadow-mode FAIL
+                # is advisory: the orchestrator relays the caveat, nothing was
+                # auto-retried.
+                verification = result.get("verification") or {}
+                verification_section = ""
+                if verification.get("status") == "failed":
+                    retry = verification.get("retry") or {}
+                    if retry.get("status") == "redelegated":
+                        retry_note = f" An automatic retry was delegated as task #{retry.get('task_id')}."
+                    elif retry.get("status") == "restart_initiated":
+                        retry_note = f" {retry.get('message', 'Service restart initiated.')}"
+                    elif verification.get("mode") == "shadow":
+                        retry_note = " (shadow mode — no automatic retry was taken)"
+                    else:
+                        retry_note = f" No retry: {retry.get('message', 'retry unavailable')}."
+                    verification_section = (
+                        f"\n\n⚠️ Independent verification FAILED.{retry_note}\n"
+                        f"Verifier findings:\n{_truncate_for_prompt(verification.get('details', ''), 800)}\n"
+                        f"Mention this caveat to the user when relaying the results."
+                    )
+
                 prompt = (
                     f"[TASK REPORT] Task #{task_id} [{agent_type}] completed{' (interrupted)' if was_interrupted else ''}\n\n"
                     f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
                     f"Execution result:\n{_truncate_for_prompt(report, 3000)}"
                     f"{tool_log_section}"
+                    f"{verification_section}"
                     f"{interrupted_note}\n\n"
                     f"## Your role\n"
                     f"1. Relay the results to the user concisely, covering only key points. Do not use markdown formatting.\n"
@@ -2384,9 +2406,34 @@ async def bot_main():
             agent_handlers = dict(agent_handlers)
             agent_handlers["save_diary"] = _make_guarded_diary_save_handler(b, task)
 
-        def _on_task_complete(task_id: int, status: str, summary: str, **_kw):
+        # ── Post-hoc verification (Critic) routing ──────────────────
+        # The verifier runs on the low tier of a standard provider so the
+        # critique stays cheap. Codex/moon executors are verified by the task
+        # provider — an independent judge for handed-off work.
+        verification_mode = get_task_verification_mode()
+        verify_chat_fn = None
+        verify_model_fn = None
+        if verification_mode in ("shadow", "enforce"):
+            if spec.provider in ("claude", "openai", "deepseek", "local"):
+                verify_provider = spec.provider
+            elif task_provider in ("claude", "openai", "deepseek", "local"):
+                verify_provider = task_provider
+            else:
+                verify_provider = "claude"
+            verify_chat_fn = _make_provider_chat_fn(verify_provider)
+
+            async def verify_model_fn(_provider=verify_provider):
+                profile = await resolve_runtime_profile(
+                    "task", provider_override=_provider, tier_override="low",
+                )
+                return profile.model_id
+
+        def _on_task_complete(task_id: int, status: str, summary: str, **kw):
             icon = "✅" if status == "done" else "❌"
-            _add_system_alert(f"{icon} Task #{task_id} {status}: {summary[:200]}")
+            verdict_note = ""
+            if kw.get("verification_status") == "failed":
+                verdict_note = " ⚠️ verification FAILED"
+            _add_system_alert(f"{icon} Task #{task_id} {status}: {summary[:200]}{verdict_note}")
 
         result = await process_task(
             b, task,
@@ -2404,6 +2451,9 @@ async def bot_main():
             on_progress=progress_cb,
             on_complete=_on_task_complete,
             context_provider=_agent_provider,
+            verification_mode=verification_mode,
+            verify_chat_fn=verify_chat_fn,
+            verify_model_fn=verify_model_fn,
         )
         # Flush remaining progress buffer
         if progress_cb and hasattr(progress_cb, "flush"):

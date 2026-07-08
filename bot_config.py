@@ -69,6 +69,11 @@ _CONFIG_DEFAULTS = {
     # allows the call (new owner-gating / rate-limit rules); "enforce" blocks.
     # The gateway re-reads this with a short TTL, so it flips without restart.
     "gateway_enforce_mode": "shadow",  # "shadow" | "enforce"
+    # Post-hoc task verification (independent LLM critic on completed tasks).
+    # "off" leaves verification_status='pending' (legacy behavior); "shadow"
+    # runs the verifier and persists the verdict but never auto-retries;
+    # "enforce" additionally redelegates on FAIL (bounded by retry_limit).
+    "task_verification_mode": "shadow",  # "off" | "shadow" | "enforce"
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -156,6 +161,7 @@ _CONFIG_META = {
     "webchat_provider": _config_meta("웹챗 제공자", "", ["claude", "openai", "deepseek"], ["webchat"], ["api"]),
     "webchat_model": _config_meta("웹챗 모델", "", ["high", "medium", "low"], ["webchat"], ["api"]),
     "gateway_enforce_mode": _config_meta("보안 게이트웨이", "", ["shadow", "enforce"], ["all"]),
+    "task_verification_mode": _config_meta("태스크 검증", "", ["off", "shadow", "enforce"], ["telegram-task"]),
 }
 
 _MODEL_ALIAS_MAP = {
@@ -384,6 +390,12 @@ def set_gateway_enforce_mode(mode: str) -> str:
     _config["gateway_enforce_mode"] = "enforce" if str(mode).strip().lower() == "enforce" else "shadow"
     _save_config()
     return _config["gateway_enforce_mode"]
+
+
+def get_task_verification_mode() -> str:
+    """Return the task verification posture ("off" | "shadow" | "enforce")."""
+    mode = str(_config.get("task_verification_mode", "shadow")).strip().lower()
+    return mode if mode in ("off", "shadow", "enforce") else "shadow"
 
 
 def get_current_model_selection(

@@ -30,6 +30,40 @@ _DELEGATABLE_AGENTS = [
     "diary",
 ]
 
+# Optional per-delegation verification policy, persisted to task metadata and
+# consumed by telegram/tasks._normalize_verification_policy after completion.
+_VERIFICATION_POLICY_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Optional post-completion verification policy. Omit to use the per-agent "
+        "default (programmer/analyst/scout/diplomat reports are verified). "
+        "Set required=false to opt this task out."
+    ),
+    "properties": {
+        "required": {"type": "boolean", "description": "Set false to skip verification for this task."},
+        "checks": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["task_report", "url_access", "server_logs"]},
+            "description": "Which checks the verifier should run.",
+        },
+        "urls": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "URLs that must respond without HTTP errors after the task.",
+        },
+        "log_service": {
+            "type": "string",
+            "enum": ["telegram", "api", "nginx"],
+            "description": "Service whose logs the verifier should inspect for task-related errors.",
+        },
+        "log_grep": {"type": "string", "description": "Optional grep pattern for the log check."},
+        "retry_limit": {
+            "type": "integer",
+            "description": "Max auto-retries after verification failure (0-3, enforce mode only).",
+        },
+    },
+}
+
 _AGENT_ROUTING_CARDS = {
     "analyst": {
         "use_for": [
@@ -674,7 +708,9 @@ SELF_TOOLS = [
             "analyst, programmer, scout, visualizer, browser, diplomat, diary. Stasova is "
             "not a general delegation target. When routing is unclear, call route_task or "
             "list_agent_tools first. Always pass `context` and prefer explicit "
-            "success_criteria/target_identifiers so the worker does not infer the wrong content type."
+            "success_criteria/target_identifiers so the worker does not infer the wrong content type. "
+            "Completed tasks are independently verified by default (programmer/analyst/scout/diplomat); "
+            "pass `verification` to tune checks or opt out."
         ),
         "input_schema": {
             "type": "object",
@@ -722,6 +758,7 @@ SELF_TOOLS = [
                     "description": "Things the worker must not assume, e.g. 'do not treat /p/foo as research' or 'do not edit source code'.",
                 },
                 "parent_task_id": {"type": "integer", "description": "Parent task ID for task chaining (optional)."},
+                "verification": _VERIFICATION_POLICY_SCHEMA,
             },
             "required": ["agent", "task"],
         },
@@ -771,6 +808,7 @@ SELF_TOOLS = [
                                 "items": {"type": "string"},
                                 "description": "Assumptions this subtask must not make.",
                             },
+                            "verification": _VERIFICATION_POLICY_SCHEMA,
                         },
                         "required": ["agent", "task"],
                     },
@@ -2245,6 +2283,7 @@ async def _exec_delegate(
     forbidden_assumptions: list[str] | None = None,
     priority: str = "normal",
     parent_task_id: int | None = None,
+    verification: dict | None = None,
 ) -> str:
     from task_store import create_task_in_db
 
@@ -2353,6 +2392,7 @@ async def _exec_delegate(
         create_task_in_db, full_content, 0, priority,
         parent_task_id=parent_task_id, mission_id=task_mission_id,
         agent_type=agent,
+        metadata={"verification": verification} if isinstance(verification, dict) else None,
     )
     if result["status"] == "ok":
         depth_info = f", depth={result.get('depth', 0)}" if parent_task_id else ""
@@ -2466,10 +2506,16 @@ async def _exec_multi_delegate(
         content_parts.append(f"<task agent=\"{agent}\">\n{task_content}\n</task>")
         full_content = "\n\n".join(content_parts)
 
+        subtask_verification = t.get("verification")
         result = await asyncio.to_thread(
             create_task_in_db, full_content, 0, priority,
             mission_id=task_mission_id, agent_type=agent,
             plan_role="subtask",
+            metadata=(
+                {"verification": subtask_verification}
+                if isinstance(subtask_verification, dict)
+                else None
+            ),
         )
         if result["status"] == "ok":
             tid = result["task_id"]
