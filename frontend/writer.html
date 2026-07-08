@@ -653,7 +653,7 @@
         const pane = $('manuscript');
         pane.scrollTop = wasLastPage ? pane.scrollHeight : scrollTop;
         $('manuscriptBackdrop').scrollTop = pane.scrollTop;
-        updateManuscriptStatus('AI editing…');
+        updateManuscriptStatus(activeSse.reader ? 'AI editing…' : 'updated from server');
       } catch (err) {
         // transient; the next manuscript_edit event retries
       } finally {
@@ -1037,34 +1037,45 @@
     // fail fast and let the reattach loop reconnect instead of hanging.
     const SSE_STALL_MS = 45000;
 
+    // The reader of the currently-attached stream. A return to the foreground
+    // cancels it when the connection likely died while the app was backgrounded
+    // (mobile browsers freeze the page and drop sockets), so the reattach loop
+    // reconnects immediately instead of waiting out the stall timer.
+    const activeSse = { reader: null };
+
     async function readSse(res, onEvent, stallMs = SSE_STALL_MS) {
       const reader = res.body.getReader();
+      activeSse.reader = reader;
       const decoder = new TextDecoder();
       let buffer = '';
-      while (true) {
-        let timer;
-        let chunk;
-        try {
-          chunk = await Promise.race([
-            reader.read(),
-            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('sse stalled')), stallMs); }),
-          ]);
-        } catch (err) {
-          try { await reader.cancel(); } catch (cancelErr) { /* already closed */ }
-          throw err;
-        } finally {
-          clearTimeout(timer);
+      try {
+        while (true) {
+          let timer;
+          let chunk;
+          try {
+            chunk = await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('sse stalled')), stallMs); }),
+            ]);
+          } catch (err) {
+            try { await reader.cancel(); } catch (cancelErr) { /* already closed */ }
+            throw err;
+          } finally {
+            clearTimeout(timer);
+          }
+          const { value, done } = chunk;
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
+          for (const part of parts) {
+            const line = part.split('\n').find((l) => l.startsWith('data: '));
+            if (!line) continue;
+            onEvent(JSON.parse(line.slice(6)));
+          }
         }
-        const { value, done } = chunk;
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-        for (const part of parts) {
-          const line = part.split('\n').find((l) => l.startsWith('data: '));
-          if (!line) continue;
-          onEvent(JSON.parse(line.slice(6)));
-        }
+      } finally {
+        if (activeSse.reader === reader) activeSse.reader = null;
       }
     }
 
@@ -1077,6 +1088,9 @@
           ctx.assistantMessage.setText(event.text_snapshot);
           state.lastAssistant = event.text_snapshot;
         }
+        // Fresh attach to a live run: manuscript_edit events broadcast while
+        // this client was detached were missed, so re-sync the pane now.
+        scheduleLiveManuscriptRefresh();
       }
       if (event.type === 'text_delta') {
         ctx.assistantMessage.appendText(event.content);
@@ -1839,6 +1853,34 @@
     $('manuscript').addEventListener('keyup', onManuscriptSelectionChange);
     $('manuscript').addEventListener('mouseup', onManuscriptSelectionChange);
     $('manuscript').addEventListener('blur', updateSelectionInfo);
+    // Mobile app switches freeze the page and usually kill the SSE socket,
+    // while the writer run keeps going server-side. On return, don't wait for
+    // the 45s stall timer: cancel the (likely dead) reader so the existing
+    // reattach loop reconnects right away, and re-sync the manuscript pane to
+    // pick up DB writes whose events were missed while hidden.
+    const HIDDEN_DROP_MS = 5000;
+    let hiddenAt = 0;
+    function onForeground(force = false) {
+      if (!state.current) return;
+      const hiddenFor = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if (activeSse.reader) {
+        if (force || hiddenFor >= HIDDEN_DROP_MS) {
+          try { activeSse.reader.cancel(); } catch (err) { /* already closed */ }
+        }
+      } else {
+        // Nothing watching (guarded no-op if a send/resume is in flight):
+        // reattach to a run that may still be generating.
+        maybeResumeActiveRun();
+      }
+      refreshManuscriptFromServer();
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      onForeground();
+    });
+    window.addEventListener('pageshow', (event) => { if (event.persisted) onForeground(true); });
+    window.addEventListener('online', () => onForeground(true));
     $('criticToggle').checked = localStorage.getItem('writerCriticPass') === '1';
     $('criticToggle').addEventListener('change', () => {
       localStorage.setItem('writerCriticPass', $('criticToggle').checked ? '1' : '0');
