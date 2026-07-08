@@ -1157,7 +1157,10 @@
       let attempt = 0;
       while (!ctx.finalSeen && Date.now() - startedAt < maxMs) {
         attempt += 1;
-        await sleep(Math.min(1200 * attempt, 6000));
+        // First try is immediate: a foreground return cancels the stream on
+        // purpose, and making it wait out a backoff just reads as lag. The
+        // backoff only kicks in when attempts actually fail.
+        if (attempt > 1) await sleep(Math.min(1200 * attempt, 6000));
         if (!state.current || state.current.id !== projectId) return false;
         try {
           setStatus(attempt > 1
