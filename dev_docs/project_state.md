@@ -103,6 +103,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py`, `api_routes/private_reports.py` |
+| Admin user API routes | `api_routes/admin_users.py` |
 | Chat history/API routes | `api_routes/chat_history.py`, `chat_history_sanitize.py`, `web_chat.py` |
 | Email bridge | `email_bridge.py`, `api_routes/email.py` |
 | Fetch/browser | `content_fetch/*`, `browser/*`, `runtime_tools/fetch.py`, `runtime_tools/media.py` |
