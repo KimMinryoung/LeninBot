@@ -74,6 +74,13 @@ _CONFIG_DEFAULTS = {
     # runs the verifier and persists the verdict but never auto-retries;
     # "enforce" additionally redelegates on FAIL (bounded by retry_limit).
     "task_verification_mode": "shadow",  # "off" | "shadow" | "enforce"
+    # Reflexion passes (diagnose → author-revise, generalized from the writer).
+    # reflexion_task_reports: analyst/scout reports get one cheap diagnosis and,
+    # when notes surface, one text-only author revision before persisting.
+    # reflexion_autonomous_publish: staged research drafts get an editorial
+    # diagnosis injected into the next tick prompt before publication.
+    "reflexion_task_reports": True,
+    "reflexion_autonomous_publish": True,
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -162,6 +169,8 @@ _CONFIG_META = {
     "webchat_model": _config_meta("웹챗 모델", "", ["high", "medium", "low"], ["webchat"], ["api"]),
     "gateway_enforce_mode": _config_meta("보안 게이트웨이", "", ["shadow", "enforce"], ["all"]),
     "task_verification_mode": _config_meta("태스크 검증", "", ["off", "shadow", "enforce"], ["telegram-task"]),
+    "reflexion_task_reports": _config_meta("리포트 퇴고", "", [True, False], ["telegram-task"]),
+    "reflexion_autonomous_publish": _config_meta("자율 초안 진단", "", [True, False], ["autonomous-next-tick"]),
 }
 
 _MODEL_ALIAS_MAP = {
@@ -396,6 +405,16 @@ def get_task_verification_mode() -> str:
     """Return the task verification posture ("off" | "shadow" | "enforce")."""
     mode = str(_config.get("task_verification_mode", "shadow")).strip().lower()
     return mode if mode in ("off", "shadow", "enforce") else "shadow"
+
+
+def get_reflexion_task_reports() -> bool:
+    """Whether analyst/scout task reports get the diagnose→revise pass."""
+    return bool(_config.get("reflexion_task_reports", True))
+
+
+def get_reflexion_autonomous_publish() -> bool:
+    """Whether staged autonomous drafts get an editorial diagnosis before publish."""
+    return bool(_config.get("reflexion_autonomous_publish", True))
 
 
 def get_current_model_selection(

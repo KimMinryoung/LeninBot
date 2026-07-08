@@ -687,6 +687,82 @@ def _build_verifier_toolset(mode: str) -> tuple[list, dict]:
     return tools, handlers
 
 
+# ── Reflexion pass (diagnose → author-revise) on task reports ───────
+
+_REFLEXION_REPORT_AGENTS = ("analyst", "scout")
+_REFLEXION_REPORT_MIN_CHARS = 1500
+
+
+async def _maybe_reflexion_revise_report(
+    *,
+    task: dict,
+    content: str,
+    report: str,
+    task_system_prompt: str,
+    diagnose_chat_fn,
+    diagnose_model_fn,
+    revise_chat_fn,
+    revise_model_fn,
+) -> str | None:
+    """One diagnose→revise pass over a substantial analyst/scout report before
+    it is persisted. The cheap verifier-tier model diagnoses; the executor
+    model revises as the author in a text-only turn (no tools — revision must
+    never re-run side-effectful calls). Returns the revised report, or None
+    when the pass is skipped, PASSes, or fails — callers keep the original."""
+    from bot_config import get_reflexion_task_reports
+
+    if not get_reflexion_task_reports():
+        return None
+    agent_type = str(task.get("agent_type") or "").strip().lower()
+    if agent_type not in _REFLEXION_REPORT_AGENTS:
+        return None
+    if len(report or "") < _REFLEXION_REPORT_MIN_CHARS:
+        return None
+    if not (diagnose_chat_fn and diagnose_model_fn):
+        return None
+
+    from llm.reflexion import build_report_revision_prompt, diagnose, diagnosis_is_pass
+
+    task_id = task["id"]
+    task_context = content[:2000]
+    try:
+        notes = await diagnose(
+            report,
+            chat_fn=diagnose_chat_fn,
+            model=await diagnose_model_fn(),
+            content_kind="task_report",
+            context=task_context,
+        )
+    except Exception as e:
+        logger.warning("Reflexion diagnosis failed for task %d: %s", task_id, e)
+        return None
+    if not notes or diagnosis_is_pass(notes):
+        logger.info("Task %d reflexion: diagnosis PASS, keeping report as-is", task_id)
+        return None
+
+    logger.info("Task %d reflexion: diagnosis notes -> author revision\n%s", task_id, notes[:1500])
+    try:
+        revised = await revise_chat_fn(
+            [{"role": "user", "content": build_report_revision_prompt(report, notes, context=task_context)}],
+            system_prompt=task_system_prompt,
+            model=await revise_model_fn(),
+            max_tokens=16384,
+            budget_usd=0.40,
+        )
+    except Exception as e:
+        logger.warning("Reflexion revision failed for task %d: %s", task_id, e)
+        return None
+    revised = (revised or "").strip()
+    # A commentary-style or truncated reply must never replace the report.
+    if len(revised) < max(_REFLEXION_REPORT_MIN_CHARS // 2, int(len(report) * 0.5)):
+        logger.warning(
+            "Task %d reflexion: revision too short (%d vs original %d chars), keeping original",
+            task_id, len(revised), len(report),
+        )
+        return None
+    return revised
+
+
 def _get_restart_state(task: dict | None) -> dict:
     metadata = _load_task_metadata(task)
     state = metadata.get(_RESTART_PHASE_KEY)
@@ -1351,6 +1427,22 @@ async def process_task(
                 terminal_tools=terminal_tools,
                 on_progress=on_progress,
             )
+
+            # Reflexion pass before persisting so the stored report (and the
+            # verifier below) see the revised text. Reuses the cheap verifier
+            # fns as the diagnoser; falls through to the original on any skip.
+            revised = await _maybe_reflexion_revise_report(
+                task=task,
+                content=content,
+                report=report,
+                task_system_prompt=task_system_prompt,
+                diagnose_chat_fn=verify_chat_fn,
+                diagnose_model_fn=verify_model_fn,
+                revise_chat_fn=chat_with_tools_fn,
+                revise_model_fn=get_model_fn,
+            )
+            if revised:
+                report = revised
 
             final_report = await _persist_task_success(
                 task=task,

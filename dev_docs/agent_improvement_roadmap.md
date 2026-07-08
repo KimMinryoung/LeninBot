@@ -56,6 +56,8 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 2 (P0) — Generalized Reflexion service (diagnose → author-revise)
 
+**Status: SHIPPED (2026-07-08).** `llm/reflexion.py` created; task-report hook live in `telegram/tasks.py` (`_maybe_reflexion_revise_report`, analyst/scout ≥1500 chars, cheap-tier diagnoser = the Phase-1 verifier fns, text-only author revision with a ≥50%-length guard); autonomous editorial diagnosis live in `autonomous_project.py` (`_diagnose_staged_drafts_for_tick`, per-draft-version caching via `editorial_diagnosis` events, DeepSeek-flash diagnoser with provider fallback, `<editorial-diagnosis>` prompt injection). Config flags `reflexion_task_reports` / `reflexion_autonomous_publish` (default on, /config panel). Smoke: `scripts/smoke_reflexion.py` (28/28). Deviation from the original sketch: task-report revision is deliberately **text-only** (no tool surface) so a revision turn can never re-run side-effectful publishing tools.
+
 **Goal**: extract the writer's proven pattern into a reusable helper and apply it to (a) autonomous staged-draft publication, (b) long task reports.
 
 **Motivation**: `run_diagnose_revise_pass` is the system's only blind-eval-validated (12/12) quality mechanism: cheap model diagnoses with read-only tools + numbered anchored notes + PASS marker + direction-not-wording; the strongest model revises *as author*, free to reject notes; failed diagnosis degrades to self-diagnosis. A general recipe, currently locked inside `writer/`.

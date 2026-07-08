@@ -1027,12 +1027,115 @@ def _format_staged_research_drafts(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ── Editorial diagnosis of staged drafts (Reflexion, pre-publish) ────
+
+_EDITORIAL_DIAGNOSIS_EVENT_TYPE = "editorial_diagnosis"
+_EDITORIAL_DIAGNOSIS_MAX_DRAFTS = 2
+_EDITORIAL_DIAGNOSIS_BODY_CAP = 20000
+
+
+def _cached_editorial_diagnosis(project_id: int, slug: str, draft_updated_at) -> str | None:
+    """Return the stored diagnosis for a slug when the draft has not changed
+    since it was written — one diagnosis per draft version, re-injected each
+    tick until the draft is revised or published."""
+    try:
+        rows = db_query(
+            """
+            SELECT content, created_at FROM autonomous_project_events
+             WHERE project_id = %s AND event_type = %s AND meta->>'slug' = %s
+             ORDER BY created_at DESC, id DESC LIMIT 1
+            """,
+            (project_id, _EDITORIAL_DIAGNOSIS_EVENT_TYPE, slug),
+        )
+        if rows and draft_updated_at is not None and rows[0]["created_at"] > draft_updated_at:
+            return rows[0]["content"] or None
+    except Exception as e:
+        logger.warning("editorial diagnosis cache lookup failed (slug=%s): %s", slug, e)
+    return None
+
+
+async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn) -> str | None:
+    """Run (or reuse) an editorial diagnosis over this project's staged drafts.
+    Returns the combined non-PASS notes for prompt injection, or None. Any
+    failure degrades to no injection — the tick itself must never break."""
+    from bot_config import get_reflexion_autonomous_publish, _deepseek_client
+    from llm.reflexion import diagnose, diagnosis_is_pass
+    from research_store import get_document
+    from runtime_profile import resolve_runtime_profile
+
+    if not get_reflexion_autonomous_publish():
+        return None
+    drafts = [
+        row for row in _recent_staged_research_drafts(project["id"])
+        if row.get("project_match") and row.get("slug")
+    ][:_EDITORIAL_DIAGNOSIS_MAX_DRAFTS]
+    if not drafts:
+        return None
+
+    # Cheap diagnoser: DeepSeek flash when available, else the tick provider's
+    # own low tier.
+    diag_provider = "deepseek" if _deepseek_client else provider
+    profile = await resolve_runtime_profile(
+        "autonomous", provider_override=diag_provider, tier_override="low",
+    )
+
+    blocks: list[str] = []
+    for row in drafts:
+        slug = row["slug"]
+        doc = get_document(slug, include_private=True)
+        if not doc or doc.get("status") != "staged" or not (doc.get("markdown") or "").strip():
+            continue
+        notes = _cached_editorial_diagnosis(project["id"], slug, doc.get("updated_at"))
+        if notes is None:
+            context = (
+                f"Project goal: {project.get('goal') or ''}\n"
+                f"Project topic: {project.get('topic') or ''}\n"
+                f"Draft title: {doc.get('title') or ''}\n"
+                "This draft is staged for public publication on cyber-lenin.com."
+            )
+            try:
+                notes = await diagnose(
+                    (doc.get("markdown") or "")[:_EDITORIAL_DIAGNOSIS_BODY_CAP],
+                    chat_fn=chat_fn,
+                    model=profile.model_id,
+                    content_kind="research_draft",
+                    context=context,
+                    provider_override=diag_provider,
+                    agent_name="reflexion_diagnosis",
+                    runtime_kind="autonomous",
+                )
+            except Exception as e:
+                logger.warning("editorial diagnosis failed (slug=%s): %s", slug, e)
+                continue
+            if not notes:
+                continue
+            _log_event(
+                project["id"], _EDITORIAL_DIAGNOSIS_EVENT_TYPE, notes,
+                {"slug": slug, "verdict": "pass" if diagnosis_is_pass(notes) else "notes",
+                 "model": profile.model_id},
+            )
+        if not diagnosis_is_pass(notes):
+            blocks.append(f"[draft: {slug}]\n{notes}")
+    return "\n\n".join(blocks) or None
+
+
+_EDITORIAL_DIAGNOSIS_GUIDANCE = (
+    "An independent editor reviewed your staged draft(s) before publication. Judge each note "
+    "as the author: apply what is right by revising the draft "
+    "(research_document(action='stage_public', slug=<same slug>, content=<corrected draft>) — "
+    "a re-staged draft publishes on a later tick), and REJECT notes that misread the work. "
+    "Do not publish_public a draft whose serious notes you have neither addressed nor "
+    "consciously rejected."
+)
+
+
 def _build_task_prompt(
     project: dict,
     turn_budget: int,
     advisories: list[dict] | None = None,
     *,
     provider: str = "claude",
+    editorial_diagnosis: str | None = None,
 ) -> str:
     plan_text = _format_plan(project.get("plan"))
     notes_text = _format_notes(_recent_notes(project))
@@ -1074,6 +1177,11 @@ def _build_task_prompt(
             f"### Recent Tick Warnings\n\n{tick_attention_text}",
             f"### Staged Research Drafts\n\n{staged_drafts_text}",
         ])
+        if editorial_diagnosis:
+            parts.append(
+                f"### Editorial Diagnosis (staged drafts)\n\n{_EDITORIAL_DIAGNOSIS_GUIDANCE}\n\n"
+                + editorial_diagnosis
+            )
         last_log = _fetch_last_tick_tool_log(project["id"])
         if last_log and last_log.get("content"):
             meta = last_log.get("meta") or {}
@@ -1144,6 +1252,11 @@ def _build_task_prompt(
         f"<recent-tick-warnings>\n{tick_attention_text}\n</recent-tick-warnings>",
         f"<staged-research-drafts>\n{staged_drafts_text}\n</staged-research-drafts>",
     ])
+    if editorial_diagnosis:
+        parts.append(
+            f"<editorial-diagnosis>\n{_EDITORIAL_DIAGNOSIS_GUIDANCE}\n\n"
+            f"{editorial_diagnosis}\n</editorial-diagnosis>"
+        )
 
     # Previous tick's full tool trace — what YOU called and what came back.
     # research_notes capture curated findings; this captures raw execution so
@@ -1211,11 +1324,27 @@ async def _run_one_tick(project: dict) -> dict:
     # the tick saves durable project work. If the tick raises or completes as a
     # no-op, advisories remain pending so operator direction is not lost.
     pending_advisories = _fetch_pending_advisories(project["id"])
+
+    from telegram.bot import _chat_with_tools
+
+    # Reflexion pre-publish gate: staged drafts get an independent editorial
+    # diagnosis injected into this tick's prompt (cached per draft version, so
+    # unchanged drafts cost nothing on later ticks). Failure degrades to no
+    # injection — never blocks the tick.
+    editorial_diagnosis = None
+    try:
+        editorial_diagnosis = await _diagnose_staged_drafts_for_tick(
+            project, provider, _chat_with_tools,
+        )
+    except Exception as e:
+        logger.warning("editorial diagnosis skipped for project %s: %s", project["id"], e)
+
     user_content = _build_task_prompt(
         project,
         turn_budget=spec.max_rounds,
         advisories=pending_advisories,
         provider=provider,
+        editorial_diagnosis=editorial_diagnosis,
     )
 
     # Autonomous uses its own model tier, independent from chat/task settings.
@@ -1249,8 +1378,6 @@ async def _run_one_tick(project: dict) -> dict:
     # staged during this tick cannot be published by this same tick.
     staged_token = current_tick_staged_slugs.set(set())
     try:
-        from telegram.bot import _chat_with_tools
-
         result_text = await _chat_with_tools(
             tick_messages,
             model=profile.model_id,

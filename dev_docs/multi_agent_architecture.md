@@ -105,6 +105,10 @@ Every completed task passes through `_run_verification()` (`telegram/tasks.py`),
 
 Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM + captured SQL).
 
+### Report Reflexion (diagnose → author-revise)
+
+Before a substantial analyst/scout report (≥1500 chars) is persisted, `_maybe_reflexion_revise_report()` runs one Reflexion pass generalized from the writer subsystem (`llm/reflexion.py`): the cheap verifier-tier model diagnoses the report (numbered quote-anchored notes on 사실성/논리/완결성/명료성, or exactly `PASS`), and on notes the executor model revises **as the author** in a single text-only turn — no tool surface, so revision can never re-run side-effectful calls; where a note challenges an unverifiable fact the author qualifies the claim instead. A revision shorter than half the original is discarded (commentary-style replies must not replace reports). The revised report is what gets persisted and what the post-hoc verifier judges. Toggle: `reflexion_task_reports` config key (default on). Smoke test: `scripts/smoke_reflexion.py`.
+
 ## Context Assembly
 
 Agent tasks receive structured context rather than a passive chat dump:
