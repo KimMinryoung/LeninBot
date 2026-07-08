@@ -766,10 +766,14 @@ SELF_TOOLS = [
     {
         "name": "multi_delegate",
         "description": (
-            "Delegate multiple tasks in parallel with automatic result synthesis.\n"
-            "All subtasks run concurrently. After all complete, a synthesis task combines results.\n"
+            "Delegate multiple tasks with automatic result synthesis.\n"
+            "By default all subtasks run concurrently; a task may declare `depends_on` (earlier "
+            "task indices) to run only after those finish, with their results auto-injected as "
+            "<dependency-results> — use this for staged missions (research → analyze → publish). "
+            "After all subtasks complete, a synthesis task combines results.\n"
             "Use when you need multiple agents working on different aspects of the same request.\n"
-            "For single-agent tasks, use `delegate` instead. Allowed agents exclude Stasova."
+            "For single-agent tasks, use `delegate` instead. Allowed agents exclude Stasova. "
+            "Max 8 tasks per plan."
         ),
         "input_schema": {
             "type": "object",
@@ -809,11 +813,26 @@ SELF_TOOLS = [
                                 "description": "Assumptions this subtask must not make.",
                             },
                             "verification": _VERIFICATION_POLICY_SCHEMA,
+                            "depends_on": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": (
+                                    "0-based indices of EARLIER tasks in this list that must "
+                                    "finish before this one starts (forward references are "
+                                    "rejected — order stages accordingly). The dependencies' "
+                                    "results are auto-injected into this task's prompt as "
+                                    "<dependency-results>. Omit for parallel execution."
+                                ),
+                            },
                         },
                         "required": ["agent", "task"],
                     },
                     "minItems": 2,
-                    "description": "List of subtasks to run in parallel.",
+                    "maxItems": 8,
+                    "description": (
+                        "List of subtasks. Independent tasks run in parallel; tasks with "
+                        "depends_on wait for their dependencies."
+                    ),
                 },
                 "synthesis_instructions": {
                     "type": "string",
@@ -2440,6 +2459,20 @@ async def _exec_multi_delegate(
     except ValueError as e:
         return str(e)
 
+    # Dependency plan guards: bounded size, and depends_on may only reference
+    # EARLIER indices — structurally cycle-free and matches how staged plans
+    # are naturally authored (stage 1 first, dependents after).
+    if len(tasks) > 8:
+        return "multi_delegate accepts at most 8 tasks per plan. Split larger missions into sequential plans."
+    for i, t in enumerate(tasks):
+        for d in t.get("depends_on") or []:
+            if not isinstance(d, int) or isinstance(d, bool) or d < 0 or d >= i:
+                return (
+                    f"Task {i} has invalid depends_on entry {d!r}: entries must be 0-based "
+                    f"indices of EARLIER tasks (0..{i - 1}). Reorder the list so dependencies "
+                    "come before their dependents."
+                )
+
     # Resolve mission (same logic as delegate)
     task_mission_id = None
     try:
@@ -2482,13 +2515,30 @@ async def _exec_multi_delegate(
     except Exception:
         pass
 
-    # Create subtasks
+    # Create subtasks. Independent tasks start pending (parallel); tasks with
+    # depends_on start blocked with the resolved dependency task IDs in
+    # metadata — the worker unblocks them when every dependency is terminal
+    # and injects the dependencies' results as <dependency-results>.
     created_items = []
     created_info = []
+    created_by_index: list[int | None] = []
     for t in tasks:
         agent = t["agent"]
         task_content = t["task"]
         context = t.get("context", "")
+
+        dep_task_ids: list[int] = []
+        missing_dep = False
+        for d in t.get("depends_on") or []:
+            dep_id = created_by_index[d]
+            if dep_id is None:
+                missing_dep = True
+                break
+            dep_task_ids.append(dep_id)
+        if missing_dep:
+            created_by_index.append(None)
+            created_info.append(f"  SKIPPED [{agent}]: a dependency task failed to create")
+            continue
 
         content_parts = []
         if context:
@@ -2506,23 +2556,31 @@ async def _exec_multi_delegate(
         content_parts.append(f"<task agent=\"{agent}\">\n{task_content}\n</task>")
         full_content = "\n\n".join(content_parts)
 
-        subtask_verification = t.get("verification")
+        subtask_metadata: dict = {}
+        if isinstance(t.get("verification"), dict):
+            subtask_metadata["verification"] = t["verification"]
+        if dep_task_ids:
+            subtask_metadata["depends_on_task_ids"] = dep_task_ids
+
         result = await asyncio.to_thread(
             create_task_in_db, full_content, 0, priority,
             mission_id=task_mission_id, agent_type=agent,
             plan_role="subtask",
-            metadata=(
-                {"verification": subtask_verification}
-                if isinstance(subtask_verification, dict)
-                else None
-            ),
+            metadata=subtask_metadata or None,
+            status="blocked" if dep_task_ids else "pending",
         )
         if result["status"] == "ok":
             tid = result["task_id"]
-            created_items.append({"id": tid, "agent": agent, "task": task_content})
+            created_by_index.append(tid)
+            created_items.append({"id": tid, "agent": agent, "task": task_content, "depends_on": dep_task_ids})
             spec = get_agent(agent)
-            created_info.append(f"  #{tid} [{agent}] ${spec.budget_usd:.2f}")
+            dep_note = (
+                f" (blocked until #{', #'.join(str(i) for i in dep_task_ids)} finish)"
+                if dep_task_ids else ""
+            )
+            created_info.append(f"  #{tid} [{agent}] ${spec.budget_usd:.2f}{dep_note}")
         else:
+            created_by_index.append(None)
             created_info.append(f"  FAILED [{agent}]: {result.get('error')}")
 
     if not created_items:
@@ -2576,8 +2634,10 @@ async def _exec_multi_delegate(
         except Exception:
             pass
 
+    staged = any(item.get("depends_on") for item in created_items)
+    plan_kind = "staged" if staged else "parallel"
     return (
-        f"Plan #{plan_id} created: {len(created_ids)} parallel subtasks + synthesis #{synthesis_id}\n"
+        f"Plan #{plan_id} created: {len(created_ids)} {plan_kind} subtasks + synthesis #{synthesis_id}\n"
         + "\n".join(created_info)
         + f"\n  #{synthesis_id} [analyst] synthesis (blocked until subtasks complete)"
     )

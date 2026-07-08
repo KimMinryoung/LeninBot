@@ -76,6 +76,8 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 3 (P1) — Plan-and-Execute: dependency DAGs + replanning
 
+**Status: SHIPPED (2026-07-08).** `depends_on` (earlier-index-only → structurally cycle-free) in `multi_delegate` items, max 8 tasks/plan; dependents created `status='blocked'` with `metadata.depends_on_task_ids`; worker runs `_unblock_dependency_tasks_sync` each loop (missing dependency rows count as terminal; 48h watchdog fails deadlocked tasks so synthesis always completes); `<dependency-results>` injection via `prompt_context.format_dependency_results` includes failed dependencies marked by status. Planning stays in the orchestrator model as designed (no `plan_mission` tool yet — add only if orchestrator-authored plans prove weak). Replanning v1 = failure context flows to dependents/synthesis/orchestrator callback. Smoke: `scripts/smoke_plan_dag.py` (22/22). Remaining from the sketch: live 3-stage end-to-end run on production infra still to be observed.
+
 **Goal**: upgrade `multi_delegate` from "parallel fan-out + one synthesis" to small dependency graphs, so multi-step missions (research → analyze → publish) run without the operator stitching stages.
 
 **Design**:

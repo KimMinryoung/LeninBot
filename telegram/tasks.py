@@ -17,6 +17,7 @@ from db import query as _query, execute as _execute, query_one as _query_one
 from shared import KST
 from prompt_context import (
     format_agent_execution_history,
+    format_dependency_results,
     format_mission_context,
     format_subtask_results,
     uses_xml,
@@ -1082,6 +1083,21 @@ def _build_task_context_content(
         except Exception as e:
             logger.warning("Synthesis subtask result injection failed: %s", e)
 
+    # DAG-staged subtask: inject the finished dependencies' results (including
+    # failed ones, marked by status, so the agent can handle blockage honestly).
+    dep_task_ids = _load_task_metadata(task).get("depends_on_task_ids")
+    if isinstance(dep_task_ids, list) and dep_task_ids:
+        try:
+            dep_rows = _query(
+                "SELECT id, agent_type, content, result, status FROM telegram_tasks "
+                "WHERE id = ANY(%s) ORDER BY id ASC",
+                ([int(x) for x in dep_task_ids],),
+            )
+            if dep_rows:
+                content = format_dependency_results(dep_rows, context_provider) + "\n\n" + content
+        except Exception as e:
+            logger.warning("Dependency result injection failed for task %d: %s", task_id, e)
+
     agent_type = task.get("agent_type") or "analyst"
     history_ctx = ""
     if parent_task_id:
@@ -2061,6 +2077,60 @@ async def _delegate_to_browser_worker(task: dict) -> dict | None:
 
 # ── Task Worker ──────────────────────────────────────────────────────
 
+_DEPENDENCY_BLOCKED_MAX_AGE_HOURS = 48
+
+
+def _unblock_dependency_tasks_sync() -> None:
+    """Unblock DAG-staged subtasks whose dependencies are all terminal.
+
+    Runs Python-side (metadata parsed via _load_task_metadata) so it works
+    whether the metadata column is TEXT or JSONB. Deadlock guards: dependency
+    rows that no longer exist count as terminal, and any dependency-blocked
+    task older than 48h fails closed with a watchdog note.
+    """
+    rows = _query(
+        "SELECT id, metadata FROM telegram_tasks "
+        "WHERE status = 'blocked' AND plan_role = 'subtask' "
+        "AND metadata::text LIKE %s",
+        ("%depends_on_task_ids%",),
+    )
+    for row in rows or []:
+        dep_ids = _load_task_metadata(row).get("depends_on_task_ids")
+        try:
+            dep_ids = [int(x) for x in dep_ids] if isinstance(dep_ids, list) else []
+        except Exception:
+            dep_ids = []
+        blocking = 0
+        if dep_ids:
+            res = _query(
+                "SELECT COUNT(*) AS c FROM telegram_tasks "
+                "WHERE id = ANY(%s) AND status NOT IN ('done', 'failed', 'handed_off')",
+                (dep_ids,),
+            )
+            blocking = int((res or [{}])[0].get("c") or 0)
+        if blocking == 0:
+            _execute(
+                "UPDATE telegram_tasks SET status = 'pending' WHERE id = %s AND status = 'blocked'",
+                (row["id"],),
+            )
+            logger.info("Dependency task #%d unblocked (all dependencies terminal)", row["id"])
+
+    # Watchdog: a dependency-blocked task must never deadlock the plan (and
+    # thereby its synthesis task) forever.
+    _execute(
+        "UPDATE telegram_tasks SET status = 'failed', "
+        "result = COALESCE(result, '') || %s, "
+        "completed_at = NOW(), verification_status = 'failed' "
+        "WHERE status = 'blocked' AND plan_role = 'subtask' "
+        "AND metadata::text LIKE %s "
+        f"AND created_at < NOW() - INTERVAL '{_DEPENDENCY_BLOCKED_MAX_AGE_HOURS} hours'",
+        (
+            f"[WATCHDOG] dependency-blocked over {_DEPENDENCY_BLOCKED_MAX_AGE_HOURS}h; dependencies never completed",
+            "%depends_on_task_ids%",
+        ),
+    )
+
+
 _TASK_PICKUP_RETURNING = (
     "id, user_id, content, scratchpad, parent_task_id, depth, mission_id, "
     "agent_type, metadata, verification_status, verification_attempts, "
@@ -2147,6 +2217,12 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 )
             except Exception as e:
                 logger.debug("Synthesis unblock check failed: %s", e)
+
+            # Unblock DAG-staged subtasks whose dependencies are all terminal
+            try:
+                await asyncio.to_thread(_unblock_dependency_tasks_sync)
+            except Exception as e:
+                logger.debug("Dependency unblock check failed: %s", e)
 
             task = await asyncio.to_thread(
                 _query_one,

@@ -104,6 +104,50 @@ def format_subtask_results(sibling_results: list[dict], provider: str | None) ->
     return "### Subtask Results\n\n" + "\n\n".join(result_blocks)
 
 
+_DEPENDENCY_RESULTS_GUIDANCE = (
+    "This task was blocked until the tasks below finished; their outcomes are your inputs. "
+    "If a dependency failed, decide whether meaningful partial work is still possible — "
+    "otherwise report the blockage clearly instead of guessing around it."
+)
+
+
+def format_dependency_results(dep_results: list[dict], provider: str | None) -> str:
+    """Render finished dependency tasks (rows with id/agent_type/content/result/
+    status) as the <dependency-results> block for a DAG-staged subtask."""
+    if not dep_results:
+        return ""
+
+    result_blocks = []
+    for row in dep_results:
+        agent = row.get("agent_type") or "unknown"
+        status = row.get("status") or "?"
+        result = str(row.get("result") or "")[:5000]
+        task_brief = str(row.get("content") or "")[:300]
+        if uses_xml(provider):
+            result_blocks.append(
+                f"  <dependency id=\"{row['id']}\" agent=\"{agent}\" status=\"{status}\">\n"
+                f"    <task-brief>{task_brief}</task-brief>\n"
+                f"    <result>\n{result}\n    </result>\n"
+                f"  </dependency>"
+            )
+        else:
+            result_blocks.append(
+                f"#### Dependency #{row['id']} [{agent}] — {status}\n"
+                f"**Task brief:** {task_brief}\n\n"
+                f"**Result:**\n\n{result}"
+            )
+
+    if uses_xml(provider):
+        return (
+            "<dependency-results>\n" + _DEPENDENCY_RESULTS_GUIDANCE + "\n"
+            + "\n".join(result_blocks) + "\n</dependency-results>"
+        )
+    return (
+        "### Dependency Results\n\n" + _DEPENDENCY_RESULTS_GUIDANCE + "\n\n"
+        + "\n\n".join(result_blocks)
+    )
+
+
 def format_agent_execution_history(
     *,
     agent_type: str,

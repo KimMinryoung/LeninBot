@@ -77,18 +77,21 @@ Durable task states live in `telegram_tasks`:
 pending -> processing -> done
                     \-> failed
                     \-> handed_off
-blocked -> pending  (synthesis task after parallel subtasks finish)
+blocked -> pending  (synthesis task after all subtasks terminal;
+                     DAG subtask after its depends_on tasks terminal)
 ```
 
-`telegram/tasks.py` polls with `FOR UPDATE SKIP LOCKED`, uses a bounded semaphore, and unblocks synthesis tasks when all sibling subtasks are terminal.
+`telegram/tasks.py` polls with `FOR UPDATE SKIP LOCKED`, uses a bounded semaphore, and runs two unblock passes each loop: synthesis tasks when all sibling subtasks are terminal, and dependency-DAG subtasks (`_unblock_dependency_tasks_sync`) when every task ID in their `metadata.depends_on_task_ids` is terminal (`done`/`failed`/`handed_off`; missing rows count as terminal). A watchdog fails any dependency-blocked task older than 48h so a broken plan can never deadlock its synthesis.
 
 ### Delegation
 
 `delegate` creates one pending task linked to the current mission. The task content includes the orchestrator instruction plus recent conversation context. The worker runs `process_task()`, saves result/tool log, and triggers an orchestrator callback unless the agent/spec path suppresses it.
 
-### Parallel Delegation
+### Parallel Delegation & Dependency DAGs
 
-`multi_delegate` creates N subtasks sharing a `plan_id` plus one blocked synthesis task. When subtasks finish, the synthesis task receives a `<subtask-results>` block and produces a combined report.
+`multi_delegate` creates N subtasks (max 8) sharing a `plan_id` plus one blocked synthesis task. When subtasks finish, the synthesis task receives a `<subtask-results>` block and produces a combined report.
+
+A subtask entry may declare `depends_on` — 0-based indices of **earlier** tasks in the list (forward references are rejected, which makes plans structurally cycle-free). Dependent tasks are created `status='blocked'` with the resolved dependency task IDs in `metadata.depends_on_task_ids`; the worker unblocks them when every dependency is terminal, and `_build_task_context_content` injects the dependencies' results (including failed ones, marked by status, with guidance to report blockage rather than guess) as a `<dependency-results>` block. This turns multi_delegate into a small Plan-and-Execute engine: research → analyze → publish missions run without the operator stitching stages. Planning stays in the orchestrator model — the tool schema teaches it to express dependencies; there is no separate planner call. Replanning v1: a failed dependency flows into the dependent's and synthesis's context and the orchestrator's report callback, where the orchestrator decides whether to re-delegate. If a subtask's creation fails, its dependents are skipped (marked in the plan result) rather than created against a missing dependency. Smoke: `scripts/smoke_plan_dag.py`.
 
 ### Synchronous Sub-Agent
 
