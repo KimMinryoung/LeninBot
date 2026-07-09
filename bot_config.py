@@ -356,6 +356,25 @@ def _get_deepseek_thinking_params() -> dict:
     }
 
 
+def _get_deepseek_tool_thinking_params() -> dict:
+    """Thinking controls for DeepSeek multi-tool agent loops (Telegram
+    orchestrator chat, task agents, autonomous ticks, A2A).
+
+    Default DISABLED, unlike the plain-generation default above: tool loops
+    externalize reasoning through tool iterations anyway, thinking blocks must
+    be replayed into every subsequent round (input-token growth per round),
+    and a think-heavy round can exhaust max_tokens before any visible text
+    (observed on autonomous ticks 216/217, 2026-07-09 — empty-reply fallback).
+    Web chat and the browser worker already run non-thinking for the same
+    class of reasons. Writer and roleplay keep their own deliberate
+    thinking-on tuning. Set DEEPSEEK_TOOL_THINKING_MODE=thinking to restore
+    thinking in tool loops."""
+    mode = (os.getenv("DEEPSEEK_TOOL_THINKING_MODE", "off") or "off").strip().lower()
+    if mode in {"thinking", "on", "enabled", "enable", "1", "true"}:
+        return _get_deepseek_thinking_params()
+    return {"thinking": {"type": "disabled"}}
+
+
 def _get_deepseek_browser_params() -> dict:
     """Return DeepSeek controls for browser automation.
 

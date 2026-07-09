@@ -10,7 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from claude_loop import _calculate_cost, _content_block_for_replay, _pricing_for
-from bot_config import _get_deepseek_browser_params, _get_deepseek_thinking_params
+from bot_config import (
+    _get_deepseek_browser_params,
+    _get_deepseek_thinking_params,
+    _get_deepseek_tool_thinking_params,
+)
 
 
 def _read(path: str) -> str:
@@ -29,7 +33,9 @@ def test_telegram_deepseek_routes_to_anthropic_harness() -> None:
     anth = 'effective_provider == "deepseek" and _deepseek_anthropic_client'
     assert anth in source
     assert "client=_deepseek_anthropic_client" in source
-    assert "_get_deepseek_thinking_params" in source
+    # Multi-tool loops use the tool-loop thinking policy (default off); a
+    # per-call override (tick planner/critic) takes precedence.
+    assert "deepseek_thinking_override or _get_deepseek_tool_thinking_params()" in source
     assert "output_config=deepseek_thinking.get" in source
     assert 'provider_label="deepseek"' not in source
 
@@ -38,7 +44,7 @@ def test_a2a_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("a2a_handler.py")
     assert 'provider == "deepseek" and _deepseek_anthropic_client' in source
     assert "client=_deepseek_anthropic_client" in source
-    assert "_get_deepseek_thinking_params" in source
+    assert "_get_deepseek_tool_thinking_params" in source
     assert "output_config=deepseek_thinking.get" in source
     assert 'provider_label="deepseek:a2a"' not in source
 
@@ -85,6 +91,17 @@ def test_deepseek_thinking_config_is_enabled_by_default() -> None:
     assert params["output_config"]["effort"] in {"high", "max"}
 
 
+def test_deepseek_tool_thinking_disabled_by_default() -> None:
+    import os
+    params = _get_deepseek_tool_thinking_params()
+    assert params == {"thinking": {"type": "disabled"}}
+    os.environ["DEEPSEEK_TOOL_THINKING_MODE"] = "thinking"
+    try:
+        assert _get_deepseek_tool_thinking_params()["thinking"] == {"type": "enabled"}
+    finally:
+        del os.environ["DEEPSEEK_TOOL_THINKING_MODE"]
+
+
 def test_thinking_blocks_are_replayed_not_coerced_to_text() -> None:
     thinking_block = {
         "type": "thinking",
@@ -121,6 +138,7 @@ if __name__ == "__main__":
     test_browser_use_deepseek_routes_to_anthropic_harness()
     test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress()
     test_deepseek_thinking_config_is_enabled_by_default()
+    test_deepseek_tool_thinking_disabled_by_default()
     test_thinking_blocks_are_replayed_not_coerced_to_text()
     test_deepseek_pricing_uses_deepseek_rows()
     print("deepseek harness smoke ok")

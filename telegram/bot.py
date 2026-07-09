@@ -36,7 +36,7 @@ from bot_config import (
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
-    _get_task_provider, _get_deepseek_thinking_params,
+    _get_task_provider,
     get_current_model_selection, get_task_verification_mode,
     _extract_text,
 )
@@ -1618,7 +1618,10 @@ async def _chat_with_tools(
             return await _chat_coro
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
-        deepseek_thinking = deepseek_thinking_override or _get_deepseek_thinking_params()
+        # Multi-tool loops default to thinking OFF (_get_deepseek_tool_thinking_params);
+        # DEEPSEEK_TOOL_THINKING_MODE=thinking restores the old behavior.
+        from bot_config import _get_deepseek_tool_thinking_params
+        deepseek_thinking = deepseek_thinking_override or _get_deepseek_tool_thinking_params()
         _chat_coro = chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,

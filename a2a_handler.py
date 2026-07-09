@@ -21,7 +21,6 @@ from identity.prompts import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
     _claude, _openai_client, _deepseek_anthropic_client, _config,
-    _get_deepseek_thinking_params,
 )
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
@@ -377,7 +376,10 @@ async def _run_llm(
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
         from claude_loop import chat_with_tools
-        deepseek_thinking = _get_deepseek_thinking_params()
+        from bot_config import _get_deepseek_tool_thinking_params
+        # A2A conversations run a multi-tool loop — thinking off by default
+        # (see _get_deepseek_tool_thinking_params).
+        deepseek_thinking = _get_deepseek_tool_thinking_params()
         return await chat_with_tools(
             history,
             client=_deepseek_anthropic_client,
