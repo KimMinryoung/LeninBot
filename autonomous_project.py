@@ -1269,18 +1269,23 @@ def _cached_editorial_diagnosis(project_id: int, slug: str, draft_updated_at) ->
     return None
 
 
-async def _cheap_reviewer_profile(provider: str) -> tuple[str, "object"]:
-    """Resolve the cheap model used by tick-side review calls (editorial
-    diagnosis, tick planner, tick critic): DeepSeek flash when available,
-    else the tick provider's own low tier."""
+async def _reviewer_profile(provider: str, tier: str = "low") -> tuple[str, "object"]:
+    """Resolve the model used by tick-side review calls. DeepSeek when
+    available, else the tick provider itself.
+
+    Tier per caller: editorial diagnosis stays "low" (cheap-diagnoser →
+    author-revises is the writer's blind-eval-validated pattern); the tick
+    planner and critic use "high" — choosing the tick's single objective and
+    judging real progress are judgment calls, and at measured tick costs
+    (~$0.04, 2026-07-09) the stronger model adds ~$0.01–0.02 per call."""
     from bot_config import _deepseek_client
     from runtime_profile import resolve_runtime_profile
 
-    cheap_provider = "deepseek" if _deepseek_client else provider
+    reviewer_provider = "deepseek" if _deepseek_client else provider
     profile = await resolve_runtime_profile(
-        "autonomous", provider_override=cheap_provider, tier_override="low",
+        "autonomous", provider_override=reviewer_provider, tier_override=tier,
     )
-    return cheap_provider, profile
+    return reviewer_provider, profile
 
 
 async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn) -> str | None:
@@ -1300,7 +1305,7 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
     if not drafts:
         return None
 
-    diag_provider, profile = await _cheap_reviewer_profile(provider)
+    diag_provider, profile = await _reviewer_profile(provider, tier="low")
 
     blocks: list[str] = []
     for row in drafts:
@@ -1377,14 +1382,14 @@ _TICK_CRITIC_SYSTEM = (
 
 
 async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, chat_fn) -> str | None:
-    """Pre-tick planner: one cheap call over the assembled tick context picks
+    """Pre-tick planner: one bounded call over the assembled tick context picks
     the tick's single objective. Returns the planner text for prompt injection,
     or None (disabled, malformed reply, or failure — never blocks the tick)."""
     from bot_config import get_autonomous_tick_planner
 
     if not get_autonomous_tick_planner():
         return None
-    cheap_provider, profile = await _cheap_reviewer_profile(provider)
+    planner_provider, profile = await _reviewer_profile(provider, tier="high")
     try:
         objective = await chat_fn(
             [{
@@ -1402,7 +1407,7 @@ async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, c
             # reply entirely on the first live tick (2026-07-09).
             max_tokens=1200,
             budget_usd=0.05,
-            provider_override=cheap_provider,
+            provider_override=planner_provider,
             agent_name="tick_planner",
             runtime_kind="autonomous",
         )
@@ -1456,7 +1461,7 @@ def _summarize_tick_actions_for_review(actions: dict) -> str:
 async def _review_tick_outcome(
     project: dict, objective: str | None, actions: dict, provider: str, chat_fn,
 ) -> dict | None:
-    """Post-tick critic: one cheap call judges the tick's durable actions
+    """Post-tick critic: one bounded call judges the tick's durable actions
     against the pre-tick objective (or the one-concrete-step standard). The
     verdict is logged as a tick_review event; partial/no-op verdicts surface
     in the next tick's warnings. Never blocks the tick."""
@@ -1464,7 +1469,7 @@ async def _review_tick_outcome(
 
     if not get_autonomous_tick_critic():
         return None
-    cheap_provider, profile = await _cheap_reviewer_profile(provider)
+    critic_provider, profile = await _reviewer_profile(provider, tier="high")
     parts = [f"Project goal: {project.get('goal') or ''}"]
     if objective:
         parts.append(f"Tick objective (chosen pre-tick):\n{objective}")
@@ -1483,7 +1488,7 @@ async def _review_tick_outcome(
             # Same reasoning-headroom consideration as the planner above.
             max_tokens=800,
             budget_usd=0.03,
-            provider_override=cheap_provider,
+            provider_override=critic_provider,
             agent_name="tick_critic",
             runtime_kind="autonomous",
         )

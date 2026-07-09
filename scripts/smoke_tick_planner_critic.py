@@ -39,10 +39,14 @@ async def main():
     logged_events = []
     ap._log_event = lambda pid, et, content="", meta=None, **kw: logged_events.append((et, content, meta))
 
-    async def fake_profile(provider):
-        return "deepseek", SimpleNamespace(model_id="deepseek-v4-flash")
+    profile_tiers = []
 
-    ap._cheap_reviewer_profile = fake_profile
+    async def fake_profile(provider, tier="low"):
+        profile_tiers.append(tier)
+        model = "deepseek-v4-pro" if tier == "high" else "deepseek-v4-flash"
+        return "deepseek", SimpleNamespace(model_id=model)
+
+    ap._reviewer_profile = fake_profile
 
     def make_chat(response, raise_exc=False):
         calls = []
@@ -72,7 +76,8 @@ async def main():
     check("planner returns objective text", obj == PLANNER_REPLY)
     check("tick_objective event logged", any(e[0] == "tick_objective" for e in logged_events))
     check("planner context capped at ~20k", len(sent) < ap._TICK_PLANNER_CONTEXT_CAP + 200)
-    check("planner uses cheap model + tiny budget", kwargs.get("model") == "deepseek-v4-flash" and kwargs.get("budget_usd") == 0.05)
+    check("planner uses high tier + tiny budget", kwargs.get("model") == "deepseek-v4-pro" and kwargs.get("budget_usd") == 0.05)
+    check("planner requested tier=high", profile_tiers[-1] == "high")
 
     logged_events.clear()
     obj = await ap._plan_tick_objective(PROJECT, "ctx", "deepseek", make_chat("I think you should do research."))
@@ -143,6 +148,7 @@ async def main():
     user_msg = chat.calls[0][0][0]["content"]
     check("no objective -> judged against one-concrete-step standard", "one-concrete-step" in user_msg)
     check("critic sees goal + actions", "Track HBM political economy" in user_msg and "New finding: X" in user_msg)
+    check("critic uses high tier", chat.calls[0][1].get("model") == "deepseek-v4-pro" and profile_tiers[-1] == "high")
 
     out = await ap._review_tick_outcome(PROJECT, PLANNER_REPLY, actions, "deepseek", make_chat("", raise_exc=True))
     check("critic exception -> None", out is None)
