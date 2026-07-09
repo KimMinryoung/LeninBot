@@ -135,7 +135,15 @@ async def main():
     out, diag, rev = await run_hook()
     print(f"  full flow: diagnosis calls={len(diag.calls)}, revision calls={len(rev.calls)}, revised={out is not None}")
     check("notes trigger author revision", out is not None and "KITA June customs" in out)
-    check("revision turn is text-only (no tools passed)", "extra_tools" not in rev.calls[0][1])
+    # Text-only must be an EXPLICIT empty toolset: with extra_tools absent
+    # (None), telegram _chat_with_tools treats the call as the orchestrator
+    # and grants the full toolset — the opposite of text-only.
+    check(
+        "revision turn is text-only (explicit empty toolset, single round)",
+        rev.calls[0][1].get("extra_tools") == []
+        and rev.calls[0][1].get("extra_handlers") == {}
+        and rev.calls[0][1].get("max_rounds") == 1,
+    )
     check("revision reuses task system prompt", rev.calls[0][1].get("system_prompt") == "You are the analyst.")
 
     out, diag, rev = await run_hook(diag_response="PASS")

@@ -769,6 +769,12 @@ async def _maybe_reflexion_revise_report(
             model=await revise_model_fn(),
             max_tokens=16384,
             budget_usd=0.40,
+            # Text-only by design — enforce it: without extra_tools the chat
+            # fn treats this call as the orchestrator and grants the full
+            # toolset, letting a revision turn re-run side-effectful tools.
+            extra_tools=[],
+            extra_handlers={},
+            max_rounds=1,
         )
     except Exception as e:
         logger.warning("Reflexion revision failed for task %d: %s", task_id, e)

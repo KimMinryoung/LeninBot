@@ -96,6 +96,14 @@ async def diagnose(
     if context.strip():
         parts.append(f"[Context — what the text was supposed to accomplish]\n{context.strip()}")
     parts.append(f"[Text under review]\n{text}")
+    # The diagnosis prompt tells the model it has no tools — enforce that at
+    # the call layer too. chat_fn implementations that receive extra_tools=None
+    # (telegram _chat_with_tools) treat the call as the orchestrator and grant
+    # the FULL orchestrator toolset to what must be a pure text judgment.
+    # Callers may still pass explicit read-only tools through chat_kwargs.
+    chat_kwargs.setdefault("extra_tools", [])
+    chat_kwargs.setdefault("extra_handlers", {})
+    chat_kwargs.setdefault("max_rounds", 1)
     notes = await chat_fn(
         [{"role": "user", "content": "\n\n".join(parts)}],
         system_prompt=_diagnosis_system_prompt(content_kind),
