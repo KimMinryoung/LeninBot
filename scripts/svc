@@ -24,8 +24,11 @@
 
 set -euo pipefail
 
-# Resolve DEPLOY_DIR from script location (scripts/ lives inside it)
-DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve DEPLOY_DIR from the script's REAL location (scripts/ lives inside
+# it). readlink -f matters: /home/grass/bin/svc is a symlink, and dirname "$0"
+# alone resolved DEPLOY_DIR to /home/grass — .env never loaded, FRONTEND_DIR
+# pointed at a nonexistent path, and frontend deploys silently no-oped.
+DEPLOY_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 # Load .env
 if [[ -f "$DEPLOY_DIR/.env" ]]; then
