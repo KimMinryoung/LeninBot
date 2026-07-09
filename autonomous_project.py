@@ -1397,7 +1397,10 @@ async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, c
             }],
             system_prompt=_TICK_PLANNER_SYSTEM,
             model=profile.model_id,
-            max_tokens=400,
+            # Reasoning-capable low tiers (deepseek-v4-flash) spend output
+            # tokens on thinking before the visible reply; 400 starved the
+            # reply entirely on the first live tick (2026-07-09).
+            max_tokens=1200,
             budget_usd=0.05,
             provider_override=cheap_provider,
             agent_name="tick_planner",
@@ -1477,7 +1480,8 @@ async def _review_tick_outcome(
             [{"role": "user", "content": "\n\n".join(parts)}],
             system_prompt=_TICK_CRITIC_SYSTEM,
             model=profile.model_id,
-            max_tokens=200,
+            # Same reasoning-headroom consideration as the planner above.
+            max_tokens=800,
             budget_usd=0.03,
             provider_override=cheap_provider,
             agent_name="tick_critic",
