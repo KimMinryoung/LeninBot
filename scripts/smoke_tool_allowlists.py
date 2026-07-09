@@ -30,6 +30,24 @@ DYNAMIC_HANDLER_TOOLS = {
     "run_agent",
 }
 
+# Tools owned and registered by a dedicated service process rather than the
+# main runtime registry. The writer workspace builds its tools per project in
+# writer/tools.py and runs in novel-writer-api.service (split 2026-07-08), so
+# its profile names are validated here explicitly instead of against
+# runtime_tools.registry.
+SERVICE_LOCAL_PROFILE_TOOLS = {
+    "system.writer": {
+        "search_manuscript",
+        "read_manuscript",
+        "append_to_manuscript",
+        "replace_in_manuscript",
+        "read_document",
+        "search_documents",
+        "save_document",
+        "research_web",
+    },
+}
+
 REQUIRED_PUBLIC_TOOLS = {
     "read_self",
     "research_document",
@@ -123,7 +141,10 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
 def _assert_tool_profiles(tool_names: set[str]) -> None:
     for profile in iter_tool_profiles():
         assert profile.tool_names, f"{profile.id} has empty fail-closed tool profile"
-        unknown = sorted(set(profile.tool_names) - tool_names - MCP_GATEWAY_LOCAL_TOOLS)
+        service_local = SERVICE_LOCAL_PROFILE_TOOLS.get(profile.id, set())
+        unknown = sorted(
+            set(profile.tool_names) - tool_names - MCP_GATEWAY_LOCAL_TOOLS - service_local
+        )
         assert not unknown, f"{profile.id} references unknown tools: {unknown}"
         if profile.surface == "webchat":
             forbidden = sorted(
