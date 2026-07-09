@@ -171,6 +171,20 @@ def _parse_user_fingerprints(http_req: Request) -> list[str]:
     return [f.strip()[:256] for f in raw.split(",") if f.strip()][:20]
 
 
+def _parse_authenticated_user_id(http_req: Request) -> int | None:
+    """Read the account id stamped by the trusted frontend proxy."""
+    if not _trusted_proxy_request(http_req):
+        return None
+    raw = (http_req.headers.get("x-authenticated-user-id") or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def _client_ip(http_req: Request) -> str:
     if _trusted_proxy_request(http_req):
         forwarded = http_req.headers.get("x-forwarded-for", "")
@@ -217,6 +231,7 @@ async def chat(request: ChatRequest, http_req: Request):
     user_agent = http_req.headers.get("user-agent", "")
     ip_address = _client_ip(http_req)
     user_fingerprints = _parse_user_fingerprints(http_req)
+    authenticated_user_id = _parse_authenticated_user_id(http_req)
     rate_key = _webchat_rate_key(request, http_req, ip_address)
 
     # Admin-only personas (e.g. adult roleplay) require a valid X-Admin-Key.
@@ -264,6 +279,7 @@ async def chat(request: ChatRequest, http_req: Request):
                     fingerprint=request.fingerprint,
                     user_agent=user_agent,
                     ip_address=ip_address,
+                    authenticated_user_id=authenticated_user_id,
                     user_fingerprints=user_fingerprints,
                     persona=request.persona,
                     regenerate_from_id=request.regenerate_from_id,
@@ -303,8 +319,9 @@ async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
     if request.rating is None and not tone_feedback and not note:
         raise HTTPException(status_code=400, detail="rating, tone_feedback, or note is required")
 
+    authenticated_user_id = _parse_authenticated_user_id(http_req)
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [request.fingerprint or ""]) if f})
-    if not fps:
+    if not authenticated_user_id and not fps:
         raise HTTPException(status_code=400, detail="fingerprint is required")
 
     row = await asyncio.to_thread(
@@ -313,6 +330,7 @@ async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
         fps,
         request.session_id,
         request.persona,
+        account_user_id=authenticated_user_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="chat message not found")

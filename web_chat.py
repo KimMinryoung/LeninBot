@@ -817,12 +817,19 @@ def get_web_chat_log_for_feedback(
     fingerprints: list[str],
     session_id: str | None = None,
     persona: str | None = None,
+    account_user_id: int | None = None,
 ) -> dict | None:
     fps = [f for f in (fingerprints or []) if f]
-    if not fps:
+    if not account_user_id and not fps:
         return None
-    clauses = ["id = %s", "fingerprint = ANY(%s)"]
-    params: list = [chat_log_id, fps]
+    clauses = ["id = %s"]
+    params: list = [chat_log_id]
+    if account_user_id:
+        clauses.append("user_id = %s")
+        params.append(account_user_id)
+    else:
+        clauses.append("fingerprint = ANY(%s)")
+        params.append(fps)
     if session_id:
         clauses.append("session_id = %s")
         params.append(session_id)
@@ -874,12 +881,14 @@ def _load_web_feedback_rows(
     session_id: str | None,
     persona: str,
     limit: int = 8,
+    account_user_id: int | None = None,
 ) -> list[dict]:
     fps = [f for f in (fingerprints or []) if f]
-    if not fps:
+    if not account_user_id and not fps:
         return []
     session_clause = "AND (f.session_id = %s OR f.session_id IS NULL)" if session_id else ""
-    params: list = [fps, persona]
+    identity_clause = "l.user_id = %s" if account_user_id else "f.fingerprint = ANY(%s)"
+    params: list = [account_user_id or fps, persona]
     if session_id:
         params.append(session_id)
     params.append(limit)
@@ -887,7 +896,7 @@ def _load_web_feedback_rows(
         f"""SELECT f.id, f.rating, f.tone_feedback, f.note, l.user_query, l.bot_answer, f.updated_at
               FROM web_chat_feedback f
               JOIN chat_logs l ON l.id = f.chat_log_id
-             WHERE f.fingerprint = ANY(%s)
+             WHERE {identity_clause}
                AND f.persona = %s
                AND f.consumed_at IS NULL
                AND f.note IS NOT NULL
@@ -917,25 +926,28 @@ def _load_web_tone_policy(
     session_id: str | None,
     persona: str,
     limit: int = 40,
+    account_user_id: int | None = None,
 ) -> list[dict]:
     fps = [f for f in (fingerprints or []) if f]
-    if not fps:
+    if not account_user_id and not fps:
         return []
-    session_clause = "AND (session_id = %s OR session_id IS NULL)" if session_id else ""
-    params: list = [fps, persona]
+    session_clause = "AND (f.session_id = %s OR f.session_id IS NULL)" if session_id else ""
+    identity_clause = "l.user_id = %s" if account_user_id else "f.fingerprint = ANY(%s)"
+    params: list = [account_user_id or fps, persona]
     if session_id:
         params.append(session_id)
     params.append(max(1, min(int(limit or 40), 100)))
     rows = db_query(
         f"""WITH recent AS (
-               SELECT tone_feedback
-                 FROM web_chat_feedback
-                WHERE fingerprint = ANY(%s)
-                  AND persona = %s
-                  AND tone_feedback IS NOT NULL
-                  AND btrim(tone_feedback) <> ''
-                  {session_clause}
-                ORDER BY updated_at DESC
+	               SELECT f.tone_feedback
+	                 FROM web_chat_feedback f
+	                 JOIN chat_logs l ON l.id = f.chat_log_id
+	                WHERE {identity_clause}
+	                  AND f.persona = %s
+	                  AND f.tone_feedback IS NOT NULL
+	                  AND btrim(f.tone_feedback) <> ''
+	                  {session_clause}
+	                ORDER BY f.updated_at DESC
                 LIMIT %s
            )
            SELECT tone_feedback, count(*) AS count
@@ -1013,6 +1025,7 @@ def _load_web_history(
     limit: int = 20,
     persona: str = DEFAULT_PERSONA_ID,
     exclude_chat_log_ids: set[int] | None = None,
+    account_user_id: int | None = None,
 ) -> list[dict]:
     """Load recent conversation history from chat_logs.
 
@@ -1028,9 +1041,11 @@ def _load_web_history(
     entire prefix after every turn.
     """
     fps = [f for f in (fingerprints or []) if f]
-    if not fps:
+    if not account_user_id and not fps:
         return []
     excluded_ids = {int(x) for x in (exclude_chat_log_ids or set()) if x}
+    identity_clause = "user_id = %s" if account_user_id else "fingerprint = ANY(%s)"
+    identity_value = account_user_id or fps
 
     def _rows_to_messages(rows: list[dict]) -> list[dict]:
         if excluded_ids:
@@ -1053,25 +1068,25 @@ def _load_web_history(
         # Does this session actually belong to one of the provided fingerprints,
         # under this persona?
         owned = db_query(
-            """SELECT 1 FROM chat_logs
-               WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
+            f"""SELECT 1 FROM chat_logs
+               WHERE session_id = %s AND {identity_clause} AND persona = %s
                LIMIT 1""",
-            (session_id, fps, persona),
+            (session_id, identity_value, persona),
         )
         if owned:
             anchor_limit = min(4, max(0, limit // 4))
             recent_limit = max(0, limit - anchor_limit)
             anchor_rows = db_query(
-                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-                   WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
+                f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+                   WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at ASC LIMIT %s""",
-                (session_id, fps, persona, anchor_limit),
+                (session_id, identity_value, persona, anchor_limit),
             )
             recent_rows = db_query(
-                """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-                   WHERE session_id = %s AND fingerprint = ANY(%s) AND persona = %s
+                f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+                   WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
-                (session_id, fps, persona, recent_limit),
+                (session_id, identity_value, persona, recent_limit),
             )
             by_id = {row["id"]: row for row in anchor_rows + recent_rows}
             rows = sorted(by_id.values(), key=lambda r: r["created_at"])
@@ -1082,10 +1097,10 @@ def _load_web_history(
             return []
     else:
         rows = db_query(
-            """SELECT id, user_query, bot_answer, created_at FROM chat_logs
-               WHERE fingerprint = ANY(%s) AND persona = %s
+            f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+               WHERE {identity_clause} AND persona = %s
                ORDER BY created_at DESC LIMIT %s""",
-            (fps, persona, limit),
+            (identity_value, persona, limit),
         )
 
     if not rows:
@@ -1098,7 +1113,7 @@ def _load_web_history(
 # ── Logging ──────────────────────────────────────────────────────────
 
 def ensure_chat_logs_persona_column() -> None:
-    """Add the persona column to chat_logs (idempotent schema migration).
+    """Add chat_logs columns used by persona/account-aware web chat.
 
     Existing rows backfill to the default persona. Applied via
     scripts/schema_migrations.py before deploying persona-aware web chat.
@@ -1110,6 +1125,22 @@ def ensure_chat_logs_persona_column() -> None:
     db_execute(
         """CREATE INDEX IF NOT EXISTS idx_chat_logs_persona_fp
            ON chat_logs (persona, fingerprint, created_at DESC)"""
+    )
+    db_execute(
+        """ALTER TABLE chat_logs
+           ADD COLUMN IF NOT EXISTS user_id bigint"""
+    )
+    db_execute(
+        """UPDATE chat_logs cl
+              SET user_id = uf.user_id
+             FROM user_fingerprints uf
+            WHERE cl.user_id IS NULL
+              AND cl.fingerprint = uf.fingerprint"""
+    )
+    db_execute(
+        """CREATE INDEX IF NOT EXISTS idx_chat_logs_user_persona_created
+           ON chat_logs (user_id, persona, created_at DESC)
+           WHERE user_id IS NOT NULL"""
     )
 
 
@@ -1149,7 +1180,7 @@ def _log_chat(
     session_id: str, fingerprint: str, user_agent: str, ip_address: str,
     user_query: str, bot_answer: str, route: str = "web_chat",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
-    persona: str = DEFAULT_PERSONA_ID,
+    persona: str = DEFAULT_PERSONA_ID, authenticated_user_id: int | None = None,
 ) -> int | None:
     """Save web chat exchange to chat_logs table and return its id."""
     try:
@@ -1157,12 +1188,12 @@ def _log_chat(
             """INSERT INTO chat_logs
                (session_id, fingerprint, user_agent, ip_address,
                 user_query, bot_answer, route, documents_count,
-                web_search_used, strategy, persona)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                web_search_used, strategy, persona, user_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (session_id, fingerprint, user_agent, ip_address,
              user_query, bot_answer, route, documents_count, web_search_used, strategy,
-             persona),
+             persona, authenticated_user_id),
         )
         return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
@@ -1249,6 +1280,7 @@ async def handle_web_chat(
     fingerprint: str,
     user_agent: str,
     ip_address: str,
+    authenticated_user_id: int | None = None,
     user_fingerprints: list[str] | None = None,
     persona: str = DEFAULT_PERSONA_ID,
     regenerate_from_id: int | None = None,
@@ -1274,6 +1306,7 @@ async def handle_web_chat(
             fps,
             session_id,
             persona,
+            account_user_id=authenticated_user_id,
         )
         if not regeneration_source:
             yield _format_sse({"type": "error", "content": "재생성할 이전 응답을 찾을 수 없습니다."})
@@ -1298,7 +1331,8 @@ async def handle_web_chat(
     # the new answer's conversational context.
     exclude_history_ids = {int(regeneration_source["id"])} if regeneration_source else set()
     history = await asyncio.to_thread(
-        _load_web_history, fps, session_id, 20, persona, exclude_history_ids
+        _load_web_history, fps, session_id, 20, persona, exclude_history_ids,
+        account_user_id=authenticated_user_id,
     )
 
     # Web chat has its OWN provider/tier keys so Telegram's /config does not
@@ -1330,9 +1364,15 @@ async def handle_web_chat(
     feedback_ids: list[int] = []
     tone_policy_rows = []
     if regeneration_source is None:
-        feedback_rows = await asyncio.to_thread(_load_web_feedback_rows, fps, session_id, persona, 8)
+        feedback_rows = await asyncio.to_thread(
+            _load_web_feedback_rows, fps, session_id, persona, 8,
+            account_user_id=authenticated_user_id,
+        )
         feedback_ids = [int(row["id"]) for row in feedback_rows if row.get("id")]
-        tone_policy_rows = await asyncio.to_thread(_load_web_tone_policy, fps, session_id, persona, 40)
+        tone_policy_rows = await asyncio.to_thread(
+            _load_web_tone_policy, fps, session_id, persona, 40,
+            account_user_id=authenticated_user_id,
+        )
     feedback_context = _render_web_feedback_context(feedback_rows, provider)
     tone_policy_context = _render_web_tone_policy(tone_policy_rows, provider)
     preflight_context = ""
@@ -1526,7 +1566,7 @@ async def handle_web_chat(
             chat_log_id = await asyncio.to_thread(
                 _log_chat, session_id, fingerprint, user_agent, ip_address,
                 original_message, answer, f"{provider}_loop",
-                documents_count, web_search_used, strategy, persona,
+                documents_count, web_search_used, strategy, persona, authenticated_user_id,
             )
             if feedback_ids:
                 try:
