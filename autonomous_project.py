@@ -1402,14 +1402,22 @@ async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, c
             }],
             system_prompt=_TICK_PLANNER_SYSTEM,
             model=profile.model_id,
-            # Reasoning-capable low tiers (deepseek-v4-flash) spend output
-            # tokens on thinking before the visible reply; 400 starved the
-            # reply entirely on the first live tick (2026-07-09).
             max_tokens=1200,
             budget_usd=0.05,
+            # Pure text judgment over the assembled context — no tools. With
+            # extra_tools=None, _chat_with_tools treats the call as the
+            # orchestrator and grants the FULL orchestrator toolset (delegate,
+            # broadcast, KG writes); a planner must not act, only choose.
+            extra_tools=[],
+            extra_handlers={},
+            max_rounds=1,
             provider_override=planner_provider,
             agent_name="tick_planner",
             runtime_kind="autonomous",
+            # DeepSeek reasoning mode burned the entire max_tokens (400, then
+            # 1200) before any visible reply on the first live ticks
+            # (2026-07-09) — a 3-line formatted verdict doesn't need thinking.
+            deepseek_thinking_override={"thinking": {"type": "disabled"}},
         )
     except Exception as e:
         logger.warning("tick planner failed for project %s: %s", project["id"], e)
@@ -1485,12 +1493,17 @@ async def _review_tick_outcome(
             [{"role": "user", "content": "\n\n".join(parts)}],
             system_prompt=_TICK_CRITIC_SYSTEM,
             model=profile.model_id,
-            # Same reasoning-headroom consideration as the planner above.
             max_tokens=800,
             budget_usd=0.03,
+            # No tools — same reasoning as the planner call above.
+            extra_tools=[],
+            extra_handlers={},
+            max_rounds=1,
             provider_override=critic_provider,
             agent_name="tick_critic",
             runtime_kind="autonomous",
+            # Same as the planner: two-line verdict, thinking off (see there).
+            deepseek_thinking_override={"thinking": {"type": "disabled"}},
         )
     except Exception as e:
         logger.warning("tick critic failed for project %s: %s", project["id"], e)

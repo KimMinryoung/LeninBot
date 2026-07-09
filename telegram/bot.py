@@ -1439,6 +1439,7 @@ async def _chat_with_tools(
     extra_system_context: str = "",
     agent_name: str | None = None,
     runtime_kind: str | None = None,
+    deepseek_thinking_override: dict | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
@@ -1447,6 +1448,12 @@ async def _chat_with_tools(
     extra_system_context: appended to the rendered orchestrator system prompt
     (active mission timeline, task state block, retrieved experiences, etc.).
     Ignored when `system_prompt` is passed directly.
+    deepseek_thinking_override: per-call replacement for the global DeepSeek
+    thinking params (same shape as _get_deepseek_thinking_params()). Short
+    format-constrained calls (autonomous tick planner/critic) pass
+    {"thinking": {"type": "disabled"}} — reasoning-mode burn was exhausting
+    their whole max_tokens before any visible reply. Ignored by non-DeepSeek
+    providers.
     """
     # Resolve provider up-front so the system prompt can be rendered in the
     # format native to the target model family (XML for Claude, Markdown for
@@ -1611,7 +1618,7 @@ async def _chat_with_tools(
             return await _chat_coro
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
-        deepseek_thinking = _get_deepseek_thinking_params()
+        deepseek_thinking = deepseek_thinking_override or _get_deepseek_thinking_params()
         _chat_coro = chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,
