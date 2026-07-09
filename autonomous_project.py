@@ -46,6 +46,10 @@ NOTE_SNIPPET_CHARS = 500     # char cap per note when surfaced in prompt
 TICK_LOG_TOOL_CAP_CHARS = 500   # char cap per tool result when persisting a tick's tool log
 SYNTHESIS_DUE_AFTER_FINDINGS = 12   # finding-notes since last synthesis before synthesis is due
 SYNTHESIS_PROMPT_CHARS = 3000       # char cap for the latest synthesis note in the tick prompt
+RESEARCH_TRAIL_LOGS = 6      # past tick tool logs mined for the research trail
+RESEARCH_TRAIL_MAX_LINES = 40   # newest-first cap on trail lines surfaced in the prompt
+RESEARCH_TRAIL_ARGS_CAP = 180   # char cap per trail line's argument payload
+STALL_AUTO_PAUSE_STREAK = 3  # consecutive no-op/error ticks before auto-pause
 
 
 # ── Schema bootstrap ────────────────────────────────────────────────
@@ -245,6 +249,69 @@ def _fetch_last_tick_tool_log(project_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
+# Tools whose invocations are worth remembering across ticks — external
+# research calls that cost rounds/quota to repeat. Internal state tools
+# (add_research_note, revise_plan, ...) are excluded: their effects are
+# already visible as notes/plan in the prompt.
+_RESEARCH_TRAIL_TOOLS = frozenset({
+    "web_search", "fetch_url", "fetch_x_post", "vector_search",
+    "knowledge_graph_search", "get_finance_data", "download_file",
+    "read_document", "research_deep_dive",
+})
+
+# Matches the head of one tool-log entry: `  [3] tool_name({json args}) → result`.
+# Non-greedy args so a `) → ` inside the result text cannot swallow the line.
+_TOOL_LOG_HEAD_RE = re.compile(
+    r"^\s*\[[^\]]{1,8}\]\s*([A-Za-z_][A-Za-z0-9_]*)\((.*?)\)\s*→", re.MULTILINE
+)
+
+
+def _extract_research_queries(log_contents: list[str]) -> list[str]:
+    """Pure: mine research-tool invocation heads out of stored tick tool logs
+    (pass logs oldest first). Returns deduped `tool(args)` lines, oldest first,
+    capped at RESEARCH_TRAIL_MAX_LINES keeping the newest lines."""
+    seen: set[str] = set()
+    lines: list[str] = []
+    for content in log_contents:
+        for m in _TOOL_LOG_HEAD_RE.finditer(content or ""):
+            tool, args = m.group(1), m.group(2).strip()
+            if tool not in _RESEARCH_TRAIL_TOOLS:
+                continue
+            if len(args) > RESEARCH_TRAIL_ARGS_CAP:
+                args = args[: RESEARCH_TRAIL_ARGS_CAP - 1].rstrip() + "…"
+            line = f"{tool}({args})"
+            if line in seen:
+                continue
+            seen.add(line)
+            lines.append(line)
+    return lines[-RESEARCH_TRAIL_MAX_LINES:]
+
+
+def _research_trail(project_id: int) -> str | None:
+    """Deduped list of research queries run on ticks BEFORE the last one (the
+    last tick's full trace is shown separately in last-tick-execution).
+    Prevents the classic autonomous-loop waste: re-running a search that a
+    tick outside the visible window already ran."""
+    try:
+        rows = db_query(
+            "SELECT content FROM autonomous_project_events "
+            "WHERE project_id = %s AND event_type = %s "
+            "ORDER BY created_at DESC, id DESC LIMIT %s",
+            (project_id, _TICK_TOOL_LOG_EVENT_TYPE, RESEARCH_TRAIL_LOGS + 1),
+        )
+    except Exception as e:
+        logger.debug("research trail fetch failed (project=%s): %s", project_id, e)
+        return None
+    if len(rows) < 2:
+        return None
+    older = [r.get("content") or "" for r in rows[1:]]  # skip newest — shown in full
+    older.reverse()  # oldest first
+    lines = _extract_research_queries(older)
+    if not lines:
+        return None
+    return "\n".join(f"- {line}" for line in lines)
+
+
 def _recent_tick_attention_events(project_id: int, limit: int = 3) -> list[dict]:
     """Return recent tick-level failures or no-op warnings for prompt handoff."""
     try:
@@ -298,20 +365,45 @@ def _last_paragraph(text: str) -> str:
     return paragraphs[-1] if paragraphs else ""
 
 
-async def _notify_telegram(project: dict, result_text: str, actions: dict, runtime: dict) -> None:
+async def _send_owner_telegram(text: str) -> bool:
+    """Send one plain-text message to the owner chat. Never raises."""
+    from secrets_loader import get_secret
+    token = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        logger.warning("Telegram env not set — skipping owner notification")
+        return False
+    try:
+        from aiogram import Bot
+        bot = Bot(token=token)
+        try:
+            await bot.send_message(chat_id=chat_id, text=text[:3800])
+        finally:
+            await bot.session.close()
+        return True
+    except Exception as e:
+        logger.warning("Telegram notify failed: %s", e)
+        return False
+
+
+def _review_reason(review_text: str) -> str:
+    """Extract the REASON: line from a tick critic reply, or ''."""
+    for line in (review_text or "").splitlines():
+        if line.upper().startswith("REASON:"):
+            return line[len("REASON:"):].strip()
+    return ""
+
+
+async def _notify_telegram(
+    project: dict, result_text: str, actions: dict, runtime: dict,
+    tick_review: dict | None = None,
+) -> None:
     """Send a substantive tick summary to the owner.
 
     Shows WHAT the agent did — note excerpts, plan rationale, state transitions —
     not just counts. Plain text, no markdown. Telegram caps messages at 4096 chars;
     we leave headroom and truncate sections as needed.
     """
-    from secrets_loader import get_secret
-    token = get_secret("TELEGRAM_BOT_TOKEN", "") or ""
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        logger.warning("Telegram env not set — skipping tick notification")
-        return
-
     pid = project["id"]
     turn = (project.get("turn_count") or 0) + 1  # this tick's turn number
 
@@ -365,17 +457,19 @@ async def _notify_telegram(project: dict, result_text: str, actions: dict, runti
         parts.append("")
         parts.append(f"[자가비평] {_excerpt(critique, limit=500)}")
 
+    # Post-tick critic verdict — the independent judgment, next to the
+    # self-critique so the operator can compare them at a glance.
+    if tick_review and tick_review.get("verdict"):
+        reason = _review_reason(tick_review.get("review") or "")
+        parts.append("")
+        parts.append(
+            f"[크리틱] {tick_review['verdict']}"
+            + (f" — {_excerpt(reason, limit=300)}" if reason else "")
+        )
+
     message = "\n".join(parts)[:3900]
-    try:
-        from aiogram import Bot
-        bot = Bot(token=token)
-        try:
-            await bot.send_message(chat_id=chat_id, text=message[:3800])
-        finally:
-            await bot.session.close()
+    if await _send_owner_telegram(message):
         logger.info("Tick notification sent (project=%s, turn=%s)", pid, turn)
-    except Exception as e:
-        logger.warning("Telegram notify failed: %s", e)
 
 
 def _collect_tick_actions(project_id: int, since_iso_utc: str) -> dict:
@@ -773,6 +867,122 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         "set_project_state": _handle_set_state,
     }
     return schemas, handlers
+
+
+# ── Deep-dive research sub-agent (bounded, read-only) ────────────────
+#
+# One focused research question sometimes needs more tool rounds than the tick
+# has left. research_deep_dive commissions the analyst spec on a READ-ONLY
+# tool subset — the sub-agent gets none of the autonomous loop's publishing or
+# file-access surface (analyst's own read_file/research_document are filtered
+# out here), so the capability boundary in dev_docs/autonomous_project.md is
+# unchanged. Cost rides on top of the tick budget; both caps are hard.
+_DEEP_DIVE_READONLY_TOOLS = frozenset({
+    "web_search", "fetch_url", "fetch_x_post", "vector_search",
+    "knowledge_graph_search", "get_finance_data", "read_self",
+})
+DEEP_DIVE_MAX_CALLS_PER_TICK = 2
+DEEP_DIVE_MAX_ROUNDS = 10
+DEEP_DIVE_BUDGET_CAP = 0.50
+
+
+def _build_deep_dive_tool(project_id: int, provider: str, chat_fn) -> tuple[list[dict], dict]:
+    """Return ([schema], {handler}) for research_deep_dive, closed over this
+    tick's project id and chat function. Registered per tick like the other
+    project tools; the call counter resets naturally with the closure."""
+    calls = {"n": 0}
+
+    async def _handle_deep_dive(
+        question: str = "", context: str = "", budget_usd: float = 0.30,
+    ) -> str:
+        question = (question or "").strip()
+        if not question:
+            return "error: question is required"
+        if calls["n"] >= DEEP_DIVE_MAX_CALLS_PER_TICK:
+            return (
+                f"error: research_deep_dive is capped at {DEEP_DIVE_MAX_CALLS_PER_TICK} "
+                "calls per tick — work from what you already have or continue next tick"
+            )
+        calls["n"] += 1
+        try:
+            budget_usd = min(DEEP_DIVE_BUDGET_CAP, max(0.05, float(budget_usd)))
+        except (TypeError, ValueError):
+            budget_usd = 0.30
+
+        from agents import get_agent
+        import runtime_tools.registry as tt_module
+
+        spec = get_agent("analyst")
+        sub_provider = spec.effective_provider(provider)
+        sub_tools, sub_handlers = spec.filter_tools(tt_module.TOOLS, tt_module.TOOL_HANDLERS)
+        sub_tools = [t for t in sub_tools if t.get("name") in _DEEP_DIVE_READONLY_TOOLS]
+        sub_handlers = {k: v for k, v in sub_handlers.items() if k in _DEEP_DIVE_READONLY_TOOLS}
+
+        parts = []
+        if (context or "").strip():
+            parts.append(f"Background from the commissioning agent:\n{context.strip()[:2000]}")
+        parts.append("Research question (answer THIS, nothing broader):\n" + question[:2000])
+        parts.append(
+            "Return a dense mini-report: findings first, every specific figure/date/name "
+            "attributed inline to its source URL, unknowns stated as unknowns. End with a "
+            "SOURCES list of the URLs/ids you actually used."
+        )
+        tracker: dict = {}
+        try:
+            result = await chat_fn(
+                [{"role": "user", "content": "\n\n".join(parts)}],
+                system_prompt=spec.render_prompt(provider=sub_provider),
+                budget_usd=budget_usd,
+                max_rounds=DEEP_DIVE_MAX_ROUNDS,
+                max_tokens=8192,
+                extra_tools=sub_tools,
+                extra_handlers=sub_handlers,
+                budget_tracker=tracker,
+                provider_override=sub_provider,
+                agent_name="analyst",
+                runtime_kind="autonomous",
+            )
+        except Exception as e:
+            logger.warning("research_deep_dive failed (project=%s): %s", project_id, e)
+            return f"error: deep dive failed ({str(e)[:200]}) — continue with your own tools"
+        result = (result or "").strip()
+        if len(result) > 4000:
+            result = result[:4000] + "\n\n[... truncated]"
+        cost = round(tracker.get("total_cost", 0.0), 4)
+        _log_event(
+            project_id, "deep_dive", question[:400],
+            {"cost_usd": cost, "call_no": calls["n"], "budget_usd": budget_usd},
+        )
+        return (
+            result
+            + f"\n\n[deep dive #{calls['n']}: cost ${cost:.3f}. These are the analyst's "
+            "findings — save what matters via add_research_note citing the SOURCES above, "
+            "and verify independently before anything public.]"
+        )
+
+    schema = {
+        "name": "research_deep_dive",
+        "description": (
+            "Commission a bounded read-only analyst sub-agent for ONE focused research "
+            "question that needs more depth than your remaining rounds allow "
+            "(multi-source cross-check of a claim, mapping an unfamiliar sub-topic, "
+            "chasing a specific figure through primary coverage). It runs up to "
+            f"{DEEP_DIVE_MAX_ROUNDS} tool rounds (web/vector/KG search, fetch) and returns "
+            f"a sourced mini-report. Max {DEEP_DIVE_MAX_CALLS_PER_TICK} calls per tick. "
+            "Save its findings via add_research_note citing its sources; verify "
+            "independently before anything public."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The single focused research question."},
+                "context": {"type": "string", "description": "What you already know and why this matters for the project."},
+                "budget_usd": {"type": "number", "description": "Budget cap in USD (0.05–0.50).", "default": 0.30},
+            },
+            "required": ["question"],
+        },
+    }
+    return [schema], {"research_deep_dive": _handle_deep_dive}
 
 
 def _current_turn_counter(project_id: int) -> int:
@@ -1286,6 +1496,70 @@ async def _review_tick_outcome(
     return {"verdict": verdict, "review": review}
 
 
+def _stall_streak_reached(signals: list[str], streak: int = STALL_AUTO_PAUSE_STREAK) -> bool:
+    """Pure: `signals` are 'stall'/'ok' for recent completed ticks, newest
+    first. True when the newest `streak` signals are all stalls."""
+    return len(signals) >= streak and all(s == "stall" for s in signals[:streak])
+
+
+def _recent_stall_signals(project_id: int, limit: int = STALL_AUTO_PAUSE_STREAK) -> list[str]:
+    """Newest-first stall/ok signals from tick_review + tick_error events.
+    A tick_error is a stall; a tick_review is a stall only on a no-op verdict."""
+    try:
+        rows = db_query(
+            "SELECT event_type, meta FROM autonomous_project_events "
+            "WHERE project_id = %s AND event_type = ANY(%s) "
+            "ORDER BY created_at DESC, id DESC LIMIT %s",
+            (project_id, [_TICK_REVIEW_EVENT_TYPE, "tick_error"], limit),
+        )
+    except Exception as e:
+        logger.debug("stall signal fetch failed (project=%s): %s", project_id, e)
+        return []
+    signals: list[str] = []
+    for r in rows:
+        if r["event_type"] == "tick_error":
+            signals.append("stall")
+        else:
+            verdict = str((r.get("meta") or {}).get("verdict") or "")
+            signals.append("stall" if verdict == "no-op" else "ok")
+    return signals
+
+
+async def _maybe_auto_pause_stalled_project(project: dict, tick_review: dict | None) -> bool:
+    """Phase-4 enforcement: when the last STALL_AUTO_PAUSE_STREAK completed
+    ticks were all no-op/error, pause the project and alert the owner instead
+    of burning another hour of budget on a stuck loop. Only a no-op tick can
+    complete the streak, so a healthy tick never triggers this. Gated on the
+    tick critic flag implicitly — no verdicts, no streak."""
+    if not tick_review or tick_review.get("verdict") != "no-op":
+        return False
+    if not _stall_streak_reached(_recent_stall_signals(project["id"])):
+        return False
+    reason = (
+        f"auto-paused: last {STALL_AUTO_PAUSE_STREAK} ticks were all no-op/error. "
+        "Operator review needed — resume via set_project_state or leave an advisory."
+    )
+    try:
+        db_execute(
+            "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
+            (STATE_PAUSED, project["id"]),
+        )
+    except Exception as e:
+        logger.warning("auto-pause failed (project=%s): %s", project["id"], e)
+        return False
+    _log_event(
+        project["id"], "state_transition", reason,
+        {"from": project.get("state"), "to": STATE_PAUSED, "auto": True},
+    )
+    logger.info("Project %s auto-paused after %s stalled ticks", project["id"], STALL_AUTO_PAUSE_STREAK)
+    await _send_owner_telegram(
+        f"⏸️ 자율 프로젝트 #{project['id']} '{project.get('title', '')}' 자동 일시정지\n"
+        f"최근 {STALL_AUTO_PAUSE_STREAK}회 연속 무진전(no-op/error) 판정입니다. "
+        "프로젝트 상태를 점검한 뒤 advisory를 남기거나 상태를 researching으로 되돌려 재개하세요."
+    )
+    return True
+
+
 _EDITORIAL_DIAGNOSIS_GUIDANCE = (
     "An independent editor reviewed your staged draft(s) before publication. Judge each note "
     "as the author: apply what is right by revising the draft "
@@ -1309,6 +1583,7 @@ def _build_task_prompt(
     staged_drafts_text = _format_staged_research_drafts(_recent_staged_research_drafts(project["id"]))
     tick_attention_text = _format_tick_attention_events(_recent_tick_attention_events(project["id"]))
     synthesis_block, synthesis_due = _synthesis_context(project["id"])
+    research_trail = _research_trail(project["id"])
     # Past experiences relevant to this project (local embeddings, k=3):
     # lessons from failed verifications, no-op ticks, and daily reflection
     # resurface where the work happens.
@@ -1362,6 +1637,13 @@ def _build_task_prompt(
             parts.append(
                 f"### Editorial Diagnosis (staged drafts)\n\n{_EDITORIAL_DIAGNOSIS_GUIDANCE}\n\n"
                 + editorial_diagnosis
+            )
+        if research_trail:
+            parts.append(
+                "### Research Trail (queries from earlier ticks)\n\n"
+                "Research calls you already ran on ticks BEFORE the last one. Their findings "
+                "live in your notes/synthesis — do not re-run these unless the world has "
+                "plausibly changed since.\n\n" + research_trail
             )
         last_log = _fetch_last_tick_tool_log(project["id"])
         if last_log and last_log.get("content"):
@@ -1441,6 +1723,15 @@ def _build_task_prompt(
             f"{editorial_diagnosis}\n</editorial-diagnosis>"
         )
 
+    if research_trail:
+        parts.append(
+            "<research-trail>\n"
+            "Research calls you already ran on ticks BEFORE the last one. Their findings "
+            "live in your notes/synthesis — do not re-run these unless the world has "
+            "plausibly changed since.\n"
+            f"{research_trail}\n</research-trail>"
+        )
+
     # Previous tick's full tool trace — what YOU called and what came back.
     # research_notes capture curated findings; this captures raw execution so
     # the agent can remember "I already ran web_search on X, got Y" without
@@ -1509,6 +1800,13 @@ async def _run_one_tick(project: dict) -> dict:
     pending_advisories = _fetch_pending_advisories(project["id"])
 
     from telegram.bot import _chat_with_tools
+
+    # Deep-dive sub-agent needs the chat closure, so it is registered here
+    # rather than in _build_project_tools.
+    dd_schemas, dd_handlers = _build_deep_dive_tool(project["id"], provider, _chat_with_tools)
+    agent_tools.extend(dd_schemas)
+    agent_handlers.update(dd_handlers)
+    agent_tools = dedupe_tools_by_name(agent_tools)
 
     # Reflexion pre-publish gate: staged drafts get an independent editorial
     # diagnosis injected into this tick's prompt (cached per draft version, so
@@ -1655,11 +1953,7 @@ async def _run_one_tick(project: dict) -> dict:
     if tick_review and tick_review.get("verdict") == "no-op":
         # Lesson write-back: future ticks on similar objectives recall this
         # via the past-experiences block.
-        reason = ""
-        for line in (tick_review.get("review") or "").splitlines():
-            if line.upper().startswith("REASON:"):
-                reason = line[len("REASON:"):].strip()[:300]
-                break
+        reason = _review_reason(tick_review.get("review") or "")[:300]
         objective_head = (tick_objective or "the project goal").splitlines()[0][:200]
         await asyncio.to_thread(
             _record_tick_experience,
@@ -1667,6 +1961,10 @@ async def _run_one_tick(project: dict) -> dict:
             f"'{objective_head}' but produced no real progress"
             + (f" — {reason}" if reason else ""),
         )
+
+    # Stall enforcement (Phase-4 completion): a stuck project stops burning
+    # hourly budget and escalates to the operator instead.
+    await _maybe_auto_pause_stalled_project(project, tick_review)
 
     # Persist this tick's tool-call trace so the next tick can see WHAT this
     # tick actually ran and WHAT came back. Curated research_notes only capture
@@ -1703,7 +2001,7 @@ async def _run_one_tick(project: dict) -> dict:
         "cost_usd": budget_tracker.get("total_cost", 0.0),
         "rounds_used": budget_tracker.get("rounds_used", 0),
     }
-    await _notify_telegram(project, result_text or "", actions, runtime)
+    await _notify_telegram(project, result_text or "", actions, runtime, tick_review=tick_review)
 
     return {
         "project_id": project["id"],

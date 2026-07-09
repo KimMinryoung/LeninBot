@@ -64,6 +64,8 @@ Your input contains these context sections (read them BEFORE acting):
 - Synthesis due (when present): enough findings have accumulated that consolidation beats
   new research this tick. Follow the directive unless operator advice or a staged draft
   awaiting verification takes priority.
+- Research trail (when present): research queries you already ran on earlier ticks.
+  Do not re-run them — their findings are in your notes/synthesis.
 - Turn budget: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
 """.strip()),
             ("workflow", """
@@ -93,6 +95,12 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
      load the full text of the relevant notes — the prompt's recent-notes section is
      snippets only, and drafting from snippets reintroduces factual drift you already
      paid research rounds to eliminate.
+   - When ONE focused question needs more depth than your remaining rounds allow
+     (multi-source cross-check of a disputed claim, mapping an unfamiliar sub-topic),
+     commission `research_deep_dive(question=...)`: a bounded read-only analyst runs up to
+     10 tool rounds and returns a sourced mini-report (max 2 calls per tick). Its findings
+     are a sub-agent's work — save what matters via `add_research_note` citing the report's
+     SOURCES (not "the analyst"), and verify independently before anything public.
 3. **Publish (when appropriate)**: If the tick is at the "build" step for an artifact, use the
    right publishing tool (see building-modalities below). Publish only when quality meets the
    goal's criteria. Drafts can be held in research notes until ready.
@@ -251,6 +259,9 @@ operator-needed dependency and continue with the work your current tools allow.
         "publish_static_page",
         # Project state tools (registered dynamically per-tick by autonomous_project.py)
         "add_research_note", "read_research_notes", "revise_plan", "set_project_state",
+        # Bounded read-only analyst sub-call (registered per-tick; the handler
+        # filters the analyst spec down to read-only research tools)
+        "research_deep_dive",
     ],
     finalization_tools=[
         "add_research_note",

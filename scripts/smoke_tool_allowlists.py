@@ -21,6 +21,7 @@ DYNAMIC_AGENT_TOOLS = {
         "read_document",
         "revise_plan",
         "set_project_state",
+        "research_deep_dive",
     },
 }
 

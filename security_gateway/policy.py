@@ -29,6 +29,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "delegate": "delegate",
     "multi_delegate": "delegate",
     "run_agent": "delegate",
+    "research_deep_dive": "delegate",  # autonomous tick: bounded read-only analyst sub-call
     "route_task": "delegate",
     "mission": "state",
     "save_finding": "state",
