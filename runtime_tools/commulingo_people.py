@@ -241,7 +241,15 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
            WHERE person_id = %s ORDER BY sort_order, id""",
         (person_id,),
     )
-    person["sections"] = [dict(r) for r in cur.fetchall()]
+    person["sections"] = [
+        {
+            "slug": r["slug"],
+            "sortOrder": r["sort_order"],
+            "heading": {"ko": r["heading_ko"], "en": r["heading_en"]},
+            "bodyChars": {"ko": r["body_ko_chars"], "en": r["body_en_chars"]},
+        }
+        for r in cur.fetchall()
+    ]
     return person
 
 
@@ -314,14 +322,25 @@ def _list_categories() -> list[dict]:
 
 
 def _get_sections(person_id: str) -> list[dict] | None:
+    """Sections in the exact person_section patch shape (read → edit → write back)."""
     if not db_query_one("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,)):
         return None
-    return db_query(
+    rows = db_query(
         """SELECT slug, sort_order, heading_ko, heading_en, body_ko, body_en, sources
            FROM commulingo_person_sections
            WHERE person_id = %s ORDER BY sort_order, id""",
         (person_id,),
     )
+    return [
+        {
+            "slug": r["slug"],
+            "sortOrder": r["sort_order"],
+            "heading": {"ko": r["heading_ko"], "en": r["heading_en"]},
+            "body": {"ko": r["body_ko"], "en": r["body_en"]},
+            "sources": r["sources"],
+        }
+        for r in rows
+    ]
 
 
 def _list_suggestions(status: str, limit: int) -> list[dict]:
@@ -350,7 +369,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
         "`list_categories` (office-less role categories for role {category}), "
-        "`get_sections` (a person's full detail-page sections incl. markdown bodies), "
+        "`get_sections` (a person's full detail-page sections, returned in the "
+        "exact person_section patch shape — edit and send back), "
         "`list_suggestions` (edit history/queue from commulingo_edit; "
         "optional status filter: pending/approved/rejected/superseded). "
         "Always read the current record before editing with commulingo_edit."
