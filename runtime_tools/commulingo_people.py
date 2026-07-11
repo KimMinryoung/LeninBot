@@ -47,7 +47,7 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
 _SUGGESTED_BY = "cyber-lenin"
 
-_TARGET_TYPES = ("person", "office_row")
+_TARGET_TYPES = ("person", "office_row", "person_section")
 _ACTIONS = ("create", "update", "delete")
 
 _FATE_KINDS = (
@@ -59,7 +59,7 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "initial", "cyrillic", "years",
     "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role",
-    "office_rows",  # read-only echo from get_person; tolerated and ignored
+    "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
 })
 
 # person patch fields that must be {ko, en} objects. Plain strings are
@@ -68,17 +68,13 @@ _PERSON_PATCH_KEYS = frozenset({
 _LOCALIZED_PERSON_KEYS = ("name", "epithet", "bio", "moment", "patronymic")
 _LOCALIZED_OFFICE_ROW_KEYS = ("body", "name", "note")
 
-# Must match roleIconPaths in frontend views/public/commulingo-people.ejs —
-# a new icon id needs an SVG path there first (code deploy).
-_VALID_ICONS = frozenset({
-    "eye", "shield", "star", "handshake", "megaphone", "paintbrush",
-    "factory", "atom", "wheat", "landmark", "map", "flag", "folder",
-    "briefcase", "chart", "globe", "crown", "rose", "dove", "feather",
-    "flame", "circle-help",
-})
 _OFFICE_ROW_PATCH_KEYS = frozenset({
     "sortOrder", "years", "period", "body", "personId", "name", "note",
 })
+
+# Long-form detail sections rendered on /commulingo/people/<id>.
+_SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
 
@@ -221,20 +217,31 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         for r in cur.fetchall()
     ]
     cur.execute(
-        """SELECT r.icon, r.office_id, r.label_ko, r.label_en,
-                  COALESCE(NULLIF(r.icon, ''), o.icon, '') AS resolved_icon
+        """SELECT r.office_id, r.category_id,
+                  COALESCE(NULLIF(c.icon, ''), NULLIF(r.icon, ''), o.icon, '') AS resolved_icon,
+                  COALESCE(NULLIF(c.label_ko, ''), NULLIF(r.label_ko, ''), o.title_ko, '') AS label_ko,
+                  COALESCE(NULLIF(c.label_en, ''), NULLIF(r.label_en, ''), o.title_en, '') AS label_en
            FROM commulingo_person_roles r
            LEFT JOIN commulingo_offices o ON o.id = r.office_id
+           LEFT JOIN commulingo_role_categories c ON c.id = r.category_id
            WHERE r.person_id = %s""",
         (person_id,),
     )
     row = cur.fetchone()
     person["role"] = {
-        "icon": row["icon"],
         "officeId": row["office_id"] or "",
+        "category": row["category_id"] or "",
         "label": {"ko": row["label_ko"], "en": row["label_en"]},
         "resolvedIcon": row["resolved_icon"],
     } if row else None
+    cur.execute(
+        """SELECT slug, sort_order, heading_ko, heading_en,
+                  length(body_ko) AS body_ko_chars, length(body_en) AS body_en_chars
+           FROM commulingo_person_sections
+           WHERE person_id = %s ORDER BY sort_order, id""",
+        (person_id,),
+    )
+    person["sections"] = [dict(r) for r in cur.fetchall()]
     return person
 
 
@@ -295,6 +302,28 @@ def _get_office(office_id: str) -> dict | None:
             return _office_snapshot(cur, office_id)
 
 
+def _list_categories() -> list[dict]:
+    return db_query(
+        """SELECT c.id, c.icon, c.label_ko, c.label_en,
+                  COUNT(r.person_id) AS people_count
+           FROM commulingo_role_categories c
+           LEFT JOIN commulingo_person_roles r ON r.category_id = c.id
+           GROUP BY c.id, c.sort_order, c.icon, c.label_ko, c.label_en
+           ORDER BY c.sort_order, c.id"""
+    )
+
+
+def _get_sections(person_id: str) -> list[dict] | None:
+    if not db_query_one("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,)):
+        return None
+    return db_query(
+        """SELECT slug, sort_order, heading_ko, heading_en, body_ko, body_en, sources
+           FROM commulingo_person_sections
+           WHERE person_id = %s ORDER BY sort_order, id""",
+        (person_id,),
+    )
+
+
 def _list_suggestions(status: str, limit: int) -> list[dict]:
     return db_query(
         """SELECT id, target_type, target_id, action, status, confidence,
@@ -317,9 +346,11 @@ COMMULINGO_PEOPLE_TOOL = {
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
         "`get_person` (full record — returned in the exact patch shape "
         "commulingo_edit accepts, so you can edit fields and send them back; "
-        "office_rows and role.resolvedIcon are read-only info), "
+        "office_rows, sections and role.resolvedIcon are read-only info), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
+        "`list_categories` (office-less role categories for role {category}), "
+        "`get_sections` (a person's full detail-page sections incl. markdown bodies), "
         "`list_suggestions` (edit history/queue from commulingo_edit; "
         "optional status filter: pending/approved/rejected/superseded). "
         "Always read the current record before editing with commulingo_edit."
@@ -331,7 +362,8 @@ COMMULINGO_PEOPLE_TOOL = {
                 "type": "string",
                 "enum": [
                     "list_groups", "search_people", "get_person",
-                    "list_offices", "get_office", "list_suggestions",
+                    "list_offices", "get_office", "list_categories",
+                    "get_sections", "list_suggestions",
                 ],
             },
             "q": {
@@ -342,7 +374,7 @@ COMMULINGO_PEOPLE_TOOL = {
                 "type": "string",
                 "description": "search_people: restrict to one group id.",
             },
-            "person_id": {"type": "string", "description": "get_person: person id."},
+            "person_id": {"type": "string", "description": "get_person/get_sections: person id."},
             "office_id": {"type": "string", "description": "get_office: office id."},
             "status": {
                 "type": "string",
@@ -384,6 +416,14 @@ async def _exec_commulingo_people(
                 return f"Error: person '{person_id}' not found. Use search_people to find the id."
         elif action == "list_offices":
             result = await asyncio.to_thread(_list_offices)
+        elif action == "list_categories":
+            result = await asyncio.to_thread(_list_categories)
+        elif action == "get_sections":
+            if not person_id:
+                return "Error: person_id is required for get_sections."
+            result = await asyncio.to_thread(_get_sections, person_id.strip())
+            if result is None:
+                return f"Error: person '{person_id}' not found."
         elif action == "get_office":
             if not office_id:
                 return "Error: office_id is required for get_office."
@@ -512,22 +552,26 @@ def _replace_scenes(cur, person_id: str, scenes: list):
 
 
 def _apply_person_role(cur, person_id: str, role):
-    """Upsert (dict) or clear (None) the person's role-icon mapping."""
+    """Upsert (dict) or clear (None) the person's role mapping.
+
+    Only officeId/category are taken from the dict; icon/label render from
+    the linked office or category (legacy per-person icon/label columns are
+    written empty)."""
     if role is None:
         cur.execute("DELETE FROM commulingo_person_roles WHERE person_id = %s", (person_id,))
         return
-    label = role.get("label") or {}
     cur.execute(
         """INSERT INTO commulingo_person_roles
-              (person_id, icon, office_id, label_ko, label_en, updated_at)
-           VALUES (%s, %s, NULLIF(%s, ''), %s, %s, NOW())
+              (person_id, icon, office_id, category_id, label_ko, label_en, updated_at)
+           VALUES (%s, '', NULLIF(%s, ''), NULLIF(%s, ''), '', '', NOW())
            ON CONFLICT (person_id) DO UPDATE SET
-              icon = EXCLUDED.icon, office_id = EXCLUDED.office_id,
-              label_ko = EXCLUDED.label_ko, label_en = EXCLUDED.label_en,
-              updated_at = NOW()""",
+              icon = '', office_id = EXCLUDED.office_id,
+              category_id = EXCLUDED.category_id,
+              label_ko = '', label_en = '', updated_at = NOW()""",
         (
-            person_id, role.get("icon") or "", role.get("officeId") or "",
-            _localized(label, "ko"), _localized(label, "en"),
+            person_id,
+            role.get("officeId") or "",
+            role.get("category") or role.get("categoryId") or "",
         ),
     )
 
@@ -710,9 +754,13 @@ def _apply_office_row_update(cur, row_id: int, patch: dict) -> None:
 
 def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -> str | None:
     """Return an error string, or None when the edit is applicable."""
-    unknown = set(patch) - (_PERSON_PATCH_KEYS if target_type == "person" else _OFFICE_ROW_PATCH_KEYS)
+    allowed = {
+        "person": _PERSON_PATCH_KEYS,
+        "office_row": _OFFICE_ROW_PATCH_KEYS,
+        "person_section": _SECTION_PATCH_KEYS,
+    }[target_type]
+    unknown = set(patch) - allowed
     if unknown:
-        allowed = _PERSON_PATCH_KEYS if target_type == "person" else _OFFICE_ROW_PATCH_KEYS
         return (
             f"Error: unknown patch key(s): {', '.join(sorted(unknown))}. "
             f"Allowed: {', '.join(sorted(allowed))}."
@@ -782,18 +830,49 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         if "role" in patch and patch["role"] is not None:
             role = patch["role"]
             if not isinstance(role, dict):
-                return "Error: role must be an object {officeId} / {icon, label} or null to clear."
-            if role.get("icon") and role["icon"] not in _VALID_ICONS:
-                return f"Error: role.icon must be one of {', '.join(sorted(_VALID_ICONS))}."
-            if role.get("officeId"):
-                cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (role["officeId"],))
-                if not cur.fetchone():
-                    return f"Error: role.officeId '{role['officeId']}' does not exist."
-            elif not role.get("icon"):
+                return "Error: role must be {officeId} or {category}, or null to clear."
+            office_id = role.get("officeId") or ""
+            category = role.get("category") or role.get("categoryId") or ""
+            if office_id and category:
+                return "Error: role takes exactly one of officeId or category, not both."
+            if not office_id and not category:
                 return (
-                    "Error: role needs officeId (icon auto-derives from the institution) "
-                    f"or an explicit icon ({', '.join(sorted(_VALID_ICONS))})."
+                    "Error: role needs officeId or category (icon/label render from "
+                    "them — see commulingo_people action='list_categories' / 'list_offices')."
                 )
+            if office_id:
+                cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (office_id,))
+                if not cur.fetchone():
+                    return f"Error: role.officeId '{office_id}' does not exist."
+            else:
+                cur.execute("SELECT 1 FROM commulingo_role_categories WHERE id = %s", (category,))
+                if not cur.fetchone():
+                    cur.execute("SELECT id FROM commulingo_role_categories ORDER BY sort_order")
+                    valid = ", ".join(r["id"] for r in cur.fetchall())
+                    return f"Error: unknown role category '{category}'. Valid: {valid}."
+    elif target_type == "person_section":
+        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return f"Error: person '{target_id}' not found (person_section targets a person id)."
+        slug = patch.get("slug") or ""
+        if not _SLUG_RE.match(slug):
+            return "Error: patch.slug is required — a short kebab-case id like 'early-life' or 'purge-role'."
+        for key in ("heading", "body"):
+            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+                return f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}}."
+        cur.execute(
+            "SELECT 1 FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
+            (target_id, slug),
+        )
+        exists = bool(cur.fetchone())
+        if action == "create":
+            if exists:
+                return f"Error: section '{slug}' already exists for '{target_id}' — use action 'update'."
+            body = patch.get("body") or {}
+            if not (body.get("ko") or body.get("en")):
+                return "Error: body.ko or body.en (markdown) is required for section create."
+        elif not exists:
+            return f"Error: section '{slug}' not found for '{target_id}' (get_person lists existing slugs)."
     else:  # office_row
         for key in _LOCALIZED_OFFICE_ROW_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
@@ -844,6 +923,77 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
         _write_revision(cur, "person", target_id, "delete person", before, changed_by)
         return f"deleted person '{target_id}'"
 
+    if target_type == "person_section":
+        slug = patch["slug"]
+        entity_id = f"{target_id}/{slug}"
+
+        def section_row():
+            cur.execute(
+                """SELECT slug, sort_order, heading_ko, heading_en, body_ko, body_en, sources
+                   FROM commulingo_person_sections WHERE person_id = %s AND slug = %s""",
+                (target_id, slug),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+        if action == "delete":
+            before = section_row()
+            cur.execute(
+                "DELETE FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
+                (target_id, slug),
+            )
+            _write_revision(cur, "person_section", entity_id, "delete section", before, changed_by)
+            return f"deleted section '{slug}' of '{target_id}'"
+
+        before = section_row()
+        heading = patch.get("heading") or {}
+        body = patch.get("body") or {}
+        if action == "create":
+            cur.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_person_sections WHERE person_id = %s",
+                (target_id,),
+            )
+            next_sort = cur.fetchone()["next_sort"]
+            cur.execute(
+                """INSERT INTO commulingo_person_sections
+                      (person_id, slug, sort_order, heading_ko, heading_en,
+                       body_ko, body_en, sources, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
+                (
+                    target_id, slug,
+                    patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
+                    _localized(heading, "ko"), _localized(heading, "en"),
+                    _localized(body, "ko"), _localized(body, "en"),
+                    json.dumps(patch.get("sources") or [], ensure_ascii=False),
+                ),
+            )
+            _write_revision(cur, "person_section", entity_id, "create section", section_row(), changed_by)
+            return f"created section '{slug}' of '{target_id}'"
+
+        sets, values = [], []
+        if "heading" in patch:
+            sets += ["heading_ko = %s", "heading_en = %s"]
+            values += [_localized(heading, "ko"), _localized(heading, "en")]
+        if "body" in patch:
+            sets += ["body_ko = %s", "body_en = %s"]
+            values += [_localized(body, "ko"), _localized(body, "en")]
+        if isinstance(patch.get("sortOrder"), int):
+            sets.append("sort_order = %s")
+            values.append(patch["sortOrder"])
+        if patch.get("sources"):
+            sets.append("sources = %s::jsonb")
+            values.append(json.dumps(patch["sources"], ensure_ascii=False))
+        if sets:
+            sets.append("updated_at = NOW()")
+            values += [target_id, slug]
+            cur.execute(
+                f"UPDATE commulingo_person_sections SET {', '.join(sets)} WHERE person_id = %s AND slug = %s",
+                values,
+            )
+        _write_revision(cur, "person_section", entity_id, "update section",
+                        {"before": before, "after": section_row()}, changed_by)
+        return f"updated section '{slug}' of '{target_id}'"
+
     if action == "create":
         before = _office_snapshot(cur, target_id)
         row_id = _apply_office_row_create(cur, target_id, patch)
@@ -887,6 +1037,10 @@ def _record_suggestion(cur, target_type, action, target_id, patch, sources, conf
 
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
+    if target_type == "person_section" and not patch.get("sources"):
+        # Section rows carry their own sources column; reuse the tool-level
+        # citations so they survive into the rendered detail page data.
+        patch = {**patch, "sources": sources}
     direct = direct_apply_enabled()
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -942,17 +1096,21 @@ COMMULINGO_EDIT_TOOL = {
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
-        "(the card's ONE primary marker — pick the institution the person is "
-        "best known for; icon auto-derives; full multi-institution history "
-        "belongs in office_rows/career instead. ALWAYS set on person create. "
-        "officeId/icon/label {ko,en} combine freely when the primary role "
-        "differs from the linked institution; {icon, label} alone for figures "
-        "outside Soviet institutions; null clears); office_row — years, body "
-        "{ko,en}, personId, name {ko,en}, note {ko,en}. CAUTION: aliases/"
+        "OR {category} (the card's ONE primary marker; exactly one of the two — "
+        "icon and label render from the linked institution or category, see "
+        "list_offices/list_categories; ALWAYS set on person create; null "
+        "clears; full multi-institution history belongs in office_rows/career); "
+        "office_row — years, body {ko,en}, personId, name {ko,en}, note "
+        "{ko,en}; person_section — slug (kebab-case section id), heading "
+        "{ko,en}, body {ko,en} (MARKDOWN, replaced wholesale per section), "
+        "sortOrder — long-form detail beyond the card, rendered on the "
+        "person's detail page /commulingo/people/<id>; use sections for depth "
+        "the card can't hold, one topic per section. CAUTION: aliases/"
         "career/scenes are replaced wholesale — send the complete new list, not "
         "just additions. All text fields are bilingual {ko,en} objects; plain "
         "strings are rejected. Targets: person create → target_id = new slug; "
-        "person update/delete → person id; office_row create → "
+        "person update/delete → person id; person_section (all actions) → "
+        "person id + patch.slug; office_row create → "
         "office id; office_row update/delete → numeric row id (from get_office). "
         "HOUSE STYLE — each card is a miniature story: epithet = a "
         "characterization with tension or irony, never a job title; bio = one "
