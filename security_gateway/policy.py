@@ -57,6 +57,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "read_document": "read",
     "search_documents": "read",
     "query_db": "read",
+    "commulingo_people": "read",
     "check_inbox": "read",
     "check_wallet": "wallet_read",
     # Writes / publication
@@ -67,6 +68,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "write_kg": "write",
     "write_kg_structured": "write",
     "save_diary": "write",
+    "commulingo_edit": "publish",  # live in direct_apply mode; staged otherwise
     "research_document": "publish",
     "edit_content": "publish",
     "publish_hub_curation": "publish",

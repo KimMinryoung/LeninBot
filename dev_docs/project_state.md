@@ -135,6 +135,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py`, `api_routes/private_reports.py` (JSON), frontend `/admin/private-reports` shell |
+| CommuLingo 인물 사전 | `runtime_tools/commulingo_people.py` (read + `commulingo_edit`; direct/staging 모드 스위치 `config/commulingo_people.json`), `scripts/commulingo_suggestions.py` (staging 리뷰 CLI). 데이터/렌더링은 frontend 저장소 — `frontend/dev_docs/commulingo_people_handoff.md` 참고 |
 | Admin user API routes | `api_routes/admin_users.py` |
 | Chat history/API routes | `api_routes/chat_history.py`, `chat_history_sanitize.py`, `web_chat.py` |
 | Email bridge | `email_bridge.py`, `api_routes/email.py`, `email_api.py`, `scripts/email_poll_once.py` |

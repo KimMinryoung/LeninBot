@@ -1,0 +1,4 @@
+{
+  "_comment": "commulingo_edit tool mode. direct_apply=true: agent edits go live immediately (revision snapshot + auto-approved log row). false: edits are staged as pending suggestions for review via scripts/commulingo_suggestions.py. Picked up on mtime change, no restart needed.",
+  "direct_apply": true
+}

@@ -78,5 +78,6 @@ Publishing channels (use when the analysis warrants public output):
         "save_finding", "mission",
         "research_document", "get_finance_data",
         "edit_content",
+        "commulingo_people", "commulingo_edit",
     ],
 )

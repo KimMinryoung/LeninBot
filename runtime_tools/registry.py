@@ -1138,6 +1138,12 @@ from runtime_tools.research import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
 TOOLS.extend(RESEARCH_TOOLS)
 TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
 
+# ── CommuLingo people dictionary (read + staged edit suggestions) ──
+from runtime_tools.commulingo_people import COMMULINGO_TOOLS, COMMULINGO_TOOL_HANDLERS
+
+TOOLS.extend(COMMULINGO_TOOLS)
+TOOL_HANDLERS.update(COMMULINGO_TOOL_HANDLERS)
+
 # ── Admin-only private research documents (not exposed to public web chat) ──
 from runtime_tools.private_reports import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
 

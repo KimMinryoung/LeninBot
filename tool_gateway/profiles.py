@@ -51,6 +51,8 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
     "route_task",
     "list_agent_tools",
     "run_agent",
+    "commulingo_people",
+    "commulingo_edit",
 })
 
 ROLEPLAY_TELEGRAM_PROFILE = "telegram.roleplay"
@@ -142,6 +144,7 @@ MCP_FORBIDDEN_TOOL_NAMES = frozenset({
     "a2a_send",
     "allowlist_sender",
     "broadcast_to_channel",
+    "commulingo_edit",
     "convert_document",
     "download_file",
     "download_image",
