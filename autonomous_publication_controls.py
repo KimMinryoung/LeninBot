@@ -153,8 +153,8 @@ def validate_autonomous_research_publication(
     if not is_edit:
         if not re.search(r"(?m)^\s*##\s*요약\b", prose):
             errors.append(
-                "body must contain a '## 요약' section (fixed report layout: "
-                "## 요약 → ## 핵심 지표 → analysis sections → ## 반론과 한계 → ## 전망 → ## 출처)"
+                "body must contain a '## 요약' section (fixed report frame: 요약 first, "
+                "출처 footnote definitions last; analysis sections between are free-form)"
             )
         footnote_defs = re.findall(r"(?m)^\s*\[\^[A-Za-z0-9_]+\]:", prose)
         if len(footnote_defs) < 2:

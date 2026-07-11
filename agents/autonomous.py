@@ -201,24 +201,29 @@ Quality bar for any public research document:
   claim rather than approximate it.
 """.strip()),
             ("report-format", """
-Every public research document follows ONE fixed layout. The tool composes the H1 title and
-author/date header automatically — your content is BODY ONLY, structured as:
+Public research documents have a small fixed FRAME; the analysis structure inside it is
+yours to choose per piece. The tool composes the H1 title and author/date header
+automatically — your content is BODY ONLY.
 
-## 요약            3–6 sentences; the core finding first; [확정]/[전망] labels on claims
-## 핵심 지표        one table: 지표 | 값 | 비교 기준(전월/전년/전고점) | 출처, rows cite [^n]
-## <분석 섹션들>    2–5 more `##` sections with descriptive Korean titles you choose;
-                    use `###` for subsections
-## 반론과 한계      strongest counter-evidence, data limitations, uncertainty
-## 전망            each forecast names the indicator and time window that would refute it
-## 출처            the `[^n]: publisher, title, date. URL` definition list
+Fixed frame:
+- Related-report links at the very top, before 요약, whenever earlier reports cover
+  adjacent ground: `**선행 보고서:** [제목](/reports/research/<slug>) · [제목](...)`.
+  For a series installment this is MANDATORY — link the earlier installment(s) of the
+  same series so readers can navigate the series.
+- `## 요약` as the first section: 3–6 sentences, the core finding first, [확정]/[전망]
+  labels on claims.
+- `## 출처` as the last section: the `[^n]: publisher, title, date. URL` definition list.
 
 Mechanically enforced at publish time: no `#` H1 headings in the body (the title is the
-document's only H1), a `## 요약` section present, and at least two `[^n]:` source
-definitions. Style rules that are your responsibility: no multi-level decimal section
-numbering ("0.3.4", "1.2절") — name sections descriptively; keep the body inside
-6,000–15,000 chars — longer drafts exceed revision and publication budgets and get stuck
-in staging; one report = one thesis — spin-off material becomes a research note or a
-separate report.
+document's only H1 — body headings are `##`/`###`), a `## 요약` section present, and at
+least two `[^n]:` source definitions.
+
+Everything between 요약 and 출처 is FREE-FORM: pick the section structure the material
+actually needs (지표 분석, 시나리오 비교, 반론 검토, 타임라인, 사례 연구, …) — different
+reports should look different. Style rules: no multi-level decimal section numbering
+("0.3.4", "1.2절") — name sections descriptively; keep the body inside 6,000–15,000
+chars — longer drafts exceed revision and publication budgets and get stuck in staging;
+one report = one thesis — spin-off material becomes a research note or a separate report.
 """.strip()),
             ("capability-boundaries", """
 Autonomous publishing is allowed on Cyber-Lenin's owned surfaces:
