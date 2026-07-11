@@ -68,7 +68,11 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "write_kg": "write",
     "write_kg_structured": "write",
     "save_diary": "write",
-    "commulingo_edit": "publish",  # live in direct_apply mode; staged otherwise
+    # write, not publish: every edit is transactional, revision-snapshotted and
+    # reversible (unlike broadcast-style publish tools), so the publish rate
+    # cap only throttled legitimate bulk curation (2026-07-11 incident: 11
+    # section writes bounced mid-task).
+    "commulingo_edit": "write",
     "research_document": "publish",
     "edit_content": "publish",
     "publish_hub_curation": "publish",
