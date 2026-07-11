@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.commulingo_curator import COMMULINGO_CURATOR
+from runtime_tools.commulingo_people import _validate
 import scripts.commulingo_people_maintainer as maintainer
 
 
@@ -17,6 +18,10 @@ assert COMMULINGO_CURATOR.provider == "deepseek"
 assert COMMULINGO_CURATOR.model == "deepseek_pro"
 assert set(COMMULINGO_CURATOR.tools) == {"web_search", "fetch_url", "commulingo_people", "commulingo_edit"}
 assert COMMULINGO_CURATOR.terminal_tools == ["commulingo_edit"]
+assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
+assert "already includes cyrillicPatronymic" in _validate(
+    None, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
+)
 
 with TemporaryDirectory() as tmp:
     path = Path(tmp) / "config.json"

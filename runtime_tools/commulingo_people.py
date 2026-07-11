@@ -786,6 +786,13 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             f"Allowed: {', '.join(sorted(allowed))}."
         )
     if target_type == "person":
+        cyrillic = str(patch.get("cyrillic") or "").strip()
+        cyrillic_patronymic = str(patch.get("cyrillicPatronymic") or "").strip()
+        if cyrillic and cyrillic_patronymic and cyrillic_patronymic in cyrillic.split():
+            return (
+                "Error: cyrillic already includes cyrillicPatronymic. Put the Russian patronymic "
+                "only in cyrillicPatronymic; cyrillic must contain given name + surname only."
+            )
         for key in _LOCALIZED_PERSON_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
                 return (
@@ -1111,7 +1118,8 @@ COMMULINGO_EDIT_TOOL = {
         "first, and cite at least one source per edit. `patch` fields (include "
         "only what you change): person — group, initial (one letter of the "
         "native-script name), cyrillic (native-script name: Cyrillic for "
-        "Soviet figures, hanzi/Latin/etc. for non-Soviet ones, e.g. 毛泽东), "
+        "Soviet figures, hanzi/Latin/etc. for non-Soviet ones, e.g. 毛泽东; with "
+        "cyrillicPatronymic, use cyrillic for given name + surname only), "
         "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
