@@ -731,7 +731,7 @@ async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
     def fake_log_event(_project_id, event_type, content="", meta=None, **_kwargs):
         events.append((event_type, content, meta or {}))
 
-    async def fake_notify(_project, _result_text, actions, runtime):
+    async def fake_notify(_project, _result_text, actions, runtime, tick_review=None):
         notifications.append({"actions": actions, "runtime": runtime})
 
     import agents
@@ -835,7 +835,7 @@ async def _assert_successful_durable_tick_consumes_advisories() -> None:
     def fake_log_event(_project_id, event_type, content="", meta=None, **_kwargs):
         events.append((event_type, content, meta or {}))
 
-    async def fake_notify(_project, _result_text, actions, runtime):
+    async def fake_notify(_project, _result_text, actions, runtime, tick_review=None):
         notifications.append({"actions": actions, "runtime": runtime})
 
     import agents
@@ -940,7 +940,7 @@ async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
     def fake_log_event(_project_id, event_type, content="", meta=None, **_kwargs):
         events.append((event_type, content, meta or {}))
 
-    async def fake_notify(_project, _result_text, actions, runtime):
+    async def fake_notify(_project, _result_text, actions, runtime, tick_review=None):
         notifications.append({"actions": actions, "runtime": runtime})
 
     import agents
