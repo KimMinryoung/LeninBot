@@ -879,7 +879,10 @@ COMMULINGO_EDIT_TOOL = {
         "and favors one concrete detail (a habit, a decision, a scene) over "
         "abstractions; moment = ONE defining quote or scene line per language, "
         "rendered as a pull-quote between epithet and bio — no dates-and-posts "
-        "summary, that's what career is for."
+        "summary, that's what career is for. moment MUST be a real, verifiable "
+        "quote or documented scene with a source; NEVER compose or embellish "
+        "one — if nothing solid exists for a person, leave moment empty. An "
+        "empty moment is correct; an invented one is vandalism."
     ),
     "input_schema": {
         "type": "object",
