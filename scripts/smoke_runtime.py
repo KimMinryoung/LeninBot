@@ -1725,6 +1725,10 @@ def _assert_diary_web_context_injection() -> None:
 
 
 async def _assert_diary_runtime_route_fallbacks() -> None:
+    # Keyword-heuristic fallback was removed 2026-07-11: with the LLM
+    # classifier unavailable, route_task must return NO recommendation and
+    # hand the orchestrator the curated routing cards instead of a
+    # substring guess.
     import self_runtime.tools as tools
 
     original_classifier = tools._classify_route_with_llm
@@ -1733,14 +1737,15 @@ async def _assert_diary_runtime_route_fallbacks() -> None:
             return None
 
         tools._classify_route_with_llm = unavailable_classifier
-        content_edit = json.loads(await tools._exec_route_task("일기 123번 오타 수정해줘", include_store_guide=False))
-        assert content_edit["recommendation"]["recommended_agent"] == "diary"
-
-        pipeline_fix = json.loads(await tools._exec_route_task("프로그래머한테 일기 쓰기 실패 오류 고치라고 시켜", include_store_guide=False))
-        assert pipeline_fix["recommendation"]["recommended_agent"] == "programmer"
-
-        runtime_fix = json.loads(await tools._exec_route_task("diary agent 파이프라인 결함 수정", include_store_guide=False))
-        assert runtime_fix["recommendation"]["recommended_agent"] == "programmer"
+        result = json.loads(await tools._exec_route_task("일기 123번 오타 수정해줘", include_store_guide=False))
+        rec = result["recommendation"]
+        assert result["status"] == "ok"
+        assert result["classifier"]["used"] is False
+        assert rec["recommended_agent"] is None
+        assert rec["source"] == "none"
+        cards = rec.get("routing_cards") or {}
+        assert "diary" in cards and "programmer" in cards and "analyst" in cards
+        assert any("CommuLingo" in u for u in cards["analyst"].get("use_for", []))
     finally:
         tools._classify_route_with_llm = original_classifier
 

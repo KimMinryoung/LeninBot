@@ -192,41 +192,13 @@ _CONTENT_STORE_GUIDE = {
 }
 
 
-_PUBLIC_CONTENT_TERMS = (
-    "published", "already-published", "public post", "public content", "diary",
-    "research", "report", "blog post", "hub", "curation", "slug", "post_id",
-    "게시", "공개", "발행", "일기", "연구", "보고서", "블로그", "허브", "큐레이션",
-    "문구", "오타", "수정",
-    # CommuLingo people dictionary — DB content owned by analyst via
-    # commulingo_edit. Content briefs quote tool parameter syntax
-    # (target_type="person_section" 등), which must not read as code work.
-    "commulingo", "인물 사전", "person_section", "인물 카드",
-)
-
-_CODE_TERMS = (
-    "code", "source", "bug", "test", "script", "config", "template", "frontend",
-    "backend", "deploy", "service", "traceback", "exception", "repository",
-    "코드", "소스", "버그", "테스트", "스크립트", "설정", "템플릿", "프론트",
-    "백엔드", "배포", "서비스", "에러", "예외", "저장소",
-)
-
-_PRIVATE_RESEARCH_TERMS = (
-    "private research", "private_research", "private document", "private report",
-    "admin-only", "비공개 연구", "비공개 문서", "비공개 보고", "비공개 리서치",
-    "사적 연구", "내부 연구", "관리자 전용",
-)
-
-_PROGRAMMER_EXPLICIT_TERMS = (
-    "programmer", "coding agent", "code agent", "developer",
-    "프로그래머", "코더", "개발자",
-)
-
-_PIPELINE_ERROR_TERMS = (
-    "pipeline", "workflow", "scheduler", "cron", "route", "routing",
-    "failure", "failed", "error", "bug", "regression",
-    "파이프라인", "워크플로우", "스케줄러", "크론", "라우팅", "분기",
-    "실패", "오류", "에러", "버그", "결함",
-)
+# NOTE: keyword-heuristic routing (term lists + _routing_warning veto in
+# delegate()) was removed 2026-07-11. Substring matching kept overruling the
+# orchestrator's own judgment — e.g. a commulingo content brief clarifying
+# "이것은 소스코드 작업이 아니다" tripped the CODE terms and bounced three
+# legitimate delegations. Routing knowledge now lives in the curated
+# _AGENT_ROUTING_CARDS / _CONTENT_STORE_GUIDE plus the route_task LLM
+# classifier; the orchestrator's delegate() choice is final.
 
 
 def _to_kst(ts) -> str:
@@ -267,32 +239,6 @@ def _slice_text(text: str, max_chars: int | None = None, offset: int | None = No
         end = min(len(text), start + length)
 
     return text[start:end], start, end, end < len(text)
-
-
-def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    lowered = (text or "").lower()
-    return any(term.lower() in lowered for term in terms)
-
-
-def _routing_warning(agent: str, task: str, context: str = "") -> str | None:
-    """Return a concise warning when a delegation is probably misrouted."""
-    text = f"{task}\n{context}"
-    if agent == "programmer" and _contains_any(text, _PUBLIC_CONTENT_TERMS) and not _contains_any(text, _CODE_TERMS):
-        if "diary" in text.lower() or "일기" in text:
-            return (
-                "Probable misroute: already-published diary content should go to "
-                "diary, which owns edit_content(content_type='diary'), not programmer."
-            )
-        return (
-            "Probable misroute: already-published research/report/post/hub content "
-            "and CommuLingo people-dictionary content should go to analyst, which owns "
-            "edit_content/research_document/commulingo_edit, not programmer."
-        )
-    if agent == "analyst" and _contains_any(text, _CODE_TERMS) and not _contains_any(text, _PUBLIC_CONTENT_TERMS):
-        return "Probable misroute: source-code/config/test/service work should go to programmer, not analyst."
-    if agent == "diary" and any(term in text.lower() for term in ("research", "report", "blog post", "hub", "curation")):
-        return "Probable misroute: non-diary public content edits should go to analyst, not diary."
-    return None
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -348,9 +294,6 @@ def _normalize_llm_route(parsed: dict, task: str, candidates: list[str] | None) 
         ][:4],
         "source": "llm_classifier",
     }
-    warning = _routing_warning(agent, task)
-    if warning:
-        result["warning"] = warning
     return result
 
 
@@ -423,73 +366,6 @@ async def _classify_route_with_llm(task: str, candidates: list[str] | None = Non
     except Exception as e:
         logger.info("route_task LLM classifier unavailable: %s", e)
         return None
-
-
-def _recommend_agent_for_task(task: str, *, candidates: list[str] | None = None) -> dict:
-    """Heuristic routing aid for the orchestrator; advisory, not authoritative."""
-    text = task or ""
-    lowered = text.lower()
-    allowed = set(candidates or _DELEGATABLE_AGENTS)
-
-    def choose(agent: str, reason: str, confidence: str = "medium") -> dict:
-        card = _AGENT_ROUTING_CARDS.get(agent, {})
-        return {
-            "recommended_agent": agent,
-            "confidence": confidence,
-            "reason": reason,
-            "source": "heuristic",
-            "routing_card": card,
-            "alternatives": [
-                {"agent": name, "use_for": _AGENT_ROUTING_CARDS.get(name, {}).get("use_for", [])}
-                for name in _DELEGATABLE_AGENTS
-                if name != agent and name in allowed
-            ][:4],
-        }
-
-    explicit_programmer = _contains_any(text, _PROGRAMMER_EXPLICIT_TERMS)
-    pipeline_or_code_fix = _contains_any(text, _PIPELINE_ERROR_TERMS) or _contains_any(text, _CODE_TERMS)
-    if explicit_programmer and pipeline_or_code_fix and "programmer" in allowed:
-        return choose(
-            "programmer",
-            "The user explicitly requested programmer handling for code, routing, pipeline, or failure work.",
-            "high",
-        )
-
-    if ("diary" in lowered or "일기" in text) and pipeline_or_code_fix and "programmer" in allowed:
-        return choose(
-            "programmer",
-            "This is about the diary pipeline/runtime failing, not a routine diary content edit.",
-            "high",
-        )
-
-    if {"diary", "일기"} & set(lowered.replace("/", " ").split()):
-        if any(term in lowered for term in ("edit", "fix", "correct", "수정", "고쳐", "오타")):
-            return choose("diary", "The task is about creating or editing diary content.", "high")
-    if _contains_any(text, _PRIVATE_RESEARCH_TERMS):
-        return choose(
-            "analyst",
-            "Private research documents are owned by analyst; publish only when explicitly requested.",
-            "high",
-        )
-    if _contains_any(text, _PUBLIC_CONTENT_TERMS) and not _contains_any(text, _CODE_TERMS):
-        if "diary" in lowered or "일기" in text:
-            return choose("diary", "Already-published diary content is owned by the diary agent.", "high")
-        return choose(
-            "analyst",
-            "Published research/report/blog/hub content is operational content, and analyst owns the edit tools.",
-            "high",
-        )
-    if _contains_any(text, _CODE_TERMS):
-        return choose("programmer", "The task requires source-code/config/test/service work.", "high")
-    if any(term in lowered for term in ("moltbook", "mersoom", "patrol", "crawl", "recon", "정찰", "순찰")):
-        return choose("scout", "The task is external platform reconnaissance or posting.", "high")
-    if any(term in lowered for term in ("login", "form", "browser", "click", "dynamic", "로그인", "브라우저")):
-        return choose("browser", "The task requires interactive browser automation.", "high")
-    if any(term in lowered for term in ("image", "visual", "poster", "generate_image", "이미지", "포스터", "시각")):
-        return choose("visualizer", "The task is visual generation or direction.", "high")
-    if any(term in lowered for term in ("email", "a2a", "diplomat", "메일", "외교")):
-        return choose("diplomat", "The task is email or A2A communication.", "medium")
-    return choose("analyst", "Default route for information analysis, research, and synthesis.", "medium")
 
 
 def _resolve_recent_operator_user_id() -> int:
@@ -2245,21 +2121,30 @@ async def _exec_route_task(
                     indent=2,
                 )
         recommendation = await _classify_route_with_llm(task or "", clean_candidates)
-        fallback_used = False
+        llm_used = recommendation is not None
         if recommendation is None:
-            recommendation = _recommend_agent_for_task(task or "", candidates=clean_candidates)
-            fallback_used = True
-        warning = _routing_warning(recommendation.get("recommended_agent", ""), task or "")
-        if warning and "warning" not in recommendation:
-            recommendation["warning"] = warning
+            # No keyword fallback (removed 2026-07-11): a substring guess is
+            # worse than handing the orchestrator the curated cards and
+            # letting it decide.
+            allowed = [a for a in _DELEGATABLE_AGENTS if not clean_candidates or a in clean_candidates]
+            recommendation = {
+                "recommended_agent": None,
+                "confidence": None,
+                "reason": (
+                    "LLM classifier unavailable — no automatic recommendation. "
+                    "Decide yourself from the per-agent routing cards."
+                ),
+                "source": "none",
+                "routing_cards": {a: _AGENT_ROUTING_CARDS.get(a, {}) for a in allowed},
+            }
         payload = {
             "status": "ok",
             "delegatable_agents": list(_DELEGATABLE_AGENTS),
             "recommendation": recommendation,
             "classifier": {
                 "attempted": True,
-                "used": not fallback_used,
-                "fallback": "heuristic" if fallback_used else None,
+                "used": llm_used,
+                "fallback": None,
                 "classes": [
                     "public_content_edit",
                     "code_config_work",
@@ -2335,14 +2220,6 @@ async def _exec_delegate(
             "publication-review flows and is not in the general delegation whitelist."
         )
 
-    warning = _routing_warning(agent, task, context)
-    if warning:
-        recommended = _recommend_agent_for_task(f"{task}\n{context}")
-        return (
-            f"{warning}\n"
-            f"Recommended agent: {recommended.get('recommended_agent')} "
-            f"({recommended.get('reason')}). Call route_task if you need the full store guide."
-        )
 
     # Validate agent name
     try:
@@ -2466,14 +2343,6 @@ async def _exec_multi_delegate(
                 return (
                     f"Cannot delegate to {agent_name!r}. Delegatable agents are: "
                     f"{', '.join(_DELEGATABLE_AGENTS)}. Stasova is not a general delegation target."
-                )
-            warning = _routing_warning(agent_name, str(t.get("task") or ""), str(t.get("context") or ""))
-            if warning:
-                recommended = _recommend_agent_for_task(f"{t.get('task')}\n{t.get('context', '')}")
-                return (
-                    f"Subtask for {agent_name!r} appears misrouted: {warning}\n"
-                    f"Recommended agent: {recommended.get('recommended_agent')} "
-                    f"({recommended.get('reason')})."
                 )
             t["agent"] = agent_name
             get_agent(agent_name)
