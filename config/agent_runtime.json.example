@@ -65,5 +65,18 @@
     "model": null,
     "budget_usd": 1.0,
     "max_rounds": 40
+  },
+  "commulingo_curator": {
+    "provider": "deepseek",
+    "model": "deepseek_pro",
+    "budget_usd": 0.35,
+    "max_rounds": 12,
+    "finalization_tools": [
+      "commulingo_edit"
+    ],
+    "terminal_tools": [
+      "commulingo_edit"
+    ],
+    "skip_orchestrator_report": true
   }
 }

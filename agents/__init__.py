@@ -18,6 +18,7 @@ from agents.diary import DIARY
 from agents.stasova import STASOVA
 from agents.kollontai import KOLLONTAI
 from agents.autonomous import AUTONOMOUS_PROJECT
+from agents.commulingo_curator import COMMULINGO_CURATOR
 from agents.runtime_config import apply_agent_runtime_config, reload_agent_runtime_config_if_changed
 
 _REGISTRY: dict[str, AgentSpec] = {
@@ -30,6 +31,7 @@ _REGISTRY: dict[str, AgentSpec] = {
     "stasova": STASOVA,
     "diplomat": KOLLONTAI,
     "autonomous_project": AUTONOMOUS_PROJECT,
+    "commulingo_curator": COMMULINGO_CURATOR,
 }
 
 apply_agent_runtime_config(_REGISTRY)

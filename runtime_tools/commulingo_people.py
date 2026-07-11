@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
-_SUGGESTED_BY = "cyber-lenin"
+_SUGGESTED_BY = os.getenv("COMMULINGO_SUGGESTED_BY", "cyber-lenin").strip() or "cyber-lenin"
 
 _TARGET_TYPES = ("person", "office_row", "person_section")
 _ACTIONS = ("create", "update", "delete")

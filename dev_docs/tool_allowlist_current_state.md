@@ -58,6 +58,7 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 - `stasova`
 - `diplomat`
 - `autonomous_project`
+- `commulingo_curator` — `web_search`, `fetch_url`, `commulingo_people`, and terminal `commulingo_edit` only; the scheduled runner gives it one target and one write per run
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
 

@@ -15,6 +15,7 @@
 | stasova | Publication security (OpSec) reviewer for public-bound writing; flags risks and alternative wording without veto power | read_file, write_file, fetch_url | - | - |
 | diplomat | External communications diplomat: A2A agent-to-agent messaging, email sending/receiving, inter-agent coordination | a2a_send, send_email, check_inbox, allowlist_sender, web_search, fetch_url, read_self, save_finding, mission | - | - |
 | autonomous_project | Scheduled autonomous agent — advances one long-term project per hourly wake. Research + publishing to cyber-lenin.com. | web_search, fetch_url, fetch_x_post, vector_search, knowledge_graph_search, read_self, recall_experience, get_finance_data, download_file, convert_document, read_document, write_kg_structured, research_document, publish_hub_curation, edit_content, publish_static_page, add_research_note, read_research_notes, revise_plan, set_project_state | add_research_note, revise_plan, set_project_state, research_document, publish_hub_curation, edit_content, publish_static_page | - |
+| commulingo_curator | Scheduled low-cost curator that directly enriches or adds one CommuLingo person per run | web_search, fetch_url, commulingo_people, commulingo_edit | commulingo_edit | commulingo_edit |
 
 Notes:
 

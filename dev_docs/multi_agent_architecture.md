@@ -36,8 +36,11 @@ Registered in `agents/__init__.py`:
 | `stasova` | publication OpSec reviewer | small read/fetch/write tool set and low budget |
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
+| `commulingo_curator` | scheduled CommuLingo people-dictionary curator | DeepSeek V4 Pro; one direct, sourced edit per run; web research plus CommuLingo read/edit tools only |
 
 Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
+
+`commulingo_curator` is normally invoked by `scripts/commulingo_people_maintainer.py`, not the Telegram task queue. The script deterministically selects one sparse existing record, periodically switches to new-person discovery, and exits after the terminal `commulingo_edit` call. `config/commulingo_maintainer.json` controls cadence policy; the AgentSpec runtime budget/model remain hot-reloadable through `config/agent_runtime.json`.
 
 ## Runtime Overlay
 
