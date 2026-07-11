@@ -1247,6 +1247,27 @@ def _format_staged_research_drafts(rows: list[dict]) -> str:
 _EDITORIAL_DIAGNOSIS_EVENT_TYPE = "editorial_diagnosis"
 _EDITORIAL_DIAGNOSIS_MAX_DRAFTS = 2
 _EDITORIAL_DIAGNOSIS_BODY_CAP = 20000
+# Revision budget per staged draft: after this many non-PASS diagnosis rounds,
+# stop diagnosing and direct the tick to publish or fix only factual errors —
+# an open-ended critic never says PASS and drives endless restaging.
+_EDITORIAL_DIAGNOSIS_MAX_ROUNDS = 2
+
+
+def _editorial_diagnosis_rounds(project_id: int, slug: str) -> int:
+    """Count non-PASS diagnosis rounds already spent on a slug (any draft version)."""
+    try:
+        rows = db_query(
+            """
+            SELECT COUNT(*) AS n FROM autonomous_project_events
+             WHERE project_id = %s AND event_type = %s
+               AND meta->>'slug' = %s AND meta->>'verdict' = 'notes'
+            """,
+            (project_id, _EDITORIAL_DIAGNOSIS_EVENT_TYPE, slug),
+        )
+        return int(rows[0]["n"]) if rows else 0
+    except Exception as e:
+        logger.warning("editorial diagnosis round count failed (slug=%s): %s", slug, e)
+        return 0
 
 
 def _cached_editorial_diagnosis(project_id: int, slug: str, draft_updated_at) -> str | None:
@@ -1312,6 +1333,19 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
         slug = row["slug"]
         doc = get_document(slug, include_private=True)
         if not doc or doc.get("status") != "staged" or not (doc.get("markdown") or "").strip():
+            continue
+        rounds = _editorial_diagnosis_rounds(project["id"], slug)
+        if rounds >= _EDITORIAL_DIAGNOSIS_MAX_ROUNDS:
+            blocks.append(
+                f"[draft: {slug}]\n"
+                f"EDITORIAL REVISION BUDGET EXHAUSTED: this draft already received {rounds} "
+                f"editorial-diagnosis rounds (cap {_EDITORIAL_DIAGNOSIS_MAX_ROUNDS}). Do NOT "
+                "restage it for style, clarity, or structure. Either (a) verify the key facts "
+                "and publish it now via slug-only research_document publish_public (omit "
+                "content; pass fact_check_passed=true and fact_check_notes), or (b) if you "
+                "find a concrete FACTUAL error, fix exactly that with action='edit_staged' "
+                "(find/replace edits) and publish on the next wake."
+            )
             continue
         notes = _cached_editorial_diagnosis(project["id"], slug, doc.get("updated_at"))
         if notes is None:

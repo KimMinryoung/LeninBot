@@ -456,6 +456,29 @@ async def _exec_research_document_publish_public(
     source_task_id: int | None = None,
     broadcast: bool = True,
 ) -> str:
+    if (not content or not content.strip()) and fact_check_passed and filename:
+        # Slug-only publish: publish the stored staged draft as-is, without
+        # requiring the model to re-emit the full document (long drafts do not
+        # fit in one completion). Verification happens via fact_check_notes.
+        try:
+            staged_fname = _validate_filename(filename)
+        except ValueError as e:
+            return f"Error: {e}."
+        staged_doc = await asyncio.to_thread(
+            research_store.get_document, staged_fname, include_private=True
+        )
+        if not staged_doc:
+            return f"Error: no research document found for slug '{staged_fname}'."
+        if staged_doc.get("status") != "staged":
+            return (
+                f"Error: '{staged_fname}' has status '{staged_doc.get('status')}', not 'staged'. "
+                "Slug-only publish_public publishes an existing staged draft; pass content "
+                "explicitly to publish a new document."
+            )
+        content = staged_doc.get("markdown") or ""
+        if not (title or "").strip():
+            title = staged_doc.get("title") or ""
+
     if not title or not title.strip():
         return "Error: title is required."
     if not content or not content.strip():
@@ -548,7 +571,10 @@ async def _exec_research_document_publish_public(
                 "that staged this draft. On your NEXT wake, this draft will be surfaced in "
                 "staged-research-drafts; re-verify proper nouns, dates, numerical claims, "
                 "quotations, and source attributions against fresh fetches, then call "
-                "research_document publish_public with fact_check_passed=true and fact_check_notes. "
+                "research_document publish_public with the slug, fact_check_passed=true, and "
+                "fact_check_notes, OMITTING content — the stored staged text is published as-is. "
+                "For corrections, use action='edit_staged' with find/replace edits instead of "
+                "restaging the full document. "
                 "Spend the rest of THIS tick saving a verification checklist note or other project work."
             )
         else:
@@ -687,6 +713,100 @@ async def _exec_research_document_publish_public(
         f"{review_note}\n"
         f"Size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
         f"{broadcast_note}"
+    )
+
+
+# ── Staged draft in-place revision ──────────────────────────────────────
+
+async def _exec_research_document_edit_staged(
+    filename: str,
+    edits: list[dict] | None,
+    title: str | None = None,
+) -> str:
+    """Revise a staged draft with exact find/replace edits, so long drafts can
+    be corrected without re-emitting the whole document in one completion."""
+    if not filename:
+        return "Error: slug is required for edit_staged."
+    try:
+        fname = _validate_filename(filename)
+    except ValueError as e:
+        return f"Error: {e}."
+    if not edits:
+        return "Error: edits is required — a list of {find, replace} objects."
+    doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
+    if not doc:
+        return f"Error: no research document found for slug '{fname}'."
+    if doc.get("status") != "staged":
+        return (
+            f"Error: '{fname}' has status '{doc.get('status')}', not 'staged'. "
+            "edit_staged only revises staged drafts; use edit_public for public documents."
+        )
+    markdown = doc.get("markdown") or ""
+    original_publish_date = _extract_publish_date_from_markdown(markdown)
+    body = _strip_leading_research_scaffold(markdown)
+    applied = 0
+    for i, edit in enumerate(edits, 1):
+        find = (edit or {}).get("find") or ""
+        replace = (edit or {}).get("replace")
+        if not find or not isinstance(replace, str):
+            return f"Error: edit #{i} must have non-empty 'find' and a string 'replace'."
+        count = body.count(find)
+        if count != 1:
+            return (
+                f"Error: edit #{i} 'find' text matches {count} time(s) in the draft body "
+                "(must match exactly once). No edits were applied. Use a longer, more "
+                f"specific find text: {find[:120]!r}"
+            )
+        body = body.replace(find, replace)
+        applied += 1
+    citation_error = _validate_public_citation_format(body)
+    if citation_error:
+        return f"Error: {citation_error}"
+    new_title = (title or "").strip() or doc.get("title") or ""
+    document = _build_document(
+        new_title, body, original_publish_date or datetime.now(KST).strftime("%Y-%m-%d")
+    )
+    try:
+        draft_path = await asyncio.to_thread(
+            _save_publication_draft,
+            filename=fname,
+            title=new_title,
+            document=document,
+            fact_check_passed=False,
+            fact_check_notes=None,
+        )
+    except Exception as e:
+        logger.error("edit_staged draft backup failed for %s: %s", fname, e)
+        return f"Error: failed to back up revised draft: {type(e).__name__}: {e}"
+    try:
+        row, _ = await asyncio.to_thread(
+            research_store.upsert_document,
+            filename=fname,
+            title=new_title,
+            markdown=document,
+            summary=research_store.extract_excerpt(document),
+            status="staged",
+        )
+    except Exception as e:
+        logger.error("edit_staged DB write error for %s: %s", fname, e)
+        return f"Error: failed to store revised staged draft: {type(e).__name__}: {e}"
+    record_autonomous_staged_draft(
+        publication_kind="research",
+        title=new_title,
+        public_url=_public_url(fname),
+        meta={
+            "filename": fname,
+            "research_document_id": row["id"],
+            "status": "staged",
+            "edits_applied": applied,
+        },
+    )
+    return (
+        f"Staged draft revised in place: {applied} edit(s) applied.\n"
+        f"Draft backup: {draft_path}\n"
+        f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
+        "Publication remains cross-tick: on a later wake, publish with slug-only "
+        "publish_public (omit content) plus fact_check_passed=true and fact_check_notes."
     )
 
 
@@ -940,7 +1060,11 @@ RESEARCH_DOCUMENT_TOOL = {
         "private documents are simply unpublished research documents. The public "
         "publishing flow is two-step: action='stage_public' saves an exact draft and "
         "does not publish; action='publish_public' requires fact_check_notes and publishes "
-        "the checked version. Use this tool for research documents only. Use edit_content "
+        "the checked version. To publish an EXISTING staged draft, call publish_public with "
+        "the slug and fact_check_notes and OMIT content — the stored staged text is published "
+        "as-is (do not re-emit long drafts). To revise a staged draft, use action='edit_staged' "
+        "with the slug and `edits` (exact find/replace pairs) instead of restaging the full "
+        "document. Use this tool for research documents only. Use edit_content "
         "for diary, task report, blog post, and hub curation edits. Citation format is fixed "
         "for website rendering: cite sources in body text only as Markdown footnotes `[^1]`, "
         "`[^2]`, etc.; end the document with matching footnote definitions that contain URLs, "
@@ -955,6 +1079,7 @@ RESEARCH_DOCUMENT_TOOL = {
                 "type": "string",
                 "enum": [
                     "stage_public",
+                    "edit_staged",
                     "publish_public",
                     "edit_public",
                     "unpublish_public",
@@ -973,6 +1098,18 @@ RESEARCH_DOCUMENT_TOOL = {
                 ),
             },
             "slug": {"type": "string", "description": "Stable research document slug. '.md' is optional. Required for autonomous public-bound actions."},
+            "edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "find": {"type": "string", "description": "Exact text currently in the staged draft body; must match exactly once."},
+                        "replace": {"type": "string", "description": "Replacement text."},
+                    },
+                    "required": ["find", "replace"],
+                },
+                "description": "For action='edit_staged': exact find/replace edits applied to the stored staged draft body.",
+            },
             "id": {"type": "integer", "description": "Optional private research document id for compatibility reads/edits."},
             "markdown_body": {"type": "string", "description": "Markdown body for action='save_private'."},
             "body": {"type": "string", "description": "Optional replacement Markdown body for action='publish_private'."},
@@ -1009,8 +1146,15 @@ async def _exec_research_document(
     source_task_id: int | None = None,
     fact_check_notes: str | None = None,
     broadcast: bool = True,
+    edits: list | None = None,
 ) -> str:
     op = (action or "").strip().lower()
+    if op == "edit_staged":
+        return await _exec_research_document_edit_staged(
+            filename=slug or "",
+            edits=edits,
+            title=title,
+        )
     if op in {"stage_public", "publish_public"}:
         return await _exec_research_document_publish_public(
             title=title or "",
@@ -1096,7 +1240,7 @@ async def _exec_research_document(
             broadcast=broadcast,
         )
     return (
-        "Error: action must be one of stage_public, publish_public, edit_public, "
+        "Error: action must be one of stage_public, edit_staged, publish_public, edit_public, "
         "unpublish_public, republish_public, save_private, publish_private."
     )
 
