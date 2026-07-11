@@ -462,6 +462,13 @@ async def _exec_research_document_publish_public(
         return "Error: content is required."
 
     title = title.strip()
+    # Agents often pass the full document returned by read_self; strip the
+    # leading H1/author/date scaffold so _build_document does not duplicate
+    # the public header. Mirrors edit_public.
+    original_publish_date = _extract_publish_date_from_markdown(content)
+    content = _strip_leading_research_scaffold(content)
+    if not content:
+        return "Error: content has no body after removing the research-document header."
     citation_error = _validate_public_citation_format(content)
     if citation_error:
         return f"Error: {citation_error}"
@@ -481,7 +488,9 @@ async def _exec_research_document_publish_public(
     else:
         fname = f"{now.strftime('%Y%m%d')}_{_slug_from_title(title)}.md"
 
-    document = _build_document(title, content, now.strftime("%Y-%m-%d"))
+    document = _build_document(
+        title, content, original_publish_date or now.strftime("%Y-%m-%d")
+    )
     try:
         draft_path = await asyncio.to_thread(
             _save_publication_draft,
