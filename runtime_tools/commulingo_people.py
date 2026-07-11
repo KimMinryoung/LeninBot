@@ -58,7 +58,15 @@ _FATE_KINDS = (
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "initial", "cyrillic", "years",
     "name", "epithet", "bio", "fate", "patronymic", "cyrillicPatronymic",
-    "aliases", "scenes", "career",
+    "aliases", "scenes", "career", "role",
+})
+
+# Must match roleIconPaths in frontend views/public/commulingo-people.ejs —
+# a new icon id needs an SVG path there first (code deploy).
+_VALID_ICONS = frozenset({
+    "eye", "shield", "star", "handshake", "megaphone", "paintbrush",
+    "factory", "atom", "wheat", "landmark", "map", "flag", "folder",
+    "briefcase", "chart", "globe", "crown", "rose", "dove", "circle-help",
 })
 _OFFICE_ROW_PATCH_KEYS = frozenset({
     "sortOrder", "years", "period", "body", "personId", "name", "note",
@@ -179,6 +187,16 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         (person_id,),
     )
     person["career"] = [dict(r) for r in cur.fetchall()]
+    cur.execute(
+        """SELECT r.icon, r.office_id, r.label_ko, r.label_en,
+                  COALESCE(NULLIF(r.icon, ''), o.icon, '') AS resolved_icon
+           FROM commulingo_person_roles r
+           LEFT JOIN commulingo_offices o ON o.id = r.office_id
+           WHERE r.person_id = %s""",
+        (person_id,),
+    )
+    row = cur.fetchone()
+    person["role"] = dict(row) if row else None
     return person
 
 
@@ -453,6 +471,27 @@ def _replace_scenes(cur, person_id: str, scenes: list):
         )
 
 
+def _apply_person_role(cur, person_id: str, role):
+    """Upsert (dict) or clear (None) the person's role-icon mapping."""
+    if role is None:
+        cur.execute("DELETE FROM commulingo_person_roles WHERE person_id = %s", (person_id,))
+        return
+    label = role.get("label") or {}
+    cur.execute(
+        """INSERT INTO commulingo_person_roles
+              (person_id, icon, office_id, label_ko, label_en, updated_at)
+           VALUES (%s, %s, NULLIF(%s, ''), %s, %s, NOW())
+           ON CONFLICT (person_id) DO UPDATE SET
+              icon = EXCLUDED.icon, office_id = EXCLUDED.office_id,
+              label_ko = EXCLUDED.label_ko, label_en = EXCLUDED.label_en,
+              updated_at = NOW()""",
+        (
+            person_id, role.get("icon") or "", role.get("officeId") or "",
+            _localized(label, "ko"), _localized(label, "en"),
+        ),
+    )
+
+
 def _replace_career(cur, person_id: str, career: list):
     cur.execute("DELETE FROM commulingo_person_career_entries WHERE person_id = %s", (person_id,))
     for index, entry in enumerate(career or []):
@@ -507,6 +546,8 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
     })
     _replace_scenes(cur, person_id, patch.get("scenes") or [])
     _replace_career(cur, person_id, patch.get("career") or [])
+    if patch.get("role"):
+        _apply_person_role(cur, person_id, patch["role"])
 
 
 def _apply_person_update(cur, person_id: str, patch: dict) -> None:
@@ -555,6 +596,8 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         _replace_scenes(cur, person_id, patch.get("scenes") or [])
     if "career" in patch:
         _replace_career(cur, person_id, patch.get("career") or [])
+    if "role" in patch:
+        _apply_person_role(cur, person_id, patch.get("role"))
 
 
 def _apply_office_row_create(cur, office_id: str, patch: dict) -> int:
@@ -657,6 +700,21 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         fate = patch.get("fate")
         if isinstance(fate, dict) and fate.get("kind") and fate["kind"] not in _FATE_KINDS:
             return f"Error: fate.kind must be one of {', '.join(_FATE_KINDS)}."
+        if "role" in patch and patch["role"] is not None:
+            role = patch["role"]
+            if not isinstance(role, dict):
+                return "Error: role must be an object {officeId} / {icon, label} or null to clear."
+            if role.get("icon") and role["icon"] not in _VALID_ICONS:
+                return f"Error: role.icon must be one of {', '.join(sorted(_VALID_ICONS))}."
+            if role.get("officeId"):
+                cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (role["officeId"],))
+                if not cur.fetchone():
+                    return f"Error: role.officeId '{role['officeId']}' does not exist."
+            elif not role.get("icon"):
+                return (
+                    "Error: role needs officeId (icon auto-derives from the institution) "
+                    f"or an explicit icon ({', '.join(sorted(_VALID_ICONS))})."
+                )
     else:  # office_row
         if action == "create":
             cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (target_id,))
@@ -796,8 +854,14 @@ COMMULINGO_EDIT_TOOL = {
         "cyrillic, years ('1878–1953', en dash), name/epithet/bio {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
-        "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}]; office_row — years, "
-        "body {ko,en}, personId, name {ko,en}, note {ko,en}. CAUTION: aliases/"
+        "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
+        "(the card's ONE primary marker — pick the institution the person is "
+        "best known for; icon auto-derives; full multi-institution history "
+        "belongs in office_rows/career instead. ALWAYS set on person create. "
+        "officeId/icon/label {ko,en} combine freely when the primary role "
+        "differs from the linked institution; {icon, label} alone for figures "
+        "outside Soviet institutions; null clears); office_row — years, body "
+        "{ko,en}, personId, name {ko,en}, note {ko,en}. CAUTION: aliases/"
         "career/scenes are replaced wholesale — send the complete new list, not "
         "just additions. Targets: person create → target_id = new slug "
         "(= patch.id); person update/delete → person id; office_row create → "
