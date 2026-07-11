@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
-CODEX_DEFAULT_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.5")
+CODEX_DEFAULT_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.6-sol")
 _PROGRESS_EMIT_TIMEOUT = 10.0
 
 
