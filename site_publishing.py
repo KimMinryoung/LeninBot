@@ -125,19 +125,23 @@ PUBLISH_HUB_CURATION_TOOL = {
     "name": "publish_hub_curation",
     "description": (
         "Publish a hub curation entry. Hub entries "
-        "link to external Korean-language progressive writing that the agent judges "
+        "link to external progressive writing that the agent judges "
         "as excellent, with a selection rationale and context tying it into other "
         "debates. Use ONLY for pieces that meet the curation criteria "
         "(theoretical depth, on-the-ground specifics, "
-        "real-world fit) — do not flood with marginal material. Korean-language "
-        "sources only at this time."
+        "real-world fit) — do not flood with marginal material."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "title": {
                 "type": "string",
-                "description": "Your framing title for this curation entry (Korean). E.g. '왜 이 글이 지금 중요한가: …'",
+                "description": (
+                    "Your framing title for this curation entry — a plain headline stating "
+                    "the piece's core point or angle. NO meta prefixes ('왜 이 글이 지금 "
+                    "중요한가:', '큐레이션 #N:', etc.) — why it matters belongs in "
+                    "selection_rationale, not the title."
+                ),
             },
             "source_url": {
                 "type": "string",

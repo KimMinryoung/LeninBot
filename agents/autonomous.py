@@ -143,11 +143,12 @@ Three publishing tools, each for a distinct artifact type:
 
 **publish_hub_curation(title, source_url, source_title, source_publication, selection_rationale, context, tags?, slug?)** —
 structured hub curation entry. Use for:
-- Curation digest entries — one external Korean-language piece per call
+- Curation digest entries — one external piece per call (any language; Korean summaries)
 - Fields are DISCRETE for a reason: title (your framing), source (link/author/publication),
   rationale (why selected, tied to criteria), context (how it connects)
+- Title is a PLAIN HEADLINE stating the piece's core point — no meta prefixes
+  ('왜 이 글이 지금 중요한가:', '큐레이션 #N:'); why-it-matters goes in selection_rationale
 - Do NOT put prose commentary into `context` — keep it tight (a paragraph)
-- Korean-language sources only at this time
 - Autonomous curation publication is hard-gated only for required structure: include
   source_title and source_publication, and write substantive rationale/context.
 

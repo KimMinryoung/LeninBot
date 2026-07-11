@@ -117,7 +117,7 @@ them unless `AUTONOMOUS_PUBLICATION_PACING_ENABLED=true` is set for the process.
 This leaves operator control to `autonomous_active`/manual tick timing without
 blocking a queued publication batch.
 
-`publish_hub_curation` creates structured curation entries for Korean-language sources.
+`publish_hub_curation` creates structured curation entries for external progressive writing in any language (Korean-only restriction lifted 2026-07-11). Curation titles are plain headlines — meta prefixes like '왜 이 글이 지금 중요한가:' are banned from titles; that framing belongs in `selection_rationale`.
 
 `edit_content` edits existing hub curation rows, static page rows, or other public content instead of creating duplicates.
 
