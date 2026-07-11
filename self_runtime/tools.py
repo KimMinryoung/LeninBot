@@ -69,6 +69,7 @@ _AGENT_ROUTING_CARDS = {
         "use_for": [
             "research, analysis, fact-checking, KG/vector/web synthesis",
             "publishing or editing research documents, task reports, blog posts, and hub curations",
+            "CommuLingo people dictionary content (cards, moments, sections, office rows via commulingo_edit)",
             "admin-only private research documents",
         ],
         "do_not_use_for": [
@@ -78,7 +79,7 @@ _AGENT_ROUTING_CARDS = {
         ],
         "signature_tools": [
             "knowledge_graph_search", "vector_search", "web_search", "fetch_url",
-            "research_document", "edit_content",
+            "research_document", "edit_content", "commulingo_edit",
         ],
     },
     "programmer": {
@@ -129,6 +130,16 @@ _AGENT_ROUTING_CARDS = {
 }
 
 _CONTENT_STORE_GUIDE = {
+    "commulingo_people": {
+        "content_type": "CommuLingo people dictionary (person cards, moments, detail sections, office rows)",
+        "identifier": "person id (kebab-case slug) / office id / section slug",
+        "read": "commulingo_people(action='get_person'|'get_sections'|'search_people', ...)",
+        "write_or_edit": "analyst: commulingo_edit(target_type='person'|'person_section'|'office_row', ...)",
+        "not_this": (
+            "Not code work — commulingo_edit writes DB content only. Do not route to "
+            "programmer even when the brief quotes tool parameters or DB terms."
+        ),
+    },
     "research_document": {
         "content_type": "public long-form research document",
         "identifier": "research slug or filename",
@@ -186,6 +197,10 @@ _PUBLIC_CONTENT_TERMS = (
     "research", "report", "blog post", "hub", "curation", "slug", "post_id",
     "게시", "공개", "발행", "일기", "연구", "보고서", "블로그", "허브", "큐레이션",
     "문구", "오타", "수정",
+    # CommuLingo people dictionary — DB content owned by analyst via
+    # commulingo_edit. Content briefs quote tool parameter syntax
+    # (target_type="person_section" 등), which must not read as code work.
+    "commulingo", "인물 사전", "person_section", "인물 카드",
 )
 
 _CODE_TERMS = (
@@ -270,7 +285,8 @@ def _routing_warning(agent: str, task: str, context: str = "") -> str | None:
             )
         return (
             "Probable misroute: already-published research/report/post/hub content "
-            "should go to analyst, which owns edit_content/research_document, not programmer."
+            "and CommuLingo people-dictionary content should go to analyst, which owns "
+            "edit_content/research_document/commulingo_edit, not programmer."
         )
     if agent == "analyst" and _contains_any(text, _CODE_TERMS) and not _contains_any(text, _PUBLIC_CONTENT_TERMS):
         return "Probable misroute: source-code/config/test/service work should go to programmer, not analyst."
@@ -364,6 +380,11 @@ async def _classify_route_with_llm(task: str, candidates: list[str] | None = Non
             "Map public_content_edit/research to analyst except diary content to diary; "
             "code_config_work to programmer; browser_automation to browser; "
             "external_platform_scout to scout; email_a2a to diplomat. "
+            "The CommuLingo people dictionary (commulingo_edit tool: person cards, "
+            "moments, person_sections, office rows) is public_content_edit → analyst — "
+            "it writes DB content, never source code, and a content brief quoting tool "
+            "parameter syntax (target_type, action, slug, {ko,en}) does NOT make it "
+            "code_config_work. "
             "If the user explicitly asks for programmer/developer handling and the request is about "
             "a failure, runtime pipeline, scheduler, routing, code, config, or test problem, choose programmer "
             "even when a public content type such as diary is mentioned."
