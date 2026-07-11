@@ -66,7 +66,8 @@ _PERSON_PATCH_KEYS = frozenset({
 _VALID_ICONS = frozenset({
     "eye", "shield", "star", "handshake", "megaphone", "paintbrush",
     "factory", "atom", "wheat", "landmark", "map", "flag", "folder",
-    "briefcase", "chart", "globe", "crown", "rose", "dove", "circle-help",
+    "briefcase", "chart", "globe", "crown", "rose", "dove", "feather",
+    "circle-help",
 })
 _OFFICE_ROW_PATCH_KEYS = frozenset({
     "sortOrder", "years", "period", "body", "personId", "name", "note",
