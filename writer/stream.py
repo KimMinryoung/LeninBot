@@ -212,6 +212,8 @@ async def run_diagnose_revise_pass(
             on_progress=on_progress,
             agent_name="writer_revision",
             provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+            continue_on_length=True,
+            max_length_continuations=2,
             **m_extra,
         )
 
@@ -555,6 +557,10 @@ async def stream_writer_reply(
                     on_progress=on_progress,
                     agent_name="writer",
                     provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+                    # A 20k-token chapter draft can hit max_tokens mid-response;
+                    # without continuation the round (and its cost) is lost.
+                    continue_on_length=True,
+                    max_length_continuations=2,
                     **model_extra,
                 )
             answer_holder.append(result)

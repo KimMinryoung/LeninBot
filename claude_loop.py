@@ -598,19 +598,34 @@ async def chat_with_tools(
                 if (
                     continue_on_length
                     and length_continuations < max(0, int(max_length_continuations or 0))
-                    and partial_text
                 ):
                     length_continuations += 1
-                    accumulated_text_parts.append(partial_text)
-                    working_msgs.append({
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": partial_text}],
-                    })
-                    _append_user_text_message(
-                        working_msgs,
-                        "Continue exactly from where the previous answer stopped. "
-                        "Do not restart, summarize, or repeat earlier text.",
-                    )
+                    if partial_text:
+                        accumulated_text_parts.append(partial_text)
+                        working_msgs.append({
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": partial_text}],
+                        })
+                        _append_user_text_message(
+                            working_msgs,
+                            "Continue exactly from where the previous answer stopped. "
+                            "Do not restart, summarize, or repeat earlier text.",
+                        )
+                    else:
+                        # Truncation landed mid-tool_use: no text block survived,
+                        # so there is nothing to stitch — the whole round would
+                        # otherwise be dropped on the floor (2026-07-11 writer
+                        # incident: a manuscript rewrite inside one huge
+                        # replace_in_manuscript call was lost this way). Ask for
+                        # a retry in smaller steps instead.
+                        _append_user_text_message(
+                            working_msgs,
+                            "Your previous response was cut off by the output-length "
+                            "limit before any usable content arrived — likely inside "
+                            "a large tool call. Redo that work in smaller steps: "
+                            "split big tool inputs into several smaller calls, and "
+                            "keep each call comfortably under the limit.",
+                        )
                     continue
             # Combine accumulated text from tool_use rounds with final response
             all_text = accumulated_text_parts + text_parts
