@@ -59,7 +59,14 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "initial", "cyrillic", "years",
     "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role",
+    "office_rows",  # read-only echo from get_person; tolerated and ignored
 })
+
+# person patch fields that must be {ko, en} objects. Plain strings are
+# rejected outright: _localized() would store them as Korean-only and
+# silently blank the English side (this happened in production).
+_LOCALIZED_PERSON_KEYS = ("name", "epithet", "bio", "moment", "patronymic")
+_LOCALIZED_OFFICE_ROW_KEYS = ("body", "name", "note")
 
 # Must match roleIconPaths in frontend views/public/commulingo-people.ejs —
 # a new icon id needs an SVG path there first (code deploy).
@@ -150,45 +157,69 @@ def _search_people(q: str, group_id: str, limit: int) -> list[dict]:
 
 
 def _person_snapshot(cur, person_id: str) -> dict | None:
-    """Full person record via an existing cursor (transaction-consistent)."""
+    """Full person record via an existing cursor (transaction-consistent).
+
+    Returned in the SAME shape commulingo_edit's patch accepts, so agents can
+    read a record, modify fields, and send them straight back.
+    """
     cur.execute(
-        """SELECT id, group_id, initial, cyrillic, years_label, birth_year, death_year,
+        """SELECT id, group_id, initial, cyrillic, years_label,
                   name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
                   moment_ko, moment_en,
                   fate_kind, fate_label_ko, fate_label_en
            FROM commulingo_people WHERE id = %s""",
         (person_id,),
     )
-    person = cur.fetchone()
-    if not person:
+    row = cur.fetchone()
+    if not row:
         return None
-    person = dict(person)
+    person = {
+        "id": row["id"],
+        "group": row["group_id"],
+        "initial": row["initial"],
+        "cyrillic": row["cyrillic"],
+        "years": row["years_label"],
+        "name": {"ko": row["name_ko"], "en": row["name_en"]},
+        "epithet": {"ko": row["epithet_ko"], "en": row["epithet_en"]},
+        "bio": {"ko": row["bio_ko"], "en": row["bio_en"]},
+        "moment": {"ko": row["moment_ko"], "en": row["moment_en"]},
+        "fate": {
+            "kind": row["fate_kind"],
+            "label": {"ko": row["fate_label_ko"], "en": row["fate_label_en"]},
+        },
+    }
     cur.execute(
         """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
            FROM commulingo_person_patronymics WHERE person_id = %s""",
         (person_id,),
     )
     row = cur.fetchone()
-    person["patronymic"] = dict(row) if row else None
+    person["patronymic"] = {"ko": row["patronymic_ko"], "en": row["patronymic_en"]} if row else None
+    person["cyrillicPatronymic"] = row["cyrillic_patronymic"] if row else ""
     cur.execute(
         """SELECT lang, alias FROM commulingo_person_aliases
            WHERE person_id = %s ORDER BY lang, sort_order, alias""",
         (person_id,),
     )
-    person["aliases"] = [dict(r) for r in cur.fetchall()]
+    person["aliases"] = {"ko": [], "en": []}
+    for r in cur.fetchall():
+        person["aliases"][r["lang"]].append(r["alias"])
     cur.execute(
         """SELECT collection_id, episode_id FROM commulingo_person_scenes
            WHERE person_id = %s ORDER BY sort_order""",
         (person_id,),
     )
-    person["scenes"] = [dict(r) for r in cur.fetchall()]
+    person["scenes"] = [[r["collection_id"], r["episode_id"]] for r in cur.fetchall()]
     cur.execute(
         """SELECT period_label, role_ko, role_en
            FROM commulingo_person_career_entries
            WHERE person_id = %s ORDER BY sort_order, id""",
         (person_id,),
     )
-    person["career"] = [dict(r) for r in cur.fetchall()]
+    person["career"] = [
+        {"y": r["period_label"], "r": {"ko": r["role_ko"], "en": r["role_en"]}}
+        for r in cur.fetchall()
+    ]
     cur.execute(
         """SELECT r.icon, r.office_id, r.label_ko, r.label_en,
                   COALESCE(NULLIF(r.icon, ''), o.icon, '') AS resolved_icon
@@ -198,7 +229,12 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         (person_id,),
     )
     row = cur.fetchone()
-    person["role"] = dict(row) if row else None
+    person["role"] = {
+        "icon": row["icon"],
+        "officeId": row["office_id"] or "",
+        "label": {"ko": row["label_ko"], "en": row["label_en"]},
+        "resolvedIcon": row["resolved_icon"],
+    } if row else None
     return person
 
 
@@ -279,7 +315,9 @@ COMMULINGO_PEOPLE_TOOL = {
         "(office) leadership timelines, all bilingual ko/en. Actions: "
         "`list_groups` (era groups + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
-        "`get_person` (full record: bio, patronymic, aliases, career, office rows), "
+        "`get_person` (full record — returned in the exact patch shape "
+        "commulingo_edit accepts, so you can edit fields and send them back; "
+        "office_rows and role.resolvedIcon are read-only info), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
         "`list_suggestions` (edit history/queue from commulingo_edit; "
@@ -680,11 +718,45 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             f"Allowed: {', '.join(sorted(allowed))}."
         )
     if target_type == "person":
+        for key in _LOCALIZED_PERSON_KEYS:
+            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+                return (
+                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                    "a plain string is rejected because the site is bilingual and the "
+                    "other language would be silently lost."
+                )
+        if "aliases" in patch and patch["aliases"] is not None:
+            aliases = patch["aliases"]
+            if (not isinstance(aliases, dict)
+                    or not set(aliases) <= {"ko", "en"}
+                    or not all(isinstance(v, list) for v in aliases.values())):
+                return (
+                    "Error: aliases must be {\"ko\": [\"수슬로프\"], \"en\": [\"Suslov\"]} — "
+                    "lists per language of the exact strings used in book text."
+                )
+        if "career" in patch and patch["career"] is not None:
+            if not isinstance(patch["career"], list):
+                return "Error: career must be a list of {y, r} entries."
+            for i, entry in enumerate(patch["career"]):
+                if (not isinstance(entry, dict)
+                        or not (entry.get("y") or entry.get("period"))
+                        or not isinstance(entry.get("r") or entry.get("role"), dict)):
+                    return (
+                        f"Error: career[{i}] must be {{\"y\": \"1922–1953\", "
+                        "\"r\": {\"ko\": \"...\", \"en\": \"...\"}}} — other shapes would "
+                        "be stored as empty rows."
+                    )
+        if "fate" in patch and patch["fate"] is not None:
+            fate = patch["fate"]
+            if not isinstance(fate, dict):
+                return "Error: fate must be {kind, label: {ko, en}} or null."
+            if fate.get("label") is not None and not isinstance(fate["label"], dict):
+                return "Error: fate.label must be {\"ko\": \"처형 1938\", \"en\": \"Shot, 1938\"}."
         if action == "create":
-            if target_id != (patch.get("id") or ""):
-                return "Error: for person create, target_id must equal patch.id."
+            if patch.get("id") and patch["id"] != target_id:
+                return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
             if not _ID_RE.match(target_id):
-                return "Error: patch.id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
+                return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
             cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
             if cur.fetchone():
                 return f"Error: person '{target_id}' already exists — use action 'update'."
@@ -723,6 +795,12 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     f"or an explicit icon ({', '.join(sorted(_VALID_ICONS))})."
                 )
     else:  # office_row
+        for key in _LOCALIZED_OFFICE_ROW_KEYS:
+            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+                return (
+                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                    "a plain string would silently blank the other language."
+                )
         if action == "create":
             cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (target_id,))
             if not cur.fetchone():
@@ -870,8 +948,9 @@ COMMULINGO_EDIT_TOOL = {
         "outside Soviet institutions; null clears); office_row — years, body "
         "{ko,en}, personId, name {ko,en}, note {ko,en}. CAUTION: aliases/"
         "career/scenes are replaced wholesale — send the complete new list, not "
-        "just additions. Targets: person create → target_id = new slug "
-        "(= patch.id); person update/delete → person id; office_row create → "
+        "just additions. All text fields are bilingual {ko,en} objects; plain "
+        "strings are rejected. Targets: person create → target_id = new slug; "
+        "person update/delete → person id; office_row create → "
         "office id; office_row update/delete → numeric row id (from get_office). "
         "HOUSE STYLE — each card is a miniature story: epithet = a "
         "characterization with tension or irony, never a job title; bio = one "
