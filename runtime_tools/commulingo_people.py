@@ -57,7 +57,7 @@ _FATE_KINDS = (
 
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "initial", "cyrillic", "years",
-    "name", "epithet", "bio", "fate", "patronymic", "cyrillicPatronymic",
+    "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role",
 })
 
@@ -153,6 +153,7 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
     cur.execute(
         """SELECT id, group_id, initial, cyrillic, years_label, birth_year, death_year,
                   name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
+                  moment_ko, moment_en,
                   fate_kind, fate_label_ko, fate_label_en
            FROM commulingo_people WHERE id = %s""",
         (person_id,),
@@ -521,9 +522,10 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
         """INSERT INTO commulingo_people
               (id, group_id, sort_order, initial, cyrillic, years_label, birth_year, death_year,
                name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
+               moment_ko, moment_en,
                fate_kind, fate_label_ko, fate_label_en, updated_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
+                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
         (
             person_id,
             patch.get("groupId") or patch.get("group"),
@@ -535,6 +537,7 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             _localized(name, "ko"), _localized(name, "en"),
             _localized(patch.get("epithet"), "ko"), _localized(patch.get("epithet"), "en"),
             _localized(patch.get("bio"), "ko"), _localized(patch.get("bio"), "en"),
+            _localized(patch.get("moment"), "ko"), _localized(patch.get("moment"), "en"),
             fate.get("kind") or "" if isinstance(fate, dict) else "",
             _localized(fate.get("label") if isinstance(fate, dict) else None, "ko"),
             _localized(fate.get("label") if isinstance(fate, dict) else None, "en"),
@@ -577,6 +580,9 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
     if "bio" in patch:
         set_col("bio_ko", _localized(patch.get("bio"), "ko"))
         set_col("bio_en", _localized(patch.get("bio"), "en"))
+    if "moment" in patch:
+        set_col("moment_ko", _localized(patch.get("moment"), "ko"))
+        set_col("moment_en", _localized(patch.get("moment"), "en"))
     if "fate" in patch:
         fate = patch.get("fate") or {}
         set_col("fate_kind", fate.get("kind") or "" if isinstance(fate, dict) else "")
@@ -851,7 +857,7 @@ COMMULINGO_EDIT_TOOL = {
         "says which happened. Read the current record with commulingo_people "
         "first, and cite at least one source per edit. `patch` fields (include "
         "only what you change): person — group, initial (one Cyrillic letter), "
-        "cyrillic, years ('1878–1953', en dash), name/epithet/bio {ko,en}, fate "
+        "cyrillic, years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
@@ -866,8 +872,13 @@ COMMULINGO_EDIT_TOOL = {
         "just additions. Targets: person create → target_id = new slug "
         "(= patch.id); person update/delete → person id; office_row create → "
         "office id; office_row update/delete → numeric row id (from get_office). "
-        "Write bios in the dictionary's house style: story-like, concrete, one "
-        "short paragraph per language."
+        "HOUSE STYLE — each card is a miniature story: epithet = a "
+        "characterization with tension or irony, never a job title; bio = one "
+        "short paragraph per language that opens with a scene or contradiction "
+        "and favors one concrete detail (a habit, a decision, a scene) over "
+        "abstractions; moment = ONE defining quote or scene line per language, "
+        "rendered as a pull-quote between epithet and bio — no dates-and-posts "
+        "summary, that's what career is for."
     ),
     "input_schema": {
         "type": "object",
