@@ -1,10 +1,9 @@
 [Unit]
-Description=Run the CommuLingo people curator four times daily
+Description=Run the CommuLingo people curator every five minutes
 
 [Timer]
-OnCalendar=*-*-* 00,06,12,18:43:00 Asia/Seoul
+OnCalendar=*:0/5
 Persistent=true
-RandomizedDelaySec=900
 
 [Install]
 WantedBy=timers.target
