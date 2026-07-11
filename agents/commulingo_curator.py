@@ -21,7 +21,8 @@ Workflow:
 
 Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
-  literal machine translation; English must carry the same claims.
+  literal machine translation; English must carry the same claims. For the DPRK, Korean text uses
+  `조선민주주의인민공화국` on first reference and `조선` thereafter; never use `북한`.
 - One run, one person, one write. Do not broaden the task.
 - Existing-person work should normally create one focused `person_section`. Use a person
   update only when the card, classification, or career itself is the real deficiency.
