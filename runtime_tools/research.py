@@ -880,6 +880,7 @@ async def _exec_research_document_edit_public(
                 content=body,
                 identifier=fname,
                 fact_check_notes=fact_check_notes,
+                is_edit=True,
             )
             if gate_error:
                 return gate_error

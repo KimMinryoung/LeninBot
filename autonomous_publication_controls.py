@@ -90,6 +90,7 @@ _SOURCE_MARKER_RE = re.compile(
 )
 _HTML_SECTION_RE = re.compile(r"<(?:article|section|h[1-3])(?:\s|>)", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 
 def _looks_like_http_url(value: str) -> bool:
@@ -118,8 +119,15 @@ def validate_autonomous_research_publication(
     content: str,
     identifier: str,
     fact_check_notes: str | None,
+    is_edit: bool = False,
 ) -> str | None:
-    """Hard quality gate for autonomous long-form public research."""
+    """Hard quality gate for autonomous long-form public research.
+
+    Structural format checks are mechanical only (heading levels, required
+    section markers, footnote definitions) — semantic quality stays with the
+    LLM review path. `is_edit` relaxes the fixed-layout checks so factual
+    corrections to pre-layout legacy documents are not blocked.
+    """
     text = (content or "").strip()
     notes = (fact_check_notes or "").strip()
     errors: list[str] = []
@@ -134,6 +142,26 @@ def validate_autonomous_research_publication(
             "fact_check_notes must cite at least two source markers or URLs "
             f"(got {source_count}, need >= 2)"
         )
+
+    prose = _FENCED_CODE_RE.sub("", text)
+    body_h1s = re.findall(r"(?m)^\s*#\s+(\S.*)$", prose)
+    if body_h1s:
+        errors.append(
+            f"body contains {len(body_h1s)} H1 heading(s) (e.g. '# {body_h1s[0][:60]}'); "
+            "the document title is the only H1 — demote body section headings to ## / ###"
+        )
+    if not is_edit:
+        if not re.search(r"(?m)^\s*##\s*요약\b", prose):
+            errors.append(
+                "body must contain a '## 요약' section (fixed report layout: "
+                "## 요약 → ## 핵심 지표 → analysis sections → ## 반론과 한계 → ## 전망 → ## 출처)"
+            )
+        footnote_defs = re.findall(r"(?m)^\s*\[\^[A-Za-z0-9_]+\]:", prose)
+        if len(footnote_defs) < 2:
+            errors.append(
+                "body must define at least two footnote sources "
+                f"('[^n]: publisher, title, date. URL' lines; got {len(footnote_defs)}, need >= 2)"
+            )
 
     if errors:
         return _format_gate_errors("research", errors)
