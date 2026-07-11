@@ -74,7 +74,7 @@ _VALID_ICONS = frozenset({
     "eye", "shield", "star", "handshake", "megaphone", "paintbrush",
     "factory", "atom", "wheat", "landmark", "map", "flag", "folder",
     "briefcase", "chart", "globe", "crown", "rose", "dove", "feather",
-    "circle-help",
+    "flame", "circle-help",
 })
 _OFFICE_ROW_PATCH_KEYS = frozenset({
     "sortOrder", "years", "period", "body", "personId", "name", "note",
@@ -935,8 +935,10 @@ COMMULINGO_EDIT_TOOL = {
         "so it is reversible) or is staged for operator review — the response "
         "says which happened. Read the current record with commulingo_people "
         "first, and cite at least one source per edit. `patch` fields (include "
-        "only what you change): person — group, initial (one Cyrillic letter), "
-        "cyrillic, years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
+        "only what you change): person — group, initial (one letter of the "
+        "native-script name), cyrillic (native-script name: Cyrillic for "
+        "Soviet figures, hanzi/Latin/etc. for non-Soviet ones, e.g. 毛泽东), "
+        "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
