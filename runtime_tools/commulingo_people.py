@@ -51,7 +51,7 @@ _TARGET_TYPES = ("person", "office_row", "person_section")
 _ACTIONS = ("create", "update", "delete")
 
 _FATE_KINDS = (
-    "executed", "assassinated", "murdered", "killed",
+    "executed", "assassinated", "murdered", "killed", "suicide",
     "deposed", "exile", "natural",
 )
 
@@ -1122,7 +1122,7 @@ COMMULINGO_EDIT_TOOL = {
         "cyrillicPatronymic, use cyrillic for given name + surname only), "
         "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
-        "deposed/exile/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
+        "deposed/exile/suicide/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
         "OR {category} (the card's ONE primary marker; exactly one of the two — "
         "icon and label render from the linked institution or category, see "
