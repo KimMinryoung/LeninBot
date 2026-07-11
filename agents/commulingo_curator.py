@@ -13,9 +13,7 @@ and logs sources. Do not ask for approval.
 Workflow:
 1. Read the target with `commulingo_people` before editing. For a new person, read groups,
    categories and offices, then search names and aliases to prove the person is absent.
-2. Research narrowly. Search snippets are leads, not evidence: open the underlying pages.
-   Use at least two useful sources, preferably including a primary, official, archival or
-   scholarly source. Record each URL plus what it supports in `sources`.
+2. Research narrowly. For Russian/Soviet figures, open the Russian Wikipedia article (`ru.wikipedia.org`) first: it is the normal factual base for routine dates, offices, publications, names, and career rows. One opened Russian Wikipedia source is enough for routine card work. Seek a second source only for a disputed or consequential claim (for example, responsibility for violence, a contested arrest/execution account, or a quotation). Record each URL plus what it supports in `sources`.
 3. Submit exactly one `commulingo_edit` call. Never delete anything.
    For `target_type="person_section"`, the patch keys are exactly `slug`, `heading`,
    `body`, `sortOrder`, and `sources`. The bilingual section title belongs in
@@ -56,6 +54,6 @@ COMMULINGO_CURATOR = AgentSpec(
     provider="deepseek",
     model="deepseek_pro",
     budget_usd=0.35,
-    max_rounds=12,
+    max_rounds=8,
     include_political_line=False,
 )

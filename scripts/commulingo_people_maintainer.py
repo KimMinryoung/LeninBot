@@ -121,7 +121,7 @@ def build_task(mode: str, candidate: dict | None) -> str:
 Identify one historically important person missing from CommuLingo whose inclusion would
 materially improve coverage of revolutionary or Soviet history. Inspect list_groups,
 list_categories and list_offices, then search_people under the proposed name and aliases to
-prove there is no duplicate. Research the person with at least two opened sources. Create one
+prove there is no duplicate. Start by opening the Russian Wikipedia article when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
 complete bilingual person card with a correct group and one primary role. Make exactly one
 `commulingo_edit(target_type='person', action='create', ...)` call and stop. Do not create a
 section or office row in this run."""
@@ -144,7 +144,7 @@ Call get_person and get_sections first. Find the single most valuable missing to
 creating one substantial bilingual `person_section` (one topic, roughly 350-700 Korean
 characters plus equivalent English) when no section covers it. If the real defect is a bad
 classification or a very thin career, update the person instead, preserving every wholesale
-field exactly. Open at least two sources. Make one commulingo_edit call and stop."""
+field exactly. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
 
 
 def latest_maintainer_edit() -> dict | None:

@@ -70,7 +70,7 @@
     "provider": "deepseek",
     "model": "deepseek_pro",
     "budget_usd": 0.35,
-    "max_rounds": 12,
+    "max_rounds": 8,
     "finalization_tools": [
       "commulingo_edit"
     ],
