@@ -9,6 +9,7 @@ import anthropic
 from secrets_loader import get_secret
 
 from writer.store import get_writer_setting, set_writer_setting
+from writer.config import WriterCallPolicy
 
 WRITER_MODEL = "claude-fable-5"
 WRITER_MODEL_DISPLAY = "Claude Fable 5"
@@ -154,6 +155,16 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
         extra = bot_config._get_deepseek_thinking_params()
         return client, spec["model"], spec["display"], extra
     return _client(), spec["model"], spec["display"], dict(spec.get("extra") or {})
+
+
+def resolve_writer_call_extra(
+    policy: WriterCallPolicy, model: str, default_extra: dict,
+) -> dict:
+    """Apply centrally declared provider controls for one writer call role."""
+    if policy.thinking_policy == "tool_loop" and model.startswith("deepseek"):
+        import bot_config
+        return bot_config._get_deepseek_tool_thinking_params()
+    return dict(default_extra)
 
 
 def light_effort_extra(model: str, extra: dict) -> dict:

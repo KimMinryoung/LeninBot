@@ -87,6 +87,16 @@ def _agent_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _writer_policy_rows() -> list[dict[str, Any]]:
+    from dataclasses import asdict
+    from writer.config import WRITER_CALL_POLICIES
+
+    return [
+        {"role": role, **asdict(policy)}
+        for role, policy in WRITER_CALL_POLICIES.items()
+    ]
+
+
 def build_snapshot() -> dict[str, Any]:
     from bot_config import _config
 
@@ -99,6 +109,7 @@ def build_snapshot() -> dict[str, Any]:
             "webchat": _selection("webchat"),
         },
         "agents": _agent_rows(),
+        "writer_call_policies": _writer_policy_rows(),
     }
 
 
@@ -116,6 +127,15 @@ def _print_table(snapshot: dict[str, Any]) -> None:
         print(
             f"{row['agent']:<18} {provider:<13} {model:<24} "
             f"{row['budget_usd']:<7.2f} {row['max_rounds']:<7} {row['tools']}"
+        )
+
+    print("\nWriter call policies")
+    print("role          input    output   rounds  continuations  thinking")
+    for row in snapshot["writer_call_policies"]:
+        print(
+            f"{row['role']:<13} {row['max_input_tokens']:<8} "
+            f"{row['max_output_tokens']:<8} {row['max_rounds']:<7} "
+            f"{row['max_output_continuations']:<14} {row['thinking_policy']}"
         )
 
 

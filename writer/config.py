@@ -2,10 +2,35 @@
 
 from __future__ import annotations
 
-WRITER_DEFAULT_MAX_TOKENS = 20000
-# Tool-use rounds: allow extended continuity searches and edit retries before
-# the model writes. 1 = no tools (legacy). Each round is a priced model call.
-WRITER_MAX_ROUNDS = 16
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class WriterCallPolicy:
+    """One centrally declared model-call envelope for a writer role."""
+
+    max_input_tokens: int
+    max_output_tokens: int
+    max_rounds: int
+    max_output_continuations: int = 0
+    thinking_policy: str = "model_default"
+
+
+WRITER_CALL_POLICIES: dict[str, WriterCallPolicy] = {
+    "main": WriterCallPolicy(120_000, 20_000, 16, 2),
+    "diagnosis": WriterCallPolicy(64_000, 8_000, 5, 2, "tool_loop"),
+    "revision": WriterCallPolicy(96_000, 16_000, 10, 2),
+    "line_edit": WriterCallPolicy(64_000, 8_000, 8, 2, "tool_loop"),
+    "research": WriterCallPolicy(32_000, 3_000, 6, 1, "tool_loop"),
+}
+
+
+def writer_call_policy(role: str) -> WriterCallPolicy:
+    try:
+        return WRITER_CALL_POLICIES[role]
+    except KeyError as exc:
+        raise ValueError(f"Unknown writer call role: {role!r}") from exc
+
 WRITER_IDLE_TIMEOUT_SEC = 240
 # Max zero-event silence on a provider stream before the call is treated as
 # stalled and retried. Fable's adaptive thinking emits NO stream events while
@@ -24,8 +49,6 @@ WRITER_WEB_SEARCH_ENABLED = True
 
 # Delegated research sub-agent (research_web): light model, few rounds, and a
 # hard wall-clock cap so a stuck sub-run can never hang the main writer turn.
-WRITER_RESEARCH_MAX_ROUNDS = 6
-WRITER_RESEARCH_MAX_TOKENS = 3000
 WRITER_RESEARCH_BUDGET_USD = 1.0
 WRITER_RESEARCH_TIMEOUT_SEC = 240
 WRITER_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
@@ -87,19 +110,12 @@ STYLE_DOC_MAX_COUNT = 2
 #   to the strongest model instead of a weaker model rewriting its prose.
 # - 'line_edit': legacy single light-model line edit of the changed spans.
 WRITER_REVISION_MODE = "diagnose_revise"
-WRITER_DIAGNOSIS_MAX_TOKENS = 4000
-WRITER_DIAGNOSIS_MAX_ROUNDS = 5
 # Read-only surface for the diagnosis stage: it reports, it never edits.
 WRITER_DIAGNOSIS_TOOL_NAMES = frozenset({
     "read_manuscript",
     "search_manuscript",
     "read_document",
 })
-WRITER_REVISION_MAX_TOKENS = 16000
-WRITER_REVISION_MAX_ROUNDS = 10
-
-WRITER_CRITIC_MAX_TOKENS = 8000
-WRITER_CRITIC_MAX_ROUNDS = 8
 # Skip the critic when the main pass changed fewer characters than this.
 WRITER_CRITIC_MIN_CHANGED_CHARS = 600
 # Context included around each changed span in the critic's excerpts.

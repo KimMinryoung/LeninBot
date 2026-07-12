@@ -16,21 +16,17 @@ from typing import Awaitable, Callable
 
 from claude_loop import chat_with_tools
 from tool_gateway.security import CallerContext, caller_scope
+from tool_loop_common import EMPTY_RESPONSE_FALLBACK
 
 from writer.config import (
-    WRITER_CRITIC_MAX_ROUNDS,
-    WRITER_CRITIC_MAX_TOKENS,
-    WRITER_DEFAULT_MAX_TOKENS,
-    WRITER_DIAGNOSIS_MAX_ROUNDS,
-    WRITER_DIAGNOSIS_MAX_TOKENS,
     WRITER_IDLE_TIMEOUT_SEC,
-    WRITER_MAX_ROUNDS,
     WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-    WRITER_REVISION_MAX_ROUNDS,
-    WRITER_REVISION_MAX_TOKENS,
     WRITER_REVISION_MODE,
+    writer_call_policy,
 )
-from writer.models import WRITER_CRITIC_CHOICE, resolve_light_model, resolve_writer_model
+from writer.models import (
+    WRITER_CRITIC_CHOICE, resolve_light_model, resolve_writer_call_extra, resolve_writer_model,
+)
 from writer.prompts import (
     DIAGNOSIS_PASS_MARKER,
     build_critic_system_blocks,
@@ -110,6 +106,8 @@ async def run_line_edit_pass(
     if not critic_msg:
         return None
     client, model, display, extra = light_model
+    policy = writer_call_policy("line_edit")
+    call_extra = resolve_writer_call_extra(policy, model, extra)
     tools, handlers = build_critic_tools(project_id)
     system = await asyncio.to_thread(build_critic_system_blocks, project)
     with _writer_scope():
@@ -120,14 +118,18 @@ async def run_line_edit_pass(
             tools=tools,
             tool_handlers=handlers,
             system_prompt=system,
-            max_rounds=WRITER_CRITIC_MAX_ROUNDS,
-            max_tokens=WRITER_CRITIC_MAX_TOKENS,
+            max_rounds=policy.max_rounds,
+            max_tokens=policy.max_output_tokens,
+            max_input_tokens=policy.max_input_tokens,
+            recover_input_via_tools=True,
             budget_usd=100.0,
             budget_tracker=tracker,
             on_progress=on_progress,
             agent_name="writer_critic",
             provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-            **extra,
+            continue_on_length=policy.max_output_continuations > 0,
+            max_length_continuations=policy.max_output_continuations,
+            **call_extra,
         )
 
 
@@ -153,6 +155,8 @@ async def run_diagnose_revise_pass(
     if not diag_msg:
         return None
     d_client, d_model, d_display, d_extra = light_model
+    diagnosis_policy = writer_call_policy("diagnosis")
+    diagnosis_extra = resolve_writer_call_extra(diagnosis_policy, d_model, d_extra)
     notes: str | None = None
     await announce(f"퇴고 1/2 — 편집자 진단 ({d_display})…")
     try:
@@ -166,16 +170,32 @@ async def run_diagnose_revise_pass(
                 tools=diag_tools,
                 tool_handlers=diag_handlers,
                 system_prompt=diag_system,
-                max_rounds=WRITER_DIAGNOSIS_MAX_ROUNDS,
-                max_tokens=WRITER_DIAGNOSIS_MAX_TOKENS,
+                max_rounds=diagnosis_policy.max_rounds,
+                max_tokens=diagnosis_policy.max_output_tokens,
+                max_input_tokens=diagnosis_policy.max_input_tokens,
+                recover_input_via_tools=True,
                 budget_usd=100.0,
                 budget_tracker=diagnosis_tracker,
                 on_progress=on_progress,
                 agent_name="writer_diagnosis",
                 provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-                **d_extra,
+                continue_on_length=diagnosis_policy.max_output_continuations > 0,
+                max_length_continuations=diagnosis_policy.max_output_continuations,
+                **diagnosis_extra,
             )
         notes = (notes or "").strip() or None
+        # ``chat_with_tools`` returns this non-empty fallback when a provider
+        # round yields no usable text (for example, a diagnosis that exhausts
+        # its read-tool rounds). It is not an editor note. Treating it as one
+        # makes the author revision see no actionable diagnosis and skip edits;
+        # None selects the existing author self-diagnosis fallback instead.
+        if notes == EMPTY_RESPONSE_FALLBACK:
+            logger.warning(
+                "writer diagnosis returned empty-response fallback project_id=%s; "
+                "author revision will self-diagnose",
+                project_id,
+            )
+            notes = None
     except Exception:
         logger.exception(
             "writer diagnosis stage failed project_id=%s; author revision will self-diagnose", project_id
@@ -191,6 +211,8 @@ async def run_diagnose_revise_pass(
     if not rev_msg:
         return None
     m_client, m_model, m_display, m_extra = main_model
+    revision_policy = writer_call_policy("revision")
+    revision_extra = resolve_writer_call_extra(revision_policy, m_model, m_extra)
     await announce(f"퇴고 2/2 — 저자 수정 ({m_display})…")
     # Deliberately the FULL writer surface and the SAME system blocks as the
     # main pass: an identical (tools, system) prefix reads the prompt cache
@@ -205,16 +227,18 @@ async def run_diagnose_revise_pass(
             tools=rev_tools,
             tool_handlers=rev_handlers,
             system_prompt=rev_system,
-            max_rounds=WRITER_REVISION_MAX_ROUNDS,
-            max_tokens=WRITER_REVISION_MAX_TOKENS,
+            max_rounds=revision_policy.max_rounds,
+            max_tokens=revision_policy.max_output_tokens,
+            max_input_tokens=revision_policy.max_input_tokens,
+            recover_input_via_tools=True,
             budget_usd=100.0,
             budget_tracker=revision_tracker,
             on_progress=on_progress,
             agent_name="writer_revision",
             provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
-            continue_on_length=True,
-            max_length_continuations=2,
-            **m_extra,
+            continue_on_length=revision_policy.max_output_continuations > 0,
+            max_length_continuations=revision_policy.max_output_continuations,
+            **revision_extra,
         )
 
 
@@ -322,6 +346,8 @@ async def stream_writer_reply(
         return
 
     request_kind = ""
+    main_policy = writer_call_policy("main")
+    main_extra = resolve_writer_call_extra(main_policy, writer_model, model_extra)
     # Claude-tier turns get the heavy context budget (longer tail + history);
     # cheap tiers keep the lean defaults. See writer.config.
     heavy_context = writer_model.startswith("claude")
@@ -550,8 +576,10 @@ async def stream_writer_reply(
                     tools=writer_tools,
                     tool_handlers=writer_handlers,
                     system_prompt=system_blocks,
-                    max_rounds=WRITER_MAX_ROUNDS,
-                    max_tokens=WRITER_DEFAULT_MAX_TOKENS,
+                    max_rounds=main_policy.max_rounds,
+                    max_tokens=main_policy.max_output_tokens,
+                    max_input_tokens=main_policy.max_input_tokens,
+                    recover_input_via_tools=True,
                     budget_usd=100.0,
                     budget_tracker=budget_tracker,
                     on_progress=on_progress,
@@ -559,9 +587,9 @@ async def stream_writer_reply(
                     provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
                     # A 20k-token chapter draft can hit max_tokens mid-response;
                     # without continuation the round (and its cost) is lost.
-                    continue_on_length=True,
-                    max_length_continuations=2,
-                    **model_extra,
+                    continue_on_length=main_policy.max_output_continuations > 0,
+                    max_length_continuations=main_policy.max_output_continuations,
+                    **main_extra,
                 )
             answer_holder.append(result)
             if critic:

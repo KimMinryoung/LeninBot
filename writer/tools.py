@@ -20,8 +20,10 @@ from writer.config import (
 )
 from writer.documents import get_document, list_documents, save_document, search_documents
 from writer.runs import record_run_edit
+from writer.prompts import scene_locator_entries
 from writer.store import (
     append_manuscript,
+    get_manuscript,
     read_manuscript_slice,
     replace_manuscript_text,
     search_manuscript,
@@ -51,16 +53,20 @@ _SEARCH_MANUSCRIPT_TOOL = {
 _READ_MANUSCRIPT_TOOL = {
     "name": "read_manuscript",
     "description": (
-        "Read an exact slice of the saved manuscript by character offsets (offsets appear in search_manuscript "
-        "results and the manuscript context header). Use it to pull full surrounding context before revising a "
-        "passage, or to re-read an earlier scene. With no arguments it returns the last 5000 characters. "
-        "Max 20000 characters per call."
+        "Read the saved manuscript by stable chapter anchors (preferred) or temporary character offsets. "
+        "For durable checkpoints pass chapter plus its opening and closing sentence from the scene index; "
+        "the server resolves their CURRENT offsets after earlier edits. Duplicate or missing anchors fail safely. "
+        "With no arguments it returns the last 5000 characters. Max 20000 characters per call; long chapters "
+        "return a next_start_anchor for the following page."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "start": {"type": "integer", "description": "Start character offset (0-based). Omit to read the tail."},
-            "end": {"type": "integer", "description": "End character offset (exclusive). Defaults to start + 5000."},
+            "chapter": {"type": "string", "description": "Chapter heading or number, e.g. # 12 or 12."},
+            "start_anchor": {"type": "string", "description": "Opening sentence copied from the scene index, or a continuation anchor."},
+            "end_anchor": {"type": "string", "description": "Closing sentence copied from the scene index."},
+            "start": {"type": "integer", "description": "Temporary start character offset (0-based)."},
+            "end": {"type": "integer", "description": "Temporary end character offset (exclusive)."},
         },
     },
 }
@@ -201,8 +207,56 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
             )
         return "\n\n".join(blocks)
 
-    async def _handle_read_manuscript(start: int | None = None, end: int | None = None) -> str:
-        return await asyncio.to_thread(read_manuscript_slice, project_id, start, end)
+    async def _handle_read_manuscript(
+        start: int | None = None,
+        end: int | None = None,
+        chapter: str | None = None,
+        start_anchor: str | None = None,
+        end_anchor: str | None = None,
+    ) -> str:
+        if not chapter:
+            return await asyncio.to_thread(read_manuscript_slice, project_id, start, end)
+        manuscript = await asyncio.to_thread(get_manuscript, project_id)
+        body = str((manuscript or {}).get("body") or "")
+        requested = str(chapter).strip().lstrip("#").strip().casefold()
+        matches = [
+            entry for entry in scene_locator_entries(body)
+            if str(entry["heading"]).strip().lstrip("#").strip().casefold() == requested
+        ]
+        if len(matches) != 1:
+            return f"Chapter locator must match exactly once; {chapter!r} matched {len(matches)} chapters."
+        entry = matches[0]
+        scope_start, scope_end = int(entry["start"]), int(entry["end"])
+        scope = body[scope_start:scope_end]
+
+        def resolve_anchor(anchor: str | None, default: int, *, after: bool = False) -> int | str:
+            value = str(anchor or "").strip()
+            if not value:
+                return default
+            count = scope.count(value)
+            if count != 1:
+                return f"Anchor must match exactly once inside {entry['heading']}; {value!r} matched {count} times."
+            pos = scope.find(value)
+            return scope_start + pos + (len(value) if after else 0)
+
+        lo = resolve_anchor(start_anchor, scope_start)
+        if isinstance(lo, str):
+            return lo
+        hi = resolve_anchor(end_anchor, scope_end, after=True)
+        if isinstance(hi, str):
+            return hi
+        if hi < lo:
+            return "The end anchor occurs before the start anchor inside the chapter."
+        result = await asyncio.to_thread(read_manuscript_slice, project_id, lo, hi)
+        if hi - lo > 20000:
+            rest = body[lo + 20000:hi]
+            next_anchor = next((line.strip() for line in rest.splitlines() if line.strip()), "")[:240]
+            if next_anchor:
+                result += (
+                    f"\n[chapter continues; next call: read_manuscript(chapter={chapter!r}, "
+                    f"start_anchor={next_anchor!r}, end_anchor={str(end_anchor or entry['end_anchor'])!r})]"
+                )
+        return result
 
     async def _handle_read_document(title: str) -> str:
         doc = await asyncio.to_thread(get_document, project_id, None, title)

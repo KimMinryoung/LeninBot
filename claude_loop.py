@@ -425,6 +425,8 @@ async def chat_with_tools(
     system_prompt: str | list[dict],
     max_rounds: int = 50,
     max_tokens: int = 4096,
+    max_input_tokens: int | None = None,
+    recover_input_via_tools: bool = False,
     log_event=None,
     budget_usd: float = 0.30,
     budget_tracker: dict | None = None,
@@ -450,7 +452,9 @@ async def chat_with_tools(
         tool_handlers: Dict mapping tool name → async handler function.
         system_prompt: System prompt text or Anthropic system content blocks.
         max_rounds: Max tool-use rounds before forcing response.
-        max_tokens: Max tokens for response.
+        max_tokens: Max tokens for one response.
+        max_input_tokens: Estimated request-input ceiling.
+        recover_input_via_tools: Replace old large tool results with replay instructions before failing the ceiling.
         log_event: Optional callable(level, source, message, detail=None, task_id=None)
             for persistent error logging.
         budget_usd: Maximum USD budget for this call (default 0.30).
@@ -494,6 +498,60 @@ async def chat_with_tools(
     # Callers that don't care about text_delta (e.g. Telegram) simply drop
     # the event — the final Message object is identical either way.
     async def _claude_call_once(**kwargs):
+        if max_input_tokens is not None:
+            request_blob = json.dumps(
+                {
+                    "system": kwargs.get("system", []),
+                    "messages": kwargs.get("messages", []),
+                    "tools": kwargs.get("tools", []),
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+            estimated_input = estimate_tokens(request_blob)
+            if estimated_input > int(max_input_tokens) and recover_input_via_tools:
+                compacted = [dict(message) for message in kwargs.get("messages", [])]
+                # Old read results are reproducible from manuscript/document
+                # storage. Keep tool names and arguments in the preceding
+                # assistant tool_use block, but replace bulky result bodies
+                # oldest-first with an explicit replay instruction. The latest
+                # result is eligible only if older results are insufficient; order
+                # naturally gives it that last-resort behavior.
+                for message in compacted:
+                    content = message.get("content")
+                    if not isinstance(content, list):
+                        continue
+                    changed = False
+                    blocks = []
+                    for block in content:
+                        if (
+                            isinstance(block, dict)
+                            and block.get("type") == "tool_result"
+                            and len(str(block.get("content") or "")) > 800
+                        ):
+                            block = dict(block)
+                            block["content"] = (
+                                "[Input checkpoint: prior tool result omitted from replay. "
+                                "The source remains stored; repeat the preceding tool call "
+                                "with the same chapter/anchors or document title to recover it.]"
+                            )
+                            changed = True
+                        blocks.append(block)
+                    if changed:
+                        message["content"] = blocks
+                        request_blob = json.dumps(
+                            {"system": kwargs.get("system", []), "messages": compacted, "tools": kwargs.get("tools", [])},
+                            ensure_ascii=False, default=str,
+                        )
+                        estimated_input = estimate_tokens(request_blob)
+                        if estimated_input <= int(max_input_tokens):
+                            break
+                kwargs["messages"] = compacted
+            if estimated_input > int(max_input_tokens):
+                raise ValueError(
+                    f"Estimated input {estimated_input} tokens exceeds policy limit "
+                    f"{int(max_input_tokens)}; compact to durable summary and anchor-based reads first."
+                )
         if thinking is not None:
             kwargs["thinking"] = thinking
         if output_config is not None:
@@ -553,7 +611,16 @@ async def chat_with_tools(
     response = None
     round_num = 0
     accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
-    for round_num in range(1, max_rounds + 1):
+    # A max-token continuation needs a fresh model round even when the
+    # truncation happened on the final normal tool round. Reserve those rounds
+    # up front; they are reachable only after an actual max_tokens stop.
+    continuation_rounds = (
+        max(0, int(max_length_continuations or 0)) if continue_on_length else 0
+    )
+    max_total_round_limit = max_rounds + continuation_rounds
+    total_round_limit = max_rounds
+    while round_num < total_round_limit:
+        round_num += 1
         # ── Cancel check ──
         check_cancelled(task_id)
 
@@ -600,6 +667,9 @@ async def chat_with_tools(
                     and length_continuations < max(0, int(max_length_continuations or 0))
                 ):
                     length_continuations += 1
+                    # Extend only after an actual max-token stop. Tool-use
+                    # rounds alone must still respect max_rounds.
+                    total_round_limit = min(max_total_round_limit, total_round_limit + 1)
                     if partial_text:
                         accumulated_text_parts.append(partial_text)
                         working_msgs.append({
@@ -743,7 +813,7 @@ async def chat_with_tools(
             if not budget_warning_sent and total_cost > budget_usd * 0.8:
                 budget_warning_sent = True
                 tool_results.append({"type": "text", "text": build_budget_warning(total_cost, budget_usd)})
-            if round_num == max_rounds - 2:
+            if round_num == total_round_limit - 2:
                 tool_results.append({"type": "text", "text": build_round_warning(round_num, max_rounds)})
             working_msgs.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
@@ -789,8 +859,8 @@ async def chat_with_tools(
     log_detail = "\n".join(tool_call_log) if tool_call_log else ""
     was_still_working = response.stop_reason in ("tool_use", "pause_turn") if response else False
     logger.warning(
-        "Limit reached (rounds=%d/%d, budget=$%.4f/$%.2f, still_working=%s). Forcing final response. Calls:\n%s",
-        round_num if response else 0, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
+        "Limit reached (rounds=%d/%d, normal_rounds=%d, budget=$%.4f/$%.2f, still_working=%s). Forcing final response. Calls:\n%s",
+        round_num if response else 0, total_round_limit, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
     )
 
     limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
@@ -816,7 +886,7 @@ async def chat_with_tools(
         working_msgs,
         build_limit_message(
             limit_reason, total_cost, budget_usd,
-            round_num if response else 0, max_rounds, was_still_working,
+            round_num if response else 0, total_round_limit, was_still_working,
             finalization_tools=final_tool_names or None,
         ),
     )

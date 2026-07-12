@@ -165,17 +165,38 @@ _SCENE_HEADING_RE = re.compile(r"(?m)^[ \t]*#.+$")
 _SCENE_INDEX_MAX_ENTRIES = 80
 
 
+def _boundary_sentence(text: str, *, first: bool) -> str:
+    """Stable prose anchor for a scene locator (not a mutable char offset)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    source = lines[0] if first else lines[-1]
+    sentences = re.split(r"(?<=[.!?。！？])\s+", source)
+    value = sentences[0] if first else sentences[-1]
+    return value.strip()[:240]
+
+
+def scene_locator_entries(body: str) -> list[dict]:
+    """Current chapter ranges with boundary anchors that survive earlier edits."""
+    headings = list(_SCENE_HEADING_RE.finditer(body))
+    entries: list[dict] = []
+    for i, match in enumerate(headings):
+        content_start = match.end()
+        content_end = headings[i + 1].start() if i + 1 < len(headings) else len(body)
+        content = body[content_start:content_end].strip()
+        entries.append({
+            "heading": match.group(0).strip()[:120],
+            "start": content_start,
+            "end": content_end,
+            "start_anchor": _boundary_sentence(content, first=True),
+            "end_anchor": _boundary_sentence(content, first=False),
+        })
+    return entries
+
+
 def scene_index(body: str) -> str:
-    """Compact navigation map of the manuscript: every `#` heading line with
-    its char offset and the scene's opening words. Lets the model jump straight
-    to a scene with read_manuscript(start, end) instead of exploratory
-    searches. Empty string when the manuscript uses no headings."""
-    entries = []
-    for m in _SCENE_HEADING_RE.finditer(body):
-        heading = m.group(0).strip()[:80]
-        after = body[m.end():m.end() + 400]
-        opener = next((ln.strip() for ln in after.splitlines() if ln.strip()), "")[:48]
-        entries.append((m.start(), heading, opener))
+    """Stable chapter navigation map using boundary sentences, not offsets."""
+    entries: list[dict | None] = list(scene_locator_entries(body))
     if not entries:
         return ""
     if len(entries) > _SCENE_INDEX_MAX_ENTRIES:
@@ -186,11 +207,14 @@ def scene_index(body: str) -> str:
         if entry is None:
             lines.append("  … (older scenes omitted)")
             continue
-        offset, heading, opener = entry
-        lines.append(f"- {heading} — char {offset}" + (f" — {opener}…" if opener else ""))
+        start_anchor = str(entry.get("start_anchor") or "")
+        end_anchor = str(entry.get("end_anchor") or "")
+        lines.append(
+            f"- {entry['heading']} — starts: {start_anchor!r} — ends: {end_anchor!r}"
+        )
     return (
-        "Scene index (heading — start char offset — opening words; jump with "
-        "read_manuscript(start, end), anchor replace_in_manuscript nearby):\n" + "\n".join(lines)
+        "Scene index (chapter heading + stable boundary sentences; retrieve with "
+        "read_manuscript(chapter, start_anchor, end_anchor)):\n" + "\n".join(lines)
     )
 
 
@@ -665,9 +689,20 @@ def messages_for_model(
     # The volatile manuscript state rides in the CURRENT turn only. It is
     # never persisted with the prompt (store keeps the bare prompt), so past
     # turns replay byte-identically and the history prefix stays cacheable.
+    checkpoint = ""
+    if threshold > 0:
+        checkpoint = (
+            "<input_checkpoint>\n"
+            "Older chat turns are outside this input window. Their durable story state must be read from "
+            "the pinned Story so far and background documents below. Exact manuscript prose remains in "
+            "storage; use the scene index chapter + start/end sentence anchors with read_manuscript to "
+            "recover it without relying on mutable character offsets.\n"
+            "</input_checkpoint>\n\n"
+        )
     current_turn = (
         manuscript_state_block(project_id, selection_start, selection_end, tail_chars=tail_chars)
-        + "\n\n<user_request>\n" + user_prompt.strip() + "\n</user_request>"
+        + "\n\n" + checkpoint
+        + "<user_request>\n" + user_prompt.strip() + "\n</user_request>"
     )
     messages.append({"role": "user", "content": current_turn})
     return messages

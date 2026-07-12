@@ -14,11 +14,12 @@ import logging
 from writer.config import (
     WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
     WRITER_RESEARCH_BUDGET_USD,
-    WRITER_RESEARCH_MAX_ROUNDS,
-    WRITER_RESEARCH_MAX_TOKENS,
     WRITER_RESEARCH_TIMEOUT_SEC,
+    writer_call_policy,
 )
-from writer.models import WRITER_RESEARCH_CHOICE, light_effort_extra, resolve_writer_model
+from writer.models import (
+    WRITER_RESEARCH_CHOICE, light_effort_extra, resolve_writer_call_extra, resolve_writer_model,
+)
 from writer.runs import broadcast_run_event, record_run_cost
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,9 @@ def build_research_handler(project_id: int, resolve_fallback):
                 logger.exception("writer research: no model provider available project_id=%s", project_id)
                 return f"Research failed: model provider unavailable ({exc})."
 
+        policy = writer_call_policy("research")
+        extra = resolve_writer_call_extra(policy, model, extra)
+
         async def on_progress(event: str, detail: str):
             if event in ("tool_call", "tool_result") and detail:
                 await broadcast_run_event(project_id, {"type": "tool", "content": f"[리서치] {detail}"})
@@ -123,13 +127,17 @@ def build_research_handler(project_id: int, resolve_fallback):
                     tools=[web_spec],
                     tool_handlers={"web_search": web_handler},
                     system_prompt=_RESEARCH_SYSTEM_PROMPT,
-                    max_rounds=WRITER_RESEARCH_MAX_ROUNDS,
-                    max_tokens=WRITER_RESEARCH_MAX_TOKENS,
+                    max_rounds=policy.max_rounds,
+                    max_tokens=policy.max_output_tokens,
+                    max_input_tokens=policy.max_input_tokens,
+                    recover_input_via_tools=True,
                     budget_usd=WRITER_RESEARCH_BUDGET_USD,
                     budget_tracker=budget_tracker,
                     on_progress=on_progress,
                     agent_name="writer_research",
                     provider_idle_timeout_sec=WRITER_PROVIDER_IDLE_TIMEOUT_SEC,
+                    continue_on_length=policy.max_output_continuations > 0,
+                    max_length_continuations=policy.max_output_continuations,
                     **extra,
                 ),
                 timeout=WRITER_RESEARCH_TIMEOUT_SEC,
