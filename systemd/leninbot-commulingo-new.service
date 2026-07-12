@@ -1,0 +1,19 @@
+[Unit]
+Description=LeninBot CommuLingo new-person curator
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=COMMULINGO_SUGGESTED_BY=commulingo-maintainer-new
+LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_people_parallel.py --mode new
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
