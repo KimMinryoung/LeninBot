@@ -56,7 +56,7 @@ _FATE_KINDS = (
 )
 
 _PERSON_PATCH_KEYS = frozenset({
-    "id", "group", "groupId", "sortOrder", "initial", "cyrillic", "years",
+    "id", "group", "groupId", "sortOrder", "cyrillic", "years",
     "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
@@ -159,7 +159,7 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
     read a record, modify fields, and send them straight back.
     """
     cur.execute(
-        """SELECT id, group_id, initial, cyrillic, years_label,
+        """SELECT id, group_id, cyrillic, years_label,
                   name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
                   moment_ko, moment_en,
                   fate_kind, fate_label_ko, fate_label_en
@@ -172,7 +172,6 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
     person = {
         "id": row["id"],
         "group": row["group_id"],
-        "initial": row["initial"],
         "cyrillic": row["cyrillic"],
         "years": row["years_label"],
         "name": {"ko": row["name_ko"], "en": row["name_en"]},
@@ -633,7 +632,7 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             person_id,
             patch.get("groupId") or patch.get("group"),
             sort_order,
-            patch.get("initial") or "",
+            "",
             patch.get("cyrillic") or "",
             patch.get("years") or "",
             birth, death,
@@ -665,8 +664,6 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
 
     if "group" in patch or "groupId" in patch:
         set_col("group_id", patch.get("groupId") or patch.get("group"))
-    if "initial" in patch:
-        set_col("initial", patch.get("initial") or "")
     if "cyrillic" in patch:
         set_col("cyrillic", patch.get("cyrillic") or "")
     if "years" in patch:
@@ -786,6 +783,12 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             f"Allowed: {', '.join(sorted(allowed))}."
         )
     if target_type == "person":
+        for key in ("id", "group", "groupId", "cyrillic", "cyrillicPatronymic", "years"):
+            if key in patch and patch[key] is not None and not isinstance(patch[key], str):
+                return (
+                    f"Error: {key} must be a plain string, not an object or list. "
+                    "Only bilingual public text fields use {ko, en}."
+                )
         cyrillic = str(patch.get("cyrillic") or "").strip()
         cyrillic_patronymic = str(patch.get("cyrillicPatronymic") or "").strip()
         if cyrillic and cyrillic_patronymic and cyrillic_patronymic in cyrillic.split():
@@ -842,6 +845,20 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             name = patch.get("name") or {}
             if not (isinstance(name, dict) and name.get("ko") and name.get("en")):
                 return "Error: patch.name.ko and patch.name.en are required for person create."
+            for key in ("bio", "epithet"):
+                value = patch.get(key) or {}
+                if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
+                    return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
+            if not patch.get("career"):
+                return "Error: at least one bilingual career entry is required for person create."
+            role = patch.get("role")
+            if not isinstance(role, dict) or not (
+                role.get("officeId") or role.get("category") or role.get("categoryId")
+            ):
+                return (
+                    "Error: a primary role with officeId, category, or categoryId "
+                    "is required for person create."
+                )
         else:
             cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
             if not cur.fetchone():
@@ -1108,6 +1125,73 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             return msg
 
 
+_BILINGUAL_TEXT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {"ko": {"type": "string"}, "en": {"type": "string"}},
+    "required": ["ko", "en"],
+}
+
+_COMMULINGO_PATCH_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "description": (
+        "Canonical patch. Scalar fields stay strings; bilingual fields are {ko,en}. "
+        "For person create include name, bio, epithet, groupId, role, years, aliases, "
+        "career, and native-script name fields. Empty object is only for delete."
+    ),
+    "properties": {
+        "id": {"type": "string"},
+        "group": {"type": "string"},
+        "groupId": {"type": "string"},
+        "sortOrder": {"type": "integer"},
+        "cyrillic": {"type": "string"},
+        "cyrillicPatronymic": {"type": "string"},
+        "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
+        "name": _BILINGUAL_TEXT_SCHEMA,
+        "epithet": _BILINGUAL_TEXT_SCHEMA,
+        "bio": _BILINGUAL_TEXT_SCHEMA,
+        "moment": _BILINGUAL_TEXT_SCHEMA,
+        "patronymic": _BILINGUAL_TEXT_SCHEMA,
+        "aliases": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "ko": {"type": "array", "items": {"type": "string"}},
+                "en": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["ko", "en"],
+        },
+        "career": {
+            "type": "array",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {"y": {"type": "string"}, "r": _BILINGUAL_TEXT_SCHEMA},
+                "required": ["y", "r"],
+            },
+        },
+        "role": {
+            "type": ["object", "null"], "additionalProperties": False,
+            "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}},
+        },
+        "fate": {
+            "type": "object", "additionalProperties": False,
+            "properties": {"kind": {"type": "string"}, "label": _BILINGUAL_TEXT_SCHEMA},
+            "required": ["kind", "label"],
+        },
+        "scenes": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
+        "slug": {"type": "string"},
+        "heading": _BILINGUAL_TEXT_SCHEMA,
+        "body": _BILINGUAL_TEXT_SCHEMA,
+        "sources": {"type": "array", "items": {"type": "string"}},
+        "period": {"type": "string"},
+        "personId": {"type": "string"},
+        "note": _BILINGUAL_TEXT_SCHEMA,
+        "office_rows": {"type": "array", "items": {"type": "object"}},
+        "sections": {"type": "array", "items": {"type": "object"}},
+    },
+}
+
+
 COMMULINGO_EDIT_TOOL = {
     "name": "commulingo_edit",
     "description": (
@@ -1116,8 +1200,7 @@ COMMULINGO_EDIT_TOOL = {
         "so it is reversible) or is staged for operator review — the response "
         "says which happened. Read the current record with commulingo_people "
         "first, and cite at least one source per edit. `patch` fields (include "
-        "only what you change): person — group, initial (one letter of the "
-        "native-script name), cyrillic (native-script name: Cyrillic for "
+        "only what you change): person — group, cyrillic (native-script name: Cyrillic for "
         "Soviet figures, hanzi/Latin/etc. for non-Soviet ones, e.g. 毛泽东; with "
         "cyrillicPatronymic, use cyrillic for given name + surname only), "
         "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
@@ -1160,10 +1243,7 @@ COMMULINGO_EDIT_TOOL = {
                 "type": "string",
                 "description": "Person id, new person slug, office id, or numeric office-row id (see description).",
             },
-            "patch": {
-                "type": "object",
-                "description": "Fields to set (admin-store shape). Empty object for delete.",
-            },
+            "patch": _COMMULINGO_PATCH_SCHEMA,
             "sources": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1177,7 +1257,7 @@ COMMULINGO_EDIT_TOOL = {
                 "description": "Optional self-assessed confidence, 0–1.",
             },
         },
-        "required": ["target_type", "action", "target_id", "sources"],
+        "required": ["target_type", "action", "target_id", "patch", "sources"],
     },
 }
 

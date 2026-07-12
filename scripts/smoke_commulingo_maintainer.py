@@ -46,6 +46,7 @@ candidate = {
     "name_en": "Example",
     "group_id": "thaw",
     "bio_chars": 40,
+    "has_epithet": 0,
     "career_count": 1,
     "section_count": 0,
     "has_moment": 0,
@@ -53,6 +54,9 @@ candidate = {
 }
 task = maintainer.build_task("enrich", candidate)
 assert "example" in task and "get_person" in task and "one commulingo_edit" in task
+assert "Do not create a section" in task and "has epithet: False" in task
+assert "initial" not in maintainer._PERSON_PATCH_KEYS
+assert "initial" not in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["patch"]["properties"]
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "action='create'" in new_task
 

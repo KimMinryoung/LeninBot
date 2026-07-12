@@ -105,6 +105,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
     rows = db_query(
         """SELECT p.id, p.group_id, p.name_ko, p.name_en,
                   LENGTH(COALESCE(p.bio_ko, '')) AS bio_chars,
+                  CASE WHEN COALESCE(p.epithet_ko, '') = '' THEN 0 ELSE 1 END AS has_epithet,
                   COUNT(DISTINCT c.id)::int AS career_count,
                   COUNT(DISTINCT s.id)::int AS section_count,
                   CASE WHEN COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END AS has_moment,
@@ -120,8 +121,10 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
                        AND rev.changed_by = 'commulingo-maintainer'
                        AND rev.created_at >= NOW() - (%(recent_days)s * INTERVAL '1 day')
                   ))
-            GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.moment_ko, r.person_id
+            GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko, r.person_id
             ORDER BY
+                  CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
+                         OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
                   COUNT(DISTINCT s.id) ASC,
                   CASE WHEN COUNT(DISTINCT c.id) <= 1 THEN 0 ELSE 1 END ASC,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END ASC,
@@ -154,16 +157,18 @@ Target exactly this person and no one else:
 - English name: {candidate['name_en']}
 - group: {candidate['group_id']}
 - current Korean bio length: {candidate['bio_chars']} characters
+- has epithet: {bool(candidate['has_epithet'])}
 - career rows: {candidate['career_count']}
 - detail sections: {candidate['section_count']}
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
 
-Call get_person and get_sections first. Find the single most valuable missing topic. Prefer
-creating one substantial bilingual `person_section` (one topic, roughly 350-700 Korean
-characters plus equivalent English) when no section covers it. If the real defect is a bad
-classification or a very thin career, update the person instead, preserving every wholesale
-field exactly. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
+Call get_person and get_sections first. Basic card completeness takes priority over detail
+sections: if bio or epithet is empty, career has no rows, or the primary role is missing,
+make one person update that fills every such missing basic field. Do not create a section in
+that case. Otherwise find the single most valuable missing topic and prefer one substantial
+bilingual `person_section` (one topic, roughly 350-700 Korean characters plus equivalent
+English) when no section covers it. Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
 
 
 def build_discovery_task() -> str:
@@ -217,13 +222,14 @@ Create exactly this pre-verified missing person and no one else:
 Re-check search_people for the exact names, fetch the starting source, inspect groups and
 roles, then create one complete bilingual card. Use ONLY the canonical person patch keys
 documented by commulingo_edit: name, bio, epithet, fate, role, groupId, years, aliases,
-career, cyrillic, cyrillicPatronymic, patronymic, initial, moment, scenes, sortOrder.
+career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
+Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
 Make exactly one commulingo_edit(target_type='person', action='create') call and stop.
 """
 
 
 _PERSON_PATCH_KEYS = frozenset({
-    "id", "group", "groupId", "sortOrder", "initial", "cyrillic",
+    "id", "group", "groupId", "sortOrder", "cyrillic",
     "cyrillicPatronymic", "years", "name", "epithet", "bio", "moment",
     "fate", "patronymic", "aliases", "career", "role", "scenes", "office_rows",
 })
