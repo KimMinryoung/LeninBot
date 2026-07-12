@@ -968,9 +968,18 @@ def _checkpoint_tool_results_for_replay(
         return msgs, estimated
 
     checkpointed = [dict(message) for message in msgs]
+    from tool_gateway.inference import is_replay_safe_tool
+    tool_names_by_id = {}
+    for message in checkpointed:
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function") or {}
+            tool_names_by_id[str(tool_call.get("id") or "")] = str(function.get("name") or "")
     candidates = [
         index for index, message in enumerate(checkpointed)
         if message.get("role") == "tool"
+        and is_replay_safe_tool(tool_names_by_id.get(str(message.get("tool_call_id") or "")))
         and len(str(message.get("content", ""))) > 800
         and not str(message.get("content", "")).startswith("[Input checkpoint:")
     ]
@@ -1128,7 +1137,13 @@ async def chat_with_tools(
             completion_tokens, call_cost, current_total, budget_usd,
         )
 
-    for round_num in range(1, max_rounds + 1):
+    continuation_rounds = (
+        max(0, int(max_length_continuations or 0)) if continue_on_length else 0
+    )
+    max_total_round_limit = max_rounds + continuation_rounds
+    total_round_limit = max_rounds
+    while round_num < total_round_limit:
+        round_num += 1
 
         # ── Cancel check ──
         check_cancelled(task_id)
@@ -1301,6 +1316,7 @@ async def chat_with_tools(
                     and content_text.strip()
                 ):
                     length_continuations += 1
+                    total_round_limit = min(max_total_round_limit, total_round_limit + 1)
                     await emit_progress(
                         on_progress,
                         "warning",

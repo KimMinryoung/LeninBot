@@ -204,6 +204,21 @@ async def _assert_runtime_profiles() -> None:
     )
 
 
+def _assert_writer_heavy_policy_uses_gateway_defaults() -> None:
+    from tool_gateway.inference import (
+        DEFAULT_AGENT_MAX_INPUT_TOKENS, DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+    )
+    from writer.config import writer_call_policy
+
+    for role in ("main", "revision"):
+        policy = writer_call_policy(role)
+        assert policy.max_input_tokens == DEFAULT_AGENT_MAX_INPUT_TOKENS
+        assert policy.max_output_tokens == DEFAULT_AGENT_MAX_OUTPUT_TOKENS
+    assert writer_call_policy("diagnosis").max_output_tokens == 8000
+    assert writer_call_policy("line_edit").max_output_tokens == 8000
+    assert writer_call_policy("research").max_output_tokens == 3000
+
+
 def _assert_openai_input_replay_checkpoint() -> None:
     import json as _json
     from openai_tool_loop import _checkpoint_tool_results_for_replay
@@ -230,6 +245,75 @@ def _assert_openai_input_replay_checkpoint() -> None:
     assert checkpointed[2]["content"].startswith("[Input checkpoint:")
     assert estimated <= 500
 
+    write_calls = [{
+        "id": "call-write",
+        "type": "function",
+        "function": {"name": "broadcast_to_channel", "arguments": "{}"},
+    }]
+    write_messages = [
+        {"role": "assistant", "content": "", "tool_calls": write_calls},
+        {"role": "tool", "tool_call_id": "call-write", "content": "sent" * 5000},
+    ]
+    unchanged, write_estimate = _checkpoint_tool_results_for_replay(write_messages, 500)
+    assert unchanged[1]["content"] == write_messages[1]["content"]
+    assert write_estimate > 500
+
+
+def _assert_inference_reasoning_policy() -> None:
+    from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
+
+    base = dict(
+        max_input_tokens=160000, max_output_tokens=32000, max_rounds=10,
+        budget_usd=1.0, max_output_continuations=2, thinking_budget_tokens=8192,
+    )
+    thinking = AgentInferencePolicy(**base, thinking_policy="thinking")
+    disabled = AgentInferencePolicy(**base, thinking_policy="disabled")
+    model_default = AgentInferencePolicy(**base, thinking_policy="model_default")
+    assert resolve_inference_extra(thinking, "claude")["thinking"] == {
+        "type": "enabled", "budget_tokens": 8192,
+    }
+    assert resolve_inference_extra(disabled, "claude") == {}
+    assert resolve_inference_extra(thinking, "openai")["extra_body"] == {
+        "reasoning_effort": "high",
+    }
+    assert resolve_inference_extra(disabled, "openai")["extra_body"] == {
+        "reasoning_effort": "none",
+    }
+    assert resolve_inference_extra(model_default, "openai") == {}
+
+
+async def _assert_openai_continuation_extends_round_limit() -> None:
+    from types import SimpleNamespace
+    from openai_tool_loop import chat_with_tools
+
+    class _Completions:
+        def __init__(self):
+            self.calls = 0
+
+        async def create(self, **_kwargs):
+            self.calls += 1
+            finish = "length" if self.calls < 3 else "stop"
+            text = f"part-{self.calls}"
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason=finish,
+                    message=SimpleNamespace(content=text, tool_calls=None, refusal=None),
+                )],
+                usage=None,
+            )
+
+    completions = _Completions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    result = await chat_with_tools(
+        [{"role": "user", "content": "continue test"}],
+        client=client, model="gpt-test", tools=[], tool_handlers={},
+        system_prompt="system", max_rounds=1, max_tokens=8, budget_usd=1.0,
+        continue_on_length=True, max_length_continuations=2, return_metadata=True,
+    )
+    assert completions.calls == 3
+    assert result["continuations_used"] == 2
+    assert result["text"] == "part-1\npart-2\npart-3"
+
 
 def _assert_agent_runtime_config() -> None:
     import agents.runtime_config as runtime_config
@@ -254,6 +338,7 @@ def _assert_agent_runtime_config() -> None:
             "max_output_tokens": int(cfg.get("max_output_tokens", base["max_output_tokens"])),
             "max_output_continuations": int(cfg.get("max_output_continuations", base["max_output_continuations"])),
             "thinking_policy": str(cfg.get("thinking_policy", base["thinking_policy"])),
+            "thinking_budget_tokens": int(cfg.get("thinking_budget_tokens", base["thinking_budget_tokens"])),
             "finalization_tools": list(cfg.get("finalization_tools", base["finalization_tools"])),
             "terminal_tools": list(cfg.get("terminal_tools", base["terminal_tools"])),
             "skip_orchestrator_report": bool(
@@ -269,6 +354,7 @@ def _assert_agent_runtime_config() -> None:
         assert spec.max_output_tokens == expected["max_output_tokens"], name
         assert spec.max_output_continuations == expected["max_output_continuations"], name
         assert spec.thinking_policy == expected["thinking_policy"], name
+        assert spec.thinking_budget_tokens == expected["thinking_budget_tokens"], name
         assert spec.finalization_tools == expected["finalization_tools"], name
         assert spec.terminal_tools == expected["terminal_tools"], name
         assert spec.skip_orchestrator_report is expected["skip_orchestrator_report"], name
@@ -323,6 +409,7 @@ def _assert_agent_runtime_dynamic_reload() -> None:
                         "max_output_tokens": 12000,
                         "max_output_continuations": 3,
                         "thinking_policy": "disabled",
+                        "thinking_budget_tokens": 6000,
                     }
                 }),
                 encoding="utf-8",
@@ -336,6 +423,7 @@ def _assert_agent_runtime_dynamic_reload() -> None:
             assert registry["dummy"].max_output_tokens == 12000
             assert registry["dummy"].max_output_continuations == 3
             assert registry["dummy"].thinking_policy == "disabled"
+            assert registry["dummy"].thinking_budget_tokens == 6000
 
             path.write_text(
                 json.dumps({
@@ -1906,7 +1994,10 @@ async def _assert_diary_unpublish_action() -> None:
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
+    _assert_writer_heavy_policy_uses_gateway_defaults()
     _assert_openai_input_replay_checkpoint()
+    _assert_inference_reasoning_policy()
+    await _assert_openai_continuation_extends_round_limit()
     _assert_agent_runtime_config()
     _assert_autonomous_base_finalization_tools()
     _assert_agent_runtime_dynamic_reload()

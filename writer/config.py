@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from tool_gateway.inference import (
+    DEFAULT_AGENT_MAX_INPUT_TOKENS,
+    DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+)
+
 
 @dataclass(frozen=True)
 class WriterCallPolicy:
@@ -17,9 +22,13 @@ class WriterCallPolicy:
 
 
 WRITER_CALL_POLICIES: dict[str, WriterCallPolicy] = {
-    "main": WriterCallPolicy(120_000, 20_000, 16, 2),
+    "main": WriterCallPolicy(
+        DEFAULT_AGENT_MAX_INPUT_TOKENS, DEFAULT_AGENT_MAX_OUTPUT_TOKENS, 16, 2
+    ),
     "diagnosis": WriterCallPolicy(64_000, 8_000, 5, 2, "tool_loop"),
-    "revision": WriterCallPolicy(96_000, 16_000, 10, 2),
+    "revision": WriterCallPolicy(
+        DEFAULT_AGENT_MAX_INPUT_TOKENS, DEFAULT_AGENT_MAX_OUTPUT_TOKENS, 10, 2
+    ),
     "line_edit": WriterCallPolicy(64_000, 8_000, 8, 2, "tool_loop"),
     "research": WriterCallPolicy(32_000, 3_000, 6, 1, "tool_loop"),
 }

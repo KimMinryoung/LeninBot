@@ -28,6 +28,7 @@ _ALLOWED_KEYS = {
     "max_output_tokens",
     "max_output_continuations",
     "thinking_policy",
+    "thinking_budget_tokens",
     "finalization_tools",
     "terminal_tools",
     "skip_orchestrator_report",
@@ -76,6 +77,7 @@ def _snapshot_runtime(spec: AgentSpec) -> dict[str, Any]:
         "max_output_tokens": spec.max_output_tokens,
         "max_output_continuations": spec.max_output_continuations,
         "thinking_policy": spec.thinking_policy,
+        "thinking_budget_tokens": spec.thinking_budget_tokens,
         "finalization_tools": list(spec.finalization_tools),
         "terminal_tools": list(spec.terminal_tools),
         "skip_orchestrator_report": spec.skip_orchestrator_report,
@@ -109,8 +111,17 @@ def _apply_one(spec: AgentSpec, base: dict[str, Any], cfg: dict[str, Any]) -> No
         "max_output_continuations", base["max_output_continuations"]
     ))
     thinking_policy = str(cfg.get("thinking_policy", base["thinking_policy"]))
+    thinking_budget_tokens = int(cfg.get(
+        "thinking_budget_tokens", base["thinking_budget_tokens"]
+    ))
     if max_input_tokens <= 0 or max_output_tokens <= 0:
         raise ValueError(f"{spec.name} input/output token limits must be positive")
+    if thinking_budget_tokens <= 0:
+        raise ValueError(f"{spec.name}.thinking_budget_tokens must be positive")
+    if thinking_policy == "thinking" and thinking_budget_tokens >= max_output_tokens:
+        raise ValueError(
+            f"{spec.name}.thinking_budget_tokens must be below max_output_tokens when thinking is enabled"
+        )
     if max_output_continuations < 0:
         raise ValueError(f"{spec.name}.max_output_continuations must be non-negative")
     if thinking_policy not in {"tool_loop", "thinking", "disabled", "model_default"}:
@@ -137,6 +148,7 @@ def _apply_one(spec: AgentSpec, base: dict[str, Any], cfg: dict[str, Any]) -> No
     spec.max_output_tokens = max_output_tokens
     spec.max_output_continuations = max_output_continuations
     spec.thinking_policy = thinking_policy
+    spec.thinking_budget_tokens = thinking_budget_tokens
     spec.finalization_tools = finalization_tools
     spec.terminal_tools = terminal_tools
     spec.skip_orchestrator_report = bool(

@@ -511,8 +511,18 @@ async def chat_with_tools(
             estimated_input = estimate_tokens(request_blob)
             if estimated_input > int(max_input_tokens) and recover_input_via_tools:
                 compacted = [dict(message) for message in kwargs.get("messages", [])]
-                # Old read results are reproducible from manuscript/document
-                # storage. Keep tool names and arguments in the preceding
+                from tool_gateway.inference import is_replay_safe_tool
+                tool_names_by_id = {}
+                for prior in compacted:
+                    prior_content = prior.get("content")
+                    if not isinstance(prior_content, list):
+                        continue
+                    for prior_block in prior_content:
+                        if isinstance(prior_block, dict) and prior_block.get("type") == "tool_use":
+                            tool_names_by_id[str(prior_block.get("id") or "")] = str(
+                                prior_block.get("name") or ""
+                            )
+                # Replay-safe read results are reproducible from their source. Keep tool names and arguments in the preceding
                 # assistant tool_use block, but replace bulky result bodies
                 # oldest-first with an explicit replay instruction. The latest
                 # result is eligible only if older results are insufficient; order
@@ -527,13 +537,16 @@ async def chat_with_tools(
                         if (
                             isinstance(block, dict)
                             and block.get("type") == "tool_result"
+                            and is_replay_safe_tool(tool_names_by_id.get(
+                                str(block.get("tool_use_id") or "")
+                            ))
                             and len(str(block.get("content") or "")) > 800
                         ):
                             block = dict(block)
                             block["content"] = (
                                 "[Input checkpoint: prior tool result omitted from replay. "
-                                "The source remains stored; repeat the preceding tool call "
-                                "with the same chapter/anchors or document title to recover it.]"
+                                "The source remains stored; repeat the preceding read-only tool "
+                                "call with the exact same tool name and arguments to recover it.]"
                             )
                             changed = True
                         blocks.append(block)

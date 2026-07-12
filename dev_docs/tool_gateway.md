@@ -30,7 +30,7 @@ Read-only/idempotent tools in consecutive batches may run concurrently through t
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
 | `tool_gateway.dispatcher` | Runtime dispatch implementation for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
 | `tool_gateway.security` | Runtime adapter/re-export for `security_gateway` caller context, authorization, and audit |
-| `tool_gateway.inference` | Default and resolved delegated-agent input/output ceilings, continuation count, round/budget envelope, and provider thinking policy |
+| `tool_gateway.inference` | Default and resolved delegated-agent input/output ceilings, continuation count, round/budget envelope, replay-safe reads, and provider thinking/budget policy |
 
 ## Current Sources Of Truth
 
@@ -56,7 +56,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.
 - `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
-- Gateway-managed input overflow must not silently drop conversation text. Large tool results become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source.
+- Gateway-managed input overflow must not silently drop conversation text. Large results from explicitly replay-safe read-only tools become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source. Side-effecting tools are never marked for replay.
 - Output continuation is bounded by policy and does not consume an ordinary tool round solely because a completion hit its output ceiling.
 
 ## Verification

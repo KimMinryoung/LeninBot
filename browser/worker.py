@@ -220,6 +220,7 @@ async def execute_browser_task(task: dict) -> dict:
         max_input_tokens=None,
         max_output_continuations=0,
         thinking_policy="tool_loop",
+        thinking_budget_tokens=8192,
         budget_usd=None,
         extra_tools=None,
         extra_handlers=None,
@@ -257,6 +258,7 @@ async def execute_browser_task(task: dict) -> dict:
                 budget_usd=float(budget_usd or inference_policy.budget_usd),
                 max_output_continuations=int(max_output_continuations or 0),
                 thinking_policy=thinking_policy,
+                thinking_budget_tokens=thinking_budget_tokens,
             )
             deepseek_params = resolve_inference_extra(call_policy, "deepseek")
             return await deepseek_chat(
@@ -337,6 +339,7 @@ async def execute_browser_task(task: dict) -> dict:
             max_input_tokens_task=inference_policy.max_input_tokens,
             max_output_continuations=inference_policy.max_output_continuations,
             thinking_policy=inference_policy.thinking_policy,
+            thinking_budget_tokens=inference_policy.thinking_budget_tokens,
             allowed_user_ids=allowed_user_ids,
             log_event_fn=_log_event,
             extra_tools=agent_tools,

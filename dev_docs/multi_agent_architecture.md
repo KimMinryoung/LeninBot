@@ -54,11 +54,12 @@ Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalizatio
 - `max_output_tokens`
 - `max_output_continuations`
 - `thinking_policy` (`tool_loop`, `thinking`, `disabled`, or `model_default`)
+- `thinking_budget_tokens` (Claude extended-thinking token budget; must be below `max_output_tokens`)
 - `finalization_tools`
 - `terminal_tools`
 - `skip_orchestrator_report`
 
-`agents/runtime_config.py` reloads this overlay when specs are requested. The default inference envelope is owned by `tool_gateway.inference`; the overlay changes individual agents without adding provider-loop constants. Delegated tasks resolve one immutable policy before provider dispatch. Input overflow checkpoints large tool results while retaining the exact preceding tool name and arguments, so the agent can re-run that call for the complete source instead of receiving silently truncated text. Output exhaustion uses the configured bounded continuation count.
+`agents/runtime_config.py` reloads this overlay when specs are requested. The default inference envelope is owned by `tool_gateway.inference` (160k estimated input, 32k output per response, two bounded continuations, and an 8k Claude thinking budget); the overlay changes individual agents without adding provider-loop constants. Delegated tasks resolve one immutable policy before provider dispatch. Input overflow checkpoints large tool results while retaining the exact preceding tool name and arguments, so the agent can re-run that call for the complete source instead of receiving silently truncated text. Output exhaustion uses the configured bounded continuation count.
 
 ## Prompt And Tool Payload Efficiency
 

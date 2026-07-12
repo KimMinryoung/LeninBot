@@ -1430,6 +1430,7 @@ async def _chat_with_tools(
     max_input_tokens: int | None = None,
     max_output_continuations: int = 0,
     thinking_policy: str = "tool_loop",
+    thinking_budget_tokens: int = 8192,
     budget_usd: float | None = None,
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
@@ -1491,6 +1492,16 @@ async def _chat_with_tools(
     resolved_max_input_tokens = int(max_input_tokens or DEFAULT_AGENT_MAX_INPUT_TOKENS)
     resolved_output_continuations = max(0, int(max_output_continuations or 0))
     resolved_budget = profile.budget_usd
+    from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
+    call_inference_policy = AgentInferencePolicy(
+        max_input_tokens=resolved_max_input_tokens,
+        max_output_tokens=resolved_max_tokens,
+        max_rounds=resolved_max_rounds,
+        budget_usd=resolved_budget,
+        max_output_continuations=resolved_output_continuations,
+        thinking_policy=thinking_policy,
+        thinking_budget_tokens=thinking_budget_tokens,
+    )
 
     # Runtime context injection (applies to orchestrator AND agents). Volatile
     # data — current time, current model, caller-supplied extras (mission,
@@ -1604,6 +1615,7 @@ async def _chat_with_tools(
 
     if effective_provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
+        openai_inference = resolve_inference_extra(call_inference_policy, "openai")
         _chat_coro = openai_chat(
             messages,
             client=_openai_client,
@@ -1627,22 +1639,14 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             provider_label="openai",
+            extra_body=openai_inference.get("extra_body"),
         )
         with caller_scope(_gw_ctx):
             return await _chat_coro
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
-        from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
-        inference_policy = AgentInferencePolicy(
-            max_input_tokens=resolved_max_input_tokens,
-            max_output_tokens=resolved_max_tokens,
-            max_rounds=resolved_max_rounds,
-            budget_usd=resolved_budget,
-            max_output_continuations=resolved_output_continuations,
-            thinking_policy=thinking_policy,
-        )
         deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
-            inference_policy, "deepseek"
+            call_inference_policy, "deepseek"
         )
         _chat_coro = chat_with_tools(
             messages,
@@ -1679,6 +1683,7 @@ async def _chat_with_tools(
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_merge_runtime_context_into_last_user` above,
     # so history remains byte-stable across turns and prefix caching works.
+    claude_inference = resolve_inference_extra(call_inference_policy, "claude")
     _chat_coro = chat_with_tools(
         messages,
         client=_claude,
@@ -1701,6 +1706,7 @@ async def _chat_with_tools(
         mission_id=_mission_id,
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
+        thinking=claude_inference.get("thinking"),
     )
     with caller_scope(_gw_ctx):
         return await _chat_coro
@@ -1833,7 +1839,7 @@ def _make_moon_chat_fn(spec):
     async def _moon_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
         max_tokens=None, max_input_tokens=None, max_output_continuations=0,
-        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
+        thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
     ):
@@ -1868,7 +1874,7 @@ def _make_codex_chat_fn(spec):
     async def _codex_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
         max_tokens=None, max_input_tokens=None, max_output_continuations=0,
-        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
+        thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
     ):
@@ -1900,7 +1906,7 @@ def _make_provider_chat_fn(provider: str):
     async def _provider_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
         max_tokens=None, max_input_tokens=None, max_output_continuations=0,
-        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
+        thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
         agent_name=None,
@@ -1910,7 +1916,8 @@ def _make_provider_chat_fn(provider: str):
             messages, max_rounds=max_rounds, system_prompt=system_prompt,
             model=model, max_tokens=max_tokens, max_input_tokens=max_input_tokens,
             max_output_continuations=max_output_continuations,
-            thinking_policy=thinking_policy, budget_usd=budget_usd,
+            thinking_policy=thinking_policy,
+            thinking_budget_tokens=thinking_budget_tokens, budget_usd=budget_usd,
             extra_tools=extra_tools, extra_handlers=extra_handlers,
             on_progress=on_progress, budget_tracker=budget_tracker,
             task_id=task_id, provider_override=provider,
@@ -2488,6 +2495,7 @@ async def bot_main():
             max_input_tokens_task=inference_policy.max_input_tokens,
             max_output_continuations=inference_policy.max_output_continuations,
             thinking_policy=inference_policy.thinking_policy,
+            thinking_budget_tokens=inference_policy.thinking_budget_tokens,
             allowed_user_ids=ALLOWED_USER_IDS,
             log_event_fn=_log_event,
             extra_tools=agent_tools,

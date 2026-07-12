@@ -11,6 +11,7 @@ from tool_gateway.inference import (
     DEFAULT_AGENT_MAX_OUTPUT_CONTINUATIONS,
     DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
     DEFAULT_AGENT_THINKING_POLICY,
+    DEFAULT_AGENT_THINKING_BUDGET_TOKENS,
 )
 
 
@@ -185,6 +186,7 @@ class AgentSpec:
     max_output_tokens: int = DEFAULT_AGENT_MAX_OUTPUT_TOKENS
     max_output_continuations: int = DEFAULT_AGENT_MAX_OUTPUT_CONTINUATIONS
     thinking_policy: str = DEFAULT_AGENT_THINKING_POLICY
+    thinking_budget_tokens: int = DEFAULT_AGENT_THINKING_BUDGET_TOKENS
     include_political_line: bool = True
 
     def __post_init__(self):
