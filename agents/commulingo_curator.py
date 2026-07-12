@@ -26,12 +26,18 @@ Content rules:
   characters. `bio` is 2–4 sentences: at most 320 Korean characters and 750 English
   characters. Do not turn career rows into prose; use bio for background, defining work,
   and one historically meaningful tension or consequence.
+- Verified nicknames, habits, physical details, and concrete scenes are welcome when they
+  make a card memorable. Use them to illuminate the subject, but never let them replace the
+  person’s political role, institutional work, or historical responsibility.
 - One run, one person, one write. Do not broaden the task.
 - Existing-person work should fill a clearly missing basic card field first. For a complete card
   with no linked historical events, inspect list_events and create one well-supported
   history_event_person relation when applicable. Otherwise create one focused person_section.
 - `career`, `aliases`, and `scenes` replace the whole stored list. If changing one of them,
   preserve every existing entry and send the complete new list.
+- `fate.label` is a compact card badge, not a second biography: at most 12 Korean
+  characters and 32 English characters. Keep only cause or disposition plus year; move burial,
+  rehabilitation, dismissal details, and explanation to bio, career, or sections.
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no
   solid source exists. Never invent dialogue or inner motives.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual

@@ -912,6 +912,14 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return "Error: fate must be {kind, label: {ko, en}} or null."
             if fate.get("label") is not None and not isinstance(fate["label"], dict):
                 return "Error: fate.label must be {\"ko\": \"처형 1938\", \"en\": \"Shot, 1938\"}."
+            label = fate.get("label") or {}
+            if (len(label.get("ko") or "") > 12
+                    or len(label.get("en") or "") > 32):
+                return (
+                    "Error: fate.label is too long; limits are 12 Korean characters "
+                    "and 32 English characters. Keep only cause/disposition plus year; "
+                    "move burial and other details to bio, career, or sections."
+                )
         if action == "create":
             if patch.get("id") and patch["id"] != target_id:
                 return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
@@ -1290,6 +1298,12 @@ _BIO_SCHEMA = {
                    "en": {"type": "string", "maxLength": 750}},
 }
 
+_FATE_LABEL_SCHEMA = {
+    **_BILINGUAL_TEXT_SCHEMA,
+    "properties": {"ko": {"type": "string", "maxLength": 12},
+                   "en": {"type": "string", "maxLength": 32}},
+}
+
 _COMMULINGO_PATCH_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -1333,7 +1347,7 @@ _COMMULINGO_PATCH_SCHEMA = {
         },
         "fate": {
             "type": "object", "additionalProperties": False,
-            "properties": {"kind": {"type": "string"}, "label": _BILINGUAL_TEXT_SCHEMA},
+            "properties": {"kind": {"type": "string"}, "label": _FATE_LABEL_SCHEMA},
             "required": ["kind", "label"],
         },
         "scenes": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},

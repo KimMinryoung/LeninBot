@@ -26,6 +26,7 @@ assert COMMULINGO_CURATOR.max_input_tokens == 160_000
 assert COMMULINGO_CURATOR.max_output_tokens == 16_000
 assert COMMULINGO_CURATOR.max_output_continuations == 2
 assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
+assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "already includes cyrillicPatronymic" in _validate(
     None, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
@@ -41,6 +42,10 @@ assert "bio is too long" in _validate(
 assert "epithet is too long" in _validate(
     None, "person", "update", "example",
     {"epithet": {"ko": "짧은 표현", "en": "x" * 141}},
+)
+assert "fate.label is too long" in _validate(
+    None, "person", "update", "example",
+    {"fate": {"kind": "natural", "label": {"ko": "가" * 13, "en": "Died 1948"}}},
 )
 
 with TemporaryDirectory() as tmp:
