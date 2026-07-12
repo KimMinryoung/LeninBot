@@ -166,6 +166,9 @@ async def execute_browser_task(task: dict) -> dict:
     except (ValueError, ImportError):
         spec = get_agent("browser")
 
+    from tool_gateway.inference import resolve_agent_inference_policy
+    inference_policy = resolve_agent_inference_policy(spec)
+
     provider = _resolve_browser_provider(BROWSER_PROVIDER_OVERRIDE or spec.effective_provider("deepseek"))
     browser_model = _normalize_browser_model(BROWSER_MODEL_OVERRIDE or spec.model, provider)
 
@@ -214,6 +217,9 @@ async def execute_browser_task(task: dict) -> dict:
         system_prompt=None,
         model=None,
         max_tokens=None,
+        max_input_tokens=None,
+        max_output_continuations=0,
+        thinking_policy="tool_loop",
         budget_usd=None,
         extra_tools=None,
         extra_handlers=None,
@@ -243,8 +249,16 @@ async def execute_browser_task(task: dict) -> dict:
 
         if provider == "deepseek":
             from claude_loop import chat_with_tools as deepseek_chat
-            from bot_config import _get_deepseek_browser_params
-            deepseek_params = _get_deepseek_browser_params()
+            from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
+            call_policy = AgentInferencePolicy(
+                max_input_tokens=int(max_input_tokens or inference_policy.max_input_tokens),
+                max_output_tokens=int(max_tokens or inference_policy.max_output_tokens),
+                max_rounds=int(max_rounds or inference_policy.max_rounds),
+                budget_usd=float(budget_usd or inference_policy.budget_usd),
+                max_output_continuations=int(max_output_continuations or 0),
+                thinking_policy=thinking_policy,
+            )
+            deepseek_params = resolve_inference_extra(call_policy, "deepseek")
             return await deepseek_chat(
                 messages,
                 client=client,
@@ -253,7 +267,11 @@ async def execute_browser_task(task: dict) -> dict:
                 tool_handlers=merged_handlers,
                 system_prompt=system_prompt or "",
                 max_rounds=max_rounds or spec.max_rounds,
-                max_tokens=max_tokens or 8192,
+                max_tokens=max_tokens or inference_policy.max_output_tokens,
+                max_input_tokens=max_input_tokens or inference_policy.max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=max_output_continuations > 0,
+                max_length_continuations=max_output_continuations,
                 budget_usd=budget_usd or spec.budget_usd,
                 on_progress=on_progress,
                 budget_tracker=budget_tracker,
@@ -273,7 +291,11 @@ async def execute_browser_task(task: dict) -> dict:
             tool_handlers=merged_handlers,
             system_prompt=system_prompt or "",
             max_rounds=max_rounds or spec.max_rounds,
-            max_tokens=max_tokens or 8192,
+            max_tokens=max_tokens or inference_policy.max_output_tokens,
+            max_input_tokens=max_input_tokens or inference_policy.max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=max_output_continuations > 0,
+            max_length_continuations=max_output_continuations,
             budget_usd=budget_usd or spec.budget_usd,
             on_progress=on_progress,
             budget_tracker=budget_tracker,
@@ -311,7 +333,10 @@ async def execute_browser_task(task: dict) -> dict:
             chat_with_tools_fn=_chat_fn,
             get_model_fn=_get_model,
             task_system_prompt=system_prompt,
-            max_tokens_task=4096,
+            max_tokens_task=inference_policy.max_output_tokens,
+            max_input_tokens_task=inference_policy.max_input_tokens,
+            max_output_continuations=inference_policy.max_output_continuations,
+            thinking_policy=inference_policy.thinking_policy,
             allowed_user_ids=allowed_user_ids,
             log_event_fn=_log_event,
             extra_tools=agent_tools,

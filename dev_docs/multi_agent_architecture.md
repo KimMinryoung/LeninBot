@@ -1,6 +1,6 @@
 # Multi-Agent Architecture
 
-최종 확인 기준: 2026-05-09 코드 트리.
+최종 확인 기준: 2026-07-12 코드 트리.
 
 Telegram is the full multi-agent runtime. The orchestrator receives user messages, answers directly when appropriate, or creates database-backed tasks for specialist agents. PostgreSQL is the durable task record; Redis holds live progress and shared mission state.
 
@@ -38,7 +38,7 @@ Registered in `agents/__init__.py`:
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
 | `commulingo_curator` | scheduled CommuLingo people-dictionary curator | DeepSeek V4 Pro; one direct, sourced edit per run; web research plus CommuLingo read/edit tools only |
 
-Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
+Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, input and output token ceilings, bounded output continuation, thinking policy, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
 
 `commulingo_curator` is normally invoked by `scripts/commulingo_people_maintainer.py`, not the Telegram task queue. The script deterministically selects one sparse existing record, periodically switches to new-person discovery, and exits after the terminal `commulingo_edit` call. `config/commulingo_maintainer.json` controls cadence policy; the AgentSpec runtime budget/model remain hot-reloadable through `config/agent_runtime.json`.
 
@@ -50,11 +50,15 @@ Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalizatio
 - `model`
 - `budget_usd`
 - `max_rounds`
+- `max_input_tokens`
+- `max_output_tokens`
+- `max_output_continuations`
+- `thinking_policy` (`tool_loop`, `thinking`, `disabled`, or `model_default`)
 - `finalization_tools`
 - `terminal_tools`
 - `skip_orchestrator_report`
 
-`agents/runtime_config.py` reloads this overlay when specs are requested.
+`agents/runtime_config.py` reloads this overlay when specs are requested. The default inference envelope is owned by `tool_gateway.inference`; the overlay changes individual agents without adding provider-loop constants. Delegated tasks resolve one immutable policy before provider dispatch. Input overflow checkpoints large tool results while retaining the exact preceding tool name and arguments, so the agent can re-run that call for the complete source instead of receiving silently truncated text. Output exhaustion uses the configured bounded continuation count.
 
 ## Prompt And Tool Payload Efficiency
 

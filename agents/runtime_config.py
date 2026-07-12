@@ -24,6 +24,10 @@ _ALLOWED_KEYS = {
     "model",
     "budget_usd",
     "max_rounds",
+    "max_input_tokens",
+    "max_output_tokens",
+    "max_output_continuations",
+    "thinking_policy",
     "finalization_tools",
     "terminal_tools",
     "skip_orchestrator_report",
@@ -68,6 +72,10 @@ def _snapshot_runtime(spec: AgentSpec) -> dict[str, Any]:
         "model": spec.model,
         "budget_usd": spec.budget_usd,
         "max_rounds": spec.max_rounds,
+        "max_input_tokens": spec.max_input_tokens,
+        "max_output_tokens": spec.max_output_tokens,
+        "max_output_continuations": spec.max_output_continuations,
+        "thinking_policy": spec.thinking_policy,
         "finalization_tools": list(spec.finalization_tools),
         "terminal_tools": list(spec.terminal_tools),
         "skip_orchestrator_report": spec.skip_orchestrator_report,
@@ -95,6 +103,19 @@ def _apply_one(spec: AgentSpec, base: dict[str, Any], cfg: dict[str, Any]) -> No
     if max_rounds <= 0:
         raise ValueError(f"{spec.name}.max_rounds must be positive")
 
+    max_input_tokens = int(cfg.get("max_input_tokens", base["max_input_tokens"]))
+    max_output_tokens = int(cfg.get("max_output_tokens", base["max_output_tokens"]))
+    max_output_continuations = int(cfg.get(
+        "max_output_continuations", base["max_output_continuations"]
+    ))
+    thinking_policy = str(cfg.get("thinking_policy", base["thinking_policy"]))
+    if max_input_tokens <= 0 or max_output_tokens <= 0:
+        raise ValueError(f"{spec.name} input/output token limits must be positive")
+    if max_output_continuations < 0:
+        raise ValueError(f"{spec.name}.max_output_continuations must be non-negative")
+    if thinking_policy not in {"tool_loop", "thinking", "disabled", "model_default"}:
+        raise ValueError(f"{spec.name}.thinking_policy is invalid: {thinking_policy!r}")
+
     finalization_tools = _coerce_tool_list(
         cfg.get("finalization_tools", base["finalization_tools"]),
         "finalization_tools",
@@ -112,6 +133,10 @@ def _apply_one(spec: AgentSpec, base: dict[str, Any], cfg: dict[str, Any]) -> No
     spec.model = model
     spec.budget_usd = budget
     spec.max_rounds = max_rounds
+    spec.max_input_tokens = max_input_tokens
+    spec.max_output_tokens = max_output_tokens
+    spec.max_output_continuations = max_output_continuations
+    spec.thinking_policy = thinking_policy
     spec.finalization_tools = finalization_tools
     spec.terminal_tools = terminal_tools
     spec.skip_orchestrator_report = bool(

@@ -1,6 +1,6 @@
 # LLM Provider Architecture
 
-최종 확인 기준: 2026-07-04 코드 트리.
+최종 확인 기준: 2026-07-12 코드 트리.
 
 LeninBot은 provider와 모델 티어를 런타임 설정으로 해석한다. Telegram chat, background task, autonomous loop, public web chat은 서로 다른 provider 설정을 가질 수 있다.
 
@@ -9,7 +9,7 @@ LeninBot은 provider와 모델 티어를 런타임 설정으로 해석한다. Te
 | Source | Owner | Purpose |
 |---|---|---|
 | `config.json` | `bot_config.py` | mutable runtime config saved by Telegram `/config` |
-| `config/agent_runtime.json` | `agents/runtime_config.py` | per-agent provider/model/budget/round/tool overlay |
+| `config/agent_runtime.json` | `agents/runtime_config.py` | per-agent provider/model/budget/round/input-output/continuation/thinking/tool overlay |
 | systemd credentials / env | `secrets_loader.py` | API keys and provider endpoint secrets |
 
 `bot_config.py` defaults are authoritative when `config.json` is missing a key.
@@ -54,7 +54,7 @@ Local
 ```
 
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different.
-Telegram chat, background tasks, A2A (`leninbot-a2a-api.service`), public web chat, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths enable thinking mode by default and send `output_config.effort` explicitly; `claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat and browser automation deliberately keep DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`): web chat does it for lower latency, while browser automation does it because browser-use relies on forced structured tool calls and DeepSeek does not support that path with thinking enabled. DeepSeek Anthropic-compatible messages do not support image content, so browser-use runs DeepSeek as a non-vision DOM/tool controller first and retries with the configured Google/OpenAI vision fallback only if that primary attempt fails.
+Telegram chat, background tasks, A2A (`leninbot-a2a-api.service`), public web chat, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths resolve `thinking_policy=tool_loop` through `tool_gateway.inference`; the current `DEEPSEEK_TOOL_THINKING_MODE` default is off, and operators can enable it centrally without per-call overrides. `claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat and browser automation deliberately keep DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`): web chat does it for lower latency, while browser automation does it because browser-use relies on forced structured tool calls and DeepSeek does not support that path with thinking enabled. DeepSeek Anthropic-compatible messages do not support image content, so browser-use runs DeepSeek as a non-vision DOM/tool controller first and retries with the configured Google/OpenAI vision fallback only if that primary attempt fails.
 
 The roleplay bot (`leninbot-roleplay.service`, `telegram/roleplay_bot.py`) is a separate runtime, not the Cyber-Lenin orchestrator, and does not read `config.json`'s `provider`/`chat_model` keys. It pins DeepSeek directly: `_deepseek_anthropic_client` + `claude_loop.chat_with_tools`, model `deepseek-v4-flash` (via `_resolve_deepseek_model("deepseek_flash")`), with thinking **enabled** (`output_config.effort=high`). Thinking is on for answer quality; because it goes through `claude_loop`, the reasoning stays in replay-only `thinking` blocks and never appears in the user-facing reply — which is why the roleplay bot uses the Anthropic-compatible path rather than the OpenAI-compatible loop (the latter prepends reasoning to the reply). The bot ignores the global `DEEPSEEK_THINKING_MODE` env and sets its thinking inline.
 
@@ -86,6 +86,8 @@ Browser-use automation has its own environment overrides because it runs inside 
 | `BROWSER_USE_VISION_FALLBACK_PROVIDER` | `google` | Vision retry provider; supported values are `google` and `openai`. |
 | `BROWSER_USE_VISION_FALLBACK_MODEL` | provider default | Optional vision fallback model override. |
 
+DeepSeek general/roleplay thinking is controlled by the following environment variables. Delegated-agent `thinking_policy=tool_loop` instead uses `DEEPSEEK_TOOL_THINKING_MODE` and `DEEPSEEK_TOOL_THINKING_EFFORT`; an explicit per-agent `thinking_policy` of `thinking`, `disabled`, or `model_default` overrides that tool-loop choice through the gateway. Browser is explicitly `disabled` in `config/agent_runtime.json` because forced structured browser calls do not support the thinking path.
+
 DeepSeek Anthropic-compatible thinking is controlled by environment variables:
 
 | Env | Default | Meaning |
@@ -105,7 +107,7 @@ Claude aliases are resolved lazily through Anthropic Models API and cached in-pr
 
 ## Agent Overrides
 
-Each `AgentSpec` may set `provider` and `model`. `None` means follow task config. Current example overlay (`config/agent_runtime.json.example`) pins:
+Each `AgentSpec` may set `provider` and `model`. `None` means follow task config. Its inference envelope is resolved centrally by `tool_gateway.inference`: `max_input_tokens`, `max_output_tokens`, `max_output_continuations`, `thinking_policy`, `max_rounds`, and `budget_usd`. Provider wrappers receive that single resolved policy rather than choosing token or thinking settings independently. Current example overlay (`config/agent_runtime.json.example`) pins:
 
 | Agent | Default override |
 |---|---|
@@ -122,11 +124,13 @@ The browser worker accepts tier names, legacy model aliases such as `deepseek_fl
 
 `get_current_model_selection(kind, provider_override=None)` returns provider, tier, alias, model ID, display name, and resolution status for `chat`, `task`, `autonomous`, and `webchat`. Telegram and task prompts inject this metadata so the model sees the actual runtime model selection.
 
-Use `scripts/model_runtime_audit.py` to print the current surface-level and per-agent provider/model/budget policy. Add `--json` for a full machine-readable snapshot.
+Use `scripts/model_runtime_audit.py` to print the current surface-level and per-agent provider/model/budget/input-output/continuation/thinking policy. Add `--json` for a full machine-readable snapshot.
 
 Do not hardcode model names in prompts or docs beyond describing current maps. Use `bot_config.py` as source of truth.
 
 ## Error Recovery and Tool Conversion
+
+For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gateway input ceiling. When tool output growth crosses it, large prior results are replaced in the request by explicit replay checkpoints while their preceding tool calls retain the exact tool name and arguments. This allows complete source material to be retrieved again instead of silently truncating it. Output-length stops continue from the exact cutoff up to the configured bounded continuation count.
 
 Provider-facing tool definitions are compacted before API calls: long human-readable `description` strings in tool definitions and nested schemas are shortened, while tool names, schema keys, types, enums, defaults, and required fields are preserved. This reduces prompt overhead without changing execution capabilities.
 

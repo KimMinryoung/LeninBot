@@ -1,6 +1,6 @@
 # Runtime Tool Gateway
 
-최종 확인 기준: 2026-07-04 코드 트리.
+최종 확인 기준: 2026-07-12 코드 트리.
 
 `tool_gateway` is the runtime facade for LeninBot tool visibility and dispatch. It is separate from `mcp_gateway`: MCP is an inbound developer/operator server, while `tool_gateway` is the internal control-plane boundary used when Cyber-Lenin, specialist agents, web chat, or A2A model loops call runtime tools.
 
@@ -30,6 +30,7 @@ Read-only/idempotent tools in consecutive batches may run concurrently through t
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
 | `tool_gateway.dispatcher` | Runtime dispatch implementation for `execute_tool`, `execute_tools_batch`, and prompt schema compaction |
 | `tool_gateway.security` | Runtime adapter/re-export for `security_gateway` caller context, authorization, and audit |
+| `tool_gateway.inference` | Default and resolved delegated-agent input/output ceilings, continuation count, round/budget envelope, and provider thinking policy |
 
 ## Current Sources Of Truth
 
@@ -45,6 +46,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
 | MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface; `list_runtime_tool_profiles` exposes runtime allow-list inspection through MCP |
 | Execution authorization and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` for every executed tool |
+| Delegated-agent inference envelope | `tool_gateway.inference` + `config/agent_runtime.json` | Resolves one policy before task provider dispatch; all normal provider loops receive the same input/output/continuation settings |
 
 ## Invariants
 
@@ -54,6 +56,8 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.
 - `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
+- Gateway-managed input overflow must not silently drop conversation text. Large tool results become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source.
+- Output continuation is bounded by policy and does not consume an ordinary tool round solely because a completion hit its output ceiling.
 
 ## Verification
 

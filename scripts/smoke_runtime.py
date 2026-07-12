@@ -204,6 +204,33 @@ async def _assert_runtime_profiles() -> None:
     )
 
 
+def _assert_openai_input_replay_checkpoint() -> None:
+    import json as _json
+    from openai_tool_loop import _checkpoint_tool_results_for_replay
+
+    tool_calls = [{
+        "id": "call-1",
+        "type": "function",
+        "function": {
+            "name": "read_self",
+            "arguments": _json.dumps({
+                "chapter": 3,
+                "start_sentence": "첫 문장",
+                "end_sentence": "끝 문장",
+            }, ensure_ascii=False),
+        },
+    }]
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "", "tool_calls": tool_calls},
+        {"role": "tool", "tool_call_id": "call-1", "content": "원문" * 5000},
+    ]
+    checkpointed, estimated = _checkpoint_tool_results_for_replay(messages, 500)
+    assert checkpointed[1]["tool_calls"] == tool_calls
+    assert checkpointed[2]["content"].startswith("[Input checkpoint:")
+    assert estimated <= 500
+
+
 def _assert_agent_runtime_config() -> None:
     import agents.runtime_config as runtime_config
     from agents import list_agents
@@ -223,6 +250,10 @@ def _assert_agent_runtime_config() -> None:
             "model": cfg.get("model", base["model"]),
             "budget_usd": float(cfg.get("budget_usd", base["budget_usd"])),
             "max_rounds": int(cfg.get("max_rounds", base["max_rounds"])),
+            "max_input_tokens": int(cfg.get("max_input_tokens", base["max_input_tokens"])),
+            "max_output_tokens": int(cfg.get("max_output_tokens", base["max_output_tokens"])),
+            "max_output_continuations": int(cfg.get("max_output_continuations", base["max_output_continuations"])),
+            "thinking_policy": str(cfg.get("thinking_policy", base["thinking_policy"])),
             "finalization_tools": list(cfg.get("finalization_tools", base["finalization_tools"])),
             "terminal_tools": list(cfg.get("terminal_tools", base["terminal_tools"])),
             "skip_orchestrator_report": bool(
@@ -234,6 +265,10 @@ def _assert_agent_runtime_config() -> None:
         assert spec.model == expected["model"], name
         assert spec.budget_usd == expected["budget_usd"], name
         assert spec.max_rounds == expected["max_rounds"], name
+        assert spec.max_input_tokens == expected["max_input_tokens"], name
+        assert spec.max_output_tokens == expected["max_output_tokens"], name
+        assert spec.max_output_continuations == expected["max_output_continuations"], name
+        assert spec.thinking_policy == expected["thinking_policy"], name
         assert spec.finalization_tools == expected["finalization_tools"], name
         assert spec.terminal_tools == expected["terminal_tools"], name
         assert spec.skip_orchestrator_report is expected["skip_orchestrator_report"], name
@@ -284,6 +319,10 @@ def _assert_agent_runtime_dynamic_reload() -> None:
                         "model": "sonnet",
                         "budget_usd": 2.0,
                         "max_rounds": 12,
+                        "max_input_tokens": 48000,
+                        "max_output_tokens": 12000,
+                        "max_output_continuations": 3,
+                        "thinking_policy": "disabled",
                     }
                 }),
                 encoding="utf-8",
@@ -293,6 +332,10 @@ def _assert_agent_runtime_dynamic_reload() -> None:
             assert registry["dummy"].model == "sonnet"
             assert registry["dummy"].budget_usd == 2.0
             assert registry["dummy"].max_rounds == 12
+            assert registry["dummy"].max_input_tokens == 48000
+            assert registry["dummy"].max_output_tokens == 12000
+            assert registry["dummy"].max_output_continuations == 3
+            assert registry["dummy"].thinking_policy == "disabled"
 
             path.write_text(
                 json.dumps({
@@ -1863,6 +1906,7 @@ async def _assert_diary_unpublish_action() -> None:
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
+    _assert_openai_input_replay_checkpoint()
     _assert_agent_runtime_config()
     _assert_autonomous_base_finalization_tools()
     _assert_agent_runtime_dynamic_reload()

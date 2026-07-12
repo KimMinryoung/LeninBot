@@ -954,6 +954,39 @@ def _build_tc_list(sdk_mode, tool_calls) -> list[dict]:
     return result
 
 
+def _checkpoint_tool_results_for_replay(
+    msgs: list[dict], max_input_tokens: int, tool_schema_tokens: int = 0,
+) -> tuple[list[dict], int]:
+    """Replace large tool results with explicit same-call replay checkpoints.
+
+    The preceding assistant tool_call remains intact, including its exact tool
+    name and arguments. The model can therefore issue the same call again when
+    it needs the omitted source instead of receiving silently truncated text.
+    """
+    estimated = _estimate_tokens(msgs) + max(0, tool_schema_tokens)
+    if estimated <= max_input_tokens:
+        return msgs, estimated
+
+    checkpointed = [dict(message) for message in msgs]
+    candidates = [
+        index for index, message in enumerate(checkpointed)
+        if message.get("role") == "tool"
+        and len(str(message.get("content", ""))) > 800
+        and not str(message.get("content", "")).startswith("[Input checkpoint:")
+    ]
+    for index in candidates:
+        tool_call_id = checkpointed[index].get("tool_call_id", "unknown")
+        checkpointed[index]["content"] = (
+            "[Input checkpoint: prior tool result omitted to stay within the "
+            "input ceiling. Re-run the preceding tool call with the same name "
+            f"and arguments if its complete source is needed. tool_call_id={tool_call_id}]"
+        )
+        estimated = _estimate_tokens(checkpointed) + max(0, tool_schema_tokens)
+        if estimated <= max_input_tokens:
+            break
+    return checkpointed, estimated
+
+
 # ── Tool-use loop ────────────────────────────────────────────────────
 
 async def chat_with_tools(
@@ -973,6 +1006,8 @@ async def chat_with_tools(
     on_progress=None,
     task_id: int | None = None,
     context_limit: int = 0,
+    max_input_tokens: int | None = None,
+    recover_input_via_tools: bool = False,
     enable_thinking: bool = False,
     agent_name: str = "agent",
     mission_id: int | None = None,
@@ -1002,6 +1037,27 @@ async def chat_with_tools(
     # Wrap _api_call with per-call semaphore so the lock is held only during
     # the HTTP POST, not during tool execution between rounds.
     async def _guarded_api_call(*a, **kw):
+        if max_input_tokens is not None and len(a) > 4:
+            request_args = list(a)
+            request_messages = list(request_args[4])
+            request_tools = request_args[5] if len(request_args) > 5 else None
+            schema_tokens = _estimate_tokens([{
+                "role": "user",
+                "content": json.dumps(request_tools or [], ensure_ascii=False),
+            }])
+            if recover_input_via_tools:
+                request_messages, estimated_input = _checkpoint_tool_results_for_replay(
+                    request_messages, int(max_input_tokens), schema_tokens,
+                )
+            else:
+                estimated_input = _estimate_tokens(request_messages) + schema_tokens
+            if estimated_input > int(max_input_tokens):
+                raise RuntimeError(
+                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
+                    f"{int(max_input_tokens)}; persist a durable summary and use anchored tool reads."
+                )
+            request_args[4] = request_messages
+            a = tuple(request_args)
         if api_semaphore is not None:
             async with api_semaphore:
                 return await _api_call(*a, **kw)
@@ -1020,8 +1076,9 @@ async def chat_with_tools(
     working_msgs = _normalize_messages(messages)
     working_msgs = _ensure_system_first(working_msgs, system_prompt)
 
-    # ── Context window management for local LLMs ──
-    if context_limit > 0:
+    # Legacy local-only trimming remains for unmanaged calls. Gateway-managed
+    # agent calls use replay checkpoints so source text is never silently lost.
+    if context_limit > 0 and max_input_tokens is None:
         working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
 
     tool_call_log = []
@@ -1079,8 +1136,25 @@ async def chat_with_tools(
         # ── Context window management ──
         # Tool-heavy research tasks can grow past provider context after many
         # rounds. Re-check before every API call, not just at startup.
-        if context_limit > 0:
+        if context_limit > 0 and max_input_tokens is None:
             working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
+
+        if max_input_tokens is not None:
+            tool_schema_tokens = _estimate_tokens([{
+                "role": "user",
+                "content": json.dumps(openai_tools, ensure_ascii=False),
+            }])
+            if recover_input_via_tools:
+                working_msgs, estimated_input = _checkpoint_tool_results_for_replay(
+                    working_msgs, int(max_input_tokens), tool_schema_tokens,
+                )
+            else:
+                estimated_input = _estimate_tokens(working_msgs) + tool_schema_tokens
+            if estimated_input > int(max_input_tokens):
+                raise RuntimeError(
+                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
+                    f"{int(max_input_tokens)}; persist a durable summary and use anchored tool reads."
+                )
 
         # ── Pre-API validation: check tool result completeness ──
         missing_ids = _validate_tool_results(working_msgs)
@@ -1427,7 +1501,7 @@ async def chat_with_tools(
             finalization_tools=finalization_names or None,
         ),
     })
-    if context_limit > 0:
+    if context_limit > 0 and max_input_tokens is None:
         working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
 
     # ── Preflight: validate tool result completeness ──
@@ -1516,7 +1590,7 @@ async def chat_with_tools(
                     )
                 else:
                     # Plain text follow-up to collect the final answer.
-                    if context_limit > 0:
+                    if context_limit > 0 and max_input_tokens is None:
                         working_msgs = _truncate_to_context(working_msgs, context_limit, min(max_tokens, 2048))
                     followup = await _guarded_api_call(
                         sdk_mode, client, base_url, model, working_msgs, None, min(max_tokens, 2048),

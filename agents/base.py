@@ -6,6 +6,12 @@ from pathlib import Path
 
 from identity.prompts import EXTERNAL_SOURCE_RULE
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
+from tool_gateway.inference import (
+    DEFAULT_AGENT_MAX_INPUT_TOKENS,
+    DEFAULT_AGENT_MAX_OUTPUT_CONTINUATIONS,
+    DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+    DEFAULT_AGENT_THINKING_POLICY,
+)
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -175,6 +181,10 @@ class AgentSpec:
     provider: str | None = None  # None = follow task config; "claude"/"openai"/"deepseek"/"local" = force provider; "moon" = local LLM
     budget_usd: float = 1.00
     max_rounds: int = 50
+    max_input_tokens: int = DEFAULT_AGENT_MAX_INPUT_TOKENS
+    max_output_tokens: int = DEFAULT_AGENT_MAX_OUTPUT_TOKENS
+    max_output_continuations: int = DEFAULT_AGENT_MAX_OUTPUT_CONTINUATIONS
+    thinking_policy: str = DEFAULT_AGENT_THINKING_POLICY
     include_political_line: bool = True
 
     def __post_init__(self):

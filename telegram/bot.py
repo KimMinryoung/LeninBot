@@ -1427,6 +1427,9 @@ async def _chat_with_tools(
     system_prompt: str | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
+    max_input_tokens: int | None = None,
+    max_output_continuations: int = 0,
+    thinking_policy: str = "tool_loop",
     budget_usd: float | None = None,
     extra_tools: list | None = None,
     extra_handlers: dict | None = None,
@@ -1484,6 +1487,9 @@ async def _chat_with_tools(
     effective_provider = profile.provider
     resolved_max_rounds = profile.max_rounds
     resolved_max_tokens = profile.max_tokens
+    from tool_gateway.inference import DEFAULT_AGENT_MAX_INPUT_TOKENS
+    resolved_max_input_tokens = int(max_input_tokens or DEFAULT_AGENT_MAX_INPUT_TOKENS)
+    resolved_output_continuations = max(0, int(max_output_continuations or 0))
     resolved_budget = profile.budget_usd
 
     # Runtime context injection (applies to orchestrator AND agents). Volatile
@@ -1575,6 +1581,10 @@ async def _chat_with_tools(
             system_prompt=sys_prompt,
             max_rounds=resolved_max_rounds,
             max_tokens=local_max_tokens,
+            max_input_tokens=resolved_max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=resolved_output_continuations > 0,
+            max_length_continuations=resolved_output_continuations,
             log_event=_log_event,
             budget_usd=resolved_budget,
             on_progress=on_progress,
@@ -1603,6 +1613,10 @@ async def _chat_with_tools(
             system_prompt=sys_prompt,
             max_rounds=resolved_max_rounds,
             max_tokens=resolved_max_tokens,
+            max_input_tokens=resolved_max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=resolved_output_continuations > 0,
+            max_length_continuations=resolved_output_continuations,
             log_event=_log_event,
             budget_usd=resolved_budget,
             on_progress=on_progress,
@@ -1618,10 +1632,18 @@ async def _chat_with_tools(
             return await _chat_coro
 
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
-        # Multi-tool loops default to thinking OFF (_get_deepseek_tool_thinking_params);
-        # DEEPSEEK_TOOL_THINKING_MODE=thinking restores the old behavior.
-        from bot_config import _get_deepseek_tool_thinking_params
-        deepseek_thinking = deepseek_thinking_override or _get_deepseek_tool_thinking_params()
+        from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
+        inference_policy = AgentInferencePolicy(
+            max_input_tokens=resolved_max_input_tokens,
+            max_output_tokens=resolved_max_tokens,
+            max_rounds=resolved_max_rounds,
+            budget_usd=resolved_budget,
+            max_output_continuations=resolved_output_continuations,
+            thinking_policy=thinking_policy,
+        )
+        deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
+            inference_policy, "deepseek"
+        )
         _chat_coro = chat_with_tools(
             messages,
             client=_deepseek_anthropic_client,
@@ -1631,6 +1653,10 @@ async def _chat_with_tools(
             system_prompt=sys_prompt,
             max_rounds=resolved_max_rounds,
             max_tokens=resolved_max_tokens,
+            max_input_tokens=resolved_max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=resolved_output_continuations > 0,
+            max_length_continuations=resolved_output_continuations,
             log_event=_log_event,
             budget_usd=resolved_budget,
             on_progress=on_progress,
@@ -1662,6 +1688,10 @@ async def _chat_with_tools(
         system_prompt=sys_prompt,
         max_rounds=resolved_max_rounds,
         max_tokens=resolved_max_tokens,
+        max_input_tokens=resolved_max_input_tokens,
+        recover_input_via_tools=True,
+        continue_on_length=resolved_output_continuations > 0,
+        max_length_continuations=resolved_output_continuations,
         log_event=_log_event,
         budget_usd=resolved_budget,
         on_progress=on_progress,
@@ -1802,7 +1832,8 @@ def _make_moon_chat_fn(spec):
 
     async def _moon_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
-        max_tokens=None, budget_usd=None, extra_tools=None,
+        max_tokens=None, max_input_tokens=None, max_output_continuations=0,
+        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
     ):
@@ -1814,7 +1845,11 @@ def _make_moon_chat_fn(spec):
             tool_handlers=dict(extra_handlers or {}),
             system_prompt=system_prompt,
             max_rounds=max_rounds or spec.max_rounds,
-            max_tokens=max_tokens or 8192,
+            max_tokens=max_tokens or spec.max_output_tokens,
+            max_input_tokens=max_input_tokens or spec.max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=max_output_continuations > 0,
+            max_length_continuations=max_output_continuations,
             log_event=_log_event,
             budget_usd=budget_usd or 0.0,
             budget_tracker=budget_tracker,
@@ -1832,7 +1867,8 @@ def _make_codex_chat_fn(spec):
 
     async def _codex_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
-        max_tokens=None, budget_usd=None, extra_tools=None,
+        max_tokens=None, max_input_tokens=None, max_output_continuations=0,
+        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
     ):
@@ -1863,7 +1899,8 @@ def _make_provider_chat_fn(provider: str):
     """
     async def _provider_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,
-        max_tokens=None, budget_usd=None, extra_tools=None,
+        max_tokens=None, max_input_tokens=None, max_output_continuations=0,
+        thinking_policy="tool_loop", budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
         agent_name=None,
@@ -1871,7 +1908,9 @@ def _make_provider_chat_fn(provider: str):
     ):
         return await _chat_with_tools(
             messages, max_rounds=max_rounds, system_prompt=system_prompt,
-            model=model, max_tokens=max_tokens, budget_usd=budget_usd,
+            model=model, max_tokens=max_tokens, max_input_tokens=max_input_tokens,
+            max_output_continuations=max_output_continuations,
+            thinking_policy=thinking_policy, budget_usd=budget_usd,
             extra_tools=extra_tools, extra_handlers=extra_handlers,
             on_progress=on_progress, budget_tracker=budget_tracker,
             task_id=task_id, provider_override=provider,
@@ -2362,6 +2401,8 @@ async def bot_main():
         # — current time, current model, and alerts are injected as runtime
         # context by _chat_with_tools, not baked into the system prompt.
         task_provider = _get_task_provider()
+        from tool_gateway.inference import resolve_agent_inference_policy
+        inference_policy = resolve_agent_inference_policy(spec)
         _agent_provider = spec.effective_provider(task_provider)
         system_prompt = spec.render_prompt(provider=_agent_provider)
 
@@ -2380,26 +2421,19 @@ async def bot_main():
         if spec.provider == "moon":
             chosen_chat_fn = _make_moon_chat_fn(spec)
             fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
-            chosen_max_tokens = (
-                _CLAUDE_MAX_TOKENS_TASK
-                if fallback_provider and fallback_provider != "local"
-                else 8192
-            )
+            chosen_max_tokens = inference_policy.max_output_tokens
         elif spec.provider == "codex":
             chosen_chat_fn = _make_codex_chat_fn(spec)
-            chosen_max_tokens = 8192
+            chosen_max_tokens = inference_policy.max_output_tokens
         elif spec.provider in ("claude", "openai", "deepseek", "local"):
             chosen_chat_fn = _make_provider_chat_fn(spec.provider)
-            chosen_max_tokens = 8192 if spec.provider == "local" else _CLAUDE_MAX_TOKENS_TASK
+            chosen_max_tokens = inference_policy.max_output_tokens
         elif task_provider in ("claude", "openai", "deepseek", "local"):
             chosen_chat_fn = _make_provider_chat_fn(task_provider)
-            chosen_max_tokens = (
-                8192 if task_provider == "local"
-                else _CLAUDE_MAX_TOKENS_TASK
-            )
+            chosen_max_tokens = inference_policy.max_output_tokens
         else:
             chosen_chat_fn = _chat_with_tools
-            chosen_max_tokens = _CLAUDE_MAX_TOKENS_TASK
+            chosen_max_tokens = inference_policy.max_output_tokens
 
         async def chosen_model_fn():
             if spec.provider == "moon":
@@ -2451,11 +2485,14 @@ async def bot_main():
             get_model_fn=chosen_model_fn,
             task_system_prompt=system_prompt,
             max_tokens_task=chosen_max_tokens,
+            max_input_tokens_task=inference_policy.max_input_tokens,
+            max_output_continuations=inference_policy.max_output_continuations,
+            thinking_policy=inference_policy.thinking_policy,
             allowed_user_ids=ALLOWED_USER_IDS,
             log_event_fn=_log_event,
             extra_tools=agent_tools,
             extra_handlers=agent_handlers,
-            budget_usd=spec.budget_usd,
+            budget_usd=inference_policy.budget_usd,
             finalization_tools=list(spec.finalization_tools),
             terminal_tools=list(spec.terminal_tools),
             on_progress=progress_cb,

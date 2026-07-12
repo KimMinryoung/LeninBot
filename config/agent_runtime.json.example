@@ -24,7 +24,8 @@
     "provider": "deepseek",
     "model": "deepseek_flash",
     "budget_usd": 1.5,
-    "max_rounds": 30
+    "max_rounds": 30,
+    "thinking_policy": "disabled"
   },
   "diary": {
     "provider": "deepseek",

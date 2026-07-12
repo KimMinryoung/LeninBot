@@ -78,6 +78,10 @@ def _agent_rows() -> list[dict[str, Any]]:
                 "display_name": model_selection.get("display_name"),
                 "budget_usd": spec.budget_usd,
                 "max_rounds": spec.max_rounds,
+                "max_input_tokens": spec.max_input_tokens,
+                "max_output_tokens": spec.max_output_tokens,
+                "max_output_continuations": spec.max_output_continuations,
+                "thinking_policy": spec.thinking_policy,
                 "tools": len(spec.tools),
                 "finalization_tools": list(spec.finalization_tools),
                 "terminal_tools": list(spec.terminal_tools),
@@ -120,13 +124,15 @@ def _print_table(snapshot: dict[str, Any]) -> None:
         print(f"{name:<17} {row.get('provider', ''):<10} {str(row.get('tier', '')):<9} {row.get('model_id', '')}")
 
     print("\nAgents")
-    print("agent              provider      model                    budget  rounds  tools")
+    print("agent              provider      model                    budget  rounds  input   output  cont  thinking")
     for row in snapshot["agents"]:
         provider = row["provider_effective"]
         model = row["model_id"] or ""
         print(
             f"{row['agent']:<18} {provider:<13} {model:<24} "
-            f"{row['budget_usd']:<7.2f} {row['max_rounds']:<7} {row['tools']}"
+            f"{row['budget_usd']:<7.2f} {row['max_rounds']:<7} "
+            f"{row['max_input_tokens']:<7} {row['max_output_tokens']:<7} "
+            f"{row['max_output_continuations']:<5} {row['thinking_policy']}"
         )
 
     print("\nWriter call policies")
