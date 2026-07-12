@@ -83,7 +83,7 @@ developer MCP clients
 | `leninbot-autonomous.service` | `venv/bin/python -m autonomous_project` | one autonomous project tick |
 | `leninbot-experience.service` | `experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
-| `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one direct, sourced CommuLingo person edit through the dedicated DeepSeek V4 Pro curator |
+| `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one direct, sourced CommuLingo edit; two-stage validated new-person creation, enrich fallback/cooldown, and gateway-owned DeepSeek inference policy |
 
 Dependency direction is simple: Neo4j/Redis and embedding start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
 

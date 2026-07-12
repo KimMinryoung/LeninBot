@@ -46,7 +46,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
 | MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface; `list_runtime_tool_profiles` exposes runtime allow-list inspection through MCP |
 | Execution authorization and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` for every executed tool |
-| Delegated-agent inference envelope | `tool_gateway.inference` + `config/agent_runtime.json` | Resolves one policy before task provider dispatch; all normal provider loops receive the same input/output/continuation settings |
+| Delegated-agent inference envelope | `tool_gateway.inference` + `config/agent_runtime.json` | Resolves one policy before task provider dispatch; all normal provider loops and the scheduled CommuLingo curator receive the same input/output/continuation/thinking settings |
 
 ## Invariants
 

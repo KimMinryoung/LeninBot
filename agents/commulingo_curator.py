@@ -55,6 +55,11 @@ COMMULINGO_CURATOR = AgentSpec(
     provider="deepseek",
     model="deepseek_pro",
     budget_usd=0.35,
-    max_rounds=8,
+    max_rounds=16,
+    max_input_tokens=160_000,
+    max_output_tokens=16_000,
+    max_output_continuations=2,
+    thinking_policy="tool_loop",
+    thinking_budget_tokens=8_192,
     include_political_line=False,
 )

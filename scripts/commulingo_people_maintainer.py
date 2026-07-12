@@ -14,6 +14,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ logger = logging.getLogger("commulingo_people_maintainer")
 
 CONFIG_PATH = PROJECT_ROOT / "config" / "commulingo_maintainer.json"
 LOCK_PATH = Path("/tmp/leninbot-commulingo-maintainer.lock")
+STATE_PATH = PROJECT_ROOT / "data" / "commulingo_maintainer_state.json"
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
@@ -44,7 +46,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "mode": "auto",
         "new_person_every": 8,
         "recent_days": 30,
-        "max_tokens": 8192,
+        "new_person_cooldown_runs": 6,
     }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -57,8 +59,23 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("mode must be auto, enrich, or new")
     cfg["new_person_every"] = max(0, int(cfg["new_person_every"]))
     cfg["recent_days"] = max(1, int(cfg["recent_days"]))
-    cfg["max_tokens"] = max(2048, int(cfg["max_tokens"]))
+    cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
     return cfg
+
+
+def load_state(path: Path = STATE_PATH) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"new_cooldown_remaining": 0}
+    return {"new_cooldown_remaining": max(0, int(raw.get("new_cooldown_remaining", 0)))}
+
+
+def save_state(state: dict, path: Path = STATE_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def completed_run_count() -> int:
@@ -71,10 +88,12 @@ def completed_run_count() -> int:
     return int((row or {}).get("n") or 0)
 
 
-def choose_mode(config: dict, requested: str | None = None) -> str:
+def choose_mode(config: dict, requested: str | None = None, state: dict | None = None) -> str:
     mode = requested or config["mode"]
     if mode != "auto":
         return mode
+    if int((state or {}).get("new_cooldown_remaining", 0)) > 0:
+        return "enrich"
     every = int(config["new_person_every"])
     if every > 0 and (completed_run_count() + 1) % every == 0:
         return "new"
@@ -147,6 +166,139 @@ classification or a very thin career, update the person instead, preserving ever
 field exactly. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
 
 
+def build_discovery_task() -> str:
+    return """MODE: NEW PERSON DISCOVERY ONLY
+
+Do not create or edit anything in this stage. Inspect list_groups, list_categories and
+list_offices, then use search_people under a proposed name and aliases to prove the person
+is absent. Prefer a historically important gap in revolutionary or Soviet history. Open one
+reliable biographical source. End with exactly one machine-readable line and no text after it:
+CANDIDATE_JSON: {"id":"lowercase-kebab-slug","name_ko":"...","name_en":"...",
+"reason":"...","source_url":"https://..."}
+"""
+
+
+def parse_discovered_candidate(text: str) -> dict:
+    matches = re.findall(r"CANDIDATE_JSON:\s*(\{[^\n]+\})", text or "")
+    if not matches:
+        raise ValueError("discovery did not return CANDIDATE_JSON")
+    candidate = json.loads(matches[-1])
+    required = ("id", "name_ko", "name_en", "reason", "source_url")
+    if not isinstance(candidate, dict) or any(not str(candidate.get(k) or "").strip() for k in required):
+        raise ValueError("discovery candidate is missing required fields")
+    candidate = {k: str(candidate[k]).strip() for k in required}
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", candidate["id"]):
+        raise ValueError("candidate id is not lowercase kebab-case")
+    if not candidate["source_url"].startswith(("https://", "http://")):
+        raise ValueError("candidate source_url must be HTTP(S)")
+    duplicate = db_query_one(
+        """SELECT id FROM commulingo_people
+             WHERE id = %(id)s
+                OR LOWER(name_en) = LOWER(%(name_en)s)
+                OR name_ko = %(name_ko)s
+             LIMIT 1""",
+        candidate,
+    )
+    if duplicate:
+        raise ValueError(f"candidate duplicates existing person {duplicate['id']}")
+    return candidate
+
+
+def build_new_person_task(candidate: dict) -> str:
+    return f"""MODE: NEW PERSON CREATION
+
+Create exactly this pre-verified missing person and no one else:
+- id: {candidate['id']}
+- Korean name: {candidate['name_ko']}
+- English name: {candidate['name_en']}
+- coverage reason: {candidate['reason']}
+- starting source: {candidate['source_url']}
+
+Re-check search_people for the exact names, fetch the starting source, inspect groups and
+roles, then create one complete bilingual card. Use ONLY the canonical person patch keys
+documented by commulingo_edit: name, bio, epithet, fate, role, groupId, years, aliases,
+career, cyrillic, cyrillicPatronymic, patronymic, initial, moment, scenes, sortOrder.
+Make exactly one commulingo_edit(target_type='person', action='create') call and stop.
+"""
+
+
+_PERSON_PATCH_KEYS = frozenset({
+    "id", "group", "groupId", "sortOrder", "initial", "cyrillic",
+    "cyrillicPatronymic", "years", "name", "epithet", "bio", "moment",
+    "fate", "patronymic", "aliases", "career", "role", "scenes", "office_rows",
+})
+_SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
+
+
+def normalize_commulingo_patch(target_type: str, target_id: str, patch: dict | None) -> tuple[dict, list[str]]:
+    normalized = dict(patch or {})
+    repairs: list[str] = []
+    if target_type != "person":
+        return normalized, repairs
+
+    localized = {
+        "name": ("nameKo", "nameEn"),
+        "bio": ("bioKo", "bioEn"),
+        "epithet": ("epithetKo", "epithetEn"),
+        "moment": ("momentKo", "momentEn"),
+        "patronymic": ("patronymicKo", "patronymicEn"),
+    }
+    for canonical, (ko_key, en_key) in localized.items():
+        if ko_key in normalized or en_key in normalized:
+            current = normalized.get(canonical) if isinstance(normalized.get(canonical), dict) else {}
+            normalized[canonical] = {
+                "ko": normalized.pop(ko_key, current.get("ko", "")),
+                "en": normalized.pop(en_key, current.get("en", "")),
+            }
+            repairs.append(f"{ko_key}/{en_key}->{canonical}")
+    if "yearsLabel" in normalized:
+        normalized.setdefault("years", normalized.pop("yearsLabel"))
+        repairs.append("yearsLabel->years")
+    if "fateKind" in normalized:
+        fate = normalized.get("fate") if isinstance(normalized.get("fate"), dict) else {}
+        fate["kind"] = normalized.pop("fateKind")
+        normalized["fate"] = fate
+        repairs.append("fateKind->fate.kind")
+    if "category" in normalized or "officeId" in normalized:
+        role = normalized.get("role") if isinstance(normalized.get("role"), dict) else {}
+        if "officeId" in normalized:
+            role["officeId"] = normalized.pop("officeId")
+        elif "category" in normalized:
+            role["category"] = normalized.pop("category")
+        normalized["role"] = role
+        repairs.append("category/officeId->role")
+    if normalized.get("slug") == target_id:
+        normalized.pop("slug", None)
+        repairs.append("dropped redundant slug")
+    return normalized, repairs
+
+
+def build_validating_edit_handler(handler):
+    async def _validated_edit(
+        target_type: str, action: str, target_id: str, sources: list,
+        patch: dict | None = None, confidence: float | None = None,
+    ) -> str:
+        normalized, repairs = normalize_commulingo_patch(target_type, target_id, patch)
+        allowed = _PERSON_PATCH_KEYS if target_type == "person" else _SECTION_PATCH_KEYS if target_type == "person_section" else None
+        if allowed is not None:
+            unknown = sorted(set(normalized) - allowed)
+            if unknown:
+                raise ValueError(
+                    f"maintainer preflight rejected unknown patch key(s): {', '.join(unknown)}. "
+                    f"Allowed: {', '.join(sorted(allowed))}. Retry once with canonical keys."
+                )
+        if repairs:
+            logger.warning("auto-corrected commulingo_edit patch once: %s", ", ".join(repairs))
+        result = await handler(
+            target_type=target_type, action=action, target_id=target_id,
+            sources=sources, patch=normalized, confidence=confidence,
+        )
+        if str(result).startswith("Error:"):
+            raise ValueError(str(result))
+        return result
+    return _validated_edit
+
+
 def latest_maintainer_edit() -> dict | None:
     return db_query_one(
         """SELECT id, target_type, target_id, action, status, confidence, created_at
@@ -156,62 +308,169 @@ def latest_maintainer_edit() -> dict | None:
     )
 
 
+async def _call_curator_stage(
+    *, task: str, spec, model: str, tools: list, handlers: dict,
+    policy, stage: str, expect_edit: bool, before_count: int,
+) -> tuple[str, dict, dict | None]:
+    from tool_gateway.inference import resolve_inference_extra
+
+    reasoning = resolve_inference_extra(policy, "deepseek")
+    attempts = 1 + max(0, int(policy.max_output_continuations))
+    total_cost = 0.0
+    total_rounds = 0
+    last_result = ""
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        tracker: dict = {}
+        retry_note = "" if attempt == 1 else (
+            "\n\nRETRY: The prior attempt produced no usable terminal edit/candidate. "
+            "Do not emit DSML markup or commentary-only output. Complete the required "
+            "terminal action now using canonical tool arguments."
+        )
+        try:
+            last_result = await chat_with_tools(
+                [{"role": "user", "content": task + retry_note}],
+                client=_deepseek_anthropic_client,
+                model=model,
+                tools=tools,
+                tool_handlers=handlers,
+                system_prompt=(
+                    spec.render_prompt(provider="deepseek")
+                    + ("\n\nDISCOVERY-STAGE EXCEPTION: do not edit in this stage; return only CANDIDATE_JSON." if not expect_edit else "")
+                ),
+                max_rounds=policy.max_rounds,
+                max_tokens=policy.max_output_tokens,
+                max_input_tokens=policy.max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=policy.max_output_continuations > 0,
+                max_length_continuations=policy.max_output_continuations,
+                budget_usd=policy.budget_usd,
+                budget_tracker=tracker,
+                agent_name=spec.name,
+                finalization_tools=spec.finalization_tools if expect_edit else [],
+                terminal_tools=spec.terminal_tools if expect_edit else [],
+                thinking=reasoning.get("thinking"),
+                output_config=reasoning.get("output_config"),
+            )
+            total_cost += float(tracker.get("total_cost") or 0.0)
+            total_rounds += int(tracker.get("rounds_used") or 0)
+            after = completed_run_count()
+            if expect_edit:
+                if after == before_count + 1:
+                    return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, None
+                if after != before_count:
+                    raise RuntimeError(
+                        f"unexpected edit count change during {stage}: {before_count} -> {after}"
+                    )
+                raise RuntimeError(f"{stage} produced no edit: {last_result[:500]}")
+            candidate = parse_discovered_candidate(last_result)
+            return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, candidate
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "%s attempt %d/%d failed without an applied edit: %s",
+                stage, attempt, attempts, exc,
+            )
+            if completed_run_count() != before_count:
+                raise
+    raise RuntimeError(
+        f"{stage} failed after {attempts} attempts: {last_error}; result={last_result[:500]}"
+    )
+
+
 async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     if not config["enabled"]:
         return {"status": "disabled"}
 
     from runtime_tools.commulingo_people import direct_apply_enabled
+    from tool_gateway.inference import resolve_agent_inference_policy
+
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
 
-    chosen_mode = choose_mode(config, mode if mode != "auto" else None)
-    candidate = select_sparse_person(config["recent_days"], candidate_id) if chosen_mode == "enrich" else None
-    task = build_task(chosen_mode, candidate)
+    state = load_state()
+    requested_mode = mode if mode != "auto" else None
+    chosen_mode = choose_mode(config, requested_mode, state)
     before = completed_run_count()
 
     spec = get_agent("commulingo_curator")
+    policy = resolve_agent_inference_policy(spec)
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
     expected = set(spec.tools)
     available = {str(t.get("name") or "") for t in tools} & set(handlers)
     if expected != available:
         raise RuntimeError(f"curator toolset incomplete: missing={sorted(expected - available)}")
-
+    handlers = dict(handlers)
+    handlers["commulingo_edit"] = build_validating_edit_handler(handlers["commulingo_edit"])
     model = _resolve_deepseek_model(spec.model or "deepseek_pro")
-    tracker: dict = {}
     ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
+
+    candidate = None
+    discovery = None
+    fallback_error = None
+    tracker = {"total_cost": 0.0, "rounds_used": 0}
     with caller_scope(ctx):
-        result = await chat_with_tools(
-            [{"role": "user", "content": task}],
-            client=_deepseek_anthropic_client,
-            model=model,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=spec.render_prompt(provider="deepseek"),
-            max_rounds=spec.max_rounds,
-            max_tokens=config["max_tokens"],
-            budget_usd=spec.budget_usd,
-            budget_tracker=tracker,
-            agent_name=spec.name,
-            finalization_tools=spec.finalization_tools,
-            terminal_tools=spec.terminal_tools,
-            thinking={"type": "enabled"},
-            output_config={"effort": "high"},
-        )
+        if chosen_mode == "new":
+            try:
+                discovery_tools = [t for t in tools if t.get("name") != "commulingo_edit"]
+                discovery_handlers = {k: v for k, v in handlers.items() if k != "commulingo_edit"}
+                discovery_result, discovery_tracker, candidate = await _call_curator_stage(
+                    task=build_discovery_task(), spec=spec, model=model,
+                    tools=discovery_tools, handlers=discovery_handlers, policy=policy,
+                    stage="new-person discovery", expect_edit=False, before_count=before,
+                )
+                discovery = {"candidate": candidate, "result": discovery_result}
+                tracker["total_cost"] += discovery_tracker["total_cost"]
+                tracker["rounds_used"] += discovery_tracker["rounds_used"]
+                result, create_tracker, _ = await _call_curator_stage(
+                    task=build_new_person_task(candidate), spec=spec, model=model,
+                    tools=tools, handlers=handlers, policy=policy,
+                    stage="new-person creation", expect_edit=True, before_count=before,
+                )
+                tracker["total_cost"] += create_tracker["total_cost"]
+                tracker["rounds_used"] += create_tracker["rounds_used"]
+                state["new_cooldown_remaining"] = 0
+            except Exception as exc:
+                if completed_run_count() != before:
+                    raise
+                fallback_error = str(exc)
+                logger.error("new-person path failed; falling back to enrich: %s", exc)
+                state["new_cooldown_remaining"] = int(config["new_person_cooldown_runs"])
+                save_state(state)
+                chosen_mode = "enrich_fallback"
+
+        if chosen_mode in {"enrich", "enrich_fallback"}:
+            candidate = select_sparse_person(config["recent_days"], candidate_id)
+            task = build_task("enrich", candidate)
+            result, enrich_tracker, _ = await _call_curator_stage(
+                task=task, spec=spec, model=model, tools=tools, handlers=handlers,
+                policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
+            )
+            tracker["total_cost"] += enrich_tracker["total_cost"]
+            tracker["rounds_used"] += enrich_tracker["rounds_used"]
+            if chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:
+                state["new_cooldown_remaining"] -= 1
 
     after = completed_run_count()
     if after != before + 1:
-        raise RuntimeError(f"expected exactly one applied edit, count changed {before} -> {after}; result={result[:500]}")
+        raise RuntimeError(
+            f"expected exactly one applied edit, count changed {before} -> {after}; result={result[:500]}"
+        )
+    save_state(state)
     edit = latest_maintainer_edit()
     if not edit or edit.get("status") != "approved":
         raise RuntimeError("applied edit was not recorded as approved")
     return {
         "status": "applied",
         "mode": chosen_mode,
-        "candidate": candidate and candidate["id"],
+        "candidate": candidate and candidate.get("id"),
         "model": model,
         "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
         "rounds": int(tracker.get("rounds_used") or 0),
         "edit": edit,
+        "discovery": discovery,
+        "fallback_error": fallback_error,
+        "cooldown_remaining": state.get("new_cooldown_remaining", 0),
         "result": result,
     }
 

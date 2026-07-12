@@ -3,6 +3,9 @@
 
 from pathlib import Path
 import sys
+import json
+import asyncio
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +21,11 @@ assert COMMULINGO_CURATOR.provider == "deepseek"
 assert COMMULINGO_CURATOR.model == "deepseek_pro"
 assert set(COMMULINGO_CURATOR.tools) == {"web_search", "fetch_url", "commulingo_people", "commulingo_edit"}
 assert COMMULINGO_CURATOR.terminal_tools == ["commulingo_edit"]
+assert COMMULINGO_CURATOR.max_rounds == 16
+assert COMMULINGO_CURATOR.max_input_tokens == 160_000
+assert COMMULINGO_CURATOR.max_output_tokens == 16_000
+assert COMMULINGO_CURATOR.max_output_continuations == 2
+assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "already includes cyrillicPatronymic" in _validate(
     None, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
@@ -30,6 +38,7 @@ with TemporaryDirectory() as tmp:
     assert cfg["mode"] == "enrich"
     assert cfg["new_person_every"] == 4
     assert cfg["recent_days"] == 7
+    assert cfg["new_person_cooldown_runs"] == 6
 
 candidate = {
     "id": "example",
@@ -46,5 +55,80 @@ task = maintainer.build_task("enrich", candidate)
 assert "example" in task and "get_person" in task and "one commulingo_edit" in task
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "action='create'" in new_task
+
+assert maintainer.choose_mode(
+    {**cfg, "mode": "auto", "new_person_every": 1},
+    state={"new_cooldown_remaining": 2},
+) == "enrich"
+
+legacy_patch = {
+    "slug": "example-person", "nameKo": "예시", "nameEn": "Example",
+    "bioKo": "한국어", "bioEn": "English", "epithetKo": "긴장",
+    "epithetEn": "Tension", "fateKind": "natural", "yearsLabel": "1900–1980",
+    "category": "revolutionary",
+}
+normalized, repairs = maintainer.normalize_commulingo_patch(
+    "person", "example-person", legacy_patch
+)
+assert normalized["name"] == {"ko": "예시", "en": "Example"}
+assert normalized["bio"] == {"ko": "한국어", "en": "English"}
+assert normalized["fate"]["kind"] == "natural"
+assert normalized["role"] == {"category": "revolutionary"}
+assert normalized["years"] == "1900–1980"
+assert "slug" not in normalized and repairs
+
+original_query_one = maintainer.db_query_one
+try:
+    maintainer.db_query_one = lambda *_a, **_kw: None
+    candidate_line = "CANDIDATE_JSON: " + json.dumps({
+        "id": "example-person", "name_ko": "예시",
+        "name_en": "Example Person", "reason": "gap",
+        "source_url": "https://example.com/bio",
+    }, ensure_ascii=False)
+    discovered = maintainer.parse_discovered_candidate(candidate_line)
+    assert discovered["id"] == "example-person"
+finally:
+    maintainer.db_query_one = original_query_one
+
+async def assert_dsml_retry():
+    original_chat = maintainer.chat_with_tools
+    original_count = maintainer.completed_run_count
+    original_query = maintainer.db_query_one
+    calls = []
+    async def fake_chat(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            return "<｜｜DSML｜｜tool_calls>"
+        return "CANDIDATE_JSON: " + json.dumps({
+            "id": "retry-person", "name_ko": "재시도",
+            "name_en": "Retry Person", "reason": "gap",
+            "source_url": "https://example.com/retry",
+        }, ensure_ascii=False)
+    try:
+        maintainer.chat_with_tools = fake_chat
+        maintainer.completed_run_count = lambda: 10
+        maintainer.db_query_one = lambda *_a, **_kw: None
+        policy = SimpleNamespace(
+            max_output_continuations=2, max_rounds=16, max_output_tokens=16000,
+            max_input_tokens=160000, budget_usd=0.35,
+            thinking_policy="disabled", thinking_budget_tokens=8192,
+        )
+        spec = SimpleNamespace(
+            name="commulingo_curator", finalization_tools=[], terminal_tools=[],
+            render_prompt=lambda **_kw: "system",
+        )
+        _result, _tracker, found = await maintainer._call_curator_stage(
+            task="discover", spec=spec, model="deepseek-v4-pro", tools=[],
+            handlers={}, policy=policy, stage="test discovery",
+            expect_edit=False, before_count=10,
+        )
+        assert len(calls) == 2
+        assert found["id"] == "retry-person"
+    finally:
+        maintainer.chat_with_tools = original_chat
+        maintainer.completed_run_count = original_count
+        maintainer.db_query_one = original_query
+
+asyncio.run(assert_dsml_retry())
 
 print("commulingo maintainer smoke ok")
