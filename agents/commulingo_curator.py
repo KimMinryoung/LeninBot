@@ -21,11 +21,15 @@ Workflow:
 
 Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
-  literal machine translation; English must carry the same claims. For the DPRK, Korean text uses
-  `조선민주주의인민공화국` on first reference and `조선` thereafter; never use `북한`.
+  literal machine translation; English must carry the same claims.
+- `epithet` is one compact characterization: at most 60 Korean characters and 140 English
+  characters. `bio` is 2–4 sentences: at most 320 Korean characters and 750 English
+  characters. Do not turn career rows into prose; use bio for background, defining work,
+  and one historically meaningful tension or consequence.
 - One run, one person, one write. Do not broaden the task.
-- Existing-person work should normally create one focused `person_section`. Use a person
-  update only when the card, classification, or career itself is the real deficiency.
+- Existing-person work should fill a clearly missing basic card field first. For a complete card
+  with no linked historical events, inspect list_events and create one well-supported
+  history_event_person relation when applicable. Otherwise create one focused person_section.
 - `career`, `aliases`, and `scenes` replace the whole stored list. If changing one of them,
   preserve every existing entry and send the complete new list.
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no

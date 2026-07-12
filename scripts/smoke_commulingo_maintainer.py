@@ -30,6 +30,18 @@ assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "already includes cyrillicPatronymic" in _validate(
     None, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
 )
+assert "contains '북한'" in _validate(
+    None, "person", "update", "example",
+    {"bio": {"ko": "북한 관련 문장", "en": "A sentence"}},
+)
+assert "bio is too long" in _validate(
+    None, "person", "update", "example",
+    {"bio": {"ko": "가" * 321, "en": "A sentence"}},
+)
+assert "epithet is too long" in _validate(
+    None, "person", "update", "example",
+    {"epithet": {"ko": "짧은 표현", "en": "x" * 141}},
+)
 
 with TemporaryDirectory() as tmp:
     path = Path(tmp) / "config.json"
@@ -49,13 +61,16 @@ candidate = {
     "has_epithet": 0,
     "career_count": 1,
     "section_count": 0,
+    "event_count": 0,
     "has_moment": 0,
     "has_role": 1,
 }
 task = maintainer.build_task("enrich", candidate)
 assert "example" in task and "get_person" in task and "one commulingo_edit" in task
 assert "Do not create a section" in task and "has epithet: False" in task
+assert "history_event_person" in task and "linked historical events: 0" in task
 assert "initial" not in maintainer._PERSON_PATCH_KEYS
+assert "history_event_person" in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["target_type"]["enum"]
 assert "initial" not in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["patch"]["properties"]
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "action='create'" in new_task

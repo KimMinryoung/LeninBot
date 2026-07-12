@@ -108,12 +108,14 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
                   CASE WHEN COALESCE(p.epithet_ko, '') = '' THEN 0 ELSE 1 END AS has_epithet,
                   COUNT(DISTINCT c.id)::int AS career_count,
                   COUNT(DISTINCT s.id)::int AS section_count,
+                  COUNT(DISTINCT ep.event_id)::int AS event_count,
                   CASE WHEN COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END AS has_moment,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END AS has_role
              FROM commulingo_people p
              LEFT JOIN commulingo_person_career_entries c ON c.person_id = p.id
              LEFT JOIN commulingo_person_sections s ON s.person_id = p.id
              LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
+             LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
               AND (%(forced_id)s <> '' OR NOT EXISTS (
                     SELECT 1 FROM commulingo_people_revisions rev
@@ -125,6 +127,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
+                  CASE WHEN COUNT(DISTINCT ep.event_id) = 0 THEN 0 ELSE 1 END ASC,
                   COUNT(DISTINCT s.id) ASC,
                   CASE WHEN COUNT(DISTINCT c.id) <= 1 THEN 0 ELSE 1 END ASC,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END ASC,
@@ -160,13 +163,17 @@ Target exactly this person and no one else:
 - has epithet: {bool(candidate['has_epithet'])}
 - career rows: {candidate['career_count']}
 - detail sections: {candidate['section_count']}
+- linked historical events: {candidate['event_count']}
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
 
 Call get_person and get_sections first. Basic card completeness takes priority over detail
 sections: if bio or epithet is empty, career has no rows, or the primary role is missing,
 make one person update that fills every such missing basic field. Do not create a section in
-that case. Otherwise find the single most valuable missing topic and prefer one substantial
+that case. Otherwise, if linked historical events is zero, inspect list_events and the most
+plausible get_event records. When one event connection is clearly supported, create exactly
+one history_event_person relation; never force a weak connection. If no event is clearly
+relevant, find the single most valuable missing topic and prefer one substantial
 bilingual `person_section` (one topic, roughly 350-700 Korean characters plus equivalent
 English) when no section covers it. Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
 

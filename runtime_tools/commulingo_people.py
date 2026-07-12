@@ -47,7 +47,9 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
 _SUGGESTED_BY = os.getenv("COMMULINGO_SUGGESTED_BY", "cyber-lenin").strip() or "cyber-lenin"
 
-_TARGET_TYPES = ("person", "office_row", "person_section")
+_TARGET_TYPES = ("person", "office_row", "person_section", "history_event_person")
+
+_HISTORY_RELATION_KINDS = ("leader", "participant", "executor", "target", "opponent", "witness")
 _ACTIONS = ("create", "update", "delete")
 
 _FATE_KINDS = (
@@ -75,6 +77,10 @@ _OFFICE_ROW_PATCH_KEYS = frozenset({
 # Long-form detail sections rendered on /commulingo/people/<id>.
 _SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
+
+_HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
+    "personId", "sortOrder", "relationKind", "relation", "note",
+})
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
 
@@ -342,6 +348,45 @@ def _get_sections(person_id: str) -> list[dict] | None:
     ]
 
 
+def _list_events() -> list[dict]:
+    return db_query(
+        """SELECT e.id, e.period_label, e.title_ko, e.title_en,
+                  COUNT(ep.person_id)::int AS people_count
+             FROM commulingo_history_events e
+             LEFT JOIN commulingo_history_event_people ep ON ep.event_id = e.id
+            GROUP BY e.id, e.sort_order, e.period_label, e.title_ko, e.title_en
+            ORDER BY e.sort_order, e.id"""
+    )
+
+
+def _get_event(event_id: str) -> dict | None:
+    event = db_query_one(
+        """SELECT id, period_label, title_ko, title_en, summary_ko, summary_en
+             FROM commulingo_history_events WHERE id = %s""",
+        (event_id,),
+    )
+    if not event:
+        return None
+    event = dict(event)
+    event["people"] = [
+        {
+            "personId": row["person_id"],
+            "sortOrder": row["sort_order"],
+            "relationKind": row["relation_kind"],
+            "relation": {"ko": row["relation_ko"], "en": row["relation_en"]},
+            "note": {"ko": row["note_ko"], "en": row["note_en"]},
+        }
+        for row in db_query(
+            """SELECT person_id, sort_order, relation_kind,
+                      relation_ko, relation_en, note_ko, note_en
+                 FROM commulingo_history_event_people
+                WHERE event_id = %s ORDER BY sort_order, person_id""",
+            (event_id,),
+        )
+    ]
+    return event
+
+
 def _list_suggestions(status: str, limit: int) -> list[dict]:
     return db_query(
         """SELECT id, target_type, target_id, action, status, confidence,
@@ -370,6 +415,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "`list_categories` (office-less role categories for role {category}), "
         "`get_sections` (a person's full detail-page sections, returned in the "
         "exact person_section patch shape — edit and send back), "
+        "`list_events` (historical event ids, titles, and linked-person counts), "
+        "`get_event` (one event and all current person relationships), "
         "`list_suggestions` (edit history/queue from commulingo_edit; "
         "optional status filter: pending/approved/rejected/superseded). "
         "Always read the current record before editing with commulingo_edit."
@@ -382,7 +429,7 @@ COMMULINGO_PEOPLE_TOOL = {
                 "enum": [
                     "list_groups", "search_people", "get_person",
                     "list_offices", "get_office", "list_categories",
-                    "get_sections", "list_suggestions",
+                    "get_sections", "list_events", "get_event", "list_suggestions",
                 ],
             },
             "q": {
@@ -395,6 +442,7 @@ COMMULINGO_PEOPLE_TOOL = {
             },
             "person_id": {"type": "string", "description": "get_person/get_sections: person id."},
             "office_id": {"type": "string", "description": "get_office: office id."},
+            "event_id": {"type": "string", "description": "get_event: historical event id."},
             "status": {
                 "type": "string",
                 "description": "list_suggestions: filter (pending/approved/rejected/superseded). Default: all.",
@@ -415,6 +463,7 @@ async def _exec_commulingo_people(
     group_id: str = "",
     person_id: str = "",
     office_id: str = "",
+    event_id: str = "",
     status: str = "",
     limit: int = 30,
 ) -> str:
@@ -449,6 +498,14 @@ async def _exec_commulingo_people(
             result = await asyncio.to_thread(_get_office, office_id.strip())
             if result is None:
                 return f"Error: office '{office_id}' not found. Use list_offices to find the id."
+        elif action == "list_events":
+            result = await asyncio.to_thread(_list_events)
+        elif action == "get_event":
+            if not event_id:
+                return "Error: event_id is required for get_event."
+            result = await asyncio.to_thread(_get_event, event_id.strip())
+            if result is None:
+                return f"Error: event '{event_id}' not found. Use list_events to find the id."
         elif action == "list_suggestions":
             result = await asyncio.to_thread(_list_suggestions, (status or "").strip(), limit)
         else:
@@ -475,6 +532,16 @@ def _localized(value, lang: str) -> str:
     if isinstance(value, dict):
         return value.get(lang) or ""
     return ""
+
+
+def _contains_north_korea(value) -> bool:
+    if isinstance(value, str):
+        return "북한" in value
+    if isinstance(value, dict):
+        return any(_contains_north_korea(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_north_korea(item) for item in value)
+    return False
 
 
 def _parse_life_years(label: str) -> tuple[int | None, int | None]:
@@ -771,10 +838,16 @@ def _apply_office_row_update(cur, row_id: int, patch: dict) -> None:
 
 def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -> str | None:
     """Return an error string, or None when the edit is applicable."""
+    if _contains_north_korea(patch):
+        return (
+            "Error: Korean text contains '북한'. On first reference use "
+            "'조선민주주의인민공화국', then '조선'. Rewrite only the affected text."
+        )
     allowed = {
         "person": _PERSON_PATCH_KEYS,
         "office_row": _OFFICE_ROW_PATCH_KEYS,
         "person_section": _SECTION_PATCH_KEYS,
+        "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
     }[target_type]
     unknown = set(patch) - allowed
     if unknown:
@@ -802,6 +875,15 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
                     "a plain string is rejected because the site is bilingual and the "
                     "other language would be silently lost."
+                )
+        for key, ko_max, en_max in (("epithet", 60, 140), ("bio", 320, 750)):
+            value = patch.get(key)
+            if not isinstance(value, dict):
+                continue
+            if len(value.get("ko") or "") > ko_max or len(value.get("en") or "") > en_max:
+                return (
+                    f"Error: {key} is too long; limits are {ko_max} Korean characters "
+                    f"and {en_max} English characters. Keep career chronology in career rows."
                 )
         if "aliases" in patch and patch["aliases"] is not None:
             aliases = patch["aliases"]
@@ -917,6 +999,27 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return "Error: body.ko or body.en (markdown) is required for section create."
         elif not exists:
             return f"Error: section '{slug}' not found for '{target_id}' (get_person lists existing slugs)."
+    elif target_type == "history_event_person":
+        if action == "delete":
+            return "Error: history_event_person deletion is not available to the unattended curator."
+        cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return f"Error: history event {target_id} not found. Use list_events."
+        person_id = str(patch.get("personId") or "").strip()
+        if not person_id:
+            return "Error: history_event_person patch.personId is required."
+        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,))
+        if not cur.fetchone():
+            return f"Error: person {person_id} not found. Use search_people."
+        kind = str(patch.get("relationKind") or "").strip()
+        if kind not in _HISTORY_RELATION_KINDS:
+            return f"Error: relationKind must be one of {', '.join(_HISTORY_RELATION_KINDS)}."
+        for key in ("relation", "note"):
+            value = patch.get(key)
+            if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
+                return f"Error: {key}.ko and {key}.en are required."
+        if "sortOrder" in patch and not isinstance(patch["sortOrder"], int):
+            return "Error: sortOrder must be an integer."
     else:  # office_row
         for key in _LOCALIZED_OFFICE_ROW_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
@@ -1038,6 +1141,49 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
                         {"before": before, "after": section_row()}, changed_by)
         return f"updated section '{slug}' of '{target_id}'"
 
+    if target_type == "history_event_person":
+        person_id = patch["personId"]
+        entity_id = f"{target_id}/{person_id}"
+        cur.execute(
+            """SELECT event_id, person_id, sort_order, relation_kind,
+                      relation_ko, relation_en, note_ko, note_en
+                 FROM commulingo_history_event_people
+                WHERE event_id = %s AND person_id = %s""",
+            (target_id, person_id),
+        )
+        row = cur.fetchone()
+        before = dict(row) if row else None
+        if isinstance(patch.get("sortOrder"), int):
+            sort_order = patch["sortOrder"]
+        else:
+            cur.execute(
+                """SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+                     FROM commulingo_history_event_people WHERE event_id = %s""",
+                (target_id,),
+            )
+            sort_order = cur.fetchone()["next_sort"]
+        relation = patch["relation"]
+        note = patch["note"]
+        cur.execute(
+            """INSERT INTO commulingo_history_event_people
+                      (event_id, person_id, sort_order, relation_kind,
+                       relation_ko, relation_en, note_ko, note_en)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 ON CONFLICT (event_id, person_id) DO UPDATE SET
+                     sort_order = EXCLUDED.sort_order,
+                     relation_kind = EXCLUDED.relation_kind,
+                     relation_ko = EXCLUDED.relation_ko,
+                     relation_en = EXCLUDED.relation_en,
+                     note_ko = EXCLUDED.note_ko,
+                     note_en = EXCLUDED.note_en""",
+            (target_id, person_id, sort_order, patch["relationKind"],
+             relation["ko"], relation["en"], note["ko"], note["en"]),
+        )
+        after = {**patch, "eventId": target_id, "sortOrder": sort_order}
+        _write_revision(cur, "history_event_person", entity_id,
+                        "upsert history event person", {"before": before, "after": after}, changed_by)
+        return f"linked person '{person_id}' to history event '{target_id}'"
+
     if action == "create":
         before = _office_snapshot(cur, target_id)
         row_id = _apply_office_row_create(cur, target_id, patch)
@@ -1132,6 +1278,18 @@ _BILINGUAL_TEXT_SCHEMA = {
     "required": ["ko", "en"],
 }
 
+_EPITHET_SCHEMA = {
+    **_BILINGUAL_TEXT_SCHEMA,
+    "properties": {"ko": {"type": "string", "maxLength": 60},
+                   "en": {"type": "string", "maxLength": 140}},
+}
+
+_BIO_SCHEMA = {
+    **_BILINGUAL_TEXT_SCHEMA,
+    "properties": {"ko": {"type": "string", "maxLength": 320},
+                   "en": {"type": "string", "maxLength": 750}},
+}
+
 _COMMULINGO_PATCH_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -1149,8 +1307,8 @@ _COMMULINGO_PATCH_SCHEMA = {
         "cyrillicPatronymic": {"type": "string"},
         "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
         "name": _BILINGUAL_TEXT_SCHEMA,
-        "epithet": _BILINGUAL_TEXT_SCHEMA,
-        "bio": _BILINGUAL_TEXT_SCHEMA,
+        "epithet": _EPITHET_SCHEMA,
+        "bio": _BIO_SCHEMA,
         "moment": _BILINGUAL_TEXT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
         "aliases": {
@@ -1185,6 +1343,8 @@ _COMMULINGO_PATCH_SCHEMA = {
         "sources": {"type": "array", "items": {"type": "string"}},
         "period": {"type": "string"},
         "personId": {"type": "string"},
+        "relationKind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
+        "relation": _BILINGUAL_TEXT_SCHEMA,
         "note": _BILINGUAL_TEXT_SCHEMA,
         "office_rows": {"type": "array", "items": {"type": "object"}},
         "sections": {"type": "array", "items": {"type": "object"}},
@@ -1222,7 +1382,9 @@ COMMULINGO_EDIT_TOOL = {
         "strings are rejected. Targets: person create → target_id = new slug; "
         "person update/delete → person id; person_section (all actions) → "
         "person id + patch.slug; office_row create → "
-        "office id; office_row update/delete → numeric row id (from get_office). "
+        "office id; office_row update/delete → numeric row id (from get_office); "
+        "history_event_person create/update → target_id = event id and patch "
+        "{personId, relationKind, relation {ko,en}, note {ko,en}, sortOrder?}. "
         "HOUSE STYLE — each card is a miniature story: epithet = a "
         "characterization with tension or irony, never a job title; bio = one "
         "short paragraph per language that opens with a scene or contradiction "
