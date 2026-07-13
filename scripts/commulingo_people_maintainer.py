@@ -105,8 +105,55 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
     return "enrich"
 
 
+# Prominence tiering scales the bio-length band to a person's historical weight
+# (linked events + offices held). A stub bio for a major figure like Stalin reads as a defect,
+# and an inflated bio for an obscure functionary is equally a defect. The personal band by tier:
+#   major (prominence >= MAJOR_PROMINENCE):   MAJOR_BIO_FLOOR..320   (fill it out)
+#   standard (prominence 2..3):               120..320              (whatever the material warrants)
+#   minor (prominence <= MINOR_PROMINENCE_MAX): MINOR_BIO_FLOOR..MINOR_BIO_CEILING (keep it short, under 120)
+MAJOR_PROMINENCE = 4
+MINOR_PROMINENCE_MAX = 1
+MAJOR_BIO_FLOOR = 260
+STANDARD_BIO_FLOOR = 120
+BIO_CEILING = 320
+MINOR_BIO_FLOOR = 60
+MINOR_BIO_CEILING = 115
+
+
+def person_tier(candidate: dict) -> dict:
+    """Derive the bio-length band for a candidate from its prominence signals."""
+    prominence = int(candidate.get("event_count") or 0) + int(candidate.get("office_count") or 0)
+    is_major = prominence >= MAJOR_PROMINENCE
+    is_minor = prominence <= MINOR_PROMINENCE_MAX
+    tier = "major" if is_major else "minor" if is_minor else "standard"
+    if is_major:
+        bio_floor, bio_ceiling = MAJOR_BIO_FLOOR, BIO_CEILING
+    elif is_minor:
+        bio_floor, bio_ceiling = MINOR_BIO_FLOOR, MINOR_BIO_CEILING
+    else:
+        bio_floor, bio_ceiling = STANDARD_BIO_FLOOR, BIO_CEILING
+    return {
+        "tier": tier,
+        "is_major": is_major,
+        "is_minor": is_minor,
+        "prominence": prominence,
+        "bio_floor": bio_floor,
+        "bio_ceiling": bio_ceiling,
+    }
+
+
 def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
-    params = {"recent_days": recent_days, "forced_id": forced_id.strip()}
+    params = {
+        "recent_days": recent_days,
+        "forced_id": forced_id.strip(),
+        "major_prom": MAJOR_PROMINENCE,
+        "minor_max": MINOR_PROMINENCE_MAX,
+        "major_floor": MAJOR_BIO_FLOOR,
+        "std_floor": STANDARD_BIO_FLOOR,
+        "ceiling": BIO_CEILING,
+        "minor_floor": MINOR_BIO_FLOOR,
+        "minor_ceiling": MINOR_BIO_CEILING,
+    }
     rows = db_query(
         """SELECT p.id, p.group_id, p.name_ko, p.name_en,
                   LENGTH(COALESCE(p.bio_ko, '')) AS bio_chars,
@@ -114,6 +161,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
                   COUNT(DISTINCT c.id)::int AS career_count,
                   COUNT(DISTINCT s.id)::int AS section_count,
                   COUNT(DISTINCT ep.event_id)::int AS event_count,
+                  COUNT(DISTINCT o.id)::int AS office_count,
                   CASE WHEN COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END AS has_moment,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END AS has_role
              FROM commulingo_people p
@@ -121,6 +169,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
              LEFT JOIN commulingo_person_sections s ON s.person_id = p.id
              LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
+             LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
               AND (%(forced_id)s <> '' OR NOT EXISTS (
                     SELECT 1 FROM commulingo_people_revisions rev
@@ -132,8 +181,15 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
-                  CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) < 120
-                         OR LENGTH(COALESCE(p.bio_ko, '')) > 320
+                  CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) <
+                             CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) >= %(major_prom)s
+                                       THEN %(major_floor)s
+                                  WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) <= %(minor_max)s
+                                       THEN %(minor_floor)s
+                                  ELSE %(std_floor)s END
+                         OR LENGTH(COALESCE(p.bio_ko, '')) >
+                             CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) <= %(minor_max)s
+                                  THEN %(minor_ceiling)s ELSE %(ceiling)s END
                          OR COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END ASC,
                   CASE WHEN COUNT(DISTINCT ep.event_id) = 0 THEN 0 ELSE 1 END ASC,
                   COUNT(DISTINCT s.id) ASC,
@@ -149,9 +205,14 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
 
 CARD_STYLE_GUIDANCE = (
     "LENGTH AND STYLE (keep every card consistent):\n"
-    "- Korean bio: about 120-320 characters (roughly 2-4 sentences). English bio of "
-    "comparable substance (about 250-640 characters). Never leave a one-line stub and never "
-    "run past the upper bound.\n"
+    "- Korean bio length scales with the person's historical weight, and both a too-thin and a "
+    "too-long bio are defects. A MAJOR figure (head of state, party leader, or someone central to "
+    "many events) fills roughly 260-320 characters — a thin 150-180 character bio for that weight "
+    "reads as a defect; 320 is the hard ceiling, never run past it. A STANDARD figure sits in "
+    "120-320 as the material warrants. A MINOR/obscure figure stays short, under 120 characters "
+    "(roughly 60-115) — inflating an obscure functionary's bio is a defect. The enrich task states "
+    "the exact target band for the specific person. Give the English bio comparable substance. "
+    "Never leave a one-line stub.\n"
     "- The bio states who the person essentially was and why they matter — their core "
     "significance and defining tension. It is NOT a chronological list of posts, dates, and "
     "ministries: the detailed career timeline already lists positions year by year, so do not "
@@ -178,6 +239,45 @@ section or office row in this run.
 """ + CARD_STYLE_GUIDANCE
     if not candidate:
         raise RuntimeError("no eligible sparse person found")
+    tier = person_tier(candidate)
+    bio_floor = tier["bio_floor"]
+    bio_ceiling = tier["bio_ceiling"]
+    if tier["is_major"]:
+        tier_line = (
+            f"- prominence tier: MAJOR (linked events + offices = {tier['prominence']}). "
+            f"Target Korean bio {bio_floor}-{bio_ceiling} characters."
+        )
+        bio_step = (
+            f"2. BIO DEPTH/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"characters, or reads as a list of posts and dates rather than the person's core "
+            f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
+            f"essence-first style as one person update. This is a MAJOR figure: a thin bio is a "
+            f"defect, so expand it toward the upper end with added significance, defining tensions, "
+            f"and historical weight — never padding, and never exceed {bio_ceiling}. Keep the facts."
+        )
+    elif tier["is_minor"]:
+        tier_line = (
+            f"- prominence tier: MINOR (linked events + offices = {tier['prominence']}). "
+            f"Target Korean bio {bio_floor}-{bio_ceiling} characters — keep it short."
+        )
+        bio_step = (
+            f"2. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"characters, or reads as a list of posts and dates rather than the person's core "
+            f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
+            f"essence-first style as one person update. This is a MINOR figure: keep the bio short "
+            f"and tight — a long bio here is a defect, so trim to the essentials and do not exceed "
+            f"{bio_ceiling}. Keep the facts."
+        )
+    else:
+        tier_line = (
+            f"- prominence tier: standard. Target Korean bio {bio_floor}-{bio_ceiling} characters."
+        )
+        bio_step = (
+            f"2. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"characters, or reads as a list of posts and dates rather than the person's core "
+            f"significance, rewrite the bio in both languages into the target band and essence-first "
+            f"style as one person update — keep the facts, just resize and refocus."
+        )
     return f"""MODE: ENRICH EXISTING PERSON
 
 Target exactly this person and no one else:
@@ -192,16 +292,14 @@ Target exactly this person and no one else:
 - linked historical events: {candidate['event_count']}
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
+{tier_line}
 
 Call get_person and get_sections first, then make exactly one commulingo_edit, choosing the
 first step below that applies:
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
    missing, one person update that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.
-2. BIO SIZE/STYLE: else if the Korean bio is under 120 or over 320 characters, or reads as a
-   list of posts and dates rather than the person's core significance, rewrite the bio in both
-   languages into the target band and essence-first style as one person update — keep the facts,
-   just resize and refocus.
+{bio_step}
 3. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
    update.
 4. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
