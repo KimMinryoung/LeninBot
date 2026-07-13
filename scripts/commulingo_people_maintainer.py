@@ -151,8 +151,8 @@ CARD_STYLE_GUIDANCE = (
     "significance and defining tension. It is NOT a chronological list of posts, dates, and "
     "ministries: the detailed career timeline already lists positions year by year, so do not "
     "duplicate that in the bio. Capture the essence, not the resume.\n"
-    "- `moment`: one vivid line of about 40-110 Korean characters (with an English "
-    "equivalent) capturing a single defining scene or turn; do not exceed ~120 characters.\n"
+    "- `moment`: one or two vivid lines of about 40-140 Korean characters (with an English "
+    "equivalent) capturing a single defining scene or turn; do not exceed ~150 characters.\n"
     "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it."
 )
 
