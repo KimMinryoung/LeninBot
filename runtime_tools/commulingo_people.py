@@ -168,7 +168,9 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         """SELECT id, group_id, cyrillic, years_label,
                   name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
                   moment_ko, moment_en,
-                  fate_kind, fate_label_ko, fate_label_en
+                  fate_kind, fate_label_ko, fate_label_en,
+                  citizenship_code, citizenship_label_ko, citizenship_label_en,
+                  origin_code, origin_label_ko, origin_label_en
            FROM commulingo_people WHERE id = %s""",
         (person_id,),
     )
@@ -187,6 +189,14 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         "fate": {
             "kind": row["fate_kind"],
             "label": {"ko": row["fate_label_ko"], "en": row["fate_label_en"]},
+        },
+        "citizenship": {
+            "code": row["citizenship_code"],
+            "label": {"ko": row["citizenship_label_ko"], "en": row["citizenship_label_en"]},
+        },
+        "origin": {
+            "code": row["origin_code"],
+            "label": {"ko": row["origin_label_ko"], "en": row["origin_label_en"]},
         },
     }
     cur.execute(
@@ -534,6 +544,21 @@ def _localized(value, lang: str) -> str:
     return ""
 
 
+def _nationality_values(patch: dict, key: str):
+    """Extract (code, label_ko, label_en) for a citizenship/origin patch node.
+
+    Returns None when the key is absent so the caller leaves the columns
+    untouched; an explicit empty {} clears the fields.
+    """
+    if key not in patch:
+        return None
+    node = patch.get(key) or {}
+    if not isinstance(node, dict):
+        return "", "", ""
+    label = node.get("label") if isinstance(node.get("label"), dict) else None
+    return str(node.get("code") or "").strip(), _localized(label, "ko"), _localized(label, "en")
+
+
 def _contains_north_korea(value) -> bool:
     if isinstance(value, str):
         return "북한" in value
@@ -687,14 +712,19 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
     birth, death = _parse_life_years(patch.get("years") or "")
     name = patch.get("name") or {}
     fate = patch.get("fate") or {}
+    citizenship = _nationality_values(patch, "citizenship") or ("", "", "")
+    origin = _nationality_values(patch, "origin") or ("", "", "")
     cur.execute(
         """INSERT INTO commulingo_people
               (id, group_id, sort_order, initial, cyrillic, years_label, birth_year, death_year,
                name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
                moment_ko, moment_en,
-               fate_kind, fate_label_ko, fate_label_en, updated_at)
+               fate_kind, fate_label_ko, fate_label_en,
+               citizenship_code, citizenship_label_ko, citizenship_label_en,
+               origin_code, origin_label_ko, origin_label_en, updated_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
+                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, %s, %s, NOW())""",
         (
             person_id,
             patch.get("groupId") or patch.get("group"),
@@ -710,6 +740,8 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             fate.get("kind") or "" if isinstance(fate, dict) else "",
             _localized(fate.get("label") if isinstance(fate, dict) else None, "ko"),
             _localized(fate.get("label") if isinstance(fate, dict) else None, "en"),
+            citizenship[0], citizenship[1], citizenship[2],
+            origin[0], origin[1], origin[2],
         ),
     )
     _replace_patronymic(cur, person_id, patch)
@@ -757,6 +789,15 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         set_col("fate_label_en", _localized(fate.get("label") if isinstance(fate, dict) else None, "en"))
     if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
         set_col("sort_order", patch["sortOrder"])
+    for key, cols in (
+        ("citizenship", ("citizenship_code", "citizenship_label_ko", "citizenship_label_en")),
+        ("origin", ("origin_code", "origin_label_ko", "origin_label_en")),
+    ):
+        vals = _nationality_values(patch, key)
+        if vals is not None:
+            set_col(cols[0], vals[0])
+            set_col(cols[1], vals[1])
+            set_col(cols[2], vals[2])
     if sets:
         sets.append("updated_at = NOW()")
         values.append(person_id)

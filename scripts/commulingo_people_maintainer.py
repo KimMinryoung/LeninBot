@@ -119,6 +119,14 @@ BIO_CEILING = 320
 MINOR_BIO_FLOOR = 60
 MINOR_BIO_CEILING = 115
 
+# Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
+# The curator must pick citizenship_code / origin_code from this set or the card shows no flag.
+NATIONALITY_CODES = (
+    "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
+    "latvia, lithuania, estonia, poland, finland, germany, austria, hungary, "
+    "france, italy, uk, usa, china"
+)
+
 
 def person_tier(candidate: dict) -> dict:
     """Derive the bio-length band for a candidate from its prominence signals."""
@@ -162,6 +170,8 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
                   COUNT(DISTINCT s.id)::int AS section_count,
                   COUNT(DISTINCT ep.event_id)::int AS event_count,
                   COUNT(DISTINCT o.id)::int AS office_count,
+                  p.citizenship_code AS citizenship_code,
+                  p.origin_code AS origin_code,
                   CASE WHEN COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END AS has_moment,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END AS has_role
              FROM commulingo_people p
@@ -177,10 +187,12 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
                        AND rev.changed_by = 'commulingo-maintainer'
                        AND rev.created_at >= NOW() - (%(recent_days)s * INTERVAL '1 day')
                   ))
-            GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko, r.person_id
+            GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
+                     p.citizenship_code, p.origin_code, r.person_id
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
+                  CASE WHEN COALESCE(p.citizenship_code, '') = '' THEN 0 ELSE 1 END ASC,
                   CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) <
                              CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) >= %(major_prom)s
                                        THEN %(major_floor)s
@@ -248,7 +260,7 @@ section or office row in this run.
             f"Target Korean bio {bio_floor}-{bio_ceiling} characters."
         )
         bio_step = (
-            f"2. BIO DEPTH/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"3. BIO DEPTH/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
             f"characters, or reads as a list of posts and dates rather than the person's core "
             f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
             f"essence-first style as one person update. This is a MAJOR figure: a thin bio is a "
@@ -261,7 +273,7 @@ section or office row in this run.
             f"Target Korean bio {bio_floor}-{bio_ceiling} characters — keep it short."
         )
         bio_step = (
-            f"2. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"3. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
             f"characters, or reads as a list of posts and dates rather than the person's core "
             f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
             f"essence-first style as one person update. This is a MINOR figure: keep the bio short "
@@ -273,7 +285,7 @@ section or office row in this run.
             f"- prominence tier: standard. Target Korean bio {bio_floor}-{bio_ceiling} characters."
         )
         bio_step = (
-            f"2. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
+            f"3. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
             f"characters, or reads as a list of posts and dates rather than the person's core "
             f"significance, rewrite the bio in both languages into the target band and essence-first "
             f"style as one person update — keep the facts, just resize and refocus."
@@ -292,6 +304,8 @@ Target exactly this person and no one else:
 - linked historical events: {candidate['event_count']}
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
+- citizenship flag code: {candidate.get('citizenship_code') or '(unset)'}
+- origin flag code: {candidate.get('origin_code') or '(unset)'}
 {tier_line}
 
 Call get_person and get_sections first, then make exactly one commulingo_edit, choosing the
@@ -299,13 +313,24 @@ first step below that applies:
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
    missing, one person update that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.
+2. NATIONALITY: else if the citizenship flag code is unset, set the person's nationality in one
+   person update. Provide `citizenship` — the state whose citizenship the person actually held
+   (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
+   state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
+   revolutionaries take their own state) — and, only when it is a DIFFERENT nation, `origin`, the
+   birthplace people/nation (e.g. `georgia` for Stalin, `poland` for Dzerzhinsky). Citizenship is
+   the primary flag and comes first; origin is secondary. Omit origin when it equals citizenship
+   or is genuinely unknown. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
+   {{"ko": "...", "en": "..."}}}}. Never invent a code outside that list. Example:
+   patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
+   "origin": {{"code": "georgia", "label": {{"ko": "조지아", "en": "Georgia"}}}}}}.
 {bio_step}
-3. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
+4. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
    update.
-4. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
+5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
    get_event records. When one event connection is clearly supported, create exactly one
    history_event_person relation; never force a weak connection.
-5. SECTION: else find the single most valuable missing topic and add one substantial bilingual
+6. SECTION: else find the single most valuable missing topic and add one substantial bilingual
    `person_section` (one topic, roughly 350-700 Korean characters plus equivalent English) when
    no section covers it.
 Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop.
@@ -376,6 +401,7 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic",
     "cyrillicPatronymic", "years", "name", "epithet", "bio", "moment",
     "fate", "patronymic", "aliases", "career", "role", "scenes", "office_rows",
+    "citizenship", "origin",
 })
 _SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
 
