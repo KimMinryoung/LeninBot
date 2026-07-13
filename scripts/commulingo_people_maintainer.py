@@ -123,8 +123,10 @@ MINOR_BIO_CEILING = 115
 # The curator must pick citizenship_code / origin_code from this set or the card shows no flag.
 NATIONALITY_CODES = (
     "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
-    "latvia, lithuania, estonia, poland, finland, germany, austria, hungary, "
-    "france, italy, uk, usa, china"
+    "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
+    "kyrgyzstan, poland, finland, germany, east-germany, austria, hungary, czechia, "
+    "romania, bulgaria, france, italy, spain, uk, netherlands, usa, "
+    "cuba, argentina, chile, china, japan, india, turkey, vietnam, north-korea, south-korea"
 )
 
 
