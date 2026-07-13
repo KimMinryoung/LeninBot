@@ -47,6 +47,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "new_person_every": 8,
         "recent_days": 30,
         "new_person_cooldown_runs": 6,
+        # Parallel-lane switch: when false, the dedicated new-person lane
+        # (COMMULINGO_SUGGESTED_BY=commulingo-maintainer-new) no-ops so all
+        # maintenance effort concentrates on enriching existing cards.
+        "new_lane_enabled": True,
     }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -60,6 +64,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["new_person_every"] = max(0, int(cfg["new_person_every"]))
     cfg["recent_days"] = max(1, int(cfg["recent_days"]))
     cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
+    cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     return cfg
 
 

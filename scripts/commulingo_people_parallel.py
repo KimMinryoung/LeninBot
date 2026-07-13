@@ -9,6 +9,7 @@ the other lane's successful edit for its own.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -93,4 +94,11 @@ maintainer.build_new_person_task = build_new_person_task_with_policy
 
 
 if __name__ == "__main__":
+    # Focus policy: the new-person lane stands down when new_lane_enabled is
+    # false, so its timer keeps firing cheaply while every real maintenance
+    # cycle goes to the enrich lane's standard-field work. Re-enable by setting
+    # new_lane_enabled back to true in config/commulingo_maintainer.json.
+    if SUGGESTED_BY == "commulingo-maintainer-new" and not maintainer.load_config()["new_lane_enabled"]:
+        print(json.dumps({"status": "skipped", "reason": "new_lane_enabled=false"}, ensure_ascii=False))
+        raise SystemExit(0)
     raise SystemExit(maintainer.main())
