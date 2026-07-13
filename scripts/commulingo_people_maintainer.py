@@ -127,6 +127,9 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
+                  CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) < 120
+                         OR LENGTH(COALESCE(p.bio_ko, '')) > 320
+                         OR COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END ASC,
                   CASE WHEN COUNT(DISTINCT ep.event_id) = 0 THEN 0 ELSE 1 END ASC,
                   COUNT(DISTINCT s.id) ASC,
                   CASE WHEN COUNT(DISTINCT c.id) <= 1 THEN 0 ELSE 1 END ASC,
@@ -139,6 +142,21 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
     return rows[0] if rows else None
 
 
+CARD_STYLE_GUIDANCE = (
+    "LENGTH AND STYLE (keep every card consistent):\n"
+    "- Korean bio: about 120-320 characters (roughly 2-4 sentences). English bio of "
+    "comparable substance (about 250-640 characters). Never leave a one-line stub and never "
+    "run past the upper bound.\n"
+    "- The bio states who the person essentially was and why they matter — their core "
+    "significance and defining tension. It is NOT a chronological list of posts, dates, and "
+    "ministries: the detailed career timeline already lists positions year by year, so do not "
+    "duplicate that in the bio. Capture the essence, not the resume.\n"
+    "- `moment`: one vivid line of about 40-110 Korean characters (with an English "
+    "equivalent) capturing a single defining scene or turn; do not exceed ~120 characters.\n"
+    "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it."
+)
+
+
 def build_task(mode: str, candidate: dict | None) -> str:
     if mode == "new":
         return """MODE: NEW PERSON
@@ -147,9 +165,12 @@ Identify one historically important person missing from CommuLingo whose inclusi
 materially improve coverage of revolutionary or Soviet history. Inspect list_groups,
 list_categories and list_offices, then search_people under the proposed name and aliases to
 prove there is no duplicate. Start by opening the Russian Wikipedia article when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
-complete bilingual person card with a correct group and one primary role. Make exactly one
+complete bilingual person card with a correct group and one primary role, including a bio and a
+one-line `moment` that follow the style rules below. Make exactly one
 `commulingo_edit(target_type='person', action='create', ...)` call and stop. Do not create a
-section or office row in this run."""
+section or office row in this run.
+
+""" + CARD_STYLE_GUIDANCE
     if not candidate:
         raise RuntimeError("no eligible sparse person found")
     return f"""MODE: ENRICH EXISTING PERSON
@@ -167,15 +188,26 @@ Target exactly this person and no one else:
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
 
-Call get_person and get_sections first. Basic card completeness takes priority over detail
-sections: if bio or epithet is empty, career has no rows, or the primary role is missing,
-make one person update that fills every such missing basic field. Do not create a section in
-that case. Otherwise, if linked historical events is zero, inspect list_events and the most
-plausible get_event records. When one event connection is clearly supported, create exactly
-one history_event_person relation; never force a weak connection. If no event is clearly
-relevant, find the single most valuable missing topic and prefer one substantial
-bilingual `person_section` (one topic, roughly 350-700 Korean characters plus equivalent
-English) when no section covers it. Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop."""
+Call get_person and get_sections first, then make exactly one commulingo_edit, choosing the
+first step below that applies:
+1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
+   missing, one person update that fills every such missing basic field (bio and moment written
+   to the style rules below). Do not create a section in that case.
+2. BIO SIZE/STYLE: else if the Korean bio is under 120 or over 320 characters, or reads as a
+   list of posts and dates rather than the person's core significance, rewrite the bio in both
+   languages into the target band and essence-first style as one person update — keep the facts,
+   just resize and refocus.
+3. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
+   update.
+4. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
+   get_event records. When one event connection is clearly supported, create exactly one
+   history_event_person relation; never force a weak connection.
+5. SECTION: else find the single most valuable missing topic and add one substantial bilingual
+   `person_section` (one topic, roughly 350-700 Korean characters plus equivalent English) when
+   no section covers it.
+Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop.
+
+""" + CARD_STYLE_GUIDANCE
 
 
 def build_discovery_task() -> str:
@@ -227,12 +259,14 @@ Create exactly this pre-verified missing person and no one else:
 - starting source: {candidate['source_url']}
 
 Re-check search_people for the exact names, fetch the starting source, inspect groups and
-roles, then create one complete bilingual card. Use ONLY the canonical person patch keys
+roles, then create one complete bilingual card, including a bio and a one-line `moment` that
+follow the style rules below. Use ONLY the canonical person patch keys
 documented by commulingo_edit: name, bio, epithet, fate, role, groupId, years, aliases,
 career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
 Make exactly one commulingo_edit(target_type='person', action='create') call and stop.
-"""
+
+""" + CARD_STYLE_GUIDANCE
 
 
 _PERSON_PATCH_KEYS = frozenset({
