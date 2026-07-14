@@ -576,6 +576,34 @@ def _parse_life_years(label: str) -> tuple[int | None, int | None]:
     return int(m.group(1)), int(m.group(2))
 
 
+def _normalize_fate_label(label: str, death_year: int | None) -> str:
+    """Strip the death year from a fate label — it already lives in `years` /
+    deathYear and must not be repeated on the card. Political-event years (실각
+    1964) differ from the death year and are preserved; only the death-year token
+    is removed, then "년"/parens/dates/legacy "d." artifacts and separators are
+    tidied. Keep in sync with frontend/data/commulingo/people-standard.js
+    normalizeFateLabel — the CommuLingo fate standard both enforce."""
+    text = (label or "").strip()
+    if not text or not death_year:
+        return text
+    y = str(death_year)
+    out = text
+    out = re.sub(r"\(\s*" + y + r"\s*\)", "", out)                              # (1980)
+    out = re.sub(y + r"\s*년(?:\s*\d{1,2}\s*월)?(?:\s*\d{1,2}\s*일)?", "", out)  # 1956년 4월 20일
+    out = re.sub(r"\d{1,2}\s+[A-Z][a-z]+\s+" + y, "", out)                      # 20 April 1956
+    out = re.sub(r"[A-Z][a-z]+\s+\d{1,2},?\s+" + y, "", out)                    # April 20, 1956
+    out = re.sub(r"(?<![0-9])" + y + r"(?![0-9])", "", out)                     # bare death year
+    out = re.sub(r"\bd\.\s*", "", out)                                          # legacy EN "d." tail
+    out = re.sub(r"\(\s*\)", "", out)                                           # empty parens
+    out = re.sub(r"(^|[\s·,])년(?=[\s·,]|$)", r"\1", out)                        # orphan 년
+    out = re.sub(r"\s*·\s*", " · ", out)
+    out = re.sub(r"\s*,\s*", ", ", out)
+    out = re.sub(r"([·,])(?:\s*[·,])+", r"\1", out)
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"^[\s·,]+|[\s·,]+$", "", out).strip()
+    return out
+
+
 def _parse_date_token(token: str, fallback_year: int | None):
     token = (token or "").strip()
     if not token:
@@ -738,8 +766,8 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             _localized(patch.get("bio"), "ko"), _localized(patch.get("bio"), "en"),
             _localized(patch.get("moment"), "ko"), _localized(patch.get("moment"), "en"),
             fate.get("kind") or "" if isinstance(fate, dict) else "",
-            _localized(fate.get("label") if isinstance(fate, dict) else None, "ko"),
-            _localized(fate.get("label") if isinstance(fate, dict) else None, "en"),
+            _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "ko"), death),
+            _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "en"), death),
             citizenship[0], citizenship[1], citizenship[2],
             origin[0], origin[1], origin[2],
         ),
@@ -784,9 +812,17 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         set_col("moment_en", _localized(patch.get("moment"), "en"))
     if "fate" in patch:
         fate = patch.get("fate") or {}
+        # Death year comes from an incoming years patch if present, else the
+        # stored record, so the fate label is stripped against the right year.
+        if "years" in patch:
+            _, death = _parse_life_years(patch.get("years") or "")
+        else:
+            cur.execute("SELECT death_year FROM commulingo_people WHERE id = %s", (person_id,))
+            row = cur.fetchone()
+            death = row["death_year"] if row else None
         set_col("fate_kind", fate.get("kind") or "" if isinstance(fate, dict) else "")
-        set_col("fate_label_ko", _localized(fate.get("label") if isinstance(fate, dict) else None, "ko"))
-        set_col("fate_label_en", _localized(fate.get("label") if isinstance(fate, dict) else None, "en"))
+        set_col("fate_label_ko", _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "ko"), death))
+        set_col("fate_label_en", _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "en"), death))
     if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
         set_col("sort_order", patch["sortOrder"])
     for key, cols in (
@@ -952,14 +988,17 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             if not isinstance(fate, dict):
                 return "Error: fate must be {kind, label: {ko, en}} or null."
             if fate.get("label") is not None and not isinstance(fate["label"], dict):
-                return "Error: fate.label must be {\"ko\": \"처형 1938\", \"en\": \"Shot, 1938\"}."
+                return "Error: fate.label must be {\"ko\": \"처형\", \"en\": \"Executed\"}."
             label = fate.get("label") or {}
-            if (len(label.get("ko") or "") > 12
-                    or len(label.get("en") or "") > 32):
+            if (len(label.get("ko") or "") > 22
+                    or len(label.get("en") or "") > 50):
                 return (
-                    "Error: fate.label is too long; limits are 12 Korean characters "
-                    "and 32 English characters. Keep only cause/disposition plus year; "
-                    "move burial and other details to bio, career, or sections."
+                    "Error: fate.label is too long; limits are 22 Korean characters "
+                    "and 50 English characters. Write the cause of death only, WITHOUT "
+                    "the death year (it renders from `years`): 처형/Executed, 자연사/"
+                    "Natural causes, a specific illness (심장마비/Heart attack), place "
+                    "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
+                    "year (실각 1964). Move burial and other detail to bio or sections."
                 )
         if action == "create":
             if patch.get("id") and patch["id"] != target_id:
@@ -1339,10 +1378,20 @@ _BIO_SCHEMA = {
                    "en": {"type": "string", "maxLength": 750}},
 }
 
+# Fate label = cause of death only, NO death year (it renders from `years`).
+# Execution → 처형/Executed; vague natural death → 자연사/Natural causes; keep a
+# specific illness word (심장마비/폐암…); place with " · " (암살 · 멕시코). A
+# deposed/exile fate keeps its EVENT year (실각 1964) and may append the cause
+# (실각 1964 · 자연사). The death year is stripped automatically on save.
 _FATE_LABEL_SCHEMA = {
     **_BILINGUAL_TEXT_SCHEMA,
-    "properties": {"ko": {"type": "string", "maxLength": 12},
-                   "en": {"type": "string", "maxLength": 32}},
+    "description": (
+        "Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
+        "natural causes). Execution=처형/Executed; natural=자연사/Natural causes; "
+        "place with ' · '. The death year is dropped automatically on save."
+    ),
+    "properties": {"ko": {"type": "string", "maxLength": 22},
+                   "en": {"type": "string", "maxLength": 50}},
 }
 
 _COMMULINGO_PATCH_SCHEMA = {
@@ -1420,7 +1469,12 @@ COMMULINGO_EDIT_TOOL = {
         "cyrillicPatronymic, use cyrillic for given name + surname only), "
         "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
-        "deposed/exile/suicide/natural), patronymic {ko,en}, cyrillicPatronymic, aliases "
+        "deposed/exile/suicide/natural; label = cause of death ONLY, no death "
+        "year — it renders from `years`: 처형/Executed, 자연사/Natural causes, a "
+        "specific illness like 심장마비/Heart attack, place with ' · ' e.g. 암살 · "
+        "멕시코; a deposed/exile fate keeps its event year, 실각 1964 · 자연사. The "
+        "death year is stripped automatically on save), "
+        "patronymic {ko,en}, cyrillicPatronymic, aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
         "OR {category} (the card's ONE primary marker; exactly one of the two — "
         "icon and label render from the linked institution or category, see "
