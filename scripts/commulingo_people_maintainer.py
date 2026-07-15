@@ -186,7 +186,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
               AND (%(forced_id)s <> '' OR NOT EXISTS (
                     SELECT 1 FROM commulingo_people_revisions rev
                      WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
-                       AND rev.changed_by LIKE 'commulingo-maintainer%'
+                       AND rev.changed_by LIKE 'commulingo-maintainer%%'
                        AND rev.created_at >= NOW() - (%(recent_days)s * INTERVAL '1 day')
                   ))
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
