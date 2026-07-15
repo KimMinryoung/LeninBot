@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly CommuLingo name-variant scan
+
+[Timer]
+OnCalendar=Tue 10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

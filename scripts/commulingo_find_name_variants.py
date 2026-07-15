@@ -10,6 +10,9 @@ config/commulingo_name_normalization.json; nothing is written automatically.
 Usage:
   scripts/commulingo_find_name_variants.py            # report to stdout
   scripts/commulingo_find_name_variants.py --min-count 2
+  scripts/commulingo_find_name_variants.py --min-count 2 --notify
+      # weekly timer mode: remembers reported candidates in --state and
+      # sends a Telegram message only when NEW ones appear
 """
 
 from __future__ import annotations
@@ -55,9 +58,42 @@ def edit_distance(a: str, b: str, cap: int = 3) -> int:
     return prev[-1]
 
 
+def notify_telegram(message: str) -> bool:
+    """Send `message` to the configured Telegram chat (stale-secrets pattern)."""
+    sys.path.insert(0, str(ROOT))
+    try:
+        from secrets_loader import get_secret
+    except Exception as e:
+        print(f"WARNING: cannot import secrets_loader ({e}); skipping notify", file=sys.stderr)
+        return False
+    import os
+    import urllib.parse
+    import urllib.request
+    token = get_secret("TELEGRAM_BOT_TOKEN") or ""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        print("WARNING: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skipping notify",
+              file=sys.stderr)
+        return False
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=data, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        print(f"WARNING: telegram notify failed: {e}", file=sys.stderr)
+        return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--min-count", type=int, default=1, help="hide candidates seen fewer times")
+    ap.add_argument("--state", type=Path, default=ROOT / "data" / "commulingo_variant_scan_state.json",
+                    help="JSON file remembering already-reported candidates")
+    ap.add_argument("--notify", action="store_true",
+                    help="Telegram-notify NEW candidates (vs --state) and update the state")
     args = ap.parse_args()
 
     cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
@@ -116,15 +152,49 @@ def main() -> int:
                         break
 
     rows = sorted(candidates.items(), key=lambda kv: -len(kv[1]))
-    shown = 0
+    shown: list[tuple[str, str, int, str]] = []
     for (prefix, surname), sources in rows:
         if len(sources) < args.min_count:
             continue
-        shown += 1
         sample = ", ".join(sources[:4])
+        shown.append((prefix, surname, len(sources), sample))
         print(f"{prefix:<12} ≈ {surname:<12} ×{len(sources):<4} {sample}")
-    print(f"\n[find-variants] {shown} candidates (of {len(rows)} raw) — review by hand; "
+    print(f"\n[find-variants] {len(shown)} candidates (of {len(rows)} raw) — review by hand; "
           f"add real misspellings to {CONFIG.name} (and container words to 'blocked')")
+
+    if args.notify:
+        seen: set[str] = set()
+        if args.state.exists():
+            try:
+                seen = set(json.loads(args.state.read_text(encoding="utf-8")).get("seen") or [])
+            except Exception as e:
+                print(f"WARNING: state file unreadable ({e}); treating all as new", file=sys.stderr)
+        new = [(p, s, n, src) for p, s, n, src in shown if f"{p}≈{s}" not in seen]
+        if new:
+            lines = [f"• {p} ≈ {s} (×{n}) — {src}" for p, s, n, src in new[:20]]
+            more = f"\n…외 {len(new) - 20}건" if len(new) > 20 else ""
+            message = (
+                f"📖 CommuLingo 인물 표기 변형 후보 {len(new)}건 (신규)\n"
+                + "\n".join(lines) + more
+                + "\n\n진짜 오기만 config/commulingo_name_normalization.json에 추가한 뒤 "
+                "scripts/commulingo_normalize_names.py 를 실행하세요. "
+                "지명·동명이인은 무시(자동으로 다시 알리지 않음)."
+            )
+            if notify_telegram(message):
+                print(f"[find-variants] notified {len(new)} new candidates")
+            else:
+                # Leave the state untouched so the failed batch re-notifies
+                # on the next run instead of being silently lost.
+                print("[find-variants] notify failed — state NOT updated", file=sys.stderr)
+                return 1
+        else:
+            print("[find-variants] no new candidates — no notification")
+        seen.update(f"{p}≈{s}" for p, s, _, _ in shown)
+        args.state.parent.mkdir(parents=True, exist_ok=True)
+        args.state.write_text(
+            json.dumps({"seen": sorted(seen)}, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
     return 0
 
 
