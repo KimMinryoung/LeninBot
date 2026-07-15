@@ -120,14 +120,28 @@ def fetch_chat_logs(
             return []
 
     # 기본: web (chat_logs 테이블)
-    cols = "session_id, fingerprint, user_query, bot_answer, created_at"
+    cols = "session_id, fingerprint, user_query, bot_answer, user_query_active, bot_answer_active, created_at"
     if include_logs:
         cols = (
-            "session_id, fingerprint, user_query, bot_answer, route, documents_count, "
-            "web_search_used, strategy, processing_logs, created_at"
+            "session_id, fingerprint, user_query, bot_answer, user_query_active, bot_answer_active, "
+            "route, documents_count, web_search_used, strategy, processing_logs, created_at"
         )
+
+    def mask_inactive_rows(rows: list[dict]) -> list[dict]:
+        masked = []
+        for row in rows:
+            item = dict(row)
+            if not item.pop("user_query_active", True):
+                item["user_query"] = "[지워진 턴]"
+            if not item.pop("bot_answer_active", True):
+                item["bot_answer"] = "[지워진 턴]"
+            masked.append(item)
+        return masked
     if keyword:
-        conditions.append("(user_query ILIKE %s OR bot_answer ILIKE %s)")
+        conditions.append(
+            "((user_query_active AND user_query ILIKE %s) "
+            "OR (bot_answer_active AND bot_answer ILIKE %s))"
+        )
         params.extend([f"%{keyword}%", f"%{keyword}%"])
     if persona:
         # Restrict the agent to its own persona's web conversations.
@@ -165,7 +179,7 @@ def fetch_chat_logs(
             "ORDER BY c.latest DESC, f.fingerprint, f.session_id, f.created_at ASC"
         )
         try:
-            return db_query(sql, tuple(params) + (context_limit, row_limit))
+            return mask_inactive_rows(db_query(sql, tuple(params) + (context_limit, row_limit)))
         except Exception as e:
             logger.error("[shared] fetch_chat_logs grouped web error: %s", e)
             return []
@@ -173,7 +187,7 @@ def fetch_chat_logs(
     sql = f"SELECT {cols} FROM chat_logs {where} ORDER BY created_at DESC LIMIT %s"
     params.append(limit)
     try:
-        return db_query(sql, tuple(params))
+        return mask_inactive_rows(db_query(sql, tuple(params)))
     except Exception as e:
         logger.error("[shared] fetch_chat_logs error: %s", e)
         return []

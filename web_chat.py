@@ -837,7 +837,8 @@ def get_web_chat_log_for_feedback(
         clauses.append("persona = %s")
         params.append(persona)
     return db_query_one(
-        f"""SELECT id, session_id, fingerprint, user_query, bot_answer, persona, created_at
+        f"""SELECT id, session_id, fingerprint, user_query, bot_answer,
+                   user_query_active, bot_answer_active, persona, created_at
               FROM chat_logs
              WHERE {' AND '.join(clauses)}
              LIMIT 1""",
@@ -893,7 +894,10 @@ def _load_web_feedback_rows(
         params.append(session_id)
     params.append(limit)
     return db_query(
-        f"""SELECT f.id, f.rating, f.tone_feedback, f.note, l.user_query, l.bot_answer, f.updated_at
+        f"""SELECT f.id, f.rating, f.tone_feedback, f.note,
+                  CASE WHEN l.user_query_active THEN l.user_query ELSE '[지워진 턴]' END AS user_query,
+                  CASE WHEN l.bot_answer_active THEN l.bot_answer ELSE '[지워진 턴]' END AS bot_answer,
+                  f.updated_at
               FROM web_chat_feedback f
               JOIN chat_logs l ON l.id = f.chat_log_id
              WHERE {identity_clause}
@@ -1046,6 +1050,7 @@ def _load_web_history(
     excluded_ids = {int(x) for x in (exclude_chat_log_ids or set()) if x}
     identity_clause = "user_id = %s" if account_user_id else "fingerprint = ANY(%s)"
     identity_value = account_user_id or fps
+    deleted_turn_marker = "[지워진 턴]"
 
     def _rows_to_messages(rows: list[dict]) -> list[dict]:
         if excluded_ids:
@@ -1055,12 +1060,20 @@ def _load_web_history(
             if row.get("user_query"):
                 messages.append({
                     "role": "user",
-                    "content": _truncate_history_content(row["user_query"], _HISTORY_USER_CHAR_LIMIT),
+                    "content": (
+                        _truncate_history_content(row["user_query"], _HISTORY_USER_CHAR_LIMIT)
+                        if row.get("user_query_active", True)
+                        else deleted_turn_marker
+                    ),
                 })
             if row.get("bot_answer"):
                 messages.append({
                     "role": "assistant",
-                    "content": _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT),
+                    "content": (
+                        _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT)
+                        if row.get("bot_answer_active", True)
+                        else deleted_turn_marker
+                    ),
                 })
         return _fit_history_budget(messages)
 
@@ -1077,13 +1090,15 @@ def _load_web_history(
             anchor_limit = min(4, max(0, limit // 4))
             recent_limit = max(0, limit - anchor_limit)
             anchor_rows = db_query(
-                f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+                f"""SELECT id, user_query, bot_answer,
+                          user_query_active, bot_answer_active, created_at FROM chat_logs
                    WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at ASC LIMIT %s""",
                 (session_id, identity_value, persona, anchor_limit),
             )
             recent_rows = db_query(
-                f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+                f"""SELECT id, user_query, bot_answer,
+                          user_query_active, bot_answer_active, created_at FROM chat_logs
                    WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
                 (session_id, identity_value, persona, recent_limit),
@@ -1097,7 +1112,8 @@ def _load_web_history(
             return []
     else:
         rows = db_query(
-            f"""SELECT id, user_query, bot_answer, created_at FROM chat_logs
+            f"""SELECT id, user_query, bot_answer,
+                          user_query_active, bot_answer_active, created_at FROM chat_logs
                WHERE {identity_clause} AND persona = %s
                ORDER BY created_at DESC LIMIT %s""",
             (identity_value, persona, limit),
@@ -1129,6 +1145,14 @@ def ensure_chat_logs_persona_column() -> None:
     db_execute(
         """ALTER TABLE chat_logs
            ADD COLUMN IF NOT EXISTS user_id bigint"""
+    )
+    db_execute(
+        """ALTER TABLE chat_logs
+           ADD COLUMN IF NOT EXISTS user_query_active boolean NOT NULL DEFAULT true"""
+    )
+    db_execute(
+        """ALTER TABLE chat_logs
+           ADD COLUMN IF NOT EXISTS bot_answer_active boolean NOT NULL DEFAULT true"""
     )
     db_execute(
         """UPDATE chat_logs cl
@@ -1210,6 +1234,7 @@ def _update_chat_answer(
         row = db_query_one(
             """UPDATE chat_logs
                   SET bot_answer = %s,
+                      bot_answer_active = true,
                       route = %s,
                       documents_count = %s,
                       web_search_used = %s,
@@ -1308,7 +1333,11 @@ async def handle_web_chat(
             persona,
             account_user_id=authenticated_user_id,
         )
-        if not regeneration_source:
+        if (
+            not regeneration_source
+            or not regeneration_source.get("user_query_active", True)
+            or not regeneration_source.get("bot_answer_active", True)
+        ):
             yield _format_sse({"type": "error", "content": "재생성할 이전 응답을 찾을 수 없습니다."})
             return
         if tone_feedback or feedback_note:

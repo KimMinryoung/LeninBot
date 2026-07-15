@@ -39,6 +39,7 @@ Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret
 | `GET`, `HEAD` | `/api/health` | health check alias |
 | `POST` | `/chat` | public web chat SSE stream |
 | `POST` | `/chat/feedback` | store rating/tone feedback for a web chat answer |
+| `POST` | `/chat/messages/{message_id}/deactivate` | soft-delete one user or assistant side of a stored web-chat exchange |
 | `GET` | `/personas` | selectable public web-chat persona catalog |
 | `GET` | `/history` | chat history visible to fingerprint/proxy identity |
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
@@ -72,6 +73,8 @@ Request:
 ```
 
 Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. Unknown persona IDs fall back server-side to `cyber-lenin`. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
+
+`POST /chat/messages/{message_id}/deactivate` accepts `part` (`user` or `assistant`), `fingerprint`, `session_id`, and `persona` through the trusted frontend proxy. It sets the corresponding `chat_logs.user_query_active` or `chat_logs.bot_answer_active` flag to false without deleting stored text. Inactive sides are omitted from browser history responses and represented as `[지워진 턴]` in LLM and agent chat-history context.
 
 Selectable personas are defined in `web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; for Gramsci theory/concept triggers the server also performs a preflight vector lookup and injects a bounded grounding block into the current turn. His persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
 
