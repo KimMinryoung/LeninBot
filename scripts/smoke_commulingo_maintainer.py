@@ -49,11 +49,11 @@ assert "fate.label is too long" in _validate(
 )
 assert "unknown patch key" not in (_validate(
     None, "person", "update", "example",
-    {"citizenship": {"code": "ghana", "label": {"ko": "가나", "en": "Ghana"}}},
+    {"citizenship": {"code": "mali", "label": {"ko": "말리", "en": "Mali"}}},
 ) or "")
 assert "no flag icon" in _validate(
     None, "person", "update", "example",
-    {"citizenship": {"code": "ghana", "label": {"ko": "가나", "en": "Ghana"}}},
+    {"citizenship": {"code": "mali", "label": {"ko": "말리", "en": "Mali"}}},
 )
 assert "citizenship must be" in _validate(
     None, "person", "update", "example", {"citizenship": "vietnam"},

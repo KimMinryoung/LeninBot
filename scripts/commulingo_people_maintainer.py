@@ -126,7 +126,9 @@ NATIONALITY_CODES = (
     "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
     "kyrgyzstan, poland, finland, germany, east-germany, austria, hungary, czechia, "
     "romania, bulgaria, france, italy, spain, uk, netherlands, usa, "
-    "cuba, argentina, chile, china, japan, india, turkey, vietnam, north-korea, south-korea"
+    "cuba, argentina, chile, china, japan, india, turkey, vietnam, north-korea, south-korea, "
+    "albania, angola, burkina-faso, congo, ghana, guinea-bissau, indonesia, "
+    "mozambique, peru, trinidad"
 )
 
 

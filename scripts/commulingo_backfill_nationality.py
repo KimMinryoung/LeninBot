@@ -76,6 +76,16 @@ FLAG_NAMES = {
     "north-korea": ("조선", "North Korea"),
     "south-korea": ("대한민국", "South Korea"),
     "vietnam": ("베트남", "Vietnam"),
+    "albania": ("알바니아", "Albania"),
+    "angola": ("앙골라", "Angola"),
+    "burkina-faso": ("부르키나파소", "Burkina Faso"),
+    "congo": ("콩고민주공화국", "DR Congo"),
+    "ghana": ("가나", "Ghana"),
+    "guinea-bissau": ("기니비사우", "Guinea-Bissau"),
+    "indonesia": ("인도네시아", "Indonesia"),
+    "mozambique": ("모잠비크", "Mozambique"),
+    "peru": ("페루", "Peru"),
+    "trinidad": ("트리니다드 토바고", "Trinidad and Tobago"),
 }
 
 # Wikidata QIDs whose citizenship means "Soviet" for our purposes: the USSR, the
@@ -147,6 +157,16 @@ COUNTRY_QID = {
     "Q211274": "poland",  # People's Republic of Poland
     "Q846739": "bulgaria", "Q841628": "bulgaria", "Q7842": "bulgaria",  # PR/Kingdom/Principality Bulgaria
     "Q28513_hu": "hungary",
+    "Q222": "albania",
+    "Q916": "angola", "Q2208280": "angola",  # Angola, People's Republic of Angola
+    "Q965": "burkina-faso",  # Burkina Faso (incl. renamed Upper Volta)
+    "Q974": "congo", "Q618399": "congo",  # DR Congo, Congo-Léopoldville
+    "Q117": "ghana",
+    "Q1007": "guinea-bissau",
+    "Q252": "indonesia", "Q188161": "indonesia",  # Indonesia, Dutch East Indies
+    "Q1029": "mozambique", "Q617078": "mozambique",  # Mozambique, People's Republic of Mozambique
+    "Q419": "peru",
+    "Q754": "trinidad", "Q116282722": "trinidad",  # Trinidad and Tobago, Crown colony
 }
 
 
