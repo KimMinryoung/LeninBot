@@ -47,6 +47,17 @@ assert "fate.label is too long" in _validate(
     None, "person", "update", "example",
     {"fate": {"kind": "natural", "label": {"ko": "가" * 23, "en": "Died of illness"}}},
 )
+assert "unknown patch key" not in (_validate(
+    None, "person", "update", "example",
+    {"citizenship": {"code": "ghana", "label": {"ko": "가나", "en": "Ghana"}}},
+) or "")
+assert "no flag icon" in _validate(
+    None, "person", "update", "example",
+    {"citizenship": {"code": "ghana", "label": {"ko": "가나", "en": "Ghana"}}},
+)
+assert "citizenship must be" in _validate(
+    None, "person", "update", "example", {"citizenship": "vietnam"},
+)
 
 with TemporaryDirectory() as tmp:
     path = Path(tmp) / "config.json"

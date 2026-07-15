@@ -60,8 +60,20 @@ _FATE_KINDS = (
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
     "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
-    "aliases", "scenes", "career", "role",
+    "aliases", "scenes", "career", "role", "citizenship", "origin",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
+})
+
+# Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
+# Must stay in sync with NATIONALITY_CODES in scripts/commulingo_people_maintainer.py.
+_NATIONALITY_CODES = frozenset({
+    "soviet", "russia", "ukraine", "georgia", "armenia", "azerbaijan", "belarus",
+    "kazakhstan", "latvia", "lithuania", "estonia", "uzbekistan", "moldova",
+    "turkmenistan", "tajikistan", "kyrgyzstan", "poland", "finland", "germany",
+    "east-germany", "austria", "hungary", "czechia", "romania", "bulgaria",
+    "france", "italy", "spain", "uk", "netherlands", "usa", "cuba", "argentina",
+    "chile", "china", "japan", "india", "turkey", "vietnam", "north-korea",
+    "south-korea",
 })
 
 # person patch fields that must be {ko, en} objects. Plain strings are
@@ -961,6 +973,22 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return (
                     f"Error: {key} is too long; limits are {ko_max} Korean characters "
                     f"and {en_max} English characters. Keep career chronology in career rows."
+                )
+        for key in ("citizenship", "origin"):
+            if key not in patch or patch[key] is None:
+                continue
+            node = patch[key]
+            if not isinstance(node, dict):
+                return (
+                    f"Error: {key} must be {{\"code\": \"soviet\", "
+                    f"\"label\": {{\"ko\": \"소련\", \"en\": \"Soviet Union\"}}}} or {{}} to clear."
+                )
+            code = str(node.get("code") or "").strip()
+            if code and code not in _NATIONALITY_CODES:
+                return (
+                    f"Error: {key}.code '{code}' has no flag icon on the site. "
+                    f"Use one of: {', '.join(sorted(_NATIONALITY_CODES))}. "
+                    f"If none applies, omit {key} entirely."
                 )
         if "aliases" in patch and patch["aliases"] is not None:
             aliases = patch["aliases"]

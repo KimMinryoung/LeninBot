@@ -186,7 +186,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
               AND (%(forced_id)s <> '' OR NOT EXISTS (
                     SELECT 1 FROM commulingo_people_revisions rev
                      WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
-                       AND rev.changed_by = 'commulingo-maintainer'
+                       AND rev.changed_by LIKE 'commulingo-maintainer%'
                        AND rev.created_at >= NOW() - (%(recent_days)s * INTERVAL '1 day')
                   ))
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
@@ -624,6 +624,15 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
             candidate = select_sparse_person(config["recent_days"], candidate_id)
+            if candidate is None:
+                # Every person was already touched within the cooldown window;
+                # idling until candidates age back in is the correct, zero-cost outcome.
+                return {
+                    "status": "skipped",
+                    "reason": f"no candidate outside the {config['recent_days']}-day cooldown",
+                    "mode": chosen_mode,
+                    "fallback_error": fallback_error,
+                }
             task = build_task("enrich", candidate)
             result, enrich_tracker, _ = await _call_curator_stage(
                 task=task, spec=spec, model=model, tools=tools, handlers=handlers,
