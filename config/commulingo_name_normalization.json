@@ -1,0 +1,22 @@
+{
+  "_comment": "Person-name spelling normalization: variant -> canonical, per language. The commulingo_edit validator rejects prose that uses a variant outside direct quotation marks, and scripts/commulingo_normalize_names.py bulk-fixes stored text. 'blocked' lists longer strings that merely CONTAIN a variant and must never match (시베리아 contains 베리아) — same trick as the linkify BLOCKED list. Keep variants OUT of commulingo_person_aliases — aliases are linkified verbatim, so registering a misspelling there would display it. Grow this map via scripts/commulingo_find_name_variants.py candidates after human review. Picked up on mtime change, no restart needed.",
+  "ko": {
+    "베리아": "베리야",
+    "투하체프스키": "투하쳅스키",
+    "흐루시초프": "흐루쇼프",
+    "후르시초프": "흐루쇼프",
+    "에조프": "예조프",
+    "트로트스키": "트로츠키",
+    "지노비에프": "지노비예프",
+    "까메네프": "카메네프",
+    "오르드조니키제": "오르조니키제",
+    "워로실로프": "보로실로프",
+    "지에르진스키": "제르진스키",
+    "에이젠시테인": "예이젠시테인"
+  },
+  "en": {},
+  "blocked": {
+    "ko": ["시베리아", "라이베리아", "이베리아"],
+    "en": []
+  }
+}

@@ -58,6 +58,22 @@ assert "no flag icon" in _validate(
 assert "citizenship must be" in _validate(
     None, "person", "update", "example", {"citizenship": "vietnam"},
 )
+assert "non-standard person-name spelling" in _validate(
+    None, "person", "update", "example",
+    {"bio": {"ko": "베리아의 심복으로 일했다.", "en": "Worked under Beria."}},
+)
+assert "non-standard person-name spelling" in _validate(
+    None, "person_section", "create", "example",
+    {"slug": "x", "heading": {"ko": "제목", "en": "T"},
+     "body": {"ko": "투하체프스키 재판에 관여했다.", "en": "Involved."}, "sources": []},
+)
+from runtime_tools.commulingo_people import _find_name_variants
+assert _find_name_variants(
+    {"body": {"ko": "그는 “베리아 동지에게 보고하라”라고 적었다. 베리야는 침묵했다.", "en": ""}}
+) == []
+assert _find_name_variants(
+    {"career": [{"y": "1938", "r": {"ko": "베리아의 부관", "en": "Beria's deputy"}}]}
+) == [("베리아", "베리야")]
 
 with TemporaryDirectory() as tmp:
     path = Path(tmp) / "config.json"

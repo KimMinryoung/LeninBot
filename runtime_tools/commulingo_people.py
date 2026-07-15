@@ -105,6 +105,87 @@ _CONFIG_PATH = os.path.join(
 _config_cache: dict | None = None
 _config_mtime: float = -1.0
 
+# ── Name-spelling normalization (config/commulingo_name_normalization.json) ──
+# variant -> canonical per language. Prose using a variant outside direct
+# quotation marks is rejected by _validate so every card spells other people
+# the way their own card does.
+
+_NAME_NORM_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "config",
+    "commulingo_name_normalization.json",
+)
+_name_norm_cache: dict | None = None
+_name_norm_mtime: float = -1.0
+
+# Spans inside these quote pairs keep their original spelling (direct
+# quotations of period documents and speech).
+_QUOTED_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|《[^》]*》')
+
+
+def _name_normalization() -> dict:
+    """{'ko': {variant: canonical}, 'en': {...}, 'blocked': {'ko': [...], 'en': [...]}}.
+
+    'blocked' strings merely contain a variant (시베리아 ⊃ 베리아) and are
+    masked before matching so they never trigger.
+    """
+    global _name_norm_cache, _name_norm_mtime
+    empty = {"ko": {}, "en": {}, "blocked": {"ko": [], "en": []}}
+    try:
+        mtime = os.path.getmtime(_NAME_NORM_PATH)
+    except OSError:
+        return empty
+    if _name_norm_cache is None or mtime != _name_norm_mtime:
+        try:
+            with open(_NAME_NORM_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            blocked = data.get("blocked") or {}
+            _name_norm_cache = {
+                "ko": {str(k): str(v) for k, v in (data.get("ko") or {}).items()},
+                "en": {str(k): str(v) for k, v in (data.get("en") or {}).items()},
+                "blocked": {
+                    "ko": [str(s) for s in (blocked.get("ko") or [])],
+                    "en": [str(s) for s in (blocked.get("en") or [])],
+                },
+            }
+            _name_norm_mtime = mtime
+        except Exception as e:
+            logger.warning("commulingo name normalization config unreadable: %s", e)
+            return empty
+    return _name_norm_cache
+
+
+def _collect_localized_strings(node, out: list) -> None:
+    """Recursively gather ('ko'|'en', text) pairs from {ko, en} dicts in a patch."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in ("ko", "en") and isinstance(value, str):
+                out.append((key, value))
+            else:
+                _collect_localized_strings(value, out)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_localized_strings(item, out)
+
+
+def _find_name_variants(patch: dict) -> list[tuple[str, str]]:
+    """(variant, canonical) pairs used outside quotation marks, deduped."""
+    norm = _name_normalization()
+    texts: list[tuple[str, str]] = []
+    _collect_localized_strings(patch, texts)
+    hits: dict[str, str] = {}
+    for lang, text in texts:
+        table = norm.get(lang) or {}
+        if not table:
+            continue
+        scannable = _QUOTED_SPAN_RE.sub(" ", text)
+        for blocked in norm["blocked"].get(lang) or []:
+            scannable = scannable.replace(blocked, " ")
+        for variant, canonical in table.items():
+            if variant in scannable:
+                hits[variant] = canonical
+    return sorted(hits.items())
+
 
 def direct_apply_enabled() -> bool:
     """True when edits apply immediately; False stages them for review.
@@ -932,6 +1013,14 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         return (
             "Error: Korean text contains '북한'. On first reference use "
             "'조선민주주의인민공화국', then '조선'. Rewrite only the affected text."
+        )
+    variants = _find_name_variants(patch)
+    if variants:
+        fixes = "; ".join(f"'{v}' → '{c}'" for v, c in variants)
+        return (
+            f"Error: non-standard person-name spelling(s): {fixes}. Spell people "
+            "exactly as their own dictionary card does. Keep an original spelling "
+            "only inside direct quotation marks (quoted spans are already exempt)."
         )
     allowed = {
         "person": _PERSON_PATCH_KEYS,

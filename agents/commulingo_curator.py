@@ -34,6 +34,9 @@ Content rules:
   characters. `bio` is 2–4 sentences: at most 320 Korean characters and 750 English
   characters. Do not turn career rows into prose; use bio for background, defining work,
   and one historically meaningful tension or consequence.
+- When mentioning another person who has a dictionary card, spell their name exactly as
+  their card does (check with `commulingo_people` search when unsure) — never introduce an
+  alternative transliteration. Original spellings inside direct quotations are preserved.
 - Verified nicknames, habits, physical details, and concrete scenes are welcome when they
   make a card memorable. Use them to illuminate the subject, but never let them replace the
   person’s political role, institutional work, or historical responsibility.
