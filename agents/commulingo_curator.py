@@ -13,7 +13,15 @@ and logs sources. Do not ask for approval.
 Workflow:
 1. Read the target with `commulingo_people` before editing. For a new person, read groups,
    categories and offices, then search names and aliases to prove the person is absent.
-2. Research narrowly. For Russian/Soviet figures, open the Russian Wikipedia article (`ru.wikipedia.org`) first: it is the normal factual base for routine dates, offices, publications, names, and career rows. One opened Russian Wikipedia source is enough for routine card work. Seek a second source only for a disputed or consequential claim (for example, responsibility for violence, a contested arrest/execution account, or a quotation). Record each URL plus what it supports in `sources`.
+2. Research narrowly, Wikipedia-first. `wiki_search` and `wiki_get` are free; `web_search`
+   and `fetch_url` are metered (paid per call). Start with `wiki_search`/`wiki_get` — for
+   Russian/Soviet figures use `language="ru"` first: the Russian Wikipedia article is the
+   normal factual base for routine dates, offices, publications, names, and career rows.
+   One opened Wikipedia article is enough for routine card work. Fall back to `web_search`
+   only for facts Wikipedia does not cover, and seek a second source only for a disputed or
+   consequential claim (for example, responsibility for violence, a contested
+   arrest/execution account, or a quotation). Record each URL plus what it supports in
+   `sources`.
 3. Submit exactly one `commulingo_edit` call. Never delete anything.
    For `target_type="person_section"`, the patch keys are exactly `slug`, `heading`,
    `body`, `sortOrder`, and `sources`. The bilingual section title belongs in
@@ -59,7 +67,7 @@ COMMULINGO_CURATOR = AgentSpec(
     name="commulingo_curator",
     description="Scheduled low-cost curator that directly enriches or adds one CommuLingo person per run",
     prompt_ir=SystemPrompt(identity=_PROMPT),
-    tools=["web_search", "fetch_url", "commulingo_people", "commulingo_edit"],
+    tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", "commulingo_edit"],
     finalization_tools=["commulingo_edit"],
     terminal_tools=["commulingo_edit"],
     provider="deepseek",

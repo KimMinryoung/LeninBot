@@ -45,6 +45,8 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "web_search": "fetch",
     "research_web": "fetch",  # writer: light-agent web research delegation
     "fetch_url": "fetch",
+    "wiki_search": "fetch",
+    "wiki_get": "fetch",
     "fetch_x_post": "fetch",
     "convert_document": "fetch",
     "download_file": "fetch",

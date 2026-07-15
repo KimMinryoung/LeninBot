@@ -19,7 +19,7 @@ import scripts.commulingo_people_maintainer as maintainer
 
 assert COMMULINGO_CURATOR.provider == "deepseek"
 assert COMMULINGO_CURATOR.model == "deepseek_pro"
-assert set(COMMULINGO_CURATOR.tools) == {"web_search", "fetch_url", "commulingo_people", "commulingo_edit"}
+assert set(COMMULINGO_CURATOR.tools) == {"wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", "commulingo_edit"}
 assert COMMULINGO_CURATOR.terminal_tools == ["commulingo_edit"]
 assert COMMULINGO_CURATOR.max_rounds == 16
 assert COMMULINGO_CURATOR.max_input_tokens == 160_000
@@ -45,7 +45,7 @@ assert "epithet is too long" in _validate(
 )
 assert "fate.label is too long" in _validate(
     None, "person", "update", "example",
-    {"fate": {"kind": "natural", "label": {"ko": "가" * 13, "en": "Died 1948"}}},
+    {"fate": {"kind": "natural", "label": {"ko": "가" * 23, "en": "Died of illness"}}},
 )
 
 with TemporaryDirectory() as tmp:

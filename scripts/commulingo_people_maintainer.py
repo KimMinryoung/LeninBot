@@ -244,7 +244,9 @@ def build_task(mode: str, candidate: dict | None) -> str:
 Identify one historically important person missing from CommuLingo whose inclusion would
 materially improve coverage of revolutionary or Soviet history. Inspect list_groups,
 list_categories and list_offices, then search_people under the proposed name and aliases to
-prove there is no duplicate. Start by opening the Russian Wikipedia article when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
+prove there is no duplicate. Research with the free wiki_search/wiki_get tools first (Russian
+Wikipedia when available); use the paid web_search only for facts Wikipedia lacks. One opened
+source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
 complete bilingual person card with a correct group and one primary role, including a bio and a
 one-line `moment` that follow the style rules below. Make exactly one
 `commulingo_edit(target_type='person', action='create', ...)` call and stop. Do not create a
@@ -335,7 +337,10 @@ first step below that applies:
 6. SECTION: else find the single most valuable missing topic and add one substantial bilingual
    `person_section` (one topic, roughly 350-700 Korean characters plus equivalent English) when
    no section covers it.
-Preserve every wholesale field exactly when updating. Start with Russian Wikipedia when available. One opened source is enough for routine card facts; use a second only for disputed or consequential claims. Make one commulingo_edit call and stop.
+Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
+tools first (Russian Wikipedia when available); use the paid web_search only for facts Wikipedia
+lacks. One opened source is enough for routine card facts; use a second only for disputed or
+consequential claims. Make one commulingo_edit call and stop.
 
 """ + CARD_STYLE_GUIDANCE
 

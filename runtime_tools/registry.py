@@ -1138,6 +1138,12 @@ from runtime_tools.research import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
 TOOLS.extend(RESEARCH_TOOLS)
 TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
 
+# ── Wikipedia (free MediaWiki API — no Tavily credits) ──
+from runtime_tools.wiki import WIKI_TOOLS, WIKI_TOOL_HANDLERS
+
+TOOLS.extend(WIKI_TOOLS)
+TOOL_HANDLERS.update(WIKI_TOOL_HANDLERS)
+
 # ── CommuLingo people dictionary (read + staged edit suggestions) ──
 from runtime_tools.commulingo_people import COMMULINGO_TOOLS, COMMULINGO_TOOL_HANDLERS
 
