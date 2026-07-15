@@ -86,6 +86,7 @@ FLAG_NAMES = {
     "mozambique": ("모잠비크", "Mozambique"),
     "peru": ("페루", "Peru"),
     "trinidad": ("트리니다드 토바고", "Trinidad and Tobago"),
+    "portugal": ("포르투갈", "Portugal"),
 }
 
 # Wikidata QIDs whose citizenship means "Soviet" for our purposes: the USSR, the
@@ -167,6 +168,11 @@ COUNTRY_QID = {
     "Q1029": "mozambique", "Q617078": "mozambique",  # Mozambique, People's Republic of Mozambique
     "Q419": "peru",
     "Q754": "trinidad", "Q116282722": "trinidad",  # Trinidad and Tobago, Crown colony
+    "Q45": "portugal",
+    "Q121932": "bulgaria",  # People's Republic of Bulgaria
+    "Q172640": "vietnam", "Q185682": "vietnam",  # North Vietnam, French Indochina
+    "Q467864": "albania",  # People's Socialist Republic of Albania
+    "Q2685298": "romania", "Q842794": "romania", "Q203493": "romania",  # PR/SR/Kingdom of Romania
 }
 
 
