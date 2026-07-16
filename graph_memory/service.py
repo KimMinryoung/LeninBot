@@ -12,6 +12,7 @@ import asyncio
 import os
 import json
 import logging
+import time
 from datetime import datetime, timezone
 import re
 from typing import Any
@@ -90,14 +91,75 @@ def _embedding_retry_delays() -> list[float]:
     return delays or [5.0, 15.0, 45.0]
 
 
+class _EmbedRateLimiter:
+    """Client-side request pacer for embedding calls (KG_EMBED_MAX_RPS).
+
+    Batch producers (scout→KG ingest, kg_enricher, curation ingest) used to
+    burst SEMAPHORE_LIMIT-wide into the Gemini quota and rely on the retry
+    wrapper to paper over the resulting 429s. Spacing requests at the client
+    keeps quota headroom for interactive searches instead.
+
+    Simple serializing scheduler: each acquire reserves the next free slot
+    1/rate seconds after the previous one. Rate is re-read from the env on
+    every acquire (cheap, and lets ops tune without restart); <= 0 disables.
+    """
+
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0
+
+    @staticmethod
+    def _rate() -> float:
+        try:
+            return float(os.getenv("KG_EMBED_MAX_RPS", "2"))
+        except (TypeError, ValueError):
+            return 2.0
+
+    async def acquire(self) -> float:
+        """Wait for the next request slot; returns the seconds slept."""
+        rate = self._rate()
+        if rate <= 0:
+            return 0.0
+        async with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next_at)
+            self._next_at = start + (1.0 / rate)
+            wait = start - now
+        if wait > 0:
+            await asyncio.sleep(wait)
+        return wait
+
+
+_EMBED_LIMITER = _EmbedRateLimiter()
+
+
+def _resolve_kg_gemini_key() -> str:
+    """Gemini key for the KG service (LLM extraction + embeddings).
+
+    KG_GEMINI_API_KEY isolates KG traffic onto its own quota; it falls back
+    to the shared GEMINI_API_KEY so the separation can be provisioned later
+    (a key from the SAME Google project shares quota and gains nothing —
+    it must come from a separate project/account)."""
+    from secrets_loader import get_secret
+
+    return (get_secret("KG_GEMINI_API_KEY", "") or "").strip() or (get_secret("GEMINI_API_KEY", "") or "")
+
+
 class RetryingGeminiEmbedder(GeminiEmbedder):
-    """Gemini embedder with bounded retry for transient Vertex/Gemini limits."""
+    """Gemini embedder with client-side pacing plus bounded retry for
+    transient Vertex/Gemini limits."""
 
     async def _with_retry(self, operation: str, call):
         delays = _embedding_retry_delays()
         max_attempts = len(delays) + 1
         for attempt in range(1, max_attempts + 1):
             try:
+                waited = await _EMBED_LIMITER.acquire()
+                if waited > 1.0:
+                    logger.debug(
+                        "[KG] embedding %s rate-limited client-side; waited %.1fs",
+                        operation, waited,
+                    )
                 return await call()
             except Exception as exc:
                 if attempt >= max_attempts or not _is_retryable_embedding_error(exc):
@@ -156,7 +218,7 @@ class GraphMemoryService:
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = get_secret("NEO4J_PASSWORD", "") or ""
         neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
-        gemini_api_key = get_secret("GEMINI_API_KEY", "") or ""
+        gemini_api_key = _resolve_kg_gemini_key()
 
         llm_client = GeminiClient(
             config=LLMConfig(

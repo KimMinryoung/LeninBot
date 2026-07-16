@@ -130,6 +130,8 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 6 (P1, parallel ops track) — KG embedding resilience completion
 
+**Status: SHIPPED code-side (2026-07-16), key provisioning pending.** Client-side pacer `_EmbedRateLimiter` in `graph_memory/service.py` (`KG_EMBED_MAX_RPS`, default 2 req/s, env re-read per request, 0 disables) wraps every embedder attempt; `KG_GEMINI_API_KEY` plumbing live via `_resolve_kg_gemini_key()` with fallback to the shared `GEMINI_API_KEY`. Read-path degradation turned out to be **already implemented** before this phase: `kg_runtime/search.py` falls back to direct-Cypher text match on any Graphiti search failure (including embedding errors) and otherwise returns an explicit "do not treat as no KG data" message — verified by code audit, no change needed. Smoke: `scripts/smoke_kg_embed_limiter.py` (11/11). Remaining: the dedicated key itself — must come from a **separate Google project/account** (same-project keys share quota); operator decision, optionally skippable if the limiter alone zeroes the 429 warnings over a month.
+
 **Goal**: finish what the retry wrapper started; eliminate remaining 429/503 impact per `knowledge_graph_design.md` Maintenance guidance.
 
 **Design** (retry/backoff already exists — do not rebuild):
