@@ -90,6 +90,9 @@ WEB_CYBER_LENIN_TOOLS = frozenset({
     "get_finance_data",
     "check_wallet",
     "read_self",
+    # Read-only CommuLingo people-dictionary lookup (the data is already
+    # public at /commulingo/people). commulingo_edit stays off this surface.
+    "commulingo_people",
 })
 
 WEB_ROLEPLAY_PROFILE = "web.roleplay"
