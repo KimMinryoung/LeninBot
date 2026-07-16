@@ -161,6 +161,38 @@ _REPLACE_MANUSCRIPT_TOOL = {
 }
 
 
+# CommuLingo people dictionary, read side only (the edit tool is not in the
+# system.writer profile). The handler is project-independent and module-level,
+# so its identity is stable for the dispatcher's signature cache. The spec
+# reuses the canonical schema but swaps the description: the canonical one
+# instructs the reader to follow up with commulingo_edit, which the writer
+# does not have.
+_COMMULINGO_PEOPLE_WRITER_TOOL: dict | None = None
+_COMMULINGO_PEOPLE_HANDLER = None
+try:
+    from runtime_tools.commulingo_people import COMMULINGO_TOOL_HANDLERS, COMMULINGO_PEOPLE_TOOL
+
+    _COMMULINGO_PEOPLE_WRITER_TOOL = {
+        **COMMULINGO_PEOPLE_TOOL,
+        "description": (
+            "Read-only reference: the CommuLingo people dictionary "
+            "(cyber-lenin.com/commulingo/people) — Soviet-history figures with bios, "
+            "career timelines, and institution (office) leadership timelines, bilingual "
+            "ko/en. Use it to get historical facts right (who held which post when, "
+            "life dates, fates, name spellings ko/en/cyrillic) when the story touches "
+            "real Soviet figures; background documents still rule for this story's own "
+            "fictional canon. Actions: `search_people` (q matches id/name/cyrillic; "
+            "optional group_id), `get_person` (full record), `get_sections` (a person's "
+            "long-form detail sections), `list_groups` (era groups), `list_offices` / "
+            "`get_office` (institution leadership timelines), `list_categories`, "
+            "`list_events` / `get_event` (historical events and who was involved)."
+        ),
+    }
+    _COMMULINGO_PEOPLE_HANDLER = COMMULINGO_TOOL_HANDLERS["commulingo_people"]
+except Exception:
+    logger.exception("writer: commulingo_people tool unavailable; continuing without it")
+
+
 _writer_tools_cache: dict[int, tuple[list[dict], dict]] = {}
 
 
@@ -327,6 +359,10 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
         "search_documents": _handle_search_documents,
         "save_document": _handle_save_document,
     }
+
+    if _COMMULINGO_PEOPLE_WRITER_TOOL is not None and _COMMULINGO_PEOPLE_HANDLER is not None:
+        tools.append(_COMMULINGO_PEOPLE_WRITER_TOOL)
+        handlers["commulingo_people"] = _COMMULINGO_PEOPLE_HANDLER
 
     # Web research (see WRITER_WEB_SEARCH_ENABLED): the main model gets the
     # research_web delegation tool, not raw web_search — a light DeepSeek

@@ -74,6 +74,9 @@ WRITER_TOOLS = frozenset({
     # that uses web_search internally — both belong to the writer surface.
     "research_web",
     "web_search",
+    # Read-only lookup in the CommuLingo people dictionary (Soviet-history
+    # reference for fiction). commulingo_edit stays off this surface.
+    "commulingo_people",
 })
 
 # -- Public web chat profiles --------------------------------------------
