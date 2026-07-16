@@ -96,7 +96,14 @@ WEB_CYBER_LENIN_TOOLS = frozenset({
 })
 
 WEB_ROLEPLAY_PROFILE = "web.roleplay"
-WEB_ROLEPLAY_TOOLS = frozenset({"vector_search", "web_search", "fetch_url"})
+WEB_ROLEPLAY_TOOLS = frozenset({
+    "vector_search",
+    "web_search",
+    "fetch_url",
+    # Read-only CommuLingo people-dictionary lookup — Soviet-history figures,
+    # a natural reference for the Yezhov-era roleplay personas.
+    "commulingo_people",
+})
 
 # -- A2A skill profiles --------------------------------------------------
 

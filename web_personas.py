@@ -336,7 +336,9 @@ YEZHOV = _verbatim_persona(
     display_name="니콜라이 예조프",
     description="역사 인물 역할극 — NKVD 수장 니콜라이 예조프 (성인·관리자 전용).",
     body=_YEZHOV_BODY + _YEZHOV_WEB_TOOL_DISCIPLINE,
-    allowed_tools=frozenset({"vector_search", "web_search", "fetch_url", "knowledge_graph_search"}),
+    allowed_tools=frozenset(
+        {"vector_search", "web_search", "fetch_url", "knowledge_graph_search", "commulingo_people"}
+    ),
     provider_override="deepseek",
     admin_only=False,
 )
