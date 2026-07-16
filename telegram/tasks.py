@@ -633,12 +633,22 @@ async def _run_verification(
                 extra_handlers=extra_handlers,
             )
             llm_upper = (llm_response or "").strip().upper()
-            # Extract first non-VERDICT line as reasoning
-            verdict_reasoning = ""
-            for _vline in (llm_response or "").strip().splitlines():
-                if _vline.strip() and not _vline.strip().upper().startswith("VERDICT:"):
-                    verdict_reasoning = _vline.strip()
-                    break
+            # Extract the reasoning anchored to the VERDICT line. The verifier
+            # narrates its checks before concluding, so the FIRST line is
+            # process talk ("Let me verify..."), not the rationale — observed
+            # across all shadow rows to 2026-07-16. Prefer the line right
+            # after the verdict (the prescribed "Reason: ..." line), then the
+            # line before it, then fall back to the first line.
+            _vlines = [l.strip() for l in (llm_response or "").strip().splitlines() if l.strip()]
+            _vidx = next((i for i, l in enumerate(_vlines) if "VERDICT:" in l.upper()), None)
+            if _vidx is not None and _vidx + 1 < len(_vlines):
+                verdict_reasoning = _vlines[_vidx + 1]
+            elif _vidx is not None and _vidx > 0:
+                verdict_reasoning = _vlines[_vidx - 1]
+            elif _vlines:
+                verdict_reasoning = _vlines[0]
+            else:
+                verdict_reasoning = ""
             if "VERDICT: PASS" in llm_upper:
                 llm_verdict = "passed"
                 detail_lines.append(f"llm_verification: passed — {verdict_reasoning[:300]}")
