@@ -34,7 +34,7 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 1 (P0) — Activate the Task Critic (wire the dead verifier)
 
-**Status: SHIPPED in shadow mode (2026-07-08).** Implemented as designed; see `multi_agent_architecture.md` "Post-Hoc Verification (Critic)" for the operational description and `scripts/smoke_task_verification.py` for the hermetic smoke test (25/25). Awaiting 1–2 weeks of shadow data before the enforce decision.
+**Status: ENFORCED (2026-07-16).** Implemented as designed; see `multi_agent_architecture.md` "Post-Hoc Verification (Critic)" for the operational description and `scripts/smoke_task_verification.py` for the hermetic smoke test (25/25). Shadow audit over 2026-07-08→07-16 (35 done tasks): coverage 97% non-pending (≥90% ✓), false-FAIL 0/18 LLM-verified (≤10% ✓), 2 genuine catches (#1108 report about the wrong people; #1103 edits blocked by the gateway 20/hr rate limit, report itself said "re-delegate to execute") — all three enforce criteria met, `task_verification_mode` flipped to `enforce` globally (both observed FAILs were analyst tasks and both were retry-appropriate, so the per-agent staging in the original rollout note was skipped). Audit side-fix: verification_details used to store the verifier's opening narration instead of its rationale; reasoning is now anchored to the VERDICT line (commit c1b00be). Open decision 1 resolved: verifier stays on the low tier (0 misjudgments in 18 shadow verdicts).
 
 **Goal**: every completed delegated task gets independent post-hoc verification; failed verification triggers the existing bounded auto-retry.
 
@@ -179,7 +179,7 @@ Every phase ships behind a flag, starts in shadow/log-only mode where output rea
 
 ## Open decisions
 
-1. **Verifier model tier** (Phase 1): pin verification to low tier (haiku/deepseek_flash) for cost, or medium for judgment quality? Shadow phase should compare both on the same tasks before enforce.
+1. **Verifier model tier** (Phase 1): ~~pin verification to low tier (haiku/deepseek_flash) for cost, or medium for judgment quality?~~ **Resolved 2026-07-16: low tier.** The shadow audit found 0 misjudgments across 18 LLM verdicts (both FAILs genuine, all PASSes plausible); the planned same-task tier comparison was unnecessary.
 2. **Cross-provider critique**: when tasks run on DeepSeek, is a DeepSeek verifier independent *enough*, or should the Critic deliberately be a different provider than the Executor? (Writer precedent: DeepSeek diagnoses Fable's prose successfully — the reverse pairing is untested.)
 3. **Autonomous tick cost ceiling** (Phase 4): is +2 flash calls per hourly tick (~+10%) acceptable, and should the tick Critic run on `tick_error` ticks too?
 4. **Phase 3 shape**: extend `multi_delegate` with `depends_on` (recommended, minimal) vs. a new `plan_mission` planner tool — is an explicit Planner component wanted for its own sake, or only if orchestrator-authored plans prove weak?
