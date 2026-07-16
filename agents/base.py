@@ -39,12 +39,15 @@ Use this to avoid redundant work and build on past results.
 **CRITICAL: Read the parent's <tool-log> FIRST to understand what was already completed.** \
 Resume from where the parent stopped — do NOT redo work that is already done.
 - <agent-board>: messages from sibling agents on the same mission (if any)
+- <dependency-results>: outputs of earlier plan stages your task depends on — treat as your primary input when present
+- <past-experiences>: lessons from similar past tasks; do not repeat recorded mistakes
 - <task>: your specific instructions
 
 **Context isolation**: The orchestrator only sees high-level summaries of your work. \
 You have full access to your own execution history (tool logs, results). \
 Use this to maintain continuity across multiple sessions.
-Read ALL context sections carefully before starting.
+Read ALL context sections carefully before starting. Before submitting, re-read <task>: \
+your report must answer THAT task — history and prior context are background, not the assignment.
 
 **Inter-agent messaging**: To pass information to other agents on the same mission:
 - `send_message(message)`: Post a message to the mission board. Other agents working in parallel can see it.
@@ -64,7 +67,9 @@ _MISSION_GUIDELINES_BODY = """\
 - KG storage — use `write_kg_structured(facts=[...])` for all new writes. YOU specify each (subject_name, subject_type, predicate, object_name, object_type, fact). Deterministic, no LLM extraction, exact entity reuse by name+type. Use for analyst conclusions, OSINT confirmations, news facts, structured updates. Predicates: Affiliation/PersonalRelation/OrgRelation/Funding/AssetTransfer/ThreatAction/Involvement/Presence/PolicyEffect/Participation/Statement/Causation. Entity types: Person/Organization/Location/Asset/Incident/Policy/Campaign/Concept/Role/Industry. See the tool description for the (subject → object) → predicate matrix. group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
 - The system will automatically terminate your work when budget/limits are reached. Don't worry — just do as much as you can.
   If there is unfinished work, state **what was done + what was not done + what should be done next** in your final response.
-  The orchestrator will read your response and decide whether to re-delegate."""
+  The orchestrator will read your response and decide whether to re-delegate.
+- Completed tasks are independently verified against actual state (files, DB, URLs). Claiming work \
+that was not done FAILs verification and triggers re-delegation — report done vs not-done precisely."""
 
 
 _CHAT_AUDIENCE_BODY = """\
@@ -124,6 +129,40 @@ def _load_agent_prompt_overlay_section(agent_name: str) -> tuple[str, str] | Non
     if not body:
         return None
     return ("runtime-prompt", body)
+
+
+def _load_rate_limit_section(tool_names: list[str]) -> tuple[str, str] | None:
+    """Live gateway rate limits for this agent's tools, loaded at render time.
+
+    Reads security_gateway.policy (mtime-cached config overlay), so a policy
+    change is reflected on the next render without a restart and the prompt
+    never hardcodes stale limits. Byte-stable between policy edits — prompt
+    caching still hits. Returns None when none of the agent's tools are
+    rate-limited (most agents)."""
+    try:
+        from security_gateway.policy import TOOL_RISK_CLASS, rate_limits
+
+        limits = rate_limits()
+        by_class: dict[str, list[str]] = {}
+        for tool in tool_names:
+            cls = TOOL_RISK_CLASS.get(tool)
+            spec = limits.get(cls) if cls else None
+            if spec and int(spec.get("max_calls", 0)) > 0:
+                by_class.setdefault(cls, []).append(tool)
+        if not by_class:
+            return None
+        lines = ["Current gateway rate limits on your tools (live policy; exceeding blocks the call):"]
+        for cls in sorted(by_class):
+            spec = limits[cls]
+            minutes = max(1, int(spec.get("window_seconds", 3600)) // 60)
+            lines.append(f"- {', '.join(sorted(by_class[cls]))}: {int(spec['max_calls'])} calls / {minutes} min")
+        lines.append(
+            "Unlisted tools are unlimited. Execute rate-limited calls as you go rather than "
+            "batching them all at the end; if blocked, report the remaining items precisely."
+        )
+        return ("tool-rate-limits", "\n".join(lines))
+    except Exception:
+        return None
 
 
 # ── Legacy XML block strings (kept for callers not yet on IR) ────────
@@ -227,9 +266,12 @@ class AgentSpec:
         if self.prompt_ir is not None:
             political_line = _load_political_line_section() if self.include_political_line else None
             prompt_overlay = _load_agent_prompt_overlay_section(self.name)
+            rate_limit_note = _load_rate_limit_section(self.tools)
             prompt_ir = self.prompt_ir
             extra_sections = [
-                section for section in (political_line, prompt_overlay) if section is not None
+                section
+                for section in (political_line, prompt_overlay, rate_limit_note)
+                if section is not None
             ]
             if extra_sections:
                 prompt_ir = SystemPrompt(
