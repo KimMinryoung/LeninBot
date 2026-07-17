@@ -208,65 +208,71 @@ class GraphMemoryService:
             return
 
         async with self._init_lock:
-            # Double-check after acquiring lock
             if self._graphiti is not None:
                 return
 
-        from secrets_loader import get_secret
+            from secrets_loader import get_secret
 
-        neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-        neo4j_password = get_secret("NEO4J_PASSWORD", "") or ""
-        neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
-        gemini_api_key = _resolve_kg_gemini_key()
+            neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+            neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+            neo4j_password = get_secret("NEO4J_PASSWORD", "") or ""
+            neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
+            gemini_api_key = _resolve_kg_gemini_key()
 
-        llm_client = GeminiClient(
-            config=LLMConfig(
-                api_key=gemini_api_key,
-                model="gemini-3.1-flash-lite",
-                small_model="gemini-2.5-flash-lite",
+            llm_client = GeminiClient(
+                config=LLMConfig(
+                    api_key=gemini_api_key,
+                    model="gemini-3.1-flash-lite",
+                    small_model="gemini-2.5-flash-lite",
+                )
             )
-        )
 
-        embedder = RetryingGeminiEmbedder(
-            config=GeminiEmbedderConfig(
-                api_key=gemini_api_key,
-                embedding_model="gemini-embedding-001",
+            embedder = RetryingGeminiEmbedder(
+                config=GeminiEmbedderConfig(
+                    api_key=gemini_api_key,
+                    embedding_model="gemini-embedding-001",
+                )
             )
-        )
 
-        graph_driver = Neo4jDriver(
-            uri=neo4j_uri,
-            user=neo4j_user,
-            password=neo4j_password,
-            database=neo4j_database,
-        )
-        # graphiti의 Neo4jDriver가 keepalive/lifetime 설정 없이 드라이버를 생성하므로,
-        # 내부 client를 재생성하여 유휴 연결 끊김 방지
-        from neo4j import AsyncGraphDatabase
-        graph_driver.client = AsyncGraphDatabase.driver(
-            uri=neo4j_uri,
-            auth=(neo4j_user or '', neo4j_password or ''),
-            keep_alive=True,
-            max_connection_lifetime=300,       # 5분마다 연결 갱신
-            liveness_check_timeout=30,         # 유휴 연결 사용 전 30초 내 liveness 확인
-            connection_acquisition_timeout=30,
-            max_connection_pool_size=50,
-        )
+            graph_driver = Neo4jDriver(
+                uri=neo4j_uri,
+                user=neo4j_user,
+                password=neo4j_password,
+                database=neo4j_database,
+            )
+            # graphiti의 Neo4jDriver가 keepalive/lifetime 설정 없이 드라이버를 생성하므로,
+            # 내부 client를 재생성하여 유휴 연결 끊김 방지
+            from neo4j import AsyncGraphDatabase
+            graph_driver.client = AsyncGraphDatabase.driver(
+                uri=neo4j_uri,
+                auth=(neo4j_user or '', neo4j_password or ''),
+                keep_alive=True,
+                max_connection_lifetime=300,       # 5분마다 연결 갱신
+                liveness_check_timeout=30,         # 유휴 연결 사용 전 30초 내 liveness 확인
+                connection_acquisition_timeout=30,
+                max_connection_pool_size=50,
+            )
 
-        self._llm_client = llm_client
+            graphiti = Graphiti(
+                uri=None,
+                user=None,
+                password=None,
+                llm_client=llm_client,
+                embedder=embedder,
+                graph_driver=graph_driver,
+            )
 
-        self._graphiti = Graphiti(
-            uri=None,
-            user=None,
-            password=None,
-            llm_client=llm_client,
-            embedder=embedder,
-            graph_driver=graph_driver,
-        )
+            # _graphiti는 인덱스 빌드까지 성공한 뒤에만 할당 — 실패하면
+            # 반쯤 초기화된 인스턴스가 "완료"로 남지 않도록 드라이버를 닫는다.
+            try:
+                await graphiti.build_indices_and_constraints()
+            except BaseException:
+                await graph_driver.client.close()
+                raise
 
-        await self._graphiti.build_indices_and_constraints()
-        print("✅ [GraphMemory] 지식 그래프 서비스 초기화 완료")
+            self._llm_client = llm_client
+            self._graphiti = graphiti
+            logger.info("✅ [GraphMemory] 지식 그래프 서비스 초기화 완료")
 
     def _ensure_initialized(self) -> Graphiti:
         """초기화 확인 후 Graphiti 인스턴스 반환."""
@@ -355,11 +361,11 @@ class GraphMemoryService:
         if self._llm_client is None:
             return raw_article
 
-        print(f"    [preprocess] LLM 전처리 시작 (본문 {len(raw_article)}자)...", flush=True)
+        logger.info("[preprocess] LLM 전처리 시작 (본문 %d자)", len(raw_article))
         prompt = NEWS_PREPROCESS_PROMPT_TEMPLATE.format(article=raw_article)
         response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
         processed = self._extract_text_from_llm_response(response)
-        print(f"    [preprocess] 완료 → {len(processed)}자", flush=True)
+        logger.info("[preprocess] 완료 → %d자", len(processed))
         return processed or raw_article
 
     async def ingest_episode(
@@ -410,10 +416,10 @@ class GraphMemoryService:
 
         # 전처리 후 본문 길이 제한 (Graphiti output token 초과 방지)
         if max_body_chars and len(ingest_body) > max_body_chars:
-            print(f"    [truncate] {len(ingest_body)}자 → {max_body_chars}자로 잘라냄", flush=True)
+            logger.info("[truncate] %d자 → %d자로 잘라냄", len(ingest_body), max_body_chars)
             ingest_body = ingest_body[:max_body_chars]
 
-        print(f"    [graphiti] add_episode 시작 (name={sanitized_name}, body {len(ingest_body)}자)...", flush=True)
+        logger.info("[graphiti] add_episode 시작 (name=%s, body %d자)", sanitized_name, len(ingest_body))
         result = await graphiti.add_episode(
             name=sanitized_name,
             episode_body=ingest_body,
@@ -427,7 +433,7 @@ class GraphMemoryService:
             excluded_entity_types=EXCLUDED_ENTITY_TYPES,
             custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS,
         )
-        print(f"    [graphiti] add_episode 완료", flush=True)
+        logger.info("[graphiti] add_episode 완료")
 
         # ── Conformance gate ──
         # Validate the just-created entities/edges against the schema. Hard
@@ -444,26 +450,7 @@ class GraphMemoryService:
                 )
         except Exception as exc:
             # Conformance is best-effort — never break ingestion on validator errors
-            print(f"    [conformance] check failed (non-fatal): {exc}", flush=True)
-
-    async def ingest_episodes_bulk(self, episodes: list[dict]) -> None:
-        """대량 에피소드 일괄 수집.
-
-        Args:
-            episodes: 각 항목은 ingest_episode()의 인자를 담은 dict.
-                필수 키: name, body, source_type, reference_time, group_id
-                선택 키: source_description
-        """
-        for ep in episodes:
-            await self.ingest_episode(
-                name=ep["name"],
-                body=ep["body"],
-                source_type=ep["source_type"],
-                reference_time=ep["reference_time"],
-                group_id=ep["group_id"],
-                source_description=ep.get("source_description"),
-                preprocess_news=ep.get("preprocess_news", True),
-            )
+            logger.warning("[conformance] check failed (non-fatal): %s", exc)
 
     async def search(
         self,
@@ -532,82 +519,6 @@ class GraphMemoryService:
 
         return {"nodes": nodes, "edges": edges}
 
-    async def generate_briefing(
-        self,
-        topic: str,
-        group_ids: list[str],
-    ) -> dict:
-        """주제 기반 전략 브리핑 데이터 수집.
-
-        Returns:
-            {
-                "topic": str,
-                "key_entities": [...],
-                "relationships": [...],
-                "incidents": [...],
-                "timeline": [...]
-            }
-        """
-        graphiti = self._ensure_initialized()
-
-        briefing_data = {
-            "topic": topic,
-            "key_entities": [],
-            "relationships": [],
-            "incidents": [],
-            "timeline": [],
-        }
-
-        # 1. 주제 관련 핵심 엔티티 + 관계 검색
-        main_results = await graphiti.search_(
-            query=topic,
-            config=SearchConfig(limit=30),
-            group_ids=group_ids,
-        )
-
-        for node in main_results.nodes:
-            briefing_data["key_entities"].append({
-                "name": node.name,
-                "type": node.labels,
-                "summary": node.summary,
-            })
-
-        for edge in main_results.edges:
-            entry = {
-                "fact": edge.fact,
-                "valid_from": str(edge.valid_at) if edge.valid_at else None,
-                "valid_until": str(edge.invalid_at) if edge.invalid_at else None,
-            }
-            briefing_data["relationships"].append(entry)
-
-            if edge.valid_at:
-                briefing_data["timeline"].append({
-                    "date": str(edge.valid_at),
-                    "event": edge.fact,
-                })
-
-        # 2. 관련 특이사건 검색
-        incident_results = await graphiti.search_(
-            query=topic,
-            config=SearchConfig(limit=10),
-            search_filter=SearchFilters(
-                node_labels=["Incident"],
-                edge_types=["Involvement", "ThreatAction"],
-            ),
-            group_ids=group_ids,
-        )
-
-        for node in incident_results.nodes:
-            briefing_data["incidents"].append({
-                "name": node.name,
-                "summary": node.summary,
-            })
-
-        # 3. 타임라인 정렬
-        briefing_data["timeline"].sort(key=lambda x: x["date"])
-
-        return briefing_data
-
     async def query_chatbot(
         self,
         query: str,
@@ -671,57 +582,10 @@ class GraphMemoryService:
             "context": context,
         }
 
-    async def query_active_wars(
-        self,
-        group_ids: list[str] | None = None,
-        num_results: int = 30,
-    ) -> dict:
-        """지식그래프에서 '현재 진행 중인 전쟁'과 개시일을 구조화 추출한다."""
-        context = await self.search(
-            query=(
-                "ongoing war current conflict invasion military campaign "
-                "active hostilities start date belligerents"
-            ),
-            group_ids=group_ids,
-            edge_types=["ThreatAction", "Participation", "Involvement", "Presence"],
-            node_labels=["Campaign", "Incident", "Organization", "Location"],
-            num_results=num_results,
-        )
-
-        if self._llm_client is None:
-            return {
-                "items": [],
-                "note": "LLM client가 초기화되지 않아 구조화 추출을 수행하지 못했습니다.",
-                "context": context,
-            }
-
-        prompt = (
-            "아래 지식그래프 컨텍스트만 사용해서 현재 진행 중인 전쟁 목록을 JSON으로 추출하라.\n"
-            "컨텍스트 밖 지식은 사용 금지. 근거가 부족하면 unknown으로 채워라.\n"
-            "반드시 JSON 배열만 출력하라. 스키마:\n"
-            "[{'war_name': str, 'countries': [str], 'start_date': 'YYYY-MM-DD|YYYY-MM|YYYY|unknown', 'status': 'ongoing|unknown', 'evidence': [str]}]\n\n"
-            f"[nodes] {json.dumps(context['nodes'], ensure_ascii=False)}\n"
-            f"[edges] {json.dumps(context['edges'], ensure_ascii=False)}\n"
-        )
-
-        response = await self._llm_client.generate_response([Message(role="user", content=prompt)])
-        text = self._extract_text_from_llm_response(response)
-        parsed = self._parse_json_from_llm_response(text)
-
-        items: list[dict] = []
-        if isinstance(parsed, list):
-            items = [item for item in parsed if isinstance(item, dict)]
-
-        return {
-            "items": items,
-            "raw_response": text,
-            "context": context,
-        }
-
     async def close(self) -> None:
         """Graphiti 연결 종료."""
         if self._graphiti is not None:
             await self._graphiti.close()
             self._graphiti = None
             self._llm_client = None
-            print("✅ [GraphMemory] 지식 그래프 서비스 종료")
+            logger.info("[GraphMemory] 지식 그래프 서비스 종료")

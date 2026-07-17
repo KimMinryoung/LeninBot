@@ -32,7 +32,6 @@ _KG_TRANSIENT_KEYWORDS = (
     "connection refused",
     "failed to read",
     "dns",
-    "neo4j",
 )
 
 
@@ -41,12 +40,33 @@ def _is_transient_kg_error(err) -> bool:
     return any(k in s for k in _KG_TRANSIENT_KEYWORDS)
 
 
+def _close_service_on_loop(svc) -> None:
+    """Close a discarded service's Neo4j driver on the KG loop (fire-and-forget).
+
+    The driver is bound to the KG loop, so close() must run there. Failures
+    are swallowed — the service is already unusable and this is just cleanup
+    to avoid leaking connection pools across unhealthy/reset cycles.
+    """
+    if svc is None:
+        return
+    loop = _kg_loop
+    if loop is None or loop.is_closed():
+        return
+    try:
+        future = asyncio.run_coroutine_threadsafe(svc.close(), loop)
+        future.add_done_callback(lambda f: f.exception())
+    except Exception:
+        pass
+
+
 def _mark_kg_unhealthy(reason: str = ""):
     """Mark KG singleton unhealthy so next call re-initializes after cooldown."""
     global _kg_service, _kg_init_cooldown
     with _kg_lock:
+        old = _kg_service
         _kg_service = None
         _kg_init_cooldown = time.monotonic() + _KG_RETRY_INTERVAL
+    _close_service_on_loop(old)
     if reason:
         logger.warning("[KG] marked unhealthy (retry in %ds): %s", _KG_RETRY_INTERVAL, reason)
 
@@ -214,20 +234,17 @@ def reset_kg_service():
     """Reset the KG singleton so next get_kg_service() retries initialization.
 
     Call this when KG operations fail due to connection issues (e.g. AuraDB paused).
+    The KG event loop is deliberately left running: stopping it would silently
+    kill in-flight tasks (e.g. an episode ingest) whenever a search-side
+    connection blip triggers a reset. Only the service (and its broken driver)
+    is discarded; a dead loop thread is recreated by _ensure_kg_loop anyway.
     """
-    global _kg_service, _kg_init_cooldown, _kg_loop, _kg_loop_thread
+    global _kg_service, _kg_init_cooldown
     with _kg_lock:
+        old = _kg_service
         _kg_service = None
         _kg_init_cooldown = 0.0
-    with _kg_run_lock:
-        if _kg_loop is not None and not _kg_loop.is_closed():
-            try:
-                _kg_loop.call_soon_threadsafe(_kg_loop.stop)
-            except Exception as e:
-                logger.debug("[KG] loop stop skipped: %s", e)
-            _kg_loop = None
-        _kg_loop_thread = None
-        _kg_loop_ready.clear()
+    _close_service_on_loop(old)
     logger.info("[KG] service reset — will retry on next access")
 
 # ── KG Health Check ──────────────────────────────────────────────────

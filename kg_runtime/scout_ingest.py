@@ -1,12 +1,80 @@
 """Scout-report-to-KG ingestion heuristic."""
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from kg_runtime.writes import add_kg_episode
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
+
+# KG group ids the classifier may choose from (self_runtime/tools.py enum과 동일).
+KG_GROUP_IDS = (
+    "geopolitics_conflict",
+    "diplomacy",
+    "economy",
+    "korea_domestic",
+    "agent_knowledge",
+)
+
+_GROUP_CLASSIFY_PROMPT = """\
+You are routing an OSINT scout report into a knowledge-graph group.
+Pick exactly ONE group id from this list:
+
+- geopolitics_conflict: wars, military actions, sanctions, territorial disputes, security tensions
+- diplomacy: negotiations, treaties, summits, alliances, formal inter-state relations
+- economy: markets, industry, trade, investment, labor, technology business
+- korea_domestic: South Korean internal politics and society
+- agent_knowledge: none of the above fits clearly
+
+Output ONLY the group id, nothing else.
+
+[Task instructions]
+{task}
+
+[Report findings]
+{findings}
+"""
+
+
+def _classify_group_id(task_content: str, findings: str) -> str:
+    """Classify a scout report into a KG group with a light Gemini call.
+
+    Falls back to 'agent_knowledge' when the key is missing, the call fails,
+    or the model answers outside the known set — misrouting into the default
+    group is cheaper than blocking ingestion.
+    """
+    try:
+        from secrets_loader import get_secret
+
+        api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
+        if not api_key:
+            logger.warning("[Scout→KG] no GEMINI_API_KEY; group defaults to agent_knowledge")
+            return "agent_knowledge"
+
+        from google import genai
+        from google.genai.types import GenerateContentConfig
+
+        prompt = _GROUP_CLASSIFY_PROMPT.format(
+            task=(task_content or "").strip()[:500] or "(none)",
+            findings=(findings or "").strip()[:1500],
+        )
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=os.getenv("SCOUT_KG_CLASSIFY_MODEL", "gemini-2.5-flash-lite"),
+            contents=prompt,
+            config=GenerateContentConfig(temperature=0.0, max_output_tokens=32),
+        )
+        answer = (response.text or "").strip().lower()
+        for group in KG_GROUP_IDS:
+            if group in answer:
+                return group
+        logger.warning("[Scout→KG] classifier answered %r; using agent_knowledge", answer[:80])
+        return "agent_knowledge"
+    except Exception as e:
+        logger.warning("[Scout→KG] group classification failed (%s); using agent_knowledge", e)
+        return "agent_knowledge"
 
 def process_scout_report_to_kg(
     report: str,
@@ -57,16 +125,9 @@ def process_scout_report_to_kg(
             lines = report.split("\n")
             findings_section = "\n".join(lines[2:10]) if len(lines) > 2 else report[:1000]
 
-        # Determine group_id from task_content keywords
-        group_id = "agent_knowledge"  # default
-        content_lower = (task_content + " " + report[:500]).lower()
-
-        if any(k in content_lower for k in ("미국", "중국", "러시아", "북한", "전쟁", "제재", "외교", "정책", "영토", "분쟁")):
-            group_id = "geopolitics_conflict"
-        elif any(k in content_lower for k in ("ai", "기술", "투자", "주가", "시장", "경제", "산업", "노동", "실업", "임금")):
-            group_id = "economy"
-        elif any(k in content_lower for k in ("한국", "대한민국", "서울", "울산", "광주", "부산", "정부", "국회", "청와대", "정당")):
-            group_id = "korea_domestic"
+        # Determine group_id with a light LLM call (keyword substring matching
+        # misrouted anything containing "ai"/"정책" etc.)
+        group_id = _classify_group_id(task_content, findings_section)
 
         # Build factual content: bullet points from findings
         content_lines = []
@@ -95,19 +156,6 @@ def process_scout_report_to_kg(
         ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
         episode_content = "\n".join(f"- {line}" for line in content_lines)
         episode_content = f"[Scout Report: {ts}]\n\n{episode_content}"
-
-        # Check for potential duplicates (simple heuristic)
-        # If any of the fact lines appear in recent episodes, skip
-        try:
-            from db import query as _db_query
-            recent = _db_query(
-                "SELECT name FROM telegram_tasks WHERE agent_type = 'scout' "
-                "AND status = 'done' AND completed_at > NOW() - INTERVAL 1 DAY "
-                "ORDER BY completed_at DESC LIMIT 5"
-            )
-            # Could add more sophisticated dedup here if needed
-        except Exception:
-            pass  # Non-critical
 
         # Write to KG
         result = add_kg_episode(

@@ -220,8 +220,10 @@ def fetch_kg_stats() -> dict:
 
             # Recent episodes WITH their mentioned entities and linked facts
             # Note: created_at may be STRING (old) or DATE_TIME (new) — use toString() for consistent sorting
+            # LIMIT 먼저: 전체 에피소드 × 전체 엣지를 스캔한 뒤 자르면 그래프가 클수록 느려진다.
             recent_episodes_raw = _run_cypher(
                 "MATCH (e:Episodic) "
+                "WITH e ORDER BY toString(e.created_at) DESC LIMIT 10 "
                 "OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity) "
                 "WITH e, collect(DISTINCT {name: n.name, labels: labels(n)}) AS entities "
                 "OPTIONAL MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
@@ -231,7 +233,7 @@ def fetch_kg_stats() -> dict:
                 "RETURN e.name AS name, toString(e.created_at) AS created_at, "
                 "  e.group_id AS group_id, e.source AS source, "
                 "  entities, facts "
-                "ORDER BY toString(e.created_at) DESC LIMIT 10"
+                "ORDER BY toString(e.created_at) DESC"
             )
 
         # Format recent episodes with knowledge detail
@@ -278,7 +280,7 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     If query_en is provided, searches with both queries and merges results.
     """
     _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
-    _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable", "graphiti")
+    _RESET_KEYWORDS = ("dns", "connection", "timeout", "unavailable")
     search_errors: list[str] = []
 
     query = _expand_query_aliases(query)

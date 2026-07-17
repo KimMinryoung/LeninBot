@@ -114,9 +114,9 @@ async def find_canonical_entity_uuid(
     the one with the most relationships. Returns None if no match."""
     async with driver_client.session(database=database) as session:
         result = await session.run(
-            f"""
-            MATCH (n:Entity {{name: $name}})
-            WHERE '{entity_type}' IN labels(n)
+            """
+            MATCH (n:Entity {name: $name})
+            WHERE $etype IN labels(n)
             OPTIONAL MATCH (n)-[r:RELATES_TO]-()
             WITH n, count(r) AS rels
             RETURN n.uuid AS uuid
@@ -124,6 +124,7 @@ async def find_canonical_entity_uuid(
             LIMIT 1
             """,
             name=name,
+            etype=entity_type,
         )
         record = await result.single()
         return record["uuid"] if record else None
@@ -326,7 +327,11 @@ async def write_structured_facts(
         valid_at = None
         if f.get("valid_at"):
             try:
-                valid_at = datetime.fromisoformat(f["valid_at"]).replace(tzinfo=timezone.utc)
+                valid_at = datetime.fromisoformat(f["valid_at"])
+                # naive일 때만 UTC 부여 — 오프셋이 이미 있는 입력을 replace로
+                # 덮으면 실제 시각이 틀어진다.
+                if valid_at.tzinfo is None:
+                    valid_at = valid_at.replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
                 valid_at = None
         entity_edges.append(

@@ -26,9 +26,16 @@ Graphiti/Neo4j objects are sensitive to event-loop ownership. `kg_runtime/servic
 - `collect_kg_futures()` waits for multiple submitted tasks
 - transient connection failures mark the singleton unhealthy and apply a 120-second retry cooldown
 
-`graph_memory/service.py` uses Gemini `gemini-3.1-flash-lite` as the primary Graphiti LLM and `gemini-2.5-flash-lite` as the small model. Graphiti semantic search and structured writer embeddings use `gemini-embedding-001` through a bounded retry wrapper for transient Gemini/Vertex `429 RESOURCE_EXHAUSTED` and `503 UNAVAILABLE` responses. The retry delays default to `5,15,45` seconds and can be overridden with `KG_EMBED_RETRY_DELAYS` as a comma-separated seconds list. Since 2026-07-16 (roadmap Phase 6) embedding calls are also **paced client-side** by a serializing scheduler (`KG_EMBED_MAX_RPS`, default 2 req/s, `0` disables; re-read from the env on every request) so batch producers (scout ingest, `kg_enricher`, curation) don't burst `SEMAPHORE_LIMIT`-wide into quota that retries then paper over. The KG service resolves its Gemini key as `KG_GEMINI_API_KEY` → fallback `GEMINI_API_KEY` (`_resolve_kg_gemini_key`); the dedicated key isolates KG traffic onto its own quota **only if it comes from a separate Google project/account** — same-project keys share quota. Not yet provisioned; the fallback keeps everything on the shared key until it is. Hermetic smoke: `scripts/smoke_kg_embed_limiter.py`. `graph_memory/kr_news_fetcher.py` uses the same Gemini pair for Korean news cleanup and person/profile extraction.
+`graph_memory/service.py` uses Gemini `gemini-3.1-flash-lite` as the primary Graphiti LLM and `gemini-2.5-flash-lite` as the small model. Graphiti semantic search and structured writer embeddings use `gemini-embedding-001` through a bounded retry wrapper for transient Gemini/Vertex `429 RESOURCE_EXHAUSTED` and `503 UNAVAILABLE` responses. The retry delays default to `5,15,45` seconds and can be overridden with `KG_EMBED_RETRY_DELAYS` as a comma-separated seconds list. Since 2026-07-16 (roadmap Phase 6) embedding calls are also **paced client-side** by a serializing scheduler (`KG_EMBED_MAX_RPS`, default 2 req/s, `0` disables; re-read from the env on every request) so batch producers (scout ingest, `kg_enricher`, curation) don't burst `SEMAPHORE_LIMIT`-wide into quota that retries then paper over. The KG service resolves its Gemini key as `KG_GEMINI_API_KEY` → fallback `GEMINI_API_KEY` (`_resolve_kg_gemini_key`); the dedicated key isolates KG traffic onto its own quota **only if it comes from a separate Google project/account** — same-project keys share quota. Not yet provisioned; the fallback keeps everything on the shared key until it is. Hermetic smoke: `scripts/smoke_kg_embed_limiter.py`.
 
 API startup eagerly initializes KG in a background thread and starts a periodic health check, but callers must still tolerate `get_kg_service()` returning `None`.
+
+Robustness rules (2026-07-17):
+
+- `GraphMemoryService.initialize()` runs entirely inside its async init lock and only publishes `_graphiti` after `build_indices_and_constraints()` succeeds; on failure the Neo4j driver is closed before re-raising.
+- `reset_kg_service()` no longer stops the KG event loop — stopping it silently killed in-flight ingests whenever a search-side connection blip triggered a reset. Only the service singleton (and its driver, closed asynchronously on the loop) is discarded.
+- Transient-error keyword lists no longer contain bare module names (`neo4j`, `graphiti`) — an error message merely mentioning a module must not tear down the service.
+- Legacy OSINT pipelines were removed (`news_fetcher.py`, `kr_news_fetcher.py`, `generate_briefing`, `query_active_wars`, `ingest_episodes_bulk`); `query_chatbot` stays as the CLI diagnostic path (`python -m graph_memory.cli`).
 
 ## Schema Summary
 
@@ -77,6 +84,8 @@ Typical `group_id` values:
 - `agent_knowledge`
 
 Use shared topic groups for reusable knowledge, including facts discovered by autonomous or diary agents. Do not create diary-specific or project-specific KG groups for ordinary facts; keep transient working notes in task logs, mission events, diary drafts, or autonomous project notes instead.
+
+Scout report ingestion (`kg_runtime/scout_ingest.py`) routes each report into a group via a light Gemini call (`SCOUT_KG_CLASSIFY_MODEL`, default `gemini-2.5-flash-lite`, temperature 0) instead of keyword substring matching; on any failure it falls back to `agent_knowledge` rather than blocking ingestion.
 
 ## Search Paths
 

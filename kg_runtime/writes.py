@@ -63,7 +63,7 @@ def add_kg_episode(
     except Exception as e:
         logger.error("[shared] add_kg_episode error: %s", e)
         err_str = str(e).lower()
-        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable")):
             reset_kg_service()
         return {"status": "error", "message": str(e)}
 
@@ -128,7 +128,7 @@ def add_kg_structured(
     except Exception as e:
         logger.error("[shared] add_kg_structured error: %s", e)
         err_str = str(e).lower()
-        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable", "graphiti")):
+        if any(k in err_str for k in ("dns", "connection", "timeout", "unavailable")):
             reset_kg_service()
         return {"status": "error", "message": str(e)}
 
