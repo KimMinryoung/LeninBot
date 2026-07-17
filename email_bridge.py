@@ -48,6 +48,7 @@ class EmailBridgeConfig:
     imap_username: str
     imap_password: str
     imap_mailbox: str
+    imap_extra_mailboxes: tuple[str, ...]
     smtp_host: str
     smtp_port: int
     smtp_username: str
@@ -99,6 +100,9 @@ def load_email_bridge_config() -> EmailBridgeConfig:
         imap_username=os.getenv("EMAIL_IMAP_USERNAME", "").strip(),
         imap_password=(get_secret("EMAIL_IMAP_PASSWORD", "") or "").strip(),
         imap_mailbox=os.getenv("EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX",
+        imap_extra_mailboxes=tuple(
+            f.strip() for f in os.getenv("EMAIL_IMAP_EXTRA_MAILBOXES", "Junk").split(",") if f.strip()
+        ),
         smtp_host=os.getenv("EMAIL_SMTP_HOST", "").strip(),
         smtp_port=int(os.getenv("EMAIL_SMTP_PORT", "465") or "465"),
         smtp_username=os.getenv("EMAIL_SMTP_USERNAME", "").strip(),
@@ -292,7 +296,7 @@ def _extract_bodies(msg: Message) -> tuple[str, str, list[dict[str, Any]]]:
     return "\n\n".join(p.strip() for p in text_parts if p.strip()), "\n\n".join(p.strip() for p in html_parts if p.strip()), attachments
 
 
-def _message_to_record(uid: str, msg: Message) -> dict[str, Any]:
+def _message_to_record(uid: str, msg: Message, mailbox_name: str | None = None) -> dict[str, Any]:
     sender_name, sender_email = _extract_name_and_email(msg.get("From"))
     header_message_id = (msg.get("Message-ID") or "").strip()
     message_id = header_message_id or f"<{uid}@imap.local>"
@@ -317,7 +321,7 @@ def _message_to_record(uid: str, msg: Message) -> dict[str, Any]:
         "text_body": text_body,
         "html_body": html_body,
         "attachments": attachments,
-        "mailbox": CONFIG.imap_mailbox,
+        "mailbox": mailbox_name or CONFIG.imap_mailbox,
         "received_at": _coerce_dt(msg.get("Date")) or datetime.now(timezone.utc),
         "raw_headers": {
             "message_id": message_id,
@@ -359,15 +363,19 @@ def _find_existing_inbound_email(record: dict[str, Any]) -> dict[str, Any] | Non
         return existing
     imap_uid = str((record.get("metadata") or {}).get("imap_uid") or "").strip()
     if imap_uid:
+        # IMAP UIDs are only unique per folder — qualify by mailbox so a Junk
+        # message can't be swallowed as a duplicate of an INBOX row with the
+        # same UID.
         return db_query_one(
             """
             SELECT id, status FROM email_messages
             WHERE provider = %s
+              AND mailbox = %s
               AND COALESCE(metadata->>'imap_uid', '') = %s
             ORDER BY id DESC
             LIMIT 1
             """,
-            (record["provider"], imap_uid),
+            (record["provider"], record["mailbox"], imap_uid),
         )
     return None
 
@@ -794,54 +802,60 @@ def poll_inbox_once(limit: int = 10) -> list[dict[str, Any]]:
         return []
     processed: list[dict[str, Any]] = []
     mailbox = None
+    folders = [CONFIG.imap_mailbox, *(f for f in CONFIG.imap_extra_mailboxes if f != CONFIG.imap_mailbox)]
     try:
         mailbox = imaplib.IMAP4_SSL(CONFIG.imap_host, CONFIG.imap_port)
         mailbox.login(CONFIG.imap_username, CONFIG.imap_password)
-        typ, select_data = mailbox.select(CONFIG.imap_mailbox)
-        if typ != "OK":
-            raise RuntimeError(f"IMAP SELECT {CONFIG.imap_mailbox!r} failed: {typ}")
-        message_count = int(select_data[0]) if select_data and select_data[0] else 0
-        logger.info(
-            "email poller IMAP connected: host=%s mailbox=%s messages=%d",
-            CONFIG.imap_host,
-            CONFIG.imap_mailbox,
-            message_count,
-        )
-        typ, data = mailbox.uid("search", None, "UNSEEN")
-        if typ != "OK":
-            raise RuntimeError(f"IMAP UID SEARCH UNSEEN failed: {typ}")
-        uids = [u.decode() if isinstance(u, bytes) else str(u) for u in (data[0].split() if data and data[0] else [])][-limit:]
-        for uid in uids:
-            typ, msg_data = mailbox.uid("fetch", uid, "(RFC822)")
-            if typ != "OK" or not msg_data:
+        for folder in folders:
+            typ, select_data = mailbox.select(f'"{folder}"')
+            if typ != "OK":
+                if folder == CONFIG.imap_mailbox:
+                    raise RuntimeError(f"IMAP SELECT {folder!r} failed: {typ}")
+                logger.warning("IMAP SELECT %r failed: %s — skipping extra mailbox", folder, typ)
                 continue
-            raw = b""
-            for item in msg_data:
-                if isinstance(item, tuple):
-                    raw = item[1]
-                    break
-            if not raw:
-                continue
-            msg = email.message_from_bytes(raw)
-            record = _message_to_record(uid, msg)
-            classification = classify_inbound_email(record)
-            record["metadata"] = {
-                **(record.get("metadata") or {}),
-                "classification": classification,
-                "delivery_status": "pending_review",
-                "attachments_auto_processing": "disabled",
-            }
-            stored = store_inbound_email(record)
-            if stored:
-                status = "duplicate" if stored.get("_is_duplicate") else "stored"
-                processed.append({
-                    "stored_message_id": stored.get("id"),
-                    "subject": record.get("subject"),
-                    "sender": record.get("sender_email"),
+            message_count = int(select_data[0]) if select_data and select_data[0] else 0
+            logger.info(
+                "email poller IMAP connected: host=%s mailbox=%s messages=%d",
+                CONFIG.imap_host,
+                folder,
+                message_count,
+            )
+            typ, data = mailbox.uid("search", None, "UNSEEN")
+            if typ != "OK":
+                raise RuntimeError(f"IMAP UID SEARCH UNSEEN failed in {folder!r}: {typ}")
+            uids = [u.decode() if isinstance(u, bytes) else str(u) for u in (data[0].split() if data and data[0] else [])][-limit:]
+            for uid in uids:
+                typ, msg_data = mailbox.uid("fetch", uid, "(RFC822)")
+                if typ != "OK" or not msg_data:
+                    continue
+                raw = b""
+                for item in msg_data:
+                    if isinstance(item, tuple):
+                        raw = item[1]
+                        break
+                if not raw:
+                    continue
+                msg = email.message_from_bytes(raw)
+                record = _message_to_record(uid, msg, folder)
+                classification = classify_inbound_email(record)
+                record["metadata"] = {
+                    **(record.get("metadata") or {}),
                     "classification": classification,
-                    "processing_status": status,
-                })
-            mailbox.uid("store", uid, "+FLAGS", "(\\Seen)")
+                    "delivery_status": "pending_review",
+                    "attachments_auto_processing": "disabled",
+                }
+                stored = store_inbound_email(record)
+                if stored:
+                    status = "duplicate" if stored.get("_is_duplicate") else "stored"
+                    processed.append({
+                        "stored_message_id": stored.get("id"),
+                        "subject": record.get("subject"),
+                        "sender": record.get("sender_email"),
+                        "mailbox": folder,
+                        "classification": classification,
+                        "processing_status": status,
+                    })
+                mailbox.uid("store", uid, "+FLAGS", "(\\Seen)")
     finally:
         try:
             if mailbox is not None:
@@ -912,6 +926,9 @@ def build_inbound_summary_notification(item: dict[str, Any], row: dict[str, Any]
         f"route: `{route}` / labels: {labels}",
         f"status: `{item.get('processing_status') or '-'}`",
     ]
+    source_mailbox = (item.get("mailbox") or (row or {}).get("mailbox") or "").strip()
+    if source_mailbox and source_mailbox != CONFIG.imap_mailbox:
+        lines.insert(1, f"folder: ⚠️ {source_mailbox}")
     if classification.get("contains_attachments"):
         lines.append("attachments: 감지됨 — 자동처리 금지")
     if preview:

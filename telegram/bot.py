@@ -1814,7 +1814,9 @@ async def _email_bridge_notify_loop(bot: Bot):
                     lines = [f"📨 새 메일 {len(rows)}건 수신 (요약)"]
                     for row in rows:
                         subject = (row.get("subject") or "(no subject)")[:60]
-                        lines.append(f"- [{row['id']}] {row.get('sender_email') or '-'} — {subject}")
+                        folder = (row.get("mailbox") or "").strip()
+                        marker = f" ⚠️{folder}" if folder and folder != CONFIG.imap_mailbox else ""
+                        lines.append(f"- [{row['id']}]{marker} {row.get('sender_email') or '-'} — {subject}")
                     lines.append("\n승인 후 내부 입력 전달: /email_deliver <inbound_id> [메모]")
                     await bot.send_message(int(target_chat_id), "\n".join(lines))
                 else:
