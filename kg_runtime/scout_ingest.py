@@ -62,7 +62,7 @@ def _classify_group_id(task_content: str, findings: str) -> str:
         )
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=os.getenv("SCOUT_KG_CLASSIFY_MODEL", "gemini-2.5-flash-lite"),
+            model=os.getenv("SCOUT_KG_CLASSIFY_MODEL", "gemini-3.1-flash-lite"),
             contents=prompt,
             config=GenerateContentConfig(temperature=0.0, max_output_tokens=32),
         )

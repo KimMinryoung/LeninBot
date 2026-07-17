@@ -85,7 +85,7 @@ Typical `group_id` values:
 
 Use shared topic groups for reusable knowledge, including facts discovered by autonomous or diary agents. Do not create diary-specific or project-specific KG groups for ordinary facts; keep transient working notes in task logs, mission events, diary drafts, or autonomous project notes instead.
 
-Scout report ingestion (`kg_runtime/scout_ingest.py`) routes each report into a group via a light Gemini call (`SCOUT_KG_CLASSIFY_MODEL`, default `gemini-2.5-flash-lite`, temperature 0) instead of keyword substring matching; on any failure it falls back to `agent_knowledge` rather than blocking ingestion.
+Scout report ingestion (`kg_runtime/scout_ingest.py`) routes each report into a group via a light Gemini call (`SCOUT_KG_CLASSIFY_MODEL`, default `gemini-3.1-flash-lite`, temperature 0) instead of keyword substring matching; on any failure it falls back to `agent_knowledge` rather than blocking ingestion.
 
 ## Search Paths
 
