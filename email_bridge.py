@@ -879,37 +879,6 @@ def run_polling_cycle(limit: int = 10) -> dict[str, Any]:
     }
 
 
-def fetch_unnotified_inbound(window_hours: int = 48, limit: int = 30) -> list[dict[str, Any]]:
-    """Inbound messages stored by the dedicated poller that have no 'notified' event yet.
-
-    The created_at window keeps pre-existing rows (stored before notification
-    tracking existed) from flooding the operations chat on first deploy.
-    """
-    return db_query(
-        """
-        SELECT m.* FROM email_messages m
-        WHERE m.direction = 'inbound'
-          AND m.status = 'received'
-          AND m.created_at >= NOW() - make_interval(hours => %s)
-          AND NOT EXISTS (
-              SELECT 1 FROM email_bridge_events e
-              WHERE e.message_id = m.id AND e.event_type = 'notified'
-          )
-        ORDER BY m.id ASC
-        LIMIT %s
-        """,
-        (window_hours, limit),
-    )
-
-
-def mark_inbound_notified(message_ids: list[int], detail: str = "") -> None:
-    for message_id in message_ids:
-        db_execute(
-            "INSERT INTO email_bridge_events (message_id, event_type, detail, metadata) VALUES (%s, %s, %s, %s::jsonb)",
-            (message_id, "notified", detail or None, json.dumps({})),
-        )
-
-
 def build_inbound_summary_notification(item: dict[str, Any], row: dict[str, Any] | None = None) -> str:
     classification = (item.get("classification") or {}) if isinstance(item, dict) else {}
     route = classification.get("route") or "manual_review"

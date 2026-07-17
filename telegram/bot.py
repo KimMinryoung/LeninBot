@@ -1796,49 +1796,6 @@ register_handlers(router, ctx={
 
 # ── Entry Point ──────────────────────────────────────────────────────
 
-async def _email_bridge_notify_loop(bot: Bot):
-    """Notify the operations chat about inbound mail stored by the dedicated poller.
-
-    IMAP ingestion lives in leninbot-email-poller.service (email_poll_once.py);
-    this loop only watches the DB for rows without a 'notified' event, so it
-    works regardless of EMAIL_POLLING_ENABLED.
-    """
-    from email_bridge import CONFIG, build_inbound_summary_notification, fetch_unnotified_inbound, mark_inbound_notified
-    await asyncio.sleep(15)
-    while True:
-        try:
-            rows = await asyncio.to_thread(fetch_unnotified_inbound)
-            target_chat_id = CONFIG.operations_chat_id or EMAIL_DEFAULT_APPROVER_USER_ID
-            if rows and target_chat_id:
-                if len(rows) > 5:
-                    lines = [f"📨 새 메일 {len(rows)}건 수신 (요약)"]
-                    for row in rows:
-                        subject = (row.get("subject") or "(no subject)")[:60]
-                        folder = (row.get("mailbox") or "").strip()
-                        marker = f" ⚠️{folder}" if folder and folder != CONFIG.imap_mailbox else ""
-                        lines.append(f"- [{row['id']}]{marker} {row.get('sender_email') or '-'} — {subject}")
-                    lines.append("\n승인 후 내부 입력 전달: /email_deliver <inbound_id> [메모]")
-                    await bot.send_message(int(target_chat_id), "\n".join(lines))
-                else:
-                    for row in rows:
-                        classification = (row.get("metadata") or {}).get("classification") or {}
-                        item = {
-                            "stored_message_id": row["id"],
-                            "subject": row.get("subject"),
-                            "sender": row.get("sender_email"),
-                            "classification": classification,
-                            "processing_status": "stored",
-                        }
-                        text = build_inbound_summary_notification(item, row)
-                        text += "\n\n승인 후 내부 입력 전달: /email_deliver <inbound_id> [메모]"
-                        await bot.send_message(int(target_chat_id), text)
-                await asyncio.to_thread(mark_inbound_notified, [row["id"] for row in rows], "telegram")
-        except Exception as e:
-            logger.warning("email bridge notify loop error: %s", e)
-            _log_event("warning", "email_bridge", f"notify loop error: {e}")
-        await asyncio.sleep(EMAIL_POLL_INTERVAL_SECONDS)
-
-
 # ── Per-agent dispatch helpers ────────────────────────────────────────
 # These resolve which chat_with_tools implementation + which model an agent
 # spec runs against. Keeping them at module level (rather than as inline
@@ -2194,10 +2151,6 @@ async def bot_main():
     dp.my_chat_member.register(_ignore_chat_member_update)
     dp.update.register(_handle_guest_update, _has_guest_message)
     dp.include_router(router)
-
-    email_bridge_task = None
-    if EMAIL_BRIDGE_ENABLED:
-        email_bridge_task = asyncio.create_task(_email_bridge_notify_loop(bot), name="email-bridge-notify")
 
     # Register commands for Telegram "/" autocomplete menu
     from aiogram.types import BotCommand
@@ -2613,8 +2566,6 @@ async def bot_main():
             name="telegram_connectivity_watchdog",
         ),
     ]
-    if email_bridge_task is not None:
-        _bg_tasks.insert(0, email_bridge_task)
 
     # Graceful shutdown: notify + stop polling cleanly when SIGTERM received (Render deploy)
     import signal
