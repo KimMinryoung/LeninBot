@@ -401,52 +401,35 @@ def _append_email_audit_entry(message_id: int, event: str, actor: str, metadata:
     )
 
 
-# ── Local LLM (OpenAI-compatible: llama-server, Ollama, etc.) ─────
-_LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:8080")
-_LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen3.5-9b")
-_local_llm_available: bool | None = None  # None = not checked yet
+# ── Light LLM (Gemini Flash-Lite: chunk summaries, reflections) ──
+_LIGHT_LLM_MODEL = os.getenv("LIGHT_LLM_MODEL", "gemini-3.1-flash-lite")
 
 
-async def _local_llm_generate(prompt: str, max_tokens: int = 2048) -> str | None:
-    """Call local LLM via OpenAI-compatible /v1/chat/completions.
+async def _gemini_light_generate(prompt: str, max_tokens: int = 2048) -> str | None:
+    """Generate with the light Gemini model (cheap summarization/extraction).
 
-    Works with llama-server, TabbyAPI, Ollama (/v1 endpoint), vLLM, etc.
-    Handles thinking models (Qwen3.5) — extracts content, ignores reasoning_content.
-    Falls back gracefully — if server is down, callers should use Haiku.
+    Returns None on any failure — callers must have their own fallback
+    (extractive summary, skip) rather than blocking on this path.
     """
-    global _local_llm_available
-    import httpx
+    def _call() -> str:
+        from google import genai
+        from google.genai.types import GenerateContentConfig
 
-    if _local_llm_available is False:
-        return None
+        api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY not configured")
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=_LIGHT_LLM_MODEL,
+            contents=prompt,
+            config=GenerateContentConfig(temperature=0.3, max_output_tokens=max_tokens),
+        )
+        return (response.text or "").strip()
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{_LOCAL_LLM_BASE_URL}/v1/chat/completions",
-                json={
-                    "model": _LOCAL_LLM_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.3,
-                    "stream": False,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            msg = data["choices"][0]["message"]
-            result = (msg.get("content") or "").strip()
-            if not result:
-                # Fallback: reasoning field (Ollama) or reasoning_content (llama-server)
-                result = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
-            if _local_llm_available is None:
-                _local_llm_available = True
-                logger.info("Local LLM available: %s @ %s", _LOCAL_LLM_MODEL, _LOCAL_LLM_BASE_URL)
-            return result or None
+        return (await asyncio.to_thread(_call)) or None
     except Exception as e:
-        if _local_llm_available is not False:
-            logger.info("Local LLM not available (%s), falling back to Haiku", e)
-            _local_llm_available = False
+        logger.warning("Light LLM (%s) generation failed: %s", _LIGHT_LLM_MODEL, e)
         return None
 
 
@@ -1288,17 +1271,11 @@ async def _maybe_summarize_chunk(user_id: int):
             + conversation_text
         )
 
-        summary = await _local_llm_generate(summary_prompt)
-        if not summary:
-            resp = await _claude.messages.create(
-                model=await _get_model_light(),
-                max_tokens=768,
-                messages=[{"role": "user", "content": summary_prompt}],
-            )
-            summary = _extract_text(resp)
-        if _summary_is_contaminated(summary):
+        summary = await _gemini_light_generate(summary_prompt, max_tokens=768)
+        if not summary or _summary_is_contaminated(summary):
             logger.warning(
-                "Chunk summary contaminated; using extractive fallback user=%d msgs=#%d~#%d",
+                "Chunk summary %s; using extractive fallback user=%d msgs=#%d~#%d",
+                "generation failed" if not summary else "contaminated",
                 user_id, chunk_start_id, chunk_end_id,
             )
             summary = _build_extractive_chat_summary(chunk)
@@ -1784,7 +1761,7 @@ register_handlers(router, ctx={
     "deepseek_anthropic_client": _deepseek_anthropic_client,
     "kimi_client": _kimi_client,
     "extract_text": _extract_text,
-    "local_llm_generate": _local_llm_generate,
+    "gemini_light_generate": _gemini_light_generate,
     "get_model_light": _get_model_light,
     "maybe_summarize_chunk": _maybe_summarize_chunk,
     "build_skills_prompt": build_skills_prompt,

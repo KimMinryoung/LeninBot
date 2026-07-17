@@ -1698,15 +1698,10 @@ async def _reflect_on_recent(user_id: int):
         )
         prompt = _REFLECTION_PROMPT + conv_text
 
-        # Try local LLM first (free), fall back to Haiku (paid)
-        result = await _ctx["local_llm_generate"](prompt)
+        result = await _ctx["gemini_light_generate"](prompt, max_tokens=512)
         if not result:
-            resp = await _ctx["claude_client"].messages.create(
-                model=await _ctx["get_model_light"](),
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            result = _ctx["extract_text"](resp).strip()
+            logger.warning("Reflection: light LLM generation failed — skipping this round")
+            return
 
         if result.upper() == "NONE":
             logger.info("Reflection: nothing to learn from recent conversation")
