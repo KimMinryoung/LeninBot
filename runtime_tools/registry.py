@@ -1266,6 +1266,7 @@ def _parse_email_message(
     """Parse a raw email and return dict with subject, from, date, links, and extracted body text."""
     import email as _email
     from email.header import decode_header
+    from email.utils import parsedate_to_datetime
     from html import unescape
     import re
 
@@ -1281,6 +1282,10 @@ def _parse_email_message(
 
     sender = msg.get("From", "")
     date = msg.get("Date", "")
+    try:
+        date_sort_timestamp = parsedate_to_datetime(date).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        date_sort_timestamp = 0.0
 
     def _decode_payload(part):
         payload = part.get_payload(decode=True)
@@ -1367,6 +1372,7 @@ def _parse_email_message(
         "subject": subject,
         "from": sender,
         "date": date,
+        "date_sort_timestamp": date_sort_timestamp,
         "links": unique_links[:50],
         "body": sliced_body if include_body else "",
         "body_chars": body_chars,
@@ -1400,9 +1406,11 @@ async def _exec_check_inbox(
     def _fetch():
         conn = _imap_connect()
         if conn is None:
-            return "Error: IMAP credentials not configured in .env"
+            return "Error: IMAP credentials not configured"
 
         results = []
+        successful_folders = 0
+        folder_errors = []
         try:
             if uid:
                 status, _ = conn.select(selected_folder, readonly=True)
@@ -1428,14 +1436,18 @@ async def _exec_check_inbox(
                 try:
                     status, _ = conn.select(mailbox_folder, readonly=True)
                     if status != "OK":
+                        folder_errors.append(f"{mailbox_folder}: select returned {status}")
                         continue
-                except Exception:
+                except Exception as exc:
+                    folder_errors.append(f"{mailbox_folder}: select failed ({type(exc).__name__})")
                     continue
 
                 search_criteria = "UNSEEN" if unread_only else "ALL"
                 search_status, data = conn.uid("search", None, search_criteria)
                 if search_status != "OK":
+                    folder_errors.append(f"{mailbox_folder}: search returned {search_status}")
                     continue
+                successful_folders += 1
                 all_uids = data[0].split() if data and data[0] else []
                 if not all_uids:
                     continue
@@ -1480,7 +1492,18 @@ async def _exec_check_inbox(
         finally:
             conn.logout()
 
-        results.sort(key=lambda x: x["date"], reverse=True)
+        if not successful_folders:
+            detail = "; ".join(folder_errors) or "no folder completed"
+            return f"Error: IMAP connected, but mailbox checks failed ({detail})"
+        if folder_errors:
+            logger.warning("check_inbox partial mailbox failure: %s", "; ".join(folder_errors))
+        logger.info(
+            "check_inbox IMAP completed: successful_folders=%d matched=%d unread_only=%s",
+            successful_folders,
+            len(results),
+            unread_only,
+        )
+        results.sort(key=lambda x: x.get("date_sort_timestamp", 0.0), reverse=True)
         return results[:limit]
 
     try:

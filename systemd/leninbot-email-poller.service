@@ -7,4 +7,6 @@ Type=oneshot
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
+# EMAIL_POLLING_ENABLED is forced true inside email_poll_once.py — an
+# Environment= override here would be clobbered by EnvironmentFile=.
 ExecStart=/home/grass/leninbot/venv/bin/python scripts/email_poll_once.py --limit 10

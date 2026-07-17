@@ -797,10 +797,19 @@ def poll_inbox_once(limit: int = 10) -> list[dict[str, Any]]:
     try:
         mailbox = imaplib.IMAP4_SSL(CONFIG.imap_host, CONFIG.imap_port)
         mailbox.login(CONFIG.imap_username, CONFIG.imap_password)
-        mailbox.select(CONFIG.imap_mailbox)
+        typ, select_data = mailbox.select(CONFIG.imap_mailbox)
+        if typ != "OK":
+            raise RuntimeError(f"IMAP SELECT {CONFIG.imap_mailbox!r} failed: {typ}")
+        message_count = int(select_data[0]) if select_data and select_data[0] else 0
+        logger.info(
+            "email poller IMAP connected: host=%s mailbox=%s messages=%d",
+            CONFIG.imap_host,
+            CONFIG.imap_mailbox,
+            message_count,
+        )
         typ, data = mailbox.uid("search", None, "UNSEEN")
         if typ != "OK":
-            return []
+            raise RuntimeError(f"IMAP UID SEARCH UNSEEN failed: {typ}")
         uids = [u.decode() if isinstance(u, bytes) else str(u) for u in (data[0].split() if data and data[0] else [])][-limit:]
         for uid in uids:
             typ, msg_data = mailbox.uid("fetch", uid, "(RFC822)")

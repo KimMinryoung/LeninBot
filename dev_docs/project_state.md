@@ -77,7 +77,7 @@ developer MCP clients
 | `leninbot-api.service` | `uvicorn api:app` | web chat, chat history, admin users, task reports, private report JSON, x402 demo; remaining `api_routes/*` here are code modules in this same process |
 | `novel-writer-api.service` | `uvicorn novel_writer_api:app` | isolated personal fiction writer API and writer SSE runs |
 | `leninbot-email-api.service` | `uvicorn email_api:app` | admin-gated `/email/*` review, approval, draft, and manual poll API |
-| `leninbot-email-poller.timer` | `scripts/email_poll_once.py` | periodic IMAP polling into the email bridge tables |
+| `leninbot-email-poller.timer` | `scripts/email_poll_once.py` | periodic IMAP polling into the email bridge tables; the script forces `EMAIL_POLLING_ENABLED=true` at import time (a unit `Environment=` override would lose to `EnvironmentFile=`), independently of the legacy Telegram-loop setting |
 | `leninbot-a2a-api.service` | `uvicorn a2a_api:app` | public A2A discovery and JSON-RPC endpoint |
 | `leninbot-browser.service` | `browser/worker.py` | browser automation worker over Unix socket |
 | `leninbot-autonomous.service` | `venv/bin/python -m autonomous_project` | one autonomous project tick |

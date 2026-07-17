@@ -22,6 +22,20 @@ RAW_EMAIL = (
     + SOURCE
 ).encode("utf-8")
 
+OLDER_EMAIL = (
+    "From: older@example.test\n"
+    "Subject: Older lexical trap\n"
+    "Date: Wed, 8 Jul 2026 18:11:40 +0000\n"
+    "Content-Type: text/plain; charset=utf-8\n\nolder"
+).encode("utf-8")
+
+NEWER_EMAIL = (
+    "From: newer@example.test\n"
+    "Subject: Newer chronological message\n"
+    "Date: Wed, 15 Jul 2026 09:03:31 +0000\n"
+    "Content-Type: text/plain; charset=utf-8\n\nnewer"
+).encode("utf-8")
+
 
 class FakeImap:
     def __init__(self):
@@ -47,6 +61,25 @@ class FakeImap:
         return "BYE", [b""]
 
 
+class FakeChronologicalImap(FakeImap):
+    def uid(self, command, *args):
+        if command == "search":
+            return "OK", [b"244 259"]
+        if command == "fetch":
+            uid, query = args
+            assert query == "(FLAGS BODY.PEEK[])", query
+            if uid == b"244":
+                return "OK", [(b"244 (UID 244 FLAGS () BODY[] {6}", OLDER_EMAIL)]
+            if uid == b"259":
+                return "OK", [(b"259 (UID 259 FLAGS () BODY[] {6}", NEWER_EMAIL)]
+        raise AssertionError(f"unexpected uid command: {command} {args}")
+
+
+class FakeBrokenImap(FakeImap):
+    def select(self, folder, readonly=True):
+        return "NO", [b"mailbox unavailable"]
+
+
 async def _main() -> None:
     original_imap_connect = registry._imap_connect
     registry._imap_connect = lambda: FakeImap()
@@ -63,6 +96,16 @@ async def _main() -> None:
         assert "returned_chars=1000:2000" in inbox_page, inbox_page
         assert "B" * 80 in inbox_page, inbox_page
         assert "A" * 80 not in inbox_page, inbox_page
+
+        registry._imap_connect = lambda: FakeChronologicalImap()
+        chronological = await registry._exec_check_inbox(limit=2, include_body=False)
+        newer_position = chronological.index("Newer chronological message")
+        older_position = chronological.index("Older lexical trap")
+        assert newer_position < older_position, chronological
+
+        registry._imap_connect = lambda: FakeBrokenImap()
+        broken = await registry._exec_check_inbox(limit=2, include_body=False)
+        assert broken.startswith("Error: IMAP connected, but mailbox checks failed"), broken
     finally:
         registry._imap_connect = original_imap_connect
 

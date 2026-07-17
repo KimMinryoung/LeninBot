@@ -6,12 +6,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# The shared .env sets EMAIL_POLLING_ENABLED=false to disable the legacy
+# in-process Telegram poll loop. This dedicated worker must always poll, and
+# a systemd Environment= override cannot win against EnvironmentFile=, so
+# force it here before email_bridge builds CONFIG at import time.
+os.environ["EMAIL_POLLING_ENABLED"] = "true"
 
 from email_bridge import run_polling_cycle
 
