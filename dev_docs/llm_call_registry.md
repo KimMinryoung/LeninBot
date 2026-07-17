@@ -29,6 +29,10 @@ python scripts/llm_registry_cli.py list              # 원샷 + 에이전트 루
 python scripts/llm_registry_cli.py show <feature>    # 원본 + env 오버라이드 반영 유효값
 python scripts/llm_registry_cli.py set <feature> <key> <value>   # 핫리로드 반영
 python scripts/llm_registry_cli.py add <feature> --provider gemini --model ... 
+python scripts/llm_registry_cli.py agent-show <agent>            # 에이전트 루프 설정 조회
+python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
+#   key: provider|model|budget_usd|max_rounds — agent_runtime.json 수정, 핫리로드
+#   저장 후 런타임 로더로 재검증, 실패 시 자동 원복. model 별칭 오타는 경고
 ```
 
 ## 새 호출부 등록 방법

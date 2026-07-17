@@ -8,8 +8,15 @@ Usage:
                                                       # config/llm_call_sites.json 수정 (핫리로드 반영)
   python scripts/llm_registry_cli.py add <feature> --provider P --model M [--temperature T] ...
 
-`set`/`add`는 원샷 레지스트리(config/llm_call_sites.json)만 수정한다.
-에이전트 루프(config/agent_runtime.json)는 기존처럼 해당 파일을 직접 편집.
+  python scripts/llm_registry_cli.py agent-show <agent>
+  python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
+                                                      # config/agent_runtime.json 수정 (핫리로드 반영)
+                                                      # key: provider | model | budget_usd | max_rounds
+                                                      # value "null" → 기본값 상속(provider/model)
+
+`set`/`add`는 원샷 레지스트리(config/llm_call_sites.json),
+`agent-set`은 에이전트 루프(config/agent_runtime.json)를 수정한다.
+둘 다 핫리로드 — 서비스 재시작 불필요.
 """
 
 from __future__ import annotations
@@ -139,6 +146,80 @@ def cmd_add(args) -> None:
           f"await generate({args.feature!r}, prompt)")
 
 
+# ── 에이전트 루프 (config/agent_runtime.json) ─────────────────────────
+
+_AGENT_PROVIDERS = {"claude", "openai", "deepseek", "kimi", "local", "moon", "codex"}
+_AGENT_KEYS = {"provider", "model", "budget_usd", "max_rounds"}
+# provider별 모델 별칭 힌트 (bot_config 티어/별칭 맵 기준; 오타 경고용, 차단 아님)
+_AGENT_MODEL_HINTS = {
+    "claude": {"haiku", "sonnet", "opus"},
+    "openai": {"gpt54", "gpt54mini", "gpt54nano"},
+    "deepseek": {"deepseek_pro", "deepseek_flash"},
+    "kimi": {"kimi_k3"},
+}
+
+
+def _save_agent_runtime(data: dict) -> None:
+    with open(AGENT_RUNTIME_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def cmd_agent_show(agent: str) -> None:
+    agents = _load(AGENT_RUNTIME_PATH)
+    if agent not in agents:
+        print(f"'{agent}' 미등록. 등록된 에이전트: {', '.join(sorted(agents))}")
+        sys.exit(1)
+    print(json.dumps(agents[agent], ensure_ascii=False, indent=2))
+
+
+def cmd_agent_set(agent: str, key: str, value: str) -> None:
+    if key not in _AGENT_KEYS:
+        print(f"알 수 없는 키 '{key}'. 허용: {', '.join(sorted(_AGENT_KEYS))} "
+              "(terminal_tools 등 구조 필드는 파일을 직접 편집)")
+        sys.exit(1)
+    agents = _load(AGENT_RUNTIME_PATH)
+    if agent not in agents:
+        print(f"'{agent}' 미등록. 등록된 에이전트: {', '.join(sorted(agents))}")
+        sys.exit(1)
+
+    entry = agents[agent]
+    if key in ("provider", "model") and value.lower() in ("null", "none", ""):
+        new_value = None
+    elif key == "provider":
+        if value not in _AGENT_PROVIDERS:
+            print(f"provider는 {sorted(_AGENT_PROVIDERS)} 또는 null이어야 합니다.")
+            sys.exit(1)
+        new_value = value
+    elif key == "model":
+        new_value = value
+        provider = entry.get("provider")
+        hints = _AGENT_MODEL_HINTS.get(provider or "", set())
+        if hints and value not in hints:
+            print(f"⚠ 경고: '{value}'는 provider '{provider}'의 알려진 별칭 {sorted(hints)}에 없습니다. "
+                  "런타임 티어 해석에 실패하면 기본 티어로 폴백합니다.")
+    elif key == "budget_usd":
+        new_value = float(value)
+    else:  # max_rounds
+        new_value = int(value)
+
+    old_value = entry.get(key)
+    entry[key] = new_value
+    _save_agent_runtime(agents)
+
+    # 저장본을 런타임 로더로 재검증 — 실패 시 원복 (런타임 리로더도 fail-safe지만 이중 방어)
+    try:
+        from agents.runtime_config import _load_runtime_config
+        _load_runtime_config()
+    except Exception as e:
+        entry[key] = old_value
+        _save_agent_runtime(agents)
+        print(f"검증 실패로 원복했습니다: {e}")
+        sys.exit(1)
+
+    print(f"{agent}.{key}: {old_value!r} → {new_value!r}  (핫리로드 — 다음 태스크부터 적용)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="LLM 호출 레지스트리 조회/수정")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -159,6 +240,12 @@ def main() -> None:
     p_add.add_argument("--json-mode", dest="json_mode", action="store_true")
     p_add.add_argument("--managed", choices=["executor", "model-only", "external"])
     p_add.add_argument("--note")
+    p_ashow = sub.add_parser("agent-show")
+    p_ashow.add_argument("agent")
+    p_aset = sub.add_parser("agent-set")
+    p_aset.add_argument("agent")
+    p_aset.add_argument("key")
+    p_aset.add_argument("value")
     args = parser.parse_args()
 
     if args.cmd == "list":
@@ -169,6 +256,10 @@ def main() -> None:
         cmd_set(args.feature, args.key, args.value)
     elif args.cmd == "add":
         cmd_add(args)
+    elif args.cmd == "agent-show":
+        cmd_agent_show(args.agent)
+    elif args.cmd == "agent-set":
+        cmd_agent_set(args.agent, args.key, args.value)
 
 
 if __name__ == "__main__":
