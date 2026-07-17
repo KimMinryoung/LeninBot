@@ -266,9 +266,12 @@ prove there is no duplicate. Research with the free wiki_search/wiki_get tools f
 Wikipedia when available); use the paid web_search only for facts Wikipedia lacks. One opened
 source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
 complete bilingual person card with a correct group and one primary role, including a bio and a
-one-line `moment` that follow the style rules below. Make exactly one
-`commulingo_edit(target_type='person', action='create', ...)` call and stop. Do not create a
-section or office row in this run.
+one-line `moment` that follow the style rules below, via one
+`commulingo_edit(target_type='person', action='create', ...)` call. Then inspect list_events and
+link the new person to the history events they were clearly and materially involved in — up to
+three `commulingo_edit(target_type='history_event_person', action='create', ...)` calls, each
+with concise bilingual relation labels; skip any event where the connection is weak rather than
+force it. Then stop. Do not create a section or office row in this run.
 
 """ + CARD_STYLE_GUIDANCE
     if not candidate:
@@ -675,9 +678,12 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 state["new_cooldown_remaining"] -= 1
 
     after = completed_run_count()
-    if after != before + 1:
+    # A new-person run may add up to three event links after the create; every
+    # other mode must land exactly one edit (the burst-bug guard).
+    max_edits = 4 if chosen_mode == "new" else 1
+    if not (before + 1 <= after <= before + max_edits):
         raise RuntimeError(
-            f"expected exactly one applied edit, count changed {before} -> {after}; result={result[:500]}"
+            f"expected 1..{max_edits} applied edits, count changed {before} -> {after}; result={result[:500]}"
         )
     save_state(state)
     edit = latest_maintainer_edit()
