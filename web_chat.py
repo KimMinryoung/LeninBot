@@ -18,7 +18,7 @@ from pathlib import Path
 
 from shared import KST
 from bot_config import (
-    _claude, _openai_client, _deepseek_anthropic_client,
+    _claude, _openai_client, _deepseek_anthropic_client, _kimi_client,
 )
 from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
@@ -1481,6 +1481,31 @@ async def handle_web_chat(
                     budget_usd=profile.budget_usd,
                     on_progress=on_progress,
                     provider_label=f"{provider}:web",
+                    continue_on_length=True,
+                    max_length_continuations=2,
+                    return_metadata=True,
+                    budget_tracker=budget_tracker,
+                )
+            elif provider == "kimi":
+                if not _kimi_client:
+                    raise RuntimeError("MOONSHOT_API_KEY is not configured for webchat_provider=kimi")
+                from openai_tool_loop import chat_with_tools as openai_chat
+                result = await openai_chat(
+                    history,
+                    client=_kimi_client,
+                    model=profile.model_id,
+                    tools=web_tools,
+                    tool_handlers=web_handlers,
+                    system_prompt=system_prompt,
+                    max_rounds=profile.max_rounds,
+                    max_tokens=profile.max_tokens,
+                    budget_usd=profile.budget_usd,
+                    on_progress=on_progress,
+                    provider_label=f"{provider}:web",
+                    extra_body={"reasoning_effort": "max"},
+                    sdk_max_token_param="max_tokens",
+                    include_parallel_tool_calls=False,
+                    preserve_reasoning_content=True,
                     continue_on_length=True,
                     max_length_continuations=2,
                     return_metadata=True,

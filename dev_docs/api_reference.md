@@ -235,7 +235,7 @@ Background document request (`POST`/`PUT`):
 
 Documents are per-project reference material (worldbuilding, character sheets, outline, research) stored in `writer_documents`, unique by `(project_id, title)`; `POST` upserts by title. A document inventory (titles, kinds, sizes) is injected into the model's manuscript-context system block, and the model reads them with the `read_document`/`search_documents` tools and maintains them with `save_document`. Documents with kind `pinned` (up to 2, 6000 chars each) are injected in full every turn; the prompt instructs the model to maintain a pinned 'Story so far' synopsis so long-novel continuity does not require re-reading the manuscript.
 
-Model selection: the admin's choice persists server-side in `writer_settings` (`PUT /writer/settings`, loaded as `selected_model` on the project list) and is used when a message request omits `model`. Choices: `fable` (Claude Fable 5, adaptive thinking, effort high), `fable_fast` (effort low), `deepseek_pro`, `deepseek_flash`. Conversation history sent to the model is budgeted to ~30k chars (newest first, minimum 8 messages).
+Model selection: the admin's choice persists server-side in `writer_settings` (`PUT /writer/settings`, loaded as `selected_model` on the project list) and is used when a message request omits `model`. Choices: `fable` (Claude Fable 5, adaptive thinking, effort high), `fable_fast` (effort low), `deepseek_pro`, `deepseek_flash`, and `kimi_k3` (Kimi K3 through Moonshot's Anthropic-compatible endpoint, default thinking). Conversation history sent to the model is budgeted to ~30k chars (newest first, minimum 8 messages).
 
 Message request:
 

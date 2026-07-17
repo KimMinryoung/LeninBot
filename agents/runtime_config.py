@@ -18,7 +18,7 @@ from agents.base import AgentSpec
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "agent_runtime.json"
-_ALLOWED_PROVIDERS = {None, "claude", "openai", "deepseek", "local", "moon", "codex"}
+_ALLOWED_PROVIDERS = {None, "claude", "openai", "deepseek", "kimi", "local", "moon", "codex"}
 _ALLOWED_KEYS = {
     "provider",
     "model",

@@ -134,6 +134,12 @@ PRICING_TABLE = {
         "cache_creation":  0.435 / 1_000_000,
         "cache_read":      0.003625 / 1_000_000,
     },
+    "kimi-k3": {
+        "input":            3.00 / 1_000_000,
+        "output":          15.00 / 1_000_000,
+        "cache_creation":   3.00 / 1_000_000,
+        "cache_read":       0.30 / 1_000_000,
+    },
 }
 
 # Fallback when the model string doesn't match any known family — use Sonnet

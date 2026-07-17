@@ -105,6 +105,12 @@ OPENAI_PRICING = {
         "output": 0.87 / 1_000_000,
         "cached_input": 0.003625 / 1_000_000,
     },
+    # Moonshot Kimi K3 official pricing, per 1M tokens.
+    "kimi-k3": {
+        "input": 3.00 / 1_000_000,
+        "output": 15.00 / 1_000_000,
+        "cached_input": 0.30 / 1_000_000,
+    },
 }
 _DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
 
@@ -850,7 +856,12 @@ def _rescue_inline_tool_calls(content: str) -> tuple[str, list[dict] | None]:
     return cleaned, calls
 
 
-def _extract_response(sdk_mode, response_or_data):
+def _message_reasoning_content(message) -> str:
+    value = _obj_get(message, "reasoning_content", None) or _obj_get(message, "reasoning", None) or ""
+    return value if isinstance(value, str) else ""
+
+
+def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = True):
     """Extract (finish_reason, content_text, tool_calls, message, usage) from response.
 
     Post-processing applied before returning:
@@ -919,7 +930,7 @@ def _extract_response(sdk_mode, response_or_data):
     # keep clean content so the conversation history we feed back to the
     # model doesn't accumulate 💭-prefixed past turns.
     is_final = finish_reason != "tool_calls" and not tool_calls
-    if reasoning and is_final:
+    if reasoning and is_final and surface_reasoning:
         content = f"💭 {reasoning}\n\n{content}" if content else f"💭 {reasoning}"
 
     return finish_reason, content, tool_calls, msg, usage
@@ -1027,6 +1038,7 @@ async def chat_with_tools(
     sdk_max_token_param: str = "max_completion_tokens",
     include_parallel_tool_calls: bool = True,
     provider_label: str | None = None,
+    preserve_reasoning_content: bool = False,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
     return_metadata: bool = False,
@@ -1273,8 +1285,9 @@ async def chat_with_tools(
         if response is None:
             break
 
-        finish_reason, content_text, tool_calls, message_obj, usage = \
-            _extract_response(sdk_mode, response)
+        finish_reason, content_text, tool_calls, message_obj, usage = _extract_response(
+            sdk_mode, response, surface_reasoning=not preserve_reasoning_content,
+        )
 
         # ── Cost tracking (SDK mode) ──
         # OpenAI caching is automatic (no cache_control markers) — we just
@@ -1326,10 +1339,15 @@ async def chat_with_tools(
                         ),
                     )
                     accumulated_text_parts.append(content_text.strip())
-                    working_msgs.append({
+                    continuation_msg = {
                         "role": "assistant",
                         "content": content_text.strip(),
-                    })
+                    }
+                    if preserve_reasoning_content:
+                        reasoning_content = _message_reasoning_content(message_obj)
+                        if reasoning_content:
+                            continuation_msg["reasoning_content"] = reasoning_content
+                    working_msgs.append(continuation_msg)
                     working_msgs.append({
                         "role": "user",
                         "content": (
@@ -1387,6 +1405,10 @@ async def chat_with_tools(
             "content": content_text if content_text.strip() else None,
             "tool_calls": tc_list,
         }
+        if preserve_reasoning_content:
+            reasoning_content = _message_reasoning_content(message_obj)
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
         working_msgs.append(assistant_msg)
 
         if content_text.strip():
@@ -1481,7 +1503,9 @@ async def chat_with_tools(
     budget_exhausted = total_cost >= budget_usd
     was_still_working = (
         response is not None
-        and _extract_response(sdk_mode, response)[0] == "tool_calls"
+        and _extract_response(
+            sdk_mode, response, surface_reasoning=not preserve_reasoning_content,
+        )[0] == "tool_calls"
     ) if response else False
 
     limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
@@ -1542,7 +1566,9 @@ async def chat_with_tools(
             sdk_max_token_param=sdk_max_token_param,
             include_parallel_tool_calls=include_parallel_tool_calls,
         )
-        _, text, final_tool_calls, _, final_usage = _extract_response(sdk_mode, final_response)
+        _, text, final_tool_calls, final_message, final_usage = _extract_response(
+            sdk_mode, final_response, surface_reasoning=not preserve_reasoning_content,
+        )
         if sdk_mode and final_usage:
             call_cost = _calculate_cost(final_usage, model)
             total_cost += call_cost
@@ -1553,11 +1579,16 @@ async def chat_with_tools(
         if final_tool_calls and finalization_names:
             final_tc_list = _build_tc_list(sdk_mode, final_tool_calls)
             if final_tc_list:
-                working_msgs.append({
+                final_assistant_msg = {
                     "role": "assistant",
                     "content": text if text.strip() else None,
                     "tool_calls": final_tc_list,
-                })
+                }
+                if preserve_reasoning_content:
+                    reasoning_content = _message_reasoning_content(final_message)
+                    if reasoning_content:
+                        final_assistant_msg["reasoning_content"] = reasoning_content
+                working_msgs.append(final_assistant_msg)
                 allowed = set(finalization_names)
                 final_batch: list[tuple[str, str, dict]] = []
                 for tc_item in final_tc_list:
@@ -1614,7 +1645,9 @@ async def chat_with_tools(
                         sdk_max_token_param=sdk_max_token_param,
                         include_parallel_tool_calls=include_parallel_tool_calls,
                     )
-                    _, followup_text, _, _, followup_usage = _extract_response(sdk_mode, followup)
+                    _, followup_text, _, _, followup_usage = _extract_response(
+                        sdk_mode, followup, surface_reasoning=not preserve_reasoning_content,
+                    )
                     if sdk_mode and followup_usage:
                         call_cost = _calculate_cost(followup_usage, model)
                         total_cost += call_cost
@@ -1638,7 +1671,9 @@ async def chat_with_tools(
                 sdk_max_token_param=sdk_max_token_param,
                 include_parallel_tool_calls=include_parallel_tool_calls,
             )
-            _, text, _, _, last_usage = _extract_response(sdk_mode, last_response)
+            _, text, _, _, last_usage = _extract_response(
+                sdk_mode, last_response, surface_reasoning=not preserve_reasoning_content,
+            )
             if sdk_mode and last_usage:
                 call_cost = _calculate_cost(last_usage, model)
                 total_cost += call_cost

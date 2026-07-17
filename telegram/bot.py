@@ -31,7 +31,7 @@ from secrets_loader import get_secret
 # Extracted modules
 from bot_config import (
     ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client,
+    _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client, _kimi_client,
     _CLAUDE_MAX_TOKENS, _CLAUDE_MAX_TOKENS_TASK,
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
@@ -1644,6 +1644,39 @@ async def _chat_with_tools(
         with caller_scope(_gw_ctx):
             return await _chat_coro
 
+    if effective_provider == "kimi" and _kimi_client:
+        from openai_tool_loop import chat_with_tools as openai_chat
+        _chat_coro = openai_chat(
+            messages,
+            client=_kimi_client,
+            model=profile.model_id,
+            tools=merged_tools,
+            tool_handlers=merged_handlers,
+            system_prompt=sys_prompt,
+            max_rounds=resolved_max_rounds,
+            max_tokens=resolved_max_tokens,
+            max_input_tokens=resolved_max_input_tokens,
+            recover_input_via_tools=True,
+            continue_on_length=resolved_output_continuations > 0,
+            max_length_continuations=resolved_output_continuations,
+            log_event=_log_event,
+            budget_usd=resolved_budget,
+            on_progress=on_progress,
+            budget_tracker=budget_tracker,
+            task_id=task_id,
+            agent_name=_agent_name,
+            mission_id=_mission_id,
+            finalization_tools=finalization_tools,
+            terminal_tools=terminal_tools,
+            provider_label="kimi",
+            extra_body={"reasoning_effort": "max"},
+            sdk_max_token_param="max_tokens",
+            include_parallel_tool_calls=False,
+            preserve_reasoning_content=True,
+        )
+        with caller_scope(_gw_ctx):
+            return await _chat_coro
+
     if effective_provider == "deepseek" and _deepseek_anthropic_client:
         deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
             call_inference_policy, "deepseek"
@@ -1676,8 +1709,12 @@ async def _chat_with_tools(
         with caller_scope(_gw_ctx):
             return await _chat_coro
 
-    if effective_provider in ("openai", "deepseek"):
-        missing = "OPENAI_API_KEY" if effective_provider == "openai" else "DEEPSEEK_API_KEY"
+    if effective_provider in ("openai", "deepseek", "kimi"):
+        missing = {
+            "openai": "OPENAI_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "kimi": "MOONSHOT_API_KEY",
+        }[effective_provider]
         raise RuntimeError(f"{missing} is not configured for provider={effective_provider}")
 
     # Claude path. `messages` has already had the runtime context merged into
@@ -1745,6 +1782,7 @@ register_handlers(router, ctx={
     "openai_client": _openai_client,
     "deepseek_client": _deepseek_client,
     "deepseek_anthropic_client": _deepseek_anthropic_client,
+    "kimi_client": _kimi_client,
     "extract_text": _extract_text,
     "local_llm_generate": _local_llm_generate,
     "get_model_light": _get_model_light,
@@ -1808,7 +1846,7 @@ async def _get_model_for_agent(spec):
             return spec.model
         from llm.client import _resolve_backend
         return _resolve_backend()["model"]
-    if provider in ("claude", "openai", "deepseek"):
+    if provider in ("claude", "openai", "deepseek", "kimi"):
         profile = await resolve_runtime_profile(
             "task",
             provider_override=provider,
@@ -2432,10 +2470,10 @@ async def bot_main():
         elif spec.provider == "codex":
             chosen_chat_fn = _make_codex_chat_fn(spec)
             chosen_max_tokens = inference_policy.max_output_tokens
-        elif spec.provider in ("claude", "openai", "deepseek", "local"):
+        elif spec.provider in ("claude", "openai", "deepseek", "kimi", "local"):
             chosen_chat_fn = _make_provider_chat_fn(spec.provider)
             chosen_max_tokens = inference_policy.max_output_tokens
-        elif task_provider in ("claude", "openai", "deepseek", "local"):
+        elif task_provider in ("claude", "openai", "deepseek", "kimi", "local"):
             chosen_chat_fn = _make_provider_chat_fn(task_provider)
             chosen_max_tokens = inference_policy.max_output_tokens
         else:
@@ -2465,9 +2503,9 @@ async def bot_main():
         verify_chat_fn = None
         verify_model_fn = None
         if verification_mode in ("shadow", "enforce"):
-            if spec.provider in ("claude", "openai", "deepseek", "local"):
+            if spec.provider in ("claude", "openai", "deepseek", "kimi", "local"):
                 verify_provider = spec.provider
-            elif task_provider in ("claude", "openai", "deepseek", "local"):
+            elif task_provider in ("claude", "openai", "deepseek", "kimi", "local"):
                 verify_provider = task_provider
             else:
                 verify_provider = "claude"

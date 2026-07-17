@@ -218,7 +218,7 @@ class AgentSpec:
     # delegated invocations still get the callback so the user sees a reply.
     skip_orchestrator_report: bool = False
     model: str | None = None
-    provider: str | None = None  # None = follow task config; "claude"/"openai"/"deepseek"/"local" = force provider; "moon" = local LLM
+    provider: str | None = None  # None = follow task config; cloud provider/local = force provider; "moon" = local LLM
     budget_usd: float = 1.00
     max_rounds: int = 50
     max_input_tokens: int = DEFAULT_AGENT_MAX_INPUT_TOKENS
@@ -244,7 +244,7 @@ class AgentSpec:
         """
         if self.provider in ("moon", "codex"):
             return "local"
-        if self.provider in ("claude", "openai", "deepseek", "local"):
+        if self.provider in ("claude", "openai", "deepseek", "kimi", "local"):
             return self.provider
         return config_provider or "claude"
 

@@ -1,4 +1,4 @@
-"""Personal fiction-writing workspace (Claude Fable 5 first).
+"""Personal fiction-writing workspace with selectable provider models.
 
 Package layout mirrors the repo's other subsystems:
 - config     — runtime constants

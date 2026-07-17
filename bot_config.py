@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", "") or ""
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "") or ""
 DEEPSEEK_API_KEY = get_secret("DEEPSEEK_API_KEY", "") or ""
+MOONSHOT_API_KEY = get_secret("MOONSHOT_API_KEY", "") or ""
+MOONSHOT_BASE_URL = os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1").rstrip("/")
+MOONSHOT_ANTHROPIC_BASE_URL = os.getenv(
+    "MOONSHOT_ANTHROPIC_BASE_URL", "https://api.moonshot.ai/anthropic"
+).rstrip("/")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEEPSEEK_ANTHROPIC_BASE_URL = os.getenv(
     "DEEPSEEK_ANTHROPIC_BASE_URL",
@@ -30,7 +35,9 @@ _claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _openai_client = None
 _deepseek_client = None
 _deepseek_anthropic_client = None
-if OPENAI_API_KEY or DEEPSEEK_API_KEY:
+_kimi_client = None
+_kimi_anthropic_client = None
+if OPENAI_API_KEY or DEEPSEEK_API_KEY or MOONSHOT_API_KEY:
     from openai import AsyncOpenAI
 if OPENAI_API_KEY:
     _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -40,9 +47,19 @@ if DEEPSEEK_API_KEY:
         api_key=DEEPSEEK_API_KEY,
         base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
     )
+if MOONSHOT_API_KEY:
+    _kimi_client = AsyncOpenAI(api_key=MOONSHOT_API_KEY, base_url=MOONSHOT_BASE_URL)
+    _kimi_anthropic_client = anthropic.AsyncAnthropic(
+        auth_token=MOONSHOT_API_KEY,
+        base_url=MOONSHOT_ANTHROPIC_BASE_URL,
+    )
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
 _WEBCHAT_MAX_TOKENS = 4096
+try:
+    _KIMI_MIN_OUTPUT_TOKENS = max(4096, int(os.getenv("KIMI_MIN_OUTPUT_TOKENS", "16384")))
+except ValueError:
+    _KIMI_MIN_OUTPUT_TOKENS = 16384
 
 # ── Runtime Config (mutable at runtime via /config) ──────────────────
 _CONFIG_DEFAULTS = {
@@ -53,8 +70,8 @@ _CONFIG_DEFAULTS = {
     "task_model": "high",      # "high" | "medium" | "low"
     "max_rounds_chat": 50,
     "max_rounds_task": 100,
-    "provider": "claude",      # Telegram chat: "claude" | "openai" | "deepseek" | "local"
-    "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/local
+    "provider": "claude",      # Telegram chat: "claude" | "openai" | "deepseek" | "kimi" | "local"
+    "task_provider": "default", # "default" inherits provider; else claude/openai/deepseek/kimi/local
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
     "autonomous_provider": "deepseek", # scheduled autonomous loop provider
@@ -63,7 +80,7 @@ _CONFIG_DEFAULTS = {
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
     # the next `systemctl restart leninbot-api`.
-    "webchat_provider": "claude",  # "claude" | "openai" | "deepseek" (no "local" on public web)
+    "webchat_provider": "claude",  # "claude" | "openai" | "deepseek" | "kimi" (no "local" on public web)
     "webchat_model":    "medium",  # tier: "high" | "medium" | "low"
     # Security gateway enforcement posture. "shadow" logs would-be denials but
     # allows the call (new owner-gating / rate-limit rules); "enforce" blocks.
@@ -156,11 +173,11 @@ _CONFIG_META = {
     "task_model": _config_meta("태스크 모델", "", ["high", "medium", "low"], ["telegram-task"]),
     "max_rounds_chat": _config_meta("대화 라운드", "회", [15, 30, 50, 80], ["telegram-chat"]),
     "max_rounds_task": _config_meta("태스크 라운드", "회", [15, 30, 50, 80, 100], ["telegram-task"]),
-    "provider": _config_meta("대화 제공자", "", ["claude", "openai", "deepseek", "local"], ["telegram-chat"]),
+    "provider": _config_meta("대화 제공자", "", ["claude", "openai", "deepseek", "kimi", "local"], ["telegram-chat"]),
     "task_provider": _config_meta(
         "태스크 제공자",
         "",
-        ["default", "claude", "openai", "deepseek", "local"],
+        ["default", "claude", "openai", "deepseek", "kimi", "local"],
         ["telegram-task"],
     ),
     "task_concurrency": _config_meta("동시 태스크", "개", [1, 2, 3, 4], ["telegram-task-worker"], ["telegram"]),
@@ -168,11 +185,11 @@ _CONFIG_META = {
     "autonomous_provider": _config_meta(
         "자율 제공자",
         "",
-        ["default", "claude", "openai", "deepseek", "local"],
+        ["default", "claude", "openai", "deepseek", "kimi", "local"],
         ["autonomous-next-tick"],
     ),
     "autonomous_model": _config_meta("자율 모델", "", ["high", "medium", "low"], ["autonomous-next-tick"]),
-    "webchat_provider": _config_meta("웹챗 제공자", "", ["claude", "openai", "deepseek"], ["webchat"], ["api"]),
+    "webchat_provider": _config_meta("웹챗 제공자", "", ["claude", "openai", "deepseek", "kimi"], ["webchat"], ["api"]),
     "webchat_model": _config_meta("웹챗 모델", "", ["high", "medium", "low"], ["webchat"], ["api"]),
     "gateway_enforce_mode": _config_meta("보안 게이트웨이", "", ["shadow", "enforce"], ["all"]),
     "task_verification_mode": _config_meta("태스크 검증", "", ["off", "shadow", "enforce"], ["telegram-task"]),
@@ -199,6 +216,10 @@ _DEEPSEEK_MODEL_MAP = {
     "deepseek_flash": "deepseek-v4-flash",
 }
 
+_KIMI_MODEL_MAP = {
+    "kimi_k3": "kimi-k3",
+}
+
 # Human-readable display names keyed by API model ID. Used when injecting
 # "current model" context into the orchestrator prompt so the model sees its
 # own official product name ("Claude Opus 4.8") rather than the internal API
@@ -216,6 +237,8 @@ _MODEL_DISPLAY_NAMES = {
     # DeepSeek
     "deepseek-v4-pro":   "DeepSeek V4 Pro",
     "deepseek-v4-flash": "DeepSeek V4 Flash",
+    # Moonshot AI
+    "kimi-k3": "Kimi K3",
     # Local (Qwen family — common Ollama/llama.cpp tags)
     "qwen3.5-9b":   "Qwen 3.5 9B",
     "qwen3.6-9b":   "Qwen 3.6 9B",
@@ -245,6 +268,7 @@ _TIER_MAP = {
     "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
     "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
     "deepseek": {"high": "deepseek_pro", "medium": "deepseek_flash", "low": "deepseek_flash"},
+    "kimi": {"high": "kimi_k3", "medium": "kimi_k3", "low": "kimi_k3"},
     "local":  {"high": "local",  "medium": "local",  "low": "local"},
 }
 
@@ -287,6 +311,8 @@ def _tier_to_display(tier: str, provider: str | None = None) -> str:
         model_name = _OPENAI_MODEL_MAP.get(alias, alias)
     elif provider == "deepseek":
         model_name = _DEEPSEEK_MODEL_MAP.get(alias, alias)
+    elif provider == "kimi":
+        model_name = _KIMI_MODEL_MAP.get(alias, alias)
     elif provider == "local":
         from llm.client import MOON_MODEL
         model_name = MOON_MODEL
@@ -330,6 +356,11 @@ def _resolve_openai_model(alias: str) -> str:
 def _resolve_deepseek_model(alias: str) -> str:
     """Resolve DeepSeek model alias to the current official API model ID."""
     return _DEEPSEEK_MODEL_MAP.get(alias, alias)
+
+
+def _resolve_kimi_model(alias: str) -> str:
+    """Resolve a Kimi model alias to the official Moonshot API model ID."""
+    return _KIMI_MODEL_MAP.get(alias, alias)
 
 
 def _get_deepseek_thinking_params() -> dict:
@@ -493,6 +524,8 @@ def get_current_model_selection(
         model_id = _resolve_openai_model(alias)
     elif provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
         model_id = _resolve_deepseek_model(alias)
+    elif provider == "kimi" or alias in _KIMI_MODEL_MAP:
+        model_id = _resolve_kimi_model(alias)
     else:
         model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
         model_id = _resolved_models.get(alias, fallback)
@@ -503,7 +536,7 @@ def get_current_model_selection(
         "alias": alias,
         "model_id": model_id,
         "display_name": _display_name_for_model_id(model_id),
-        "resolved": True if provider in ("openai", "deepseek", "local") else alias in _resolved_models,
+        "resolved": True if provider in ("openai", "deepseek", "kimi", "local") else alias in _resolved_models,
     }
 
 
@@ -517,6 +550,8 @@ async def _get_model() -> str:
         return _resolve_openai_model(alias)
     if _config.get("provider") == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
         return _resolve_deepseek_model(alias)
+    if _config.get("provider") == "kimi" or alias in _KIMI_MODEL_MAP:
+        return _resolve_kimi_model(alias)
     return await _get_model_by_alias(alias)
 
 
@@ -531,6 +566,8 @@ async def _get_model_task() -> str:
         return _resolve_openai_model(alias)
     if provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
         return _resolve_deepseek_model(alias)
+    if provider == "kimi" or alias in _KIMI_MODEL_MAP:
+        return _resolve_kimi_model(alias)
     return await _get_model_by_alias(alias)
 
 

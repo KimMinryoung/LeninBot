@@ -348,9 +348,9 @@ async def stream_writer_reply(
     request_kind = ""
     main_policy = writer_call_policy("main")
     main_extra = resolve_writer_call_extra(main_policy, writer_model, model_extra)
-    # Claude-tier turns get the heavy context budget (longer tail + history);
-    # cheap tiers keep the lean defaults. See writer.config.
-    heavy_context = writer_model.startswith("claude")
+    # Heavy Claude/Kimi turns get the longer tail + history; cheap DeepSeek
+    # tiers keep the lean defaults. See writer.config.
+    heavy_context = writer_model.startswith(("claude", "kimi-"))
     model_messages = messages_for_model(
         project_id, prompt, selection_start, selection_end, heavy=heavy_context
     )

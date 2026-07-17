@@ -164,6 +164,14 @@ async def _assert_runtime_profiles() -> None:
     assert openai_task.max_tokens == bot_config._CLAUDE_MAX_TOKENS_TASK
     assert openai_task.budget_usd == float(bot_config._config.get("task_budget", 1.00))
 
+    kimi_task = await resolve_runtime_profile("task", provider_override="kimi")
+    assert kimi_task.provider == "kimi"
+    assert kimi_task.prompt_format == "markdown"
+    assert kimi_task.alias == "kimi_k3"
+    assert kimi_task.model_id == "kimi-k3"
+    assert kimi_task.display_name == "Kimi K3"
+    assert kimi_task.max_tokens >= bot_config._KIMI_MIN_OUTPUT_TOKENS
+
     autonomous = await resolve_runtime_profile(
         "autonomous",
         provider_override="openai",
@@ -217,6 +225,41 @@ def _assert_writer_heavy_policy_uses_gateway_defaults() -> None:
     assert writer_call_policy("diagnosis").max_output_tokens == 8000
     assert writer_call_policy("line_edit").max_output_tokens == 8000
     assert writer_call_policy("research").max_output_tokens == 3000
+
+
+def _assert_writer_kimi_catalog_and_resolution() -> None:
+    import bot_config
+    import claude_loop
+    from writer.models import list_writer_models, resolve_writer_model
+
+    original = bot_config._kimi_anthropic_client
+    dummy = object()
+    try:
+        bot_config._kimi_anthropic_client = dummy
+        rows = {row["key"]: row for row in list_writer_models()}
+        assert rows["kimi_k3"] == {
+            "key": "kimi_k3",
+            "id": "kimi-k3",
+            "display_name": "Kimi K3",
+            "provider": "kimi",
+            "input_price_per_mtok": 3.0,
+            "output_price_per_mtok": 15.0,
+            "available": True,
+            "default": False,
+        }
+        client, model, display, extra = resolve_writer_model("kimi_k3")
+        assert client is dummy
+        assert model == "kimi-k3"
+        assert display == "Kimi K3"
+        assert extra == {}
+        assert claude_loop._pricing_for("kimi-k3") == {
+            "input": 3.0 / 1_000_000,
+            "output": 15.0 / 1_000_000,
+            "cache_creation": 3.0 / 1_000_000,
+            "cache_read": 0.30 / 1_000_000,
+        }
+    finally:
+        bot_config._kimi_anthropic_client = original
 
 
 def _assert_openai_input_replay_checkpoint() -> None:
@@ -313,6 +356,73 @@ async def _assert_openai_continuation_extends_round_limit() -> None:
     assert completions.calls == 3
     assert result["continuations_used"] == 2
     assert result["text"] == "part-1\npart-2\npart-3"
+
+
+async def _assert_kimi_preserves_reasoning_for_tool_replay() -> None:
+    from types import SimpleNamespace
+    from openai_tool_loop import chat_with_tools
+
+    seen: list[dict] = []
+
+    class _Completions:
+        async def create(self, **kwargs):
+            seen.append(kwargs)
+            if len(seen) == 1:
+                tool_call = SimpleNamespace(
+                    id="call-kimi-1",
+                    function=SimpleNamespace(name="lookup", arguments='{"query":"x"}'),
+                )
+                message = SimpleNamespace(
+                    content="",
+                    reasoning_content="private reasoning",
+                    tool_calls=[tool_call],
+                    refusal=None,
+                )
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(finish_reason="tool_calls", message=message)],
+                    usage=None,
+                )
+            replay = kwargs["messages"]
+            assistant = next(m for m in replay if m.get("role") == "assistant")
+            assert assistant["reasoning_content"] == "private reasoning"
+            message = SimpleNamespace(
+                content="final answer", reasoning_content="final private reasoning",
+                tool_calls=None, refusal=None,
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="stop", message=message)],
+                usage=None,
+            )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
+    result = await chat_with_tools(
+        [{"role": "user", "content": "test"}],
+        client=client,
+        model="kimi-k3",
+        tools=[{
+            "name": "lookup",
+            "description": "Lookup",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        }],
+        tool_handlers={"lookup": lambda query: f"found {query}"},
+        system_prompt="system",
+        max_rounds=2,
+        max_tokens=128,
+        budget_usd=1.0,
+        extra_body={"reasoning_effort": "max"},
+        sdk_max_token_param="max_tokens",
+        include_parallel_tool_calls=False,
+        preserve_reasoning_content=True,
+    )
+    assert result == "final answer"
+    assert len(seen) == 2
+    assert seen[0]["extra_body"] == {"reasoning_effort": "max"}
+    assert seen[0]["max_tokens"] == 128
+    assert "parallel_tool_calls" not in seen[0]
 
 
 def _assert_agent_runtime_config() -> None:
@@ -1995,9 +2105,11 @@ async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
     _assert_writer_heavy_policy_uses_gateway_defaults()
+    _assert_writer_kimi_catalog_and_resolution()
     _assert_openai_input_replay_checkpoint()
     _assert_inference_reasoning_policy()
     await _assert_openai_continuation_extends_round_limit()
+    await _assert_kimi_preserves_reasoning_for_tool_replay()
     _assert_agent_runtime_config()
     _assert_autonomous_base_finalization_tools()
     _assert_agent_runtime_dynamic_reload()

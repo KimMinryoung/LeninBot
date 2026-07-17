@@ -41,6 +41,7 @@ TIER_A = [
     "GRAFFITI_API_KEY",
     "HF_TOKEN",
     "MOLTBOOK_API_KEY",
+    "MOONSHOT_API_KEY",
     "NEO4J_PASSWORD",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
@@ -64,6 +65,19 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-api": _FULL,
     "leninbot-telegram": _FULL,
 
+    # Personal fiction workspace: selectable Claude, DeepSeek, and Kimi main
+    # models plus Tavily-backed delegated research.
+    "novel-writer-api": {
+        "ADMIN_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "WRITER_ANTHROPIC_API_KEY",
+        "WRITER_ACCESS_KEY",
+        "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
+        "DB_PASSWORD",
+        "TAVILY_API_KEY",
+    },
+
     # Email API handles admin review, outbound approval, and optional resend.
     "leninbot-email-api": {
         "ADMIN_API_KEY",
@@ -84,6 +98,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
         "TAVILY_API_KEY",
@@ -105,6 +120,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
         "GEMINI_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
@@ -131,6 +147,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
     },
 
     # KG backup (daily 03:00) — R2 upload + Neo4j dump.

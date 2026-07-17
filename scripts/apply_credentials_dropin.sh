@@ -28,8 +28,10 @@ fi
 
 LONG_RUNNING=(
   leninbot-api
+  leninbot-a2a-api
   leninbot-telegram
   leninbot-browser
+  novel-writer-api
 )
 
 echo "--- installing per-service drop-ins ---"

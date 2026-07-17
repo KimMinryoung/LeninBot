@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from identity.prompts import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
-    _claude, _openai_client, _deepseek_anthropic_client, _config,
+    _claude, _openai_client, _deepseek_anthropic_client, _kimi_client, _config,
 )
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
@@ -184,6 +184,8 @@ def _resolve_a2a_provider() -> str:
         provider = "claude"
     if provider == "deepseek" and not _deepseek_anthropic_client:
         provider = "claude"
+    if provider == "kimi" and not _kimi_client:
+        provider = "openai" if _openai_client else "claude"
     return provider
 
 
@@ -373,6 +375,24 @@ async def _run_llm(
             max_tokens=profile.max_tokens,
             budget_usd=profile.budget_usd,
             provider_label="openai:a2a",
+        )
+    elif provider == "kimi" and _kimi_client:
+        from openai_tool_loop import chat_with_tools as openai_chat
+        return await openai_chat(
+            history,
+            client=_kimi_client,
+            model=profile.model_id,
+            tools=tools,
+            tool_handlers=handlers,
+            system_prompt=system_prompt,
+            max_rounds=profile.max_rounds,
+            max_tokens=profile.max_tokens,
+            budget_usd=profile.budget_usd,
+            provider_label="kimi:a2a",
+            extra_body={"reasoning_effort": "max"},
+            sdk_max_token_param="max_tokens",
+            include_parallel_tool_calls=False,
+            preserve_reasoning_content=True,
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
         from claude_loop import chat_with_tools

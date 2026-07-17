@@ -16,9 +16,9 @@ WRITER_MODEL_DISPLAY = "Claude Fable 5"
 WRITER_INPUT_PRICE_PER_MTOK = 10.0
 WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 
-# Selectable models. Fable is the default; DeepSeek options route through the
-# same chat_with_tools loop via bot_config's Anthropic-compatible DeepSeek
-# client. Prices are display hints only — authoritative cost comes from
+# Selectable models. Fable is the default; DeepSeek and Kimi options route
+# through the same chat_with_tools loop via provider Anthropic-compatible
+# clients. Prices are display hints only — authoritative cost comes from
 # claude_loop.PRICING_TABLE (keyed by model id) at runtime.
 # "extra" carries provider kwargs passed straight to chat_with_tools.
 WRITER_MODEL_CHOICES: dict[str, dict] = {
@@ -67,6 +67,13 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
         "input_price_per_mtok": 0.14,
         "output_price_per_mtok": 0.28,
     },
+    "kimi_k3": {
+        "provider": "kimi",
+        "model": "kimi-k3",
+        "display": "Kimi K3",
+        "input_price_per_mtok": 3.0,
+        "output_price_per_mtok": 15.0,
+    },
 }
 WRITER_DEFAULT_CHOICE = "fable"
 
@@ -98,11 +105,24 @@ def _deepseek_available() -> bool:
         return False
 
 
+def _kimi_available() -> bool:
+    try:
+        import bot_config
+        return bot_config._kimi_anthropic_client is not None
+    except Exception:
+        return False
+
+
 def list_writer_models() -> list[dict]:
     """Public metadata for the model picker: keys, display names, prices, availability."""
     out: list[dict] = []
     for key, spec in WRITER_MODEL_CHOICES.items():
-        available = True if spec["provider"] == "anthropic" else _deepseek_available()
+        if spec["provider"] == "anthropic":
+            available = True
+        elif spec["provider"] == "deepseek":
+            available = _deepseek_available()
+        else:
+            available = _kimi_available()
         out.append({
             "key": key,
             "id": spec["model"],
@@ -154,6 +174,12 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
         # agents). The writer never forces tool_choice, so thinking is stable.
         extra = bot_config._get_deepseek_thinking_params()
         return client, spec["model"], spec["display"], extra
+    if spec["provider"] == "kimi":
+        import bot_config
+        client = bot_config._kimi_anthropic_client
+        if client is None:
+            raise RuntimeError("Kimi is not configured (MOONSHOT_API_KEY missing).")
+        return client, spec["model"], spec["display"], dict(spec.get("extra") or {})
     return _client(), spec["model"], spec["display"], dict(spec.get("extra") or {})
 
 

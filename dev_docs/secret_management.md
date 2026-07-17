@@ -1,6 +1,6 @@
 # Secret Management
 
-최종 확인 기준: 2026-07-08 코드 트리.
+최종 확인 기준: 2026-07-17 코드 트리.
 
 Production services read secrets from systemd credentials. Local development can still use `.env`. The common access layer is `secrets_loader.py`.
 
@@ -27,6 +27,7 @@ Credential filename is the lowercased env var name:
 | `WRITER_ACCESS_KEY` | `writer_access_key` |
 | `OPENAI_API_KEY` | `openai_api_key` |
 | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
+| `MOONSHOT_API_KEY` | `moonshot_api_key` |
 | `ADMIN_API_KEY` | `admin_api_key` |
 
 The startup bridge only exports credential files whose names match lowercase env-var shape: letters, digits, and underscores, starting with a letter or underscore.
@@ -56,10 +57,11 @@ Relevant implementation files:
 ## Per-Service Notes
 
 - `leninbot-roleplay.service` mounts a minimal credential set via its `.service.d/credentials.conf` drop-in: `deepseek_api_key`, `db_password`, `neo4j_password`, `tavily_api_key` — enough for its four read-only tools and DeepSeek over the Anthropic-compatible endpoint, nothing more. The bot token `ROLEPLAY_BOT_TOKEN` is supplied via `EnvironmentFile=.env` (or a `roleplay_bot_token` credential if migrated). Drop-ins are applied with `scripts/apply_credentials_dropin.sh` and are host-managed (not committed), matching the existing services.
-- `novel-writer-api.service` mounts `admin_api_key`, `anthropic_api_key`, `db_password`, `deepseek_api_key`, and `tavily_api_key` for the `/writer` personal fiction workspace. `db_password` is required by `security_gateway/audit.py` because writer tool calls still write `tool_audit_log` in the main PostgreSQL database; writer manuscript/project tables remain on the local writer Postgres via `WRITER_DB_*`. Optional dedicated `writer_anthropic_api_key`, `writer_access_key`, and writer DB credentials should be mounted there too if migrated into the encrypted store. `creative_writer.py` checks `WRITER_ANTHROPIC_API_KEY` first and falls back to `ANTHROPIC_API_KEY`, so a separate paid Claude Fable 5 key can be isolated from normal Claude usage. `WRITER_ACCESS_KEY` can protect direct writer API calls separately; if unset, `/writer/*` accepts `ADMIN_API_KEY` through `X-Writer-Key`. The public frontend writer page normally uses the admin login session and server-side key injection instead of exposing either key to the browser.
+- `novel-writer-api.service` mounts `admin_api_key`, `anthropic_api_key`, `writer_anthropic_api_key`, `writer_access_key`, `db_password`, `deepseek_api_key`, `moonshot_api_key`, and `tavily_api_key` for the `/writer` personal fiction workspace. `db_password` is required by `security_gateway/audit.py` because writer tool calls still write `tool_audit_log` in the main PostgreSQL database; writer manuscript/project tables remain on the local writer Postgres via `WRITER_DB_*`. `creative_writer.py` checks `WRITER_ANTHROPIC_API_KEY` first and falls back to `ANTHROPIC_API_KEY`; Kimi uses `MOONSHOT_API_KEY` through Moonshot's Anthropic-compatible endpoint. `WRITER_ACCESS_KEY` can protect direct writer API calls separately; if unset, `/writer/*` accepts `ADMIN_API_KEY` through `X-Writer-Key`. The public frontend writer page normally uses the admin login session and server-side key injection instead of exposing either key to the browser.
 - `leninbot-email-api.service` mounts `admin_api_key`, `db_password`, `email_imap_password`, `email_smtp_password`, and `resend_api_key` for admin-gated `/email/*` review, draft, approval, manual poll, and outbound send paths. The public frontend uses the existing admin login session and injects the backend admin key server-side through `/api/proxy/email/*`.
 - `leninbot-email-poller.service` mounts only `db_password` and `email_imap_password`; it runs `scripts/email_poll_once.py` from `leninbot-email-poller.timer` and stores unseen inbound messages in the email bridge tables.
-- `leninbot-a2a-api.service` mounts `anthropic_api_key`, `openai_api_key`, `deepseek_api_key`, `db_password`, `neo4j_password`, `tavily_api_key`, and `github_token` for the public A2A LLM/tool surface. It does not mount email credentials or the broad main API credential set. `A2A_ENABLED` remains non-secret config from `.env`/systemd environment.
+- `leninbot-a2a-api.service` mounts `anthropic_api_key`, `openai_api_key`, `deepseek_api_key`, `moonshot_api_key`, `db_password`, `neo4j_password`, `tavily_api_key`, and `github_token` for the public A2A LLM/tool surface. It does not mount email credentials or the broad main API credential set. `A2A_ENABLED` remains non-secret config from `.env`/systemd environment.
+- `scripts/apply_credentials_dropin.sh` regenerates and installs the drop-ins, then restarts the long-running API, A2A API, Telegram, browser, and novel-writer services. Timer-driven services load the credential on their next run.
 
 ## Operational Notes
 

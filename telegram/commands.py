@@ -44,7 +44,7 @@ _SVC_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 def _model_name_for_provider(provider: str) -> str:
     """Resolve the current chat-tier model name for a given provider."""
     from bot_config import (
-        _TIER_MAP, _OPENAI_MODEL_MAP, _DEEPSEEK_MODEL_MAP,
+        _TIER_MAP, _OPENAI_MODEL_MAP, _DEEPSEEK_MODEL_MAP, _KIMI_MODEL_MAP,
         _MODEL_ALIAS_MAP, _resolved_models,
     )
     tier = _ctx["config"].get("chat_model", "high")
@@ -56,6 +56,8 @@ def _model_name_for_provider(provider: str) -> str:
         return _OPENAI_MODEL_MAP.get(alias, alias)
     if provider == "deepseek":
         return _DEEPSEEK_MODEL_MAP.get(alias, alias)
+    if provider == "kimi":
+        return _KIMI_MODEL_MAP.get(alias, alias)
     model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
     return _resolved_models.get(alias, fallback)
 
@@ -1343,6 +1345,8 @@ async def cmd_provider(message: Message):
         available.append("openai")
     if _ctx.get("deepseek_client"):
         available.append("deepseek")
+    if _ctx.get("kimi_client"):
+        available.append("kimi")
     if len(available) == 1:
         await message.answer("❌ 전환 가능한 추가 provider 키가 설정되어 있지 않습니다.")
         return
@@ -1406,9 +1410,13 @@ async def handle_photo(message: Message):
     t_start = _time.monotonic()
     try:
         config = _ctx["config"]
-        if config.get("provider") == "openai" and _ctx["openai_client"]:
+        if config.get("provider") in {"openai", "kimi"}:
+            provider = config["provider"]
+            vision_client = _ctx.get(f"{provider}_client")
+            if not vision_client:
+                raise RuntimeError(f"{provider} API key is not configured")
             model_id = await _ctx["get_model"]()
-            # OpenAI Vision: image_url with base64 data URI
+            # OpenAI-compatible vision: image_url with base64 data URI
             messages = context_msgs + [
                 {
                     "role": "user",
@@ -1426,11 +1434,13 @@ async def handle_photo(message: Message):
                     ],
                 }
             ]
-            response = await _ctx["openai_client"].chat.completions.create(
-                model=model_id,
-                max_completion_tokens=1024,
-                messages=messages,
+            request = {"model": model_id, "messages": messages}
+            request["max_tokens" if provider == "kimi" else "max_completion_tokens"] = (
+                4096 if provider == "kimi" else 1024
             )
+            if provider == "kimi":
+                request["extra_body"] = {"reasoning_effort": "max"}
+            response = await vision_client.chat.completions.create(**request)
             reply_text = response.choices[0].message.content or ""
             usage = response.usage
             in_tok = getattr(usage, "prompt_tokens", "?") if usage else "?"
