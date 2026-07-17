@@ -54,6 +54,42 @@ def main() -> None:
     else:
         print("RESULT: PARTIAL — 호출은 성공했으나 응답 형식이 예상과 다름 (기능상 문제 없음)")
 
+    _smoke_anthropic_endpoint(key)
+
+
+def _smoke_anthropic_endpoint(key: str) -> None:
+    """claude_loop/writer가 쓰는 Anthropic 호환 엔드포인트 검증.
+
+    bot_config._kimi_anthropic_client와 동일 구성: auth_token +
+    api.moonshot.ai/anthropic, thinking/temperature 미전송.
+    """
+    import anthropic
+
+    print("\n-- Anthropic 호환 엔드포인트 (claude_loop/writer 경로) --")
+    client = anthropic.Anthropic(
+        auth_token=key,
+        base_url="https://api.moonshot.ai/anthropic",
+        timeout=60,
+    )
+    response = client.messages.create(
+        model="kimi-k3",
+        max_tokens=512,
+        messages=[{"role": "user", "content": "Reply with exactly: KIMI_K3_ANTHROPIC_OK"}],
+    )
+    texts, block_types = [], []
+    for block in response.content:
+        block_types.append(getattr(block, "type", "?"))
+        if getattr(block, "type", "") == "text":
+            texts.append(block.text)
+    text = " ".join(texts).strip()
+    print(f"blocks: {block_types}")
+    print(f"reply: {text!r}")
+    print(f"usage: in={response.usage.input_tokens} out={response.usage.output_tokens}")
+    if "KIMI_K3_ANTHROPIC_OK" in text:
+        print("RESULT: PASS — Anthropic 호환 경로 정상 (writer/claude_loop에서 사용 가능)")
+    else:
+        print("RESULT: PARTIAL — 호출 성공, 응답 형식 확인 필요")
+
 
 if __name__ == "__main__":
     main()

@@ -8,6 +8,8 @@ import anthropic
 
 from secrets_loader import get_secret
 
+from llm.call_registry import resolve as _resolve_call_site
+
 from writer.store import get_writer_setting, set_writer_setting
 from writer.config import WriterCallPolicy
 
@@ -69,7 +71,8 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
     },
     "kimi_k3": {
         "provider": "kimi",
-        "model": "kimi-k3",
+        # config/llm_call_sites.json("writer_main_kimi")이 관리 (임포트 시점 해석)
+        "model": _resolve_call_site("writer_main_kimi", model="kimi-k3").model,
         "display": "Kimi K3",
         "input_price_per_mtok": 3.0,
         "output_price_per_mtok": 15.0,
@@ -82,8 +85,6 @@ WRITER_DEFAULT_CHOICE = "fable"
 # gets the pro tier for craft, web research digestion gets flash. Both fall
 # back to the main model when DeepSeek is unconfigured.
 # 선택은 config/llm_call_sites.json이 관리 (여기 상수는 최종 폴백).
-from llm.call_registry import resolve as _resolve_call_site
-
 WRITER_CRITIC_CHOICE = _resolve_call_site("writer_critic_diagnosis", model="deepseek_pro").model
 WRITER_RESEARCH_CHOICE = _resolve_call_site("writer_research_digest", model="deepseek_flash").model
 

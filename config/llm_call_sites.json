@@ -82,6 +82,18 @@
     "managed": "model-only",
     "note": "writer 웹리서치 소화 경량 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
   },
+  "kimi_chat_model": {
+    "provider": "kimi",
+    "model": "kimi-k3",
+    "managed": "model-only",
+    "note": "텔레그램/웹챗 kimi provider 전 티어 모델 (bot_config._KIMI_MODEL_MAP에서 조회, 변경 시 재시작). temperature=1만 허용·추론 모델"
+  },
+  "writer_main_kimi": {
+    "provider": "kimi",
+    "model": "kimi-k3",
+    "managed": "model-only",
+    "note": "writer 메인 모델 선택지 kimi_k3 (writer/models.py에서 조회, Anthropic 호환 엔드포인트로 실행, 변경 시 재시작)"
+  },
   "vision_fallback": {
     "provider": "claude",
     "model": "(bot_config 티어 해석)",

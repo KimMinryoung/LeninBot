@@ -39,6 +39,7 @@ python scripts/llm_registry_cli.py add <feature> --provider gemini --model ...
 
 ## 주의
 
+- **Kimi K3 제약**: temperature=1만 허용(그 외 400) — executor가 kimi provider에서는 temperature를 자동 생략한다. 추론 모델이라 max_tokens에 추론분 여유 필요. Kimi 경로 등재: `kimi_chat_model`(텔레그램/웹챗 티어, bot_config), `writer_main_kimi`(writer 메인 선택지) — 둘 다 model-only, 임포트 시점 해석.
 - `writer/models.py`의 critic/research 별칭은 **임포트 시점**에 해석된다 — 바꾸면 writer 서비스 재시작 필요 (다른 executor 사이트는 핫리로드).
 - KG graphiti 모델(kg_extraction_*, kg_embedding)도 KG 서비스 초기화 시점 해석 — 반영은 재시작 또는 KG unhealthy→재초기화 시.
 - `vision_fallback`은 조회용 등재만 — 실제 모델은 bot_config 티어 시스템이 결정.

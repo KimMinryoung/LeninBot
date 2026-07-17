@@ -151,7 +151,7 @@ def main() -> None:
     p_set.add_argument("value")
     p_add = sub.add_parser("add")
     p_add.add_argument("feature")
-    p_add.add_argument("--provider", required=True, choices=["gemini", "deepseek", "openai", "claude"])
+    p_add.add_argument("--provider", required=True, choices=["gemini", "deepseek", "kimi", "openai", "claude"])
     p_add.add_argument("--model", required=True)
     p_add.add_argument("--temperature", type=float)
     p_add.add_argument("--max-tokens", dest="max_tokens", type=int)

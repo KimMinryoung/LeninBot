@@ -216,8 +216,11 @@ _DEEPSEEK_MODEL_MAP = {
     "deepseek_flash": "deepseek-v4-flash",
 }
 
+# kimi 모델은 config/llm_call_sites.json("kimi_chat_model")이 관리 (임포트 시점 해석).
+from llm.call_registry import resolve as _resolve_call_site
+
 _KIMI_MODEL_MAP = {
-    "kimi_k3": "kimi-k3",
+    "kimi_k3": _resolve_call_site("kimi_chat_model", model="kimi-k3").model,
 }
 
 # Human-readable display names keyed by API model ID. Used when injecting

@@ -42,11 +42,13 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "llm_call_site
 
 _PROVIDER_BASE_URLS = {
     "deepseek": "https://api.deepseek.com",
+    "kimi": "https://api.moonshot.ai/v1",
     "openai": None,
 }
 _PROVIDER_KEYS = {
     "gemini": "GEMINI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
     "openai": "OPENAI_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
 }
@@ -185,10 +187,12 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
     kwargs: dict = {}
     if p.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    # Kimi K3는 temperature=1만 허용 (그 외 400) — 파라미터 자체를 생략한다.
+    if p.provider != "kimi":
+        kwargs["temperature"] = p.temperature
     response = client.chat.completions.create(
         model=p.model,
         messages=messages,
-        temperature=p.temperature,
         max_tokens=p.max_tokens,
         **kwargs,
     )
@@ -214,6 +218,7 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> str
 _EXECUTORS = {
     "gemini": _generate_gemini,
     "deepseek": _generate_openai_compat,
+    "kimi": _generate_openai_compat,
     "openai": _generate_openai_compat,
     "claude": _generate_claude,
 }
