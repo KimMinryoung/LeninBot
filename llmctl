@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# LLM 레지스트리 CLI 런처 — 인자 없이 실행하면 대화형 메뉴 (./llmctl)
+exec /home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/llm_registry_cli.py "$@"

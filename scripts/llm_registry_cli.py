@@ -220,8 +220,121 @@ def cmd_agent_set(agent: str, key: str, value: str) -> None:
     print(f"{agent}.{key}: {old_value!r} → {new_value!r}  (핫리로드 — 다음 태스크부터 적용)")
 
 
+
+# ── 대화형 모드 (인자 없이 실행) ──────────────────────────────────────
+
+def _pick(title: str, options: list[str], details: dict[str, str] | None = None) -> str | None:
+    """번호 선택 프롬프트. 빈 입력 → None (뒤로/종료)."""
+    print(f"\n{title}")
+    for i, name in enumerate(options, 1):
+        suffix = f"  — {details.get(name, '')}" if details else ""
+        print(f"  {i}. {name}{suffix}")
+    raw = input("번호 선택 (Enter=뒤로): ").strip()
+    if not raw:
+        return None
+    try:
+        idx = int(raw) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+    except ValueError:
+        pass
+    print("잘못된 입력입니다.")
+    return _pick(title, options, details)
+
+
+def _wizard_edit_call_site() -> None:
+    data = _load(CALL_SITES_PATH)
+    features = sorted(data)
+    notes = {f: str(data[f].get("note", ""))[:40] for f in features}
+    feature = _pick("어느 기능을 수정할까요?", features, notes)
+    if not feature:
+        return
+    print("\n[현재 설정]")
+    print(json.dumps(data[feature], ensure_ascii=False, indent=2))
+    editable = sorted(_KNOWN_KEYS - {"env"})
+    current = {k: repr(data[feature].get(k)) for k in editable}
+    key = _pick("어느 항목을 바꿀까요?", editable, current)
+    if not key:
+        return
+    value = input(f"{feature}.{key}의 새 값: ").strip()
+    if value:
+        try:
+            cmd_set(feature, key, value)
+        except SystemExit:
+            pass
+
+
+def _wizard_edit_agent() -> None:
+    agents = _load(AGENT_RUNTIME_PATH)
+    names = sorted(agents)
+    summary = {
+        a: f"{agents[a].get('provider') or '(기본)'} / {agents[a].get('model') or '(티어)'} / ${agents[a].get('budget_usd', '-')}"
+        for a in names
+    }
+    agent = _pick("어느 에이전트를 수정할까요?", names, summary)
+    if not agent:
+        return
+    print("\n[현재 설정]")
+    print(json.dumps(agents[agent], ensure_ascii=False, indent=2))
+    editable = sorted(_AGENT_KEYS)
+    current = {k: repr(agents[agent].get(k)) for k in editable}
+    key = _pick("어느 항목을 바꿀까요?", editable, current)
+    if not key:
+        return
+    hint = ""
+    if key == "provider":
+        hint = f" ({'/'.join(sorted(_AGENT_PROVIDERS))} 또는 null)"
+    elif key == "model":
+        hints = _AGENT_MODEL_HINTS.get(agents[agent].get("provider") or "", set())
+        if hints:
+            hint = f" (별칭: {'/'.join(sorted(hints))} 또는 null)"
+    value = input(f"{agent}.{key}의 새 값{hint}: ").strip()
+    if value:
+        try:
+            cmd_agent_set(agent, key, value)
+        except SystemExit:
+            pass
+
+
+_CHEAT_SHEET = """\
+╭─ LLM 레지스트리 CLI ─────────────────────────────────────────────╮
+│ 빠른 명령 (외울 필요 없음 — 그냥 ./llmctl 만 쳐도 이 메뉴가 뜸)      │
+│                                                                  │
+│   ./llmctl list                 전체 현황 (원샷 + 에이전트)          │
+│   ./llmctl show <기능>          원샷 기능 상세                       │
+│   ./llmctl set <기능> <키> <값>  원샷 수정 (핫리로드)                │
+│   ./llmctl agent-show <에이전트>                                     │
+│   ./llmctl agent-set <에이전트> <키> <값>   (핫리로드)               │
+│                                                                  │
+│ 예시: ./llmctl agent-set diary budget_usd 5.0                        │
+│       ./llmctl set chunk_summary model gemini-3.5-flash              │
+│                                                                  │
+│ 팁: Claude Code에게 "일기 예산 5달러로 올려줘"라고 말해도 됩니다   │
+╰──────────────────────────────────────────────────────────────────╯"""
+
+
+def interactive_menu() -> None:
+    print(_CHEAT_SHEET)
+    while True:
+        choice = _pick(
+            "무엇을 할까요?",
+            ["전체 현황 보기", "원샷 호출 수정", "에이전트 루프 수정", "종료"],
+        )
+        if choice in (None, "종료"):
+            return
+        if choice == "전체 현황 보기":
+            cmd_list()
+        elif choice == "원샷 호출 수정":
+            _wizard_edit_call_site()
+        elif choice == "에이전트 루프 수정":
+            _wizard_edit_agent()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="LLM 호출 레지스트리 조회/수정")
+    if len(sys.argv) == 1:
+        interactive_menu()
+        return
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
     p_show = sub.add_parser("show")
