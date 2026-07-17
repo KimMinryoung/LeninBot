@@ -1,7 +1,6 @@
 """Scout-report-to-KG ingestion heuristic."""
 
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
 from kg_runtime.writes import add_kg_episode
@@ -39,42 +38,28 @@ Output ONLY the group id, nothing else.
 
 
 def _classify_group_id(task_content: str, findings: str) -> str:
-    """Classify a scout report into a KG group with a light Gemini call.
+    """Classify a scout report into a KG group via the LLM call registry.
 
-    Falls back to 'agent_knowledge' when the key is missing, the call fails,
-    or the model answers outside the known set — misrouting into the default
-    group is cheaper than blocking ingestion.
+    Falls back to 'agent_knowledge' when the call fails or the model answers
+    outside the known set — misrouting into the default group is cheaper than
+    blocking ingestion. Model/options: config/llm_call_sites.json
+    ("scout_kg_classify").
     """
-    try:
-        from secrets_loader import get_secret
+    from llm.call_registry import generate_sync
 
-        api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
-        if not api_key:
-            logger.warning("[Scout→KG] no GEMINI_API_KEY; group defaults to agent_knowledge")
-            return "agent_knowledge"
-
-        from google import genai
-        from google.genai.types import GenerateContentConfig
-
-        prompt = _GROUP_CLASSIFY_PROMPT.format(
-            task=(task_content or "").strip()[:500] or "(none)",
-            findings=(findings or "").strip()[:1500],
-        )
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=os.getenv("SCOUT_KG_CLASSIFY_MODEL", "gemini-3.1-flash-lite"),
-            contents=prompt,
-            config=GenerateContentConfig(temperature=0.0, max_output_tokens=32),
-        )
-        answer = (response.text or "").strip().lower()
-        for group in KG_GROUP_IDS:
-            if group in answer:
-                return group
-        logger.warning("[Scout→KG] classifier answered %r; using agent_knowledge", answer[:80])
+    prompt = _GROUP_CLASSIFY_PROMPT.format(
+        task=(task_content or "").strip()[:500] or "(none)",
+        findings=(findings or "").strip()[:1500],
+    )
+    answer = (generate_sync("scout_kg_classify", prompt) or "").strip().lower()
+    if not answer:
+        logger.warning("[Scout→KG] group classification failed; using agent_knowledge")
         return "agent_knowledge"
-    except Exception as e:
-        logger.warning("[Scout→KG] group classification failed (%s); using agent_knowledge", e)
-        return "agent_knowledge"
+    for group in KG_GROUP_IDS:
+        if group in answer:
+            return group
+    logger.warning("[Scout→KG] classifier answered %r; using agent_knowledge", answer[:80])
+    return "agent_knowledge"
 
 def process_scout_report_to_kg(
     report: str,

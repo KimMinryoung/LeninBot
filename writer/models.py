@@ -81,8 +81,11 @@ WRITER_DEFAULT_CHOICE = "fable"
 # regardless of the (usually heavy) main writer model: the line-edit critic
 # gets the pro tier for craft, web research digestion gets flash. Both fall
 # back to the main model when DeepSeek is unconfigured.
-WRITER_CRITIC_CHOICE = "deepseek_pro"
-WRITER_RESEARCH_CHOICE = "deepseek_flash"
+# 선택은 config/llm_call_sites.json이 관리 (여기 상수는 최종 폴백).
+from llm.call_registry import resolve as _resolve_call_site
+
+WRITER_CRITIC_CHOICE = _resolve_call_site("writer_critic_diagnosis", model="deepseek_pro").model
+WRITER_RESEARCH_CHOICE = _resolve_call_site("writer_research_digest", model="deepseek_flash").model
 
 _writer_client: anthropic.AsyncAnthropic | None = None
 

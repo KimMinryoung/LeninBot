@@ -1,0 +1,109 @@
+{
+  "chunk_summary": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "temperature": 0.3,
+    "max_tokens": 768,
+    "timeout": 60,
+    "env": [
+      "LIGHT_LLM_MODEL"
+    ],
+    "note": "텔레그램 대화 10메시지 청크 요약 → chat_history_summaries (실패 시 추출식 폴백)"
+  },
+  "conversation_reflection": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "temperature": 0.3,
+    "max_tokens": 512,
+    "timeout": 60,
+    "env": [
+      "LIGHT_LLM_MODEL"
+    ],
+    "note": "대화 성찰 → experiential_memory(vectorDB) 저장 (실패 시 해당 회차 스킵)"
+  },
+  "scout_kg_classify": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "temperature": 0.0,
+    "max_tokens": 32,
+    "timeout": 30,
+    "env": [
+      "SCOUT_KG_CLASSIFY_MODEL"
+    ],
+    "note": "스카우트 리포트 KG group_id 분류 (실패 시 agent_knowledge)"
+  },
+  "experience_extraction": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "temperature": 0.3,
+    "max_tokens": 4096,
+    "timeout": 120,
+    "env": [
+      "EXPERIENCE_WRITER_MODEL"
+    ],
+    "note": "일일(00:30 KST) 24시간 활동 → 경험 항목 추출 → experiential_memory(vectorDB)"
+  },
+  "vector_query_translation": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.0,
+    "max_tokens": 200,
+    "timeout": 12,
+    "json_mode": true,
+    "note": "vector_search 질의를 코퍼스 언어로 번역 (실패 시 원문 그대로 검색)"
+  },
+  "task_routing_advisor": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.0,
+    "max_tokens": 500,
+    "timeout": 12,
+    "json_mode": true,
+    "note": "태스크 → 에이전트 라우팅 조언 JSON (실패 시 오케스트레이터 판단만 사용)"
+  },
+  "writer_critic_diagnosis": {
+    "provider": "deepseek",
+    "model": "deepseek_pro",
+    "managed": "model-only",
+    "note": "writer 퇴고 진단 critic 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
+  },
+  "razvedchik_chat": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "managed": "model-only",
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
+    "note": "정찰(razvedchik) 에이전트 대화 모델. 실행·클라우드 가드는 agents/razvedchik/cloud_llm.py"
+  },
+  "writer_research_digest": {
+    "provider": "deepseek",
+    "model": "deepseek_flash",
+    "managed": "model-only",
+    "note": "writer 웹리서치 소화 경량 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
+  },
+  "vision_fallback": {
+    "provider": "claude",
+    "model": "(bot_config 티어 해석)",
+    "managed": "external",
+    "note": "이미지 이해 폴백 — provider별 vision client 분기 (telegram/commands.py). 모델은 bot_config 티어 시스템 관리"
+  },
+  "kg_extraction_main": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "managed": "model-only",
+    "note": "KG graphiti 엔티티/엣지 추출 메인 모델 (graph_memory/service.py에서 조회)"
+  },
+  "kg_extraction_small": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash-lite",
+    "managed": "model-only",
+    "note": "KG graphiti 보조(small) 모델 — 고볼륨이라 저가 2.5 유지, 2.5 폐기 공지 시 3.1로"
+  },
+  "kg_embedding": {
+    "provider": "gemini",
+    "model": "gemini-embedding-001",
+    "managed": "model-only",
+    "note": "KG 임베딩 모델 (graph_memory/service.py에서 조회, KG_EMBED_MAX_RPS 페이싱)"
+  }
+}

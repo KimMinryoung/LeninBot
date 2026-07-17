@@ -219,18 +219,21 @@ class GraphMemoryService:
             neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
             gemini_api_key = _resolve_kg_gemini_key()
 
+            # 모델명은 config/llm_call_sites.json이 관리 (kg_extraction_main/small, kg_embedding)
+            from llm.call_registry import resolve as _resolve_call_site
+
             llm_client = GeminiClient(
                 config=LLMConfig(
                     api_key=gemini_api_key,
-                    model="gemini-3.1-flash-lite",
-                    small_model="gemini-2.5-flash-lite",
+                    model=_resolve_call_site("kg_extraction_main", model="gemini-3.1-flash-lite").model,
+                    small_model=_resolve_call_site("kg_extraction_small", model="gemini-2.5-flash-lite").model,
                 )
             )
 
             embedder = RetryingGeminiEmbedder(
                 config=GeminiEmbedderConfig(
                     api_key=gemini_api_key,
-                    embedding_model="gemini-embedding-001",
+                    embedding_model=_resolve_call_site("kg_embedding", model="gemini-embedding-001").model,
                 )
             )
 

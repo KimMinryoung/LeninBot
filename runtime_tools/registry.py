@@ -45,24 +45,12 @@ def _extract_json_object(text: str) -> dict | None:
 
 
 async def _llm_translate_search_query(query: str, target_language: str, layer: str) -> str | None:
-    """Best-effort query translation for cross-language corpus recall."""
-    try:
-        from bot_config import (
-            _deepseek_client,
-            _openai_client,
-            _resolve_deepseek_model,
-            _resolve_openai_model,
-        )
+    """Best-effort query translation for cross-language corpus recall.
 
-        client = _deepseek_client or _openai_client
-        if not client:
-            return None
-        provider = "deepseek" if _deepseek_client else "openai"
-        model = (
-            _resolve_deepseek_model("deepseek_flash")
-            if provider == "deepseek"
-            else _resolve_openai_model("gpt54nano")
-        )
+    Model/options: config/llm_call_sites.json ("vector_query_translation")."""
+    try:
+        from llm.call_registry import generate as _registry_generate
+
         system = (
             "Translate a vector-search query for Marxist/political document retrieval. "
             "Return only JSON with key translated_query. Preserve names and technical terms."
@@ -72,20 +60,13 @@ async def _llm_translate_search_query(query: str, target_language: str, layer: s
             "target_language": target_language,
             "target_corpus_layer": layer,
         }
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0,
-                max_tokens=200,
-            ),
-            timeout=12,
+        content = await _registry_generate(
+            "vector_query_translation",
+            json.dumps(user, ensure_ascii=False),
+            system=system,
         )
-        content = response.choices[0].message.content
+        if not content:
+            return None
         parsed = _extract_json_object(content)
         translated = str((parsed or {}).get("translated_query") or "").strip()
         if translated and translated.lower() != query.lower():

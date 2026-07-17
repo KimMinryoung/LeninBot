@@ -10,50 +10,14 @@ lessons/mistakes/insights that make the agent smarter over time.
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
 from db import query as db_query, execute as db_execute
 from memory_store.queries import fetch_chat_logs
-from secrets_loader import get_secret
 
 KST = timezone(timedelta(hours=9))
-MODEL_MAIN = os.getenv("EXPERIENCE_WRITER_MODEL", "gemini-3.1-flash-lite")
 
 logger = logging.getLogger("experience_writer")
-
-
-def _extract_text_content(content) -> str:
-    """Normalize LLM response content to a plain string."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content)
-
-# ── Lazy-initialized clients ────────────────────────────────────
-_llm = None
-_initialized = False
-
-
-def _init():
-    global _llm, _initialized
-    if _initialized:
-        return
-    _initialized = True
-
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    _llm = ChatGoogleGenerativeAI(
-        model=MODEL_MAIN,
-        google_api_key=get_secret("GEMINI_API_KEY"),
-        temperature=0.3,
-        max_output_tokens=4096,
-        streaming=False,
-    )
-    logger.info("✅ [경험] 경험 기록 모듈 초기화 완료")
 
 
 def _get_embeddings():
@@ -277,8 +241,12 @@ def _compress_experiences(web_chats: str, tg_chats: str, tasks: str,
     )
 
     try:
-        response = _llm.invoke(prompt)
-        text = _extract_text_content(response.content).strip()
+        from llm.call_registry import generate_sync
+
+        text = (generate_sync("experience_extraction", prompt) or "").strip()
+        if not text:
+            logger.error("[경험] LLM 호출 실패 — 이번 회차 건너뜀")
+            return []
         entries = _loads_json_array(text)
         if not isinstance(entries, list):
             logger.warning("[경험] LLM이 리스트가 아닌 결과 반환")
@@ -366,7 +334,6 @@ def _run_pending_curation_ingest() -> None:
 
 def write_experiences():
     """Main entry point. Collects past 24h activity, compresses, stores."""
-    _init()
     _ensure_table()
 
     now = datetime.now(KST)

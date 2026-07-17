@@ -1698,7 +1698,7 @@ async def _reflect_on_recent(user_id: int):
         )
         prompt = _REFLECTION_PROMPT + conv_text
 
-        result = await _ctx["gemini_light_generate"](prompt, max_tokens=512)
+        result = await _ctx["light_generate"]("conversation_reflection", prompt)
         if not result:
             logger.warning("Reflection: light LLM generation failed — skipping this round")
             return

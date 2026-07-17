@@ -31,7 +31,12 @@ _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "moon"}
 
 
 def _model() -> str:
-    return os.getenv("RAZVEDCHIK_LLM_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    # config/llm_call_sites.json ("razvedchik_chat")이 관리; RAZVEDCHIK_LLM_MODEL env가 우선.
+    try:
+        from llm.call_registry import resolve
+        return resolve("razvedchik_chat", model=DEFAULT_MODEL).model or DEFAULT_MODEL
+    except Exception:
+        return os.getenv("RAZVEDCHIK_LLM_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
 def _base_url() -> str:

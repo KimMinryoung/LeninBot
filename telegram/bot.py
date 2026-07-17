@@ -401,36 +401,17 @@ def _append_email_audit_entry(message_id: int, event: str, actor: str, metadata:
     )
 
 
-# ── Light LLM (Gemini Flash-Lite: chunk summaries, reflections) ──
-_LIGHT_LLM_MODEL = os.getenv("LIGHT_LLM_MODEL", "gemini-3.1-flash-lite")
+# ── Light LLM — llm/call_registry 경유 (config/llm_call_sites.json 관리) ──
+from llm.call_registry import generate as _registry_generate
 
 
-async def _gemini_light_generate(prompt: str, max_tokens: int = 2048) -> str | None:
-    """Generate with the light Gemini model (cheap summarization/extraction).
+async def _light_generate(feature: str, prompt: str) -> str | None:
+    """Run a registered one-shot generation (chunk_summary, conversation_reflection).
 
-    Returns None on any failure — callers must have their own fallback
-    (extractive summary, skip) rather than blocking on this path.
+    Model/options come from config/llm_call_sites.json (hot-reloaded).
+    Returns None on any failure — callers keep their own fallbacks.
     """
-    def _call() -> str:
-        from google import genai
-        from google.genai.types import GenerateContentConfig
-
-        api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY not configured")
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=_LIGHT_LLM_MODEL,
-            contents=prompt,
-            config=GenerateContentConfig(temperature=0.3, max_output_tokens=max_tokens),
-        )
-        return (response.text or "").strip()
-
-    try:
-        return (await asyncio.to_thread(_call)) or None
-    except Exception as e:
-        logger.warning("Light LLM (%s) generation failed: %s", _LIGHT_LLM_MODEL, e)
-        return None
+    return await _registry_generate(feature, prompt)
 
 
 def _current_datetime_str() -> str:
@@ -1271,7 +1252,7 @@ async def _maybe_summarize_chunk(user_id: int):
             + conversation_text
         )
 
-        summary = await _gemini_light_generate(summary_prompt, max_tokens=768)
+        summary = await _light_generate("chunk_summary", summary_prompt)
         if not summary or _summary_is_contaminated(summary):
             logger.warning(
                 "Chunk summary %s; using extractive fallback user=%d msgs=#%d~#%d",
@@ -1761,7 +1742,7 @@ register_handlers(router, ctx={
     "deepseek_anthropic_client": _deepseek_anthropic_client,
     "kimi_client": _kimi_client,
     "extract_text": _extract_text,
-    "gemini_light_generate": _gemini_light_generate,
+    "light_generate": _light_generate,
     "get_model_light": _get_model_light,
     "maybe_summarize_chunk": _maybe_summarize_chunk,
     "build_skills_prompt": build_skills_prompt,

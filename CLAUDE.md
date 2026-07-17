@@ -14,6 +14,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/secret_management.md` — systemd-creds 기반 시크릿 관리 — 3-tier 분류, 서비스별 최소권한, 로테이션 플로우, 운영 CLI
 - `dev_docs/security_gateway.md` — 툴 보안 게이트웨이 — execute_tool 단일 seam, 통합 정책/권한 통제, tool_audit_log 감사 로깅, shadow→enforce 롤아웃, 운영 CLI
 - `dev_docs/agent_improvement_roadmap.md` — 에이전트 지능(CLAW/Reflexion/Plan-and-Execute) + 메모리 개선 단계별 로드맵
+- `dev_docs/llm_call_registry.md` — LLM 원샷 호출 통합 레지스트리 (config/llm_call_sites.json, 핫리로드, 운영 CLI)
 
 Update these documents as phases are completed.
 

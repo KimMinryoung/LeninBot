@@ -299,22 +299,8 @@ def _normalize_llm_route(parsed: dict, task: str, candidates: list[str] | None) 
 
 async def _classify_route_with_llm(task: str, candidates: list[str] | None = None) -> dict | None:
     try:
-        from bot_config import (
-            _deepseek_client,
-            _openai_client,
-            _resolve_deepseek_model,
-            _resolve_openai_model,
-        )
+        from llm.call_registry import generate as _registry_generate
 
-        client = _deepseek_client or _openai_client
-        if not client:
-            return None
-        provider = "deepseek" if _deepseek_client else "openai"
-        model = (
-            _resolve_deepseek_model("deepseek_flash")
-            if provider == "deepseek"
-            else _resolve_openai_model("gpt54nano")
-        )
         allowed = [agent for agent in _DELEGATABLE_AGENTS if not candidates or agent in candidates]
         system = (
             "You are a strict task router for LeninBot. Return only JSON. "
@@ -346,20 +332,14 @@ async def _classify_route_with_llm(task: str, candidates: list[str] | None = Non
                 "routing_class",
             ],
         }
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0,
-                max_tokens=500,
-            ),
-            timeout=12,
+        content = await _registry_generate(
+            "task_routing_advisor",
+            json.dumps(user, ensure_ascii=False),
+            system=system,
         )
-        parsed = _extract_json_object(response.choices[0].message.content)
+        if not content:
+            return None
+        parsed = _extract_json_object(content)
         if not parsed:
             return None
         return _normalize_llm_route(parsed, task, candidates)
