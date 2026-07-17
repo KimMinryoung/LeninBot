@@ -3,6 +3,7 @@
   "mode": "auto",
   "new_person_every": 8,
   "recent_days": 30,
+  "incomplete_recent_days": 2,
   "new_person_cooldown_runs": 6,
   "new_lane_enabled": false
 }

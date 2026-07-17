@@ -46,6 +46,12 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "mode": "auto",
         "new_person_every": 8,
         "recent_days": 30,
+        # Cards with basic gaps (empty bio/epithet/moment, no career, role,
+        # citizenship, event link, or section) age back in on this much
+        # shorter cooldown so one-step-per-run enrichment can actually finish
+        # a card; the long recent_days cooldown only throttles complete cards,
+        # where a forced re-pick would just accrete filler edits.
+        "incomplete_recent_days": 2,
         "new_person_cooldown_runs": 6,
         # Parallel-lane switch: when false, the dedicated new-person lane
         # (COMMULINGO_SUGGESTED_BY=commulingo-maintainer-new) no-ops so all
@@ -63,6 +69,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         raise ValueError("mode must be auto, enrich, or new")
     cfg["new_person_every"] = max(0, int(cfg["new_person_every"]))
     cfg["recent_days"] = max(1, int(cfg["recent_days"]))
+    cfg["incomplete_recent_days"] = max(1, int(cfg["incomplete_recent_days"]))
     cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     return cfg
@@ -154,9 +161,10 @@ def person_tier(candidate: dict) -> dict:
     }
 
 
-def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
+def select_sparse_person(recent_days: int, forced_id: str = "", incomplete_recent_days: int | None = None) -> dict | None:
     params = {
         "recent_days": recent_days,
+        "incomplete_days": incomplete_recent_days if incomplete_recent_days is not None else recent_days,
         "forced_id": forced_id.strip(),
         "major_prom": MAJOR_PROMINENCE,
         "minor_max": MINOR_PROMINENCE_MAX,
@@ -185,14 +193,22 @@ def select_sparse_person(recent_days: int, forced_id: str = "") -> dict | None:
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
              LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
-              AND (%(forced_id)s <> '' OR NOT EXISTS (
-                    SELECT 1 FROM commulingo_people_revisions rev
-                     WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
-                       AND rev.changed_by LIKE 'commulingo-maintainer%%'
-                       AND rev.created_at >= NOW() - (%(recent_days)s * INTERVAL '1 day')
-                  ))
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
                      p.citizenship_code, p.origin_code, r.person_id
+           HAVING %(forced_id)s <> ''
+               OR COALESCE((
+                    SELECT MAX(rev.created_at) FROM commulingo_people_revisions rev
+                     WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
+                       AND rev.changed_by LIKE 'commulingo-maintainer%%'
+                  ), TIMESTAMP '-infinity') < NOW() - (
+                    CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
+                              OR COALESCE(p.moment_ko, '') = ''
+                              OR COALESCE(p.citizenship_code, '') = ''
+                              OR r.person_id IS NULL
+                              OR COUNT(DISTINCT c.id) = 0
+                              OR COUNT(DISTINCT ep.event_id) = 0
+                              OR COUNT(DISTINCT s.id) = 0
+                         THEN %(incomplete_days)s ELSE %(recent_days)s END * INTERVAL '1 day')
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
@@ -315,7 +331,15 @@ Target exactly this person and no one else:
 {tier_line}
 
 Call get_person and get_sections first, then make exactly one commulingo_edit, choosing the
-first step below that applies:
+first step below that applies.
+
+CONTENT PRESERVATION: before writing anything, compare your draft against what the card
+already holds. Default to building on the existing content — keep accurate, in-style facts and
+prose, and fold them into any rewrite rather than regenerating a field from scratch. You MAY
+remove or replace existing material, but only on a judged reason (factually wrong, contradicted
+by sources, duplicated elsewhere on the card, or clearly violating the style rules) — never as
+an accidental side effect of a rewrite. If the existing content already satisfies a step, that
+step does not apply; move to the next one.
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
    missing, one person update that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.
@@ -625,13 +649,18 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 chosen_mode = "enrich_fallback"
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
-            candidate = select_sparse_person(config["recent_days"], candidate_id)
+            candidate = select_sparse_person(
+                config["recent_days"], candidate_id, config["incomplete_recent_days"]
+            )
             if candidate is None:
                 # Every person was already touched within the cooldown window;
                 # idling until candidates age back in is the correct, zero-cost outcome.
                 return {
                     "status": "skipped",
-                    "reason": f"no candidate outside the {config['recent_days']}-day cooldown",
+                    "reason": (
+                        f"no candidate outside the cooldown "
+                        f"({config['incomplete_recent_days']}d incomplete / {config['recent_days']}d complete)"
+                    ),
                     "mode": chosen_mode,
                     "fallback_error": fallback_error,
                 }
@@ -689,7 +718,7 @@ def main() -> int:
         return 0
 
     if args.print_candidate:
-        print(json.dumps(select_sparse_person(config["recent_days"], args.candidate), ensure_ascii=False, default=str, indent=2))
+        print(json.dumps(select_sparse_person(config["recent_days"], args.candidate, config["incomplete_recent_days"]), ensure_ascii=False, default=str, indent=2))
         return 0
     result = asyncio.run(run_once(mode=args.mode, candidate_id=args.candidate, config=config))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
