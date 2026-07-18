@@ -113,14 +113,17 @@
       height: 100vh;
       height: 100dvh;
     }
-    .sidebar, .assistant {
+    /* Column selectors are scoped to the aside: assistant chat messages carry
+       class="message assistant" too, and a bare .assistant selector would
+       clamp every AI reply to the column's height/overflow. */
+    .sidebar, aside.assistant {
       min-width: 0;
       background: var(--panel);
       padding: 15px;
       overflow-y: auto;
     }
     .sidebar { border-right: 1px solid var(--line); }
-    .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto auto; gap: 12px; }
+    aside.assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto auto; gap: 12px; }
     .editor {
       min-width: 0;
       display: grid;
@@ -288,7 +291,7 @@
        views switched by a fixed bottom tab bar (thumb-reachable). */
     @media (max-width: 1120px) {
       .app { display: block; height: auto; }
-      .sidebar, .editor, .assistant {
+      .sidebar, .editor, aside.assistant {
         display: none;
         border: 0;
         height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
@@ -296,19 +299,21 @@
       }
       body[data-tab="projects"] .sidebar { display: block; }
       body[data-tab="manuscript"] .editor { display: grid; }
-      /* AI tab: conversation-only chat layout — messages fill the screen and
-         scroll, composer stays pinned at the bottom. The Project/Documents/
-         Search/Cost panels live in the 자료 tab instead. */
-      body[data-tab="assistant"] .assistant,
-      body[data-tab="docs"] .assistant { display: grid; grid-template-rows: auto; }
-      body[data-tab="assistant"] .assistant > details.panel { display: none; }
-      /* Answers unfold to their full height — the assistant column itself is
-         the scroll container, not a small inner box. */
-      body[data-tab="assistant"] .conversation { overflow: visible; }
+      /* AI tab: conversation-only chat view — answers unfold to their full
+         height and the whole column scrolls (block layout so nothing can
+         shrink or clip). The Project/Documents/Search/Cost panels live in
+         the 자료 tab instead. */
+      body[data-tab="assistant"] aside.assistant,
+      body[data-tab="docs"] aside.assistant { display: block; }
+      body[data-tab="assistant"] aside.assistant > *,
+      body[data-tab="docs"] aside.assistant > * { margin-bottom: 12px; }
+      body[data-tab="assistant"] aside.assistant > details.panel { display: none; }
+      body[data-tab="assistant"] .conversation { display: block; overflow: visible; min-height: 0; }
+      body[data-tab="assistant"] .conversation > .message { margin-bottom: 10px; }
       body[data-tab="assistant"] .prompt { min-height: 64px; }
-      body[data-tab="docs"] .assistant > .conversation,
-      body[data-tab="docs"] .assistant > .pager,
-      body[data-tab="docs"] .assistant > .composer { display: none; }
+      body[data-tab="docs"] aside.assistant > .conversation,
+      body[data-tab="docs"] aside.assistant > .pager,
+      body[data-tab="docs"] aside.assistant > .composer { display: none; }
       .tabbar {
         display: flex;
         position: fixed;
@@ -370,7 +375,7 @@
       .editor-actions { padding: 9px 10px; }
       .editor-actions button { min-height: 32px; padding: 0 8px; }
       .page-input { width: 48px; padding: 5px 2px; }
-      .sidebar, .assistant { padding: 12px; }
+      .sidebar, aside.assistant { padding: 12px; }
       .topbar { padding: 10px 12px; }
       .manuscript, .manuscript-backdrop { padding: 14px 14px; }
       .prompt { min-height: 88px; }
@@ -550,7 +555,6 @@
 
   <script>
     const MANUSCRIPT_PAGE_CHARS = 12000;
-    const CONVERSATION_PAGE_SIZE = 8;
     const state = {
       projects: [],
       current: null,
@@ -584,7 +588,7 @@
       const conversation = $('conversation');
       conversation.scrollTop = conversation.scrollHeight;
       if (mobileTabs.matches && document.body.dataset.tab === 'assistant') {
-        const column = document.querySelector('.assistant');
+        const column = document.querySelector('aside.assistant');
         column.scrollTop = column.scrollHeight;
       }
     }
@@ -865,8 +869,20 @@
       }
     }
 
+    // One "round" per page: a user request plus every assistant/system message
+    // that follows it until the next user message. Long novel-writing replies
+    // stay readable instead of eight messages sharing one screen.
+    function conversationRounds() {
+      const rounds = [];
+      for (const message of state.conversationMessages) {
+        if (!rounds.length || message.role === 'user') rounds.push([]);
+        rounds[rounds.length - 1].push(message);
+      }
+      return rounds;
+    }
+
     function conversationPageTotal() {
-      return pageCount(state.conversationMessages.length, CONVERSATION_PAGE_SIZE);
+      return Math.max(1, conversationRounds().length);
     }
 
     function renderConversationPage() {
@@ -885,14 +901,13 @@
         return null;
       }
 
-      const start = state.conversationPage * CONVERSATION_PAGE_SIZE;
-      const pageMessages = state.conversationMessages.slice(start, start + CONVERSATION_PAGE_SIZE);
+      const pageMessages = conversationRounds()[state.conversationPage] || [];
       let lastBody = null;
       for (const message of pageMessages) {
         lastBody = renderMessageElement(message);
       }
       $('conversationStatus').textContent =
-        `Messages ${start + 1}-${start + pageMessages.length} of ${totalMessages} · page ${state.conversationPage + 1}/${totalPages}`;
+        `Round ${state.conversationPage + 1}/${totalPages} · ${totalMessages} messages`;
       $('conversationFirst').disabled = state.conversationPage <= 0;
       $('conversationPrev').disabled = state.conversationPage <= 0;
       $('conversationNext').disabled = state.conversationPage >= totalPages - 1;
