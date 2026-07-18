@@ -301,11 +301,10 @@
          Search/Cost panels live in the 자료 tab instead. */
       body[data-tab="assistant"] .assistant,
       body[data-tab="docs"] .assistant { display: grid; grid-template-rows: auto; }
-      body[data-tab="assistant"] .assistant {
-        grid-template-rows: minmax(0, 1fr) auto auto;
-        overflow: hidden;
-      }
       body[data-tab="assistant"] .assistant > details.panel { display: none; }
+      /* Answers unfold to their full height — the assistant column itself is
+         the scroll container, not a small inner box. */
+      body[data-tab="assistant"] .conversation { overflow: visible; }
       body[data-tab="assistant"] .prompt { min-height: 64px; }
       body[data-tab="docs"] .assistant > .conversation,
       body[data-tab="docs"] .assistant > .pager,
@@ -578,6 +577,17 @@
       composing: false,
     };
     const $ = (id) => document.getElementById(id);
+    const mobileTabs = window.matchMedia('(max-width: 1120px)');
+    // Bottom-anchor the conversation. On the mobile AI tab the messages list
+    // is fully unfolded and the assistant column is the scroll container.
+    function anchorConversation() {
+      const conversation = $('conversation');
+      conversation.scrollTop = conversation.scrollHeight;
+      if (mobileTabs.matches && document.body.dataset.tab === 'assistant') {
+        const column = document.querySelector('.assistant');
+        column.scrollTop = column.scrollHeight;
+      }
+    }
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
     const api = async (path, options = {}) => {
@@ -887,7 +897,7 @@
       $('conversationPrev').disabled = state.conversationPage <= 0;
       $('conversationNext').disabled = state.conversationPage >= totalPages - 1;
       $('conversationLast').disabled = state.conversationPage >= totalPages - 1;
-      conversation.scrollTop = conversation.scrollHeight;
+      anchorConversation();
       return lastBody;
     }
 
@@ -1265,7 +1275,7 @@
         if (ctx.assistantMessage) ctx.assistantMessage.finishProgress();
         setStatus(event.content || 'Request failed.');
       }
-      $('conversation').scrollTop = $('conversation').scrollHeight;
+      anchorConversation();
     }
 
     async function reattachToRun(ctx, maxMs = 15 * 60 * 1000) {
@@ -2072,9 +2082,8 @@
     let manuscriptFontSize = applyManuscriptFontSize(parseInt(localStorage.getItem(FONT_KEY) || '16', 10));
     $('fontSmaller').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize - 1); });
     $('fontLarger').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize + 1); });
-    // Mobile tab navigation: below 1120px the three columns become full-height
+    // Mobile tab navigation: below 1120px the columns become full-height
     // views switched by the fixed bottom tab bar.
-    const mobileTabs = window.matchMedia('(max-width: 1120px)');
     function setMobileTab(name) {
       document.body.dataset.tab = name;
       for (const b of document.querySelectorAll('.tabbar button')) {
@@ -2082,10 +2091,7 @@
       }
       // A hidden (display:none) conversation can't be scrolled, so re-anchor
       // to the newest messages whenever the AI tab becomes visible.
-      if (name === 'assistant') {
-        const conversation = $('conversation');
-        conversation.scrollTop = conversation.scrollHeight;
-      }
+      if (name === 'assistant') anchorConversation();
     }
     for (const b of document.querySelectorAll('.tabbar button')) {
       b.onclick = () => setMobileTab(b.dataset.tab);
