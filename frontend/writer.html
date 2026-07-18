@@ -341,6 +341,12 @@
           <label>Premise<textarea id="premise" placeholder="Premise"></textarea></label>
           <label>Style Notes<textarea id="styleNotes" placeholder="Style, POV, continuity"></textarea></label>
           <div class="row">
+            <label for="publicToggle" class="meta" title="켜면 누구나 공개 URL로 원고를 읽을 수 있습니다. 언제든 다시 끌 수 있습니다. 사이트에는 링크가 노출되지 않고 URL을 아는 사람만 접근합니다.">
+              <input type="checkbox" id="publicToggle"> 웹 공개
+            </label>
+          </div>
+          <div id="publicUrl" class="meta" style="display:none"></div>
+          <div class="row">
             <button id="saveProject" class="primary" type="button">Save</button>
             <button id="deleteProject" class="danger" type="button">Delete</button>
           </div>
@@ -887,6 +893,7 @@
         $('title').value = '';
         $('premise').value = '';
         $('styleNotes').value = '';
+        renderPublicState();
         renderConversationPage();
         updateManuscriptStatus();
         return;
@@ -896,6 +903,7 @@
       $('title').value = project.title || '';
       $('premise').value = project.premise || '';
       $('styleNotes').value = project.style_notes || '';
+      renderPublicState();
       renderManuscriptPage();
       const messages = project.messages || [];
       let latestAssistant = '';
@@ -1366,6 +1374,47 @@
       await loadProject(data.project.id);
     }
 
+    const PUBLIC_NOVEL_BASE = 'https://cyber-lenin.com/novels/';
+
+    function renderPublicState() {
+      const project = state.current;
+      const toggle = $('publicToggle');
+      const urlBox = $('publicUrl');
+      toggle.disabled = !project;
+      toggle.checked = !!(project && project.is_public);
+      urlBox.innerHTML = '';
+      if (project && project.is_public && project.public_slug) {
+        const link = document.createElement('a');
+        link.href = PUBLIC_NOVEL_BASE + project.public_slug;
+        link.textContent = link.href;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        urlBox.append('공개 URL: ', link);
+        urlBox.style.display = '';
+      } else {
+        urlBox.style.display = 'none';
+      }
+    }
+
+    async function togglePublicProject() {
+      if (!state.current) return;
+      const desired = $('publicToggle').checked;
+      try {
+        const res = await api(`/writer/projects/${state.current.id}/publish`, {
+          method: 'POST',
+          body: JSON.stringify({ is_public: desired }),
+        });
+        const data = await res.json();
+        state.current = { ...state.current, ...data.project };
+        renderPublicState();
+        renderProjects();
+        setStatus(desired ? '웹 공개가 활성화되었습니다.' : '웹 공개가 비활성화되었습니다.');
+      } catch (err) {
+        renderPublicState();
+        setStatus('공개 설정 변경 실패: ' + (err.message || err));
+      }
+    }
+
     async function saveProject() {
       if (!state.current) return;
       const body = JSON.stringify({ title: $('title').value, premise: $('premise').value, style_notes: $('styleNotes').value });
@@ -1791,6 +1840,7 @@
     $('newProject').onclick = createProject;
     $('refresh').onclick = loadProjects;
     $('saveProject').onclick = saveProject;
+    $('publicToggle').onchange = togglePublicProject;
     $('deleteProject').onclick = () => {
       if (!state.current) return;
       openDeleteModal({ id: state.current.id, title: state.current.title, permanent: false });

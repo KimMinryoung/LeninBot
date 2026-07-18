@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from typing import Any
 
 from psycopg2.extras import RealDictCursor, execute_values
@@ -42,6 +43,16 @@ def ensure_writer_tables() -> None:
                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
            )"""
+    )
+    # Web publication flags for existing installs. The slug is minted on first
+    # publish and kept on unpublish so a re-enabled project gets the same URL.
+    db_execute(
+        "ALTER TABLE writer_projects ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE"
+    )
+    db_execute("ALTER TABLE writer_projects ADD COLUMN IF NOT EXISTS public_slug TEXT")
+    db_execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS writer_projects_public_slug_key "
+        "ON writer_projects(public_slug) WHERE public_slug IS NOT NULL"
     )
     db_execute(
         """CREATE TABLE IF NOT EXISTS writer_messages (
@@ -165,6 +176,7 @@ def set_writer_setting(key: str, value: Any) -> None:
 def list_projects(limit: int = 100, status: str = "active") -> list[dict]:
     return db_query(
         """SELECT p.id, p.title, p.premise, p.style_notes, p.status,
+                  p.is_public, p.public_slug,
                   p.created_at, p.updated_at,
                   COALESCE(m.message_count, 0)::int AS message_count,
                   COALESCE(length(w.body), 0)::int AS manuscript_char_count,
@@ -187,7 +199,8 @@ def create_project(title: str, premise: str = "", style_notes: str = "") -> dict
     project = db_query_one(
         """INSERT INTO writer_projects (title, premise, style_notes)
              VALUES (%s, %s, %s)
-          RETURNING id, title, premise, style_notes, status, created_at, updated_at""",
+          RETURNING id, title, premise, style_notes, status, is_public, public_slug,
+                    created_at, updated_at""",
         (title.strip(), premise.strip(), style_notes.strip()),
     ) or {}
     if project.get("id"):
@@ -203,7 +216,8 @@ def update_project(project_id: int, title: str, premise: str, style_notes: str) 
                   style_notes = %s,
                   updated_at = NOW()
             WHERE id = %s
-        RETURNING id, title, premise, style_notes, status, created_at, updated_at""",
+        RETURNING id, title, premise, style_notes, status, is_public, public_slug,
+                  created_at, updated_at""",
         (title.strip(), premise.strip(), style_notes.strip(), project_id),
     )
 
@@ -211,6 +225,7 @@ def update_project(project_id: int, title: str, premise: str, style_notes: str) 
 def get_project(project_id: int) -> dict | None:
     project = db_query_one(
         """SELECT p.id, p.title, p.premise, p.style_notes, p.status,
+                  p.is_public, p.public_slug,
                   p.created_at, p.updated_at,
                   COALESCE(length(w.body), 0)::int AS manuscript_char_count,
                   w.updated_at AS manuscript_updated_at
@@ -259,6 +274,52 @@ def restore_project(project_id: int) -> bool:
         (project_id,),
     )
     return bool(row)
+
+
+def set_project_public(project_id: int, is_public: bool) -> dict | None:
+    """Toggle web publication. The slug is minted on first publish and kept on
+    unpublish, so re-enabling restores the same shared URL."""
+    project = db_query_one(
+        "SELECT id, public_slug FROM writer_projects WHERE id = %s", (project_id,)
+    )
+    if not project:
+        return None
+    if is_public and not project.get("public_slug"):
+        for _ in range(5):  # retry on the (negligible) chance of slug collision
+            try:
+                db_execute(
+                    "UPDATE writer_projects SET public_slug = %s WHERE id = %s AND public_slug IS NULL",
+                    (secrets.token_urlsafe(6), project_id),
+                )
+                break
+            except Exception:  # noqa: BLE001 — unique-index race, roll a new slug
+                continue
+    return db_query_one(
+        """UPDATE writer_projects
+              SET is_public = %s, updated_at = NOW()
+            WHERE id = %s
+        RETURNING id, title, premise, style_notes, status, is_public, public_slug,
+                  created_at, updated_at""",
+        (is_public, project_id),
+    )
+
+
+def get_public_manuscript(slug: str) -> dict | None:
+    """Anonymous web read: title + manuscript for a published, active project.
+    Returns None when the slug is unknown, unpublished, or trashed."""
+    return db_query_one(
+        """SELECT p.id, p.title, p.public_slug,
+                  COALESCE(w.body, '') AS body,
+                  COALESCE(length(w.body), 0)::int AS char_count,
+                  p.created_at,
+                  COALESCE(w.updated_at, p.updated_at) AS updated_at
+             FROM writer_projects p
+        LEFT JOIN writer_manuscripts w ON w.project_id = p.id
+            WHERE p.public_slug = %s
+              AND p.is_public
+              AND p.status = 'active'""",
+        (slug,),
+    )
 
 
 def delete_project(project_id: int) -> bool:

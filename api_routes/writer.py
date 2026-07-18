@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -26,6 +27,10 @@ class WriterMessageRequest(BaseModel):
 
 class WriterSettingsRequest(BaseModel):
     model: str = Field(..., min_length=1, max_length=64)
+
+
+class WriterPublishRequest(BaseModel):
+    is_public: bool
 
 
 class WriterDocumentRequest(BaseModel):
@@ -154,6 +159,32 @@ async def delete_writer_project(project_id: int, permanent: bool = Query(default
     if not trashed:
         raise HTTPException(status_code=404, detail="writer project not found or already trashed")
     return {"deleted": True, "permanent": False}
+
+
+@router.post("/writer/projects/{project_id}/publish", dependencies=[Depends(require_writer_access)])
+async def publish_writer_project(project_id: int, request: WriterPublishRequest):
+    from creative_writer import set_project_public
+
+    project = await asyncio.to_thread(set_project_public, project_id, request.is_public)
+    if not project:
+        raise HTTPException(status_code=404, detail="writer project not found")
+    return {"project": project}
+
+
+_PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
+
+
+@router.get("/writer/public/{slug}")
+async def get_public_novel(slug: str):
+    """Anonymous manuscript read for the public site — no writer key required."""
+    from creative_writer import get_public_manuscript
+
+    if not _PUBLIC_SLUG_RE.match(slug):
+        raise HTTPException(status_code=404, detail="novel not found")
+    novel = await asyncio.to_thread(get_public_manuscript, slug)
+    if not novel:
+        raise HTTPException(status_code=404, detail="novel not found")
+    return {"novel": novel}
 
 
 @router.post("/writer/projects/{project_id}/restore", dependencies=[Depends(require_writer_access)])
