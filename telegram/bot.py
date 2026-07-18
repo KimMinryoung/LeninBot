@@ -1604,6 +1604,14 @@ async def _chat_with_tools(
 
     if effective_provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
+        deepseek_fallback_model = None
+        if _deepseek_client:
+            deepseek_fallback_profile = await resolve_runtime_profile(
+                _runtime_kind,
+                provider_override="deepseek",
+                tier_override="high",
+            )
+            deepseek_fallback_model = deepseek_fallback_profile.model_id
         _chat_coro = openai_chat(
             messages,
             client=_kimi_client,
@@ -1627,6 +1635,9 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             provider_label="kimi",
+            content_filter_fallback_client=_deepseek_client,
+            content_filter_fallback_model=deepseek_fallback_model,
+            content_filter_fallback_label="deepseek",
             extra_body={"reasoning_effort": "max"},
             sdk_max_token_param="max_tokens",
             include_parallel_tool_calls=False,
