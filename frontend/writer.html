@@ -296,7 +296,20 @@
       }
       body[data-tab="projects"] .sidebar { display: block; }
       body[data-tab="manuscript"] .editor { display: grid; }
-      body[data-tab="assistant"] .assistant { display: grid; grid-template-rows: auto; }
+      /* AI tab: conversation-only chat layout — messages fill the screen and
+         scroll, composer stays pinned at the bottom. The Project/Documents/
+         Search/Cost panels live in the 자료 tab instead. */
+      body[data-tab="assistant"] .assistant,
+      body[data-tab="docs"] .assistant { display: grid; grid-template-rows: auto; }
+      body[data-tab="assistant"] .assistant {
+        grid-template-rows: minmax(0, 1fr) auto auto;
+        overflow: hidden;
+      }
+      body[data-tab="assistant"] .assistant > details.panel { display: none; }
+      body[data-tab="assistant"] .prompt { min-height: 64px; }
+      body[data-tab="docs"] .assistant > .conversation,
+      body[data-tab="docs"] .assistant > .pager,
+      body[data-tab="docs"] .assistant > .composer { display: none; }
       .tabbar {
         display: flex;
         position: fixed;
@@ -533,6 +546,7 @@
     <button type="button" data-tab="projects">프로젝트</button>
     <button type="button" data-tab="manuscript">원고</button>
     <button type="button" data-tab="assistant">AI</button>
+    <button type="button" data-tab="docs">자료</button>
   </nav>
 
   <script>
@@ -2065,6 +2079,12 @@
       document.body.dataset.tab = name;
       for (const b of document.querySelectorAll('.tabbar button')) {
         b.classList.toggle('active', b.dataset.tab === name);
+      }
+      // A hidden (display:none) conversation can't be scrolled, so re-anchor
+      // to the newest messages whenever the AI tab becomes visible.
+      if (name === 'assistant') {
+        const conversation = $('conversation');
+        conversation.scrollTop = conversation.scrollHeight;
       }
     }
     for (const b of document.querySelectorAll('.tabbar button')) {
