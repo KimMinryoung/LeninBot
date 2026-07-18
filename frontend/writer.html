@@ -257,11 +257,23 @@
     }
     .progress-log .progress-step.latest { color: var(--ink, inherit); }
     .prompt { min-height: 112px; }
-    .search-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
-    .doc-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+    /* No max-height scrollboxes here: squeezed grid rows made result text
+       overlap into an unreadable pile. Lists unfold; the column scrolls. */
+    .search-results { display: grid; gap: 8px; }
+    .doc-list { display: grid; gap: 6px; }
     .doc-content { min-height: 150px; }
     .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; background: rgba(255, 255, 255, .03); border-color: var(--line-soft); }
-    .result span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
+    .result span {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
     .empty { color: var(--muted); text-align: center; padding: 28px 12px; }
     details.panel > summary {
       cursor: pointer;
