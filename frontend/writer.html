@@ -2,23 +2,62 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
   <title>Novel Writer</title>
   <style>
+    /* Cyber-Lenin theme: black canvas, cream lines/text, sharp corners.
+       Palette mirrors the main site's public/css/palette.css. Fonts load from
+       the same origin when the writer is reached through the frontend proxy;
+       direct API access falls back to system fonts. */
+    @font-face {
+      font-family: 'Pretendard';
+      font-style: normal;
+      font-weight: 45 920;
+      font-display: swap;
+      src: url('/fonts/pretendard/PretendardVariable.woff2') format('woff2-variations');
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('/fonts/ibm-plex/ibm-plex-sans-400.ttf') format('truetype');
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans';
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url('/fonts/ibm-plex/ibm-plex-sans-500.ttf') format('truetype');
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans';
+      font-style: normal;
+      font-weight: 700;
+      font-display: swap;
+      src: url('/fonts/ibm-plex/ibm-plex-sans-700.ttf') format('truetype');
+    }
     :root {
-      color-scheme: light;
-      --bg: #f5f3ee;
-      --surface: #fffdf8;
-      --panel: #ecefed;
-      --ink: #171814;
-      --muted: #60665f;
-      --line: #d6d9d4;
-      --accent: #235c55;
-      --accent-soft: #e7f0ec;
-      --warn: #8a3d3d;
+      color-scheme: dark;
+      --bg: #010409;
+      --surface: #0b0d0a;
+      --panel: #0b0d0a;
+      --raised: #21262d;
+      --raised-hover: #161b22;
+      --input-bg: #161b22;
+      --ink: #faf2da;
+      --muted: #b0b8c1;
+      --line: #f8edca;
+      --line-soft: rgba(248, 237, 202, .25);
+      --accent: #214d2e;
+      --accent-soft: color-mix(in srgb, #214d2e 32%, #010409);
+      --link: color-mix(in srgb, #214d2e 72%, #f8edca);
+      --warn: #cf222e;
+      --warn-text: color-mix(in srgb, #cf222e 62%, #f8edca);
       --gold: #b8832f;
-      --shadow: 0 10px 28px rgba(24, 26, 22, .08);
+      --shadow: 0 1px 3px rgba(0, 0, 0, .3);
+      --tabbar-h: 52px;
       /* Manuscript text size — adjustable via the A−/A+ controls; shared by the
          textarea and its highlight backdrop so <mark> alignment never drifts. */
       --ms-font: 16px;
@@ -26,47 +65,59 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
       background: var(--bg);
       color: var(--ink);
-      font: 14px/1.48 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.5 'IBM Plex Sans', 'Pretendard', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    a:focus-visible, button:focus-visible, select:focus-visible {
+      outline: 2px solid var(--warn);
+      outline-offset: 2px;
     }
     button, input, textarea { font: inherit; }
     button {
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 0;
       min-height: 34px;
       padding: 0 11px;
-      background: var(--surface);
+      background: var(--raised);
       color: var(--ink);
       cursor: pointer;
       white-space: nowrap;
     }
-    button:hover { border-color: var(--accent); }
-    button.primary { background: var(--accent); border-color: var(--accent); color: white; }
-    button.danger { color: var(--warn); }
+    button:hover { background: var(--raised-hover); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #faf2da; }
+    button.danger { color: var(--warn-text); border-color: var(--warn); }
     button:disabled { opacity: .52; cursor: not-allowed; }
     input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--surface);
+      border-radius: 0;
+      background: var(--input-bg);
       color: var(--ink);
       padding: 9px 10px;
       outline: none;
     }
-    input:focus, textarea:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184, 131, 47, .18); }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--link);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+    }
     .row select { width: auto; }  /* inline selects (model picker) keep natural width */
     textarea { resize: vertical; }
+    input[type=checkbox] { width: auto; accent-color: var(--accent); }
     .app {
       display: grid;
       grid-template-columns: 280px minmax(520px, 1fr) 390px;
-      min-height: 100vh;
+      height: 100vh;
+      height: 100dvh;
     }
     .sidebar, .assistant {
       min-width: 0;
       background: var(--panel);
       padding: 15px;
+      overflow-y: auto;
     }
     .sidebar { border-right: 1px solid var(--line); }
     .assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto auto; gap: 12px; }
@@ -80,8 +131,10 @@
       padding: 13px 16px;
       border-bottom: 1px solid var(--line);
     }
-    .editor-actions { border-top: 1px solid var(--line); border-bottom: 0; background: #faf8f2; }
+    .topbar { background: var(--bg); }
+    .editor-actions { border-top: 1px solid var(--line); border-bottom: 0; background: var(--bg); }
     .composer { border: 0; padding: 0; }
+    .tabbar { display: none; }
     h1, h2 { margin: 0; letter-spacing: 0; }
     h1 { font-size: 18px; font-weight: 700; }
     h2 { font-size: 12px; color: var(--muted); font-weight: 800; text-transform: uppercase; }
@@ -98,16 +151,17 @@
       min-height: 56px;
       width: 100%;
       text-align: left;
-      background: rgba(255, 255, 255, .66);
+      background: rgba(255, 255, 255, .03);
+      border-color: var(--line-soft);
     }
-    .project.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .project.active { border-color: var(--link); box-shadow: inset 3px 0 0 var(--link); background: var(--accent-soft); }
     .project strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project.trash-item { border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; cursor: default; }
+    .project.trash-item { border: 1px solid var(--line-soft); border-radius: 0; padding: 9px 11px; cursor: default; }
     .project.trash-item .row { margin-top: 6px; }
     .project.trash-item .danger { border-color: var(--warn); }
     .manuscript-shell {
       position: relative;
-      min-height: 680px;
+      min-height: 0;
       min-width: 0;
       background: var(--surface);
     }
@@ -143,10 +197,11 @@
     }
     .manuscript-backdrop::-webkit-scrollbar { display: none; }
     .manuscript-backdrop mark {
-      background: rgba(184, 131, 47, .30);
+      background: rgba(184, 131, 47, .38);
       color: transparent;
-      border-radius: 2px;
+      border-radius: 0;
     }
+    .manuscript:focus { box-shadow: none; }
     .pager {
       display: flex;
       align-items: center;
@@ -170,22 +225,21 @@
       padding-right: 2px;
     }
     .message {
-      border: 1px solid var(--line);
-      border-radius: 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 0;
       padding: 10px 11px;
-      background: #fbfaf6;
+      background: rgba(255, 255, 255, .03);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      box-shadow: 0 1px 0 rgba(0,0,0,.03);
     }
-    .message.user { background: var(--accent-soft); }
+    .message.user { background: var(--accent-soft); border-color: var(--accent); }
     .message .label { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
     .progress-log {
       margin: 2px 0 8px;
       padding: 5px 8px;
-      border-left: 2px solid var(--line);
-      background: rgba(0,0,0,.025);
-      border-radius: 0 6px 6px 0;
+      border-left: 2px solid var(--line-soft);
+      background: rgba(255, 255, 255, .04);
+      border-radius: 0;
       font-size: 12px;
       color: var(--muted);
       white-space: normal;
@@ -205,7 +259,7 @@
     .search-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
     .doc-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
     .doc-content { min-height: 150px; }
-    .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; }
+    .result { width: 100%; text-align: left; height: auto; min-height: 54px; padding: 9px 10px; white-space: normal; background: rgba(255, 255, 255, .03); border-color: var(--line-soft); }
     .result span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
     .empty { color: var(--muted); text-align: center; padding: 28px 12px; }
     details.panel > summary {
@@ -223,23 +277,59 @@
       min-height: 24px;
     }
     details.panel > summary::-webkit-details-marker { display: none; }
+    details.panel > summary:hover { color: var(--ink); }
     details.panel > summary::before { content: '▸'; font-size: 10px; transition: transform .15s; }
     details.panel[open] > summary::before { transform: rotate(90deg); }
     details.panel > .stack { margin-top: 10px; }
     .font-controls { display: flex; align-items: center; gap: 4px; }
     .font-controls button { min-height: 32px; padding: 0 9px; font-weight: 700; }
     .font-size-label { color: var(--muted); font-size: 12px; min-width: 36px; text-align: center; }
+    /* Mobile / narrow screens: the three columns become tabbed full-height
+       views switched by a fixed bottom tab bar (thumb-reachable). */
     @media (max-width: 1120px) {
-      .app { grid-template-columns: 1fr; }
-      .sidebar, .assistant { border: 0; border-bottom: 1px solid var(--line); }
-      .assistant { grid-template-rows: auto; }
-      .editor { min-height: 72vh; }
-      .manuscript-shell { min-height: 560px; }
+      .app { display: block; height: auto; }
+      .sidebar, .editor, .assistant {
+        display: none;
+        border: 0;
+        height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+        overflow-y: auto;
+      }
+      body[data-tab="projects"] .sidebar { display: block; }
+      body[data-tab="manuscript"] .editor { display: grid; }
+      body[data-tab="assistant"] .assistant { display: grid; grid-template-rows: auto; }
+      .tabbar {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+      }
+      .tabbar button {
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+        border: 0;
+        border-left: 1px solid var(--line-soft);
+        background: transparent;
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .tabbar button:first-child { border-left: 0; }
+      .tabbar button.active {
+        color: var(--ink);
+        background: var(--accent-soft);
+        box-shadow: inset 0 2px 0 var(--link);
+      }
     }
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(23, 24, 20, .45);
+      background: rgba(1, 4, 9, .8);
       display: none;
       align-items: center;
       justify-content: center;
@@ -250,7 +340,7 @@
     .modal {
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 0;
       box-shadow: var(--shadow);
       width: 100%;
       max-width: 440px;
@@ -276,7 +366,7 @@
     }
   </style>
 </head>
-<body>
+<body data-tab="projects">
   <div id="deleteModal" class="modal-overlay">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
       <h1 id="deleteModalTitle">Delete project?</h1>
@@ -438,6 +528,12 @@
       </section>
     </aside>
   </div>
+
+  <nav class="tabbar" aria-label="모바일 탭">
+    <button type="button" data-tab="projects">프로젝트</button>
+    <button type="button" data-tab="manuscript">원고</button>
+    <button type="button" data-tab="assistant">AI</button>
+  </nav>
 
   <script>
     const MANUSCRIPT_PAGE_CHARS = 12000;
@@ -847,7 +943,10 @@
         button.innerHTML = '<strong></strong><span class="meta"></span>';
         button.querySelector('strong').textContent = project.title;
         button.querySelector('span').textContent = `${charMeta(project.manuscript_char_count)} · ${project.message_count || 0} messages`;
-        button.onclick = () => loadProject(project.id);
+        button.onclick = () => {
+          loadProject(project.id);
+          if (mobileTabs.matches) setMobileTab('manuscript');
+        };
         list.appendChild(button);
       }
     }
@@ -1372,6 +1471,7 @@
       const data = await res.json();
       await loadProjects();
       await loadProject(data.project.id);
+      if (mobileTabs.matches) setMobileTab('manuscript');
     }
 
     const PUBLIC_NOVEL_BASE = 'https://cyber-lenin.com/novels/';
@@ -1674,6 +1774,7 @@
         button.querySelector('strong').textContent = item.heading || (item.chunk_index != null ? `Chunk ${item.chunk_index}` : 'Match');
         button.querySelector('span').textContent = item.snippet || '';
         button.onclick = () => {
+          if (mobileTabs.matches) setMobileTab('manuscript');
           selectManuscriptRange(item.match_start || item.start_offset || 0, item.match_end || item.end_offset || 0);
           updateAssistantButtons();
         };
@@ -1957,9 +2058,22 @@
     let manuscriptFontSize = applyManuscriptFontSize(parseInt(localStorage.getItem(FONT_KEY) || '16', 10));
     $('fontSmaller').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize - 1); });
     $('fontLarger').addEventListener('click', () => { manuscriptFontSize = applyManuscriptFontSize(manuscriptFontSize + 1); });
+    // Mobile tab navigation: below 1120px the three columns become full-height
+    // views switched by the fixed bottom tab bar.
+    const mobileTabs = window.matchMedia('(max-width: 1120px)');
+    function setMobileTab(name) {
+      document.body.dataset.tab = name;
+      for (const b of document.querySelectorAll('.tabbar button')) {
+        b.classList.toggle('active', b.dataset.tab === name);
+      }
+    }
+    for (const b of document.querySelectorAll('.tabbar button')) {
+      b.onclick = () => setMobileTab(b.dataset.tab);
+    }
+    setMobileTab('projects');
     // On small screens, start with the utility panels collapsed so the
     // conversation and composer are reachable without a long scroll.
-    if (window.innerWidth <= 1120) {
+    if (mobileTabs.matches) {
       for (const id of ['projectPanel', 'docPanel', 'searchPanel', 'costPanel']) $(id).open = false;
     }
     renderDocuments();
