@@ -123,7 +123,12 @@
       overflow-y: auto;
     }
     .sidebar { border-right: 1px solid var(--line); }
-    aside.assistant { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto auto; gap: 12px; }
+    /* Block layout (desktop too): the conversation unfolds to full height and
+       the column scrolls — grid track sizing would squeeze it into a small
+       inner scrollbox once the panels are open. */
+    aside.assistant { border-left: 1px solid var(--line); }
+    aside.assistant > * { margin-bottom: 12px; }
+    aside.assistant > *:last-child { margin-bottom: 0; }
     .editor {
       min-width: 0;
       display: grid;
@@ -219,14 +224,8 @@
     .page-input::-webkit-outer-spin-button, .page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     .page-input[type=number] { -moz-appearance: textfield; appearance: textfield; }
     .project-fields textarea { min-height: 86px; }
-    .conversation {
-      min-height: 0;
-      overflow: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding-right: 2px;
-    }
+    .conversation > * { margin-bottom: 10px; }
+    .conversation > *:last-child { margin-bottom: 0; }
     .message {
       border: 1px solid var(--line-soft);
       border-radius: 0;
@@ -253,9 +252,8 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11px;
       line-height: 1.5;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
     .progress-log .progress-step.latest { color: var(--ink, inherit); }
     .prompt { min-height: 112px; }
@@ -299,17 +297,11 @@
       }
       body[data-tab="projects"] .sidebar { display: block; }
       body[data-tab="manuscript"] .editor { display: grid; }
-      /* AI tab: conversation-only chat view — answers unfold to their full
-         height and the whole column scrolls (block layout so nothing can
-         shrink or clip). The Project/Documents/Search/Cost panels live in
-         the 자료 tab instead. */
+      /* AI tab: conversation-only chat view. The Project/Documents/Search/
+         Cost panels live in the 자료 tab instead. */
       body[data-tab="assistant"] aside.assistant,
       body[data-tab="docs"] aside.assistant { display: block; }
-      body[data-tab="assistant"] aside.assistant > *,
-      body[data-tab="docs"] aside.assistant > * { margin-bottom: 12px; }
       body[data-tab="assistant"] aside.assistant > details.panel { display: none; }
-      body[data-tab="assistant"] .conversation { display: block; overflow: visible; min-height: 0; }
-      body[data-tab="assistant"] .conversation > .message { margin-bottom: 10px; }
       body[data-tab="assistant"] .prompt { min-height: 64px; }
       body[data-tab="docs"] aside.assistant > .conversation,
       body[data-tab="docs"] aside.assistant > .pager,
@@ -582,15 +574,12 @@
     };
     const $ = (id) => document.getElementById(id);
     const mobileTabs = window.matchMedia('(max-width: 1120px)');
-    // Bottom-anchor the conversation. On the mobile AI tab the messages list
-    // is fully unfolded and the assistant column is the scroll container.
+    // Bottom-anchor the conversation. The messages list is fully unfolded on
+    // every screen size, so the assistant column is the scroll container.
     function anchorConversation() {
-      const conversation = $('conversation');
-      conversation.scrollTop = conversation.scrollHeight;
-      if (mobileTabs.matches && document.body.dataset.tab === 'assistant') {
-        const column = document.querySelector('aside.assistant');
-        column.scrollTop = column.scrollHeight;
-      }
+      if (mobileTabs.matches && document.body.dataset.tab !== 'assistant') return;
+      const column = document.querySelector('aside.assistant');
+      column.scrollTop = column.scrollHeight;
     }
     const writerBase = window.location.pathname.startsWith('/api/proxy/writer') ? '/api/proxy/writer' : '/writer';
     const writerPath = (path) => path.startsWith('/writer') ? writerBase + path.slice('/writer'.length) : path;
