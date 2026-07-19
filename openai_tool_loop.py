@@ -778,6 +778,24 @@ def _looks_like_prompt_content_filter(err: Exception) -> bool:
     return "high risk" in text and "prompt" in text
 
 
+def _looks_like_content_filter_response(response) -> bool:
+    """Match provider safety refusals returned as a successful completion."""
+    choices = _obj_get(response, "choices", None) or []
+    if not choices:
+        return False
+    choice = choices[0]
+    if str(_obj_get(choice, "finish_reason", "") or "").lower() == "content_filter":
+        return True
+    message = _obj_get(choice, "message", None) or {}
+    return bool(_obj_get(message, "refusal", None))
+
+
+def _response_model(response, fallback: str) -> str:
+    """Return the model that actually served a completion for billing/logging."""
+    value = _obj_get(response, "model", None)
+    return value if isinstance(value, str) and value else fallback
+
+
 def _resolve_openai_model(requested: str) -> str:
     """If we recently learned `requested` is unavailable, return its fallback."""
     import time
@@ -1092,13 +1110,15 @@ async def chat_with_tools(
     content-filter rejection. Other 400s are never routed to it.
     """
     sdk_mode = client is not None
-    usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
+    primary_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
+    active_usage_label = primary_usage_label
+    active_model = model
     content_filter_fallback_active = False
 
     # Wrap _api_call with per-call semaphore so the lock is held only during
     # the HTTP POST, not during tool execution between rounds.
     async def _guarded_api_call(*a, **kw):
-        nonlocal content_filter_fallback_active
+        nonlocal content_filter_fallback_active, active_usage_label, active_model
         if max_input_tokens is not None and len(a) > 4:
             request_args = list(a)
             request_messages = list(request_args[4])
@@ -1152,7 +1172,7 @@ async def chat_with_tools(
             return await _call_content_filter_fallback()
 
         try:
-            return await _call_primary()
+            response = await _call_primary()
         except Exception as err:
             if not (
                 content_filter_fallback_client is not None
@@ -1170,7 +1190,26 @@ async def chat_with_tools(
                 fallback_label, content_filter_fallback_model,
             )
             content_filter_fallback_active = True
+            active_usage_label = fallback_label
+            active_model = content_filter_fallback_model
             return await _call_content_filter_fallback()
+
+        if not (
+            content_filter_fallback_client is not None
+            and content_filter_fallback_model
+            and _looks_like_content_filter_response(response)
+        ):
+            return response
+
+        fallback_label = content_filter_fallback_label or content_filter_fallback_model
+        logger.warning(
+            "Safety refusal response from %s model=%s; retrying same request with %s model=%s",
+            primary_usage_label, model, fallback_label, content_filter_fallback_model,
+        )
+        content_filter_fallback_active = True
+        active_usage_label = fallback_label
+        active_model = content_filter_fallback_model
+        return await _call_content_filter_fallback()
 
     budget_usd = validate_budget(budget_usd)
 
@@ -1222,7 +1261,13 @@ async def chat_with_tools(
             "rounds": round_num,
         }
 
-    def _log_sdk_usage(label: str, usage, call_cost: float, current_total: float) -> None:
+    def _log_sdk_usage(
+        label: str,
+        usage,
+        call_cost: float,
+        current_total: float,
+        billed_model: str,
+    ) -> None:
         prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
         completion_tokens = getattr(usage, "completion_tokens", 0) or 0
         cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
@@ -1233,7 +1278,7 @@ async def chat_with_tools(
         non_cached = miss_tokens or (prompt_tokens - cached_tokens)
         logger.info(
             "%s usage [%s model=%s]: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
-            label, usage_label, model, prompt_tokens, cached_tokens, non_cached,
+            label, active_usage_label, billed_model, prompt_tokens, cached_tokens, non_cached,
             completion_tokens, call_cost, current_total, budget_usd,
         )
 
@@ -1382,9 +1427,10 @@ async def chat_with_tools(
         # need a stable prefix. Log cached vs non-cached input at INFO so
         # we can see in journald whether the prefix is actually hitting.
         if sdk_mode and usage:
-            round_cost = _calculate_cost(usage, model)
+            billed_model = _response_model(response, active_model)
+            round_cost = _calculate_cost(usage, billed_model)
             total_cost += round_cost
-            _log_sdk_usage(f"Round {round_num}", usage, round_cost, total_cost)
+            _log_sdk_usage(f"Round {round_num}", usage, round_cost, total_cost, billed_model)
             await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
             update_redis_state(task_id, round_num, total_cost)
 
@@ -1658,9 +1704,10 @@ async def chat_with_tools(
             sdk_mode, final_response, surface_reasoning=not preserve_reasoning_content,
         )
         if sdk_mode and final_usage:
-            call_cost = _calculate_cost(final_usage, model)
+            billed_model = _response_model(final_response, active_model)
+            call_cost = _calculate_cost(final_usage, billed_model)
             total_cost += call_cost
-            _log_sdk_usage("Forced-final", final_usage, call_cost, total_cost)
+            _log_sdk_usage("Forced-final", final_usage, call_cost, total_cost, billed_model)
 
         # If the agent called finalization tools, execute them and do a
         # text-only follow-up to collect the final answer.
@@ -1737,9 +1784,12 @@ async def chat_with_tools(
                         sdk_mode, followup, surface_reasoning=not preserve_reasoning_content,
                     )
                     if sdk_mode and followup_usage:
-                        call_cost = _calculate_cost(followup_usage, model)
+                        billed_model = _response_model(followup, active_model)
+                        call_cost = _calculate_cost(followup_usage, billed_model)
                         total_cost += call_cost
-                        _log_sdk_usage("Forced-final followup", followup_usage, call_cost, total_cost)
+                        _log_sdk_usage(
+                            "Forced-final followup", followup_usage, call_cost, total_cost, billed_model,
+                        )
                     text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
     except Exception as final_err:
         # ── Last resort: strip all tool protocol and retry ──
@@ -1763,9 +1813,12 @@ async def chat_with_tools(
                 sdk_mode, last_response, surface_reasoning=not preserve_reasoning_content,
             )
             if sdk_mode and last_usage:
-                call_cost = _calculate_cost(last_usage, model)
+                billed_model = _response_model(last_response, active_model)
+                call_cost = _calculate_cost(last_usage, billed_model)
                 total_cost += call_cost
-                _log_sdk_usage("Forced-final stripped", last_usage, call_cost, total_cost)
+                _log_sdk_usage(
+                    "Forced-final stripped", last_usage, call_cost, total_cost, billed_model,
+                )
         except Exception as e2:
             logger.error("Final stripped response also failed: %s", e2)
             if log_event:

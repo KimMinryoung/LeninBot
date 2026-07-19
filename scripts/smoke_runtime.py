@@ -427,7 +427,11 @@ async def _assert_kimi_preserves_reasoning_for_tool_replay() -> None:
 
 async def _assert_kimi_content_filter_falls_back_in_forced_final() -> None:
     from types import SimpleNamespace
-    from openai_tool_loop import chat_with_tools, _looks_like_prompt_content_filter
+    from openai_tool_loop import (
+        chat_with_tools,
+        _looks_like_content_filter_response,
+        _looks_like_prompt_content_filter,
+    )
 
     class _FilterError(Exception):
         status_code = 400
@@ -550,6 +554,68 @@ async def _assert_kimi_content_filter_falls_back_in_forced_final() -> None:
     assert primary_seen[1]["messages"] == fallback_seen[0]["messages"]
     assert fallback_seen[0]["model"] == "deepseek-v4-pro"
     assert "extra_body" not in fallback_seen[0]
+    assert _looks_like_content_filter_response(SimpleNamespace(
+        choices=[SimpleNamespace(
+            finish_reason="content_filter",
+            message=SimpleNamespace(refusal=None),
+        )],
+    ))
+
+    refusal_seen: list[dict] = []
+    billed_fallback_seen: list[dict] = []
+
+    class _RefusalCompletions:
+        async def create(self, **kwargs):
+            refusal_seen.append(kwargs)
+            return SimpleNamespace(
+                model="kimi-k3",
+                choices=[SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(
+                        content="", tool_calls=None, refusal="request refused",
+                    ),
+                )],
+                usage=None,
+            )
+
+    class _BilledFallbackCompletions:
+        async def create(self, **kwargs):
+            billed_fallback_seen.append(kwargs)
+            return SimpleNamespace(
+                model="deepseek-v4-pro",
+                choices=[SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(content="fallback answer", tool_calls=None, refusal=None),
+                )],
+                usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=1000),
+            )
+
+    refusal_primary = SimpleNamespace(
+        chat=SimpleNamespace(completions=_RefusalCompletions())
+    )
+    billed_fallback = SimpleNamespace(
+        chat=SimpleNamespace(completions=_BilledFallbackCompletions())
+    )
+    billed_result = await chat_with_tools(
+        [{"role": "user", "content": "refused prompt"}],
+        client=refusal_primary,
+        model="kimi-k3",
+        tools=[],
+        tool_handlers={},
+        system_prompt="system",
+        max_rounds=1,
+        max_tokens=128,
+        budget_usd=1.0,
+        provider_label="kimi",
+        return_metadata=True,
+        content_filter_fallback_client=billed_fallback,
+        content_filter_fallback_model="deepseek-v4-pro",
+        content_filter_fallback_label="deepseek",
+    )
+    assert billed_result["text"] == "fallback answer"
+    assert len(refusal_seen) == 1
+    assert len(billed_fallback_seen) == 1
+    assert abs(billed_result["cost_usd"] - 0.001305) < 1e-12
 
 
 def _assert_agent_runtime_config() -> None:
