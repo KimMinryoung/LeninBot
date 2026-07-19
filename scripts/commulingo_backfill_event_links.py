@@ -35,12 +35,29 @@ MODEL = "deepseek-v4-pro"
 CHANGED_BY = "operator:claude-code"
 REPORT_DIR = PROJECT_ROOT / "logs" / "commulingo"
 
+# The event page groups people by manner of involvement. The model must classify
+# each link into one of these; anything else (or a missing value) becomes the
+# neutral "unclassified" bucket for human review — never a silent "target",
+# which would libel a mere participant as a victim of the event.
+VALID_KINDS = {"leader", "participant", "executor", "target", "opponent", "witness"}
+FALLBACK_KIND = "unclassified"
+
 PROMPT = """You are auditing the people-links of one historical event card on a Soviet/revolutionary
 history site. Below are the event and the site's full roster of people. List ONLY people from the
 roster who were clearly and materially involved in this event — participants, drivers, principal
 victims, or figures whose card meaningfully intersects it. Judge from the roster line itself; do
 not speculate beyond it. A weak, generic, or merely-contemporary connection must be omitted:
 missing a marginal link is fine, inventing one is not.
+
+For each person also classify HOW they were involved in THIS event, as one "kind":
+  leader      — directed or led the event from the top
+  participant — took active part (commanders, officials, organizers, designers, soldiers)
+  executor    — security/repression apparatus that carried out the event's coercion
+  target      — a victim or target of the event (purged, deported, executed, deposed)
+  opponent    — opposed or resisted the event
+  witness     — a chronicler or observer (writer, journalist, artist), not a direct actor
+The kind is event-specific: the same person may be a target in one event and an
+executor in another. Do NOT default to "target" — pick the role they actually played.
 
 EVENT
 {event_block}
@@ -52,8 +69,8 @@ ROSTER (id | names | epithet | group | career)
 
 Answer with ONLY a JSON object, no other text:
 {{"links": [{{"person_id": "<roster id>", "relation_ko": "<간결한 역할, 예: 진압 지휘>",
-"relation_en": "<same in English>", "confidence": <0.0-1.0>,
-"reason": "<one short sentence>"}}]}}
+"relation_en": "<same in English>", "kind": "<leader|participant|executor|target|opponent|witness>",
+"confidence": <0.0-1.0>, "reason": "<one short sentence>"}}]}}
 Use an empty list when nobody qualifies."""
 
 
@@ -110,7 +127,8 @@ def propose(client, event: dict, roster: list[dict], linked_ids: list[str]) -> l
     return links
 
 
-def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str) -> None:
+def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str, kind: str) -> None:
+    kind = kind if kind in VALID_KINDS else FALLBACK_KIND
     row = db_query(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM commulingo_history_event_people WHERE event_id = %s",
         (event_id,),
@@ -118,8 +136,8 @@ def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str
     db_execute(
         """INSERT INTO commulingo_history_event_people
              (event_id, person_id, sort_order, relation_ko, relation_en, relation_kind)
-           VALUES (%s, %s, %s, %s, %s, 'target')""",
-        (event_id, person_id, row["next"], relation_ko, relation_en),
+           VALUES (%s, %s, %s, %s, %s, %s)""",
+        (event_id, person_id, row["next"], relation_ko, relation_en, kind),
     )
     db_execute(
         """INSERT INTO commulingo_people_revisions (entity_type, entity_id, revision_note, snapshot, changed_by)
@@ -129,7 +147,7 @@ def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str
             json.dumps({"after": {
                 "event_id": event_id, "person_id": person_id,
                 "relation_ko": relation_ko, "relation_en": relation_en,
-                "relation_kind": "target",
+                "relation_kind": kind,
             }}, ensure_ascii=False),
             CHANGED_BY,
         ),
@@ -174,9 +192,11 @@ def main() -> int:
             continue
         for prop in proposals:
             pid = str(prop.get("person_id") or "").strip()
+            kind = str(prop.get("kind") or "").strip().lower()
             entry = {"event": event["id"], "person": pid,
                      "relation_ko": str(prop.get("relation_ko") or "").strip(),
                      "relation_en": str(prop.get("relation_en") or "").strip(),
+                     "kind": kind if kind in VALID_KINDS else FALLBACK_KIND,
                      "confidence": prop.get("confidence"), "reason": prop.get("reason")}
             try:
                 conf = float(prop.get("confidence") or 0.0)
@@ -193,7 +213,7 @@ def main() -> int:
             else:
                 entry["verdict"] = "proposed" if args.dry_run else "applied"
                 if not args.dry_run:
-                    apply_link(event["id"], pid, entry["relation_ko"], entry["relation_en"])
+                    apply_link(event["id"], pid, entry["relation_ko"], entry["relation_en"], entry["kind"])
                 linked.add((event["id"], pid))
                 report["applied"].append(entry)
                 continue
