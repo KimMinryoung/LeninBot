@@ -22,7 +22,10 @@ Legacy `CLAUDE.md` is for Claude Code only. For Codex, follow this `AGENTS.md`.
 ## Local Rules
 
 Use the project virtualenv before Python commands.
-Prefer small, surgical changes.
 Do not treat old handoff notes as source of truth.
-For this repository, push with `sudo -u grass git push`; do not try plain `git push` first.
+When operating from the `root` account:
+
+1. Create and modify project files as the `grass` user so that file ownership is assigned to `grass`, not `root`.
+2. Run all Git commands as the `grass` user. Do not perform Git operations as `root`.
+
 For safe project inspection from Codex/Claude Code/human tooling, prefer `scripts/mcp-gateway --list-tools` and the default `inspect` MCP profile. Use `scripts/mcp-gateway --profile operator` only when guarded read-only SQL via `scripts/query-db` is required.

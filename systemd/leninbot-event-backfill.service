@@ -10,7 +10,7 @@ WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 # Override at install time by editing this line (systemd word-splits $BACKFILL_ARGS).
-Environment=BACKFILL_ARGS=--min-confidence 0.8
+Environment="BACKFILL_ARGS=--min-confidence=0.8"
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_backfill_event_links.py $BACKFILL_ARGS
