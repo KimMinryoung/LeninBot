@@ -8,10 +8,11 @@ Bridges api.py to the unified agent system. Handles:
 """
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
+import os
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -372,12 +373,21 @@ async def _build_gramsci_preflight_context(message: str, provider: str = "claude
     if not handler:
         return ""
     try:
-        result = await handler(
-            query=query,
-            layer="core_theory",
-            author="Gramsci",
-            num_results=3,
+        result = await asyncio.wait_for(
+            handler(
+                query=query,
+                layer="core_theory",
+                author="Gramsci",
+                num_results=3,
+            ),
+            timeout=_WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC,
         )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Gramsci preflight vector_search timed out after %.1fs",
+            _WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC,
+        )
+        return ""
     except Exception as exc:
         logger.warning("Gramsci preflight vector_search failed: %s", exc)
         return ""
@@ -716,6 +726,27 @@ def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
     web_only_tools = {"read_self", "read_persona_context"}
     registry_allowed = set(allowed_tools) - web_only_tools
     tools, handlers = build_toolset(TOOLS, TOOL_HANDLERS, registry_allowed)
+    if "vector_search" in handlers:
+        vector_search_handler = handlers["vector_search"]
+
+        async def _bounded_vector_search(**kwargs):
+            try:
+                return await asyncio.wait_for(
+                    vector_search_handler(**kwargs),
+                    timeout=_WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Web chat vector_search timed out after %.1fs query=%s",
+                    _WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC,
+                    str(kwargs.get("query") or "")[:160],
+                )
+                return (
+                    "Vector search timed out before results were available. "
+                    "Continue with other available evidence or answer with an explicit limitation."
+                )
+
+        handlers = {**handlers, "vector_search": _bounded_vector_search}
     if "read_self" in allowed_tools:
         tools = tools + [WEB_READ_SELF_TOOL]
         handlers = {**handlers, "read_self": _exec_web_read_self}
@@ -1257,6 +1288,62 @@ def _format_sse(data: dict) -> str:
 
 _SSE_HEARTBEAT_INTERVAL_SEC = 15.0
 
+
+def _positive_float_env(name: str, default: float, minimum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
+
+
+_WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC = _positive_float_env(
+    "WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS", 45.0, 5.0
+)
+
+
+class _WebChatRun:
+    """Server-owned web-chat generation that outlives its SSE observer."""
+
+    def __init__(self, *, request_id: str, session_id: str) -> None:
+        self.request_id = request_id
+        self.session_id = session_id
+        self.queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self.detached = False
+        self.started_at = time.monotonic()
+        self.task: asyncio.Task | None = None
+
+    async def publish(self, event: str | None) -> None:
+        # Once the sole SSE observer has gone away, only the terminal sentinel
+        # matters. The final answer is persisted by the run itself and the
+        # frontend recovers it through /history.
+        if self.detached and event is not None:
+            return
+        await self.queue.put(event)
+
+
+_active_web_chat_runs: dict[str, _WebChatRun] = {}
+_web_chat_background_tasks: set[asyncio.Task] = set()
+
+
+def has_active_web_chat_run(session_id: str) -> bool:
+    """Return whether this API process still owns a run for the session."""
+    return session_id in _active_web_chat_runs
+
+
+def detached_web_chat_run_count() -> int:
+    """Count runs no longer represented by an open HTTP response."""
+    return sum(1 for run in _active_web_chat_runs.values() if run.detached)
+
+
+def _register_web_chat_run(run: _WebChatRun) -> None:
+    _active_web_chat_runs[run.session_id] = run
+
+
+def _unregister_web_chat_run(run: _WebChatRun) -> None:
+    if _active_web_chat_runs.get(run.session_id) is run:
+        del _active_web_chat_runs[run.session_id]
+
 _WEB_TOOL_LABELS = {
     "knowledge_graph_search": "지식 그래프 검색",
     "vector_search": "문서 검색",
@@ -1423,33 +1510,39 @@ async def handle_web_chat(
     history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
     system_prompt = render_system_prompt(spec, provider)
 
-    # Progress callback → SSE queue
-    queue: asyncio.Queue = asyncio.Queue()
+    # The generation is server-owned; this request stream is only its first
+    # observer. If that observer disappears, the run continues and persists
+    # the answer so the frontend can recover it from /history.
+    web_request_id = uuid.uuid4().hex
+    run = _WebChatRun(request_id=web_request_id, session_id=session_id)
 
     async def on_progress(event: str, detail: str):
         if event == "tool_call":
-            await queue.put(_format_sse(_tool_progress_payload(detail)))
-            await queue.put(_format_sse({"type": "log", "node": "tool", "content": detail}))
+            await run.publish(_format_sse(_tool_progress_payload(detail)))
+            await run.publish(_format_sse({"type": "log", "node": "tool", "content": detail}))
         elif event == "tool_result":
-            await queue.put(_format_sse(_tool_progress_payload(detail, done=True)))
+            await run.publish(_format_sse(_tool_progress_payload(detail, done=True)))
         elif event == "thinking":
-            await queue.put(_format_sse({"type": "log", "node": "thinking", "content": detail}))
+            await run.publish(_format_sse({"type": "log", "node": "thinking", "content": detail}))
         elif event == "warning":
-            await queue.put(_format_sse({"type": "warning", "content": detail}))
+            await run.publish(_format_sse({"type": "warning", "content": detail}))
         elif event == "status":
-            await queue.put(_format_sse({"type": "status", "content": detail}))
+            await run.publish(_format_sse({"type": "status", "content": detail}))
         elif event == "text_delta":
             # Live token stream from the LLM — the client appends to a growing
             # answer bubble as each delta arrives, then finalizes on "answer".
-            await queue.put(_format_sse({"type": "chunk", "content": detail}))
+            await run.publish(_format_sse({"type": "chunk", "content": detail}))
 
-    # Run LLM in background task, stream progress
-    answer_holder: list[str] = []
-    error_holder: list[str] = []
+    # Run LLM in a detached background task and stream progress to the current
+    # observer while it remains connected.
     budget_tracker: dict = {}
     if preflight_tool_detail:
         budget_tracker["tool_work_details"] = [preflight_tool_detail]
-    web_request_id = uuid.uuid4().hex
+    _register_web_chat_run(run)
+    logger.info(
+        "Web chat run started request_id=%s session=%s provider=%s model=%s",
+        web_request_id, session_id, provider, profile.model_id,
+    )
     try:
         from redis_state import register_active_web_chat
         register_active_web_chat(web_request_id, session_id=session_id, fingerprint=fingerprint)
@@ -1546,29 +1639,97 @@ async def handle_web_chat(
                     max_length_continuations=2,
                     budget_tracker=budget_tracker,
                 )
-            answer_holder.append(result)
+            metadata = result if isinstance(result, dict) else {}
+            answer = str((metadata.get("text") or "") if metadata else result)
+            if metadata.get("truncated"):
+                await run.publish(_format_sse({
+                    "type": "warning",
+                    "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
+                }))
+            rounds_used = metadata.get("rounds", budget_tracker.get("rounds_used"))
+            cost_usd = metadata.get("cost_usd", budget_tracker.get("total_cost"))
+            documents_count, web_search_used, strategy = _summarize_tool_usage(
+                budget_tracker.get("tool_work_details", [])
+            )
+            # Persistence belongs to the server-side run, not to the SSE
+            # observer. This must happen even when the browser has detached.
+            if regeneration_source:
+                chat_log_id = await asyncio.to_thread(
+                    _update_chat_answer,
+                    int(regeneration_source["id"]),
+                    regeneration_source["fingerprint"],
+                    answer,
+                    f"{provider}_loop_regenerated",
+                    documents_count, web_search_used, strategy,
+                )
+            else:
+                chat_log_id = await asyncio.to_thread(
+                    _log_chat, session_id, fingerprint, user_agent, ip_address,
+                    original_message, answer, f"{provider}_loop",
+                    documents_count, web_search_used, strategy, persona, authenticated_user_id,
+                )
+                if feedback_ids:
+                    try:
+                        await asyncio.to_thread(_mark_web_feedback_consumed, feedback_ids)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to mark web chat feedback consumed request_id=%s: %s",
+                            web_request_id,
+                            exc,
+                        )
+            elapsed = time.monotonic() - run.started_at
+            logger.info(
+                "Web chat run completed request_id=%s session=%s detached=%s message_id=%s elapsed=%.2fs",
+                web_request_id, session_id, run.detached, chat_log_id, elapsed,
+            )
+            await run.publish(_format_sse({
+                "type": "answer",
+                "request_id": web_request_id,
+                "message_id": chat_log_id,
+                "regenerated_from_id": regenerate_from_id,
+                "content": answer,
+                "complete": bool(metadata.get("complete", True)),
+                "truncated": bool(metadata.get("truncated", False)),
+                "finish_reason": metadata.get("finish_reason"),
+                "continuations_used": metadata.get("continuations_used", 0),
+                "rounds": rounds_used,
+                "cost_usd": cost_usd,
+            }))
         except Exception as e:
-            logger.error("Web chat LLM error: %s", e)
-            error_holder.append(str(e))
+            logger.exception(
+                "Web chat run failed request_id=%s session=%s detached=%s elapsed=%.2fs: %s",
+                web_request_id, session_id, run.detached,
+                time.monotonic() - run.started_at, e,
+            )
+            await run.publish(_format_sse({
+                "type": "error",
+                "request_id": web_request_id,
+                "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+            }))
         finally:
             try:
                 from redis_state import unregister_active_web_chat
                 unregister_active_web_chat(web_request_id)
             except Exception:
                 pass
-            await queue.put(None)  # sentinel
+            _unregister_web_chat_run(run)
+            await run.publish(None)  # sentinel
 
     llm_task = asyncio.create_task(_run_llm())
+    run.task = llm_task
+    _web_chat_background_tasks.add(llm_task)
+    llm_task.add_done_callback(_web_chat_background_tasks.discard)
 
     # Yield SSE events as they arrive. Some provider/tool combinations do not
     # emit token deltas, so send SSE comments periodically to keep proxies and
     # browser clients from treating a long model call as a dead connection.
     stream_finished = False
     try:
+        await run.publish(_format_sse({"type": "run_started", "request_id": web_request_id}))
         while True:
             try:
                 event = await asyncio.wait_for(
-                    queue.get(),
+                    run.queue.get(),
                     timeout=_SSE_HEARTBEAT_INTERVAL_SEC,
                 )
             except asyncio.TimeoutError:
@@ -1579,65 +1740,14 @@ async def handle_web_chat(
             yield event
 
         stream_finished = True
-        await llm_task  # ensure completion
+        await asyncio.shield(llm_task)  # observer cancellation must not cancel the run
     except (asyncio.CancelledError, GeneratorExit):
-        logger.info("Web chat client disconnected; cancelling LLM task session=%s", session_id)
-        llm_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await llm_task
+        run.detached = True
+        logger.warning(
+            "Web chat observer disconnected; run continues request_id=%s session=%s elapsed=%.2fs",
+            web_request_id, session_id, time.monotonic() - run.started_at,
+        )
         raise
     finally:
-        if not stream_finished and not llm_task.done():
-            llm_task.cancel()
-
-    if error_holder:
-        yield _format_sse({"type": "error", "content": "서버에 일시적 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."})
-    elif answer_holder:
-        result = answer_holder[0]
-        metadata = result if isinstance(result, dict) else {}
-        answer = str((metadata.get("text") or "") if metadata else result)
-        if metadata.get("truncated"):
-            yield _format_sse({
-                "type": "warning",
-                "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
-            })
-        rounds_used = metadata.get("rounds", budget_tracker.get("rounds_used"))
-        cost_usd = metadata.get("cost_usd", budget_tracker.get("total_cost"))
-        documents_count, web_search_used, strategy = _summarize_tool_usage(
-            budget_tracker.get("tool_work_details", [])
-        )
-        # Log to DB BEFORE yield — yield may be the last iteration if client disconnects
-        if regeneration_source:
-            chat_log_id = await asyncio.to_thread(
-                _update_chat_answer,
-                int(regeneration_source["id"]),
-                regeneration_source["fingerprint"],
-                answer,
-                f"{provider}_loop_regenerated",
-                documents_count, web_search_used, strategy,
-            )
-        else:
-            chat_log_id = await asyncio.to_thread(
-                _log_chat, session_id, fingerprint, user_agent, ip_address,
-                original_message, answer, f"{provider}_loop",
-                documents_count, web_search_used, strategy, persona, authenticated_user_id,
-            )
-            if feedback_ids:
-                try:
-                    await asyncio.to_thread(_mark_web_feedback_consumed, feedback_ids)
-                except Exception as exc:
-                    logger.warning("Failed to mark web chat feedback consumed: %s", exc)
-        yield _format_sse({
-            "type": "answer",
-            "message_id": chat_log_id,
-            "regenerated_from_id": regenerate_from_id,
-            "content": answer,
-            "complete": bool(metadata.get("complete", True)),
-            "truncated": bool(metadata.get("truncated", False)),
-            "finish_reason": metadata.get("finish_reason"),
-            "continuations_used": metadata.get("continuations_used", 0),
-            "rounds": rounds_used,
-            "cost_usd": cost_usd,
-        })
-    else:
-        yield _format_sse({"type": "error", "content": "응답을 생성하지 못했습니다."})
+        if not stream_finished:
+            run.detached = True

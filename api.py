@@ -225,7 +225,11 @@ async def chat(request: ChatRequest, http_req: Request):
     클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
     Uses claude_loop via web_chat module.
     """
-    from web_chat import handle_web_chat
+    from web_chat import (
+        detached_web_chat_run_count,
+        handle_web_chat,
+        has_active_web_chat_run,
+    )
     from web_personas import get_persona
 
     user_agent = http_req.headers.get("user-agent", "")
@@ -249,11 +253,22 @@ async def chat(request: ChatRequest, http_req: Request):
             )
             yield format_sse({"type": "error", "content": "이 대화 상대는 관리자만 이용할 수 있습니다."})
             return
+        if has_active_web_chat_run(request.session_id):
+            logger.info(
+                "web chat rejected because server-owned run is active session=%s",
+                request.session_id,
+            )
+            yield format_sse({
+                "type": "error",
+                "content": "이전 질문의 답변을 계속 생성 중입니다. 잠시 후 대화 기록에서 복구됩니다.",
+            })
+            return
         if not _check_webchat_rate_limit(rate_key):
             logger.warning("web chat rate limited key=%s session=%s", rate_key[:24], request.session_id)
             yield format_sse({"type": "error", "content": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
             return
-        if _webchat_active_count >= _WEBCHAT_GLOBAL_ACTIVE_LIMIT:
+        effective_active_count = _webchat_active_count + detached_web_chat_run_count()
+        if effective_active_count >= _WEBCHAT_GLOBAL_ACTIVE_LIMIT:
             logger.warning("web chat global active limit reached session=%s", request.session_id)
             yield format_sse({"type": "error", "content": "현재 동시 요청이 많습니다. 잠시 후 다시 시도해 주세요."})
             return

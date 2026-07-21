@@ -1,6 +1,6 @@
 # API Reference
 
-최종 확인 기준: 2026-07-08 코드 트리.
+최종 확인 기준: 2026-07-21 코드 트리.
 
 `api.py` exposes the main internal FastAPI service for public web chat and shared admin JSON routes. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Writer, email, and A2A now have dedicated FastAPI entrypoints and systemd services: `novel_writer_api.py` on `:8001`, `email_api.py` on `:8002`, and `a2a_api.py` on `:8003`. Extracted route modules are service boundaries only when included by one of those dedicated entrypoints; otherwise they are code-ownership modules inside `leninbot-api.service`.
 
@@ -81,16 +81,31 @@ Selectable personas are defined in `web_personas.py`. Current public personas in
 Response is `text/event-stream`. Event payloads are JSON:
 
 ```text
+data: {"type":"run_started","request_id":"..."}
 data: {"type":"log","node":"...","content":"..."}
-data: {"type":"answer","message_id":123,"regenerated_from_id":null,"content":"..."}
-data: {"type":"error","content":"..."}
+data: {"type":"answer","request_id":"...","message_id":123,"regenerated_from_id":null,"content":"..."}
+data: {"type":"error","request_id":"...","content":"..."}
 ```
+
+Web chat 생성 작업은 서버 측 background task가 소유하고, 최초 `POST /chat`
+SSE 연결은 관찰자 역할만 한다. 스트림은 `request_id`가 있는 `run_started`
+이벤트로 시작하며 최종 `answer`/`error` 이벤트에도 같은 식별자를 넣어 로그를
+연결한다. 작업 시작 뒤 브라우저·frontend proxy·edge 연결이 끊겨도 API는 LLM
+호출을 취소하지 않고 완료 결과를 `chat_logs`에 저장한다. Public frontend는
+session/persona 범위의 `/history`를 polling하여 새 답변을 복구한다. Detached run이
+진행 중일 때 같은 `session_id`의 새 `/chat` 요청은 거절하며, 해당 run도 global
+active-request limit에 포함한다. 이 registry는 in-process이므로 API 서비스가
+재시작되면 진행 중 run은 여전히 취소된다. Web chat의 `vector_search`와 Gramsci
+preflight 검색은 각각 `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS`(기본 45초)의
+상한을 적용하고, timeout 시 다른 근거로 답하거나 검색 한계를 밝히도록 모델에
+결과를 돌려준다.
 
 Concurrency and rate controls:
 
 - one active request per `session_id`
 - per-client sliding window from `WEBCHAT_RATE_LIMIT` and `WEBCHAT_RATE_WINDOW_SECONDS`
 - global active request cap from `WEBCHAT_GLOBAL_ACTIVE_LIMIT`
+- per-vector-search timeout from `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS` (default 45)
 
 ### `GET /personas`
 
