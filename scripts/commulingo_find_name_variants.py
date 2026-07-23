@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """Find candidate person-name spelling variants in CommuLingo card text.
 
-Compares every Korean surname in the dictionary against hangul tokens in card
-prose (edit distance 1, or 2 for long surnames) and prints candidates that are
-NOT the canonical spelling, NOT a registered alias, and NOT another person's
-name. Candidates are for HUMAN review — approve by adding them to
-config/commulingo_name_normalization.json; nothing is written automatically.
+Compares every Korean surname in the dictionary against WHOLE words in card
+prose (an 어절 with at most one trailing particle stripped) and prints
+candidates that are NOT the canonical spelling, NOT a registered alias, and NOT
+another person's name. Candidates are for HUMAN review — approve by adding them
+to config/commulingo_name_normalization.json; nothing is written automatically.
+
+Two filters keep precision usable; without them ~95% of output was noise:
+  - word boundary: a candidate must be a whole word, never an arbitrary cut of
+    a longer one (페테르부르크 must not report 페테르 ≈ 페테르스).
+  - jamo distance: one differing syllable is a weak signal in hangul, since
+    wholly unrelated syllables are one edit apart (게릴라 ≈ 게바라). Real
+    transliteration variants differ by a jamo or two (게르첸/헤르첸), so the
+    difference is re-measured on decomposed 초/중/종성.
 
 Usage:
   scripts/commulingo_find_name_variants.py            # report to stdout
   scripts/commulingo_find_name_variants.py --min-count 2
+  scripts/commulingo_find_name_variants.py --max-jamo 2   # looser, noisier
   scripts/commulingo_find_name_variants.py --min-count 2 --notify
       # weekly timer mode: remembers reported candidates in --state and
       # sends a Telegram message only when NEW ones appear
@@ -30,6 +39,21 @@ PSQL = ROOT / "scripts" / "psql-supabase"
 CONFIG = ROOT / "config" / "commulingo_name_normalization.json"
 
 HANGUL_RUN = re.compile(r"[가-힣]{3,}")
+
+CHOSUNG = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+JUNGSUNG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+JONGSUNG = " ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ"
+
+# Trailing particles stripped (at most one) to recover the bare word. Longest
+# first so 에게서 wins over 에. Deliberately conservative: a wrong strip
+# re-creates the mid-word cutting this filter exists to prevent.
+PARTICLES = (
+    "에게서", "으로서", "으로써", "에서는", "에게는", "이라고", "라고는",
+    "에서", "에게", "께서", "으로", "라고", "이라", "이고", "부터", "까지",
+    "조차", "마저", "처럼", "보다", "만이", "만을", "이나", "이란", "이는",
+    "은", "는", "이", "가", "을", "를", "의", "에", "도", "와", "과", "로",
+    "만", "랑", "나", "야", "여", "께",
+)
 
 
 def run_psql(stdin: str) -> str:
@@ -56,6 +80,32 @@ def edit_distance(a: str, b: str, cap: int = 3) -> int:
             return cap + 1
         prev = cur
     return prev[-1]
+
+
+def to_jamo(word: str) -> str:
+    """Decompose hangul syllables into 초/중/종성 so distance measures sound."""
+    out: list[str] = []
+    for ch in word:
+        code = ord(ch) - 0xAC00
+        if 0 <= code < 11172:
+            out.append(CHOSUNG[code // 588])
+            out.append(JUNGSUNG[(code % 588) // 28])
+            jong = JONGSUNG[code % 28]
+            if jong != " ":
+                out.append(jong)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def word_forms(run: str) -> list[str]:
+    """The hangul run itself, plus the form with one trailing particle removed."""
+    forms = [run]
+    for p in PARTICLES:
+        if run.endswith(p) and len(run) - len(p) >= 3:
+            forms.append(run[: -len(p)])
+            break
+    return forms
 
 
 def notify_telegram(message: str) -> bool:
@@ -90,6 +140,8 @@ def notify_telegram(message: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--min-count", type=int, default=1, help="hide candidates seen fewer times")
+    ap.add_argument("--max-jamo", type=int, default=1,
+                    help="max 초/중/종성-level difference between candidate and name")
     ap.add_argument("--state", type=Path, default=ROOT / "data" / "commulingo_variant_scan_state.json",
                     help="JSON file remembering already-reported candidates")
     ap.add_argument("--notify", action="store_true",
@@ -132,24 +184,27 @@ def main() -> int:
         for b in blocked:
             text = text.replace(b, " ")
         for run in HANGUL_RUN.findall(text):
-            for surname in surnames:
-                if run.startswith(surname):
-                    continue  # canonical + attached particle (예조프로, 샤우먄의)
-                max_d = 2 if len(surname) >= 6 else 1
-                for plen in (len(surname) - 1, len(surname), len(surname) + 1):
-                    if plen < 3 or plen > len(run):
+            for word in word_forms(run):
+                # A whole word only — never an arbitrary cut of a longer one.
+                if word in skip_exact or word in surnames:
+                    continue  # canonical, alias, or already-known variant
+                word_jamo = to_jamo(word)
+                for surname in surnames:
+                    max_d = 2 if len(surname) >= 6 else 1
+                    d = edit_distance(word, surname, cap=max_d)
+                    if not 1 <= d <= max_d:
                         continue
-                    prefix = run[:plen]
-                    if prefix in skip_exact or prefix in surnames:
+                    # One differing syllable means little on its own; require the
+                    # sounds to be close too (게르첸/헤르첸 yes, 게바라/게릴라 no).
+                    if edit_distance(word_jamo, to_jamo(surname),
+                                     cap=args.max_jamo) > args.max_jamo:
                         continue
-                    d = edit_distance(prefix, surname, cap=max_d)
-                    if 1 <= d <= max_d:
-                        # Longer canonical words that merely start like the
-                        # surname (스탈린그라드 vs 스탈린) are container noise.
-                        if any(prefix in w for w in canonical_words if w != surname):
-                            continue
-                        candidates[(prefix, surname)].append(row["src"])
-                        break
+                    # Longer canonical words that merely contain the surname
+                    # (스탈린그라드 vs 스탈린) are container noise.
+                    if any(word in w for w in canonical_words if w != surname):
+                        continue
+                    candidates[(word, surname)].append(row["src"])
+                    break
 
     rows = sorted(candidates.items(), key=lambda kv: -len(kv[1]))
     shown: list[tuple[str, str, int, str]] = []
