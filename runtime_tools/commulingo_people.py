@@ -227,18 +227,28 @@ def _detect_scripts(text: str) -> list[str]:
     return [name for name, pattern in _SCRIPT_RANGES if pattern.search(value)]
 
 
-def _check_native_script(text: str, code: str, field: str) -> str | None:
-    """Error string when a native-name line is written in the wrong script."""
+def _check_native_script(text: str, codes: list[str], field: str) -> str | None:
+    """Error string when a native-name line is written in the wrong script.
+
+    Both citizenship and origin count: Soviet republic officials are filed as
+    citizenship 'soviet' + origin 'latvia'/'georgia'/…, and a Latvian in the USSR
+    legitimately writes 'Mārtiņš Lācis' in Latin. The allowed set is the union.
+    """
     value = str(text or "").strip()
-    allowed = _NATION_SCRIPTS.get((code or "").strip())
+    codes = [c.strip() for c in codes if c and c.strip()]
+    allowed: list[str] = []
+    for code in codes:
+        for script in _NATION_SCRIPTS.get(code, ()):
+            if script not in allowed:
+                allowed.append(script)
     if not value or not allowed:
         return None
     wrong = [s for s in _detect_scripts(value) if s not in allowed]
     if not wrong:
         return None
     return (
-        f"Error: {field} '{value}' is written in {'/'.join(wrong)}, but citizenship "
-        f"'{code}' writes its own names in {' or '.join(allowed)}. {field} is the "
+        f"Error: {field} '{value}' is written in {'/'.join(wrong)}, but nationality "
+        f"'{' + '.join(codes)}' writes its own names in {' or '.join(allowed)}. {field} is the "
         "person's name in THEIR OWN script, never a Russian transliteration of it "
         "(박헌영, not 'Пак Хон Ён'; 'Kádár János', not 'Янош Кадар'; 毛泽东, not "
         "'Мао Цзэдун'). Either write the name in the right script, or fix "
@@ -1181,19 +1191,21 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         # The native-name line must use the person's own script. Check it against
         # the citizenship the record will HAVE after this patch, so correcting a
         # wrong citizenship and the name together is accepted.
-        citizenship_code = ""
-        if isinstance(patch.get("citizenship"), dict):
-            citizenship_code = str(patch["citizenship"].get("code") or "").strip()
-        elif "citizenship" not in patch:
+        nationality_codes: list[str] = []
+        stored = {}
+        if "citizenship" not in patch or "origin" not in patch:
             cur.execute(
                 "SELECT citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
                 (target_id,),
             )
-            row = cur.fetchone()
-            if row:
-                citizenship_code = str(row["citizenship_code"] or row["origin_code"] or "")
+            stored = cur.fetchone() or {}
+        for key, column in (("citizenship", "citizenship_code"), ("origin", "origin_code")):
+            if isinstance(patch.get(key), dict):
+                nationality_codes.append(str(patch[key].get("code") or "").strip())
+            elif key not in patch:
+                nationality_codes.append(str(stored.get(column) or ""))
         for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
-            problem = _check_native_script(value, citizenship_code, field)
+            problem = _check_native_script(value, nationality_codes, field)
             if problem:
                 return problem
         if cyrillic and cyrillic_patronymic and cyrillic_patronymic in cyrillic.split():
