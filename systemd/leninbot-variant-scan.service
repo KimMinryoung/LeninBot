@@ -11,7 +11,7 @@ EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
-ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_find_name_variants.py --min-count 2 --notify
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_find_name_variants.py --min-count 1 --notify
 TimeoutStartSec=600
 StandardOutput=journal
 StandardError=journal
