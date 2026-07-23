@@ -670,6 +670,63 @@ def _parse_life_years(label: str) -> tuple[int | None, int | None]:
     return int(m.group(1)), int(m.group(2))
 
 
+def _surname(name: str) -> str:
+    parts = [p for p in (name or "").replace("·", " ").split() if p]
+    return parts[-1] if parts else ""
+
+
+def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
+    """Find a card that is the same person as `patch` under a different slug.
+
+    The slug-uniqueness check alone let three duplicate pairs into the
+    dictionary (오토 쿠시넨/오토 빌레 쿠시넨, 표트르/페테리스 스투치카,
+    흐리스티안/크리스티안 라콥스키) — the curator picked a different Korean
+    transliteration, so it picked a different slug, and nothing objected. Three
+    signals catch that: the English name, the life-year pair together with a
+    shared surname, and a slug that is a segment-wise subset of an existing one.
+    Returns the matched row plus a `why` phrase, or None.
+    """
+    name = patch.get("name") or {}
+    name_ko, name_en = (name.get("ko") or "").strip(), (name.get("en") or "").strip()
+    birth, death = _parse_life_years(patch.get("years") or "")
+
+    if name_en:
+        cur.execute(
+            "SELECT id, name_ko FROM commulingo_people "
+            "WHERE lower(btrim(name_en)) = lower(btrim(%s))", (name_en,)
+        )
+        row = cur.fetchone()
+        if row:
+            return {**row, "why": f"registered under the same English name '{name_en}'"}
+
+    if birth:
+        cur.execute(
+            "SELECT id, name_ko, name_en FROM commulingo_people "
+            "WHERE birth_year = %s AND death_year IS NOT DISTINCT FROM %s",
+            (birth, death),
+        )
+        for row in cur.fetchall():
+            if _surname(row["name_ko"]) == _surname(name_ko) or (
+                name_en and _surname(row["name_en"]) == _surname(name_en)
+            ):
+                return {**row, "why": f"registered with the same life years "
+                                      f"({patch.get('years')}) and surname"}
+
+    # kuusinen vs otto-kuusinen — one slug is the other plus a given name.
+    # Differing known birth years settle it: 야코블레프 1923–2005 and 1896–1938
+    # share a slug segment and a surname but are plainly two people.
+    segments = set(target_id.split("-"))
+    cur.execute("SELECT id, name_ko, birth_year FROM commulingo_people")
+    for row in cur.fetchall():
+        other = set(row["id"].split("-"))
+        if not (segments < other or other < segments):
+            continue
+        if birth and row["birth_year"] and birth != row["birth_year"]:
+            continue
+        return {**row, "why": f"registered under the overlapping slug '{row['id']}'"}
+    return None
+
+
 def _normalize_fate_label(label: str, death_year: int | None) -> str:
     """Strip the death year from a fate label — it already lives in `years` /
     deathYear and must not be repeated on the card. Political-event years (실각
@@ -1126,6 +1183,16 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
             if cur.fetchone():
                 return f"Error: person '{target_id}' already exists — use action 'update'."
+            duplicate = _existing_person_match(cur, target_id, patch)
+            if duplicate:
+                return (
+                    f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
+                    f"{duplicate['why']} — this is the same person under a different "
+                    "slug. Use action 'update' on that id, or register the alternate "
+                    "spelling with action 'set_aliases'. If they are genuinely "
+                    "two different people, give the new card an English name and "
+                    "slug that do not collide with the existing one."
+                )
             group = patch.get("groupId") or patch.get("group") or ""
             cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
             if not cur.fetchone():
