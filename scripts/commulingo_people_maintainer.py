@@ -132,7 +132,7 @@ NATIONALITY_CODES = (
     "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
     "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
     "kyrgyzstan, poland, finland, germany, east-germany, austria, hungary, czechia, "
-    "romania, bulgaria, france, italy, spain, uk, netherlands, usa, "
+    "romania, bulgaria, yugoslavia, france, italy, spain, uk, netherlands, usa, "
     "cuba, argentina, chile, china, japan, india, turkey, vietnam, north-korea, south-korea, "
     "albania, angola, burkina-faso, congo, ghana, guinea-bissau, indonesia, "
     "mozambique, peru, trinidad, portugal"
@@ -353,7 +353,9 @@ step does not apply; move to the next one.
    revolutionaries take their own state) — and, only when it is a DIFFERENT nation, `origin`, the
    birthplace people/nation (e.g. `georgia` for Stalin, `poland` for Dzerzhinsky). Citizenship is
    the primary flag and comes first; origin is secondary. Omit origin when it equals citizenship
-   or is genuinely unknown. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
+   or is genuinely unknown. Citizenship is NOT where the person happened to die or emigrate to:
+   a Soviet official who died in exile abroad is still `soviet`. It also drives the native-name
+   script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
    {{"ko": "...", "en": "..."}}}}. Never invent a code outside that list. Example:
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
    "origin": {{"code": "georgia", "label": {{"ko": "조지아", "en": "Georgia"}}}}}}.

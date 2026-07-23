@@ -71,11 +71,64 @@ _NATIONALITY_CODES = frozenset({
     "kazakhstan", "latvia", "lithuania", "estonia", "uzbekistan", "moldova",
     "turkmenistan", "tajikistan", "kyrgyzstan", "poland", "finland", "germany",
     "east-germany", "austria", "hungary", "czechia", "romania", "bulgaria",
+    "yugoslavia",
     "france", "italy", "spain", "uk", "netherlands", "usa", "cuba", "argentina",
     "chile", "china", "japan", "india", "turkey", "vietnam", "north-korea",
     "south-korea", "albania", "angola", "burkina-faso", "congo", "ghana",
     "guinea-bissau", "indonesia", "mozambique", "peru", "trinidad", "portugal",
 })
+
+# Which writing system each nationality's own names use. Port of
+# frontend data/commulingo/native-script.js (NATION_SCRIPTS) — keep in sync.
+# `cyrillic` is the legacy column name for the native-script name line; filling
+# it with a Russian transliteration for a non-Russian filed 박헌영 as
+# "Пак Хон Ён" and Kádár János as "Янош Кадар" until frontend migration 057.
+_SCRIPT_RANGES = (
+    ("cyrillic", re.compile(r"[Ѐ-ӿԀ-ԯ]")),
+    ("greek", re.compile(r"[Ͱ-Ͽ]")),
+    ("hangul", re.compile(r"[가-힯ᄀ-ᇿ㄰-㆏]")),
+    ("kana", re.compile(r"[぀-ヿ]")),
+    ("han", re.compile(r"[㐀-䶿一-鿿]")),
+    ("georgian", re.compile(r"[Ⴀ-ჿ]")),
+    ("armenian", re.compile(r"[԰-֏]")),
+    ("hebrew", re.compile(r"[֐-׿]")),
+    ("arabic", re.compile(r"[؀-ۿ]")),
+    ("devanagari", re.compile(r"[ऀ-ॿ]")),
+    ("bengali", re.compile(r"[ঀ-৿]")),
+    ("latin", re.compile(r"[A-Za-zÀ-ɏḀ-ỿ]")),
+)
+
+_ROMAN_NUMERAL_RE = re.compile(r"(?:^|\s)[IVXLCDM]+(?=$|\s)")
+
+_CYRILLIC_NATIONS = (
+    "soviet", "russia", "ukraine", "belarus", "bulgaria",
+    "kazakhstan", "kyrgyzstan", "tajikistan",
+)
+_LATIN_NATIONS = (
+    "latvia", "lithuania", "estonia", "poland", "finland", "germany",
+    "east-germany", "austria", "hungary", "czechia", "romania", "albania",
+    "france", "italy", "spain", "portugal", "netherlands", "uk", "usa",
+    "turkey", "cuba", "argentina", "chile", "peru", "angola", "burkina-faso",
+    "congo", "ghana", "guinea-bissau", "mozambique", "trinidad", "indonesia",
+    "vietnam",
+)
+_NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
+    **{code: ("cyrillic",) for code in _CYRILLIC_NATIONS},
+    **{code: ("latin",) for code in _LATIN_NATIONS},
+    # Republics that changed alphabet: both the Soviet-era and modern form pass.
+    "moldova": ("cyrillic", "latin"),
+    "yugoslavia": ("latin", "cyrillic"),
+    "uzbekistan": ("latin", "cyrillic"),
+    "turkmenistan": ("latin", "cyrillic"),
+    "azerbaijan": ("latin", "cyrillic"),
+    "georgia": ("georgian",),
+    "armenia": ("armenian",),
+    "china": ("han",),
+    "japan": ("kana", "han"),
+    "north-korea": ("hangul", "han"),
+    "south-korea": ("hangul", "han"),
+    "india": ("devanagari", "bengali", "latin"),
+}
 
 # person patch fields that must be {ko, en} objects. Plain strings are
 # rejected outright: _localized() would store them as Korean-only and
@@ -166,6 +219,31 @@ def _collect_localized_strings(node, out: list) -> None:
     elif isinstance(node, (list, tuple)):
         for item in node:
             _collect_localized_strings(item, out)
+
+
+def _detect_scripts(text: str) -> list[str]:
+    """Writing systems present in `text`; regnal numbers (Николай II) ignored."""
+    value = _ROMAN_NUMERAL_RE.sub(" ", str(text or ""))
+    return [name for name, pattern in _SCRIPT_RANGES if pattern.search(value)]
+
+
+def _check_native_script(text: str, code: str, field: str) -> str | None:
+    """Error string when a native-name line is written in the wrong script."""
+    value = str(text or "").strip()
+    allowed = _NATION_SCRIPTS.get((code or "").strip())
+    if not value or not allowed:
+        return None
+    wrong = [s for s in _detect_scripts(value) if s not in allowed]
+    if not wrong:
+        return None
+    return (
+        f"Error: {field} '{value}' is written in {'/'.join(wrong)}, but citizenship "
+        f"'{code}' writes its own names in {' or '.join(allowed)}. {field} is the "
+        "person's name in THEIR OWN script, never a Russian transliteration of it "
+        "(박헌영, not 'Пак Хон Ён'; 'Kádár János', not 'Янош Кадар'; 毛泽东, not "
+        "'Мао Цзэдун'). Either write the name in the right script, or fix "
+        "citizenship if that is the field that is wrong."
+    )
 
 
 def _find_name_variants(patch: dict) -> list[tuple[str, str]]:
@@ -1100,6 +1178,24 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 )
         cyrillic = str(patch.get("cyrillic") or "").strip()
         cyrillic_patronymic = str(patch.get("cyrillicPatronymic") or "").strip()
+        # The native-name line must use the person's own script. Check it against
+        # the citizenship the record will HAVE after this patch, so correcting a
+        # wrong citizenship and the name together is accepted.
+        citizenship_code = ""
+        if isinstance(patch.get("citizenship"), dict):
+            citizenship_code = str(patch["citizenship"].get("code") or "").strip()
+        elif "citizenship" not in patch:
+            cur.execute(
+                "SELECT citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
+                (target_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                citizenship_code = str(row["citizenship_code"] or row["origin_code"] or "")
+        for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
+            problem = _check_native_script(value, citizenship_code, field)
+            if problem:
+                return problem
         if cyrillic and cyrillic_patronymic and cyrillic_patronymic in cyrillic.split():
             return (
                 "Error: cyrillic already includes cyrillicPatronymic. Put the Russian patronymic "
@@ -1649,9 +1745,18 @@ COMMULINGO_EDIT_TOOL = {
         "so it is reversible) or is staged for operator review — the response "
         "says which happened. Read the current record with commulingo_people "
         "first, and cite at least one source per edit. `patch` fields (include "
-        "only what you change): person — group, cyrillic (native-script name: Cyrillic for "
-        "Soviet figures, hanzi/Latin/etc. for non-Soviet ones, e.g. 毛泽东; with "
-        "cyrillicPatronymic, use cyrillic for given name + surname only), "
+        "only what you change): person — group, cyrillic (the person's name in "
+        "THEIR OWN script — despite the field name it is not always Cyrillic. "
+        "Cyrillic only for Soviet/Russian/Ukrainian/Belarusian/Bulgarian figures; "
+        "Hangul for Koreans (박헌영, never 'Пак Хон Ён'), hanzi for Chinese (毛泽东), "
+        "kanji for Japanese (片山潜), Georgian script for Georgians, Latin for "
+        "Europeans/Americans/Africans (Kádár János — Hungarians family-name-first "
+        "— never 'Янош Кадар'; Mārtiņš Lācis; Salvador Allende). Writing a Russian "
+        "transliteration for a non-Russian is rejected on save, checked against "
+        "citizenship.code; with cyrillicPatronymic, use cyrillic for given name + "
+        "surname only, and a Western middle name goes in cyrillicPatronymic in the "
+        "same script, e.g. cyrillic 'Earl Browder' + cyrillicPatronymic 'Russell'. "
+        "A Russian-style patronymic belongs only to figures who actually used one), "
         "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/suicide/natural; label = cause of death ONLY, no death "
@@ -1659,7 +1764,13 @@ COMMULINGO_EDIT_TOOL = {
         "specific illness like 심장마비/Heart attack, place with ' · ' e.g. 암살 · "
         "멕시코; a deposed/exile fate keeps its event year, 실각 1964 · 자연사. The "
         "death year is stripped automatically on save), "
-        "patronymic {ko,en}, cyrillicPatronymic, aliases "
+        "patronymic {ko,en}, cyrillicPatronymic, citizenship/origin "
+        "{code, label {ko,en}} (citizenship = the state they belonged to for the "
+        "work they are known for — a Soviet official is 'soviet' even if born in "
+        "Poland and even if they died in exile abroad; origin = birthplace only. "
+        "Neither is 'where they happened to die'. citizenship drives the "
+        "native-name script check above, so a wrong code produces wrong names), "
+        "aliases "
         "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
         "OR {category} (the card's ONE primary marker; exactly one of the two — "
         "icon and label render from the linked institution or category, see "
