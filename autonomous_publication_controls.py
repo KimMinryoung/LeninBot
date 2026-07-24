@@ -333,12 +333,18 @@ def check_autonomous_publication_allowed(publication_kind: str) -> tuple[bool, s
     return True, "publication pacing check passed"
 
 
+STASOVA_SPELLING_VERDICT_RE = re.compile(
+    r"STASOVA_SPELLING_VERDICT:\s*(\{[^{}]*\})"
+)
+
+
 async def run_stasova_publication_review(
     *,
     publication_kind: str,
     title: str,
     content: str,
     public_url: str | None = None,
+    spelling_corrections: list[str] | None = None,
 ) -> str:
     from agents import get_agent
     from bot_config import _get_task_provider
@@ -355,13 +361,26 @@ async def run_stasova_publication_review(
         f"temp_dev/stasova_reviews/autonomous_project_{project_id or 'manual'}_"
         f"{publication_kind}.md"
     )
+    spelling_section = ""
+    if spelling_corrections:
+        spelling_section = (
+            "\n\n부가 임무 — 표기 교정 검수:\n"
+            "아래는 저장 시 사전 표준 표기로 자동 교정된 목록이다(직접 인용문은 이미 면제됨). "
+            "각 교정이 문맥상 올바른지만 판단하라. 교정어가 문맥의 지시 대상과 다른 인물/개념을 "
+            "가리키거나 원문 표기가 다른 단어의 일부였다면 그 교정은 취소 대상이다. "
+            "이것은 기계적 표기 검수이지 문학적 편집이 아니다. 확신이 없으면 유지한다.\n"
+            + "\n".join(spelling_corrections)
+            + '\n\n점검 보고서의 마지막 줄에 반드시 다음 한 줄을 포함하라 (전부 올바르면 빈 배열):\n'
+            'STASOVA_SPELLING_VERDICT: {"revert": [취소할 번호, ...]}'
+        )
     review_task = (
         "다음 공개 발행물을 출판 보안 관점에서 점검하라.\n"
         "텔레그램 채널은 사이버-레닌이 공동 관리하는 공개 배포 채널이므로, "
         "그 사실 자체를 외부 플랫폼 리스크로 취급하지 말라.\n"
         "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 "
         "위험 축과 정치노선 왜곡 위험만 적용하라.\n"
-        f"점검 보고서를 `{report_path}`에도 저장하라.\n\n"
+        f"점검 보고서를 `{report_path}`에도 저장하라."
+        f"{spelling_section}\n\n"
         f"발행 종류: {publication_kind}\n"
         f"공개 URL: {public_url or '(not known yet)'}\n\n"
         f"제목:\n{title}\n\n"
@@ -388,15 +407,23 @@ async def review_autonomous_publication(
     title: str,
     content: str,
     public_url: str | None = None,
-) -> str:
+    spelling_corrections: list[str] | None = None,
+) -> str | tuple[str, list[int] | None]:
     """Run Stasova review for autonomous public-bound content and audit it.
 
     The review is advisory, matching Stasova's charter. It does not veto
     publication by itself; pacing controls are the hard gate.
+
+    When `spelling_corrections` is passed (research publish path), the review
+    additionally rules on each auto-applied spelling correction and the return
+    becomes (note, revert_indices) — revert_indices is None when the review
+    was skipped or produced no parsable verdict, so the caller can fall back
+    to its own check.
     """
     project_id = _project_id()
     if project_id is None:
-        return "Stasova review: skipped (not an autonomous project publication)"
+        note = "Stasova review: skipped (not an autonomous project publication)"
+        return (note, None) if spelling_corrections is not None else note
 
     try:
         review_report = await run_stasova_publication_review(
@@ -404,6 +431,7 @@ async def review_autonomous_publication(
             title=title,
             content=content,
             public_url=public_url,
+            spelling_corrections=spelling_corrections,
         )
         from telegram.diary_publication import stasova_report_has_warning
 
@@ -435,7 +463,20 @@ async def review_autonomous_publication(
             {"audit_id": audit_id, "warning_detected": warning_detected, "public_url": public_url},
         )
         warning_note = "warning detected" if warning_detected else "no warning detected"
-        return f"Stasova review: audit #{audit_id} ({warning_note})"
+        note = f"Stasova review: audit #{audit_id} ({warning_note})"
+        if spelling_corrections is not None:
+            reverts: list[int] | None = None
+            verdict = STASOVA_SPELLING_VERDICT_RE.search(review_report or "")
+            if verdict:
+                try:
+                    reverts = [
+                        i for i in (json.loads(verdict.group(1)).get("revert") or [])
+                        if isinstance(i, int)
+                    ]
+                except (ValueError, AttributeError):
+                    reverts = None
+            return note, reverts
+        return note
     except Exception as exc:
         logger.error("Stasova autonomous publication review failed: %s", exc, exc_info=True)
         _log_autonomous_event(
@@ -444,7 +485,8 @@ async def review_autonomous_publication(
             f"Stasova review failed for {publication_kind}: {exc}",
             {"public_url": public_url, "title": title},
         )
-        return f"Stasova review failed: {exc}"
+        note = f"Stasova review failed: {exc}"
+        return (note, None) if spelling_corrections is not None else note
 
 
 def record_autonomous_publication(

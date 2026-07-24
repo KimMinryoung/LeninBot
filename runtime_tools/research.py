@@ -241,17 +241,13 @@ def _validate_public_citation_format(content: str) -> str | None:
 _SPELLING_MARK_RE = re.compile("\x02(\\d+)\x02")
 
 
-async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
-    """Auto-correct dictionary people/term spellings, Stasova-checked.
+def _mechanical_spelling_pass(content: str) -> dict | None:
+    """Phase 1: replace every variant spelling with its dictionary-card form.
 
-    Phase 1 mechanically replaces every variant with its card form
-    (config/commulingo_name_normalization.json map; direct quotations and
-    blocked compounds preserved), tracking each occurrence. Phase 2 shows every
-    correction with its surrounding context to the Stasova proofread check
-    (llm call site 'research_spelling_proofread'), which cancels corrections
-    that are wrong in context — a variant string can be part of a different
-    word or refer to a different bearer of the name. On check failure the
-    mechanical corrections stand (the map is curated). Returns (text, note).
+    Quoted spans and blocked compounds are masked; every replacement is
+    tracked by an addressable marker so a later verdict (Stasova review or the
+    one-shot proofread) can revert individual corrections. Returns a pending
+    state dict, or None when nothing needed correcting.
     """
     from runtime_tools.commulingo_people import _name_normalization, _QUOTED_SPAN_RE
 
@@ -272,7 +268,7 @@ async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
             blocked_tokens.append((token, compound))
             masked = masked.replace(compound, token)
 
-    corrections: list[dict] = []  # {variant, canonical}
+    corrections: list[dict] = []
     for lang in ("ko", "en"):
         for variant, canonical in (norm.get(lang) or {}).items():
             while variant in masked:
@@ -280,37 +276,74 @@ async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
                 masked = masked.replace(variant, mark, 1)
                 corrections.append({"variant": variant, "canonical": canonical})
 
-    def _finish(keep: set[int]) -> str:
-        out = _SPELLING_MARK_RE.sub(
-            lambda m: corrections[int(m.group(1))]["canonical"]
-            if int(m.group(1)) in keep else corrections[int(m.group(1))]["variant"],
-            masked,
-        )
-        for token, compound in blocked_tokens:
-            out = out.replace(token, compound)
-        for key, original in placeholders.items():
-            out = out.replace(key, original)
-        return out
-
     if not corrections:
-        return text, ""
+        return None
+    return {
+        "original": text,
+        "masked": masked,
+        "corrections": corrections,
+        "placeholders": placeholders,
+        "blocked_tokens": blocked_tokens,
+    }
 
-    keep = set(range(len(corrections)))
-    reverted: list[int] = []
-    checked = False
+
+def _spelling_context_lines(pending: dict) -> list[str]:
+    corrections = pending["corrections"]
+    lines = []
+    for index, correction in enumerate(corrections):
+        match = re.search(f"\x02{index}\x02", pending["masked"])
+        start, end = max(0, match.start() - 90), match.end() + 90
+        context = _SPELLING_MARK_RE.sub(
+            lambda m: corrections[int(m.group(1))]["canonical"],
+            pending["masked"][start:end],
+        ).replace("\x00", " ")
+        lines.append(
+            f"[{index}] '{correction['variant']}' → '{correction['canonical']}' | 문맥: …{context}…"
+        )
+    return lines
+
+
+def _finish_spelling(pending: dict, keep: set[int]) -> str:
+    corrections = pending["corrections"]
+    out = _SPELLING_MARK_RE.sub(
+        lambda m: corrections[int(m.group(1))]["canonical"]
+        if int(m.group(1)) in keep else corrections[int(m.group(1))]["variant"],
+        pending["masked"],
+    )
+    for token, compound in pending["blocked_tokens"]:
+        out = out.replace(token, compound)
+    for key, original in pending["placeholders"].items():
+        out = out.replace(key, original)
+    return out
+
+
+def _spelling_note(pending: dict, keep: set[int], reverted: list[int], checked_by: str) -> str:
+    corrections = pending["corrections"]
+    note = ""
+    kept_pairs = sorted({(corrections[i]["variant"], corrections[i]["canonical"]) for i in keep})
+    if kept_pairs:
+        fixes = "; ".join(f"'{v}' → '{c}'" for v, c in kept_pairs)
+        note = (
+            f"\nSpelling auto-normalized to dictionary-card forms: {fixes} "
+            f"(direct quotations preserved; {checked_by})."
+        )
+    if reverted:
+        cancelled = "; ".join(f"'{corrections[i]['variant']}'" for i in sorted(set(reverted)))
+        note += f"\nProofread check cancelled correction(s) in context: {cancelled}."
+    logger.info("research spelling normalization: kept=%d reverted=%d (%s)",
+                len(keep), len(reverted), checked_by)
+    return note
+
+
+async def _oneshot_spelling_verdict(lines: list[str]) -> list[int] | None:
+    """One-shot proofread verdict (llm call site research_spelling_proofread).
+
+    Returns indices to revert, or None when the check is unavailable — the
+    caller keeps the mechanical corrections then (the map is curated).
+    """
     try:
         from llm.call_registry import generate
 
-        lines = []
-        for index, correction in enumerate(corrections):
-            match = re.search(f"\x02{index}\x02", masked)
-            start, end = max(0, match.start() - 90), match.end() + 90
-            context = _SPELLING_MARK_RE.sub(
-                lambda m: corrections[int(m.group(1))]["canonical"], masked[start:end]
-            ).replace("\x00", " ")
-            lines.append(
-                f"[{index}] '{correction['variant']}' → '{correction['canonical']}' | 문맥: …{context}…"
-            )
         verdict_raw = await generate(
             "research_spelling_proofread",
             "다음은 보고서 저장 시 자동 적용된 표기 교정 목록이다. 각 교정이 문맥상 올바른지 검토하라. "
@@ -322,34 +355,40 @@ async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
                 "문맥상 올바른지만 판단한다. 확신이 없으면 교정을 유지한다."
             ),
         )
-        if verdict_raw:
-            match = re.search(r"\{[^{}]*\}", verdict_raw)
-            if match:
-                checked = True
-                for index in json.loads(match.group(0)).get("revert") or []:
-                    if isinstance(index, int) and index in keep:
-                        keep.discard(index)
-                        reverted.append(index)
+        if not verdict_raw:
+            return None
+        match = re.search(r"\{[^{}]*\}", verdict_raw)
+        if not match:
+            return None
+        return [i for i in (json.loads(match.group(0)).get("revert") or []) if isinstance(i, int)]
     except Exception as e:
-        logger.warning("stasova spelling proofread unavailable, keeping mechanical fixes: %s", e)
+        logger.warning("spelling proofread check unavailable: %s", e)
+        return None
 
-    fixed = _finish(keep)
-    kept_pairs = sorted({(corrections[i]["variant"], corrections[i]["canonical"]) for i in keep})
-    note = ""
-    if kept_pairs:
-        fixes = "; ".join(f"'{v}' → '{c}'" for v, c in kept_pairs)
-        suffix = "; Stasova-checked" if checked else "; proofread check unavailable, mechanical fixes kept"
-        note = (
-            f"\nSpelling auto-normalized to dictionary-card forms: {fixes} "
-            f"(direct quotations preserved{suffix})."
-        )
-    if reverted:
-        cancelled = "; ".join(
-            f"'{corrections[i]['variant']}'" for i in sorted(set(reverted))
-        )
-        note += f"\nProofread check cancelled correction(s) in context: {cancelled}."
-    logger.info("research spelling normalization: kept=%d reverted=%d", len(keep), len(reverted))
-    return fixed, note
+
+async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
+    """Auto-correct dictionary people/term spellings with a proofread verdict.
+
+    Mechanical pass + one-shot verdict; used wherever the full Stasova
+    publication review is not in the flow (staged saves, manual publishes,
+    titles). Autonomous publish_public instead defers the verdict to the
+    Stasova review itself (see the spelling_corrections plumbing there).
+    Returns (text, note).
+    """
+    pending = _mechanical_spelling_pass(content)
+    if pending is None:
+        return str(content or ""), ""
+    keep = set(range(len(pending["corrections"])))
+    reverts = await _oneshot_spelling_verdict(_spelling_context_lines(pending))
+    checked_by = "proofread check unavailable, mechanical fixes kept"
+    reverted: list[int] = []
+    if reverts is not None:
+        checked_by = "Stasova-checked"
+        for index in reverts:
+            if index in keep:
+                keep.discard(index)
+                reverted.append(index)
+    return _finish_spelling(pending, keep), _spelling_note(pending, keep, reverted, checked_by)
 
 
 def _save_publication_draft(
@@ -609,7 +648,23 @@ async def _exec_research_document_publish_public(
     citation_error = _validate_public_citation_format(content)
     if citation_error:
         return f"Error: {citation_error}"
-    content, spelling_note = await _normalize_standard_spellings(content)
+    # Spelling normalization. On the autonomous publish-now path the verdict on
+    # each correction is folded into the Stasova publication review below (one
+    # review pass, two duties); every other path gets the one-shot check here.
+    spelling_pending = _mechanical_spelling_pass(content)
+    spelling_note = ""
+    defer_spelling_verdict = bool(
+        spelling_pending and fact_check_passed is True and is_autonomous_publication_context()
+    )
+    if spelling_pending and not defer_spelling_verdict:
+        content, spelling_note = await _normalize_standard_spellings(content)
+        spelling_pending = None
+    elif spelling_pending:
+        # Provisionally keep every correction; the Stasova verdict can revert
+        # individual ones before the DB write.
+        content = _finish_spelling(
+            spelling_pending, set(range(len(spelling_pending["corrections"])))
+        )
     title = (await _normalize_standard_spellings(title))[0]
 
     now = datetime.now(KST)
@@ -752,12 +807,39 @@ async def _exec_research_document_publish_public(
             f"Draft backup: {draft_path}\n"
             f"{reason}"
         )
-    review_note = await review_autonomous_publication(
+    review_result = await review_autonomous_publication(
         publication_kind="research",
         title=title,
         content=content,
         public_url=public_url,
+        spelling_corrections=(
+            _spelling_context_lines(spelling_pending) if defer_spelling_verdict else None
+        ),
     )
+    if defer_spelling_verdict:
+        review_note, stasova_reverts = review_result
+        keep = set(range(len(spelling_pending["corrections"])))
+        reverted: list[int] = []
+        if stasova_reverts is None:
+            # Review skipped or verdict unparsable: fall back to the one-shot check.
+            fallback = await _oneshot_spelling_verdict(_spelling_context_lines(spelling_pending))
+            checked_by = "proofread check unavailable, mechanical fixes kept"
+            if fallback is not None:
+                checked_by = "Stasova-checked (one-shot fallback)"
+                stasova_reverts = fallback
+        else:
+            checked_by = "Stasova publication review-checked"
+        for index in stasova_reverts or []:
+            if index in keep:
+                keep.discard(index)
+                reverted.append(index)
+        content = _finish_spelling(spelling_pending, keep)
+        spelling_note = _spelling_note(spelling_pending, keep, reverted, checked_by)
+        document = _build_document(
+            title, content, original_publish_date or now.strftime("%Y-%m-%d")
+        )
+    else:
+        review_note = review_result
 
     existing_before = await asyncio.to_thread(
         research_store.get_document, fname, include_private=True
