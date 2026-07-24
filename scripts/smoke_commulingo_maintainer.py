@@ -118,6 +118,17 @@ with TemporaryDirectory() as tmp:
     assert cfg["new_person_every"] == 4
     assert cfg["recent_days"] == 7
     assert cfg["new_person_cooldown_runs"] == 6
+    assert cfg["enrich_non_soviet_revolutionaries"] is True
+    assert cfg["new_person_focus"] == "all"
+
+with TemporaryDirectory() as tmp:
+    path = Path(tmp) / "config.json"
+    path.write_text('{"new_person_focus":"unsupported"}', encoding="utf-8")
+    try:
+        maintainer.load_config(path)
+        raise AssertionError("unsupported people focus should fail")
+    except ValueError as exc:
+        assert "new_person_focus" in str(exc)
 
 candidate = {
     "id": "example",
@@ -138,6 +149,23 @@ assert "Do not create a section" in task and "has epithet: False" in task
 assert "commulingo_event_link" in task and "linked historical events: 0" in task
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
+focused_discovery = maintainer.build_discovery_task("soviet_institutions")
+assert "Do not select a non-Soviet revolutionary" in focused_discovery
+assert "Soviet institution" in focused_discovery and "list_offices" in focused_discovery
+
+original_db_query = maintainer.db_query
+captured_selection = {}
+try:
+    def capture_selection(sql, params):
+        captured_selection["sql"] = sql
+        captured_selection["params"] = params
+        return []
+    maintainer.db_query = capture_selection
+    assert maintainer.select_sparse_person(30, enrich_non_soviet_revolutionaries=False) is None
+finally:
+    maintainer.db_query = original_db_query
+assert captured_selection["params"]["enrich_non_soviet_revolutionaries"] is False
+assert "excluded_role.category_id = 'non-soviet-revolutionary'" in captured_selection["sql"]
 
 assert maintainer.choose_mode(
     {**cfg, "mode": "auto", "new_person_every": 1},

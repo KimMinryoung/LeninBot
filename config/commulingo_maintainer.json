@@ -6,5 +6,7 @@
   "incomplete_recent_days": 2,
   "new_person_cooldown_runs": 6,
   "new_lane_enabled": true,
-  "term_lane_enabled": true
+  "term_lane_enabled": true,
+  "enrich_non_soviet_revolutionaries": false,
+  "new_person_focus": "soviet_institutions"
 }

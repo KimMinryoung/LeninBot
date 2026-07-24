@@ -56,8 +56,8 @@ def build_task_with_policy(mode: str, candidate: dict | None) -> str:
     return _base_build_task(mode, candidate) + EDITORIAL_POLICY
 
 
-def build_discovery_task_with_policy() -> str:
-    return _base_build_discovery_task() + EDITORIAL_POLICY
+def build_discovery_task_with_policy(new_person_focus: str = "all") -> str:
+    return _base_build_discovery_task(new_person_focus) + EDITORIAL_POLICY
 
 
 def build_new_person_task_with_policy(candidate: dict) -> str:

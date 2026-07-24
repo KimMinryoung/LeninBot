@@ -59,6 +59,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "new_lane_enabled": True,
         # Same switch for the glossary lane (commulingo_terms_maintainer.py).
         "term_lane_enabled": True,
+        # Pause this semantic category without narrowing all other enrichment.
+        "enrich_non_soviet_revolutionaries": True,
+        # New-person discovery is independently focusable.
+        "new_person_focus": "all",
     }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -75,6 +79,9 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     cfg["term_lane_enabled"] = bool(cfg["term_lane_enabled"])
+    cfg["enrich_non_soviet_revolutionaries"] = bool(cfg["enrich_non_soviet_revolutionaries"])
+    if cfg["new_person_focus"] not in {"all", "soviet_institutions"}:
+        raise ValueError("new_person_focus must be all or soviet_institutions")
     return cfg
 
 
@@ -164,7 +171,12 @@ def person_tier(candidate: dict) -> dict:
     }
 
 
-def select_sparse_person(recent_days: int, forced_id: str = "", incomplete_recent_days: int | None = None) -> dict | None:
+def select_sparse_person(
+    recent_days: int,
+    forced_id: str = "",
+    incomplete_recent_days: int | None = None,
+    enrich_non_soviet_revolutionaries: bool = True,
+) -> dict | None:
     params = {
         "recent_days": recent_days,
         "incomplete_days": incomplete_recent_days if incomplete_recent_days is not None else recent_days,
@@ -176,6 +188,7 @@ def select_sparse_person(recent_days: int, forced_id: str = "", incomplete_recen
         "ceiling": BIO_CEILING,
         "minor_floor": MINOR_BIO_FLOOR,
         "minor_ceiling": MINOR_BIO_CEILING,
+        "enrich_non_soviet_revolutionaries": enrich_non_soviet_revolutionaries,
     }
     rows = db_query(
         """SELECT p.id, p.group_id, p.name_ko, p.name_en,
@@ -196,6 +209,16 @@ def select_sparse_person(recent_days: int, forced_id: str = "", incomplete_recen
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
              LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
+              AND (
+                    %(forced_id)s <> ''
+                    OR %(enrich_non_soviet_revolutionaries)s
+                    OR NOT EXISTS (
+                        SELECT 1
+                          FROM commulingo_person_roles excluded_role
+                         WHERE excluded_role.person_id = p.id
+                           AND excluded_role.category_id = 'non-soviet-revolutionary'
+                    )
+                  )
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
                      p.citizenship_code, p.origin_code, r.person_id
            HAVING %(forced_id)s <> ''
@@ -381,13 +404,25 @@ consequential claims. Make one narrow write call and stop.
 """ + CARD_STYLE_GUIDANCE
 
 
-def build_discovery_task() -> str:
+def build_discovery_task(new_person_focus: str = "all") -> str:
+    focus_instruction = ""
+    if new_person_focus == "soviet_institutions":
+        focus_instruction = """
+CURRENT SELECTION FOCUS:
+- Do not select a non-Soviet revolutionary or a foreign socialist-bloc leader.
+- Select only a person important to a Soviet institution: the CPSU party apparatus,
+  USSR state administration, security/intelligence, armed forces, diplomacy, economic
+  planning/industry, science/space, or Soviet cultural administration.
+- Prefer a documented office or command that belongs in one of the institution timelines
+  returned by list_offices. State that institution and office explicitly in the coverage reason.
+"""
     return """MODE: NEW PERSON DISCOVERY ONLY
 
 Do not create or edit anything in this stage. Inspect list_groups, list_categories and
 list_offices, then use search_people under a proposed name and aliases to prove the person
-is absent. Prefer a historically important gap in revolutionary or Soviet history. Do not
-survey the whole dictionary: consider at most three plausible people, select the first verified
+is absent. Prefer a historically important gap in revolutionary or Soviet history.
+""" + focus_instruction + """
+Do not survey the whole dictionary: consider at most three plausible people, select the first verified
 gap, and stop searching. Open one reliable biographical source. Finish by calling
 `commulingo_candidate_select` with the missing
 person's id, Korean/English names, coverage reason, and source URL. That typed call is the ONLY
@@ -667,7 +702,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "commulingo_candidate_select": build_candidate_select_handler(candidate_box),
                 }
                 discovery_result, discovery_tracker, candidate = await _call_curator_stage(
-                    task=build_discovery_task(), spec=spec, model=model,
+                    task=build_discovery_task(config["new_person_focus"]), spec=spec, model=model,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
                     stage="new-person discovery", expect_edit=False, before_count=before,
                     finalization_tools=["commulingo_candidate_select"],
@@ -698,7 +733,8 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
             candidate = select_sparse_person(
-                config["recent_days"], candidate_id, config["incomplete_recent_days"]
+                config["recent_days"], candidate_id, config["incomplete_recent_days"],
+                config["enrich_non_soviet_revolutionaries"],
             )
             if candidate is None:
                 # Every person was already touched within the cooldown window;
@@ -773,7 +809,10 @@ def main() -> int:
         return 0
 
     if args.print_candidate:
-        print(json.dumps(select_sparse_person(config["recent_days"], args.candidate, config["incomplete_recent_days"]), ensure_ascii=False, default=str, indent=2))
+        print(json.dumps(select_sparse_person(
+            config["recent_days"], args.candidate, config["incomplete_recent_days"],
+            config["enrich_non_soviet_revolutionaries"],
+        ), ensure_ascii=False, default=str, indent=2))
         return 0
     result = asyncio.run(run_once(mode=args.mode, candidate_id=args.candidate, config=config))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
