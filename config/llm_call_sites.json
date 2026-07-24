@@ -117,5 +117,16 @@
     "model": "gemini-embedding-001",
     "managed": "model-only",
     "note": "KG 임베딩 모델 (graph_memory/service.py에서 조회, KG_EMBED_MAX_RPS 페이싱)"
+  },
+  "research_spelling_proofread": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "temperature": 0.0,
+    "max_tokens": 256,
+    "timeout": 45,
+    "env": [
+      "LIGHT_LLM_MODEL"
+    ],
+    "note": "보고서 표기 자동 교정의 스타소바 문맥 검수 — 잘못된 교정 번호 반환 (실패 시 기계 교정 유지)"
   }
 }

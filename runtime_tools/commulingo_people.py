@@ -286,6 +286,40 @@ def find_spelling_variants_in_text(text: str, lang: str) -> dict[str, str]:
     return hits
 
 
+def normalize_spellings_in_text(text: str, lang: str) -> tuple[str, dict]:
+    """Auto-correct variant spellings to their dictionary-card forms.
+
+    Quoted spans (direct quotations) and blocked compounds (시베리아 ⊃ 베리아)
+    are masked and restored untouched. Returns (fixed_text, {variant: canonical}
+    applied).
+    """
+    norm = _name_normalization()
+    table = norm.get(lang) or {}
+    if not table or not text:
+        return str(text or ""), {}
+    placeholders: dict[str, str] = {}
+
+    def _stash(match):
+        key = f"\x00Q{len(placeholders)}\x00"
+        placeholders[key] = match.group(0)
+        return key
+
+    masked = _QUOTED_SPAN_RE.sub(_stash, str(text))
+    blocked = norm["blocked"].get(lang) or []
+    for index, compound in enumerate(blocked):
+        masked = masked.replace(compound, f"\x00B{index}\x00")
+    applied: dict[str, str] = {}
+    for variant, canonical in table.items():
+        if variant in masked:
+            applied[variant] = canonical
+            masked = masked.replace(variant, canonical)
+    for index, compound in enumerate(blocked):
+        masked = masked.replace(f"\x00B{index}\x00", compound)
+    for key, original in placeholders.items():
+        masked = masked.replace(key, original)
+    return masked, applied
+
+
 def _find_name_variants(patch: dict) -> list[tuple[str, str]]:
     """(variant, canonical) pairs used outside quotation marks, deduped."""
     texts: list[tuple[str, str]] = []

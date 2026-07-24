@@ -238,28 +238,118 @@ def _validate_public_citation_format(content: str) -> str | None:
     return None
 
 
-def _validate_standard_spellings(content: str) -> str | None:
-    """Reject prose that spells dictionary people/terms differently from their cards.
+_SPELLING_MARK_RE = re.compile("\x02(\\d+)\x02")
 
-    Same variant map the CommuLingo curator enforces
-    (config/commulingo_name_normalization.json); direct quotations are exempt.
-    Keeping reports on card spellings is what makes site-wide auto-linking and
-    the 관련 보고서 reverse index actually connect (넵맨 would never link to the
-    네프맨 glossary card).
+
+async def _normalize_standard_spellings(content: str) -> tuple[str, str]:
+    """Auto-correct dictionary people/term spellings, Stasova-checked.
+
+    Phase 1 mechanically replaces every variant with its card form
+    (config/commulingo_name_normalization.json map; direct quotations and
+    blocked compounds preserved), tracking each occurrence. Phase 2 shows every
+    correction with its surrounding context to the Stasova proofread check
+    (llm call site 'research_spelling_proofread'), which cancels corrections
+    that are wrong in context — a variant string can be part of a different
+    word or refer to a different bearer of the name. On check failure the
+    mechanical corrections stand (the map is curated). Returns (text, note).
     """
-    from runtime_tools.commulingo_people import find_spelling_variants_in_text
+    from runtime_tools.commulingo_people import _name_normalization, _QUOTED_SPAN_RE
 
-    hits: dict[str, str] = {}
+    text = str(content or "")
+    norm = _name_normalization()
+    placeholders: dict[str, str] = {}
+
+    def _stash(match):
+        key = f"\x00Q{len(placeholders)}\x00"
+        placeholders[key] = match.group(0)
+        return key
+
+    masked = _QUOTED_SPAN_RE.sub(_stash, text)
+    blocked_tokens: list[tuple[str, str]] = []
     for lang in ("ko", "en"):
-        hits.update(find_spelling_variants_in_text(content or "", lang))
-    if not hits:
-        return None
-    fixes = "; ".join(f"'{variant}' → '{canonical}'" for variant, canonical in sorted(hits.items()))
-    return (
-        "Non-standard spelling(s) of dictionary people/terms: " + fixes + ". "
-        "Spell them exactly as their cards do (cyber-lenin.com/commulingo); original "
-        "spellings inside direct quotation marks are already exempt. Fix the text and retry."
-    )
+        for index, compound in enumerate(norm["blocked"].get(lang) or []):
+            token = f"\x00B{lang}{index}\x00"
+            blocked_tokens.append((token, compound))
+            masked = masked.replace(compound, token)
+
+    corrections: list[dict] = []  # {variant, canonical}
+    for lang in ("ko", "en"):
+        for variant, canonical in (norm.get(lang) or {}).items():
+            while variant in masked:
+                mark = f"\x02{len(corrections)}\x02"
+                masked = masked.replace(variant, mark, 1)
+                corrections.append({"variant": variant, "canonical": canonical})
+
+    def _finish(keep: set[int]) -> str:
+        out = _SPELLING_MARK_RE.sub(
+            lambda m: corrections[int(m.group(1))]["canonical"]
+            if int(m.group(1)) in keep else corrections[int(m.group(1))]["variant"],
+            masked,
+        )
+        for token, compound in blocked_tokens:
+            out = out.replace(token, compound)
+        for key, original in placeholders.items():
+            out = out.replace(key, original)
+        return out
+
+    if not corrections:
+        return text, ""
+
+    keep = set(range(len(corrections)))
+    reverted: list[int] = []
+    checked = False
+    try:
+        from llm.call_registry import generate
+
+        lines = []
+        for index, correction in enumerate(corrections):
+            match = re.search(f"\x02{index}\x02", masked)
+            start, end = max(0, match.start() - 90), match.end() + 90
+            context = _SPELLING_MARK_RE.sub(
+                lambda m: corrections[int(m.group(1))]["canonical"], masked[start:end]
+            ).replace("\x00", " ")
+            lines.append(
+                f"[{index}] '{correction['variant']}' → '{correction['canonical']}' | 문맥: …{context}…"
+            )
+        verdict_raw = await generate(
+            "research_spelling_proofread",
+            "다음은 보고서 저장 시 자동 적용된 표기 교정 목록이다. 각 교정이 문맥상 올바른지 검토하라. "
+            "교정어가 문맥의 지시 대상과 다른 인물/개념을 가리키거나, 원문 표기가 다른 단어의 일부였다면 "
+            "그 교정은 취소해야 한다.\n\n" + "\n".join(lines)
+            + '\n\nJSON 한 줄로만 답하라: {"revert": [취소할 번호, ...]} (전부 올바르면 {"revert": []})',
+            system=(
+                "당신은 스타소바 — 사이버레닌 조직의 교정 검수 담당이다. 사전 표준 표기로의 기계적 교정이 "
+                "문맥상 올바른지만 판단한다. 확신이 없으면 교정을 유지한다."
+            ),
+        )
+        if verdict_raw:
+            match = re.search(r"\{[^{}]*\}", verdict_raw)
+            if match:
+                checked = True
+                for index in json.loads(match.group(0)).get("revert") or []:
+                    if isinstance(index, int) and index in keep:
+                        keep.discard(index)
+                        reverted.append(index)
+    except Exception as e:
+        logger.warning("stasova spelling proofread unavailable, keeping mechanical fixes: %s", e)
+
+    fixed = _finish(keep)
+    kept_pairs = sorted({(corrections[i]["variant"], corrections[i]["canonical"]) for i in keep})
+    note = ""
+    if kept_pairs:
+        fixes = "; ".join(f"'{v}' → '{c}'" for v, c in kept_pairs)
+        suffix = "; Stasova-checked" if checked else "; proofread check unavailable, mechanical fixes kept"
+        note = (
+            f"\nSpelling auto-normalized to dictionary-card forms: {fixes} "
+            f"(direct quotations preserved{suffix})."
+        )
+    if reverted:
+        cancelled = "; ".join(
+            f"'{corrections[i]['variant']}'" for i in sorted(set(reverted))
+        )
+        note += f"\nProofread check cancelled correction(s) in context: {cancelled}."
+    logger.info("research spelling normalization: kept=%d reverted=%d", len(keep), len(reverted))
+    return fixed, note
 
 
 def _save_publication_draft(
@@ -519,9 +609,8 @@ async def _exec_research_document_publish_public(
     citation_error = _validate_public_citation_format(content)
     if citation_error:
         return f"Error: {citation_error}"
-    spelling_error = _validate_standard_spellings(content)
-    if spelling_error:
-        return f"Error: {spelling_error}"
+    content, spelling_note = await _normalize_standard_spellings(content)
+    title = (await _normalize_standard_spellings(title))[0]
 
     now = datetime.now(KST)
 
@@ -618,7 +707,7 @@ async def _exec_research_document_publish_public(
             f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
             f"Candidate filename: {fname}\n"
             f"Candidate public URL: {_public_url(fname)}\n"
-            f"{publish_step}\n\n"
+            f"{publish_step}{spelling_note}\n\n"
             f"{_format_draft_revision_guidance(filename=fname, draft_path=draft_path)}"
         )
 
@@ -739,7 +828,7 @@ async def _exec_research_document_publish_public(
         f"Public URL: {public_url}\n"
         f"{review_note}\n"
         f"Size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
-        f"{broadcast_note}"
+        f"{broadcast_note}{spelling_note}"
     )
 
 
@@ -789,9 +878,7 @@ async def _exec_research_document_edit_staged(
     citation_error = _validate_public_citation_format(body)
     if citation_error:
         return f"Error: {citation_error}"
-    spelling_error = _validate_standard_spellings(body)
-    if spelling_error:
-        return f"Error: {spelling_error}"
+    body, spelling_note = await _normalize_standard_spellings(body)
     new_title = (title or "").strip() or doc.get("title") or ""
     document = _build_document(
         new_title, body, original_publish_date or datetime.now(KST).strftime("%Y-%m-%d")
@@ -837,6 +924,7 @@ async def _exec_research_document_edit_staged(
         f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
         "Publication remains cross-tick: on a later wake, publish with slug-only "
         "publish_public (omit content) plus fact_check_passed=true and fact_check_notes."
+        f"{spelling_note}"
     )
 
 
@@ -899,9 +987,7 @@ async def _exec_research_document_edit_public(
         citation_error = _validate_public_citation_format(body)
         if citation_error:
             return f"Error: {citation_error}"
-        spelling_error = _validate_standard_spellings(body)
-        if spelling_error:
-            return f"Error: {spelling_error}"
+        body, spelling_note = await _normalize_standard_spellings(body)
         draft_path = None
         review_note = ""
         if is_autonomous_publication_context():
@@ -966,6 +1052,7 @@ async def _exec_research_document_edit_public(
             f"Public URL: {_public_url(fname)}\n"
             f"{review_line}"
             f"Title: {new_title}; size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
+            f"{spelling_note}"
         )
 
     if op == "publish":
