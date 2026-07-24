@@ -59,7 +59,8 @@ _FATE_KINDS = (
 
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
-    "name", "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
+    "name", "givenName", "familyName",
+    "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role", "citizenship", "origin",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
 })
@@ -133,7 +134,7 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
 # person patch fields that must be {ko, en} objects. Plain strings are
 # rejected outright: _localized() would store them as Korean-only and
 # silently blank the English side (this happened in production).
-_LOCALIZED_PERSON_KEYS = ("name", "epithet", "bio", "moment", "patronymic")
+_LOCALIZED_PERSON_KEYS = ("name", "givenName", "familyName", "epithet", "bio", "moment", "patronymic")
 _LOCALIZED_OFFICE_ROW_KEYS = ("body", "name", "note")
 
 _OFFICE_ROW_PATCH_KEYS = frozenset({
@@ -348,7 +349,8 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
     """
     cur.execute(
         """SELECT id, group_id, cyrillic, years_label,
-                  name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
+                  name_ko, name_en, given_name_ko, given_name_en, family_name_ko, family_name_en,
+                  epithet_ko, epithet_en, bio_ko, bio_en,
                   moment_ko, moment_en,
                   fate_kind, fate_label_ko, fate_label_en,
                   citizenship_code, citizenship_label_ko, citizenship_label_en,
@@ -365,6 +367,8 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
         "cyrillic": row["cyrillic"],
         "years": row["years_label"],
         "name": {"ko": row["name_ko"], "en": row["name_en"]},
+        "givenName": {"ko": row["given_name_ko"], "en": row["given_name_en"]},
+        "familyName": {"ko": row["family_name_ko"], "en": row["family_name_en"]},
         "epithet": {"ko": row["epithet_ko"], "en": row["epithet_en"]},
         "bio": {"ko": row["bio_ko"], "en": row["bio_en"]},
         "moment": {"ko": row["moment_ko"], "en": row["moment_en"]},
@@ -763,6 +767,44 @@ def _surname(name: str) -> str:
     return parts[-1] if parts else ""
 
 
+def _collapse_spaces(value) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _split_full_name(full: str) -> tuple[str, str]:
+    """(given, family) from a full name: family = last token, given = the rest.
+    Single-token names (김일성, 카모) go wholly to family."""
+    name = _collapse_spaces(full)
+    if not name:
+        return "", ""
+    if " " not in name:
+        return "", name
+    given, family = name.rsplit(" ", 1)
+    return given, family
+
+
+def _patch_name_parts(patch: dict, lang: str, stored: dict | None = None) -> tuple[str, str, str]:
+    """Effective (given, family, full) for one language after applying `patch`.
+
+    Structured givenName/familyName win; a legacy full `name` is split; a
+    partial parts patch falls back to `stored` (given_name_*/family_name_*
+    row) for the missing side. Mirrors frontend people-admin-store.js.
+    """
+    stored = stored or {}
+    if "givenName" in patch or "familyName" in patch:
+        given = (_collapse_spaces(_localized(patch.get("givenName"), lang))
+                 if "givenName" in patch else _collapse_spaces(stored.get(f"given_name_{lang}")))
+        family = (_collapse_spaces(_localized(patch.get("familyName"), lang))
+                  if "familyName" in patch else _collapse_spaces(stored.get(f"family_name_{lang}")))
+    elif "name" in patch:
+        given, family = _split_full_name(_localized(patch.get("name"), lang))
+    else:
+        given = _collapse_spaces(stored.get(f"given_name_{lang}"))
+        family = _collapse_spaces(stored.get(f"family_name_{lang}"))
+    full = " ".join(p for p in (given, family) if p)
+    return given, family, full
+
+
 def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     """Find a card that is the same person as `patch` under a different slug.
 
@@ -774,8 +816,8 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     shared surname, and a slug that is a segment-wise subset of an existing one.
     Returns the matched row plus a `why` phrase, or None.
     """
-    name = patch.get("name") or {}
-    name_ko, name_en = (name.get("ko") or "").strip(), (name.get("en") or "").strip()
+    _, _, name_ko = _patch_name_parts(patch, "ko")
+    _, _, name_en = _patch_name_parts(patch, "en")
     birth, death = _parse_life_years(patch.get("years") or "")
 
     if name_en:
@@ -977,20 +1019,24 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
     next_sort = cur.fetchone()["next_sort"]
     sort_order = patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort
     birth, death = _parse_life_years(patch.get("years") or "")
-    name = patch.get("name") or {}
+    # Structured name parts (givenName/familyName win, legacy `name` is split);
+    # name_ko/en are stored as the DERIVED full name — never written separately.
+    given_ko, family_ko, name_ko = _patch_name_parts(patch, "ko")
+    given_en, family_en, name_en = _patch_name_parts(patch, "en")
     fate = patch.get("fate") or {}
     citizenship = _nationality_values(patch, "citizenship") or ("", "", "")
     origin = _nationality_values(patch, "origin") or ("", "", "")
     cur.execute(
         """INSERT INTO commulingo_people
               (id, group_id, sort_order, initial, cyrillic, years_label, birth_year, death_year,
-               name_ko, name_en, epithet_ko, epithet_en, bio_ko, bio_en,
+               name_ko, name_en, given_name_ko, given_name_en, family_name_ko, family_name_en,
+               epithet_ko, epithet_en, bio_ko, bio_en,
                moment_ko, moment_en,
                fate_kind, fate_label_ko, fate_label_en,
                citizenship_code, citizenship_label_ko, citizenship_label_en,
                origin_code, origin_label_ko, origin_label_en, updated_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                    %s, %s, %s, %s, %s, %s, NOW())""",
         (
             person_id,
@@ -1000,7 +1046,7 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             patch.get("cyrillic") or "",
             patch.get("years") or "",
             birth, death,
-            _localized(name, "ko"), _localized(name, "en"),
+            name_ko, name_en, given_ko, given_en, family_ko, family_en,
             _localized(patch.get("epithet"), "ko"), _localized(patch.get("epithet"), "en"),
             _localized(patch.get("bio"), "ko"), _localized(patch.get("bio"), "en"),
             _localized(patch.get("moment"), "ko"), _localized(patch.get("moment"), "en"),
@@ -1013,7 +1059,7 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
     )
     _replace_patronymic(cur, person_id, patch)
     _replace_aliases(cur, person_id, patch.get("aliases") or {
-        "ko": [_localized(name, "ko")], "en": [_localized(name, "en")],
+        "ko": [name_ko], "en": [name_en],
     })
     _replace_scenes(cur, person_id, patch.get("scenes") or [])
     _replace_career(cur, person_id, patch.get("career") or [])
@@ -1037,9 +1083,20 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         set_col("years_label", patch.get("years") or "")
         set_col("birth_year", birth)
         set_col("death_year", death)
-    if "name" in patch:
-        set_col("name_ko", _localized(patch.get("name"), "ko"))
-        set_col("name_en", _localized(patch.get("name"), "en"))
+    if "name" in patch or "givenName" in patch or "familyName" in patch:
+        # Any name field recomputes all six name columns so the structured
+        # parts and the derived full name never diverge.
+        cur.execute(
+            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en
+               FROM commulingo_people WHERE id = %s""",
+            (person_id,),
+        )
+        stored_name = dict(cur.fetchone() or {})
+        for lang in ("ko", "en"):
+            given, family, full = _patch_name_parts(patch, lang, stored_name)
+            set_col(f"name_{lang}", full)
+            set_col(f"given_name_{lang}", given)
+            set_col(f"family_name_{lang}", family)
     if "epithet" in patch:
         set_col("epithet_ko", _localized(patch.get("epithet"), "ko"))
         set_col("epithet_en", _localized(patch.get("epithet"), "en"))
@@ -1213,6 +1270,42 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 "Error: cyrillic already includes cyrillicPatronymic. Put the Russian patronymic "
                 "only in cyrillicPatronymic; cyrillic must contain given name + surname only."
             )
+        # Same rule for the ko/en side: the name must never embed the patronymic.
+        # The frontend composes given + patronymic + family on render, so an
+        # embedded one doubles (오토 율리예비치 율리예비치 시미트 — the bug that
+        # led to structured name parts, frontend migration 060). Checked against
+        # the state the record will HAVE after this patch.
+        name_touched = any(k in patch for k in ("name", "givenName", "familyName"))
+        if name_touched or "patronymic" in patch:
+            stored_name = {}
+            if action != "create":
+                cur.execute(
+                    """SELECT p.given_name_ko, p.given_name_en, p.family_name_ko, p.family_name_en,
+                              pa.patronymic_ko, pa.patronymic_en
+                       FROM commulingo_people p
+                       LEFT JOIN commulingo_person_patronymics pa ON pa.person_id = p.id
+                       WHERE p.id = %s""",
+                    (target_id,),
+                )
+                stored_name = dict(cur.fetchone() or {})
+            for lang in ("ko", "en"):
+                _, _, full = _patch_name_parts(patch, lang, stored_name)
+                if "patronymic" in patch:
+                    pat = _collapse_spaces(_localized(patch.get("patronymic"), lang))
+                else:
+                    pat = _collapse_spaces(stored_name.get(f"patronymic_{lang}"))
+                if not pat or not full:
+                    continue
+                tokens = full.split()
+                embedded = (pat.lower() in [t.lower() for t in tokens]) if lang == "en" else (pat in tokens)
+                if embedded:
+                    return (
+                        f"Error: the {lang} name embeds the patronymic '{pat}'. name / "
+                        "givenName+familyName carry given name + surname ONLY — the "
+                        "patronymic goes only in patronymic {ko,en} and renders between "
+                        "them automatically. A Western middle name is part of givenName, "
+                        "not a patronymic."
+                    )
         for key in _LOCALIZED_PERSON_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
                 return (
@@ -1305,9 +1398,14 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
             if not cur.fetchone():
                 return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
-            name = patch.get("name") or {}
-            if not (isinstance(name, dict) and name.get("ko") and name.get("en")):
-                return "Error: patch.name.ko and patch.name.en are required for person create."
+            for lang in ("ko", "en"):
+                _, _, full = _patch_name_parts(patch, lang)
+                if not full:
+                    return (
+                        "Error: person create requires a name per language — either "
+                        "name {ko,en} or givenName/familyName {ko,en} (single-token "
+                        "East Asian names go wholly in familyName)."
+                    )
             for key in ("bio", "epithet"):
                 value = patch.get(key) or {}
                 if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
@@ -1692,8 +1790,9 @@ _COMMULINGO_PATCH_SCHEMA = {
     "additionalProperties": False,
     "description": (
         "Canonical patch. Scalar fields stay strings; bilingual fields are {ko,en}. "
-        "For person create include name, bio, epithet, groupId, role, years, aliases, "
-        "career, and native-script name fields. Empty object is only for delete."
+        "For person create include givenName/familyName (or legacy name), bio, epithet, "
+        "groupId, role, years, aliases, career, and native-script name fields. "
+        "Empty object is only for delete."
     ),
     "properties": {
         "id": {"type": "string"},
@@ -1704,6 +1803,8 @@ _COMMULINGO_PATCH_SCHEMA = {
         "cyrillicPatronymic": {"type": "string"},
         "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
         "name": _BILINGUAL_TEXT_SCHEMA,
+        "givenName": _BILINGUAL_TEXT_SCHEMA,
+        "familyName": _BILINGUAL_TEXT_SCHEMA,
         "epithet": _EPITHET_SCHEMA,
         "bio": _BIO_SCHEMA,
         "moment": _BILINGUAL_TEXT_SCHEMA,
@@ -1769,7 +1870,14 @@ COMMULINGO_EDIT_TOOL = {
         "surname only, and a Western middle name goes in cyrillicPatronymic in the "
         "same script, e.g. cyrillic 'Earl Browder' + cyrillicPatronymic 'Russell'. "
         "A Russian-style patronymic belongs only to figures who actually used one), "
-        "years ('1878–1953', en dash), name/epithet/bio/moment {ko,en}, fate "
+        "years ('1878–1953', en dash), "
+        "givenName/familyName {ko,en} (PREFERRED name fields — structured parts; "
+        "single-token East Asian names like 김일성 go wholly in familyName; a "
+        "Western middle name belongs in givenName). Legacy name {ko,en} is still "
+        "accepted and split automatically (family = last word). Either way the "
+        "name is given name + surname ONLY — a name embedding the patronymic is "
+        "rejected on save, because the site composes given + patronymic + family "
+        "on render and an embedded one would double. epithet/bio/moment {ko,en}, fate "
         "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
         "deposed/exile/suicide/natural; label = cause of death ONLY, no death "
         "year — it renders from `years`: 처형/Executed, 자연사/Natural causes, a "

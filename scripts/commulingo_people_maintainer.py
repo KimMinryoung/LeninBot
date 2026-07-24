@@ -427,8 +427,9 @@ Create exactly this pre-verified missing person and no one else:
 Re-check search_people for the exact names, fetch the starting source, inspect groups and
 roles, then create one complete bilingual card, including a bio and a one-line `moment` that
 follow the style rules below. Use ONLY the canonical person patch keys
-documented by commulingo_edit: name, bio, epithet, fate, role, groupId, years, aliases,
-career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
+documented by commulingo_edit: givenName, familyName (preferred over legacy name; given
+name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
+aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
 Make exactly one commulingo_edit(target_type='person', action='create') call and stop.
 
@@ -437,7 +438,8 @@ Make exactly one commulingo_edit(target_type='person', action='create') call and
 
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic",
-    "cyrillicPatronymic", "years", "name", "epithet", "bio", "moment",
+    "cyrillicPatronymic", "years", "name", "givenName", "familyName",
+    "epithet", "bio", "moment",
     "fate", "patronymic", "aliases", "career", "role", "scenes", "office_rows",
     "citizenship", "origin",
 })
@@ -452,6 +454,8 @@ def normalize_commulingo_patch(target_type: str, target_id: str, patch: dict | N
 
     localized = {
         "name": ("nameKo", "nameEn"),
+        "givenName": ("givenNameKo", "givenNameEn"),
+        "familyName": ("familyNameKo", "familyNameEn"),
         "bio": ("bioKo", "bioEn"),
         "epithet": ("epithetKo", "epithetEn"),
         "moment": ("momentKo", "momentEn"),

@@ -52,7 +52,11 @@ Content rules:
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no
   solid source exists. Never invent dialogue or inner motives.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
-  name/epithet/bio/fate, aliases, and a concise 4-8 row career. For Russian names, `cyrillic`
+  name/epithet/bio/fate, aliases, and a concise 4-8 row career. Names are stored as parts:
+  prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
+  김일성 go wholly in `familyName`; a Western middle name is part of `givenName`). The name
+  must be given name + surname ONLY — put the patronymic ONLY in `patronymic: {ko, en}`;
+  a name that embeds it is rejected on save. Same rule in the native script: `cyrillic`
   is given name + surname ONLY (e.g. `Михаил Фриновский`); put the patronymic ONLY in
   `cyrillicPatronymic` (e.g. `Петрович`). Never put it in both fields. Epithet is a historical
   tension or irony, not a job title. Bio is one compact story-like paragraph.
