@@ -76,6 +76,8 @@ _NATIONALITY_CODES = frozenset({
     "chile", "china", "japan", "india", "turkey", "vietnam", "north-korea",
     "south-korea", "albania", "angola", "burkina-faso", "congo", "ghana",
     "guinea-bissau", "indonesia", "mozambique", "peru", "trinidad", "portugal",
+    "brazil", "el-salvador", "grenada", "guyana", "nicaragua", "south-africa",
+    "tanzania", "ireland", "slovakia", "czechoslovakia", "korea",
 })
 
 # Which writing system each nationality's own names use. Port of
@@ -110,7 +112,8 @@ _LATIN_NATIONS = (
     "france", "italy", "spain", "portugal", "netherlands", "uk", "usa",
     "turkey", "cuba", "argentina", "chile", "peru", "angola", "burkina-faso",
     "congo", "ghana", "guinea-bissau", "mozambique", "trinidad", "indonesia",
-    "vietnam",
+    "vietnam", "brazil", "el-salvador", "grenada", "guyana", "nicaragua",
+    "south-africa", "tanzania", "ireland", "slovakia", "czechoslovakia",
 )
 _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     **{code: ("cyrillic",) for code in _CYRILLIC_NATIONS},
@@ -128,6 +131,7 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     "north-korea": ("hangul", "han"),
     "south-korea": ("hangul", "han"),
     "india": ("devanagari", "bengali", "latin"),
+    "korea": ("hangul", "han"),
 }
 
 # person patch fields that must be {ko, en} objects. Plain strings are

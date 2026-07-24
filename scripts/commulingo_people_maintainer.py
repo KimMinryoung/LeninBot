@@ -145,7 +145,8 @@ NATIONALITY_CODES = (
     "romania, bulgaria, yugoslavia, france, italy, spain, uk, netherlands, usa, "
     "cuba, argentina, chile, china, japan, india, turkey, vietnam, north-korea, south-korea, "
     "albania, angola, burkina-faso, congo, ghana, guinea-bissau, indonesia, "
-    "mozambique, peru, trinidad, portugal"
+    "mozambique, peru, trinidad, portugal, brazil, el-salvador, grenada, guyana, "
+    "nicaragua, south-africa, tanzania, ireland, slovakia, czechoslovakia, korea"
 )
 
 

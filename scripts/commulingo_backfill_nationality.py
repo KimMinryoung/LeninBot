@@ -89,6 +89,17 @@ FLAG_NAMES = {
     "peru": ("페루", "Peru"),
     "trinidad": ("트리니다드 토바고", "Trinidad and Tobago"),
     "portugal": ("포르투갈", "Portugal"),
+    "brazil": ("브라질", "Brazil"),
+    "el-salvador": ("엘살바도르", "El Salvador"),
+    "grenada": ("그레나다", "Grenada"),
+    "guyana": ("가이아나", "Guyana"),
+    "nicaragua": ("니카라과", "Nicaragua"),
+    "south-africa": ("남아프리카 공화국", "South Africa"),
+    "tanzania": ("탄자니아", "Tanzania"),
+    "ireland": ("아일랜드", "Ireland"),
+    "slovakia": ("슬로바키아", "Slovakia"),
+    "czechoslovakia": ("체코슬로바키아", "Czechoslovakia"),
+    "korea": ("조선", "Korea"),
 }
 
 # Wikidata QIDs whose citizenship means "Soviet" for our purposes: the USSR, the
@@ -141,7 +152,7 @@ COUNTRY_QID = {
     "Q241": "cuba",
     "Q29": "spain", "Q29999_es": "spain",
     "Q218": "romania",
-    "Q213": "czechia", "Q33946": "czechia", "Q11205": "czechia",  # Czechia, Czechoslovakia
+    "Q213": "czechia",  # Czechia
     "Q16957": "east-germany",
     "Q265": "uzbekistan", "Q131142": "uzbekistan",
     "Q217": "moldova", "Q214006": "moldova",
@@ -171,6 +182,16 @@ COUNTRY_QID = {
     "Q419": "peru",
     "Q754": "trinidad", "Q116282722": "trinidad",  # Trinidad and Tobago, Crown colony
     "Q45": "portugal",
+    "Q155": "brazil",
+    "Q792": "el-salvador",
+    "Q769": "grenada",
+    "Q734": "guyana",
+    "Q811": "nicaragua",
+    "Q258": "south-africa",
+    "Q924": "tanzania",
+    "Q27": "ireland",
+    "Q214": "slovakia",
+    "Q33946": "czechoslovakia", "Q11205": "czechoslovakia",
     "Q121932": "bulgaria",  # People's Republic of Bulgaria
     "Q172640": "vietnam", "Q185682": "vietnam",  # North Vietnam, French Indochina
     "Q467864": "albania",  # People's Socialist Republic of Albania
