@@ -1,5 +1,5 @@
 {
-  "_comment": "Person-name and glossary-term spelling normalization: variant -> canonical, per language. The commulingo_edit validator rejects prose that uses a variant outside direct quotation marks, and scripts/commulingo_normalize_names.py bulk-fixes stored text. 'blocked' lists longer strings that merely CONTAIN a variant and must never match (시베리아 contains 베리아) — same trick as the linkify BLOCKED list. Keep variants OUT of commulingo_person_aliases — aliases are linkified verbatim, so registering a misspelling there would display it. Grow this map via scripts/commulingo_find_name_variants.py candidates after human review. Picked up on mtime change, no restart needed. Also enforced on research-document writes (runtime_tools/research.py).",
+  "_comment": "Spelling normalization for dictionary names — people, history events, and glossary terms: variant -> canonical, per language. The commulingo_edit validator rejects prose that uses a variant outside direct quotation marks, and scripts/commulingo_normalize_names.py bulk-fixes stored text. 'blocked' lists longer strings that merely CONTAIN a variant and must never match (시베리아 contains 베리아) — same trick as the linkify BLOCKED list. Keep variants OUT of commulingo_person_aliases — aliases are linkified verbatim, so registering a misspelling there would display it. Grow this map via scripts/commulingo_find_name_variants.py candidates after human review. Picked up on mtime change, no restart needed. Also enforced on research-document writes (runtime_tools/research.py).",
   "ko": {
     "베리아": "베리야",
     "투하체프스키": "투하쳅스키",
@@ -32,7 +32,22 @@
     "보로진": "보로딘",
     "피타코프": "퍄타코프",
     "넵맨": "네프맨",
-    "넵맵": "네프맨"
+    "넵맵": "네프맨",
+    "마샬 플랜": "마셜 플랜",
+    "마샬플랜": "마셜 플랜",
+    "항가리 혁명": "헝가리 혁명",
+    "아프카니스탄": "아프가니스탄",
+    "스푸트닉": "스푸트니크",
+    "체르노빌리": "체르노빌",
+    "뻬레스뜨로이까": "페레스트로이카",
+    "글라스노스찌": "글라스노스트",
+    "꼴호즈": "콜호스",
+    "노멘클라뚜라": "노멘클라투라",
+    "소비에뜨": "소비에트",
+    "볼셰비끼": "볼셰비키",
+    "멘셰비끼": "멘셰비키",
+    "쏘련": "소련",
+    "쿨락크": "쿨라크"
   },
   "en": {},
   "blocked": {

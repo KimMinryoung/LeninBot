@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Find candidate person-name spelling variants in CommuLingo card text.
+"""Find candidate spelling variants of CommuLingo names in site text.
 
-Compares every Korean surname in the dictionary against WHOLE words in card
-prose (an 어절 with at most one trailing particle stripped) and prints
+Compares every Korean canonical word from the dictionaries — person surnames,
+history-event title words, and glossary-term names/aliases — against WHOLE
+words in card prose and public research reports (an 어절 with at most one trailing particle stripped) and prints
 candidates that are NOT the canonical spelling, NOT a registered alias, and NOT
 another person's name. Candidates are for HUMAN review — approve by adding them
 to config/commulingo_name_normalization.json; nothing is written automatically.
@@ -154,6 +155,14 @@ def main() -> int:
 
     people = query_json("SELECT id, name_ko FROM commulingo_people")
     aliases = query_json("SELECT person_id, alias FROM commulingo_person_aliases WHERE lang='ko'")
+    events = query_json("SELECT id, title_ko FROM commulingo_history_events")
+    terms = query_json(
+        """SELECT t.id, t.term_ko, COALESCE(a.aliases, '') AS aliases
+             FROM commulingo_terms t
+             LEFT JOIN (SELECT term_id, string_agg(alias, ' ') AS aliases
+                          FROM commulingo_term_aliases WHERE lang='ko' GROUP BY term_id) a
+               ON a.term_id = t.id"""
+    )
     texts = query_json(
         """SELECT 'section:' || s.id || ':' || s.person_id AS src, s.body_ko AS txt
              FROM commulingo_person_sections s
@@ -163,7 +172,16 @@ def main() -> int:
            WHERE COALESCE(p.bio_ko, '') <> ''
         UNION ALL
           SELECT 'career:' || c.id::text, c.role_ko FROM commulingo_person_career_entries c
-           WHERE COALESCE(c.role_ko, '') <> ''"""
+           WHERE COALESCE(c.role_ko, '') <> ''
+        UNION ALL
+          SELECT 'event:' || e.id, COALESCE(e.summary_ko, '') || ' ' || COALESCE(e.outcome_ko, '')
+             FROM commulingo_history_events e
+        UNION ALL
+          SELECT 'termdef:' || t.id, t.definition_ko FROM commulingo_terms t
+           WHERE COALESCE(t.definition_ko, '') <> ''
+        UNION ALL
+          SELECT 'report:' || r.slug, r.markdown FROM research_documents r
+           WHERE r.status = 'public' AND COALESCE(r.markdown, '') <> ''"""
     )
 
     # Every exact string that must never be reported as a "variant":
@@ -175,6 +193,17 @@ def main() -> int:
         canonical_words.update(words)
         if words:
             surnames[words[-1]].add(p["id"])
+    # Event title words and glossary names/aliases join the comparison targets:
+    # a near-miss of 헝가리/네프맨 in prose is as much a variant as a surname miss.
+    for e in events:
+        cleaned = (e["title_ko"] or "").replace("(", " ").replace(")", " ")
+        for word in [w for w in cleaned.split() if len(w) >= 3]:
+            canonical_words.add(word)
+            surnames[word].add("event:" + e["id"])
+    for t in terms:
+        for word in [w for w in f"{t['term_ko'] or ''} {t['aliases'] or ''}".split() if len(w) >= 3]:
+            canonical_words.add(word)
+            surnames[word].add("term:" + t["id"])
     alias_words = {a["alias"] for a in aliases if len(a["alias"] or "") >= 3}
     skip_exact = canonical_words | alias_words | known_variants
 
@@ -229,7 +258,7 @@ def main() -> int:
             lines = [f"• {p} ≈ {s} (×{n}) — {src}" for p, s, n, src in new[:20]]
             more = f"\n…외 {len(new) - 20}건" if len(new) > 20 else ""
             message = (
-                f"📖 CommuLingo 인물 표기 변형 후보 {len(new)}건 (신규)\n"
+                f"📖 CommuLingo 인물·사건·용어 표기 변형 후보 {len(new)}건 (신규)\n"
                 + "\n".join(lines) + more
                 + "\n\n진짜 오기만 config/commulingo_name_normalization.json에 추가한 뒤 "
                 "scripts/commulingo_normalize_names.py 를 실행하세요. "
