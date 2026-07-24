@@ -272,6 +272,9 @@ CARD_STYLE_GUIDANCE = (
     "(roughly 60-115) — inflating an obscure functionary's bio is a defect. The enrich task states "
     "the exact target band for the specific person. Give the English bio comparable substance. "
     "Never leave a one-line stub.\n"
+    "- Every new person requires both citizenship and nationalOrigin. nationalOrigin may equal "
+    "citizenship; never omit it because the two match or because a distinct background is not "
+    "documented. Apply the editorial defaults below instead of storing a blank.\n"
     "- The bio states who the person essentially was and why they matter — their core "
     "significance and defining tension. It is NOT a chronological list of posts, dates, and "
     "ministries: the detailed career timeline already lists positions year by year, so do not "
@@ -378,16 +381,19 @@ use `조지아`.
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
    missing, one `commulingo_person_update` that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.
-2. NATIONALITY: else if the citizenship flag code is unset, set the person's nationality in one
+2. NATIONALITY: else if either the citizenship or nationalOrigin flag code is unset,
+   set both in one
    `commulingo_person_update`. Provide `citizenship` — the state whose citizenship the person actually held
    (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
    state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
-   revolutionaries take their own state) — and, only when it is a DIFFERENT nation,
+   revolutionaries take their own state) — and always provide
    `nationalOrigin`, the person's documented national or ethnic background (e.g. `georgia` for
    Stalin, `poland` for Dzerzhinsky). Never infer nationalOrigin from birthplace: Karl Radek was
    born in present-day Ukraine but was Polish, and Nikolai Yezhov was born in Lithuania but is
    classified here as Russian. Citizenship is the primary flag and comes first; nationalOrigin is
-   secondary. Omit nationalOrigin when it equals citizenship or is genuinely unknown. Citizenship
+   secondary. Never omit nationalOrigin: it may equal citizenship when the person's documented
+   background matches their state. If sources do not establish a different background, use the
+   reviewed editorial default rather than leaving it blank. Citizenship
    is NOT where the person happened to die or emigrate to:
    a Soviet official who died in exile abroad is still `soviet`. It also drives the native-name
    script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
@@ -535,8 +541,10 @@ roles, then create one complete bilingual card, including a bio and a one-line `
 follow the style rules below. Use ONLY the canonical person patch keys
 documented by commulingo_person_create: givenName, familyName (given
 name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
-aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
-The person schema also accepts citizenship and nationalOrigin when they are known.
+aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder,
+including both citizenship and nationalOrigin. Both nationality fields are mandatory for every
+new person; nationalOrigin may equal citizenship but must never be omitted.
+The person schema requires citizenship and nationalOrigin.
 nationalOrigin means documented national/ethnic background, never birthplace.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
 Make exactly one commulingo_person_create call and stop. Keep citations top-level, outside fields.

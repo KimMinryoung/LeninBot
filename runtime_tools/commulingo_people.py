@@ -1419,6 +1419,20 @@ def _apply_office_row_update(cur, row_id: int, patch: dict) -> None:
         cur.execute(f"UPDATE commulingo_office_rows SET {', '.join(sets)} WHERE id = %s", values)
 
 
+def _person_create_nationality_problem(patch: dict) -> str | None:
+    """Return a fail-closed error when a new card lacks either flag."""
+    for key, public_key in (("citizenship", "citizenship"), ("origin", "nationalOrigin")):
+        node = patch.get(key)
+        if not isinstance(node, dict) or not str(node.get("code") or "").strip():
+            return f"patch.{public_key}.code is required for person create"
+        label = node.get("label")
+        if (not isinstance(label, dict)
+                or not str(label.get("ko") or "").strip()
+                or not str(label.get("en") or "").strip()):
+            return f"patch.{public_key}.label.ko and label.en are required for person create"
+    return None
+
+
 def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -> str | None:
     """Return an error string, or None when the edit is applicable."""
     if _contains_north_korea(patch):
@@ -1548,7 +1562,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return (
                     f"Error: {key}.code '{code}' has no flag icon on the site. "
                     f"Use one of: {', '.join(sorted(_NATIONALITY_CODES))}. "
-                    f"If none applies, omit {key} entirely."
+                    f"For create, choose a reviewed supported classification; the field cannot be omitted."
                 )
         if "aliases" in patch and patch["aliases"] is not None:
             aliases = patch["aliases"]
@@ -1589,6 +1603,12 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     "year (실각 1964). Move burial and other detail to bio or sections."
                 )
         if action == "create":
+            nationality_problem = _person_create_nationality_problem(patch)
+            if nationality_problem:
+                return (
+                    f"Error: {nationality_problem}. Both citizenship and nationalOrigin "
+                    "are mandatory; nationalOrigin may equal citizenship but must not be blank."
+                )
             if patch.get("id") and patch["id"] != target_id:
                 return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
             if not _ID_RE.match(target_id):
@@ -2518,13 +2538,17 @@ _CITATIONS_SCHEMA = {
 
 
 def _person_write_tool(name: str, action: str) -> dict:
-    required_fields = ("groupId", "epithet", "bio", "career", "role") if action == "create" else ()
+    required_fields = (
+        "groupId", "epithet", "bio", "career", "role", "citizenship", "nationalOrigin",
+    ) if action == "create" else ()
     return {
         "name": name,
         "description": (
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
-            "Read the record and reference lists first. nationalOrigin means national/ethnic "
+            "Read the record and reference lists first. On create, citizenship and "
+            "nationalOrigin are both mandatory; nationalOrigin may equal citizenship. "
+            "nationalOrigin means national/ethnic "
             "background, never birthplace. Russian-style names must research and include a "
             "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
             "A successful call ends the run."

@@ -24,6 +24,7 @@ from runtime_tools.commulingo_people import (
     _merge_patronymic_patch,
     _nationality_values,
     _patronymic_problem,
+    _person_create_nationality_problem,
     _validate,
     normalize_commulingo_write,
 )
@@ -151,6 +152,8 @@ assert "Do not create a section" in task and "has epithet: False" in task
 assert "commulingo_event_link" in task and "linked historical events: 0" in task
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
+assert "Every new person requires both citizenship and nationalOrigin" in new_task
+assert "either the citizenship or nationalOrigin flag code is unset" in task
 focused_discovery = maintainer.build_discovery_task("soviet_institutions")
 assert "Do not select a non-Soviet revolutionary" in focused_discovery
 assert "Soviet institution" in focused_discovery and "list_offices" in focused_discovery
@@ -197,6 +200,18 @@ assert confidence == 0.91
 person_fields = COMMULINGO_PERSON_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
 term_fields = COMMULINGO_TERM_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
 assert {"citizenship", "nationalOrigin"} <= set(person_fields)
+create_required = set(COMMULINGO_PERSON_CREATE_TOOL["input_schema"]["properties"]["fields"]["required"])
+assert {"citizenship", "nationalOrigin"} <= create_required
+valid_nationality = {"code": "russia", "label": {"ko": "러시아", "en": "Russia"}}
+assert _person_create_nationality_problem({"citizenship": valid_nationality, "origin": valid_nationality}) is None
+assert "nationalOrigin" in _person_create_nationality_problem({"citizenship": valid_nationality})
+assert "citizenship" in _person_create_nationality_problem({"origin": valid_nationality})
+assert "nationalOrigin" in _validate(
+    CURSOR, "person", "create", "missing-origin", {"citizenship": valid_nationality},
+)
+assert "citizenship" in _validate(
+    CURSOR, "person", "create", "missing-citizenship", {"origin": valid_nationality},
+)
 assert "origin" not in person_fields
 assert "sources" not in person_fields and "term" not in person_fields
 assert "sources" not in term_fields and "bio" not in term_fields
