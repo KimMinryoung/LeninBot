@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Bulk-backfill CommuLingo person nationality (citizenship + origin) from Wikidata.
+"""Bulk-backfill CommuLingo person citizenship from Wikidata.
 
 Deterministic and credential-free: reads/writes commulingo_people through the
 sanctioned scripts/psql-supabase helper, and resolves each person on Wikidata's
-public SPARQL endpoint (no API key). For every person it reads:
-  - P27 country of citizenship   -> the primary "citizenship" flag
-  - P19 place of birth -> P17 country -> the secondary "origin" flag
+public SPARQL endpoint (no API key). It reads P27 country of citizenship for
+the primary flag. P19 place of birth is used only to disambiguate competing
+citizenship claims; it must never populate nationalOrigin (whose legacy DB
+columns are named origin_*), because birthplace is not evidence of national
+or ethnic background.
 Entities are matched by exact English (then Russian/Cyrillic) label + instance
 of human (P31=Q5) and disambiguated by birth year against years_label.
 
@@ -314,7 +316,11 @@ def pick_candidate(cands: list[dict], birth_year: int | None) -> dict | None:
 
 
 def decide_nationality(ent: dict) -> tuple[str, str, list[str]]:
-    """Return (citizenship_code, origin_code, unmapped_qids)."""
+    """Return (citizenship_code, empty national-origin code, unmapped QIDs).
+
+    National/ethnic background needs curated biographical evidence and is never
+    inferred from the entity's place of birth.
+    """
     unmapped: list[str] = []
     cit_qids = ent["cit"]
     bp_qids = ent["bp"]
@@ -345,35 +351,19 @@ def decide_nationality(ent: dict) -> tuple[str, str, list[str]]:
         if not citizenship:
             unmapped += [q for q in cit_qids if q not in COUNTRY_QID and q not in SOVIET_QIDS]
 
-    # Origin: birthplace country -> code.
-    origin = ""
-    for q in bp_qids:
-        if q in COUNTRY_QID:
-            origin = COUNTRY_QID[q]
-            break
-    if not origin and bp_qids:
-        unmapped += [q for q in bp_qids if q not in COUNTRY_QID]
-
-    # Drop a redundant origin identical to citizenship (e.g. a plain French citizen
-    # born in France); keep it when citizenship is the Soviet umbrella.
-    if origin and origin == citizenship:
-        origin = ""
-    return citizenship, origin, unmapped
+    return citizenship, "", unmapped
 
 
 def sql_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def build_update(pid: str, citizenship: str, origin: str) -> str:
+def build_update(pid: str, citizenship: str) -> str:
     cit_ko, cit_en = FLAG_NAMES.get(citizenship, ("", ""))
-    org_ko, org_en = FLAG_NAMES.get(origin, ("", ""))
     return (
         "UPDATE commulingo_people SET "
         f"citizenship_code={sql_quote(citizenship)}, "
-        f"citizenship_label_ko={sql_quote(cit_ko)}, citizenship_label_en={sql_quote(cit_en)}, "
-        f"origin_code={sql_quote(origin)}, "
-        f"origin_label_ko={sql_quote(org_ko)}, origin_label_en={sql_quote(org_en)} "
+        f"citizenship_label_ko={sql_quote(cit_ko)}, citizenship_label_en={sql_quote(cit_en)} "
         f"WHERE id={sql_quote(pid)};"
     )
 
@@ -392,7 +382,7 @@ def main() -> int:
     print(f"[backfill] {len(people)} people to process", file=sys.stderr)
 
     updates: list[str] = []
-    resolved = citizenship_set = origin_set = 0
+    resolved = citizenship_set = 0
     unresolved: list[str] = []
     unmapped_tally: dict[str, int] = {}
 
@@ -427,19 +417,16 @@ def main() -> int:
         citizenship, origin, unmapped = decide_nationality(ent)
         for q in unmapped:
             unmapped_tally[q] = unmapped_tally.get(q, 0) + 1
-        if not citizenship and not origin:
+        if not citizenship:
             continue
-        if citizenship:
-            citizenship_set += 1
-        if origin:
-            origin_set += 1
-        updates.append(build_update(p["id"], citizenship, origin))
+        citizenship_set += 1
+        updates.append(build_update(p["id"], citizenship))
         if args.dry_run:
             print(f"  {p['id']:<26} cit={citizenship or '-':<9} origin={origin or '-'}")
 
     print(
         f"[backfill] resolved {resolved}/{len(people)} | citizenship set {citizenship_set} | "
-        f"origin set {origin_set} | unresolved {len(unresolved)}",
+        f"unresolved {len(unresolved)}",
         file=sys.stderr,
     )
     if unmapped_tally:

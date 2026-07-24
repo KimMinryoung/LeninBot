@@ -130,7 +130,7 @@ MINOR_BIO_FLOOR = 60
 MINOR_BIO_CEILING = 115
 
 # Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
-# The curator must pick citizenship_code / origin_code from this set or the card shows no flag.
+# The curator must pick citizenship_code / nationalOrigin code from this set or the card shows no flag.
 NATIONALITY_CODES = (
     "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
     "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
@@ -330,7 +330,7 @@ Target exactly this person and no one else:
 - has moment: {bool(candidate['has_moment'])}
 - has primary role: {bool(candidate['has_role'])}
 - citizenship flag code: {candidate.get('citizenship_code') or '(unset)'}
-- origin flag code: {candidate.get('origin_code') or '(unset)'}
+- national/ethnic background flag code: {candidate.get('origin_code') or '(unset)'}
 {tier_line}
 
 Call get_person and get_sections first, then make exactly one available narrow write, choosing the
@@ -350,15 +350,18 @@ step does not apply; move to the next one.
    `commulingo_person_update`. Provide `citizenship` — the state whose citizenship the person actually held
    (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
    state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
-   revolutionaries take their own state) — and, only when it is a DIFFERENT nation, `origin`, the
-   birthplace people/nation (e.g. `georgia` for Stalin, `poland` for Dzerzhinsky). Citizenship is
-   the primary flag and comes first; origin is secondary. Omit origin when it equals citizenship
-   or is genuinely unknown. Citizenship is NOT where the person happened to die or emigrate to:
+   revolutionaries take their own state) — and, only when it is a DIFFERENT nation,
+   `nationalOrigin`, the person's documented national or ethnic background (e.g. `georgia` for
+   Stalin, `poland` for Dzerzhinsky). Never infer nationalOrigin from birthplace: Karl Radek was
+   born in present-day Ukraine but was Polish, and Nikolai Yezhov was born in Lithuania but is
+   classified here as Russian. Citizenship is the primary flag and comes first; nationalOrigin is
+   secondary. Omit nationalOrigin when it equals citizenship or is genuinely unknown. Citizenship
+   is NOT where the person happened to die or emigrate to:
    a Soviet official who died in exile abroad is still `soviet`. It also drives the native-name
    script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
    {{"ko": "...", "en": "..."}}}}. Never invent a code outside that list. Example:
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
-   "origin": {{"code": "georgia", "label": {{"ko": "조지아", "en": "Georgia"}}}}}}.
+   "nationalOrigin": {{"code": "georgia", "label": {{"ko": "조지아", "en": "Georgia"}}}}}}.
 {bio_step}
 4. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
    update.
@@ -482,7 +485,8 @@ follow the style rules below. Use ONLY the canonical person patch keys
 documented by commulingo_person_create: givenName, familyName (given
 name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
 aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
-The person schema also accepts citizenship and origin when they are known.
+The person schema also accepts citizenship and nationalOrigin when they are known.
+nationalOrigin means documented national/ethnic background, never birthplace.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
 Make exactly one commulingo_person_create call and stop. Keep citations top-level, outside fields.
 

@@ -21,6 +21,8 @@ from runtime_tools.commulingo_people import (
     COMMULINGO_SECTION_SAVE_TOOL,
     COMMULINGO_TERM_CREATE_TOOL,
     CommulingoInputError,
+    _merge_patronymic_patch,
+    _patronymic_problem,
     _validate,
     normalize_commulingo_write,
 )
@@ -56,8 +58,12 @@ assert COMMULINGO_CURATOR.max_output_continuations == 2
 assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
 assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
-assert "already includes cyrillicPatronymic" in _validate(
-    CURSOR, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
+assert "already embeds cyrillicPatronymic" in _validate(
+    CURSOR, "person", "update", "example", {
+        "cyrillic": "Михаил Петрович Фриновский",
+        "patronymic": {"ko": "페트로비치", "en": "Petrovich"},
+        "cyrillicPatronymic": "Петрович",
+    }
 )
 assert "contains '북한'" in _validate(
     CURSOR, "person", "update", "example",
@@ -159,7 +165,8 @@ assert confidence == 0.91
 
 person_fields = COMMULINGO_PERSON_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
 term_fields = COMMULINGO_TERM_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
-assert {"citizenship", "origin"} <= set(person_fields)
+assert {"citizenship", "nationalOrigin"} <= set(person_fields)
+assert "origin" not in person_fields
 assert "sources" not in person_fields and "term" not in person_fields
 assert "sources" not in term_fields and "bio" not in term_fields
 assert COMMULINGO_PERSON_UPDATE_TOOL["input_schema"]["additionalProperties"] is False
@@ -168,6 +175,25 @@ assert COMMULINGO_EVENT_LINK_TOOL["input_schema"]["additionalProperties"] is Fal
 office_fields = COMMULINGO_OFFICE_ROW_SAVE_TOOL["input_schema"]["properties"]["fields"]["properties"]
 assert set(office_fields) == {"sortOrder", "years", "body", "personId", "name", "note"}
 assert "bio" not in office_fields and "term" not in office_fields
+
+stored_patronymic = {"ko": "이바노비치", "en": "Ivanovich", "native": "Иванович"}
+merged_patronymic = _merge_patronymic_patch(
+    {"cyrillicPatronymic": "Петрович"}, stored_patronymic,
+)
+assert merged_patronymic["ko"] == "이바노비치"
+assert merged_patronymic["en"] == "Ivanovich"
+assert merged_patronymic["native"] == "Петрович"
+assert "requires cyrillicPatronymic" in _patronymic_problem(
+    {"ko": "이바노비치", "en": "Ivanovich", "native": "", "invalid": ""},
+    "Иван Иванов",
+)
+
+normalized_origin, _, _, origin_repairs = normalize_commulingo_write(
+    "person", "example", {"nationalOrigin": {"code": "poland", "label": {"ko": "폴란드", "en": "Poland"}}},
+    ["https://example.com — national background"], None,
+)
+assert normalized_origin["origin"]["code"] == "poland"
+assert "nationalOrigin->origin" in origin_repairs
 
 try:
     normalize_commulingo_write(

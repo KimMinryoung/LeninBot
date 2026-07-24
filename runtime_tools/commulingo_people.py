@@ -60,7 +60,7 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
     "name", "givenName", "familyName",
     "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
-    "aliases", "scenes", "career", "role", "citizenship", "origin",
+    "aliases", "scenes", "career", "role", "citizenship", "origin", "nationalOrigin",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
 })
 
@@ -437,6 +437,7 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
             "label": {"ko": row["origin_label_ko"], "en": row["origin_label_en"]},
         },
     }
+    person["nationalOrigin"] = person["origin"]
     cur.execute(
         """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
            FROM commulingo_person_patronymics WHERE person_id = %s""",
@@ -881,6 +882,71 @@ def _nationality_values(patch: dict, key: str):
     return str(node.get("code") or "").strip(), _localized(label, "ko"), _localized(label, "en")
 
 
+def _merge_patronymic_patch(patch: dict, before: dict | None = None) -> dict:
+    """Field-wise patronymic PATCH merge; omitted values are never blanked."""
+    before = before or {}
+    state = {
+        "ko": _collapse_spaces(before.get("ko")),
+        "en": _collapse_spaces(before.get("en")),
+        "native": _collapse_spaces(before.get("native")),
+        "touched": "patronymic" in patch or "cyrillicPatronymic" in patch,
+        "invalid": "",
+    }
+    if "patronymic" in patch:
+        node = patch.get("patronymic")
+        if node is None:
+            state["ko"] = ""
+            state["en"] = ""
+        elif not isinstance(node, dict):
+            state["invalid"] = "patronymic must be an object {ko,en} or null"
+            return state
+        else:
+            for lang in ("ko", "en"):
+                if lang in node:
+                    state[lang] = _collapse_spaces(node.get(lang))
+    if "cyrillicPatronymic" in patch:
+        state["native"] = _collapse_spaces(patch.get("cyrillicPatronymic"))
+    return state
+
+
+def _contains_name_component(full_name: str, component: str) -> bool:
+    full = f" {_collapse_spaces(full_name).casefold()} "
+    part = _collapse_spaces(component).casefold()
+    return bool(part and f" {part} " in full)
+
+
+def _patronymic_problem(state: dict, native_name: str) -> str | None:
+    if state.get("invalid"):
+        return state["invalid"]
+    ko, en, native = state.get("ko", ""), state.get("en", ""), state.get("native", "")
+    if bool(ko) != bool(en):
+        return "patronymic.ko and patronymic.en must be supplied together"
+    if native and not (ko and en):
+        return "cyrillicPatronymic requires both patronymic.ko and patronymic.en"
+    if "cyrillic" in _detect_scripts(native_name) and ko and not native:
+        return "a Cyrillic native name with a patronymic requires cyrillicPatronymic"
+    if native and _contains_name_component(native_name, native):
+        return (
+            "cyrillic/nativeName already embeds cyrillicPatronymic; keep the "
+            "patronymic only in its separate field"
+        )
+    return None
+
+
+def _stored_patronymic_state(cur, person_id: str) -> dict:
+    cur.execute(
+        """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
+           FROM commulingo_person_patronymics WHERE person_id = %s""",
+        (person_id,),
+    )
+    row = cur.fetchone() or {}
+    return {
+        "ko": row.get("patronymic_ko") or "",
+        "en": row.get("patronymic_en") or "",
+        "native": row.get("cyrillic_patronymic") or "",
+    }
+
+
 def _contains_north_korea(value) -> bool:
     if isinstance(value, str):
         return "북한" in value
@@ -1058,11 +1124,9 @@ def _write_revision(cur, entity_type: str, entity_id: str, note: str, snapshot, 
     )
 
 
-def _replace_patronymic(cur, person_id: str, patch: dict):
+def _replace_patronymic(cur, person_id: str, state: dict):
     cur.execute("DELETE FROM commulingo_person_patronymics WHERE person_id = %s", (person_id,))
-    ko = _localized(patch.get("patronymic"), "ko")
-    en = _localized(patch.get("patronymic"), "en")
-    cyr = patch.get("cyrillicPatronymic") or ""
+    ko, en, cyr = state.get("ko", ""), state.get("en", ""), state.get("native", "")
     if not (ko or en or cyr):
         return
     cur.execute(
@@ -1193,7 +1257,7 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
             origin[0], origin[1], origin[2],
         ),
     )
-    _replace_patronymic(cur, person_id, patch)
+    _replace_patronymic(cur, person_id, _merge_patronymic_patch(patch))
     _replace_aliases(cur, person_id, patch.get("aliases") or {
         "ko": [name_ko], "en": [name_en],
     })
@@ -1271,7 +1335,8 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         values.append(person_id)
         cur.execute(f"UPDATE commulingo_people SET {', '.join(sets)} WHERE id = %s", values)
     if "patronymic" in patch or "cyrillicPatronymic" in patch:
-        _replace_patronymic(cur, person_id, patch)
+        before_patronymic = _stored_patronymic_state(cur, person_id)
+        _replace_patronymic(cur, person_id, _merge_patronymic_patch(patch, before_patronymic))
     if "aliases" in patch:
         _replace_aliases(cur, person_id, patch.get("aliases") or {})
     if "scenes" in patch:
@@ -1380,19 +1445,28 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     f"Error: {key} must be a plain string, not an object or list. "
                     "Only bilingual public text fields use {ko, en}."
                 )
-        cyrillic = str(patch.get("cyrillic") or "").strip()
-        cyrillic_patronymic = str(patch.get("cyrillicPatronymic") or "").strip()
+        stored = {}
+        if action != "create":
+            cur.execute(
+                "SELECT cyrillic, citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
+                (target_id,),
+            )
+            stored = dict(cur.fetchone() or {})
+        cyrillic = str(
+            patch.get("cyrillic") if "cyrillic" in patch else stored.get("cyrillic") or ""
+        ).strip()
+        patronymic_state = _merge_patronymic_patch(
+            patch,
+            _stored_patronymic_state(cur, target_id) if action != "create" else {},
+        )
+        patronymic_error = _patronymic_problem(patronymic_state, cyrillic)
+        if patronymic_error:
+            return f"Error: {patronymic_error}."
+        cyrillic_patronymic = patronymic_state["native"]
         # The native-name line must use the person's own script. Check it against
         # the citizenship the record will HAVE after this patch, so correcting a
         # wrong citizenship and the name together is accepted.
         nationality_codes: list[str] = []
-        stored = {}
-        if "citizenship" not in patch or "origin" not in patch:
-            cur.execute(
-                "SELECT citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
-                (target_id,),
-            )
-            stored = cur.fetchone() or {}
         for key, column in (("citizenship", "citizenship_code"), ("origin", "origin_code")):
             if isinstance(patch.get(key), dict):
                 nationality_codes.append(str(patch[key].get("code") or "").strip())
@@ -1402,11 +1476,6 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             problem = _check_native_script(value, nationality_codes, field)
             if problem:
                 return problem
-        if cyrillic and cyrillic_patronymic and cyrillic_patronymic in cyrillic.split():
-            return (
-                "Error: cyrillic already includes cyrillicPatronymic. Put the Russian patronymic "
-                "only in cyrillicPatronymic; cyrillic must contain given name + surname only."
-            )
         # Same rule for the ko/en side: the name must never embed the patronymic.
         # The frontend composes given + patronymic + family on render, so an
         # embedded one doubles (오토 율리예비치 율리예비치 시미트 — the bug that
@@ -1427,10 +1496,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 stored_name = dict(cur.fetchone() or {})
             for lang in ("ko", "en"):
                 _, _, full = _patch_name_parts(patch, lang, stored_name)
-                if "patronymic" in patch:
-                    pat = _collapse_spaces(_localized(patch.get("patronymic"), lang))
-                else:
-                    pat = _collapse_spaces(stored_name.get(f"patronymic_{lang}"))
+                pat = patronymic_state[lang]
                 if not pat or not full:
                     continue
                 tokens = full.split()
@@ -2118,6 +2184,15 @@ _NATIONALITY_SCHEMA = {
     "required": ["code", "label"],
 }
 
+_NATIONAL_ORIGIN_SCHEMA = {
+    **_NATIONALITY_SCHEMA,
+    "description": (
+        "National or ethnic background, not birthplace and not place of death. "
+        "For example Radek=Poland although born in present-day Ukraine; "
+        "Yezhov=Russia although born in Lithuania."
+    ),
+}
+
 _COMMULINGO_FIELD_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -2143,7 +2218,8 @@ _COMMULINGO_FIELD_SCHEMA = {
         "moment": _BILINGUAL_TEXT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
         "citizenship": _NATIONALITY_SCHEMA,
-        "origin": _NATIONALITY_SCHEMA,
+        "origin": _NATIONAL_ORIGIN_SCHEMA,
+        "nationalOrigin": _NATIONAL_ORIGIN_SCHEMA,
         "term": _BILINGUAL_TEXT_SCHEMA,
         "original": {"type": "string", "description": "term: native-script/original-language form (ГУЛАГ, нэпман)."},
         "period": {"type": "string", "description": "term: period label ('1930–1960') or '개념' for pure concepts."},
@@ -2248,6 +2324,17 @@ def normalize_commulingo_write(
     ]
 
     if target_type == "person":
+        if "nationalOrigin" in normalized:
+            if "origin" in normalized:
+                legacy = normalized.get("origin") if isinstance(normalized.get("origin"), dict) else {}
+                explicit = normalized.get("nationalOrigin") if isinstance(normalized.get("nationalOrigin"), dict) else {}
+                if (legacy.get("code") or "") != (explicit.get("code") or ""):
+                    raise CommulingoInputError(
+                        "conflicting_national_origin",
+                        "origin and nationalOrigin disagree; send nationalOrigin only",
+                    )
+            normalized["origin"] = normalized.pop("nationalOrigin")
+            repairs.append("nationalOrigin->origin")
         localized = {
             "name": ("nameKo", "nameEn"),
             "givenName": ("givenNameKo", "givenNameEn"),
@@ -2375,7 +2462,7 @@ def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = 
 _PERSON_NARROW_KEYS = (
     "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
     "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
-    "citizenship", "origin", "aliases", "career", "role", "fate", "scenes",
+    "citizenship", "nationalOrigin", "aliases", "career", "role", "fate", "scenes",
 )
 _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "definition", "body",
@@ -2400,7 +2487,10 @@ def _person_write_tool(name: str, action: str) -> dict:
         "description": (
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
-            "Read the record and reference lists first. A successful call ends the run."
+            "Read the record and reference lists first. nationalOrigin means national/ethnic "
+            "background, never birthplace. Russian-style names must research and include a "
+            "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
+            "A successful call ends the run."
         ),
         "input_schema": {
             "type": "object",
