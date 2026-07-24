@@ -343,6 +343,8 @@ remove or replace existing material, but only on a judged reason (factually wron
 by sources, duplicated elsewhere on the card, or clearly violating the style rules) — never as
 an accidental side effect of a rewrite. If the existing content already satisfies a step, that
 step does not apply; move to the next one.
+Korean Soviet-history prose uses `그루지야`, not `조지아`; modern citizenship labels may still
+use `조지아`.
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
    missing, one `commulingo_person_update` that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.

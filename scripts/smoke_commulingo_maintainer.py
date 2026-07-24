@@ -204,6 +204,22 @@ assert _nationality_values(
     "citizenship",
 ) == ("georgia", "조지아", "Georgia")
 
+normalized_terms, _, _, term_repairs = normalize_commulingo_write(
+    "person",
+    "example",
+    {
+        "bio": {"ko": "조지아 공산당에서 활동했다.", "en": "Worked in Georgia."},
+        "citizenship": {"code": "georgia", "label": {"ko": "조지아", "en": "Georgia"}},
+        "career": [{"y": "1930", "r": {"ko": "조지아 당 서기", "en": "Party secretary"}}],
+    },
+    ["https://example.com — terminology"],
+    None,
+)
+assert normalized_terms["bio"]["ko"] == "그루지야 공산당에서 활동했다."
+assert normalized_terms["career"][0]["r"]["ko"] == "그루지야 당 서기"
+assert normalized_terms["citizenship"]["label"]["ko"] == "조지아"
+assert "조지아->그루지야 in Korean content" in term_repairs
+
 try:
     normalize_commulingo_write(
         "person", "example", {"definition": {"ko": "x", "en": "x"}},

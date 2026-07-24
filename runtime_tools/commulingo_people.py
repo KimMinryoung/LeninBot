@@ -2305,6 +2305,29 @@ def _classify_validation_error(message: str) -> str:
     return "validation_failed"
 
 
+def _normalize_soviet_korean_content(value, *, korean: bool = False, excluded: bool = False):
+    """Rewrite Korean public copy while preserving modern citizenship labels."""
+    if isinstance(value, str):
+        if korean and not excluded:
+            return value.replace("조지아", "그루지야")
+        return value
+    if isinstance(value, list):
+        return [
+            _normalize_soviet_korean_content(item, korean=korean, excluded=excluded)
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_soviet_korean_content(
+                item,
+                korean=korean or key == "ko",
+                excluded=excluded or key == "citizenship",
+            )
+            for key, item in value.items()
+        }
+    return value
+
+
 def normalize_commulingo_write(
     target_type: str,
     target_id: str,
@@ -2388,6 +2411,11 @@ def normalize_commulingo_write(
             if confidence is None:
                 confidence = misplaced_confidence
             repairs.append("fields.confidence->confidence")
+
+    terminology_normalized = _normalize_soviet_korean_content(normalized)
+    if terminology_normalized != normalized:
+        normalized = terminology_normalized
+        repairs.append("조지아->그루지야 in Korean content")
 
     allowed = {
         "person": _PERSON_PATCH_KEYS,
