@@ -2,8 +2,7 @@
 
 1. Research trail — cross-tick query memory (_extract_research_queries / _research_trail)
 2. research_deep_dive — bounded read-only analyst sub-call (_build_deep_dive_tool)
-3. Stall auto-pause — Phase-4 enforcement (_stall_streak_reached / _maybe_auto_pause_stalled_project)
-4. Tick notification carries the critic verdict (_notify_telegram / _review_reason)
+3. Tick notification carries the critic verdict (_notify_telegram / _review_reason)
 
 Hermetic: stub chat fns, monkeypatched DB/event/telegram functions — no LLM,
 no Postgres, no network sends. Prints every intermediate result in full.
@@ -112,66 +111,11 @@ async def main():
     ap.db_query = orig_db_query
 
     print()
-    print("3. Stall streak — _stall_streak_reached")
-    print("=" * 72)
-
-    check("3 stalls → pause", ap._stall_streak_reached(["stall", "stall", "stall"]))
-    check("2 stalls → no pause", not ap._stall_streak_reached(["stall", "stall"]))
-    check("recent ok breaks streak", not ap._stall_streak_reached(["ok", "stall", "stall", "stall"]))
-    check("old ok beyond window ignored", ap._stall_streak_reached(["stall", "stall", "stall", "ok"]))
-    check("empty → no pause", not ap._stall_streak_reached([]))
-
-    print()
-    print("4. Auto-pause — _maybe_auto_pause_stalled_project (DB/telegram stubbed)")
-    print("=" * 72)
-
-    executed = []
-    events = []
-    alerts = []
-    orig_execute, orig_log_event, orig_send = ap.db_execute, ap._log_event, ap._send_owner_telegram
-    ap.db_execute = lambda sql, params=None: executed.append((sql, params))
-    ap._log_event = lambda pid, et, content="", meta=None, **kw: events.append((et, content, meta))
-
-    async def fake_send(text):
-        alerts.append(text)
-        return True
-
-    ap._send_owner_telegram = fake_send
-
-    ap._recent_stall_signals = lambda pid, limit=ap.STALL_AUTO_PAUSE_STREAK: ["stall", "stall", "stall"]
-    paused = await ap._maybe_auto_pause_stalled_project(PROJECT, {"verdict": "no-op", "review": "VERDICT: no-op"})
-    print(f"  paused={paused}; executed={len(executed)}; events={[e[0] for e in events]}")
-    print(f"  alert: {alerts[0][:150] if alerts else '(none)'}")
-    check("streak + no-op → paused", paused)
-    check("state UPDATE issued", any("SET state" in sql for sql, _ in executed))
-    check("state_transition event with auto meta", any(et == "state_transition" and (meta or {}).get("auto") for et, _, meta in events))
-    check("owner alerted", len(alerts) == 1 and "자동 일시정지" in alerts[0])
-
-    executed.clear(); events.clear(); alerts.clear()
-    paused = await ap._maybe_auto_pause_stalled_project(PROJECT, {"verdict": "advanced", "review": ""})
-    check("advanced verdict → never pauses", not paused and not executed and not alerts)
-
-    paused = await ap._maybe_auto_pause_stalled_project(PROJECT, None)
-    check("no review → never pauses", not paused)
-
-    ap._recent_stall_signals = lambda pid, limit=ap.STALL_AUTO_PAUSE_STREAK: ["stall", "ok", "stall"]
-    paused = await ap._maybe_auto_pause_stalled_project(PROJECT, {"verdict": "no-op", "review": ""})
-    check("broken streak → no pause", not paused and not executed)
-
-    def raising_execute(sql, params=None):
-        raise RuntimeError("db down")
-    ap._recent_stall_signals = lambda pid, limit=ap.STALL_AUTO_PAUSE_STREAK: ["stall", "stall", "stall"]
-    ap.db_execute = raising_execute
-    paused = await ap._maybe_auto_pause_stalled_project(PROJECT, {"verdict": "no-op", "review": ""})
-    check("db failure on pause degrades to False", not paused)
-
-    ap.db_execute, ap._log_event, ap._send_owner_telegram = orig_execute, orig_log_event, orig_send
-
-    print()
-    print("5. research_deep_dive — _build_deep_dive_tool")
+    print("3. research_deep_dive — _build_deep_dive_tool")
     print("=" * 72)
 
     dd_events = []
+    orig_log_event = ap._log_event
     ap._log_event = lambda pid, et, content="", meta=None, **kw: dd_events.append((et, content, meta))
 
     chat_calls = []
@@ -233,7 +177,7 @@ async def main():
     ap._log_event = orig_log_event
 
     print()
-    print("6. Notification — critic verdict line + _review_reason")
+    print("4. Notification — critic verdict line + _review_reason")
     print("=" * 72)
 
     check("_review_reason extracts", ap._review_reason("VERDICT: no-op\nREASON: 노트가 기존 내용 반복") == "노트가 기존 내용 반복")
@@ -245,6 +189,7 @@ async def main():
         sent.append(text)
         return True
 
+    orig_send = ap._send_owner_telegram
     ap._send_owner_telegram = capture_send
     await ap._notify_telegram(
         PROJECT, "본문.\n\n자가비평 문단.",
@@ -266,7 +211,7 @@ async def main():
     ap._send_owner_telegram = orig_send
 
     print()
-    print("7. Prompt assembly — research trail block in both renderers")
+    print("5. Prompt assembly — research trail block in both renderers")
     print("=" * 72)
 
     orig = {}

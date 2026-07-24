@@ -49,7 +49,6 @@ SYNTHESIS_PROMPT_CHARS = 3000       # char cap for the latest synthesis note in 
 RESEARCH_TRAIL_LOGS = 6      # past tick tool logs mined for the research trail
 RESEARCH_TRAIL_MAX_LINES = 40   # newest-first cap on trail lines surfaced in the prompt
 RESEARCH_TRAIL_ARGS_CAP = 180   # char cap per trail line's argument payload
-STALL_AUTO_PAUSE_STREAK = 3  # consecutive no-op/error ticks before auto-pause
 
 
 # ── Schema bootstrap ────────────────────────────────────────────────
@@ -1552,70 +1551,6 @@ async def _review_tick_outcome(
     return {"verdict": verdict, "review": review}
 
 
-def _stall_streak_reached(signals: list[str], streak: int = STALL_AUTO_PAUSE_STREAK) -> bool:
-    """Pure: `signals` are 'stall'/'ok' for recent completed ticks, newest
-    first. True when the newest `streak` signals are all stalls."""
-    return len(signals) >= streak and all(s == "stall" for s in signals[:streak])
-
-
-def _recent_stall_signals(project_id: int, limit: int = STALL_AUTO_PAUSE_STREAK) -> list[str]:
-    """Newest-first stall/ok signals from tick_review + tick_error events.
-    A tick_error is a stall; a tick_review is a stall only on a no-op verdict."""
-    try:
-        rows = db_query(
-            "SELECT event_type, meta FROM autonomous_project_events "
-            "WHERE project_id = %s AND event_type = ANY(%s) "
-            "ORDER BY created_at DESC, id DESC LIMIT %s",
-            (project_id, [_TICK_REVIEW_EVENT_TYPE, "tick_error"], limit),
-        )
-    except Exception as e:
-        logger.debug("stall signal fetch failed (project=%s): %s", project_id, e)
-        return []
-    signals: list[str] = []
-    for r in rows:
-        if r["event_type"] == "tick_error":
-            signals.append("stall")
-        else:
-            verdict = str((r.get("meta") or {}).get("verdict") or "")
-            signals.append("stall" if verdict == "no-op" else "ok")
-    return signals
-
-
-async def _maybe_auto_pause_stalled_project(project: dict, tick_review: dict | None) -> bool:
-    """Phase-4 enforcement: when the last STALL_AUTO_PAUSE_STREAK completed
-    ticks were all no-op/error, pause the project and alert the owner instead
-    of burning another hour of budget on a stuck loop. Only a no-op tick can
-    complete the streak, so a healthy tick never triggers this. Gated on the
-    tick critic flag implicitly — no verdicts, no streak."""
-    if not tick_review or tick_review.get("verdict") != "no-op":
-        return False
-    if not _stall_streak_reached(_recent_stall_signals(project["id"])):
-        return False
-    reason = (
-        f"auto-paused: last {STALL_AUTO_PAUSE_STREAK} ticks were all no-op/error. "
-        "Operator review needed — resume via set_project_state or leave an advisory."
-    )
-    try:
-        db_execute(
-            "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
-            (STATE_PAUSED, project["id"]),
-        )
-    except Exception as e:
-        logger.warning("auto-pause failed (project=%s): %s", project["id"], e)
-        return False
-    _log_event(
-        project["id"], "state_transition", reason,
-        {"from": project.get("state"), "to": STATE_PAUSED, "auto": True},
-    )
-    logger.info("Project %s auto-paused after %s stalled ticks", project["id"], STALL_AUTO_PAUSE_STREAK)
-    await _send_owner_telegram(
-        f"⏸️ 자율 프로젝트 #{project['id']} '{project.get('title', '')}' 자동 일시정지\n"
-        f"최근 {STALL_AUTO_PAUSE_STREAK}회 연속 무진전(no-op/error) 판정입니다. "
-        "프로젝트 상태를 점검한 뒤 advisory를 남기거나 상태를 researching으로 되돌려 재개하세요."
-    )
-    return True
-
-
 _EDITORIAL_DIAGNOSIS_GUIDANCE = (
     "An independent editor reviewed your staged draft(s) before publication. Judge each note "
     "as the author: apply what is right by revising the draft "
@@ -2017,10 +1952,6 @@ async def _run_one_tick(project: dict) -> dict:
             f"'{objective_head}' but produced no real progress"
             + (f" — {reason}" if reason else ""),
         )
-
-    # Stall enforcement (Phase-4 completion): a stuck project stops burning
-    # hourly budget and escalates to the operator instead.
-    await _maybe_auto_pause_stalled_project(project, tick_review)
 
     # Persist this tick's tool-call trace so the next tick can see WHAT this
     # tick actually ran and WHAT came back. Curated research_notes only capture
