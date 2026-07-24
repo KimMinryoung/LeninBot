@@ -32,6 +32,14 @@ READ_SEARCH_TOOLS = frozenset({
 
 # -- Telegram / runtime profiles -----------------------------------------
 
+COMMULINGO_NARROW_WRITE_TOOLS = frozenset({
+    "commulingo_person_create",
+    "commulingo_person_update",
+    "commulingo_section_save",
+    "commulingo_event_link",
+    "commulingo_term_create",
+})
+
 TELEGRAM_ORCHESTRATOR_PROFILE = "telegram.orchestrator"
 TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
     "delegate",
@@ -52,8 +60,7 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
     "list_agent_tools",
     "run_agent",
     "commulingo_people",
-    "commulingo_edit",
-})
+}) | COMMULINGO_NARROW_WRITE_TOOLS
 
 ROLEPLAY_TELEGRAM_PROFILE = "telegram.roleplay"
 ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS
@@ -75,7 +82,7 @@ WRITER_TOOLS = frozenset({
     "research_web",
     "web_search",
     # Read-only lookup in the CommuLingo people dictionary (Soviet-history
-    # reference for fiction). commulingo_edit stays off this surface.
+    # reference for fiction). All CommuLingo write tools stay off this surface.
     "commulingo_people",
 })
 
@@ -91,7 +98,7 @@ WEB_CYBER_LENIN_TOOLS = frozenset({
     "check_wallet",
     "read_self",
     # Read-only CommuLingo people-dictionary lookup (the data is already
-    # public at /commulingo/people). commulingo_edit stays off this surface.
+    # public at /commulingo/people). All CommuLingo write tools stay off this surface.
     "commulingo_people",
 })
 
@@ -184,7 +191,7 @@ MCP_FORBIDDEN_TOOL_NAMES = frozenset({
     "write_file",
     "write_kg",
     "write_kg_structured",
-})
+}) | COMMULINGO_NARROW_WRITE_TOOLS
 
 TOOL_PROFILES: dict[str, ToolProfile] = {
     TELEGRAM_ORCHESTRATOR_PROFILE: ToolProfile(

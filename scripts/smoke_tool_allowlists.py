@@ -81,6 +81,7 @@ REQUIRED_COMPAT_HANDLERS = {
 # allow-list smoke checks validate the same map the runtime gateway uses.
 from security_gateway.policy import TOOL_RISK_CLASS  # noqa: E402
 from tool_gateway.profiles import (  # noqa: E402
+    COMMULINGO_NARROW_WRITE_TOOLS,
     MCP_GATEWAY_LOCAL_TOOLS,
     MCP_INSPECT_PROFILE,
     MCP_OPERATOR_PROFILE,
@@ -169,6 +170,8 @@ def _assert_orchestrator(tool_names: set[str]) -> None:
     selected = select_orchestrator_tools(TOOLS)
     selected_names = _tool_names(selected)
     assert selected_names == set(ORCHESTRATOR_TOOL_NAMES)
+    assert "commulingo_edit" not in selected_names
+    assert COMMULINGO_NARROW_WRITE_TOOLS <= selected_names
     forbidden = sorted(
         name for name in selected_names
         if _risk_class(name) in {"admin", "execute", "file_read", "file_write", "pay"}
@@ -181,7 +184,8 @@ def _assert_agents(tool_names: set[str]) -> None:
     from agents.base import AgentSpec
     from llm.prompt_renderer import SystemPrompt
 
-    for spec in list_agents():
+    specs = list_agents()
+    for spec in specs:
         assert spec.tools, f"{spec.name} has empty fail-closed tool allowlist"
         dynamic = DYNAMIC_AGENT_TOOLS.get("*", set()) | DYNAMIC_AGENT_TOOLS.get(spec.name, set())
         unknown = sorted(set(spec.tools) - tool_names - dynamic)
@@ -192,6 +196,10 @@ def _assert_agents(tool_names: set[str]) -> None:
         assert not final_unknown, f"{spec.name} finalization_tools outside allowlist: {final_unknown}"
         uncategorized = sorted(name for name in spec.tools if _risk_class(name) == "uncategorized")
         assert not uncategorized, f"{spec.name} exposes uncategorized tools: {uncategorized}"
+
+    analyst = next(spec for spec in specs if spec.name == "analyst")
+    assert "commulingo_edit" not in analyst.tools
+    assert COMMULINGO_NARROW_WRITE_TOOLS <= set(analyst.tools)
 
     dummy = AgentSpec(
         name="dummy",

@@ -69,7 +69,7 @@ _AGENT_ROUTING_CARDS = {
         "use_for": [
             "research, analysis, fact-checking, KG/vector/web synthesis",
             "publishing or editing research documents, task reports, blog posts, and hub curations",
-            "CommuLingo people dictionary content (cards, moments, sections, office rows via commulingo_edit)",
+            "CommuLingo people/glossary content via target-specific narrow write tools",
             "admin-only private research documents",
         ],
         "do_not_use_for": [
@@ -79,7 +79,9 @@ _AGENT_ROUTING_CARDS = {
         ],
         "signature_tools": [
             "knowledge_graph_search", "vector_search", "web_search", "fetch_url",
-            "research_document", "edit_content", "commulingo_edit",
+            "research_document", "edit_content",
+            "commulingo_person_create", "commulingo_person_update",
+            "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
         ],
     },
     "programmer": {
@@ -134,9 +136,12 @@ _CONTENT_STORE_GUIDE = {
         "content_type": "CommuLingo people dictionary (person cards, moments, detail sections, office rows)",
         "identifier": "person id (kebab-case slug) / office id / section slug",
         "read": "commulingo_people(action='get_person'|'get_sections'|'search_people', ...)",
-        "write_or_edit": "analyst: commulingo_edit(target_type='person'|'person_section'|'office_row', ...)",
+        "write_or_edit": (
+            "analyst: commulingo_person_create / commulingo_person_update / "
+            "commulingo_section_save / commulingo_event_link / commulingo_term_create"
+        ),
         "not_this": (
-            "Not code work — commulingo_edit writes DB content only. Do not route to "
+            "Not code work — narrow CommUlingo tools write DB content only. Do not route to "
             "programmer even when the brief quotes tool parameters or DB terms."
         ),
     },
@@ -309,8 +314,8 @@ async def _classify_route_with_llm(task: str, candidates: list[str] | None = Non
             "Map public_content_edit/research to analyst except diary content to diary; "
             "code_config_work to programmer; browser_automation to browser; "
             "external_platform_scout to scout; email_a2a to diplomat. "
-            "The CommuLingo people dictionary (commulingo_edit tool: person cards, "
-            "moments, person_sections, office rows) is public_content_edit → analyst — "
+            "The CommuLingo dictionary (target-specific person, section, event-link, and term "
+            "write tools) is public_content_edit → analyst — "
             "it writes DB content, never source code, and a content brief quoting tool "
             "parameter syntax (target_type, action, slug, {ko,en}) does NOT make it "
             "code_config_work. "

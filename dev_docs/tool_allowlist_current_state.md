@@ -9,7 +9,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Layer | File | Purpose |
 |---|---|---|
 | Global registry | `runtime_tools/registry.py` | all possible tool definitions and handlers |
-| Telegram orchestrator | `runtime_tools/allowlists.py` | tools visible to the top-level Telegram orchestrator |
+| Telegram orchestrator | `tool_gateway/profiles.py` (`TELEGRAM_ORCHESTRATOR_TOOLS`; compatibility alias in `runtime_tools/allowlists.py`) | tools visible to the top-level Telegram orchestrator |
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
@@ -33,6 +33,8 @@ A tool is callable only if both its definition and handler are present after fil
 ## Telegram Orchestrator
 
 The orchestrator allow-list is `ORCHESTRATOR_TOOL_NAMES` in `runtime_tools/allowlists.py`. This surface should remain small: delegation, mission/context operations, safe recall/search, and user-facing coordination. It should not expose broad filesystem or code execution tools.
+
+CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus the five target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_term_create`). It does not see the legacy union `commulingo_edit`. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
 
 When adding a new orchestrator tool:
 
@@ -58,6 +60,7 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 - `stasova`
 - `diplomat`
 - `autonomous_project`
+- `analyst` — uses `commulingo_people` plus the same five target-specific CommUlingo writes; the legacy union `commulingo_edit` is not in its allow-list
 - `commulingo_curator` — research/read tools plus target-specific `commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, and `commulingo_term_create`; every scheduled stage filters that list again so only its applicable terminal write tool(s) are visible. New-person discovery uses a runner-local typed `commulingo_candidate_select` terminal and has no database write tool.
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
