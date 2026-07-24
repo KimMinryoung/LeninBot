@@ -1,5 +1,5 @@
 {
-  "_comment": "Person-name spelling normalization: variant -> canonical, per language. The commulingo_edit validator rejects prose that uses a variant outside direct quotation marks, and scripts/commulingo_normalize_names.py bulk-fixes stored text. 'blocked' lists longer strings that merely CONTAIN a variant and must never match (시베리아 contains 베리아) — same trick as the linkify BLOCKED list. Keep variants OUT of commulingo_person_aliases — aliases are linkified verbatim, so registering a misspelling there would display it. Grow this map via scripts/commulingo_find_name_variants.py candidates after human review. Picked up on mtime change, no restart needed.",
+  "_comment": "Person-name and glossary-term spelling normalization: variant -> canonical, per language. The commulingo_edit validator rejects prose that uses a variant outside direct quotation marks, and scripts/commulingo_normalize_names.py bulk-fixes stored text. 'blocked' lists longer strings that merely CONTAIN a variant and must never match (시베리아 contains 베리아) — same trick as the linkify BLOCKED list. Keep variants OUT of commulingo_person_aliases — aliases are linkified verbatim, so registering a misspelling there would display it. Grow this map via scripts/commulingo_find_name_variants.py candidates after human review. Picked up on mtime change, no restart needed. Also enforced on research-document writes (runtime_tools/research.py).",
   "ko": {
     "베리아": "베리야",
     "투하체프스키": "투하쳅스키",
@@ -30,11 +30,17 @@
     "호찌민": "호치민",
     "부됸늬": "부됸니",
     "보로진": "보로딘",
-    "피타코프": "퍄타코프"
+    "피타코프": "퍄타코프",
+    "넵맨": "네프맨",
+    "넵맵": "네프맨"
   },
   "en": {},
   "blocked": {
-    "ko": ["시베리아", "라이베리아", "이베리아"],
+    "ko": [
+      "시베리아",
+      "라이베리아",
+      "이베리아"
+    ],
     "en": []
   }
 }

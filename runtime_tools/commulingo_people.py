@@ -266,22 +266,33 @@ def _check_native_script(text: str, codes: list[str], field: str) -> str | None:
     )
 
 
+def find_spelling_variants_in_text(text: str, lang: str) -> dict[str, str]:
+    """variant -> canonical spellings used in `text` outside quotation marks.
+
+    Shared with the research-document writer (runtime_tools/research.py) so
+    reports spell dictionary people and glossary terms the way their cards do.
+    """
+    norm = _name_normalization()
+    table = norm.get(lang) or {}
+    hits: dict[str, str] = {}
+    if not table or not text:
+        return hits
+    scannable = _QUOTED_SPAN_RE.sub(" ", str(text))
+    for blocked in norm["blocked"].get(lang) or []:
+        scannable = scannable.replace(blocked, " ")
+    for variant, canonical in table.items():
+        if variant in scannable:
+            hits[variant] = canonical
+    return hits
+
+
 def _find_name_variants(patch: dict) -> list[tuple[str, str]]:
     """(variant, canonical) pairs used outside quotation marks, deduped."""
-    norm = _name_normalization()
     texts: list[tuple[str, str]] = []
     _collect_localized_strings(patch, texts)
     hits: dict[str, str] = {}
     for lang, text in texts:
-        table = norm.get(lang) or {}
-        if not table:
-            continue
-        scannable = _QUOTED_SPAN_RE.sub(" ", text)
-        for blocked in norm["blocked"].get(lang) or []:
-            scannable = scannable.replace(blocked, " ")
-        for variant, canonical in table.items():
-            if variant in scannable:
-                hits[variant] = canonical
+        hits.update(find_spelling_variants_in_text(text, lang))
     return sorted(hits.items())
 
 

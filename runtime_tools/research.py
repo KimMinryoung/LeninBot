@@ -238,6 +238,30 @@ def _validate_public_citation_format(content: str) -> str | None:
     return None
 
 
+def _validate_standard_spellings(content: str) -> str | None:
+    """Reject prose that spells dictionary people/terms differently from their cards.
+
+    Same variant map the CommuLingo curator enforces
+    (config/commulingo_name_normalization.json); direct quotations are exempt.
+    Keeping reports on card spellings is what makes site-wide auto-linking and
+    the 관련 보고서 reverse index actually connect (넵맨 would never link to the
+    네프맨 glossary card).
+    """
+    from runtime_tools.commulingo_people import find_spelling_variants_in_text
+
+    hits: dict[str, str] = {}
+    for lang in ("ko", "en"):
+        hits.update(find_spelling_variants_in_text(content or "", lang))
+    if not hits:
+        return None
+    fixes = "; ".join(f"'{variant}' → '{canonical}'" for variant, canonical in sorted(hits.items()))
+    return (
+        "Non-standard spelling(s) of dictionary people/terms: " + fixes + ". "
+        "Spell them exactly as their cards do (cyber-lenin.com/commulingo); original "
+        "spellings inside direct quotation marks are already exempt. Fix the text and retry."
+    )
+
+
 def _save_publication_draft(
     *,
     filename: str,
@@ -495,6 +519,9 @@ async def _exec_research_document_publish_public(
     citation_error = _validate_public_citation_format(content)
     if citation_error:
         return f"Error: {citation_error}"
+    spelling_error = _validate_standard_spellings(content)
+    if spelling_error:
+        return f"Error: {spelling_error}"
 
     now = datetime.now(KST)
 
@@ -762,6 +789,9 @@ async def _exec_research_document_edit_staged(
     citation_error = _validate_public_citation_format(body)
     if citation_error:
         return f"Error: {citation_error}"
+    spelling_error = _validate_standard_spellings(body)
+    if spelling_error:
+        return f"Error: {spelling_error}"
     new_title = (title or "").strip() or doc.get("title") or ""
     document = _build_document(
         new_title, body, original_publish_date or datetime.now(KST).strftime("%Y-%m-%d")
@@ -869,6 +899,9 @@ async def _exec_research_document_edit_public(
         citation_error = _validate_public_citation_format(body)
         if citation_error:
             return f"Error: {citation_error}"
+        spelling_error = _validate_standard_spellings(body)
+        if spelling_error:
+            return f"Error: {spelling_error}"
         draft_path = None
         review_note = ""
         if is_autonomous_publication_context():
