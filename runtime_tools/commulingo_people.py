@@ -47,7 +47,7 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
 _SUGGESTED_BY = os.getenv("COMMULINGO_SUGGESTED_BY", "cyber-lenin").strip() or "cyber-lenin"
 
-_TARGET_TYPES = ("person", "office_row", "person_section", "history_event_person")
+_TARGET_TYPES = ("person", "office_row", "person_section", "history_event_person", "term")
 
 _HISTORY_RELATION_KINDS = ("leader", "participant", "executor", "target", "opponent", "witness")
 _ACTIONS = ("create", "update", "delete")
@@ -148,6 +148,15 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
     "personId", "sortOrder", "relationKind", "relation", "note",
 })
+
+# Glossary terms (frontend /commulingo/terms, tables from frontend migration
+# 061). `aliases` are the exact strings prose uses and feed the auto-linking
+# pipeline; `people`/`events` are lists of related ids.
+_TERM_PATCH_KEYS = frozenset({
+    "id", "sortOrder", "term", "original", "period",
+    "definition", "body", "aliases", "people", "events", "sources",
+})
+_LOCALIZED_TERM_KEYS = ("term", "definition", "body")
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
 
@@ -583,6 +592,76 @@ def _get_event(event_id: str) -> dict | None:
     return event
 
 
+def _term_snapshot(cur, term_id: str) -> dict | None:
+    """Full glossary term via an existing cursor, in the term patch shape."""
+    cur.execute(
+        """SELECT id, term_ko, term_en, original, period_label,
+                  definition_ko, definition_en, body_ko, body_en, sources
+           FROM commulingo_terms WHERE id = %s""",
+        (term_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    term = {
+        "id": row["id"],
+        "term": {"ko": row["term_ko"], "en": row["term_en"]},
+        "original": row["original"],
+        "period": row["period_label"],
+        "definition": {"ko": row["definition_ko"], "en": row["definition_en"]},
+        "body": {"ko": row["body_ko"], "en": row["body_en"]},
+        "sources": row["sources"] if isinstance(row["sources"], list) else [],
+    }
+    cur.execute(
+        """SELECT lang, alias FROM commulingo_term_aliases
+           WHERE term_id = %s ORDER BY lang, sort_order, alias""",
+        (term_id,),
+    )
+    term["aliases"] = {"ko": [], "en": []}
+    for alias_row in cur.fetchall():
+        if alias_row["lang"] in term["aliases"]:
+            term["aliases"][alias_row["lang"]].append(alias_row["alias"])
+    cur.execute(
+        "SELECT person_id FROM commulingo_term_people WHERE term_id = %s ORDER BY sort_order, person_id",
+        (term_id,),
+    )
+    term["people"] = [r["person_id"] for r in cur.fetchall()]
+    cur.execute(
+        "SELECT event_id FROM commulingo_term_events WHERE term_id = %s ORDER BY sort_order, event_id",
+        (term_id,),
+    )
+    term["events"] = [r["event_id"] for r in cur.fetchall()]
+    return term
+
+
+def _list_terms() -> list[dict]:
+    rows = db_query(
+        """SELECT t.id, t.term_ko, t.term_en, t.original,
+                  COALESCE(a.aliases, ARRAY[]::text[]) AS aliases
+             FROM commulingo_terms t
+             LEFT JOIN (
+                 SELECT term_id, array_agg(alias ORDER BY lang, sort_order) AS aliases
+                   FROM commulingo_term_aliases GROUP BY term_id
+             ) a ON a.term_id = t.id
+            ORDER BY t.sort_order, t.id"""
+    )
+    return [
+        {
+            "id": row["id"],
+            "term": {"ko": row["term_ko"], "en": row["term_en"]},
+            "original": row["original"],
+            "aliases": list(row["aliases"] or []),
+        }
+        for row in rows
+    ]
+
+
+def _get_term(term_id: str) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            return _term_snapshot(cur, term_id)
+
+
 def _list_suggestions(status: str, limit: int) -> list[dict]:
     return db_query(
         """SELECT id, target_type, target_id, action, status, confidence,
@@ -613,6 +692,9 @@ COMMULINGO_PEOPLE_TOOL = {
         "exact person_section patch shape — edit and send back), "
         "`list_events` (historical event ids, titles, and linked-person counts), "
         "`get_event` (one event and all current person relationships), "
+        "`list_terms` (glossary term ids, names, and every registered alias — "
+        "check this before registering a term), "
+        "`get_term` (one glossary term in the exact term patch shape), "
         "`list_suggestions` (edit history/queue from commulingo_edit; "
         "optional status filter: pending/approved/rejected/superseded). "
         "Always read the current record before editing with commulingo_edit."
@@ -625,7 +707,8 @@ COMMULINGO_PEOPLE_TOOL = {
                 "enum": [
                     "list_groups", "search_people", "get_person",
                     "list_offices", "get_office", "list_categories",
-                    "get_sections", "list_events", "get_event", "list_suggestions",
+                    "get_sections", "list_events", "get_event",
+                    "list_terms", "get_term", "list_suggestions",
                 ],
             },
             "q": {
@@ -639,6 +722,7 @@ COMMULINGO_PEOPLE_TOOL = {
             "person_id": {"type": "string", "description": "get_person/get_sections: person id."},
             "office_id": {"type": "string", "description": "get_office: office id."},
             "event_id": {"type": "string", "description": "get_event: historical event id."},
+            "term_id": {"type": "string", "description": "get_term: glossary term id."},
             "status": {
                 "type": "string",
                 "description": "list_suggestions: filter (pending/approved/rejected/superseded). Default: all.",
@@ -660,6 +744,7 @@ async def _exec_commulingo_people(
     person_id: str = "",
     office_id: str = "",
     event_id: str = "",
+    term_id: str = "",
     status: str = "",
     limit: int = 30,
 ) -> str:
@@ -702,6 +787,14 @@ async def _exec_commulingo_people(
             result = await asyncio.to_thread(_get_event, event_id.strip())
             if result is None:
                 return f"Error: event '{event_id}' not found. Use list_events to find the id."
+        elif action == "list_terms":
+            result = await asyncio.to_thread(_list_terms)
+        elif action == "get_term":
+            if not term_id:
+                return "Error: term_id is required for get_term."
+            result = await asyncio.to_thread(_get_term, term_id.strip())
+            if result is None:
+                return f"Error: term '{term_id}' not found. Use list_terms to find the id."
         elif action == "list_suggestions":
             result = await asyncio.to_thread(_list_suggestions, (status or "").strip(), limit)
         else:
@@ -1229,6 +1322,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         "office_row": _OFFICE_ROW_PATCH_KEYS,
         "person_section": _SECTION_PATCH_KEYS,
         "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
+        "term": _TERM_PATCH_KEYS,
     }[target_type]
     unknown = set(patch) - allowed
     if unknown:
@@ -1499,6 +1593,84 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return f"Error: {key}.ko and {key}.en are required."
         if "sortOrder" in patch and not isinstance(patch["sortOrder"], int):
             return "Error: sortOrder must be an integer."
+    elif target_type == "term":
+        for key in ("id", "original", "period"):
+            if key in patch and patch[key] is not None and not isinstance(patch[key], str):
+                return f"Error: {key} must be a plain string."
+        for key in _LOCALIZED_TERM_KEYS:
+            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+                return (
+                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                    "a plain string would silently blank the other language."
+                )
+        definition = patch.get("definition")
+        if isinstance(definition, dict):
+            if len(definition.get("ko") or "") > 400 or len(definition.get("en") or "") > 900:
+                return (
+                    "Error: definition is too long; limits are 400 Korean characters and "
+                    "900 English characters. It is the card paragraph — move depth to body (markdown)."
+                )
+        if "aliases" in patch and patch["aliases"] is not None:
+            aliases = patch["aliases"]
+            if (not isinstance(aliases, dict)
+                    or not set(aliases) <= {"ko", "en"}
+                    or not all(isinstance(v, list) for v in aliases.values())):
+                return (
+                    "Error: aliases must be {\"ko\": [\"굴라크\"], \"en\": [\"Gulag\"]} — the exact "
+                    "strings prose uses; they drive site-wide auto-linking."
+                )
+        for key, table, reader in (("people", "commulingo_people", "search_people"),
+                                   ("events", "commulingo_history_events", "list_events")):
+            if key not in patch or patch[key] is None:
+                continue
+            value = patch[key]
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                return f"Error: {key} must be a list of {table} ids."
+            for item in value:
+                cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (item,))
+                if not cur.fetchone():
+                    return f"Error: {key} id '{item}' not found. Use {reader}."
+        if action == "create":
+            if patch.get("id") and patch["id"] != target_id:
+                return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
+            if not _ID_RE.match(target_id):
+                return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
+            cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+            if cur.fetchone():
+                return f"Error: term '{target_id}' already exists — use action 'update'."
+            term = patch.get("term") or {}
+            if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
+                return "Error: patch.term.ko and patch.term.en are required for term create."
+            if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
+                return "Error: patch.definition.ko and patch.definition.en are required for term create."
+            # An alias or name colliding with an existing term means this is the
+            # same concept under a different slug.
+            candidates = {term.get("ko"), term.get("en")}
+            aliases = patch.get("aliases") or {}
+            for values in (aliases.get("ko") or [], aliases.get("en") or []):
+                candidates.update(v for v in values if isinstance(v, str))
+            candidates.discard(None)
+            for candidate in candidates:
+                cur.execute(
+                    """SELECT t.id FROM commulingo_terms t
+                        WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
+                           OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
+                       UNION
+                       SELECT a.term_id FROM commulingo_term_aliases a
+                        WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
+                    {"c": candidate},
+                )
+                row = cur.fetchone()
+                if row:
+                    return (
+                        f"Error: '{candidate}' is already registered on term "
+                        f"'{row['id']}' — this is the same concept. Use action 'update' "
+                        "on that id instead of creating a duplicate."
+                    )
+        else:
+            cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+            if not cur.fetchone():
+                return f"Error: term '{target_id}' not found. Use list_terms to find the id."
     else:  # office_row
         for key in _LOCALIZED_OFFICE_ROW_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
@@ -1526,6 +1698,98 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
     return None
 
 
+def _replace_term_aliases(cur, term_id: str, aliases: dict):
+    cur.execute("DELETE FROM commulingo_term_aliases WHERE term_id = %s", (term_id,))
+    for lang in ("ko", "en"):
+        for index, alias in enumerate((aliases or {}).get(lang) or []):
+            value = alias.strip() if isinstance(alias, str) else ""
+            if not value:
+                continue
+            cur.execute(
+                """INSERT INTO commulingo_term_aliases (term_id, lang, alias, sort_order)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (term_id, lang, alias) DO UPDATE SET sort_order = EXCLUDED.sort_order""",
+                (term_id, lang, value, index),
+            )
+
+
+def _replace_term_links(cur, term_id: str, table: str, column: str, ids: list):
+    cur.execute(f"DELETE FROM {table} WHERE term_id = %s", (term_id,))
+    for index, item in enumerate(ids or []):
+        value = item.strip() if isinstance(item, str) else ""
+        if not value:
+            continue
+        cur.execute(
+            f"""INSERT INTO {table} (term_id, {column}, sort_order)
+                VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+            (term_id, value, index),
+        )
+
+
+def _apply_term_create(cur, term_id: str, patch: dict) -> None:
+    cur.execute("SELECT COALESCE(MAX(sort_order), -1) + 10 AS next_sort FROM commulingo_terms")
+    next_sort = cur.fetchone()["next_sort"]
+    term = patch.get("term") or {}
+    cur.execute(
+        """INSERT INTO commulingo_terms
+              (id, sort_order, term_ko, term_en, original, period_label,
+               definition_ko, definition_en, body_ko, body_en, sources, updated_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
+        (
+            term_id,
+            patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
+            _localized(term, "ko"), _localized(term, "en"),
+            patch.get("original") or "",
+            patch.get("period") or "",
+            _localized(patch.get("definition"), "ko"), _localized(patch.get("definition"), "en"),
+            _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
+            json.dumps(patch.get("sources") or [], ensure_ascii=False),
+        ),
+    )
+    _replace_term_aliases(cur, term_id, patch.get("aliases") or {
+        "ko": [_localized(term, "ko")], "en": [_localized(term, "en")],
+    })
+    _replace_term_links(cur, term_id, "commulingo_term_people", "person_id", patch.get("people") or [])
+    _replace_term_links(cur, term_id, "commulingo_term_events", "event_id", patch.get("events") or [])
+
+
+def _apply_term_update(cur, term_id: str, patch: dict) -> None:
+    sets, values = [], []
+
+    def set_col(column, value):
+        values.append(value)
+        sets.append(f"{column} = %s")
+
+    if "term" in patch:
+        set_col("term_ko", _localized(patch.get("term"), "ko"))
+        set_col("term_en", _localized(patch.get("term"), "en"))
+    if "original" in patch:
+        set_col("original", patch.get("original") or "")
+    if "period" in patch:
+        set_col("period_label", patch.get("period") or "")
+    if "definition" in patch:
+        set_col("definition_ko", _localized(patch.get("definition"), "ko"))
+        set_col("definition_en", _localized(patch.get("definition"), "en"))
+    if "body" in patch:
+        set_col("body_ko", _localized(patch.get("body"), "ko"))
+        set_col("body_en", _localized(patch.get("body"), "en"))
+    if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
+        set_col("sort_order", patch["sortOrder"])
+    if "sources" in patch and patch.get("sources") is not None:
+        values.append(json.dumps(patch["sources"], ensure_ascii=False))
+        sets.append("sources = %s::jsonb")
+    if sets:
+        sets.append("updated_at = NOW()")
+        values.append(term_id)
+        cur.execute(f"UPDATE commulingo_terms SET {', '.join(sets)} WHERE id = %s", values)
+    if "aliases" in patch:
+        _replace_term_aliases(cur, term_id, patch.get("aliases") or {})
+    if "people" in patch:
+        _replace_term_links(cur, term_id, "commulingo_term_people", "person_id", patch.get("people") or [])
+    if "events" in patch:
+        _replace_term_links(cur, term_id, "commulingo_term_events", "event_id", patch.get("events") or [])
+
+
 def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, changed_by: str) -> str:
     """Apply a validated edit via an open RealDictCursor. Returns a summary.
 
@@ -1548,6 +1812,22 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
         cur.execute("DELETE FROM commulingo_people WHERE id = %s", (target_id,))
         _write_revision(cur, "person", target_id, "delete person", before, changed_by)
         return f"deleted person '{target_id}'"
+
+    if target_type == "term":
+        if action == "create":
+            _apply_term_create(cur, target_id, patch)
+            _write_revision(cur, "term", target_id, "create term", _term_snapshot(cur, target_id), changed_by)
+            return f"created term '{target_id}'"
+        if action == "update":
+            before = _term_snapshot(cur, target_id)
+            _apply_term_update(cur, target_id, patch)
+            _write_revision(cur, "term", target_id, "update term",
+                            {"before": before, "after": _term_snapshot(cur, target_id)}, changed_by)
+            return f"updated term '{target_id}' ({', '.join(sorted(patch)) or 'no fields'})"
+        before = _term_snapshot(cur, target_id)
+        cur.execute("DELETE FROM commulingo_terms WHERE id = %s", (target_id,))
+        _write_revision(cur, "term", target_id, "delete term", before, changed_by)
+        return f"deleted term '{target_id}'"
 
     if target_type == "person_section":
         slug = patch["slug"]
@@ -1809,6 +2089,13 @@ _COMMULINGO_PATCH_SCHEMA = {
         "bio": _BIO_SCHEMA,
         "moment": _BILINGUAL_TEXT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
+        "term": _BILINGUAL_TEXT_SCHEMA,
+        "original": {"type": "string", "description": "term: native-script/original-language form (ГУЛАГ, нэпман)."},
+        "period": {"type": "string", "description": "term: period label ('1930–1960') or '개념' for pure concepts."},
+        "definition": _BILINGUAL_TEXT_SCHEMA,
+        "body": _BILINGUAL_TEXT_SCHEMA,
+        "people": {"type": "array", "items": {"type": "string"}, "description": "term: related person ids."},
+        "events": {"type": "array", "items": {"type": "string"}, "description": "term: related history event ids."},
         "aliases": {
             "type": "object", "additionalProperties": False,
             "properties": {
@@ -1909,7 +2196,18 @@ COMMULINGO_EDIT_TOOL = {
         "person id + patch.slug; office_row create → "
         "office id; office_row update/delete → numeric row id (from get_office); "
         "history_event_person create/update → target_id = event id and patch "
-        "{personId, relationKind, relation {ko,en}, note {ko,en}, sortOrder?}. "
+        "{personId, relationKind, relation {ko,en}, note {ko,en}, sortOrder?}; "
+        "term (glossary, /commulingo/terms) → target_id = kebab-case slug; patch "
+        "{term {ko,en}, original (native-script/original-language form, e.g. "
+        "'ГУЛАГ'), period ('1930–1960' or '개념' for pure concepts), definition "
+        "{ko,en} (ONE card paragraph, 2-3 sentences, ≤400 ko / ≤900 en chars), "
+        "body {ko,en} (optional long-form MARKDOWN), aliases {ko:[],en:[]} (the "
+        "EXACT strings prose uses — these drive site-wide auto-linking, so "
+        "include common variant spellings and English plural forms; NEVER "
+        "include a string that is also an ordinary everyday word), people "
+        "[person ids], events [event ids], sources}. ALWAYS check list_terms "
+        "first: an alias colliding with an existing term is rejected as a "
+        "duplicate concept. "
         "HOUSE STYLE — each card is a miniature story: epithet = a "
         "characterization with tension or irony, never a job title; bio = one "
         "short paragraph per language that opens with a scene or contradiction "

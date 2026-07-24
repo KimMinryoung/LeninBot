@@ -60,6 +60,12 @@ Content rules:
   is given name + surname ONLY (e.g. `Михаил Фриновский`); put the patronymic ONLY in
   `cyrillicPatronymic` (e.g. `Петрович`). Never put it in both fields. Epithet is a historical
   tension or irony, not a job title. Bio is one compact story-like paragraph.
+- Glossary terms (`target_type='term'`, /commulingo/terms) cover concepts, doctrines,
+  policies, and period vocabulary — never a person, a single event, or an institution that
+  has its own office page. `definition` is one card paragraph (2-3 sentences, both
+  languages); depth goes in `body` (markdown). `aliases` are the exact strings prose uses
+  and drive site-wide auto-linking: include variant spellings, NEVER a string that is also
+  an ordinary everyday word. Check `list_terms` before any term create.
 - Distinguish documented fact from interpretation. Do not sanitize repression, colonial
   violence, political responsibility, or historiographical dispute; do not sensationalize.
 - Confidence below 0.80 means do not write: research more within the run or stop without an

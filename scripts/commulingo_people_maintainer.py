@@ -57,6 +57,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         # (COMMULINGO_SUGGESTED_BY=commulingo-maintainer-new) no-ops so all
         # maintenance effort concentrates on enriching existing cards.
         "new_lane_enabled": True,
+        # Same switch for the glossary lane (commulingo_terms_maintainer.py).
+        "term_lane_enabled": True,
     }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -72,6 +74,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["incomplete_recent_days"] = max(1, int(cfg["incomplete_recent_days"]))
     cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
+    cfg["term_lane_enabled"] = bool(cfg["term_lane_enabled"])
     return cfg
 
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Register one missing CommuLingo glossary term every fifteen minutes
+
+[Timer]
+OnCalendar=*:7/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
