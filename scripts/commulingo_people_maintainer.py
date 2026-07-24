@@ -361,7 +361,7 @@ step does not apply; move to the next one.
    script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
    {{"ko": "...", "en": "..."}}}}. Never invent a code outside that list. Example:
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
-   "nationalOrigin": {{"code": "georgia", "label": {{"ko": "조지아", "en": "Georgia"}}}}}}.
+   "nationalOrigin": {{"code": "georgia", "label": {{"ko": "그루지야", "en": "Georgia"}}}}}}.
 {bio_step}
 4. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
    update.

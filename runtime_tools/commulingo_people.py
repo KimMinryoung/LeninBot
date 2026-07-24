@@ -879,7 +879,12 @@ def _nationality_values(patch: dict, key: str):
     if not isinstance(node, dict):
         return "", "", ""
     label = node.get("label") if isinstance(node.get("label"), dict) else None
-    return str(node.get("code") or "").strip(), _localized(label, "ko"), _localized(label, "en")
+    code = str(node.get("code") or "").strip()
+    label_ko = _localized(label, "ko")
+    label_en = _localized(label, "en")
+    if key == "origin" and code == "georgia":
+        label_ko = "그루지야"
+    return code, label_ko, label_en
 
 
 def _merge_patronymic_patch(patch: dict, before: dict | None = None) -> dict:

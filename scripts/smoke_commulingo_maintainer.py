@@ -22,6 +22,7 @@ from runtime_tools.commulingo_people import (
     COMMULINGO_TERM_CREATE_TOOL,
     CommulingoInputError,
     _merge_patronymic_patch,
+    _nationality_values,
     _patronymic_problem,
     _validate,
     normalize_commulingo_write,
@@ -194,6 +195,14 @@ normalized_origin, _, _, origin_repairs = normalize_commulingo_write(
 )
 assert normalized_origin["origin"]["code"] == "poland"
 assert "nationalOrigin->origin" in origin_repairs
+assert _nationality_values(
+    {"origin": {"code": "georgia", "label": {"ko": "조지아", "en": "Georgia"}}},
+    "origin",
+) == ("georgia", "그루지야", "Georgia")
+assert _nationality_values(
+    {"citizenship": {"code": "georgia", "label": {"ko": "조지아", "en": "Georgia"}}},
+    "citizenship",
+) == ("georgia", "조지아", "Georgia")
 
 try:
     normalize_commulingo_write(

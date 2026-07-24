@@ -46,6 +46,8 @@ Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalizatio
 
 Person nationality and name ingestion uses two explicit invariants at that same boundary. `nationalOrigin` means national/ethnic background, never birthplace or place of death (legacy `origin` is normalized internally). Patronymic PATCHes merge omitted Korean, English, and native-script subfields instead of replacing the whole row; Korean/English must be paired, Cyrillic native names with a localized patronymic require `cyrillicPatronymic`, and a base native name may not embed the separately stored patronymic.
 
+The Korean national-background label for code `georgia` is canonicalized to the Soviet-era form `그루지야` at write time. Citizenship labels and narrative prose are not mechanically rewritten by this rule.
+
 ## Runtime Overlay
 
 `config/agent_runtime.json` can override registered specs without editing Python. The example file shows supported keys:
