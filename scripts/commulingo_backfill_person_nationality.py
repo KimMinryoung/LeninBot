@@ -94,6 +94,9 @@ CITIZENSHIP_OVERRIDES = {
 # Only exceptions to origin == citizenship (or Soviet -> Russian) belong here.
 # These encode documented family/national identity, never birthplace alone.
 ORIGIN_OVERRIDES = {
+    "kim-alexandra-petrovna": "korea",
+    "kim-tu-bong": "korea",
+    "pak-hon-yong": "korea",
     "aime-cesaire": "martinique",
     "fanon": "martinique",
     "bogdan-knunyants": "armenia",

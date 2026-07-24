@@ -13,12 +13,14 @@ spec.loader.exec_module(mod)
 rows = [
     {"id": "existing-foreign", "name": "A", "citizenship": "france", "origin": ""},
     {"id": "victor-serge", "name": "B", "citizenship": "soviet", "origin": ""},
+    {"id": "pak-hon-yong", "name": "E", "citizenship": "north-korea", "origin": ""},
     {"id": "bogdan-knunyants", "name": "C", "citizenship": "", "origin": ""},
 ]
 changes = mod.plan(rows)
 by_id = {row["id"]: row for row in changes}
 assert by_id["existing-foreign"]["new_origin"] == "france"
 assert by_id["victor-serge"]["new_origin"] == "russia"
+assert by_id["pak-hon-yong"]["new_origin"] == "korea"
 assert by_id["bogdan-knunyants"]["new_citizenship"] == "russia"
 assert by_id["bogdan-knunyants"]["new_origin"] == "armenia"
 
