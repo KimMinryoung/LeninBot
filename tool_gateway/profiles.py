@@ -37,6 +37,7 @@ COMMULINGO_NARROW_WRITE_TOOLS = frozenset({
     "commulingo_person_update",
     "commulingo_section_save",
     "commulingo_event_link",
+    "commulingo_office_row_save",
     "commulingo_term_create",
 })
 
@@ -164,7 +165,6 @@ MCP_FORBIDDEN_TOOL_NAMES = frozenset({
     "a2a_send",
     "allowlist_sender",
     "broadcast_to_channel",
-    "commulingo_edit",
     "convert_document",
     "download_file",
     "download_image",

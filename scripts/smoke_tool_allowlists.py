@@ -132,6 +132,14 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
     assert not missing_public, f"required public tools missing: {missing_public}"
     removed_still_public = sorted(REMOVED_PUBLIC_TOOLS & tool_names)
     assert not removed_still_public, f"removed tools still exposed: {removed_still_public}"
+    commulingo_write_names = {
+        name for name in tool_names
+        if name.startswith("commulingo_") and name != "commulingo_people"
+    }
+    assert commulingo_write_names == set(COMMULINGO_NARROW_WRITE_TOOLS), (
+        "global registry must expose only the canonical narrow CommUlingo writes: "
+        f"{sorted(commulingo_write_names)}"
+    )
     missing_compat = sorted(REQUIRED_COMPAT_HANDLERS - handler_names)
     assert not missing_compat, f"compat handlers missing: {missing_compat}"
     uncategorized = sorted(name for name in tool_names if _risk_class(name) == "uncategorized")
@@ -170,7 +178,6 @@ def _assert_orchestrator(tool_names: set[str]) -> None:
     selected = select_orchestrator_tools(TOOLS)
     selected_names = _tool_names(selected)
     assert selected_names == set(ORCHESTRATOR_TOOL_NAMES)
-    assert "commulingo_edit" not in selected_names
     assert COMMULINGO_NARROW_WRITE_TOOLS <= selected_names
     forbidden = sorted(
         name for name in selected_names
@@ -198,7 +205,6 @@ def _assert_agents(tool_names: set[str]) -> None:
         assert not uncategorized, f"{spec.name} exposes uncategorized tools: {uncategorized}"
 
     analyst = next(spec for spec in specs if spec.name == "analyst")
-    assert "commulingo_edit" not in analyst.tools
     assert COMMULINGO_NARROW_WRITE_TOOLS <= set(analyst.tools)
 
     dummy = AgentSpec(

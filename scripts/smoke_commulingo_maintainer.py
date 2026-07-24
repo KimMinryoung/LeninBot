@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agents.commulingo_curator import COMMULINGO_CURATOR
 from runtime_tools.commulingo_people import (
     COMMULINGO_EVENT_LINK_TOOL,
+    COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
     COMMULINGO_PERSON_UPDATE_TOOL,
     COMMULINGO_SECTION_SAVE_TOOL,
@@ -128,8 +129,6 @@ task = maintainer.build_task("enrich", candidate)
 assert "example" in task and "get_person" in task and "one available narrow write" in task
 assert "Do not create a section" in task and "has epithet: False" in task
 assert "commulingo_event_link" in task and "linked historical events: 0" in task
-assert "history_event_person" in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["target_type"]["enum"]
-assert "initial" not in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["patch"]["properties"]
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
 
@@ -166,6 +165,9 @@ assert "sources" not in term_fields and "bio" not in term_fields
 assert COMMULINGO_PERSON_UPDATE_TOOL["input_schema"]["additionalProperties"] is False
 assert COMMULINGO_SECTION_SAVE_TOOL["input_schema"]["additionalProperties"] is False
 assert COMMULINGO_EVENT_LINK_TOOL["input_schema"]["additionalProperties"] is False
+office_fields = COMMULINGO_OFFICE_ROW_SAVE_TOOL["input_schema"]["properties"]["fields"]["properties"]
+assert set(office_fields) == {"sortOrder", "years", "body", "personId", "name", "note"}
+assert "bio" not in office_fields and "term" not in office_fields
 
 try:
     normalize_commulingo_write(

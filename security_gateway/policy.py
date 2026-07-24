@@ -76,11 +76,11 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # reversible (unlike broadcast-style publish tools), so the publish rate
     # cap only throttled legitimate bulk curation (2026-07-11 incident: 11
     # section writes bounced mid-task).
-    "commulingo_edit": "write",
     "commulingo_person_create": "write",
     "commulingo_person_update": "write",
     "commulingo_section_save": "write",
     "commulingo_event_link": "write",
+    "commulingo_office_row_save": "write",
     "commulingo_term_create": "write",
     "research_document": "publish",
     "edit_content": "publish",

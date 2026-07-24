@@ -34,7 +34,7 @@ A tool is callable only if both its definition and handler are present after fil
 
 The orchestrator allow-list is `ORCHESTRATOR_TOOL_NAMES` in `runtime_tools/allowlists.py`. This surface should remain small: delegation, mission/context operations, safe recall/search, and user-facing coordination. It should not expose broad filesystem or code execution tools.
 
-CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus the five target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_term_create`). It does not see the legacy union `commulingo_edit`. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
+CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus six target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, `commulingo_term_create`). The global registry no longer contains a generic union write tool. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
 
 When adding a new orchestrator tool:
 
@@ -60,7 +60,7 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 - `stasova`
 - `diplomat`
 - `autonomous_project`
-- `analyst` — uses `commulingo_people` plus the same five target-specific CommUlingo writes; the legacy union `commulingo_edit` is not in its allow-list
+- `analyst` — uses `commulingo_people` plus the same six target-specific CommUlingo writes
 - `commulingo_curator` — research/read tools plus target-specific `commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, and `commulingo_term_create`; every scheduled stage filters that list again so only its applicable terminal write tool(s) are visible. New-person discovery uses a runner-local typed `commulingo_candidate_select` terminal and has no database write tool.
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.

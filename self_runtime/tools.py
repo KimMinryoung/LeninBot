@@ -81,7 +81,8 @@ _AGENT_ROUTING_CARDS = {
             "knowledge_graph_search", "vector_search", "web_search", "fetch_url",
             "research_document", "edit_content",
             "commulingo_person_create", "commulingo_person_update",
-            "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+            "commulingo_section_save", "commulingo_event_link",
+            "commulingo_office_row_save", "commulingo_term_create",
         ],
     },
     "programmer": {
@@ -138,7 +139,8 @@ _CONTENT_STORE_GUIDE = {
         "read": "commulingo_people(action='get_person'|'get_sections'|'search_people', ...)",
         "write_or_edit": (
             "analyst: commulingo_person_create / commulingo_person_update / "
-            "commulingo_section_save / commulingo_event_link / commulingo_term_create"
+            "commulingo_section_save / commulingo_event_link / "
+            "commulingo_office_row_save / commulingo_term_create"
         ),
         "not_this": (
             "Not code work — narrow CommUlingo tools write DB content only. Do not route to "

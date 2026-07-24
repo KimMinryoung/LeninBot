@@ -1,15 +1,14 @@
-"""runtime_tools.commulingo_people — CommuLingo 인물 사전 read + edit tools.
+"""runtime_tools.commulingo_people — CommuLingo dictionary read + narrow write tools.
 
 The people dictionary at cyber-lenin.com/commulingo/people is DB-backed
 (commulingo_* tables in the main Postgres; see
 frontend/dev_docs/commulingo_people_handoff.md).
 
-Two tools:
+The public tool surface contains one read/search tool and target-specific narrow
+write tools for people, sections, event links, and terms. Every write requires
+citations and shares the same validation and transaction core.
 
-- commulingo_people — read/search the dictionary + edit history/queue status
-- commulingo_edit   — propose or apply an edit (sources required)
-
-commulingo_edit runs in one of two modes, switched by
+Writes run in one of two modes, switched by
 config/commulingo_people.json → {"direct_apply": true|false} (mtime-cached,
 no restart needed):
 
@@ -398,8 +397,7 @@ def _search_people(q: str, group_id: str, limit: int) -> list[dict]:
 def _person_snapshot(cur, person_id: str) -> dict | None:
     """Full person record via an existing cursor (transaction-consistent).
 
-    Returned in the SAME shape commulingo_edit's patch accepts, so agents can
-    read a record, modify fields, and send them straight back.
+    Returned in the canonical person-field shape accepted by the narrow writers.
     """
     cur.execute(
         """SELECT id, group_id, cyrillic, years_label,
@@ -727,8 +725,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "(office) leadership timelines, all bilingual ko/en. Actions: "
         "`list_groups` (era groups + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
-        "`get_person` (full record — returned in the exact patch shape "
-        "commulingo_edit accepts, so you can edit fields and send them back; "
+        "`get_person` (full record — returned in the canonical person-field shape "
+        "accepted by the narrow person writers; "
         "office_rows, sections and role.resolvedIcon are read-only info), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
@@ -740,9 +738,9 @@ COMMULINGO_PEOPLE_TOOL = {
         "`list_terms` (glossary term ids, names, and every registered alias — "
         "check this before registering a term), "
         "`get_term` (one glossary term in the exact term patch shape), "
-        "`list_suggestions` (edit history/queue from commulingo_edit; "
+        "`list_suggestions` (narrow-write edit history/queue; "
         "optional status filter: pending/approved/rejected/superseded). "
-        "Always read the current record before editing with commulingo_edit."
+        "Always read the current record before calling a narrow write tool."
     ),
     "input_schema": {
         "type": "object",
@@ -2120,7 +2118,7 @@ _NATIONALITY_SCHEMA = {
     "required": ["code", "label"],
 }
 
-_COMMULINGO_PATCH_SCHEMA = {
+_COMMULINGO_FIELD_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "description": (
@@ -2327,117 +2325,7 @@ def normalize_commulingo_write(
     return normalized, normalized_citations, confidence, repairs
 
 
-COMMULINGO_EDIT_TOOL = {
-    "name": "commulingo_edit",
-    "description": (
-        "Edit the CommuLingo people dictionary. Depending on the operator-set "
-        "mode, the edit either applies immediately (with a revision snapshot, "
-        "so it is reversible) or is staged for operator review — the response "
-        "says which happened. Read the current record with commulingo_people "
-        "first, and cite at least one source per edit. `patch` fields (include "
-        "only what you change): person — group, cyrillic (the person's name in "
-        "THEIR OWN script — despite the field name it is not always Cyrillic. "
-        "Cyrillic only for Soviet/Russian/Ukrainian/Belarusian/Bulgarian figures; "
-        "Hangul for Koreans (박헌영, never 'Пак Хон Ён'), hanzi for Chinese (毛泽东), "
-        "kanji for Japanese (片山潜), Georgian script for Georgians, Latin for "
-        "Europeans/Americans/Africans (Kádár János — Hungarians family-name-first "
-        "— never 'Янош Кадар'; Mārtiņš Lācis; Salvador Allende). Writing a Russian "
-        "transliteration for a non-Russian is rejected on save, checked against "
-        "citizenship.code; with cyrillicPatronymic, use cyrillic for given name + "
-        "surname only, and a Western middle name goes in cyrillicPatronymic in the "
-        "same script, e.g. cyrillic 'Earl Browder' + cyrillicPatronymic 'Russell'. "
-        "A Russian-style patronymic belongs only to figures who actually used one), "
-        "years ('1878–1953', en dash), "
-        "givenName/familyName {ko,en} (PREFERRED name fields — structured parts; "
-        "single-token East Asian names like 김일성 go wholly in familyName; a "
-        "Western middle name belongs in givenName). Legacy name {ko,en} is still "
-        "accepted and split automatically (family = last word). Either way the "
-        "name is given name + surname ONLY — a name embedding the patronymic is "
-        "rejected on save, because the site composes given + patronymic + family "
-        "on render and an embedded one would double. epithet/bio/moment {ko,en}, fate "
-        "{kind, label {ko,en}} (kind: executed/assassinated/murdered/killed/"
-        "deposed/exile/suicide/natural; label = cause of death ONLY, no death "
-        "year — it renders from `years`: 처형/Executed, 자연사/Natural causes, a "
-        "specific illness like 심장마비/Heart attack, place with ' · ' e.g. 암살 · "
-        "멕시코; a deposed/exile fate keeps its event year, 실각 1964 · 자연사. The "
-        "death year is stripped automatically on save), "
-        "patronymic {ko,en}, cyrillicPatronymic, citizenship/origin "
-        "{code, label {ko,en}} (citizenship = the state they belonged to for the "
-        "work they are known for — a Soviet official is 'soviet' even if born in "
-        "Poland and even if they died in exile abroad; origin = birthplace only. "
-        "Neither is 'where they happened to die'. citizenship drives the "
-        "native-name script check above, so a wrong code produces wrong names), "
-        "aliases "
-        "{ko:[],en:[]}, career [{y:'1922–1953', r:{ko,en}}], role {officeId} "
-        "OR {category} (the card's ONE primary marker; exactly one of the two — "
-        "icon and label render from the linked institution or category, see "
-        "list_offices/list_categories; ALWAYS set on person create; null "
-        "clears; full multi-institution history belongs in office_rows/career); "
-        "office_row — years, body {ko,en}, personId, name {ko,en}, note "
-        "{ko,en}; person_section — slug (kebab-case section id), heading "
-        "{ko,en}, body {ko,en} (MARKDOWN, replaced wholesale per section), "
-        "sortOrder — long-form detail beyond the card, rendered on the "
-        "person's detail page /commulingo/people/<id>; use sections for depth "
-        "the card can't hold, one topic per section. CAUTION: aliases/"
-        "career/scenes are replaced wholesale — send the complete new list, not "
-        "just additions. All text fields are bilingual {ko,en} objects; plain "
-        "strings are rejected. Targets: person create → target_id = new slug; "
-        "person update/delete → person id; person_section (all actions) → "
-        "person id + patch.slug; office_row create → "
-        "office id; office_row update/delete → numeric row id (from get_office); "
-        "history_event_person create/update → target_id = event id and patch "
-        "{personId, relationKind, relation {ko,en}, note {ko,en}, sortOrder?}; "
-        "term (glossary, /commulingo/terms) → target_id = kebab-case slug; patch "
-        "{term {ko,en}, original (native-script/original-language form, e.g. "
-        "'ГУЛАГ'), period ('1930–1960' or '개념' for pure concepts), definition "
-        "{ko,en} (ONE card paragraph, 2-3 sentences, ≤400 ko / ≤900 en chars), "
-        "body {ko,en} (optional long-form MARKDOWN), aliases {ko:[],en:[]} (the "
-        "EXACT strings prose uses — these drive site-wide auto-linking, so "
-        "include common variant spellings and English plural forms; NEVER "
-        "include a string that is also an ordinary everyday word), people "
-        "[person ids], events [event ids], sources}. ALWAYS check list_terms "
-        "first: an alias colliding with an existing term is rejected as a "
-        "duplicate concept. "
-        "HOUSE STYLE — each card is a miniature story: epithet = a "
-        "characterization with tension or irony, never a job title; bio = one "
-        "short paragraph per language that opens with a scene or contradiction "
-        "and favors one concrete detail (a habit, a decision, a scene) over "
-        "abstractions; moment = ONE defining quote or scene line per language, "
-        "rendered as a pull-quote between epithet and bio — no dates-and-posts "
-        "summary, that's what career is for. moment MUST be a real, verifiable "
-        "quote or documented scene with a source; NEVER compose or embellish "
-        "one — if nothing solid exists for a person, leave moment empty. An "
-        "empty moment is correct; an invented one is vandalism."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "target_type": {"type": "string", "enum": list(_TARGET_TYPES)},
-            "action": {"type": "string", "enum": list(_ACTIONS)},
-            "target_id": {
-                "type": "string",
-                "description": "Person id, new person slug, office id, or numeric office-row id (see description).",
-            },
-            "patch": _COMMULINGO_PATCH_SCHEMA,
-            "sources": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Required, non-empty. Each entry: a URL or citation plus what it "
-                    "supports, e.g. 'https://... — 1937 arrest date'."
-                ),
-            },
-            "confidence": {
-                "type": "number",
-                "description": "Optional self-assessed confidence, 0–1.",
-            },
-        },
-        "required": ["target_type", "action", "target_id", "patch", "sources"],
-    },
-}
-
-
-async def _exec_commulingo_edit(
+async def _exec_commulingo_write(
     target_type: str,
     action: str,
     target_id: str,
@@ -2471,7 +2359,7 @@ async def _exec_commulingo_edit(
     except CommulingoInputError as e:
         return _commulingo_error(e.code, str(e), retryable=e.retryable)
     except Exception as e:
-        logger.warning("commulingo_edit error: %s", e)
+        logger.warning("commulingo write error: %s", e)
         return _commulingo_error("internal_error", f"{type(e).__name__}: {e}", retryable=True)
 
 
@@ -2479,7 +2367,7 @@ def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = 
     return {
         "type": "object",
         "additionalProperties": False,
-        "properties": {key: _COMMULINGO_PATCH_SCHEMA["properties"][key] for key in keys},
+        "properties": {key: _COMMULINGO_FIELD_SCHEMA["properties"][key] for key in keys},
         **({"required": list(required)} if required else {}),
     }
 
@@ -2492,6 +2380,9 @@ _PERSON_NARROW_KEYS = (
 _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "definition", "body",
     "aliases", "people", "events",
+)
+_OFFICE_ROW_NARROW_KEYS = (
+    "sortOrder", "years", "body", "personId", "name", "note",
 )
 
 _CITATIONS_SCHEMA = {
@@ -2564,6 +2455,25 @@ COMMULINGO_EVENT_LINK_TOOL = {
     },
 }
 
+COMMULINGO_OFFICE_ROW_SAVE_TOOL = {
+    "name": "commulingo_office_row_save",
+    "description": (
+        "Create or update one sourced bilingual institution leadership row. "
+        "For create, target_id is the office id; for update, target_id is the numeric row id."
+    ),
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "action": {"type": "string", "enum": ["create", "update"]},
+            "target_id": {"type": "string"},
+            "fields": _narrow_fields_schema(_OFFICE_ROW_NARROW_KEYS),
+            "citations": _CITATIONS_SCHEMA,
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["action", "target_id", "fields", "citations"],
+    },
+}
+
 COMMULINGO_TERM_CREATE_TOOL = {
     "name": "commulingo_term_create",
     "description": "Create one sourced bilingual CommuLingo glossary term. Term fields only; citations stay top-level.",
@@ -2581,11 +2491,11 @@ COMMULINGO_TERM_CREATE_TOOL = {
 
 
 async def _exec_commulingo_person_create(person_id: str, fields: dict, citations: list, confidence=None) -> str:
-    return await _exec_commulingo_edit("person", "create", person_id, citations, fields, confidence)
+    return await _exec_commulingo_write("person", "create", person_id, citations, fields, confidence)
 
 
 async def _exec_commulingo_person_update(person_id: str, fields: dict, citations: list, confidence=None) -> str:
-    return await _exec_commulingo_edit("person", "update", person_id, citations, fields, confidence)
+    return await _exec_commulingo_write("person", "update", person_id, citations, fields, confidence)
 
 
 async def _exec_commulingo_section_save(
@@ -2595,7 +2505,7 @@ async def _exec_commulingo_section_save(
     fields = {"slug": slug, "heading": heading, "body": body, "sources": citations}
     if sort_order is not None:
         fields["sortOrder"] = sort_order
-    return await _exec_commulingo_edit("person_section", action, person_id, citations, fields, None)
+    return await _exec_commulingo_write("person_section", action, person_id, citations, fields, None)
 
 
 async def _exec_commulingo_event_link(
@@ -2608,30 +2518,38 @@ async def _exec_commulingo_event_link(
     }
     if sort_order is not None:
         fields["sortOrder"] = sort_order
-    return await _exec_commulingo_edit("history_event_person", "create", event_id, citations, fields, None)
+    return await _exec_commulingo_write("history_event_person", "create", event_id, citations, fields, None)
+
+
+async def _exec_commulingo_office_row_save(
+    action: str, target_id: str, fields: dict, citations: list, confidence=None,
+) -> str:
+    return await _exec_commulingo_write(
+        "office_row", action, target_id, citations, fields, confidence,
+    )
 
 
 async def _exec_commulingo_term_create(term_id: str, fields: dict, citations: list, confidence=None) -> str:
     fields = dict(fields or {})
     fields.setdefault("sources", citations)
-    return await _exec_commulingo_edit("term", "create", term_id, citations, fields, confidence)
+    return await _exec_commulingo_write("term", "create", term_id, citations, fields, confidence)
 
 
 COMMULINGO_TOOLS = [
     COMMULINGO_PEOPLE_TOOL,
-    COMMULINGO_EDIT_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
     COMMULINGO_PERSON_UPDATE_TOOL,
     COMMULINGO_SECTION_SAVE_TOOL,
     COMMULINGO_EVENT_LINK_TOOL,
+    COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_TERM_CREATE_TOOL,
 ]
 COMMULINGO_TOOL_HANDLERS = {
     "commulingo_people": _exec_commulingo_people,
-    "commulingo_edit": _exec_commulingo_edit,
     "commulingo_person_create": _exec_commulingo_person_create,
     "commulingo_person_update": _exec_commulingo_person_update,
     "commulingo_section_save": _exec_commulingo_section_save,
     "commulingo_event_link": _exec_commulingo_event_link,
+    "commulingo_office_row_save": _exec_commulingo_office_row_save,
     "commulingo_term_create": _exec_commulingo_term_create,
 }

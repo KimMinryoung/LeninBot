@@ -165,7 +165,7 @@ _REPLACE_MANUSCRIPT_TOOL = {
 # system.writer profile). The handler is project-independent and module-level,
 # so its identity is stable for the dispatcher's signature cache. The spec
 # reuses the canonical schema but swaps the description: the canonical one
-# instructs the reader to follow up with commulingo_edit, which the writer
+# instructs the reader to follow up with a write tool, which the writer
 # does not have.
 _COMMULINGO_PEOPLE_WRITER_TOOL: dict | None = None
 _COMMULINGO_PEOPLE_HANDLER = None
