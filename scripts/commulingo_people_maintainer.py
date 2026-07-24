@@ -3,7 +3,7 @@
 
 The script deterministically selects one sparse existing person (or periodically asks for
 one missing person), then gives only that task to the dedicated DeepSeek V4 Pro curator.
-The curator has four tools and `commulingo_edit` is terminal, enforcing one write per run.
+Each stage exposes only its read tools and the narrow terminal write tools it can use.
 """
 
 from __future__ import annotations
@@ -269,12 +269,9 @@ prove there is no duplicate. Research with the free wiki_search/wiki_get tools f
 Wikipedia when available); use the paid web_search only for facts Wikipedia lacks. One opened
 source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
 complete bilingual person card with a correct group and one primary role, including a bio and a
-one-line `moment` that follow the style rules below, via one
-`commulingo_edit(target_type='person', action='create', ...)` call. Then inspect list_events and
-link the new person to the history events they were clearly and materially involved in — up to
-three `commulingo_edit(target_type='history_event_person', action='create', ...)` calls, each
-with concise bilingual relation labels; skip any event where the connection is weak rather than
-force it. Then stop. Do not create a section or office row in this run.
+one-line `moment` that follow the style rules below, via one `commulingo_person_create` call.
+Then stop. Event links can be added by a later enrichment run. Do not create a section or office
+row in this run.
 
 """ + CARD_STYLE_GUIDANCE
     if not candidate:
@@ -336,7 +333,7 @@ Target exactly this person and no one else:
 - origin flag code: {candidate.get('origin_code') or '(unset)'}
 {tier_line}
 
-Call get_person and get_sections first, then make exactly one commulingo_edit, choosing the
+Call get_person and get_sections first, then make exactly one available narrow write, choosing the
 first step below that applies.
 
 CONTENT PRESERVATION: before writing anything, compare your draft against what the card
@@ -347,10 +344,10 @@ by sources, duplicated elsewhere on the card, or clearly violating the style rul
 an accidental side effect of a rewrite. If the existing content already satisfies a step, that
 step does not apply; move to the next one.
 1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
-   missing, one person update that fills every such missing basic field (bio and moment written
+   missing, one `commulingo_person_update` that fills every such missing basic field (bio and moment written
    to the style rules below). Do not create a section in that case.
 2. NATIONALITY: else if the citizenship flag code is unset, set the person's nationality in one
-   person update. Provide `citizenship` — the state whose citizenship the person actually held
+   `commulingo_person_update`. Provide `citizenship` — the state whose citizenship the person actually held
    (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
    state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
    revolutionaries take their own state) — and, only when it is a DIFFERENT nation, `origin`, the
@@ -367,14 +364,14 @@ step does not apply; move to the next one.
    update.
 5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
    get_event records. When one event connection is clearly supported, create exactly one
-   history_event_person relation; never force a weak connection.
+   `commulingo_event_link`; never force a weak connection.
 6. SECTION: else find the single most valuable missing topic and add one substantial bilingual
-   `person_section` (one topic, roughly 350-700 Korean characters plus equivalent English) when
+   section via `commulingo_section_save` (one topic, roughly 350-700 Korean characters plus equivalent English) when
    no section covers it.
 Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
 tools first (Russian Wikipedia when available); use the paid web_search only for facts Wikipedia
 lacks. One opened source is enough for routine card facts; use a second only for disputed or
-consequential claims. Make one commulingo_edit call and stop.
+consequential claims. Make one narrow write call and stop.
 
 """ + CARD_STYLE_GUIDANCE
 
@@ -384,18 +381,16 @@ def build_discovery_task() -> str:
 
 Do not create or edit anything in this stage. Inspect list_groups, list_categories and
 list_offices, then use search_people under a proposed name and aliases to prove the person
-is absent. Prefer a historically important gap in revolutionary or Soviet history. Open one
-reliable biographical source. End with exactly one machine-readable line and no text after it:
-CANDIDATE_JSON: {"id":"lowercase-kebab-slug","name_ko":"...","name_en":"...",
-"reason":"...","source_url":"https://..."}
+is absent. Prefer a historically important gap in revolutionary or Soviet history. Do not
+survey the whole dictionary: consider at most three plausible people, select the first verified
+gap, and stop searching. Open one reliable biographical source. Finish by calling
+`commulingo_candidate_select` with the missing
+person's id, Korean/English names, coverage reason, and source URL. That typed call is the ONLY
+valid completion of this stage.
 """
 
 
-def parse_discovered_candidate(text: str) -> dict:
-    matches = re.findall(r"CANDIDATE_JSON:\s*(\{[^\n]+\})", text or "")
-    if not matches:
-        raise ValueError("discovery did not return CANDIDATE_JSON")
-    candidate = json.loads(matches[-1])
+def validate_discovered_candidate(candidate: dict) -> dict:
     required = ("id", "name_ko", "name_en", "reason", "source_url")
     if not isinstance(candidate, dict) or any(not str(candidate.get(k) or "").strip() for k in required):
         raise ValueError("discovery candidate is missing required fields")
@@ -417,6 +412,60 @@ def parse_discovered_candidate(text: str) -> dict:
     return candidate
 
 
+COMMULINGO_CANDIDATE_SELECT_TOOL = {
+    "name": "commulingo_candidate_select",
+    "description": (
+        "Finish discovery by submitting one verified missing-person candidate. "
+        "Duplicate candidates are rejected so another can be selected in the same run."
+    ),
+    "input_schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "description": "Lowercase kebab-case slug."},
+            "name_ko": {"type": "string"},
+            "name_en": {"type": "string"},
+            "reason": {"type": "string"},
+            "source_url": {"type": "string"},
+        },
+        "required": ["id", "name_ko", "name_en", "reason", "source_url"],
+    },
+}
+
+
+def build_candidate_select_handler(box: dict):
+    async def _select(**candidate) -> str:
+        try:
+            selected = validate_discovered_candidate(candidate)
+        except ValueError as exc:
+            box["last_error"] = str(exc)
+            raise
+        box["candidate"] = selected
+        box.pop("last_error", None)
+        return json.dumps({"ok": True, "candidate": selected}, ensure_ascii=False)
+    return _select
+
+
+def build_bounded_discovery_handlers(read_handlers: dict, box: dict) -> dict:
+    """Bound duplicate lookups so discovery cannot spend every round surveying."""
+    handlers = dict(read_handlers)
+    people_handler = handlers["commulingo_people"]
+
+    async def _bounded_people(**kwargs) -> str:
+        if kwargs.get("action") == "search_people":
+            used = int(box.get("search_count") or 0)
+            if used >= 6:
+                raise ValueError(
+                    "discovery_search_limit: six name/alias lookups already used; "
+                    "stop surveying and call commulingo_candidate_select for the best verified gap"
+                )
+            box["search_count"] = used + 1
+        return await people_handler(**kwargs)
+
+    handlers["commulingo_people"] = _bounded_people
+    return handlers
+
+
 def build_new_person_task(candidate: dict) -> str:
     return f"""MODE: NEW PERSON CREATION
 
@@ -430,94 +479,44 @@ Create exactly this pre-verified missing person and no one else:
 Re-check search_people for the exact names, fetch the starting source, inspect groups and
 roles, then create one complete bilingual card, including a bio and a one-line `moment` that
 follow the style rules below. Use ONLY the canonical person patch keys
-documented by commulingo_edit: givenName, familyName (preferred over legacy name; given
+documented by commulingo_person_create: givenName, familyName (given
 name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
 aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder.
+The person schema also accepts citizenship and origin when they are known.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.
-Make exactly one commulingo_edit(target_type='person', action='create') call and stop.
+Make exactly one commulingo_person_create call and stop. Keep citations top-level, outside fields.
 
 """ + CARD_STYLE_GUIDANCE
 
 
-_PERSON_PATCH_KEYS = frozenset({
-    "id", "group", "groupId", "sortOrder", "cyrillic",
-    "cyrillicPatronymic", "years", "name", "givenName", "familyName",
-    "epithet", "bio", "moment",
-    "fate", "patronymic", "aliases", "career", "role", "scenes", "office_rows",
-    "citizenship", "origin",
+NARROW_WRITE_TOOLS = frozenset({
+    "commulingo_person_create", "commulingo_person_update",
+    "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
 })
-_SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
+PEOPLE_ENRICH_WRITE_TOOLS = frozenset({
+    "commulingo_person_update", "commulingo_section_save", "commulingo_event_link",
+})
 
 
-def normalize_commulingo_patch(target_type: str, target_id: str, patch: dict | None) -> tuple[dict, list[str]]:
-    normalized = dict(patch or {})
-    repairs: list[str] = []
-    if target_type != "person":
-        return normalized, repairs
-
-    localized = {
-        "name": ("nameKo", "nameEn"),
-        "givenName": ("givenNameKo", "givenNameEn"),
-        "familyName": ("familyNameKo", "familyNameEn"),
-        "bio": ("bioKo", "bioEn"),
-        "epithet": ("epithetKo", "epithetEn"),
-        "moment": ("momentKo", "momentEn"),
-        "patronymic": ("patronymicKo", "patronymicEn"),
-    }
-    for canonical, (ko_key, en_key) in localized.items():
-        if ko_key in normalized or en_key in normalized:
-            current = normalized.get(canonical) if isinstance(normalized.get(canonical), dict) else {}
-            normalized[canonical] = {
-                "ko": normalized.pop(ko_key, current.get("ko", "")),
-                "en": normalized.pop(en_key, current.get("en", "")),
-            }
-            repairs.append(f"{ko_key}/{en_key}->{canonical}")
-    if "yearsLabel" in normalized:
-        normalized.setdefault("years", normalized.pop("yearsLabel"))
-        repairs.append("yearsLabel->years")
-    if "fateKind" in normalized:
-        fate = normalized.get("fate") if isinstance(normalized.get("fate"), dict) else {}
-        fate["kind"] = normalized.pop("fateKind")
-        normalized["fate"] = fate
-        repairs.append("fateKind->fate.kind")
-    if "category" in normalized or "officeId" in normalized:
-        role = normalized.get("role") if isinstance(normalized.get("role"), dict) else {}
-        if "officeId" in normalized:
-            role["officeId"] = normalized.pop("officeId")
-        elif "category" in normalized:
-            role["category"] = normalized.pop("category")
-        normalized["role"] = role
-        repairs.append("category/officeId->role")
-    if normalized.get("slug") == target_id:
-        normalized.pop("slug", None)
-        repairs.append("dropped redundant slug")
-    return normalized, repairs
-
-
-def build_validating_edit_handler(handler):
-    async def _validated_edit(
-        target_type: str, action: str, target_id: str, sources: list,
-        patch: dict | None = None, confidence: float | None = None,
-    ) -> str:
-        normalized, repairs = normalize_commulingo_patch(target_type, target_id, patch)
-        allowed = _PERSON_PATCH_KEYS if target_type == "person" else _SECTION_PATCH_KEYS if target_type == "person_section" else None
-        if allowed is not None:
-            unknown = sorted(set(normalized) - allowed)
-            if unknown:
-                raise ValueError(
-                    f"maintainer preflight rejected unknown patch key(s): {', '.join(unknown)}. "
-                    f"Allowed: {', '.join(sorted(allowed))}. Retry once with canonical keys."
-                )
-        if repairs:
-            logger.warning("auto-corrected commulingo_edit patch once: %s", ", ".join(repairs))
-        result = await handler(
-            target_type=target_type, action=action, target_id=target_id,
-            sources=sources, patch=normalized, confidence=confidence,
+def build_retrying_write_handler(handler):
+    """Turn structured write errors into tool failures so the model can retry."""
+    async def _validated_write(**kwargs) -> str:
+        result = await handler(**kwargs)
+        if not str(result).startswith("Error:"):
+            return result
+        raw = str(result).removeprefix("Error:").strip()
+        try:
+            payload = json.loads(raw)
+            error = payload.get("error") or {}
+            code = str(error.get("code") or "unknown")
+            retryable = bool(error.get("retryable", True))
+            message = str(error.get("message") or raw)
+        except (json.JSONDecodeError, AttributeError):
+            code, retryable, message = "legacy_error", True, raw
+        raise ValueError(
+            f"commulingo_write[{code}; retryable={str(retryable).lower()}]: {message}"
         )
-        if str(result).startswith("Error:"):
-            raise ValueError(str(result))
-        return result
-    return _validated_edit
+    return _validated_write
 
 
 def latest_maintainer_edit() -> dict | None:
@@ -532,6 +531,8 @@ def latest_maintainer_edit() -> dict | None:
 async def _call_curator_stage(
     *, task: str, spec, model: str, tools: list, handlers: dict,
     policy, stage: str, expect_edit: bool, before_count: int,
+    finalization_tools: list[str], terminal_tools: list[str],
+    candidate_box: dict | None = None,
 ) -> tuple[str, dict, dict | None]:
     from tool_gateway.inference import resolve_inference_extra
 
@@ -543,10 +544,14 @@ async def _call_curator_stage(
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         tracker: dict = {}
+        if candidate_box is not None:
+            candidate_box["search_count"] = 0
+        prior_detail = str(last_error or "")[:800]
         retry_note = "" if attempt == 1 else (
             "\n\nRETRY: The prior attempt produced no usable terminal edit/candidate. "
             "Do not emit DSML markup or commentary-only output. Complete the required "
             "terminal action now using canonical tool arguments."
+            + (f" Prior failure: {prior_detail}" if prior_detail else "")
         )
         try:
             last_result = await chat_with_tools(
@@ -557,7 +562,7 @@ async def _call_curator_stage(
                 tool_handlers=handlers,
                 system_prompt=(
                     spec.render_prompt(provider="deepseek")
-                    + ("\n\nDISCOVERY-STAGE EXCEPTION: do not edit in this stage; return only CANDIDATE_JSON." if not expect_edit else "")
+                    + ("\n\nDISCOVERY-STAGE EXCEPTION: do not edit; finish only with commulingo_candidate_select." if not expect_edit else "")
                 ),
                 max_rounds=policy.max_rounds,
                 max_tokens=policy.max_output_tokens,
@@ -568,8 +573,8 @@ async def _call_curator_stage(
                 budget_usd=policy.budget_usd,
                 budget_tracker=tracker,
                 agent_name=spec.name,
-                finalization_tools=spec.finalization_tools if expect_edit else [],
-                terminal_tools=spec.terminal_tools if expect_edit else [],
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
                 thinking=reasoning.get("thinking"),
                 output_config=reasoning.get("output_config"),
             )
@@ -584,7 +589,11 @@ async def _call_curator_stage(
                         f"unexpected edit count change during {stage}: {before_count} -> {after}"
                     )
                 raise RuntimeError(f"{stage} produced no edit: {last_result[:500]}")
-            candidate = parse_discovered_candidate(last_result)
+            candidate = (candidate_box or {}).get("candidate")
+            if not candidate:
+                rejection = (candidate_box or {}).get("last_error")
+                detail = f": {rejection}" if rejection else ""
+                raise RuntimeError(f"{stage} produced no typed candidate selection{detail}")
             return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, candidate
         except Exception as exc:
             last_error = exc
@@ -622,7 +631,19 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     if expected != available:
         raise RuntimeError(f"curator toolset incomplete: missing={sorted(expected - available)}")
     handlers = dict(handlers)
-    handlers["commulingo_edit"] = build_validating_edit_handler(handlers["commulingo_edit"])
+    for name in NARROW_WRITE_TOOLS:
+        handlers[name] = build_retrying_write_handler(handlers[name])
+    read_tools = [t for t in tools if t.get("name") not in NARROW_WRITE_TOOLS]
+    read_handlers = {k: v for k, v in handlers.items() if k not in NARROW_WRITE_TOOLS}
+
+    def stage_tools(write_names: frozenset[str]) -> tuple[list, dict]:
+        selected_tools = read_tools + [t for t in tools if t.get("name") in write_names]
+        selected_handlers = {
+            **read_handlers,
+            **{name: handlers[name] for name in write_names},
+        }
+        return selected_tools, selected_handlers
+
     model = _resolve_deepseek_model(spec.model or "deepseek_pro")
     ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
 
@@ -633,20 +654,29 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     with caller_scope(ctx):
         if chosen_mode == "new":
             try:
-                discovery_tools = [t for t in tools if t.get("name") != "commulingo_edit"]
-                discovery_handlers = {k: v for k, v in handlers.items() if k != "commulingo_edit"}
+                candidate_box: dict = {}
+                discovery_tools = [*read_tools, COMMULINGO_CANDIDATE_SELECT_TOOL]
+                discovery_handlers = {
+                    **build_bounded_discovery_handlers(read_handlers, candidate_box),
+                    "commulingo_candidate_select": build_candidate_select_handler(candidate_box),
+                }
                 discovery_result, discovery_tracker, candidate = await _call_curator_stage(
                     task=build_discovery_task(), spec=spec, model=model,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
                     stage="new-person discovery", expect_edit=False, before_count=before,
+                    finalization_tools=["commulingo_candidate_select"],
+                    terminal_tools=["commulingo_candidate_select"], candidate_box=candidate_box,
                 )
                 discovery = {"candidate": candidate, "result": discovery_result}
                 tracker["total_cost"] += discovery_tracker["total_cost"]
                 tracker["rounds_used"] += discovery_tracker["rounds_used"]
+                create_tools, create_handlers = stage_tools(frozenset({"commulingo_person_create"}))
                 result, create_tracker, _ = await _call_curator_stage(
                     task=build_new_person_task(candidate), spec=spec, model=model,
-                    tools=tools, handlers=handlers, policy=policy,
+                    tools=create_tools, handlers=create_handlers, policy=policy,
                     stage="new-person creation", expect_edit=True, before_count=before,
+                    finalization_tools=["commulingo_person_create"],
+                    terminal_tools=["commulingo_person_create"],
                 )
                 tracker["total_cost"] += create_tracker["total_cost"]
                 tracker["rounds_used"] += create_tracker["rounds_used"]
@@ -677,9 +707,14 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "fallback_error": fallback_error,
                 }
             task = build_task("enrich", candidate)
+            enrich_tools, enrich_handlers = stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
+            enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS)
             result, enrich_tracker, _ = await _call_curator_stage(
-                task=task, spec=spec, model=model, tools=tools, handlers=handlers,
+                task=task, spec=spec, model=model,
+                tools=enrich_tools, handlers=enrich_handlers,
                 policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
+                finalization_tools=enrich_terminals,
+                terminal_tools=enrich_terminals,
             )
             tracker["total_cost"] += enrich_tracker["total_cost"]
             tracker["rounds_used"] += enrich_tracker["rounds_used"]
@@ -687,9 +722,8 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 state["new_cooldown_remaining"] -= 1
 
     after = completed_run_count()
-    # A new-person run may add up to three event links after the create; every
-    # other mode must land exactly one edit (the burst-bug guard).
-    max_edits = 4 if chosen_mode == "new" else 1
+    # Every completed stage lands exactly one write (the burst-bug guard).
+    max_edits = 1
     if not (before + 1 <= after <= before + max_edits):
         raise RuntimeError(
             f"expected 1..{max_edits} applied edits, count changed {before} -> {after}; result={result[:500]}"

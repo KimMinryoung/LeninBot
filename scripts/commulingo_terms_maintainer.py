@@ -5,8 +5,8 @@ Each run picks source material the site already publishes (a research report,
 the history-event texts, or a batch of person bios, rotating by run count),
 shows the curator that material together with every already-registered term
 alias, and asks it to find ONE concept term genuinely used in the material that
-the glossary does not cover yet, research it, and register it via
-commulingo_edit(target_type='term'). When the material contains no unregistered
+the glossary does not cover yet, research it, and register it via the narrow
+commulingo_term_create tool. When the material contains no unregistered
 concept the run ends with NO_CANDIDATE and no write, which is a success.
 """
 
@@ -129,16 +129,18 @@ ALREADY REGISTERED (never re-register these or their variants):
 
 Workflow:
 1. Read the material, list candidate terms it actually uses, and drop everything in the
-   registered list. Confirm absence with commulingo_people(action='list_terms').
+   registered list. Consider at most three plausible terms; do not survey indefinitely.
+   Confirm absence with commulingo_people(action='list_terms'), select the first strong gap,
+   and stop searching for alternatives.
 2. Pick ONE term. Wikipedia-first research (wiki_search/wiki_get; Russian article for
-   Soviet-era vocabulary). One solid article is enough; record source URLs in `sources`.
-3. Register exactly one term: commulingo_edit(target_type='term', action='create',
-   target_id='<kebab-slug>') with term {{ko,en}}, original (native-script form),
+   Soviet-era vocabulary). One solid article is enough; pass source URLs in top-level `citations`.
+3. Register exactly one term with `commulingo_term_create(term_id='<kebab-slug>', fields=...,
+   citations=[...])`. Fields include term {{ko,en}}, original (native-script form),
    period, definition {{ko,en}} (2-3 sentences, the card paragraph), aliases {{ko,en}}
    including the EXACT spelling the material uses plus common variants, and related
    people/events ids when clearly applicable (verify ids via search_people/list_events).
 4. If every concept in the material is already registered, reply with the single line
-   NO_CANDIDATE and STOP — do not call commulingo_edit, do not stretch the definition
+   NO_CANDIDATE and STOP — do not call commulingo_term_create, do not stretch the definition
    of a term to justify a write.
 
 One run, at most one write."""
@@ -169,8 +171,17 @@ async def run_once() -> dict:
     spec = get_agent("commulingo_curator")
     policy = resolve_agent_inference_policy(spec)
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
-    handlers = dict(handlers)
-    handlers["commulingo_edit"] = maintainer.build_validating_edit_handler(handlers["commulingo_edit"])
+    write_name = "commulingo_term_create"
+    tools = [
+        tool for tool in tools
+        if tool.get("name") not in maintainer.NARROW_WRITE_TOOLS
+        or tool.get("name") == write_name
+    ]
+    handlers = {
+        name: handler for name, handler in handlers.items()
+        if name not in maintainer.NARROW_WRITE_TOOLS or name == write_name
+    }
+    handlers[write_name] = maintainer.build_retrying_write_handler(handlers[write_name])
     model = _resolve_deepseek_model(spec.model or "deepseek_pro")
     reasoning = resolve_inference_extra(policy, "deepseek")
 
@@ -196,8 +207,8 @@ async def run_once() -> dict:
             budget_usd=policy.budget_usd,
             budget_tracker=tracker,
             agent_name=spec.name,
-            finalization_tools=[],
-            terminal_tools=spec.terminal_tools,
+            finalization_tools=[write_name],
+            terminal_tools=[write_name],
             thinking=reasoning.get("thinking"),
             output_config=reasoning.get("output_config"),
         )

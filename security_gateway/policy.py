@@ -60,6 +60,8 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "search_documents": "read",
     "query_db": "read",
     "commulingo_people": "read",
+    # Runner-local typed discovery terminal; validates through read-only duplicate lookup.
+    "commulingo_candidate_select": "read",
     "check_inbox": "read",
     "check_wallet": "wallet_read",
     # Writes / publication
@@ -75,6 +77,11 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # cap only throttled legitimate bulk curation (2026-07-11 incident: 11
     # section writes bounced mid-task).
     "commulingo_edit": "write",
+    "commulingo_person_create": "write",
+    "commulingo_person_update": "write",
+    "commulingo_section_save": "write",
+    "commulingo_event_link": "write",
+    "commulingo_term_create": "write",
     "research_document": "publish",
     "edit_content": "publish",
     "publish_hub_curation": "publish",

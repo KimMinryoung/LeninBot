@@ -58,7 +58,7 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 - `stasova`
 - `diplomat`
 - `autonomous_project`
-- `commulingo_curator` — `web_search`, `fetch_url`, `commulingo_people`, and terminal `commulingo_edit` only; the scheduled runner gives it one target and one write per run
+- `commulingo_curator` — research/read tools plus target-specific `commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, and `commulingo_term_create`; every scheduled stage filters that list again so only its applicable terminal write tool(s) are visible. New-person discovery uses a runner-local typed `commulingo_candidate_select` terminal and has no database write tool.
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
 

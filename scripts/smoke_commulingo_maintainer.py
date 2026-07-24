@@ -13,14 +13,41 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.commulingo_curator import COMMULINGO_CURATOR
-from runtime_tools.commulingo_people import _validate
+from runtime_tools.commulingo_people import (
+    COMMULINGO_EVENT_LINK_TOOL,
+    COMMULINGO_PERSON_CREATE_TOOL,
+    COMMULINGO_PERSON_UPDATE_TOOL,
+    COMMULINGO_SECTION_SAVE_TOOL,
+    COMMULINGO_TERM_CREATE_TOOL,
+    CommulingoInputError,
+    _validate,
+    normalize_commulingo_write,
+)
 import scripts.commulingo_people_maintainer as maintainer
+
+
+class EmptyCursor:
+    def execute(self, *_args, **_kwargs):
+        return None
+
+    def fetchone(self):
+        return None
+
+
+CURSOR = EmptyCursor()
 
 
 assert COMMULINGO_CURATOR.provider == "deepseek"
 assert COMMULINGO_CURATOR.model == "deepseek_pro"
-assert set(COMMULINGO_CURATOR.tools) == {"wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", "commulingo_edit"}
-assert COMMULINGO_CURATOR.terminal_tools == ["commulingo_edit"]
+NARROW_TOOLS = {
+    "commulingo_person_create", "commulingo_person_update",
+    "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+}
+assert set(COMMULINGO_CURATOR.tools) == {
+    "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", *NARROW_TOOLS,
+}
+assert set(COMMULINGO_CURATOR.terminal_tools) == NARROW_TOOLS
+assert set(COMMULINGO_CURATOR.finalization_tools) == NARROW_TOOLS
 assert COMMULINGO_CURATOR.max_rounds == 16
 assert COMMULINGO_CURATOR.max_input_tokens == 160_000
 assert COMMULINGO_CURATOR.max_output_tokens == 16_000
@@ -29,41 +56,41 @@ assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
 assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "already includes cyrillicPatronymic" in _validate(
-    None, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
+    CURSOR, "person", "update", "example", {"cyrillic": "Михаил Петрович Фриновский", "cyrillicPatronymic": "Петрович"}
 )
 assert "contains '북한'" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"bio": {"ko": "북한 관련 문장", "en": "A sentence"}},
 )
 assert "bio is too long" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"bio": {"ko": "가" * 321, "en": "A sentence"}},
 )
 assert "epithet is too long" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"epithet": {"ko": "짧은 표현", "en": "x" * 141}},
 )
 assert "fate.label is too long" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"fate": {"kind": "natural", "label": {"ko": "가" * 23, "en": "Died of illness"}}},
 )
 assert "unknown patch key" not in (_validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"citizenship": {"code": "mali", "label": {"ko": "말리", "en": "Mali"}}},
 ) or "")
 assert "no flag icon" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"citizenship": {"code": "mali", "label": {"ko": "말리", "en": "Mali"}}},
 )
 assert "citizenship must be" in _validate(
-    None, "person", "update", "example", {"citizenship": "vietnam"},
+    CURSOR, "person", "update", "example", {"citizenship": "vietnam"},
 )
 assert "non-standard person-name spelling" in _validate(
-    None, "person", "update", "example",
+    CURSOR, "person", "update", "example",
     {"bio": {"ko": "베리아의 심복으로 일했다.", "en": "Worked under Beria."}},
 )
 assert "non-standard person-name spelling" in _validate(
-    None, "person_section", "create", "example",
+    CURSOR, "person_section", "create", "example",
     {"slug": "x", "heading": {"ko": "제목", "en": "T"},
      "body": {"ko": "투하체프스키 재판에 관여했다.", "en": "Involved."}, "sources": []},
 )
@@ -98,14 +125,13 @@ candidate = {
     "has_role": 1,
 }
 task = maintainer.build_task("enrich", candidate)
-assert "example" in task and "get_person" in task and "one commulingo_edit" in task
+assert "example" in task and "get_person" in task and "one available narrow write" in task
 assert "Do not create a section" in task and "has epithet: False" in task
-assert "history_event_person" in task and "linked historical events: 0" in task
-assert "initial" not in maintainer._PERSON_PATCH_KEYS
+assert "commulingo_event_link" in task and "linked historical events: 0" in task
 assert "history_event_person" in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["target_type"]["enum"]
 assert "initial" not in __import__("runtime_tools.commulingo_people", fromlist=["COMMULINGO_EDIT_TOOL"]).COMMULINGO_EDIT_TOOL["input_schema"]["properties"]["patch"]["properties"]
 new_task = maintainer.build_task("new", None)
-assert "search_people" in new_task and "action='create'" in new_task
+assert "search_people" in new_task and "commulingo_person_create" in new_task
 
 assert maintainer.choose_mode(
     {**cfg, "mode": "auto", "new_person_every": 1},
@@ -117,9 +143,11 @@ legacy_patch = {
     "bioKo": "한국어", "bioEn": "English", "epithetKo": "긴장",
     "epithetEn": "Tension", "fateKind": "natural", "yearsLabel": "1900–1980",
     "category": "revolutionary",
+    "sources": ["https://example.com/bio — biography"],
+    "confidence": 0.91,
 }
-normalized, repairs = maintainer.normalize_commulingo_patch(
-    "person", "example-person", legacy_patch
+normalized, citations, confidence, repairs = normalize_commulingo_write(
+    "person", "example-person", legacy_patch, [], None,
 )
 assert normalized["name"] == {"ko": "예시", "en": "Example"}
 assert normalized["bio"] == {"ko": "한국어", "en": "English"}
@@ -127,16 +155,36 @@ assert normalized["fate"]["kind"] == "natural"
 assert normalized["role"] == {"category": "revolutionary"}
 assert normalized["years"] == "1900–1980"
 assert "slug" not in normalized and repairs
+assert citations == ["https://example.com/bio — biography"]
+assert confidence == 0.91
+
+person_fields = COMMULINGO_PERSON_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
+term_fields = COMMULINGO_TERM_CREATE_TOOL["input_schema"]["properties"]["fields"]["properties"]
+assert {"citizenship", "origin"} <= set(person_fields)
+assert "sources" not in person_fields and "term" not in person_fields
+assert "sources" not in term_fields and "bio" not in term_fields
+assert COMMULINGO_PERSON_UPDATE_TOOL["input_schema"]["additionalProperties"] is False
+assert COMMULINGO_SECTION_SAVE_TOOL["input_schema"]["additionalProperties"] is False
+assert COMMULINGO_EVENT_LINK_TOOL["input_schema"]["additionalProperties"] is False
+
+try:
+    normalize_commulingo_write(
+        "person", "example", {"definition": {"ko": "x", "en": "x"}},
+        ["https://example.com — source"], None,
+    )
+    raise AssertionError("cross-target field should fail")
+except CommulingoInputError as exc:
+    assert exc.code == "unknown_field"
 
 original_query_one = maintainer.db_query_one
 try:
     maintainer.db_query_one = lambda *_a, **_kw: None
-    candidate_line = "CANDIDATE_JSON: " + json.dumps({
+    candidate_payload = {
         "id": "example-person", "name_ko": "예시",
         "name_en": "Example Person", "reason": "gap",
         "source_url": "https://example.com/bio",
-    }, ensure_ascii=False)
-    discovered = maintainer.parse_discovered_candidate(candidate_line)
+    }
+    discovered = maintainer.validate_discovered_candidate(candidate_payload)
     assert discovered["id"] == "example-person"
 finally:
     maintainer.db_query_one = original_query_one
@@ -150,11 +198,12 @@ async def assert_dsml_retry():
         calls.append(1)
         if len(calls) == 1:
             return "<｜｜DSML｜｜tool_calls>"
-        return "CANDIDATE_JSON: " + json.dumps({
+        await _kwargs["tool_handlers"]["commulingo_candidate_select"](**{
             "id": "retry-person", "name_ko": "재시도",
             "name_en": "Retry Person", "reason": "gap",
             "source_url": "https://example.com/retry",
-        }, ensure_ascii=False)
+        })
+        return "selected"
     try:
         maintainer.chat_with_tools = fake_chat
         maintainer.completed_run_count = lambda: 10
@@ -168,10 +217,16 @@ async def assert_dsml_retry():
             name="commulingo_curator", finalization_tools=[], terminal_tools=[],
             render_prompt=lambda **_kw: "system",
         )
+        box = {}
+        candidate_handler = maintainer.build_candidate_select_handler(box)
         _result, _tracker, found = await maintainer._call_curator_stage(
-            task="discover", spec=spec, model="deepseek-v4-pro", tools=[],
-            handlers={}, policy=policy, stage="test discovery",
+            task="discover", spec=spec, model="deepseek-v4-pro",
+            tools=[maintainer.COMMULINGO_CANDIDATE_SELECT_TOOL],
+            handlers={"commulingo_candidate_select": candidate_handler},
+            policy=policy, stage="test discovery",
             expect_edit=False, before_count=10,
+            finalization_tools=["commulingo_candidate_select"],
+            terminal_tools=["commulingo_candidate_select"], candidate_box=box,
         )
         assert len(calls) == 2
         assert found["id"] == "retry-person"
@@ -181,5 +236,34 @@ async def assert_dsml_retry():
         maintainer.db_query_one = original_query
 
 asyncio.run(assert_dsml_retry())
+
+async def assert_structured_retry_error():
+    async def fake_write(**_kwargs):
+        return 'Error: {"ok":false,"error":{"code":"unknown_field","message":"bad field","retryable":true}}'
+    wrapped = maintainer.build_retrying_write_handler(fake_write)
+    try:
+        await wrapped(fields={})
+        raise AssertionError("structured error should become a retryable tool failure")
+    except ValueError as exc:
+        assert "unknown_field" in str(exc) and "retryable=true" in str(exc)
+
+asyncio.run(assert_structured_retry_error())
+
+async def assert_discovery_search_bound():
+    async def fake_people(**_kwargs):
+        return "[]"
+    box = {}
+    handlers = maintainer.build_bounded_discovery_handlers(
+        {"commulingo_people": fake_people}, box,
+    )
+    for _ in range(6):
+        assert await handlers["commulingo_people"](action="search_people", q="x") == "[]"
+    try:
+        await handlers["commulingo_people"](action="search_people", q="overflow")
+        raise AssertionError("discovery search limit should fail closed")
+    except ValueError as exc:
+        assert "discovery_search_limit" in str(exc)
+
+asyncio.run(assert_discovery_search_bound())
 
 print("commulingo maintainer smoke ok")

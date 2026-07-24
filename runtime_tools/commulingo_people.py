@@ -2110,6 +2110,16 @@ _FATE_LABEL_SCHEMA = {
                    "en": {"type": "string", "maxLength": 50}},
 }
 
+_NATIONALITY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "code": {"type": "string", "enum": sorted(_NATIONALITY_CODES)},
+        "label": _BILINGUAL_TEXT_SCHEMA,
+    },
+    "required": ["code", "label"],
+}
+
 _COMMULINGO_PATCH_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -2134,6 +2144,8 @@ _COMMULINGO_PATCH_SCHEMA = {
         "bio": _BIO_SCHEMA,
         "moment": _BILINGUAL_TEXT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
+        "citizenship": _NATIONALITY_SCHEMA,
+        "origin": _NATIONALITY_SCHEMA,
         "term": _BILINGUAL_TEXT_SCHEMA,
         "original": {"type": "string", "description": "term: native-script/original-language form (ГУЛАГ, нэпман)."},
         "period": {"type": "string", "description": "term: period label ('1930–1960') or '개념' for pure concepts."},
@@ -2180,6 +2192,139 @@ _COMMULINGO_PATCH_SCHEMA = {
         "sections": {"type": "array", "items": {"type": "object"}},
     },
 }
+
+
+class CommulingoInputError(ValueError):
+    """Machine-classified caller error at the shared CommuLingo write boundary."""
+
+    def __init__(self, code: str, message: str, *, retryable: bool = True):
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
+def _commulingo_error(code: str, message: str, *, retryable: bool = True) -> str:
+    return "Error: " + json.dumps(
+        {"ok": False, "error": {"code": code, "message": message, "retryable": retryable}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _classify_validation_error(message: str) -> str:
+    text = str(message or "").lower()
+    if "already exists" in text or "already registered" in text or "same person" in text:
+        return "duplicate"
+    if "not found" in text or "does not exist" in text or "unknown group" in text or "unknown role" in text:
+        return "invalid_reference"
+    if "required" in text or "needs " in text:
+        return "missing_required"
+    if "too long" in text:
+        return "length_limit"
+    if "unknown patch key" in text:
+        return "unknown_field"
+    return "validation_failed"
+
+
+def normalize_commulingo_write(
+    target_type: str,
+    target_id: str,
+    fields: dict | None,
+    citations: list | None,
+    confidence: float | None = None,
+) -> tuple[dict, list[str], float | None, list[str]]:
+    """Canonicalize all generic and narrow writes before DB validation.
+
+    The old maintainer emitted several legacy key shapes and sometimes nested
+    tool-level citations/confidence inside a person patch. Normalize those once
+    here so every caller reaches the same strict target-specific allow-list.
+    """
+    if target_type not in _TARGET_TYPES:
+        raise CommulingoInputError("invalid_target", f"target_type must be one of {_TARGET_TYPES}")
+    if not isinstance(fields, dict):
+        raise CommulingoInputError("invalid_fields", "fields must be an object")
+    normalized = dict(fields)
+    repairs: list[str] = []
+    normalized_citations = [
+        s.strip() for s in (citations or []) if isinstance(s, str) and s.strip()
+    ]
+
+    if target_type == "person":
+        localized = {
+            "name": ("nameKo", "nameEn"),
+            "givenName": ("givenNameKo", "givenNameEn"),
+            "familyName": ("familyNameKo", "familyNameEn"),
+            "bio": ("bioKo", "bioEn"),
+            "epithet": ("epithetKo", "epithetEn"),
+            "moment": ("momentKo", "momentEn"),
+            "patronymic": ("patronymicKo", "patronymicEn"),
+        }
+        for canonical, (ko_key, en_key) in localized.items():
+            if ko_key in normalized or en_key in normalized:
+                current = normalized.get(canonical) if isinstance(normalized.get(canonical), dict) else {}
+                normalized[canonical] = {
+                    "ko": normalized.pop(ko_key, current.get("ko", "")),
+                    "en": normalized.pop(en_key, current.get("en", "")),
+                }
+                repairs.append(f"{ko_key}/{en_key}->{canonical}")
+        if "yearsLabel" in normalized:
+            normalized.setdefault("years", normalized.pop("yearsLabel"))
+            repairs.append("yearsLabel->years")
+        if "fateKind" in normalized:
+            fate = normalized.get("fate") if isinstance(normalized.get("fate"), dict) else {}
+            fate["kind"] = normalized.pop("fateKind")
+            normalized["fate"] = fate
+            repairs.append("fateKind->fate.kind")
+        if "category" in normalized or "officeId" in normalized:
+            role = normalized.get("role") if isinstance(normalized.get("role"), dict) else {}
+            if "officeId" in normalized:
+                role["officeId"] = normalized.pop("officeId")
+            elif "category" in normalized:
+                role["category"] = normalized.pop("category")
+            normalized["role"] = role
+            repairs.append("category/officeId->role")
+        if normalized.get("slug") == target_id:
+            normalized.pop("slug", None)
+            repairs.append("dropped redundant slug")
+        misplaced_sources = normalized.pop("sources", None)
+        if misplaced_sources is not None:
+            if not normalized_citations and isinstance(misplaced_sources, list):
+                normalized_citations = [
+                    s.strip() for s in misplaced_sources if isinstance(s, str) and s.strip()
+                ]
+            repairs.append("fields.sources->citations")
+        misplaced_confidence = normalized.pop("confidence", None)
+        if misplaced_confidence is not None:
+            if confidence is None:
+                confidence = misplaced_confidence
+            repairs.append("fields.confidence->confidence")
+
+    allowed = {
+        "person": _PERSON_PATCH_KEYS,
+        "office_row": _OFFICE_ROW_PATCH_KEYS,
+        "person_section": _SECTION_PATCH_KEYS,
+        "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
+        "term": _TERM_PATCH_KEYS,
+    }[target_type]
+    unknown = sorted(set(normalized) - allowed)
+    if unknown:
+        raise CommulingoInputError(
+            "unknown_field",
+            f"unknown {target_type} field(s): {', '.join(unknown)}; allowed: {', '.join(sorted(allowed))}",
+        )
+    if not normalized_citations:
+        raise CommulingoInputError(
+            "missing_citations",
+            "at least one citation is required (URL/reference plus what it supports)",
+        )
+    if confidence is not None:
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError) as exc:
+            raise CommulingoInputError("invalid_confidence", "confidence must be a number between 0 and 1") from exc
+        if not 0.0 <= confidence <= 1.0:
+            raise CommulingoInputError("invalid_confidence", "confidence must be between 0 and 1")
+    return normalized, normalized_citations, confidence, repairs
 
 
 COMMULINGO_EDIT_TOOL = {
@@ -2301,38 +2446,192 @@ async def _exec_commulingo_edit(
     confidence: float | None = None,
 ) -> str:
     if target_type not in _TARGET_TYPES:
-        return f"Error: target_type must be one of {_TARGET_TYPES}."
+        return _commulingo_error("invalid_target", f"target_type must be one of {_TARGET_TYPES}")
     if action not in _ACTIONS:
-        return f"Error: action must be one of {_ACTIONS}."
+        return _commulingo_error("invalid_action", f"action must be one of {_ACTIONS}")
     target_id = (target_id or "").strip()
     if not target_id:
-        return "Error: target_id is required."
+        return _commulingo_error("missing_target_id", "target_id is required")
     patch = patch or {}
-    if not isinstance(patch, dict):
-        return "Error: patch must be an object."
     if action != "delete" and not patch:
-        return "Error: patch is required for create/update."
-    sources = [s.strip() for s in (sources or []) if isinstance(s, str) and s.strip()]
-    if not sources:
-        return "Error: at least one source citation is required (URL/reference + what it supports)."
-    if confidence is not None:
-        try:
-            confidence = float(confidence)
-        except (TypeError, ValueError):
-            return "Error: confidence must be a number between 0 and 1."
-        if not 0.0 <= confidence <= 1.0:
-            return "Error: confidence must be between 0 and 1."
+        return _commulingo_error("missing_fields", "fields are required for create/update")
     try:
-        return await asyncio.to_thread(
+        patch, sources, confidence, repairs = normalize_commulingo_write(
+            target_type, target_id, patch, sources, confidence
+        )
+        result = await asyncio.to_thread(
             _run_edit, target_type, action, target_id, patch, sources, confidence
         )
+        if result.startswith("Error:"):
+            message = result.removeprefix("Error:").strip()
+            return _commulingo_error(_classify_validation_error(message), message)
+        if repairs:
+            logger.info("commulingo write normalized: %s", ", ".join(repairs))
+        return result
+    except CommulingoInputError as e:
+        return _commulingo_error(e.code, str(e), retryable=e.retryable)
     except Exception as e:
         logger.warning("commulingo_edit error: %s", e)
-        return f"Error: {type(e).__name__}: {e}"
+        return _commulingo_error("internal_error", f"{type(e).__name__}: {e}", retryable=True)
 
 
-COMMULINGO_TOOLS = [COMMULINGO_PEOPLE_TOOL, COMMULINGO_EDIT_TOOL]
+def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = ()) -> dict:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {key: _COMMULINGO_PATCH_SCHEMA["properties"][key] for key in keys},
+        **({"required": list(required)} if required else {}),
+    }
+
+
+_PERSON_NARROW_KEYS = (
+    "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
+    "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
+    "citizenship", "origin", "aliases", "career", "role", "fate", "scenes",
+)
+_TERM_NARROW_KEYS = (
+    "sortOrder", "term", "original", "period", "definition", "body",
+    "aliases", "people", "events",
+)
+
+_CITATIONS_SCHEMA = {
+    "type": "array",
+    "minItems": 1,
+    "items": {"type": "string"},
+    "description": "Source URL/reference plus the fact it supports. Never put citations inside fields.",
+}
+
+
+def _person_write_tool(name: str, action: str) -> dict:
+    required_fields = ("groupId", "epithet", "bio", "career", "role") if action == "create" else ()
+    return {
+        "name": name,
+        "description": (
+            f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
+            "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
+            "Read the record and reference lists first. A successful call ends the run."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "person_id": {"type": "string", "description": "Existing id or new lowercase kebab-case slug."},
+                "fields": _narrow_fields_schema(_PERSON_NARROW_KEYS, required=required_fields),
+                "citations": _CITATIONS_SCHEMA,
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            "required": ["person_id", "fields", "citations"],
+        },
+    }
+
+
+COMMULINGO_PERSON_CREATE_TOOL = _person_write_tool("commulingo_person_create", "create")
+COMMULINGO_PERSON_UPDATE_TOOL = _person_write_tool("commulingo_person_update", "update")
+
+COMMULINGO_SECTION_SAVE_TOOL = {
+    "name": "commulingo_section_save",
+    "description": "Create or update one bilingual long-form person section. Citations are stored on the section.",
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "action": {"type": "string", "enum": ["create", "update"]},
+            "person_id": {"type": "string"},
+            "slug": {"type": "string"},
+            "heading": _BILINGUAL_TEXT_SCHEMA,
+            "body": _BILINGUAL_TEXT_SCHEMA,
+            "sort_order": {"type": "integer"},
+            "citations": _CITATIONS_SCHEMA,
+        },
+        "required": ["action", "person_id", "slug", "heading", "body", "citations"],
+    },
+}
+
+COMMULINGO_EVENT_LINK_TOOL = {
+    "name": "commulingo_event_link",
+    "description": "Create one sourced person-to-history-event relation. Never use for a weak connection.",
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "event_id": {"type": "string"},
+            "person_id": {"type": "string"},
+            "relation_kind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
+            "relation": _BILINGUAL_TEXT_SCHEMA,
+            "note": _BILINGUAL_TEXT_SCHEMA,
+            "sort_order": {"type": "integer"},
+            "citations": _CITATIONS_SCHEMA,
+        },
+        "required": ["event_id", "person_id", "relation_kind", "relation", "note", "citations"],
+    },
+}
+
+COMMULINGO_TERM_CREATE_TOOL = {
+    "name": "commulingo_term_create",
+    "description": "Create one sourced bilingual CommuLingo glossary term. Term fields only; citations stay top-level.",
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "term_id": {"type": "string", "description": "New lowercase kebab-case slug."},
+            "fields": _narrow_fields_schema(_TERM_NARROW_KEYS, required=("term", "definition", "aliases")),
+            "citations": _CITATIONS_SCHEMA,
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["term_id", "fields", "citations"],
+    },
+}
+
+
+async def _exec_commulingo_person_create(person_id: str, fields: dict, citations: list, confidence=None) -> str:
+    return await _exec_commulingo_edit("person", "create", person_id, citations, fields, confidence)
+
+
+async def _exec_commulingo_person_update(person_id: str, fields: dict, citations: list, confidence=None) -> str:
+    return await _exec_commulingo_edit("person", "update", person_id, citations, fields, confidence)
+
+
+async def _exec_commulingo_section_save(
+    action: str, person_id: str, slug: str, heading: dict, body: dict,
+    citations: list, sort_order: int | None = None,
+) -> str:
+    fields = {"slug": slug, "heading": heading, "body": body, "sources": citations}
+    if sort_order is not None:
+        fields["sortOrder"] = sort_order
+    return await _exec_commulingo_edit("person_section", action, person_id, citations, fields, None)
+
+
+async def _exec_commulingo_event_link(
+    event_id: str, person_id: str, relation_kind: str, relation: dict, note: dict,
+    citations: list, sort_order: int | None = None,
+) -> str:
+    fields = {
+        "personId": person_id, "relationKind": relation_kind,
+        "relation": relation, "note": note,
+    }
+    if sort_order is not None:
+        fields["sortOrder"] = sort_order
+    return await _exec_commulingo_edit("history_event_person", "create", event_id, citations, fields, None)
+
+
+async def _exec_commulingo_term_create(term_id: str, fields: dict, citations: list, confidence=None) -> str:
+    fields = dict(fields or {})
+    fields.setdefault("sources", citations)
+    return await _exec_commulingo_edit("term", "create", term_id, citations, fields, confidence)
+
+
+COMMULINGO_TOOLS = [
+    COMMULINGO_PEOPLE_TOOL,
+    COMMULINGO_EDIT_TOOL,
+    COMMULINGO_PERSON_CREATE_TOOL,
+    COMMULINGO_PERSON_UPDATE_TOOL,
+    COMMULINGO_SECTION_SAVE_TOOL,
+    COMMULINGO_EVENT_LINK_TOOL,
+    COMMULINGO_TERM_CREATE_TOOL,
+]
 COMMULINGO_TOOL_HANDLERS = {
     "commulingo_people": _exec_commulingo_people,
     "commulingo_edit": _exec_commulingo_edit,
+    "commulingo_person_create": _exec_commulingo_person_create,
+    "commulingo_person_update": _exec_commulingo_person_update,
+    "commulingo_section_save": _exec_commulingo_section_save,
+    "commulingo_event_link": _exec_commulingo_event_link,
+    "commulingo_term_create": _exec_commulingo_term_create,
 }

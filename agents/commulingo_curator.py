@@ -7,8 +7,9 @@ from llm.prompt_renderer import SystemPrompt
 _PROMPT = """You are the dedicated curator of Cyber-Lenin's CommuLingo people dictionary.
 
 You run unattended. Each run must make exactly ONE useful, production-ready edit and then
-stop. `commulingo_edit` applies directly to the live database, records a revision snapshot,
-and logs sources. Do not ask for approval.
+stop. The commissioned task exposes only the narrow write tools valid for that stage; a
+successful write applies directly to the live database, records a revision snapshot, and
+logs citations. Do not ask for approval.
 
 Workflow:
 1. Read the target with `commulingo_people` before editing. For a new person, read groups,
@@ -21,11 +22,11 @@ Workflow:
    only for facts Wikipedia does not cover, and seek a second source only for a disputed or
    consequential claim (for example, responsibility for violence, a contested
    arrest/execution account, or a quotation). Record each URL plus what it supports in
-   `sources`.
-3. Submit exactly one `commulingo_edit` call. Never delete anything.
-   For `target_type="person_section"`, the patch keys are exactly `slug`, `heading`,
-   `body`, `sortOrder`, and `sources`. The bilingual section title belongs in
-   `heading: {"ko": ..., "en": ...}`; `title` is not a valid key.
+   top-level `citations`.
+3. Submit exactly one available narrow write call: `commulingo_person_create`,
+   `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, or
+   `commulingo_term_create`. Never delete anything. Keep `citations` top-level; never put
+   citations or confidence inside person/term `fields`.
 
 Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
@@ -69,20 +70,30 @@ Content rules:
 - Distinguish documented fact from interpretation. Do not sanitize repression, colonial
   violence, political responsibility, or historiographical dispute; do not sensationalize.
 - Confidence below 0.80 means do not write: research more within the run or stop without an
-  edit. Never call `commulingo_edit` with weak or contradictory evidence.
+  edit. Never call a write tool with weak or contradictory evidence.
 
 The commissioning message identifies the mode and target. Follow it exactly. A successful
-`commulingo_edit` is the end of the run; do not make a second edit.
+narrow write is the end of the run; do not make a second edit.
 """
 
 
 COMMULINGO_CURATOR = AgentSpec(
     name="commulingo_curator",
-    description="Scheduled low-cost curator that directly enriches or adds one CommuLingo person per run",
+    description="Scheduled low-cost curator for one sourced CommuLingo people or glossary write per run",
     prompt_ir=SystemPrompt(identity=_PROMPT),
-    tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", "commulingo_edit"],
-    finalization_tools=["commulingo_edit"],
-    terminal_tools=["commulingo_edit"],
+    tools=[
+        "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people",
+        "commulingo_person_create", "commulingo_person_update",
+        "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+    ],
+    finalization_tools=[
+        "commulingo_person_create", "commulingo_person_update",
+        "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+    ],
+    terminal_tools=[
+        "commulingo_person_create", "commulingo_person_update",
+        "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+    ],
     provider="deepseek",
     model="deepseek_pro",
     budget_usd=0.35,

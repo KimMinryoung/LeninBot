@@ -78,10 +78,18 @@
     "thinking_policy": "tool_loop",
     "thinking_budget_tokens": 8192,
     "finalization_tools": [
-      "commulingo_edit"
+      "commulingo_person_create",
+      "commulingo_person_update",
+      "commulingo_section_save",
+      "commulingo_event_link",
+      "commulingo_term_create"
     ],
     "terminal_tools": [
-      "commulingo_edit"
+      "commulingo_person_create",
+      "commulingo_person_update",
+      "commulingo_section_save",
+      "commulingo_event_link",
+      "commulingo_term_create"
     ],
     "skip_orchestrator_report": true
   }

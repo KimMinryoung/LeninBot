@@ -15,10 +15,11 @@
 | stasova | Publication security (OpSec) reviewer for public-bound writing; flags risks and alternative wording without veto power | read_file, write_file, fetch_url | - | - |
 | diplomat | External communications diplomat: A2A agent-to-agent messaging, email sending/receiving, inter-agent coordination | a2a_send, send_email, check_inbox, allowlist_sender, web_search, fetch_url, read_self, save_finding, mission | - | - |
 | autonomous_project | Scheduled autonomous agent — advances one long-term project per hourly wake. Research + publishing to cyber-lenin.com. | web_search, fetch_url, fetch_x_post, vector_search, knowledge_graph_search, read_self, recall_experience, get_finance_data, download_file, convert_document, read_document, write_kg_structured, research_document, publish_hub_curation, edit_content, publish_static_page, add_research_note, read_research_notes, revise_plan, set_project_state | add_research_note, revise_plan, set_project_state, research_document, publish_hub_curation, edit_content, publish_static_page | - |
-| commulingo_curator | Scheduled low-cost curator that directly enriches or adds one CommuLingo person per run | web_search, fetch_url, commulingo_people, commulingo_edit | commulingo_edit | commulingo_edit |
+| commulingo_curator | Scheduled low-cost curator for CommuLingo people and glossary maintenance | wiki_search, wiki_get, web_search, fetch_url, commulingo_people, commulingo_person_create, commulingo_person_update, commulingo_section_save, commulingo_event_link, commulingo_term_create | the five narrow write tools | the five narrow write tools |
 
 Notes:
 
 - Empty `finalization_tools`/`terminal_tools` means the agent uses only its normal tool list.
 - `finalization_tools` remain callable after budget/round exhaustion so durable state can still be saved.
 - `terminal_tools` end the loop after a successful call and use the tool result as the task report.
+- The scheduled CommUlingo runners further reduce this declared surface per stage: discovery gets only the local typed `commulingo_candidate_select` terminal, new-person creation gets only `commulingo_person_create`, enrichment gets the three applicable people-write tools, and glossary maintenance gets only `commulingo_term_create`.
