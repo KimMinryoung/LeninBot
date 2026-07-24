@@ -100,6 +100,7 @@ FLAG_NAMES = {
     "slovakia": ("슬로바키아", "Slovakia"),
     "czechoslovakia": ("체코슬로바키아", "Czechoslovakia"),
     "korea": ("조선", "Korea"),
+    "martinique": ("마르티니크", "Martinique"),
 }
 
 # Wikidata QIDs whose citizenship means "Soviet" for our purposes: the USSR, the

@@ -77,7 +77,7 @@ _NATIONALITY_CODES = frozenset({
     "south-korea", "albania", "angola", "burkina-faso", "congo", "ghana",
     "guinea-bissau", "indonesia", "mozambique", "peru", "trinidad", "portugal",
     "brazil", "el-salvador", "grenada", "guyana", "nicaragua", "south-africa",
-    "tanzania", "ireland", "slovakia", "czechoslovakia", "korea",
+    "tanzania", "ireland", "slovakia", "czechoslovakia", "korea", "martinique",
 })
 
 # Which writing system each nationality's own names use. Port of
@@ -113,7 +113,7 @@ _LATIN_NATIONS = (
     "turkey", "cuba", "argentina", "chile", "peru", "angola", "burkina-faso",
     "congo", "ghana", "guinea-bissau", "mozambique", "trinidad", "indonesia",
     "vietnam", "brazil", "el-salvador", "grenada", "guyana", "nicaragua",
-    "south-africa", "tanzania", "ireland", "slovakia", "czechoslovakia",
+    "south-africa", "tanzania", "ireland", "slovakia", "czechoslovakia", "martinique",
 )
 _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     **{code: ("cyrillic",) for code in _CYRILLIC_NATIONS},

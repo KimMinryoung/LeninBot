@@ -42,6 +42,7 @@ LABELS = {
     "austria": ("오스트리아", "Austria"), "hungary": ("헝가리", "Hungary"),
     "czechia": ("체코", "Czechia"), "slovakia": ("슬로바키아", "Slovakia"),
     "czechoslovakia": ("체코슬로바키아", "Czechoslovakia"), "korea": ("조선", "Korea"),
+    "martinique": ("마르티니크", "Martinique"),
     "romania": ("루마니아", "Romania"), "bulgaria": ("불가리아", "Bulgaria"),
     "yugoslavia": ("유고슬라비아", "Yugoslavia"), "france": ("프랑스", "France"),
     "italy": ("이탈리아", "Italy"), "spain": ("스페인", "Spain"),
@@ -93,6 +94,8 @@ CITIZENSHIP_OVERRIDES = {
 # Only exceptions to origin == citizenship (or Soviet -> Russian) belong here.
 # These encode documented family/national identity, never birthplace alone.
 ORIGIN_OVERRIDES = {
+    "aime-cesaire": "martinique",
+    "fanon": "martinique",
     "bogdan-knunyants": "armenia",
     "connolly": "ireland",
     "dubcek": "slovakia",
