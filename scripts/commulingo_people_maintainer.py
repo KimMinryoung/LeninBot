@@ -440,10 +440,17 @@ def validate_discovered_candidate(candidate: dict) -> dict:
     if not candidate["source_url"].startswith(("https://", "http://")):
         raise ValueError("candidate source_url must be HTTP(S)")
     duplicate = db_query_one(
-        """SELECT id FROM commulingo_people
-             WHERE id = %(id)s
-                OR LOWER(name_en) = LOWER(%(name_en)s)
-                OR name_ko = %(name_ko)s
+        """SELECT p.id FROM commulingo_people p
+             WHERE p.id = %(id)s
+                OR LOWER(p.name_en) = LOWER(%(name_en)s)
+                OR p.name_ko = %(name_ko)s
+                OR EXISTS (
+                    SELECT 1
+                      FROM commulingo_person_aliases a
+                     WHERE a.person_id = p.id
+                       AND ((a.lang = 'en' AND LOWER(a.alias) = LOWER(%(name_en)s))
+                         OR (a.lang = 'ko' AND a.alias = %(name_ko)s))
+                )
              LIMIT 1""",
         candidate,
     )

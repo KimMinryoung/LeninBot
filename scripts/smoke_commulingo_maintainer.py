@@ -259,7 +259,8 @@ except CommulingoInputError as exc:
 
 original_query_one = maintainer.db_query_one
 try:
-    maintainer.db_query_one = lambda *_a, **_kw: None
+    duplicate_queries = []
+    maintainer.db_query_one = lambda sql, *_a, **_kw: duplicate_queries.append(sql) or None
     candidate_payload = {
         "id": "example-person", "name_ko": "예시",
         "name_en": "Example Person", "reason": "gap",
@@ -267,6 +268,7 @@ try:
     }
     discovered = maintainer.validate_discovered_candidate(candidate_payload)
     assert discovered["id"] == "example-person"
+    assert "commulingo_person_aliases" in duplicate_queries[-1]
 finally:
     maintainer.db_query_one = original_query_one
 
