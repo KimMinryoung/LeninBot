@@ -1,7 +1,7 @@
 {
   "chunk_summary": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "temperature": 0.3,
     "max_tokens": 768,
     "timeout": 60,
@@ -12,7 +12,7 @@
   },
   "conversation_reflection": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "temperature": 0.3,
     "max_tokens": 512,
     "timeout": 60,
@@ -23,7 +23,7 @@
   },
   "scout_kg_classify": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "temperature": 0.0,
     "max_tokens": 32,
     "timeout": 30,
@@ -34,7 +34,7 @@
   },
   "experience_extraction": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "temperature": 0.3,
     "max_tokens": 4096,
     "timeout": 120,
@@ -102,7 +102,7 @@
   },
   "kg_extraction_main": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "managed": "model-only",
     "note": "KG graphiti 엔티티/엣지 추출 메인 모델 (graph_memory/service.py에서 조회)"
   },
@@ -120,7 +120,7 @@
   },
   "research_spelling_proofread": {
     "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "temperature": 0.0,
     "max_tokens": 256,
     "timeout": 45,
