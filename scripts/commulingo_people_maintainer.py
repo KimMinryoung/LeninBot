@@ -277,7 +277,13 @@ CARD_STYLE_GUIDANCE = (
     "duplicate that in the bio. Capture the essence, not the resume.\n"
     "- `moment`: one or two vivid lines of about 40-140 Korean characters (with an English "
     "equivalent) capturing a single defining scene or turn; do not exceed ~150 characters.\n"
-    "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it."
+    "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it.\n"
+    "- nationalOrigin editorial policy for people born in territory now within Ukraine under the "
+    "Russian Empire or USSR: `ukraine` requires documented Ukrainian self-identification, "
+    "Ukrainian parentage/family, or a substantive tie to Ukrainian national culture or autonomy; "
+    "documented Polish background uses `poland`; otherwise use `russia`. Birthplace and work in "
+    "the Ukrainian SSR alone never suffice. Jewish ancestry alone does not create a separate "
+    "nationalOrigin category in this dictionary."
 )
 
 

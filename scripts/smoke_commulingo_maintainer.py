@@ -59,6 +59,8 @@ assert COMMULINGO_CURATOR.max_output_continuations == 2
 assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
 assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
+assert "Birthplace and work in the Ukrainian SSR alone never suffice" in maintainer.CARD_STYLE_GUIDANCE
+assert "Jewish ancestry alone does not create a separate" in maintainer.CARD_STYLE_GUIDANCE
 assert "already embeds cyrillicPatronymic" in _validate(
     CURSOR, "person", "update", "example", {
         "cyrillic": "Михаил Петрович Фриновский",
