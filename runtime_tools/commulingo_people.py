@@ -1752,7 +1752,32 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         exists = bool(cur.fetchone())
         if action == "create":
             if exists:
-                return f"Error: section '{slug}' already exists for '{target_id}' — use action 'update'."
+                return (
+                    f"Error: section '{slug}' already exists for '{target_id}'. Use action "
+                    f"'update' on that slug, or pick a genuinely different topic. Do NOT "
+                    f"retry this create under a modified slug — that files the same topic "
+                    f"twice."
+                )
+            # Slug uniqueness alone let the same topic in twice under two slugs when both
+            # lanes enriched one person at once: 예이젠시테인 got 몽타주 이론 as
+            # montage-theory and montage-theory-collision 65 seconds apart. Headings are
+            # the topic, so they are what a duplicate has to be caught on.
+            heading = patch.get("heading") or {}
+            key_ko, key_en = _dedup_key(heading.get("ko")), _dedup_key(heading.get("en"))
+            if key_ko or key_en:
+                cur.execute(
+                    "SELECT slug, heading_ko, heading_en FROM commulingo_person_sections "
+                    "WHERE person_id = %s", (target_id,)
+                )
+                for row in cur.fetchall():
+                    if (key_ko and _dedup_key(row["heading_ko"]) == key_ko) or (
+                        key_en and _dedup_key(row["heading_en"]) == key_en
+                    ):
+                        return (
+                            f"Error: section '{row['slug']}' already covers this topic for "
+                            f"'{target_id}' (heading '{row['heading_ko']}'). Update that "
+                            f"section or choose a different topic."
+                        )
             body = patch.get("body") or {}
             if not (body.get("ko") or body.get("en")):
                 return "Error: body.ko or body.en (markdown) is required for section create."

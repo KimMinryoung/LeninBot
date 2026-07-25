@@ -42,6 +42,28 @@ class EmptyCursor:
 CURSOR = EmptyCursor()
 
 
+class SectionCursor:
+    """A person carrying one section: slug 'taken-slug', heading '이미 있는 제목'."""
+
+    def __init__(self):
+        self._sql, self._params = "", ()
+
+    def execute(self, sql, params=None):
+        self._sql, self._params = sql, params or ()
+
+    def fetchone(self):
+        if "commulingo_person_sections" in self._sql:
+            return {"ok": 1} if self._params[-1] == "taken-slug" else None
+        return {"ok": 1}  # the target person exists
+
+    def fetchall(self):
+        return [{"slug": "taken-slug", "heading_ko": "이미 있는 제목",
+                 "heading_en": "An Existing Heading"}]
+
+
+SECTION_CURSOR = SectionCursor()
+
+
 assert COMMULINGO_CURATOR.provider == "deepseek"
 assert COMMULINGO_CURATOR.model == "deepseek_pro"
 NARROW_TOOLS = {
@@ -85,6 +107,23 @@ assert "moment is too long" in _validate(
 assert "one sentence, two at most" in _validate(
     CURSOR, "person", "update", "example",
     {"moment": {"ko": "가", "en": "x" * 301}},
+)
+# The same topic under a second slug is what two lanes enriching one person produced.
+assert "already covers this topic" in _validate(
+    SECTION_CURSOR, "person_section", "create", "example",
+    {"slug": "a-different-slug",
+     "heading": {"ko": "이미 있는 제목", "en": "An Existing Heading"},
+     "body": {"ko": "본문", "en": "Body"}},
+)
+assert "Do NOT" in _validate(
+    SECTION_CURSOR, "person_section", "create", "example",
+    {"slug": "taken-slug", "heading": {"ko": "새 제목", "en": "New Heading"},
+     "body": {"ko": "본문", "en": "Body"}},
+)
+assert not _validate(
+    SECTION_CURSOR, "person_section", "create", "example",
+    {"slug": "a-different-slug", "heading": {"ko": "새 제목", "en": "New Heading"},
+     "body": {"ko": "본문", "en": "Body"}},
 )
 assert "epithet is too long" in _validate(
     CURSOR, "person", "update", "example",

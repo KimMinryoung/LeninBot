@@ -189,11 +189,13 @@ def select_sparse_person(
     forced_id: str = "",
     incomplete_recent_days: int | None = None,
     enrich_non_soviet_revolutionaries: bool = True,
+    exclude_ids: list[str] | None = None,
 ) -> dict | None:
     params = {
         "recent_days": recent_days,
         "incomplete_days": incomplete_recent_days if incomplete_recent_days is not None else recent_days,
         "forced_id": forced_id.strip(),
+        "exclude_ids": list(exclude_ids or []),
         "major_prom": MAJOR_PROMINENCE,
         "minor_max": MINOR_PROMINENCE_MAX,
         "major_stub": MAJOR_BIO_STUB,
@@ -220,6 +222,7 @@ def select_sparse_person(
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
              LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
+              AND NOT (p.id = ANY(%(exclude_ids)s))
               AND (
                     %(forced_id)s <> ''
                     OR %(enrich_non_soviet_revolutionaries)s
@@ -456,6 +459,47 @@ def registered_person_roster() -> str:
         f"{row['name_ko']}({row['name_en']})" if row["name_en"] else str(row["name_ko"])
         for row in rows
     )
+
+
+_PERSON_CLAIMS: list = []
+
+
+def claim_person(person_id: str) -> bool:
+    """Reserve a person for this run, against the other lanes on this host.
+
+    Each lane holds only its own run lock, and select_sparse_person is
+    deterministic, so two lanes running at once pick the SAME sparsest person —
+    and then, both being asked for "the single most valuable missing topic",
+    write the same section under two slugs. 예이젠시테인 got 몽타주 이론 twice
+    65 seconds apart that way, 가톱스키 곡물 시장 연구 twice in 30. The claim is a
+    plain flock: the lanes are systemd units on one host, so a file is enough
+    and it cannot outlive the process that took it.
+    """
+    handle = Path(f"/tmp/leninbot-commulingo-person-{person_id}.lock").open("w")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return False
+    _PERSON_CLAIMS.append(handle)  # released when the process exits
+    return True
+
+
+def select_claimable_person(config: dict, candidate_id: str, attempts: int = 5) -> dict | None:
+    """The sparsest person this run can hold exclusively, or None."""
+    skipped: list[str] = []
+    for _ in range(attempts):
+        candidate = select_sparse_person(
+            config["recent_days"], candidate_id, config["incomplete_recent_days"],
+            config["enrich_non_soviet_revolutionaries"], exclude_ids=skipped,
+        )
+        if not candidate:
+            return None
+        if claim_person(candidate["id"]):
+            return candidate
+        logger.info("another lane holds %s; taking the next candidate", candidate["id"])
+        skipped.append(candidate["id"])
+    return None
 
 
 def build_discovery_task(new_person_focus: str = "all") -> str:
@@ -811,17 +855,15 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 chosen_mode = "enrich_fallback"
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
-            candidate = select_sparse_person(
-                config["recent_days"], candidate_id, config["incomplete_recent_days"],
-                config["enrich_non_soviet_revolutionaries"],
-            )
+            candidate = select_claimable_person(config, candidate_id)
             if candidate is None:
-                # Every person was already touched within the cooldown window;
-                # idling until candidates age back in is the correct, zero-cost outcome.
+                # Every person was already touched within the cooldown window, or the
+                # few that were not are held by the other lane right now. Idling until
+                # candidates age back in is the correct, zero-cost outcome.
                 return {
                     "status": "skipped",
                     "reason": (
-                        f"no candidate outside the cooldown "
+                        f"no claimable candidate outside the cooldown "
                         f"({config['incomplete_recent_days']}d incomplete / {config['recent_days']}d complete)"
                     ),
                     "mode": chosen_mode,
