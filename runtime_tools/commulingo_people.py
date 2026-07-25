@@ -2722,7 +2722,10 @@ async def _exec_commulingo_office_row_save(
 
 async def _exec_commulingo_term_create(term_id: str, fields: dict, citations: list, confidence=None) -> str:
     fields = dict(fields or {})
-    fields.setdefault("sources", citations)
+    # setdefault alone left the card unsourced whenever the curator sent an
+    # explicit empty sources list alongside real top-level citations.
+    if not fields.get("sources"):
+        fields["sources"] = citations
     return await _exec_commulingo_write("term", "create", term_id, citations, fields, confidence)
 
 
