@@ -80,6 +80,12 @@ def _tool_audit_log() -> None:
     ensure_tool_audit_log_table()
 
 
+def _tool_idempotency() -> None:
+    from security_gateway.idempotency import ensure_tool_idempotency_table
+
+    ensure_tool_idempotency_table()
+
+
 def _chat_logs_persona() -> None:
     from web_chat import ensure_chat_logs_persona_column
 
@@ -109,6 +115,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("autonomous-projects", _autonomous_projects),
     ("x402-ledger", _x402_ledger),
     ("tool-audit-log", _tool_audit_log),
+    ("tool-idempotency", _tool_idempotency),
     ("chat-logs-persona", _chat_logs_persona),
     ("web-chat-feedback", _web_chat_feedback),
     ("writer-tables", _writer_tables),

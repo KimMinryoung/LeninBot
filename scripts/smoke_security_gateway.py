@@ -113,17 +113,58 @@ def main() -> int:
         rest_denied = all(x == "deny" for x in labels[cap:])
         check(f"rate limit: first {cap} pay allowed, rest denied", first_ok and rest_denied, str(labels))
     else:
-        check("rate limit fails open without Redis", all(x == "allow" for x in labels), str(labels))
+        check("rate limit fails closed without Redis", all(x == "deny" for x in labels), str(labels))
 
     # execute and admin are intentionally uncapped.
     for uncapped in ("execute", "admin"):
         check(f"{uncapped} has no rate limit", policy.rate_limit_for(uncapped) is None,
               str(policy.rate_limit_for(uncapped)))
 
-    print("== uncategorized tool is never blocked ==")
+    print("== uncategorized tool fails closed ==")
     _force_mode(policy.ENFORCE)
     d = authorize(wc, "some_unknown_future_tool")
-    check("unknown tool allowed (fail-open on taxonomy)", d.allowed, f"{d.label}/{d.rule}")
+    check(
+        "unknown tool denied until classified",
+        d.denied and d.rule == "taxonomy",
+        f"{d.label}/{d.rule}",
+    )
+
+    print("== atomic rate-store boundary ==")
+    import security_gateway.gateway as gateway_module
+
+    original_window = gateway_module._window_consume_atomic
+    window_calls = []
+    try:
+        def fake_window(*args, **kwargs):
+            window_calls.append((args, kwargs))
+            return gateway_module.RateWindowResult(True, over=False, consumed=True, count=1)
+
+        gateway_module._window_consume_atomic = fake_window
+        probe_ctx = CallerContext(
+            interface="telegram", user_id=f"probe-{uuid.uuid4().hex[:8]}", is_owner=True
+        )
+        preflight = authorize(
+            probe_ctx, "transfer_usdc", consume_rate_limit=False
+        )
+        check(
+            "preflight authorization does not consume a slot",
+            preflight.allowed and not window_calls,
+            str(window_calls),
+        )
+        authorize(probe_ctx, "transfer_usdc")
+        check("rate decision uses one atomic store call", len(window_calls) == 1, str(window_calls))
+
+        gateway_module._window_consume_atomic = lambda *_a, **_kw: gateway_module.RateWindowResult(
+            False, error="redis down"
+        )
+        unavailable = authorize(probe_ctx, "transfer_usdc")
+        check(
+            "capped side effect fails closed on rate-store outage",
+            unavailable.denied and unavailable.rule == "rate_store",
+            f"{unavailable.label}/{unavailable.rule}",
+        )
+    finally:
+        gateway_module._window_consume_atomic = original_window
 
     print("== redaction drops secret-looking args ==")
     summary = redact_args({
@@ -242,6 +283,168 @@ def main() -> int:
                 str((calls, blocked)),
             )
         gateway_adapter.authorize = original_authorize
+
+        print("== dispatcher schema validation and durable idempotency ==")
+        schema_calls = {"count": 0}
+
+        def schema_handler(content: str, mode: str = "append") -> str:
+            schema_calls["count"] += 1
+            return f"{mode}:{content}"
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "mode": {"type": "string", "enum": ["append"], "default": "append"},
+            },
+            "required": ["content"],
+        }
+        with caller_scope(CallerContext(interface="system", is_owner=True)):
+            rejected = await execute_tool(
+                "save_diary",
+                {"content": "x", "recpient": "typo"},
+                {"save_diary": schema_handler},
+                tool_schema=schema,
+            )
+            check(
+                "unknown schema argument is rejected, not dropped",
+                rejected[1] and schema_calls["count"] == 0 and "arguments rejected" in rejected[0],
+                str((rejected, schema_calls)),
+            )
+            cache = {}
+            first = await execute_tool(
+                "save_diary",
+                {"content": "normalized"},
+                {"save_diary": schema_handler},
+                tool_schema=schema,
+                idempotency_cache=cache,
+            )
+            second = await execute_tool(
+                "save_diary",
+                {"content": "normalized", "mode": "append"},
+                {"save_diary": schema_handler},
+                tool_schema=schema,
+                idempotency_cache=cache,
+            )
+            check(
+                "schema defaults normalize the idempotency key",
+                first == second == ("append:normalized", False) and schema_calls["count"] == 1,
+                str((first, second, schema_calls)),
+            )
+
+            invalid_amount = await execute_tool(
+                "transfer_usdc",
+                {"to_address": "0x" + "1" * 40, "amount_usdc": -1},
+                {"transfer_usdc": lambda to_address, amount_usdc: "must-not-run"},
+                tool_schema={
+                    "type": "object",
+                    "properties": {
+                        "to_address": {"type": "string"},
+                        "amount_usdc": {"type": "number"},
+                    },
+                    "required": ["to_address", "amount_usdc"],
+                },
+            )
+            check("non-positive payment amount rejected", invalid_amount[1], str(invalid_amount))
+
+            nonfinite = await execute_tool(
+                "transfer_usdc",
+                {"to_address": "0x" + "1" * 40, "amount_usdc": 1, "meta": {"x": float("nan")}},
+                {"transfer_usdc": lambda **kwargs: "must-not-run"},
+                tool_schema={
+                    "type": "object",
+                    "properties": {
+                        "to_address": {"type": "string"},
+                        "amount_usdc": {"type": "number"},
+                        "meta": {"type": "object"},
+                    },
+                    "required": ["to_address", "amount_usdc"],
+                },
+            )
+            check("nested non-finite JSON number rejected", nonfinite[1], str(nonfinite))
+
+        import security_gateway.idempotency as idem
+
+        originals = (idem.lookup, idem.reserve, idem.mark_succeeded, idem.mark_outcome_unknown)
+        records = {}
+        durable_calls = {"ok": 0, "boom": 0}
+        try:
+            def fake_lookup(scope, name, args):
+                return records.get((scope, name, str(sorted(args.items()))))
+
+            def fake_reserve(scope, name, args, *, tool_call_id):
+                key = (scope, name, str(sorted(args.items())))
+                record = idem.IdempotencyRecord(
+                    key_hash=str(key), scope=scope, tool_name=name, status="running",
+                    reservation_token="token", tool_call_id=tool_call_id, acquired=True,
+                )
+                records[key] = record
+                return record
+
+            def fake_success(record, result):
+                for existing_key, existing in list(records.items()):
+                    if existing is record:
+                        records[existing_key] = idem.IdempotencyRecord(
+                            key_hash=record.key_hash, scope=record.scope, tool_name=record.tool_name,
+                            status="succeeded", reservation_token=record.reservation_token,
+                            result_text=result, tool_call_id=record.tool_call_id,
+                        )
+
+            def fake_unknown(record, result):
+                for existing_key, existing in list(records.items()):
+                    if existing is record:
+                        records[existing_key] = idem.IdempotencyRecord(
+                            key_hash=record.key_hash, scope=record.scope, tool_name=record.tool_name,
+                            status="outcome_unknown", reservation_token=record.reservation_token,
+                            result_text=result, is_error=True, tool_call_id=record.tool_call_id,
+                        )
+
+            idem.lookup = fake_lookup
+            idem.reserve = fake_reserve
+            idem.mark_succeeded = fake_success
+            idem.mark_outcome_unknown = fake_unknown
+
+            def durable_ok(content: str) -> str:
+                durable_calls["ok"] += 1
+                return f"saved:{content}"
+
+            with caller_scope(CallerContext(
+                interface="agent", agent_name="smoke", is_owner=True, task_id="durable-1"
+            )):
+                one = await execute_tool(
+                    "save_diary", {"content": "durable"}, {"save_diary": durable_ok},
+                    tool_call_id="call-1",
+                )
+                two = await execute_tool(
+                    "save_diary", {"content": "durable"}, {"save_diary": durable_ok},
+                    tool_call_id="call-2",
+                )
+                check(
+                    "durable scoped retry reuses prior success",
+                    one == two == ("saved:durable", False) and durable_calls["ok"] == 1,
+                    str((one, two, durable_calls, records)),
+                )
+
+                def durable_boom(content: str) -> str:
+                    durable_calls["boom"] += 1
+                    raise TimeoutError("response lost")
+
+                failed = await execute_tool(
+                    "save_diary", {"content": "boom"}, {"save_diary": durable_boom},
+                    tool_call_id="call-3",
+                )
+                retried = await execute_tool(
+                    "save_diary", {"content": "boom"}, {"save_diary": durable_boom},
+                    tool_call_id="call-4",
+                )
+                check(
+                    "ambiguous handler failure is not retried",
+                    failed[1] and retried[1] and durable_calls["boom"] == 1
+                    and "outcome_unknown" in retried[0],
+                    str((failed, retried, durable_calls)),
+                )
+        finally:
+            idem.lookup, idem.reserve, idem.mark_succeeded, idem.mark_outcome_unknown = originals
 
     asyncio.run(_dispatcher_checks())
 

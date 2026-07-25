@@ -753,6 +753,7 @@ async def chat_with_tools(
                 round_num=round_num,
                 log_event=log_event,
                 idempotency_cache=tool_execution_cache,
+                tool_definitions=cached_tools,
             )
             for tid, tname, tinput, result, is_error in exec_results:
                 input_summary = json.dumps(tinput, ensure_ascii=False)
@@ -932,6 +933,7 @@ async def chat_with_tools(
             round_num=(round_num if response else 0) + 1,
             log_event=log_event,
             idempotency_cache=tool_execution_cache,
+            tool_definitions=cached_tools,
         )
         final_tool_results = []
         for tid, tname, tinput, result, is_error in exec_results:

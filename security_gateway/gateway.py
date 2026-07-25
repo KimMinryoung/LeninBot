@@ -2,8 +2,8 @@
 
 ``authorize(ctx, tool_name)`` is the decision function called at the
 ``execute_tool`` seam. It is pure apart from the Redis-backed sliding-window
-rate counter, and degrades open if Redis is unavailable. Authorization-policy
-errors fail closed so a broken pre-check can never execute a handler accidentally.
+rate counter. Taxonomy errors, authorization errors, and an unavailable rate
+store for capped side effects fail closed.
 """
 
 from __future__ import annotations
@@ -18,26 +18,57 @@ from security_gateway.context import CallerContext
 
 logger = logging.getLogger(__name__)
 
-# Decision labels (also used as the audit ``decision`` column value).
 ALLOW = "allow"
 DENY = "deny"
 SHADOW_DENY = "shadow_deny"
+
+_ATOMIC_SLIDING_WINDOW_LUA = r"""
+local key = KEYS[1]
+local cutoff = tonumber(ARGV[1])
+local now = tonumber(ARGV[2])
+local member = ARGV[3]
+local ttl = tonumber(ARGV[4])
+local max_calls = tonumber(ARGV[5])
+local enforce = tonumber(ARGV[6])
+
+redis.call('ZREMRANGEBYSCORE', key, 0, cutoff)
+local count = tonumber(redis.call('ZCARD', key))
+local over = 0
+if count >= max_calls then
+    over = 1
+end
+if over == 1 and enforce == 1 then
+    return {0, count, over}
+end
+redis.call('ZADD', key, now, member)
+redis.call('EXPIRE', key, ttl)
+return {1, count + 1, over}
+"""
 
 
 @dataclass(frozen=True)
 class Decision:
     """Outcome of an authorization check."""
 
-    allowed: bool          # whether execute_tool should run the handler
-    label: str             # allow | deny | shadow_deny  (audited)
+    allowed: bool
+    label: str
     risk_class: str
-    reason: str            # empty for plain allow
-    mode: str              # shadow | enforce  (posture at decision time)
-    rule: str              # which rule fired: none | interface | owner | rate | error
+    reason: str
+    mode: str
+    rule: str
 
     @property
     def denied(self) -> bool:
         return not self.allowed
+
+
+@dataclass(frozen=True)
+class RateWindowResult:
+    available: bool
+    over: bool = False
+    consumed: bool = False
+    count: int = 0
+    error: str = ""
 
 
 def _who(ctx: CallerContext) -> str:
@@ -48,97 +79,153 @@ def _rl_key(ctx: CallerContext, rclass: str) -> str:
     return f"gw:rl:{ctx.interface}:{_who(ctx)}:{rclass}"
 
 
-def _window_count(key: str, window_seconds: int, now: float) -> int:
-    """Evict expired entries and return the count in the sliding window.
-
-    Returns 0 (degrade open) if Redis is unavailable.
-    """
+def _window_consume_atomic(
+    key: str,
+    window_seconds: int,
+    max_calls: int,
+    now: float,
+    *,
+    enforce: bool,
+) -> RateWindowResult:
+    """Atomically evict, count, decide, and consume one sliding-window slot."""
     try:
         from redis_state import get_redis
 
         r = get_redis()
         if r is None:
-            return 0
-        r.zremrangebyscore(key, 0, now - window_seconds)
-        return int(r.zcard(key) or 0)
-    except Exception:
-        return 0
+            return RateWindowResult(False, error="Redis is unavailable")
+        raw = r.eval(
+            _ATOMIC_SLIDING_WINDOW_LUA,
+            1,
+            key,
+            now - window_seconds,
+            now,
+            f"{now:.6f}:{uuid.uuid4().hex}",
+            window_seconds + 5,
+            max_calls,
+            1 if enforce else 0,
+        )
+        consumed, count, over = [int(value) for value in raw]
+        return RateWindowResult(True, bool(over), bool(consumed), count)
+    except Exception as exc:
+        logger.error("rate-limit store unavailable for %s: %s", key, exc)
+        return RateWindowResult(False, error=str(exc))
 
 
-def _window_consume(key: str, window_seconds: int, now: float) -> None:
-    """Record one call in the sliding window. Best-effort; never raises."""
-    try:
-        from redis_state import get_redis
-
-        r = get_redis()
-        if r is None:
-            return
-        r.zadd(key, {f"{now:.6f}:{uuid.uuid4().hex}": now})
-        r.expire(key, window_seconds + 5)
-    except Exception:
-        pass
-
-
-def _authorize(ctx: CallerContext, tool_name: str, now: float) -> Decision:
+def _authorize(
+    ctx: CallerContext,
+    tool_name: str,
+    now: float,
+    *,
+    consume_rate_limit: bool,
+) -> Decision:
     rclass = policy.risk_class(tool_name)
     mode = policy.enforce_mode()
 
-    # Unknown risk class (e.g. a dynamic tool not in the taxonomy): never block.
     if rclass == policy.UNCATEGORIZED:
-        return Decision(True, ALLOW, rclass, "uncategorized tool — not gated", mode, "none")
+        return Decision(
+            False,
+            DENY,
+            rclass,
+            "uncategorized tool is denied until its risk class is registered",
+            mode,
+            "taxonomy",
+        )
 
-    # 1. Interface restriction — public web chat and A2A are read-only.
-    #    Always enforced, independently of the tool schemas shown to the model.
     public_allowed = {
         "webchat": policy.WEBCHAT_ALLOWED_RISK_CLASSES,
         "a2a": policy.A2A_ALLOWED_RISK_CLASSES,
     }.get(ctx.interface)
     if public_allowed is not None and rclass not in public_allowed:
         return Decision(
-            False, DENY, rclass,
-            f"{ctx.interface} is not permitted to call '{rclass}' tools", mode, "interface",
+            False,
+            DENY,
+            rclass,
+            f"{ctx.interface} is not permitted to call '{rclass}' tools",
+            mode,
+            "interface",
         )
 
-    # 2. Owner-gating — high-impact classes restricted to the owner.
-    #    Shadow by default; enforced only when mode == enforce.
     if rclass in policy.owner_required_classes() and not ctx.is_owner:
         if mode == policy.ENFORCE:
-            return Decision(False, DENY, rclass, f"'{rclass}' is owner-only", mode, "owner")
-        return Decision(True, SHADOW_DENY, rclass, f"'{rclass}' is owner-only (shadow)", mode, "owner")
+            return Decision(
+                False,
+                DENY,
+                rclass,
+                f"'{rclass}' is owner-only",
+                mode,
+                "owner",
+            )
+        return Decision(
+            True,
+            SHADOW_DENY,
+            rclass,
+            f"'{rclass}' is owner-only (shadow)",
+            mode,
+            "owner",
+        )
 
-    # 3. Rate limit — per (caller, risk class) sliding window.
-    #    Shadow by default; enforced only when mode == enforce.
-    rl = policy.rate_limit_for(rclass)
+    rl = policy.rate_limit_for(rclass) if consume_rate_limit else None
     if rl and rl.get("max_calls"):
         window = int(rl.get("window_seconds", 3600))
         max_calls = int(rl["max_calls"])
         key = _rl_key(ctx, rclass)
-        over = _window_count(key, window, now) >= max_calls
-        if over and mode == policy.ENFORCE:
-            # Denied call does not consume a slot.
+        window_result = _window_consume_atomic(
+            key,
+            window,
+            max_calls,
+            now,
+            enforce=mode == policy.ENFORCE,
+        )
+        if not window_result.available:
             return Decision(
-                False, DENY, rclass,
-                f"rate limit exceeded ({max_calls}/{window}s for '{rclass}')",
-                mode, "rate",
+                False,
+                DENY,
+                rclass,
+                f"rate-limit store unavailable for '{rclass}' (fail-closed)",
+                mode,
+                "rate_store",
             )
-        _window_consume(key, window, now)
-        if over:
+        if window_result.over and mode == policy.ENFORCE:
             return Decision(
-                True, SHADOW_DENY, rclass,
+                False,
+                DENY,
+                rclass,
+                f"rate limit exceeded ({max_calls}/{window}s for '{rclass}')",
+                mode,
+                "rate",
+            )
+        if window_result.over:
+            return Decision(
+                True,
+                SHADOW_DENY,
+                rclass,
                 f"rate limit exceeded ({max_calls}/{window}s for '{rclass}', shadow)",
-                mode, "rate",
+                mode,
+                "rate",
             )
 
     return Decision(True, ALLOW, rclass, "", mode, "none")
 
 
-def authorize(ctx: CallerContext, tool_name: str, args: dict | None = None) -> Decision:
+def authorize(
+    ctx: CallerContext,
+    tool_name: str,
+    args: dict | None = None,
+    *,
+    consume_rate_limit: bool = True,
+) -> Decision:
     """Authorize a tool call. Fails closed on any internal gateway error."""
     now = time.time()
     try:
-        return _authorize(ctx, tool_name, now)
-    except Exception as e:  # pragma: no cover - defensive
-        logger.error("gateway.authorize failed closed for %s: %s", tool_name, e)
+        return _authorize(
+            ctx,
+            tool_name,
+            now,
+            consume_rate_limit=consume_rate_limit,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("gateway.authorize failed closed for %s: %s", tool_name, exc)
         try:
             rclass = policy.risk_class(tool_name)
         except Exception:
@@ -151,7 +238,7 @@ def authorize(ctx: CallerContext, tool_name: str, args: dict | None = None) -> D
             False,
             DENY,
             rclass,
-            f"gateway error (fail-closed): {e}",
+            f"gateway error (fail-closed): {exc}",
             mode,
             "error",
         )

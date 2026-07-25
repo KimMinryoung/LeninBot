@@ -15,6 +15,12 @@ import logging
 import time
 from typing import Any
 
+from tool_gateway.validation import (
+    ToolArgumentValidationError,
+    tool_schema_map,
+    validate_tool_arguments,
+)
+
 logger = logging.getLogger(__name__)
 
 _TOOL_DESC_LIMIT = 360
@@ -193,39 +199,15 @@ async def execute_tool(
     *,
     log_event=None,
     idempotency_cache: dict[str, tuple[str, bool]] | None = None,
+    tool_schema: dict | None = None,
+    tool_call_id: str | None = None,
 ) -> tuple[str, bool]:
-    """Execute a tool handler by name. Returns (result_str, is_error)."""
+    """Validate, authorize, deduplicate, and execute one tool handler."""
     handler = handlers.get(name)
     if not handler:
         return f"Unknown tool: {name}", True
 
     args = dict(args or {})
-    accepted, required = _inspect_handler_kwargs(handler)
-    if accepted is not None:
-        unknown = [k for k in args if k not in accepted]
-        if unknown:
-            logger.warning(
-                "Tool %s: dropping unknown kwargs %s (accepted: %s)",
-                name, unknown, sorted(accepted),
-            )
-            if log_event:
-                log_event(
-                    "warning", "tool",
-                    f"Tool {name} received unknown kwargs {unknown}; dropped before call",
-                )
-            for k in unknown:
-                args.pop(k, None)
-        missing = [k for k in required if k not in args]
-        if missing:
-            msg = (
-                f"Tool {name} called without required kwargs {missing}. "
-                f"Accepted: {sorted(accepted)}."
-            )
-            logger.warning(msg)
-            if log_event:
-                log_event("warning", "tool", msg)
-            return msg, True
-
     started = time.perf_counter()
     gw_ctx = None
     gw_decision = None
@@ -235,9 +217,14 @@ async def execute_tool(
         from tool_gateway.security import get_caller as _gw_caller
 
         gw_ctx = _gw_caller()
-        gw_decision = _gw_authorize(gw_ctx, name, args)
-    except Exception as e:
-        msg = f"Tool '{name}' blocked: security gateway pre-check failed: {e}"
+        gw_decision = _gw_authorize(
+            gw_ctx,
+            name,
+            args,
+            consume_rate_limit=False,
+        )
+    except Exception as exc:
+        msg = f"Tool '{name}' blocked: security gateway pre-check failed: {exc}"
         logger.error(msg)
         if log_event:
             log_event("error", "tool", msg)
@@ -253,19 +240,55 @@ async def execute_tool(
             log_event("warning", "tool", msg)
         try:
             _gw_audit(gw_ctx, name, args, gw_decision, result_status="denied", latency_ms=0)
-        except Exception as e:
-            logger.warning("gateway denial audit failed (ignored) for %s: %s", name, e)
+        except Exception as exc:
+            logger.warning("gateway denial audit failed (ignored) for %s: %s", name, exc)
         return msg, True
 
-    cache_key = None
-    if idempotency_cache is not None and is_side_effect_tool(name, gw_decision.risk_class):
-        cache_key = _idempotency_key(name, args)
+    try:
+        args = validate_tool_arguments(
+            name,
+            args,
+            schema=tool_schema,
+            risk_class=gw_decision.risk_class,
+        )
+        accepted, required = _inspect_handler_kwargs(handler)
+        if accepted is not None:
+            unknown = sorted(key for key in args if key not in accepted)
+            if unknown:
+                raise ToolArgumentValidationError(
+                    f"unknown arguments {unknown}; accepted: {sorted(accepted)}"
+                )
+            missing = sorted(key for key in required if key not in args)
+            if missing:
+                raise ToolArgumentValidationError(
+                    f"missing required arguments {missing}; accepted: {sorted(accepted)}"
+                )
+    except ToolArgumentValidationError as exc:
+        msg = f"Tool '{name}' arguments rejected: {exc}"
+        logger.warning(msg)
+        if log_event:
+            log_event("warning", "tool", msg)
+        try:
+            _gw_audit(
+                gw_ctx,
+                name,
+                args,
+                gw_decision,
+                result_status="invalid_args",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                error_excerpt=str(exc),
+            )
+        except Exception as audit_exc:
+            logger.warning("gateway validation audit failed for %s: %s", name, audit_exc)
+        return msg, True
+
+    side_effect = is_side_effect_tool(name, gw_decision.risk_class)
+    cache_key = _idempotency_key(name, args) if side_effect else None
+    if cache_key is not None and idempotency_cache is not None:
         cached = idempotency_cache.get(cache_key)
         if cached is not None:
             result, is_error = cached
             logger.warning("Suppressed duplicate side-effect tool call: %s", name)
-            if log_event:
-                log_event("warning", "tool", f"Duplicate side-effect call suppressed: {name}")
             try:
                 _gw_audit(
                     gw_ctx,
@@ -275,8 +298,131 @@ async def execute_tool(
                     result_status="deduplicated",
                     latency_ms=int((time.perf_counter() - started) * 1000),
                 )
-            except Exception as e:
-                logger.warning("gateway dedupe audit failed (ignored) for %s: %s", name, e)
+            except Exception as exc:
+                logger.warning("gateway dedupe audit failed for %s: %s", name, exc)
+            return result, is_error
+
+    durable_scope = None
+    durable_record = None
+    stable_scope_expected = bool(
+        getattr(gw_ctx, "task_id", None) or getattr(gw_ctx, "session_id", None)
+    )
+    if side_effect:
+        try:
+            from security_gateway.idempotency import lookup, scope_for_context
+
+            durable_scope = scope_for_context(gw_ctx)
+            if durable_scope:
+                durable_record = await asyncio.to_thread(
+                    lookup,
+                    durable_scope,
+                    name,
+                    args,
+                )
+        except Exception as exc:
+            if stable_scope_expected:
+                msg = f"Tool '{name}' blocked: durable idempotency store unavailable: {exc}"
+                logger.error(msg)
+                try:
+                    _gw_audit(
+                        gw_ctx,
+                        name,
+                        args,
+                        gw_decision,
+                        result_status="idempotency_unavailable",
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                        error_excerpt=str(exc),
+                    )
+                except Exception:
+                    pass
+                return msg, True
+
+    if durable_record is not None:
+        if durable_record.status == "succeeded":
+            result = durable_record.result_text or "(previous call succeeded)"
+            status = "deduplicated_durable"
+            is_error = False
+        else:
+            result = (
+                f"Tool '{name}' was not retried because an earlier scoped call is "
+                f"{durable_record.status}. Its external outcome may be unknown; "
+                "verify the target system before any manual retry."
+            )
+            status = "outcome_unknown"
+            is_error = True
+        try:
+            _gw_audit(
+                gw_ctx,
+                name,
+                args,
+                gw_decision,
+                result_status=status,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                error_excerpt=result if is_error else None,
+            )
+        except Exception as exc:
+            logger.warning("gateway durable dedupe audit failed for %s: %s", name, exc)
+        return result, is_error
+
+    try:
+        gw_decision = _gw_authorize(gw_ctx, name, args, consume_rate_limit=True)
+    except Exception as exc:
+        msg = f"Tool '{name}' blocked: security gateway rate pre-check failed: {exc}"
+        logger.error(msg)
+        return msg, True
+    if gw_decision.denied:
+        msg = (
+            f"Tool '{name}' denied by security gateway "
+            f"(caller={gw_ctx.label()}): {gw_decision.reason}"
+        )
+        try:
+            _gw_audit(
+                gw_ctx,
+                name,
+                args,
+                gw_decision,
+                result_status="denied",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        except Exception as exc:
+            logger.warning("gateway denial audit failed for %s: %s", name, exc)
+        return msg, True
+
+    if side_effect and durable_scope:
+        try:
+            from security_gateway.idempotency import reserve
+
+            durable_record = await asyncio.to_thread(
+                reserve,
+                durable_scope,
+                name,
+                args,
+                tool_call_id=tool_call_id,
+            )
+        except Exception as exc:
+            msg = f"Tool '{name}' blocked: durable idempotency reservation failed: {exc}"
+            logger.error(msg)
+            return msg, True
+        if not durable_record.acquired:
+            if durable_record.status == "succeeded":
+                result = durable_record.result_text or "(previous call succeeded)"
+                is_error = False
+                status = "deduplicated_durable"
+            else:
+                result = (
+                    f"Tool '{name}' was not retried because another scoped call is "
+                    f"{durable_record.status}; verify the external target before retrying."
+                )
+                is_error = True
+                status = "outcome_unknown"
+            try:
+                _gw_audit(
+                    gw_ctx, name, args, gw_decision, result_status=status,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    error_excerpt=result if is_error else None,
+                )
+            except Exception as exc:
+                logger.warning("gateway reservation conflict audit failed for %s: %s", name, exc)
             return result, is_error
 
     logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
@@ -287,12 +433,19 @@ async def execute_tool(
         else:
             result = raw
         is_error = False
-    except Exception as e:
-        logger.error("Tool %s execution error: %s", name, e)
+    except Exception as exc:
+        logger.error("Tool %s execution error: %s", name, exc)
         if log_event:
-            log_event("warning", "tool", f"Tool {name} failed: {e}")
-        result = f"Tool execution failed: {e}"
+            log_event("warning", "tool", f"Tool {name} failed: {exc}")
+        result = f"Tool execution failed; external outcome may be unknown: {exc}"
         is_error = True
+        if durable_record is not None and durable_record.acquired:
+            try:
+                from security_gateway.idempotency import mark_outcome_unknown
+
+                await asyncio.to_thread(mark_outcome_unknown, durable_record, result)
+            except Exception as store_exc:
+                logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
 
     if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
@@ -305,10 +458,7 @@ async def execute_tool(
         and read_self_type in {"diary", "static_page"}
         and args.get("max_chars") is None
     )
-    allow_complete_chat_turns = (
-        name == "read_self"
-        and read_self_type == "chat_logs"
-    )
+    allow_complete_chat_turns = name == "read_self" and read_self_type == "chat_logs"
     paginated_large_result = name in {"fetch_url", "read_file", "read_document", "read_self"}
     result_cap = 120000 if paginated_large_result else 50000
     if len(result) > result_cap and not (allow_full_content_read or allow_complete_chat_turns):
@@ -318,19 +468,31 @@ async def execute_tool(
         _record_tool_provenance(name, args, result)
         if cache_key is not None and idempotency_cache is not None:
             idempotency_cache[cache_key] = (result, False)
+        if durable_record is not None and durable_record.acquired:
+            try:
+                from security_gateway.idempotency import mark_succeeded
+
+                await asyncio.to_thread(mark_succeeded, durable_record, result)
+            except Exception as exc:
+                logger.error("failed to persist idempotency success for %s: %s", name, exc)
 
     try:
         if gw_ctx is not None:
-            from tool_gateway.security import audit as _gw_audit
-
             _gw_audit(
-                gw_ctx, name, args, gw_decision,
-                result_status="error" if is_error else "ok",
+                gw_ctx,
+                name,
+                args,
+                gw_decision,
+                result_status=(
+                    "outcome_unknown"
+                    if is_error and durable_record is not None
+                    else "error" if is_error else "ok"
+                ),
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 error_excerpt=result if is_error else None,
             )
-    except Exception as e:
-        logger.warning("gateway audit failed (ignored) for %s: %s", name, e)
+    except Exception as exc:
+        logger.warning("gateway audit failed (ignored) for %s: %s", name, exc)
 
     return result, is_error
 
@@ -369,11 +531,13 @@ async def execute_tools_batch(
     round_num: int,
     log_event=None,
     idempotency_cache: dict[str, tuple[str, bool]] | None = None,
+    tool_definitions: list[dict] | None = None,
     parallel_safe: frozenset = PARALLEL_SAFE_TOOLS,
 ) -> list[tuple[str, str, dict, str, bool]]:
     """Execute a sequence of (id, name, input) tool calls."""
     n = len(tool_uses)
     results: list = [None] * n
+    schemas = tool_schema_map(tool_definitions)
 
     async def _run_one(idx: int, tid: str, tname: str, tinput: dict):
         input_summary = json.dumps(tinput, ensure_ascii=False)
@@ -384,6 +548,8 @@ async def execute_tools_batch(
             handlers,
             log_event=log_event,
             idempotency_cache=idempotency_cache,
+            tool_schema=schemas.get(tname),
+            tool_call_id=tid,
         )
         await _emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {tname}: {result[:200]}")
         results[idx] = (tid, tname, tinput, result, is_error)

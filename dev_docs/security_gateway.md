@@ -23,9 +23,11 @@ Every interface (Telegram, web chat, agents, autonomous, A2A) funnels model-emit
 interface boundary  →  installs CallerContext (contextvar) for its run
    chat loop        →  tool_gateway.dispatcher.execute_tools_batch
                      →  tool_gateway.dispatcher.execute_tool()    ← SECURITY GATEWAY
-                          authorize(ctx, tool, args) → Decision
-                          enforced-deny → skip handler, return denial
-                          run handler (unchanged)
+                          authorize(..., consume_rate_limit=False) → preflight Decision
+                          validate schema/argument policy
+                          lookup/reserve tool_idempotency for stable scopes
+                          authorize(..., consume_rate_limit=True) → atomic Redis decision
+                          run handler; persist succeeded/outcome_unknown
                           audit(...) → tool_audit_log + journal line
 ```
 
@@ -43,9 +45,12 @@ interface boundary  →  installs CallerContext (contextvar) for its run
   classes, and the rate limits. `enforce_mode()` reads `gateway_enforce_mode` from
   `config.json` (TTL-cached, flips without restart). Optional
   `config/security_policy.json` overlay tunes owner-required classes and rate limits.
-- **`gateway.py`** — `authorize(ctx, tool) -> Decision`. Pure apart from a
-  Redis-backed sliding-window rate counter (degrades open if Redis is down). Fails
-  closed on internal authorization/policy errors (`deny`, `rule=error`).
+- **`gateway.py`** — `authorize(ctx, tool, consume_rate_limit=...) -> Decision`.
+  Redis Lua performs one atomic sliding-window decision. Capped side effects fail
+  closed when Redis is unavailable (`deny`, `rule=rate_store`); internal policy errors
+  also fail closed (`rule=error`).
+- **`idempotency.py`** — stable task/session-scoped Postgres reservation and outcome
+  store for side-effect tools (`running`, `succeeded`, `outcome_unknown`).
 - **`audit.py`** — `audit(...)`: redacts+truncates args, emits a structured JSON log
   line (always), and enqueues a best-effort row to `tool_audit_log` via a single
   background worker thread. Never blocks the event loop, never raises into tool
@@ -53,14 +58,14 @@ interface boundary  →  installs CallerContext (contextvar) for its run
 
 ## Policy rules (in order)
 
-1. **Unknown risk class** → never blocked (a dynamic/future tool is allowed, audited).
+1. **Unknown risk class** → always denied until explicitly classified (`rule=taxonomy`).
 2. **Interface restriction** → public webchat and A2A may only call
    `read`/`fetch`/`wallet_read` classes. **Always enforced**, independently of
    shadow/enforce rollout mode. This mirrors the profile pre-filters and prevents
    a stale profile or provider-emitted hidden tool name from reaching a handler.
 3. **Owner-gating** → `pay`/`send`/`execute`/`admin` require `is_owner`. **Shadow by
    default** (non-owner call allowed but logged `shadow_deny`); blocks only in enforce.
-4. **Rate limit** → per `(caller, risk_class)` sliding window on outbound/irreversible
+4. **Rate limit** → per `(caller, risk_class)` atomic Redis sliding window on outbound/irreversible
    classes only: `pay` = 3/hour, `send` = 20/hour, `publish` = 20/hour. `execute` and
    `admin` are intentionally **uncapped** (risk is in the payload, not the call count;
    legitimate bulk runs are common). **Shadow by default**; blocks only in enforce.
@@ -112,6 +117,16 @@ transaction can override this only by explicitly setting
 `SET LOCAL leninbot.audit_log_mutation_approved = on`; normal runtime paths do not
 set that flag.
 
+## Durable idempotency table
+
+`tool_idempotency` is applied explicitly with
+`scripts/schema_migrations.py --only tool-idempotency`. The primary key is a hash of
+stable task/session scope, tool name, and normalized arguments. Successful results are
+reused across process restarts. A handler exception is conservative: the external system
+may have committed before the response was lost, so status becomes `outcome_unknown` and
+a retry is blocked until an operator verifies the target. Calls without stable scope use
+loop-local dedupe only.
+
 ## Operator CLI
 
 ```
@@ -132,10 +147,9 @@ are enforced from day one.
 
 ## Invariants
 
-- **Fail-closed on authorization error.** A broken policy/pre-check returns a denied
-  tool result and never calls the handler. Redis-backed rate limiting still degrades
-  open when Redis is unavailable; that compatibility exception is separately audited
-  and remains backlog work.
+- **Fail-closed control plane.** Broken policy/pre-check, unknown taxonomy, invalid
+  arguments, unavailable capped rate store, and unavailable scoped idempotency store
+  return a denied/error tool result and never call the handler.
 - **Audit is non-fatal.** Both sinks swallow errors; a DB outage drops audit rows
   (logged) but never blocks or fails a tool call.
 - **Defense-in-depth, not a replacement.** Pre-filters (orchestrator/agent/web/A2A
@@ -146,7 +160,8 @@ are enforced from day one.
 
 - `scripts/smoke_security_gateway.py` — policy, interface restriction, owner-gating
   (shadow vs enforce), rate limiting, redaction, fail-closed, and run-local
-  side-effect idempotency.
+  side-effect idempotency, schema/default normalization, nested non-finite number rejection, atomic rate-store failures,
+  durable success reuse, and `outcome_unknown` replay suppression.
 - `scripts/smoke_tool_allowlists.py` — validates the same `TOOL_RISK_CLASS` and checks
   that orchestrator schemas and executable handlers share one filtered set.
 - `scripts/smoke_url_security.py` — validates unsafe addresses, mixed DNS answers,

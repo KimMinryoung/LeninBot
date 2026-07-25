@@ -136,7 +136,9 @@ async def _main() -> None:
     assert len(read_result) == 80000, len(read_result)
     assert "truncated by tool loop" not in read_result
 
-    other_result, other_error = await execute_tool("other_tool", {}, {"other_tool": very_long_result})
+    other_result, other_error = await execute_tool(
+        "vector_search", {}, {"vector_search": very_long_result}
+    )
     assert not other_error
     assert len(other_result) > 50000 and len(other_result) < 51000, len(other_result)
     assert "truncated by tool loop at 50000 chars" in other_result

@@ -1534,6 +1534,7 @@ async def chat_with_tools(
                 round_num=round_num,
                 log_event=log_event,
                 idempotency_cache=tool_execution_cache,
+                tool_definitions=openai_tools,
             )
             for tc_id, func_name, func_args, result, is_error in exec_results:
                 input_summary = json.dumps(func_args, ensure_ascii=False)
@@ -1712,6 +1713,7 @@ async def chat_with_tools(
                         final_batch, tool_handlers,
                         on_progress=on_progress, round_num=round_num + 1, log_event=log_event,
                         idempotency_cache=tool_execution_cache,
+                        tool_definitions=openai_tools,
                     )
                     for tc_id, fname, fargs, result, is_error in final_exec:
                         input_summary = json.dumps(fargs, ensure_ascii=False)
