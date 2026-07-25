@@ -268,20 +268,47 @@ def main() -> int:
             )
             check("duplicate reads still execute", calls["read"] == 2, str(calls))
 
-            def broken_authorize(*_args, **_kwargs):
-                raise RuntimeError("policy unavailable")
+            # Every fail-closed block must still leave an audit row: a blocked
+            # attempt is the one most worth reviewing later, and these four exits
+            # used to return bare.
+            audited: list[tuple] = []
+            original_audit = gateway_adapter.audit
 
-            gateway_adapter.authorize = broken_authorize
-            blocked = await execute_tool(
-                "save_diary",
-                {},
-                {"save_diary": blocked_handler},
-            )
-            check(
-                "dispatcher blocks pre-check exception",
-                blocked[1] and calls["blocked"] == 0 and "pre-check failed" in blocked[0],
-                str((calls, blocked)),
-            )
+            def spy_audit(ctx, tool_name, tool_args, decision, **kwargs):
+                audited.append((tool_name, decision.label, kwargs.get("result_status")))
+                return original_audit(ctx, tool_name, tool_args, decision, **kwargs)
+
+            gateway_adapter.audit = spy_audit
+            try:
+                unknown = await execute_tool("no_such_tool", {"a": 1}, {})
+                check(
+                    "unknown tool name is audited, not dropped",
+                    unknown[1]
+                    and ("no_such_tool", "deny", "unknown_tool") in audited,
+                    str((unknown, audited)),
+                )
+
+                def broken_authorize(*_args, **_kwargs):
+                    raise RuntimeError("policy unavailable")
+
+                gateway_adapter.authorize = broken_authorize
+                blocked = await execute_tool(
+                    "save_diary",
+                    {},
+                    {"save_diary": blocked_handler},
+                )
+                check(
+                    "dispatcher blocks pre-check exception",
+                    blocked[1] and calls["blocked"] == 0 and "pre-check failed" in blocked[0],
+                    str((calls, blocked)),
+                )
+                check(
+                    "blocked pre-check is audited as a deny",
+                    ("save_diary", "deny", "gateway_error") in audited,
+                    str(audited),
+                )
+            finally:
+                gateway_adapter.audit = original_audit
         gateway_adapter.authorize = original_authorize
 
         print("== dispatcher schema validation and durable idempotency ==")

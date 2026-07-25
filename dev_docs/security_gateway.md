@@ -107,9 +107,17 @@ a fallback, but no local socket is opened before this validation succeeds.
 `tool_audit_log` (applied via `scripts/schema_migrations.py --only tool-audit-log`,
 no startup DDL): `ts, interface, agent_name, user_id, is_owner, task_id, tool_name,
 risk_class, decision, enforced, deny_reason, args_summary (redacted+truncated),
-result_status (including `ok`, `error`, `denied`, `deduplicated`), latency_ms,
-`error_excerpt`. Indexed on `ts`,
+result_status, latency_ms, `error_excerpt`. Indexed on `ts`,
 `(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`.
+
+Every exit from `execute_tool` writes exactly one row, including the ones that
+never reach the handler. `result_status` is one of `ok`, `error`,
+`outcome_unknown`, `denied`, `invalid_args`, `deduplicated`,
+`deduplicated_durable`, `idempotency_unavailable`, `unknown_tool`, or
+`gateway_error`. The last two, plus `idempotency_unavailable`, cover the
+fail-closed blocks where the gateway or the idempotency store was itself
+unavailable; they are recorded as a synthetic `deny` because the caller was
+refused whatever the preflight decision had said.
 
 The table is append-only at the database layer. The migration installs triggers that
 block `UPDATE`, `DELETE`, and `TRUNCATE`. A direct administrator maintenance

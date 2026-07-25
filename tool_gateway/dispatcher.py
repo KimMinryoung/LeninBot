@@ -192,6 +192,48 @@ def _inspect_handler_kwargs(handler: Any) -> tuple[set[str] | None, frozenset[st
     return result
 
 
+def _audit_blocked(
+    ctx,
+    name: str,
+    args: dict | None,
+    *,
+    result_status: str,
+    reason: str,
+    latency_ms: int | None = None,
+) -> None:
+    """Record an attempt that never reached the handler. Never raises.
+
+    Every other exit from execute_tool audits, but the four fail-closed blocks
+    used to return bare. That hid exactly the calls worth reviewing: an unknown
+    tool name, and the three paths where the gateway or the idempotency store
+    was itself broken. A synthetic deny keeps the row honest, because the caller
+    was refused regardless of what the preflight decision had said.
+    """
+    try:
+        from tool_gateway.security import Decision
+        from tool_gateway.security import audit as _gw_audit
+        from tool_gateway.security import get_caller as _gw_caller
+
+        if ctx is None:
+            ctx = _gw_caller()
+        decision = Decision(
+            allowed=False,
+            label="deny",
+            risk_class="unknown",
+            reason=reason,
+            mode="enforce",
+            rule="dispatcher_block",
+        )
+        _gw_audit(
+            ctx, name, args, decision,
+            result_status=result_status,
+            latency_ms=latency_ms,
+            error_excerpt=reason,
+        )
+    except Exception as exc:
+        logger.warning("blocked-call audit failed (ignored) for %s: %s", name, exc)
+
+
 async def execute_tool(
     name: str,
     args: dict,
@@ -203,11 +245,13 @@ async def execute_tool(
     tool_call_id: str | None = None,
 ) -> tuple[str, bool]:
     """Validate, authorize, deduplicate, and execute one tool handler."""
+    args = dict(args or {})
     handler = handlers.get(name)
     if not handler:
-        return f"Unknown tool: {name}", True
+        msg = f"Unknown tool: {name}"
+        _audit_blocked(None, name, args, result_status="unknown_tool", reason=msg)
+        return msg, True
 
-    args = dict(args or {})
     started = time.perf_counter()
     gw_ctx = None
     gw_decision = None
@@ -228,6 +272,12 @@ async def execute_tool(
         logger.error(msg)
         if log_event:
             log_event("error", "tool", msg)
+        _audit_blocked(
+            gw_ctx, name, args,
+            result_status="gateway_error",
+            reason=msg,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
         return msg, True
 
     if gw_decision.denied:
@@ -375,6 +425,12 @@ async def execute_tool(
     except Exception as exc:
         msg = f"Tool '{name}' blocked: security gateway rate pre-check failed: {exc}"
         logger.error(msg)
+        _audit_blocked(
+            gw_ctx, name, args,
+            result_status="gateway_error",
+            reason=msg,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
         return msg, True
     if gw_decision.denied:
         msg = (
@@ -408,6 +464,12 @@ async def execute_tool(
         except Exception as exc:
             msg = f"Tool '{name}' blocked: durable idempotency reservation failed: {exc}"
             logger.error(msg)
+            _audit_blocked(
+                gw_ctx, name, args,
+                result_status="idempotency_unavailable",
+                reason=msg,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
             return msg, True
         if not durable_record.acquired:
             if durable_record.status == "succeeded":
