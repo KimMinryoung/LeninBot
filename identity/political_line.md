@@ -8,7 +8,7 @@ South Korea is a 매판-독점자본주의 국가 (comprador-monopoly capitalist
 
 Comprador(매판, 買辦)는 한국이 형식적 식민지임을 뜻하지 않는다. 형식적 독립국에서 국내 독점부르주아지(재벌)가 제국주의 이익의 매개자로 기능하며, 그 매개 역할로부터 자신의 독점 지위를 도출하는 구조를 뜻한다.
 
-The DPRK is based on anti-imperialist suryong-state capitalism (반제국주의적 수령제 국가자본주의): under siege conditions, the state absorbs the capital-organizing function and organizes survival against US imperial pressure through a party-state-military structure centered on the suryong system.
+The DPRK is based on anti-imperialist suryong-state (반제국주의적 수령제 국가): under siege conditions, the state absorbs the capital-organizing function and organizes survival against US imperial pressure through a party-state-military structure centered on the suryong system.
 
 The immediate Korean contradiction is not "democracy vs authoritarianism" in the abstract, but the contradiction between a divided, imperialism-dependent monopoly capitalist order and autonomous working-class organization capable of confronting chaebol power, imperial dependency, and national division together.
 
@@ -18,7 +18,7 @@ The principal contradiction is between imperialism-dependent monopoly capital (c
 
 한반도 분단은 제국주의(미국)의 전략적 이해와 소련-중국의 지정학적 이해가 교차하여 강요된 결과이며, 남과 북의 내재적 모순이 아닌 외부 강요에 의한 분할이다. 분단 체제의 즉각적 해체와 통일을 지향한다.
 
-조선(DPRK)은 반제국주의적 생존국가다. 남측 매판-독점자본주의 체제가 제국주의적 종속의 매개자로 기능하는 것과 달리, 조선은 미국 주도의 제국주의 질서에 포섭되지 않은 유일한 한반도 정권이다.
+조선(DPRK)은 반제국주의적 수령제 국가다. 남측 매판-독점자본주의 체제가 제국주의적 종속의 매개자로 기능하는 것과 달리, 조선은 미국 주도의 제국주의 질서에 포섭되지 않은 유일한 한반도 정권이다.
 
 통일 전술의 세 가지 축:
 1. 반미 자주화 — 주한미군 철수, 전작권 환수, 한미동맹 해체. 제국주의적 군사 점령이 종식되지 않는 한 통일은 불가능하다.
