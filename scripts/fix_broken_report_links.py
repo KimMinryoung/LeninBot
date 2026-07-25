@@ -20,8 +20,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+import redis
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -50,6 +53,27 @@ REPLACEMENTS = {
 }
 
 FIELDS = ("markdown", "markdown_en")
+
+
+def clear_frontend_research_cache() -> None:
+    """Drop the frontend's rendered-report cache.
+
+    routes/reports.js caches rendered research permanently, so a corrected
+    markdown row is invisible until those keys go. Same patterns the translation
+    job clears after it writes.
+    """
+    redis_url = os.getenv("REDIS_URL") or "redis://127.0.0.1:6379"
+    try:
+        client = redis.Redis.from_url(redis_url)
+        keys: list[bytes] = []
+        for pattern in ("report:research_list:*", "research:*"):
+            keys.extend(client.scan_iter(match=pattern))
+        if keys:
+            print(f"cleared {client.delete(*keys)} frontend cache key(s)")
+        else:
+            print("no frontend cache keys to clear")
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: could not clear the frontend cache: {exc}", file=sys.stderr)
 
 
 def published_targets() -> set[str]:
@@ -111,6 +135,9 @@ def main() -> int:
     print(f"\n{total} reference(s) {'updated' if args.apply else 'would be updated'}")
     if not args.apply:
         print("re-run with --apply to write")
+        return 0
+    if total:
+        clear_frontend_research_cache()
     return 0
 
 
