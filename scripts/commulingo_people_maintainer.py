@@ -147,6 +147,9 @@ MOMENT_HARD_CEILING = 140
 MAJOR_BIO_STUB = 100
 STANDARD_BIO_STUB = 80
 MINOR_BIO_STUB = 50
+# Detail sections a person card may carry. Today 683 of 700 people sit at 5 or
+# fewer; the thirteen above that are the 2026-07 runaway, not a standard to keep.
+MAX_SECTIONS = 12
 
 # Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # The curator must pick citizenship_code / nationalOrigin code from this set or the card shows no flag.
@@ -201,6 +204,7 @@ def select_sparse_person(
         "major_stub": MAJOR_BIO_STUB,
         "std_stub": STANDARD_BIO_STUB,
         "minor_stub": MINOR_BIO_STUB,
+        "max_sections": MAX_SECTIONS,
         "enrich_non_soviet_revolutionaries": enrich_non_soviet_revolutionaries,
     }
     rows = db_query(
@@ -236,7 +240,7 @@ def select_sparse_person(
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
                      p.citizenship_code, p.origin_code, r.person_id
            HAVING %(forced_id)s <> ''
-               OR COALESCE((
+               OR (COALESCE((
                     SELECT MAX(rev.created_at) FROM commulingo_people_revisions rev
                      WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
                        AND rev.changed_by LIKE 'commulingo-maintainer%%'
@@ -249,6 +253,29 @@ def select_sparse_person(
                               OR COUNT(DISTINCT ep.event_id) = 0
                               OR COUNT(DISTINCT s.id) = 0
                          THEN %(incomplete_days)s ELSE %(recent_days)s END * INTERVAL '1 day')
+                -- A card with every field filled falls through the enrich checklist to
+                -- its last step, "add one more section", which had no ceiling. When the
+                -- nationality step could not be satisfied in 2026-07 because the flag
+                -- code list carried no entry for their countries, the card stayed
+                -- "incomplete" on the 2-day cooldown and kept coming back: 카브랄 took 19
+                -- sections on 7/14 and 14 more on 7/15, and twelve other people ran to
+                -- 19-36. Once a card is complete AND at MAX_SECTIONS there is nothing
+                -- left to commission, so it leaves the queue instead of growing.
+                -- The event step is deliberately excluded from this test. It is the
+                -- other step a card can be unable to satisfy: the events dictionary
+                -- holds 24 Soviet events, so 카브랄, 루뭄바, 응크루마 and the rest of the
+                -- non-Soviet revolutionaries have nothing honest to link to, and the
+                -- checklist says never to force a weak connection. Requiring an event
+                -- link here would keep exactly the runaway cards in the queue with
+                -- every remaining step refusing to fire.
+                AND NOT (
+                        COUNT(DISTINCT s.id) >= %(max_sections)s
+                    AND COALESCE(p.bio_ko, '') <> '' AND COALESCE(p.epithet_ko, '') <> ''
+                    AND COALESCE(p.moment_ko, '') <> ''
+                    AND COALESCE(p.citizenship_code, '') <> ''
+                    AND r.person_id IS NOT NULL
+                    AND COUNT(DISTINCT c.id) > 0
+                ))
             ORDER BY
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
@@ -431,9 +458,11 @@ use `조지아`.
 5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
    get_event records. When one event connection is clearly supported, create exactly one
    `commulingo_event_link`; never force a weak connection.
-6. SECTION: else find the single most valuable missing topic and add one substantial bilingual
-   section via `commulingo_section_save` (one topic, roughly 350-700 Korean characters plus equivalent English) when
-   no section covers it.
+6. SECTION: else, if this card has fewer than {MAX_SECTIONS} sections, find the single most
+   valuable missing topic and add one substantial bilingual section via `commulingo_section_save`
+   (one topic, roughly 350-700 Korean characters plus equivalent English) when no section covers
+   it. A card already at {MAX_SECTIONS} sections is finished: say so and make no write rather than
+   splitting a covered topic to have something to add. This card has {candidate['section_count']}.
 Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
 tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —
 an archive or document collection, marxists.org, a journal or university page, or a published
