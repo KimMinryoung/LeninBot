@@ -54,9 +54,10 @@ interface boundary  →  installs CallerContext (contextvar) for its run
 ## Policy rules (in order)
 
 1. **Unknown risk class** → never blocked (a dynamic/future tool is allowed, audited).
-2. **Interface restriction** → web chat may only call `read`/`fetch`/`wallet_read`
-   classes. **Always enforced** (it mirrors the existing pre-filter, so enforcing
-   here changes nothing observable — it just adds defense-in-depth + audit).
+2. **Interface restriction** → public webchat and A2A may only call
+   `read`/`fetch`/`wallet_read` classes. **Always enforced**, independently of
+   shadow/enforce rollout mode. This mirrors the profile pre-filters and prevents
+   a stale profile or provider-emitted hidden tool name from reaching a handler.
 3. **Owner-gating** → `pay`/`send`/`execute`/`admin` require `is_owner`. **Shadow by
    default** (non-owner call allowed but logged `shadow_deny`); blocks only in enforce.
 4. **Rate limit** → per `(caller, risk_class)` sliding window on outbound/irreversible
@@ -85,6 +86,16 @@ Writer-specific local tools are included in the taxonomy even though they are no
 part of the global runtime registry: `search_manuscript` is `read`, while
 `append_to_manuscript` and `replace_in_manuscript` are `write`. This keeps audit
 rows policy-stable for the personal fiction workspace.
+
+## Outbound URL boundary
+
+Publicly reachable `fetch_url` calls share the same local-network exclusion policy in
+`content_fetch/url_security.py`. Only HTTP(S) on ports 80, 443, 8080, and 8443 is
+accepted. Literal addresses and every DNS answer must be globally routable; localhost,
+private, loopback, link-local, reserved, and mixed public/private answers are rejected.
+The policy is re-applied to each requests redirect, Playwright main navigation and
+subrequest, and failure-diagnosis DNS/TCP/HTTP probe. Remote Tavily retrieval may remain
+a fallback, but no local socket is opened before this validation succeeds.
 
 ## Audit table
 
@@ -115,8 +126,8 @@ Ships in **shadow** mode: new owner-gating and rate-limit rules log what they *w
 block without changing behavior. Watch `scripts/security_gateway.py audit --decision
 shadow_deny` (and the `tool_audit shadow_deny` journal lines) to confirm no legitimate
 flow trips, then flip `gateway_enforce_mode` to `enforce` (via `/config` or
-`bot_config.set_gateway_enforce_mode`). Web-chat interface restriction is enforced
-from day one.
+`bot_config.set_gateway_enforce_mode`). Public webchat and A2A interface restrictions
+are enforced from day one.
 
 ## Invariants
 
@@ -124,7 +135,7 @@ from day one.
   run. It must never take down the agent.
 - **Audit is non-fatal.** Both sinks swallow errors; a DB outage drops audit rows
   (logged) but never blocks or fails a tool call.
-- **Defense-in-depth, not a replacement.** Pre-filters (orchestrator/agent/web
+- **Defense-in-depth, not a replacement.** Pre-filters (orchestrator/agent/web/A2A
   allow-lists) still shape what the model sees; the gateway is the second,
   centralized, audited check at execution time.
 
@@ -132,8 +143,10 @@ from day one.
 
 - `scripts/smoke_security_gateway.py` — policy, interface restriction, owner-gating
   (shadow vs enforce), rate limiting, redaction, fail-open.
-- `scripts/smoke_tool_allowlists.py` — now validates the same `TOOL_RISK_CLASS` the
-  gateway uses (single source of truth).
+- `scripts/smoke_tool_allowlists.py` — validates the same `TOOL_RISK_CLASS` and checks
+  that orchestrator schemas and executable handlers share one filtered set.
+- `scripts/smoke_url_security.py` — validates unsafe addresses, mixed DNS answers,
+  redirects, and diagnostic fail-closed behavior.
 
 ## Out of scope (future)
 

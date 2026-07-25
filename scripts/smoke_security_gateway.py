@@ -61,6 +61,15 @@ def main() -> int:
         d = authorize(wc, tool)
         check(f"webchat allows {tool}", d.allowed and d.label == "allow", f"{d.label}/{d.reason}")
 
+    print("== public A2A interface restriction (always enforced) ==")
+    a2a = CallerContext(interface="a2a", is_owner=False)
+    for tool in ("write_kg_structured", "send_email", "research_document", "transfer_usdc"):
+        d = authorize(a2a, tool)
+        check(f"a2a denies {tool}", d.denied and d.label == "deny", f"{d.label}/{d.rule}")
+    for tool in ("knowledge_graph_search", "vector_search", "web_search", "fetch_url"):
+        d = authorize(a2a, tool)
+        check(f"a2a allows {tool}", d.allowed and d.label == "allow", f"{d.label}/{d.reason}")
+
     print("== owner-gating: shadow vs enforce ==")
     # Unique user ids per run so rate-limit keys never collide / accumulate.
     uid = uuid.uuid4().hex[:8]

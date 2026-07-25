@@ -8,6 +8,11 @@ from typing import Optional as _Optional
 from urllib.parse import urlparse as _urlparse
 
 from secrets_loader import get_secret
+from content_fetch.url_security import (
+    UnsafeUrlError,
+    safe_requests_get,
+    validate_public_http_url,
+)
 from content_fetch.browser_pool import (
     _is_low_quality,
     _playwright_fetch,
@@ -57,9 +62,14 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
     This is deliberately advisory. It should help agents choose the next step,
     not decide that a source is permanently unreachable.
     """
+    try:
+        url = validate_public_http_url(url)
+    except UnsafeUrlError as exc:
+        return f"Fetch diagnosis: blocked_url - {exc}."
+
     parsed = _urlparse(url)
     host = parsed.hostname
-    scheme = parsed.scheme or "https"
+    scheme = parsed.scheme
     if not host:
         return "Fetch diagnosis: invalid_url - the URL has no hostname."
 
@@ -86,6 +96,9 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
     port = parsed.port or (443 if scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        validate_public_http_url(url, resolver=lambda *_args, **_kwargs: infos)
+    except UnsafeUrlError as e:
+        return f"Fetch diagnosis: blocked_url - {e}."
     except socket.gaierror as e:
         return f"Fetch diagnosis: dns_resolution_failed - this server cannot resolve {host}: {e}."
     except Exception as e:
@@ -138,7 +151,7 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
     try:
         import requests as _req
         headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}
-        resp = _req.get(url, headers=headers, timeout=timeout, allow_redirects=True, stream=True)
+        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=timeout, stream=True)
         status = resp.status_code
         resp.close()
         if status in (401, 403):
@@ -160,46 +173,11 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
         return f"Fetch diagnosis: http_probe_failed - TCP works, but the HTTP probe failed: {e}."
 
 
-def _crawl4ai_fetch(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fetch URL via Crawl4AI and return LLM-friendly markdown."""
-    try:
-        import asyncio as _aio
-        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-
-        async def _run():
-            browser_cfg = BrowserConfig(headless=True, verbose=False)
-            run_cfg = CrawlerRunConfig(word_count_threshold=10)
-            async with AsyncWebCrawler(config=browser_cfg) as crawler:
-                result = await crawler.arun(url=url, config=run_cfg)
-                if result.success:
-                    md = result.markdown or ""
-                    return md[:max_chars] if md else None
-                return None
-
-        try:
-            loop = _aio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(lambda: _aio.run(_run())).result(timeout=60)
-        else:
-            return _aio.run(_run())
-    except ImportError:
-        logger.debug("[URL] crawl4ai not installed, skipping")
-        return None
-    except Exception as e:
-        logger.info("[URL] Crawl4AI fetch error: %s", e)
-        return None
-
-
 def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Fallback chain when Playwright is unavailable or returns low-quality
-    content: Crawl4AI → Tavily Extract → requests+BeautifulSoup. Returns the
-    best available result (low-quality only if no high-quality option found).
-    Synchronous and thread-safe (no shared state).
+    """SSRF-safe fallback chain after Playwright: Tavily → requests+BeautifulSoup.
+
+    Crawl4AI is deliberately not used here because its internal redirect and
+    subresource fetches cannot share the common destination validator.
     """
     def _clean_text(raw: str) -> str:
         """Strip boilerplate noise and keep only substantive paragraphs."""
@@ -211,15 +189,9 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
             cleaned.append(line)
         return "\n".join(cleaned)
 
-    # 1) Crawl4AI — LLM-friendly markdown extraction
-    try:
-        result = _crawl4ai_fetch(url, max_chars)
-        if result and not _is_low_quality(result):
-            return result
-    except Exception as e:
-        logger.info("[URL] Crawl4AI 실패 (%s): %s", url[:60], e)
+    url = validate_public_http_url(url)
 
-    # 2) Tavily Extract (skip if API key missing or quota exhausted)
+    # 1) Tavily Extract (remote extraction; skip if key/quota unavailable)
     best_fallback = None
     tavily_key = get_secret("TAVILY_API_KEY", "") or ""
     if tavily_key:
@@ -245,14 +217,14 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
         except Exception as e:
             logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
-    # 3) requests + BeautifulSoup
+    # 2) requests + BeautifulSoup
     try:
         import requests as _req
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
         }
-        resp = _req.get(url, headers=headers, timeout=15, allow_redirects=True)
+        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=15)
         resp.raise_for_status()
         resp.encoding = resp.apparent_encoding or "utf-8"
 
@@ -302,10 +274,8 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
 
 
 def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Sync entry point. Tries Playwright first (via dedicated async loop),
-    then Crawl4AI / Tavily / requests fallbacks. Low-quality results from any
-    method are skipped in favor of the next.
-    """
+    """Sync entry point with public-network validation on every local fetch."""
+    url = validate_public_http_url(url)
     try:
         result = _playwright_fetch(url, max_chars)
         if result and not _is_low_quality(result):
@@ -316,10 +286,8 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
 
 
 async def fetch_url_content_async(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Async entry point. Playwright runs on the dedicated Playwright loop,
-    so concurrent calls share one Chromium process and execute pages in
-    parallel. Sync fallbacks are offloaded to a worker thread.
-    """
+    """Async entry point with public-network validation on every local fetch."""
+    url = await asyncio.to_thread(validate_public_http_url, url)
     try:
         fut = _pw_submit(_playwright_fetch_async(url, max_chars))
         result = await asyncio.wrap_future(fut)

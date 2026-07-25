@@ -122,11 +122,11 @@ def risk_class(tool_name: str) -> str:
 
 
 # ── Per-interface access rules ────────────────────────────────────────
-# Public web chat may only reach read-ish classes. This mirrors the existing
-# WEB_ALLOWED/WEB_FORBIDDEN sets and is **always enforced** because the tool
-# list is already pre-filtered to the same set — enforcing here changes nothing
-# observable, it only adds defense-in-depth + an audit trail.
-WEBCHAT_ALLOWED_RISK_CLASSES = frozenset({"read", "fetch", "wallet_read"})
+# Public webchat and A2A may only reach read-ish classes. These rules mirror
+# their profile pre-filters and are always enforced as defense-in-depth.
+PUBLIC_READONLY_ALLOWED_RISK_CLASSES = frozenset({"read", "fetch", "wallet_read"})
+WEBCHAT_ALLOWED_RISK_CLASSES = PUBLIC_READONLY_ALLOWED_RISK_CLASSES
+A2A_ALLOWED_RISK_CLASSES = PUBLIC_READONLY_ALLOWED_RISK_CLASSES
 
 # Interfaces with no class restriction (the full orchestrator / agent surface).
 # Per-tool allow-listing for these already happens upstream (orchestrator and
@@ -258,6 +258,7 @@ def describe() -> dict:
         "enforce_mode": enforce_mode(),
         "tools_by_risk_class": by_class,
         "webchat_allowed_risk_classes": sorted(WEBCHAT_ALLOWED_RISK_CLASSES),
+        "a2a_allowed_risk_classes": sorted(A2A_ALLOWED_RISK_CLASSES),
         "unrestricted_interfaces": sorted(UNRESTRICTED_INTERFACES),
         "owner_required_risk_classes": sorted(owner_required_classes()),
         "rate_limits": rate_limits(),

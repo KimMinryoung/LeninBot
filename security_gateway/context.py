@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 # not yet been annotated — those calls are still authorized and audited.
 INTERFACE_TELEGRAM = "telegram"
 INTERFACE_WEBCHAT = "webchat"
+INTERFACE_A2A = "a2a"
 INTERFACE_AGENT = "agent"
 INTERFACE_AUTONOMOUS = "autonomous"
 INTERFACE_SYSTEM = "system"
@@ -28,6 +29,7 @@ INTERFACE_UNKNOWN = "unknown"
 KNOWN_INTERFACES = frozenset({
     INTERFACE_TELEGRAM,
     INTERFACE_WEBCHAT,
+    INTERFACE_A2A,
     INTERFACE_AGENT,
     INTERFACE_AUTONOMOUS,
     INTERFACE_SYSTEM,

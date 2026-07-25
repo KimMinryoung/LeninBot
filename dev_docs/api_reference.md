@@ -1,6 +1,6 @@
 # API Reference
 
-최종 확인 기준: 2026-07-21 코드 트리.
+최종 확인 기준: 2026-07-25 코드 트리.
 
 `api.py` exposes the main internal FastAPI service for public web chat and shared admin JSON routes. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Writer, email, and A2A now have dedicated FastAPI entrypoints and systemd services: `novel_writer_api.py` on `:8001`, `email_api.py` on `:8002`, and `a2a_api.py` on `:8003`. Extracted route modules are service boundaries only when included by one of those dedicated entrypoints; otherwise they are code-ownership modules inside `leninbot-api.service`.
 
@@ -16,7 +16,7 @@ Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admi
 
 Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `api.py`.
 
-Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call.
+Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call. The enabled endpoint remains unauthenticated and therefore read-only: its profiles expose only read/fetch capabilities, and `security_gateway` independently rejects write/publish/send/pay/execute/admin classes for the A2A interface.
 
 ## Service vs Module Boundaries
 
@@ -55,6 +55,9 @@ These routes are served by `leninbot-a2a-api.service` on `172.17.0.1:8003`. The 
 |---|---|---|
 | `GET` | `/.well-known/agent-card.json` | public A2A discovery card |
 | `POST` | `/a2a` | A2A JSON-RPC endpoint |
+
+A2A `geopolitical-analysis` can search and read the knowledge graph but does not
+mutate it. Structured KG updates are reserved for trusted internal execution paths.
 
 ### `POST /chat`
 
@@ -99,6 +102,11 @@ active-request limit에 포함한다. 이 registry는 in-process이므로 API �
 preflight 검색은 각각 `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS`(기본 45초)의
 상한을 적용하고, timeout 시 다른 근거로 답하거나 검색 한계를 밝히도록 모델에
 결과를 돌려준다.
+
+Public `fetch_url` calls validate HTTP(S) scheme, a narrow safe-port set, every
+resolved destination address, redirects, Playwright subrequests, and diagnostic
+probes. Loopback, private, link-local, reserved, and mixed public/private DNS
+destinations are rejected before a local connection is opened.
 
 Concurrency and rate controls:
 

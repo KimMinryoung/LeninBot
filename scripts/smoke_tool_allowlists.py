@@ -155,22 +155,26 @@ def _assert_tool_profiles(tool_names: set[str]) -> None:
             set(profile.tool_names) - tool_names - MCP_GATEWAY_LOCAL_TOOLS - service_local
         )
         assert not unknown, f"{profile.id} references unknown tools: {unknown}"
-        if profile.surface == "webchat":
+        if profile.surface in {"webchat", "a2a"}:
             forbidden = sorted(
                 name for name in profile.tool_names
                 if _risk_class(name) in WEB_FORBIDDEN_RISK_CLASSES
             )
-            assert not forbidden, f"{profile.id} exposes forbidden web risk classes: {forbidden}"
+            assert not forbidden, f"{profile.id} exposes forbidden public risk classes: {forbidden}"
             unexpected = sorted(
                 name for name in profile.tool_names
                 if _risk_class(name) not in WEB_ALLOWED_RISK_CLASSES
             )
-            assert not unexpected, f"{profile.id} exposes unexpected web risk classes: {unexpected}"
+            assert not unexpected, f"{profile.id} exposes unexpected public risk classes: {unexpected}"
 
 
 def _assert_orchestrator(tool_names: set[str]) -> None:
-    from runtime_tools.allowlists import ORCHESTRATOR_TOOL_NAMES, select_orchestrator_tools
-    from runtime_tools.registry import TOOLS
+    from runtime_tools.allowlists import (
+        ORCHESTRATOR_TOOL_NAMES,
+        build_orchestrator_toolset,
+        select_orchestrator_tools,
+    )
+    from runtime_tools.registry import TOOL_HANDLERS, TOOLS
 
     assert set(ORCHESTRATOR_TOOL_NAMES) == set(TELEGRAM_ORCHESTRATOR_TOOLS)
     missing = sorted(set(ORCHESTRATOR_TOOL_NAMES) - tool_names)
@@ -178,6 +182,20 @@ def _assert_orchestrator(tool_names: set[str]) -> None:
     selected = select_orchestrator_tools(TOOLS)
     selected_names = _tool_names(selected)
     assert selected_names == set(ORCHESTRATOR_TOOL_NAMES)
+    executable_tools, executable_handlers = build_orchestrator_toolset(
+        TOOLS,
+        TOOL_HANDLERS,
+        {
+            "mission": object(),
+            "transfer_usdc": object(),
+            "execute_python": object(),
+        },
+    )
+    assert _tool_names(executable_tools) == selected_names
+    assert set(executable_handlers) <= selected_names
+    assert "mission" in executable_handlers
+    assert "transfer_usdc" not in executable_handlers
+    assert "execute_python" not in executable_handlers
     assert COMMULINGO_NARROW_WRITE_TOOLS <= selected_names
     forbidden = sorted(
         name for name in selected_names

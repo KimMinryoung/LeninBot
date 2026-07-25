@@ -121,8 +121,9 @@ def _geopolitical_prompt_ir() -> SystemPrompt:
             (
                 "tool-strategy",
                 (
-                    "Follow the 5-step process in the skill instructions exactly.\n"
-                    "Available tools: knowledge_graph_search, vector_search, web_search, write_kg_structured."
+                    "Follow the read/analysis steps in the skill instructions. Public A2A is read-only: "
+                    "skip the optional KG-update step and return new findings in the response.\n"
+                    "Available tools: knowledge_graph_search, vector_search, web_search."
                 ),
             ),
         ],

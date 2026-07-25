@@ -88,12 +88,16 @@ def _authorize(ctx: CallerContext, tool_name: str, now: float) -> Decision:
     if rclass == policy.UNCATEGORIZED:
         return Decision(True, ALLOW, rclass, "uncategorized tool — not gated", mode, "none")
 
-    # 1. Interface restriction — public web chat may only reach read-ish classes.
-    #    Always enforced (the tool list is already pre-filtered to the same set).
-    if ctx.interface == "webchat" and rclass not in policy.WEBCHAT_ALLOWED_RISK_CLASSES:
+    # 1. Interface restriction — public web chat and A2A are read-only.
+    #    Always enforced, independently of the tool schemas shown to the model.
+    public_allowed = {
+        "webchat": policy.WEBCHAT_ALLOWED_RISK_CLASSES,
+        "a2a": policy.A2A_ALLOWED_RISK_CLASSES,
+    }.get(ctx.interface)
+    if public_allowed is not None and rclass not in public_allowed:
         return Decision(
             False, DENY, rclass,
-            f"webchat is not permitted to call '{rclass}' tools", mode, "interface",
+            f"{ctx.interface} is not permitted to call '{rclass}' tools", mode, "interface",
         )
 
     # 2. Owner-gating — high-impact classes restricted to the owner.

@@ -30,8 +30,9 @@ allowed-tools: knowledge_graph_search vector_search web_search write_kg_structur
 ## Step 4 — 종합 분석 작성
 [assets/report-template.md](assets/report-template.md) 구조를 따라 분석을 작성한다.
 
-## Step 5 — KG 업데이트 (선택)
-새로 확인된 중요 사실이 있으면 `write_kg_structured`로 저장한다.
+## Step 5 — KG 업데이트 (선택, 신뢰된 내부 runtime 전용)
+`write_kg_structured`가 명시적으로 제공된 신뢰된 내부 runtime에서만 새로 확인된 중요 사실을 저장한다.
+public A2A처럼 read-only surface에서는 이 단계를 건너뛰고 새 사실을 응답에만 포함한다.
 - 이미 KG에 있는 정보는 중복 저장 금지
 - 출처가 불명확한 정보는 저장 금지
 

@@ -42,7 +42,7 @@ from bot_config import (
 )
 from runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
-from runtime_tools.allowlists import select_orchestrator_tools
+from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
 from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
@@ -1477,15 +1477,15 @@ async def _chat_with_tools(
     is_orchestrator = extra_tools is None
 
     if is_orchestrator:
-        merged_tools = select_orchestrator_tools(TOOLS)
+        merged_tools, merged_handlers = build_orchestrator_toolset(
+            TOOLS,
+            TOOL_HANDLERS,
+            extra_handlers,
+        )
     else:
         # Task/agent: use ONLY extra_tools (already filtered by agent spec).
         # Do NOT merge full TOOLS — that would bypass agent tool restrictions.
         merged_tools = list(extra_tools or [])
-    # Orchestrator: full handler set. Task/agent: only the handlers for allowed tools.
-    if is_orchestrator:
-        merged_handlers = {**TOOL_HANDLERS, **(extra_handlers or {})}
-    else:
         merged_handlers = dict(extra_handlers or {})
 
     if is_orchestrator and "list_agent_tools" in {t.get("name") for t in merged_tools}:

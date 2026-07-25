@@ -123,7 +123,6 @@ A2A_GEOPOLITICAL_TOOLS = frozenset({
     "knowledge_graph_search",
     "vector_search",
     "web_search",
-    "write_kg_structured",
 })
 
 A2A_RESEARCH_PROFILE = "a2a.research-synthesis"

@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from typing import Optional as _Optional
 
+from content_fetch.url_security import UnsafeUrlError, validate_public_http_url
+
 logger = logging.getLogger(__name__)
 
 _JS_PLACEHOLDER_RE = _re.compile(
@@ -184,6 +186,24 @@ async def _playwright_fetch_async(url: str, max_chars: int = 10000) -> _Optional
     page = None
     try:
         page = await context.new_page()
+
+        async def _guard_outbound_request(route) -> None:
+            request_url = route.request.url
+            if request_url.startswith(("about:", "blob:", "data:")):
+                await route.continue_()
+                return
+
+            try:
+                # Re-resolve every intercepted request instead of caching origins;
+                # this narrows DNS-rebinding windows for long-lived pages.
+                await asyncio.to_thread(validate_public_http_url, request_url)
+            except (UnsafeUrlError, ValueError) as exc:
+                logger.warning("[URL] blocked unsafe Playwright request (%s): %s", request_url[:120], exc)
+                await route.abort("blockedbyclient")
+                return
+            await route.continue_()
+
+        await page.route("**/*", _guard_outbound_request)
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         except Exception as e:

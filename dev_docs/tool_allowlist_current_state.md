@@ -1,6 +1,6 @@
 # Tool Allow-List Current State
 
-최종 확인 기준: 2026-05-09 코드 트리.
+최종 확인 기준: 2026-07-25 코드 트리.
 
 Tool visibility is intentionally split by execution surface. There is no single JSON file that owns every allow-list.
 
@@ -9,7 +9,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Layer | File | Purpose |
 |---|---|---|
 | Global registry | `runtime_tools/registry.py` | all possible tool definitions and handlers |
-| Telegram orchestrator | `tool_gateway/profiles.py` (`TELEGRAM_ORCHESTRATOR_TOOLS`; compatibility alias in `runtime_tools/allowlists.py`) | tools visible to the top-level Telegram orchestrator |
+| Telegram orchestrator | `tool_gateway/profiles.py` (`TELEGRAM_ORCHESTRATOR_TOOLS`; compatibility alias in `runtime_tools/allowlists.py`) | schemas and executable handlers available to the top-level Telegram orchestrator |
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
@@ -32,7 +32,7 @@ A tool is callable only if both its definition and handler are present after fil
 
 ## Telegram Orchestrator
 
-The orchestrator allow-list is `ORCHESTRATOR_TOOL_NAMES` in `runtime_tools/allowlists.py`. This surface should remain small: delegation, mission/context operations, safe recall/search, and user-facing coordination. It should not expose broad filesystem or code execution tools.
+The orchestrator allow-list is `ORCHESTRATOR_TOOL_NAMES` in `runtime_tools/allowlists.py`. `build_orchestrator_toolset()` applies that list to both schemas and handlers, so a provider-emitted hidden tool name has no executable handler. This surface should remain small: delegation, mission/context operations, safe recall/search, and user-facing coordination. It should not expose broad filesystem or code execution tools.
 
 CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus six target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, `commulingo_term_create`). The global registry no longer contains a generic union write tool. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
 
@@ -45,7 +45,7 @@ When adding a new orchestrator tool:
 
 ## Read Tool Pagination
 
-Long body reads should keep per-call character limits and expose continuation parameters instead of forcing agents to rely on one large result. `fetch_url` uses `max_chars` + `offset`; `read_self` detail reads use `max_chars` + `offset`; `check_inbox` list mode returns bounded previews with `folder`/`uid`, and a single-email read uses `folder` + `uid` + `body_offset` + `body_max_chars`. `read_file`/`read_document` use their existing line or character pagination parameters.
+Long body reads should keep per-call character limits and expose continuation parameters instead of forcing agents to rely on one large result. `fetch_url` uses `max_chars` + `offset`; its local HTTP paths also reject unsafe schemes/ports, non-global DNS destinations, and unsafe redirects before connecting. `read_self` detail reads use `max_chars` + `offset`; `check_inbox` list mode returns bounded previews with `folder`/`uid`, and a single-email read uses `folder` + `uid` + `body_offset` + `body_max_chars`. `read_file`/`read_document` use their existing line or character pagination parameters.
 
 ## Specialist Agents
 
@@ -84,6 +84,14 @@ Current public persona-specific additions:
 
 - `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; `web_chat.py` also performs a bounded server-side preflight vector lookup for Gramsci theory/concept triggers. The persona dossier is supplemental reading protocol and strategy scaffolding.
 
+## Public A2A
+
+Inbound A2A is an unauthenticated public surface and is read-only. Every A2A skill
+profile may expose only `read`, `fetch`, or `wallet_read` risk classes;
+`geopolitical-analysis` uses search/read tools and does not receive
+`write_kg_structured`. `security_gateway` applies the same class restriction at
+execution time even if profile selection or provider output is misconfigured.
+
 ## Roleplay Bot
 
 `leninbot-roleplay.service` (`telegram/roleplay_bot.py`) is a separate identity, not the Cyber-Lenin orchestrator. Its allow-list is the inline `_TOOL_NAMES` list and is intentionally minimal and read-only: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`. These are selected from the global registry (`TOOLS` / `TOOL_HANDLERS`) at import time. No task execution, KG writes, filesystem, code, email/A2A, or publishing tools are exposed. Adding tools here is deliberate — keep this surface to safe read-only knowledge lookups.
@@ -115,8 +123,9 @@ This does not make all surfaces share one allow-list. It centralizes the mechani
 
 - Update `runtime_tools/registry.py` for new global tools.
 - Update exactly the relevant allow-list/spec.
-- Keep public web chat and Telegram orchestrator separate.
-- Keep MCP profiles separate from public web chat and Telegram orchestrator.
+- Keep public web chat, public A2A, and Telegram orchestrator separate.
+- Keep every public A2A profile read-only; KG mutation belongs to trusted internal runtimes.
+- Keep MCP profiles separate from public web chat, public A2A, and Telegram orchestrator.
 - Add smoke coverage when a new tool can write, publish, send, browse, pay, or execute.
 - Treat read-only wallet visibility separately from signing/payment capability; `check_wallet` may be public, but transfer/swap/pay tools may not.
 - Update this document only after verifying names in code.

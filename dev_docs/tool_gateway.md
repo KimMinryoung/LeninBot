@@ -1,6 +1,6 @@
 # Runtime Tool Gateway
 
-최종 확인 기준: 2026-07-12 코드 트리.
+최종 확인 기준: 2026-07-25 코드 트리.
 
 `tool_gateway` is the runtime facade for LeninBot tool visibility and dispatch. It is separate from `mcp_gateway`: MCP is an inbound developer/operator server, while `tool_gateway` is the internal control-plane boundary used when Cyber-Lenin, specialist agents, web chat, or A2A model loops call runtime tools.
 
@@ -39,7 +39,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Concern | Current owner | Gateway usage |
 |---|---|---|
 | Global tool definitions and handlers | `runtime_tools/registry.py` | Inputs to selection helpers |
-| Telegram orchestrator allow-list | `tool_gateway.profiles.TELEGRAM_ORCHESTRATOR_TOOLS` | `runtime_tools/allowlists.py` keeps a compatibility alias and uses `tool_gateway.selection.select_tools_by_name` |
+| Telegram orchestrator allow-list | `tool_gateway.profiles.TELEGRAM_ORCHESTRATOR_TOOLS` | `runtime_tools/allowlists.build_orchestrator_toolset()` filters definitions and handlers together through `tool_gateway.selection.build_toolset` |
 | Specialist agent allow-lists | `agents/*.py` `AgentSpec.tools` | `AgentSpec.filter_tools()` delegates to `tool_gateway.selection.filter_agent_tools` |
 | Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `web_personas.py` aliases profile values; `web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
 | A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
@@ -52,7 +52,9 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 
 - Tool visibility remains fail-closed: callers only see explicitly allowed tools.
 - Reusable surface allow-lists should be added to `tool_gateway.profiles`; keep agent-specific `AgentSpec.tools` beside agent definitions unless there is a concrete reuse reason.
-- A visible tool must still have a registered handler to execute.
+- A visible tool must still have a registered handler to execute. The Telegram orchestrator receives the handler map produced by the same allow-list operation as its schemas; the full global handler registry must never be passed to that provider loop.
+- Public webchat and A2A contexts are execution-time read-only boundaries (`read`, `fetch`, `wallet_read`) even if a profile or model output is misconfigured.
+- Local HTTP fetch paths validate scheme, port, resolved destination IP, every redirect, Playwright navigation/subrequest, and diagnostic probes through `content_fetch.url_security`.
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.
 - `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
@@ -66,6 +68,7 @@ For changes that touch this boundary, run at minimum:
 ```bash
 venv/bin/python scripts/smoke_tool_allowlists.py
 venv/bin/python scripts/smoke_security_gateway.py
+venv/bin/python scripts/smoke_url_security.py
 venv/bin/python scripts/smoke_mcp_gateway.py
-python3 -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py claude_loop.py openai_tool_loop.py web_chat.py a2a_handler.py mcp_gateway/tools.py
+venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py claude_loop.py openai_tool_loop.py web_chat.py a2a_handler.py mcp_gateway/tools.py
 ```
