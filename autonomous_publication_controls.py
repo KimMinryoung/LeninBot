@@ -89,6 +89,73 @@ _SOURCE_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 _HTML_SECTION_RE = re.compile(r"<(?:article|section|h[1-3])(?:\s|>)", re.IGNORECASE)
+
+# Report frame: the related-report line and the internal links inside it. The
+# frontend renders '[text](/reports/research/<slug>)' as a same-tab link; a bare
+# path, an absolute cyber-lenin.com URL or a nonexistent slug all reach readers
+# as something broken, so the shape and the targets are both checked here rather
+# than left to the prompt.
+_PRECEDING_LINE_RE = re.compile(r"(?m)^.*선행\s*보고서.*$")
+_PRECEDING_CANONICAL_RE = re.compile(
+    r"^\*\*선행 보고서:\*\*\s+"
+    r"\[[^\]]+\]\(/reports/research/[a-z0-9-]+\)"
+    r"(?:\s+·\s+\[[^\]]+\]\(/reports/research/[a-z0-9-]+\))*\s*$"
+)
+_RESEARCH_REF_RE = re.compile(r"/reports/research/([a-z0-9-]+)")
+_ABSOLUTE_SELF_LINK_RE = re.compile(r"https?://(?:www\.)?cyber-lenin\.com(/reports/\S*)")
+
+
+def _missing_research_slugs(slugs: set[str]) -> set[str]:
+    """Slugs with no published report behind them.
+
+    Best effort: a database that cannot be reached returns nothing missing, so a
+    connectivity problem never blocks a publication over a link check.
+    """
+    missing: set[str] = set()
+    for slug in sorted(slugs):
+        try:
+            row = db_query_one(
+                "SELECT 1 AS ok FROM research_documents WHERE slug = %s AND status = 'public'",
+                (slug,),
+            )
+        except Exception as exc:  # noqa: BLE001 - link check must not gate on infra
+            logger.warning("research slug check skipped (%s): %s", slug, exc)
+            return set()
+        if not row:
+            missing.add(slug)
+    return missing
+
+
+def _related_report_errors(prose: str) -> list[str]:
+    errors: list[str] = []
+
+    for match in _ABSOLUTE_SELF_LINK_RE.finditer(prose):
+        errors.append(
+            f"link to this site must be root-relative, not absolute: got "
+            f"'{match.group(0)}', write '{match.group(1)}' so it opens in the same tab"
+        )
+        break
+
+    for line in _PRECEDING_LINE_RE.findall(prose):
+        stripped = line.strip()
+        if _PRECEDING_CANONICAL_RE.match(stripped):
+            continue
+        errors.append(
+            "the related-report line must read exactly "
+            "'**선행 보고서:** [제목](/reports/research/<slug>)', further entries joined "
+            f"by ' · ' and nothing else on the line; got: {stripped[:120]!r}"
+        )
+        break
+
+    referenced = set(_RESEARCH_REF_RE.findall(prose))
+    if referenced:
+        missing = _missing_research_slugs(referenced)
+        if missing:
+            errors.append(
+                "these linked reports do not exist, so the links would 404: "
+                + ", ".join(f"/reports/research/{slug}" for slug in sorted(missing))
+            )
+    return errors
 _TAG_RE = re.compile(r"<[^>]+>")
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 
@@ -162,6 +229,7 @@ def validate_autonomous_research_publication(
                 "body must define at least two footnote sources "
                 f"('[^n]: publisher, title, date. URL' lines; got {len(footnote_defs)}, need >= 2)"
             )
+        errors.extend(_related_report_errors(prose))
 
     if errors:
         return _format_gate_errors("research", errors)

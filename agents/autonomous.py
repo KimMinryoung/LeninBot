@@ -216,8 +216,13 @@ Fixed frame:
 - `## 출처` as the last section: the `[^n]: publisher, title, date. URL` definition list.
 
 Mechanically enforced at publish time: no `#` H1 headings in the body (the title is the
-document's only H1 — body headings are `##`/`###`), a `## 요약` section present, and at
-least two `[^n]:` source definitions.
+document's only H1 — body headings are `##`/`###`), a `## 요약` section present, at
+least two `[^n]:` source definitions, and the related-report line exactly as written
+above — the label `**선행 보고서:**`, every entry a markdown link to
+`/reports/research/<slug>`, entries joined by ` · `, nothing else on the line. Links to
+this site must be root-relative, never `https://cyber-lenin.com/...`, and every slug you
+link must already exist: a slug you half-remember publishes a 404. Check with the
+research tools before linking.
 
 Everything between 요약 and 출처 is FREE-FORM: pick the section structure the material
 actually needs (지표 분석, 시나리오 비교, 반론 검토, 타임라인, 사례 연구, …) — different

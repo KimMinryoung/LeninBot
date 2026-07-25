@@ -28,6 +28,7 @@ from scripts.translate_research_markdown import (
     DEFAULT_MODEL,
     _call_deepseek,
     _validate_translation,
+    normalize_translated_markdown,
 )
 
 
@@ -117,6 +118,7 @@ def main() -> int:
                 base_url=args.base_url.rstrip("/"),
                 max_tokens=args.max_tokens,
             )
+            translated = normalize_translated_markdown(translated)
             _validate_translation(markdown, translated, max_hangul_ratio=args.max_hangul_ratio)
             _update_translation(row, translated)
             changed += 1

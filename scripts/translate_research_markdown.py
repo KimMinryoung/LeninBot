@@ -97,6 +97,21 @@ def _strip_outer_fence(text: str) -> str:
     return stripped.strip() + "\n"
 
 
+# The label the model produces for '선행 보고서:' drifts between runs
+# ("Preceding Reports:", "Preceding report:", "Preceding reports:"), so it is
+# fixed here instead of hoping the prompt holds. Link destinations are left
+# alone; the count check below catches a translation that mangles them.
+_EN_PRECEDING_LABEL_RE = re.compile(
+    r"(?mi)^(\s*)\*\*\s*preceding\s+reports?\s*:\s*\*\*"
+)
+_RESEARCH_REF_RE = re.compile(r"/reports/research/[a-z0-9-]+")
+
+
+def normalize_translated_markdown(translated: str) -> str:
+    """One canonical English wording for the fixed frame's labels."""
+    return _EN_PRECEDING_LABEL_RE.sub(r"\1**Preceding reports:**", translated)
+
+
 def _validate_translation(source: str, translated: str, *, max_hangul_ratio: float) -> None:
     if not translated.strip():
         raise ValueError("empty translation")
@@ -105,6 +120,14 @@ def _validate_translation(source: str, translated: str, *, max_hangul_ratio: flo
     ratio = _hangul_ratio(translated)
     if ratio > max_hangul_ratio:
         raise ValueError(f"translation still contains too much Hangul ({ratio:.1%}; max {max_hangul_ratio:.1%})")
+    source_refs = _RESEARCH_REF_RE.findall(source)
+    translated_refs = _RESEARCH_REF_RE.findall(translated)
+    if sorted(source_refs) != sorted(translated_refs):
+        raise ValueError(
+            "translation changed the internal report links "
+            f"({len(source_refs)} in source, {len(translated_refs)} in translation); "
+            "link destinations must be copied verbatim"
+        )
 
 
 def _call_deepseek(markdown: str, *, model: str, base_url: str, max_tokens: int) -> str:
@@ -154,7 +177,9 @@ def translate_one(
 
     source = source_path.read_text(encoding="utf-8")
     print(f"translating: {source_path.name} ({len(source):,} chars) with {model}")
-    translated = _call_deepseek(source, model=model, base_url=base_url, max_tokens=max_tokens)
+    translated = normalize_translated_markdown(
+        _call_deepseek(source, model=model, base_url=base_url, max_tokens=max_tokens)
+    )
     _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
     if dry_run:
         print(f"dry-run ok: {source_path.stem} ({len(translated):,} chars)")
