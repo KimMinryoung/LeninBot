@@ -70,6 +70,17 @@ def registered_aliases() -> list[str]:
     return sorted({str(r["a"]).strip() for r in rows if r.get("a")})
 
 
+def registered_events() -> list[str]:
+    """Event-dictionary titles, so the curator cannot file an event as a term."""
+    rows = db_query("SELECT title_ko, title_en FROM commulingo_history_events")
+    labels = []
+    for row in rows:
+        ko = str(row.get("title_ko") or "").strip()
+        en = str(row.get("title_en") or "").strip()
+        labels.append(f"{ko} ({en})" if ko and en else ko or en)
+    return sorted(label for label in labels if label)
+
+
 def pick_material(run_index: int) -> tuple[str, str]:
     """(label, text) rotating over reports / history events / person bios."""
     kind = run_index % 3
@@ -112,17 +123,31 @@ def pick_material(run_index: int) -> tuple[str, str]:
     return "person-dictionary bios", "\n".join(parts)[:MATERIAL_CHARS]
 
 
-def build_term_task(material_label: str, material: str, existing: list[str]) -> str:
+def build_term_task(
+    material_label: str, material: str, existing: list[str], events: list[str]
+) -> str:
     return f"""Glossary curation run. Source material below comes from {material_label}.
+
+SOURCE MATERIAL (the only place a candidate term may come from):
+<<<MATERIAL
+{material}
+MATERIAL>>>
 
 Find CONCEPT TERMS actually used in this material that the glossary (/commulingo/terms)
 does not cover yet, pick the single most valuable one, research it, and register it.
+A term that does not literally appear in the material above is not a candidate, no
+matter how important it is in general — those belong to a future run whose material
+happens to use them.
 
 What qualifies as a glossary term: a concept, institution-type, policy, doctrine,
 social category, or period-specific vocabulary item (like 네프맨, 굴라크, 일국사회주의).
 NOT a person (people dictionary), NOT a single historical event (events dictionary),
 NOT an institution that already has an office page (Comintern, Gosplan, state security
 organs), and NOT an ordinary everyday word.
+
+ALREADY IN THE EVENTS DICTIONARY (these are events, not glossary terms — never register
+one of these or a renaming of it):
+{', '.join(events)}
 
 ALREADY REGISTERED (never re-register these or their variants):
 {', '.join(existing)}
@@ -186,7 +211,11 @@ async def run_once() -> dict:
     reasoning = resolve_inference_extra(policy, "deepseek")
 
     label, material = pick_material(before)
-    task = build_term_task(label, material, registered_aliases()) + EDITORIAL_POLICY
+    if not material.strip():
+        return {"status": "skipped", "reason": f"no source material available from {label}"}
+    task = build_term_task(
+        label, material, registered_aliases(), registered_events()
+    ) + EDITORIAL_POLICY
 
     tracker: dict = {}
     ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)

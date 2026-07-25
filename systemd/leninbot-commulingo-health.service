@@ -1,0 +1,16 @@
+[Unit]
+Description=LeninBot CommuLingo lane health digest (notifies Telegram on unhealthy lanes)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_lane_health.py --since=-24h --notify
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal

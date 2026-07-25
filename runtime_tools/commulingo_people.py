@@ -978,6 +978,46 @@ def _surname(name: str) -> str:
     return parts[-1] if parts else ""
 
 
+_NON_NAME_CHARS = re.compile(r"[^0-9a-z가-힣]+")
+
+
+def _dedup_key(name: str) -> str:
+    """Comparison key for name identity: casefold, drop spacing and punctuation.
+
+    'C.L.R. James' and 'C. L. R. James', '본치-브루예비치' and '본치브루예비치'
+    are one person written two ways, so raw-string equality misses them.
+    """
+    return _NON_NAME_CHARS.sub("", (name or "").casefold())
+
+
+def _within_edits(a: str, b: str, limit: int) -> bool:
+    """True when `a` and `b` are within `limit` single-character edits."""
+    if abs(len(a) - len(b)) > limit:
+        return False
+    previous = list(range(len(b) + 1))
+    for i, ch_a in enumerate(a, start=1):
+        current = [i]
+        for j, ch_b in enumerate(b, start=1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1,
+                               previous[j - 1] + (ch_a != ch_b)))
+        if min(current) > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit
+
+
+def _same_surname(a: str, b: str) -> bool:
+    """Surnames match once transliteration noise is removed: Bonch-Bruyevich
+    and Bonch-Bruevich are one spelling choice apart, not two people. Only ever
+    consulted alongside an exact life-year match, so a loose threshold is safe."""
+    key_a, key_b = _dedup_key(_surname(a)), _dedup_key(_surname(b))
+    if not key_a or not key_b:
+        return False
+    if key_a == key_b:
+        return True
+    return _within_edits(key_a, key_b, 2 if min(len(key_a), len(key_b)) >= 5 else 1)
+
+
 def _collapse_spaces(value) -> str:
     return " ".join(str(value or "").split())
 
@@ -1022,33 +1062,35 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     The slug-uniqueness check alone let three duplicate pairs into the
     dictionary (오토 쿠시넨/오토 빌레 쿠시넨, 표트르/페테리스 스투치카,
     흐리스티안/크리스티안 라콥스키) — the curator picked a different Korean
-    transliteration, so it picked a different slug, and nothing objected. Three
-    signals catch that: the English name, the life-year pair together with a
-    shared surname, and a slug that is a segment-wise subset of an existing one.
+    transliteration, so it picked a different slug, and nothing objected.
+    Comparing name strings raw then let two more through (C.L.R. James over
+    C. L. R. James, 본치브루예비치 over 본치-브루예비치), so every name comparison
+    here runs on _dedup_key. Four signals: the English name, the Korean name,
+    the life-year pair together with a near-matching surname, and a slug that is
+    a segment-wise subset of an existing one.
     Returns the matched row plus a `why` phrase, or None.
     """
     _, _, name_ko = _patch_name_parts(patch, "ko")
     _, _, name_en = _patch_name_parts(patch, "en")
     birth, death = _parse_life_years(patch.get("years") or "")
+    key_en, key_ko = _dedup_key(name_en), _dedup_key(name_ko)
+    segments = set(target_id.split("-"))
 
-    if name_en:
-        cur.execute(
-            "SELECT id, name_ko FROM commulingo_people "
-            "WHERE lower(btrim(name_en)) = lower(btrim(%s))", (name_en,)
-        )
-        row = cur.fetchone()
-        if row:
-            return {**row, "why": f"registered under the same English name '{name_en}'"}
+    cur.execute("SELECT id, name_ko, name_en, birth_year, death_year FROM commulingo_people")
+    rows = cur.fetchall()
+
+    for row in rows:
+        if key_en and _dedup_key(row["name_en"]) == key_en:
+            return {**row, "why": f"registered under the same English name '{row['name_en']}'"}
+        if key_ko and _dedup_key(row["name_ko"]) == key_ko:
+            return {**row, "why": f"registered under the same Korean name '{row['name_ko']}'"}
 
     if birth:
-        cur.execute(
-            "SELECT id, name_ko, name_en FROM commulingo_people "
-            "WHERE birth_year = %s AND death_year IS NOT DISTINCT FROM %s",
-            (birth, death),
-        )
-        for row in cur.fetchall():
-            if _surname(row["name_ko"]) == _surname(name_ko) or (
-                name_en and _surname(row["name_en"]) == _surname(name_en)
+        for row in rows:
+            if row["birth_year"] != birth or row["death_year"] != death:
+                continue
+            if _same_surname(row["name_ko"], name_ko) or (
+                name_en and _same_surname(row["name_en"], name_en)
             ):
                 return {**row, "why": f"registered with the same life years "
                                       f"({patch.get('years')}) and surname"}
@@ -1056,9 +1098,7 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     # kuusinen vs otto-kuusinen — one slug is the other plus a given name.
     # Differing known birth years settle it: 야코블레프 1923–2005 and 1896–1938
     # share a slug segment and a surname but are plainly two people.
-    segments = set(target_id.split("-"))
-    cur.execute("SELECT id, name_ko, birth_year FROM commulingo_people")
-    for row in cur.fetchall():
+    for row in rows:
         other = set(row["id"].split("-"))
         if not (segments < other or other < segments):
             continue

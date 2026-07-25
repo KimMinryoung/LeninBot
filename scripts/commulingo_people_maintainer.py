@@ -30,6 +30,7 @@ from agents import get_agent
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one
+from runtime_tools.commulingo_people import _dedup_key
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.security import CallerContext, caller_scope
 
@@ -417,6 +418,24 @@ consequential claims. Make one narrow write call and stop.
 """ + CARD_STYLE_GUIDANCE
 
 
+def registered_person_roster() -> str:
+    """Every card already in the dictionary, as one comma-joined roster.
+
+    Discovery used to prove absence with at most six search_people calls
+    against ~700 cards, so it kept proposing people who were already filed:
+    85% of the lane's fallbacks were `candidate duplicates existing person`
+    after all three attempts, each one a paid agent loop. Showing the roster
+    up front turns absence into something the curator can read off.
+    """
+    rows = db_query(
+        "SELECT name_ko, name_en FROM commulingo_people ORDER BY name_ko"
+    )
+    return ", ".join(
+        f"{row['name_ko']}({row['name_en']})" if row["name_en"] else str(row["name_ko"])
+        for row in rows
+    )
+
+
 def build_discovery_task(new_person_focus: str = "all") -> str:
     focus_instruction = ""
     if new_person_focus == "soviet_institutions":
@@ -434,7 +453,11 @@ CURRENT SELECTION FOCUS:
 Do not create or edit anything in this stage. Inspect list_groups, list_categories and
 list_offices, then use search_people under a proposed name and aliases to prove the person
 is absent. Prefer a historically important gap in revolutionary or Soviet history.
-""" + focus_instruction + """
+
+ALREADY IN THE DICTIONARY — anyone below is NOT a gap, and neither is the same person
+under another transliteration. Read this roster first and pick someone who is not on it;
+a candidate that turns out to be registered is rejected and the run is wasted.
+""" + registered_person_roster() + "\n" + focus_instruction + """
 Do not survey the whole dictionary: consider at most three plausible people, select the first verified
 gap, and stop searching. Open one reliable biographical source. Finish by calling
 `commulingo_candidate_select` with the missing
@@ -469,6 +492,18 @@ def validate_discovered_candidate(candidate: dict) -> dict:
     )
     if duplicate:
         raise ValueError(f"candidate duplicates existing person {duplicate['id']}")
+
+    # The SQL above compares raw strings, so a different transliteration reads
+    # as a different person (C.L.R. James over C. L. R. James). Re-check on the
+    # spelling-insensitive key the create tool uses, here where rejecting still
+    # leaves the run a chance to pick someone else.
+    key_ko, key_en = _dedup_key(candidate["name_ko"]), _dedup_key(candidate["name_en"])
+    for row in db_query("SELECT id, name_ko, name_en FROM commulingo_people"):
+        if _dedup_key(row["name_ko"]) == key_ko or _dedup_key(row["name_en"]) == key_en:
+            raise ValueError(
+                f"candidate duplicates existing person {row['id']} "
+                f"({row['name_ko']}) under a different spelling"
+            )
     return candidate
 
 

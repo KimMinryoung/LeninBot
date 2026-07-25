@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily CommuLingo curation-lane health digest
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -154,9 +154,20 @@ new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
 assert "Every new person requires both citizenship and nationalOrigin" in new_task
 assert "either the citizenship or nationalOrigin flag code is unset" in task
-focused_discovery = maintainer.build_discovery_task("soviet_institutions")
+original_db_query = maintainer.db_query
+try:
+    maintainer.db_query = lambda sql, params=None: [
+        {"name_ko": "니콜라이 예조프", "name_en": "Nikolai Yezhov"},
+        {"name_ko": "라브렌티 베리야", "name_en": "Lavrentiy Beria"},
+    ]
+    focused_discovery = maintainer.build_discovery_task("soviet_institutions")
+finally:
+    maintainer.db_query = original_db_query
 assert "Do not select a non-Soviet revolutionary" in focused_discovery
 assert "Soviet institution" in focused_discovery and "list_offices" in focused_discovery
+# discovery must be able to read absence off a roster instead of guessing at it
+assert "ALREADY IN THE DICTIONARY" in focused_discovery
+assert "니콜라이 예조프(Nikolai Yezhov), 라브렌티 베리야(Lavrentiy Beria)" in focused_discovery
 
 original_db_query = maintainer.db_query
 captured_selection = {}
@@ -275,9 +286,12 @@ except CommulingoInputError as exc:
     assert exc.code == "unknown_field"
 
 original_query_one = maintainer.db_query_one
+original_query = maintainer.db_query
 try:
     duplicate_queries = []
     maintainer.db_query_one = lambda sql, *_a, **_kw: duplicate_queries.append(sql) or None
+    roster = [{"id": "c-l-r-james", "name_ko": "C. L. R. 제임스", "name_en": "C. L. R. James"}]
+    maintainer.db_query = lambda sql, params=None: roster
     candidate_payload = {
         "id": "example-person", "name_ko": "예시",
         "name_en": "Example Person", "reason": "gap",
@@ -286,13 +300,26 @@ try:
     discovered = maintainer.validate_discovered_candidate(candidate_payload)
     assert discovered["id"] == "example-person"
     assert "commulingo_person_aliases" in duplicate_queries[-1]
+
+    # a different transliteration of a registered card is still a duplicate
+    try:
+        maintainer.validate_discovered_candidate({
+            "id": "clr-james", "name_ko": "C.L.R. 제임스",
+            "name_en": "C.L.R. James", "reason": "gap",
+            "source_url": "https://example.com/bio",
+        })
+        raise AssertionError("respelled duplicate should be rejected")
+    except ValueError as exc:
+        assert "under a different spelling" in str(exc)
 finally:
     maintainer.db_query_one = original_query_one
+    maintainer.db_query = original_query
 
 async def assert_dsml_retry():
     original_chat = maintainer.chat_with_tools
     original_count = maintainer.completed_run_count
     original_query = maintainer.db_query_one
+    original_roster = maintainer.db_query
     calls = []
     async def fake_chat(*_args, **_kwargs):
         calls.append(1)
@@ -308,6 +335,7 @@ async def assert_dsml_retry():
         maintainer.chat_with_tools = fake_chat
         maintainer.completed_run_count = lambda: 10
         maintainer.db_query_one = lambda *_a, **_kw: None
+        maintainer.db_query = lambda sql, params=None: []
         policy = SimpleNamespace(
             max_output_continuations=2, max_rounds=16, max_output_tokens=16000,
             max_input_tokens=160000, budget_usd=0.35,
@@ -334,6 +362,7 @@ async def assert_dsml_retry():
         maintainer.chat_with_tools = original_chat
         maintainer.completed_run_count = original_count
         maintainer.db_query_one = original_query
+        maintainer.db_query = original_roster
 
 asyncio.run(assert_dsml_retry())
 
