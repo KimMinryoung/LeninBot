@@ -100,6 +100,62 @@ def main() -> int:
     d = authorize(owner, "send_email")
     check("enforce: owner send_email allowed", d.allowed and d.label == "allow", f"{d.label}/{d.reason}")
 
+    # Owner-gating for a single tool whose risk class ('write') is not owner-only.
+    # The CommuLingo dictionary writers are reachable from surfaces that legitimately
+    # hold other write tools, so the gate has to name the tool rather than the class.
+    d = authorize(nonowner_agent, "commulingo_term_create")
+    check("enforce: non-owner commulingo_term_create denied",
+          d.denied and d.label == "deny" and d.rule == "owner_tool", f"{d.label}/{d.rule}")
+    d = authorize(owner, "commulingo_term_create")
+    check("enforce: owner commulingo_term_create allowed",
+          d.allowed and d.label == "allow", f"{d.label}/{d.reason}")
+    # The curator lanes run as an owner-flagged agent; that path must stay open
+    # or the enrichment timers stop applying edits.
+    curator = CallerContext(interface="agent", agent_name="commulingo_curator", is_owner=True)
+    d = authorize(curator, "commulingo_person_update")
+    check("enforce: curator lane commulingo_person_update allowed",
+          d.allowed and d.label == "allow", f"{d.label}/{d.reason}")
+    # Reads are untouched by the tool gate, on every surface.
+    d = authorize(nonowner_agent, "commulingo_people")
+    check("non-owner commulingo_people read still allowed",
+          d.allowed and d.label == "allow", f"{d.label}/{d.rule}")
+    _force_mode(policy.SHADOW)
+    d = authorize(nonowner_agent, "commulingo_term_create")
+    check("shadow: non-owner commulingo_term_create allowed but shadow_deny",
+          d.allowed and d.label == "shadow_deny" and d.rule == "owner_tool", f"{d.label}/{d.rule}")
+    _force_mode(policy.ENFORCE)
+
+    # Caller allow-list. The roleplay bot runs on a private allow-listed channel
+    # and declares is_owner, so the owner tests above pass it; only naming the
+    # caller keeps the personas out of the dictionaries.
+    roleplay = CallerContext(interface="telegram", agent_name="roleplay",
+                             user_id=f"rp-{uid}", is_owner=True)
+    d = authorize(roleplay, "commulingo_term_create")
+    check("owner-flagged roleplay still denied commulingo_term_create",
+          d.denied and d.rule == "caller", f"{d.label}/{d.rule}")
+    d = authorize(roleplay, "commulingo_people")
+    check("roleplay keeps commulingo_people read",
+          d.allowed and d.label == "allow", f"{d.label}/{d.rule}")
+    for agent_name in ("autonomous_project", "general"):
+        ctx = CallerContext(interface="agent", agent_name=agent_name,
+                            user_id=f"{agent_name}-{uid}", is_owner=True)
+        d = authorize(ctx, "commulingo_person_update")
+        check(f"{agent_name} denied commulingo_person_update",
+              d.denied and d.rule == "caller", f"{d.label}/{d.rule}")
+    # Every caller the audit log shows has ever written must stay allowed.
+    for agent_name, interface in (("commulingo_curator", "agent"), ("analyst", "agent"), (None, "telegram")):
+        ctx = CallerContext(interface=interface, agent_name=agent_name,
+                            user_id=f"w-{uid}", is_owner=True)
+        d = authorize(ctx, "commulingo_term_create")
+        check(f"{agent_name or interface} keeps commulingo write access",
+              d.allowed and d.label == "allow", f"{d.label}/{d.rule}")
+    # The allow-list is always enforced, like the interface rule it mirrors.
+    _force_mode(policy.SHADOW)
+    d = authorize(roleplay, "commulingo_term_create")
+    check("caller allow-list is enforced even in shadow mode",
+          d.denied and d.rule == "caller", f"{d.label}/{d.rule}")
+    _force_mode(policy.ENFORCE)
+
     print("== rate limiting (enforce) ==")
     from redis_state import redis_available
 

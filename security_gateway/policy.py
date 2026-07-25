@@ -143,6 +143,44 @@ UNRESTRICTED_INTERFACES = frozenset({"telegram", "agent", "autonomous", "system"
 # but recorded as ``shadow_deny`` so we can see what enforcement would block.
 OWNER_REQUIRED_RISK_CLASSES = frozenset({"pay", "send", "execute", "admin"})
 
+# ── Owner-gated individual tools ──────────────────────────────────────
+# Some tools need owner-gating without their whole risk class being owner-only.
+# The CommuLingo narrow writers are 'write', a class that legitimately runs on
+# several surfaces, but they edit the public dictionaries at /commulingo and
+# only the curator lanes and the owner should reach them. Until now nothing at
+# this layer said so: containment lived entirely in the per-surface tool lists,
+# so one over-broad profile entry would have been enough to open them up. This
+# mirrors the webchat/A2A class rules, which likewise duplicate a profile
+# pre-filter on purpose.
+#
+# The curator lanes run as the owner (interface 'agent', is_owner true), so the
+# same owner test covers them without naming the agent.
+OWNER_REQUIRED_TOOLS = frozenset({
+    "commulingo_person_create",
+    "commulingo_person_update",
+    "commulingo_section_save",
+    "commulingo_event_link",
+    "commulingo_office_row_save",
+    "commulingo_term_create",
+})
+
+# ── Per-tool caller allow-lists ───────────────────────────────────────
+# The owner flag alone does not contain the CommuLingo writers. The roleplay
+# bot runs on an allow-listed private channel and so declares is_owner, which is
+# correct for what it is but would let the personas edit the dictionaries. This
+# names the callers instead. Matched against agent_name, falling back to the
+# interface when no agent name is set, which is how the Telegram orchestrator
+# appears.
+#
+# The list is what has actually written, taken from tool_audit_log over the
+# whole history of the table: the curation lanes, the analyst on research
+# follow-ups, and the orchestrator itself. Nothing else has ever written.
+COMMULINGO_WRITE_CALLERS = frozenset({"commulingo_curator", "analyst", "telegram"})
+
+TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
+    tool: COMMULINGO_WRITE_CALLERS for tool in OWNER_REQUIRED_TOOLS
+}
+
 # ── Rate limits (NEW — shadow by default) ─────────────────────────────
 # Per (caller, risk_class) sliding-window caps. window_seconds + max_calls.
 # Absent class => unlimited.
@@ -195,6 +233,25 @@ def owner_required_classes() -> frozenset[str]:
     if isinstance(overlay, list):
         return frozenset(str(x) for x in overlay)
     return OWNER_REQUIRED_RISK_CLASSES
+
+
+def owner_required_tools() -> frozenset[str]:
+    overlay = _load_overlay().get("owner_required_tools")
+    if isinstance(overlay, list):
+        return frozenset(str(x) for x in overlay)
+    return OWNER_REQUIRED_TOOLS
+
+
+def caller_allowlist_for(tool_name: str) -> frozenset[str] | None:
+    """Callers permitted to run ``tool_name``, or None when unrestricted."""
+    overlay = _load_overlay().get("tool_caller_allowlist")
+    if isinstance(overlay, dict):
+        entry = overlay.get(tool_name)
+        if isinstance(entry, list):
+            return frozenset(str(x) for x in entry)
+        if tool_name in overlay:
+            return None
+    return TOOL_CALLER_ALLOWLIST.get(tool_name)
 
 
 def rate_limits() -> dict[str, dict[str, int]]:
@@ -265,6 +322,11 @@ def describe() -> dict:
         "a2a_allowed_risk_classes": sorted(A2A_ALLOWED_RISK_CLASSES),
         "unrestricted_interfaces": sorted(UNRESTRICTED_INTERFACES),
         "owner_required_risk_classes": sorted(owner_required_classes()),
+        "owner_required_tools": sorted(owner_required_tools()),
+        "tool_caller_allowlist": {
+            tool: sorted(caller_allowlist_for(tool) or ())
+            for tool in sorted(TOOL_CALLER_ALLOWLIST)
+        },
         "rate_limits": rate_limits(),
         "overlay_path": _OVERLAY_PATH if _load_overlay() else None,
     }

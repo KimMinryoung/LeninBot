@@ -42,9 +42,12 @@ interface boundary  →  installs CallerContext (contextvar) for its run
   `interface="unknown"` — policy rules still run and the call is audited.
 - **`policy.py`** — single source of truth. Holds `TOOL_RISK_CLASS` (moved here from
   the smoke test, which now imports it), the per-interface rules, the owner-gated
-  classes, and the rate limits. `enforce_mode()` reads `gateway_enforce_mode` from
+  classes, the owner-gated tools, the per-tool caller allow-lists, and the rate
+  limits. `enforce_mode()` reads `gateway_enforce_mode` from
   `config.json` (TTL-cached, flips without restart). Optional
-  `config/security_policy.json` overlay tunes owner-required classes and rate limits.
+  `config/security_policy.json` overlay tunes owner-required classes and tools,
+  the caller allow-lists (`tool_caller_allowlist`, a tool→callers map; an entry
+  set to anything other than a list clears the restriction) and rate limits.
 - **`gateway.py`** — `authorize(ctx, tool, consume_rate_limit=...) -> Decision`.
   Redis Lua performs one atomic sliding-window decision. Capped side effects fail
   closed when Redis is unavailable (`deny`, `rule=rate_store`); internal policy errors
@@ -65,7 +68,18 @@ interface boundary  →  installs CallerContext (contextvar) for its run
    a stale profile or provider-emitted hidden tool name from reaching a handler.
 3. **Owner-gating** → `pay`/`send`/`execute`/`admin` require `is_owner`. **Shadow by
    default** (non-owner call allowed but logged `shadow_deny`); blocks only in enforce.
-4. **Rate limit** → per `(caller, risk_class)` atomic Redis sliding window on outbound/irreversible
+4. **Owner-gated tools** (`rule=owner_tool`) → individual tools requiring `is_owner`
+   when their whole risk class should not be owner-only. Currently the six CommuLingo
+   narrow writers, which are `write`, a class that legitimately runs elsewhere. Same
+   shadow/enforce behaviour as rule 3.
+5. **Caller allow-list** (`rule=caller`) → tools that name the callers permitted to run
+   them, matched on `agent_name` falling back to `interface`. The CommuLingo writers
+   allow `commulingo_curator`, `analyst` and `telegram` (the orchestrator, which writes
+   with no agent name), the three callers `tool_audit_log` shows have ever written.
+   **Always enforced**, like rule 2 and for the same reason: it mirrors a profile
+   pre-filter. Rule 4 alone would not hold here, because the roleplay bot runs on a
+   private allow-listed channel and correctly declares `is_owner`.
+6. **Rate limit** → per `(caller, risk_class)` atomic Redis sliding window on outbound/irreversible
    classes only: `pay` = 3/hour, `send` = 20/hour, `publish` = 20/hour. `execute` and
    `admin` are intentionally **uncapped** (risk is in the payload, not the call count;
    legitimate bulk runs are common). **Shadow by default**; blocks only in enforce.

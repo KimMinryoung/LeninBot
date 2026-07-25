@@ -165,6 +165,47 @@ def _authorize(
             "owner",
         )
 
+    # Owner-gating for individual tools whose whole risk class is not owner-only
+    # (the CommuLingo dictionary writers). Same shadow/enforce behaviour as the
+    # class rule above, reported under its own rule name so the audit rows can
+    # be told apart.
+    if tool_name in policy.owner_required_tools() and not ctx.is_owner:
+        if mode == policy.ENFORCE:
+            return Decision(
+                False,
+                DENY,
+                rclass,
+                f"'{tool_name}' is owner-only",
+                mode,
+                "owner_tool",
+            )
+        return Decision(
+            True,
+            SHADOW_DENY,
+            rclass,
+            f"'{tool_name}' is owner-only (shadow)",
+            mode,
+            "owner_tool",
+        )
+
+    # Per-tool caller allow-list. The owner test above does not separate the
+    # roleplay bot from the curation lanes, because that bot runs on a private
+    # allow-listed channel and declares is_owner. Always enforced, like the
+    # interface rule and for the same reason: it mirrors a profile pre-filter,
+    # so a stale profile must not be able to talk past it.
+    allowed_callers = policy.caller_allowlist_for(tool_name)
+    if allowed_callers is not None:
+        caller = ctx.agent_name or ctx.interface
+        if caller not in allowed_callers:
+            return Decision(
+                False,
+                DENY,
+                rclass,
+                f"'{caller}' is not permitted to call '{tool_name}'",
+                mode,
+                "caller",
+            )
+
     rl = policy.rate_limit_for(rclass) if consume_rate_limit else None
     if rl and rl.get("max_calls"):
         window = int(rl.get("window_seconds", 3600))
