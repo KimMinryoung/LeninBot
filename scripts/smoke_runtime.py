@@ -227,6 +227,61 @@ def _assert_writer_heavy_policy_uses_gateway_defaults() -> None:
     assert writer_call_policy("research").max_output_tokens == 3000
 
 
+def _assert_provider_registry_and_recovery_policy() -> None:
+    from datetime import date
+
+    import bot_config
+    from llm.provider_registry import (
+        OPENAI_COMPATIBLE_PRICING,
+        anthropic_pricing_table,
+        kimi_openai_tool_options,
+    )
+    from openai_tool_loop import _is_tool_protocol_error, _is_transient_transport_error
+
+    assert bot_config._MODEL_ALIAS_MAP["opus"] == ("claude-opus-5", "claude-opus-5")
+    assert bot_config._OPENAI_MODEL_MAP == {
+        "gpt56": "gpt-5.6-sol",
+        "gpt56terra": "gpt-5.6-terra",
+        "gpt56luna": "gpt-5.6-luna",
+    }
+    assert bot_config._TIER_MAP["openai"] == {
+        "high": "gpt56",
+        "medium": "gpt56terra",
+        "low": "gpt56luna",
+    }
+    from browser.use_agent import _normalize_model as normalize_browser_use_model
+    from browser.worker import _normalize_browser_model
+
+    expected_browser_tiers = {
+        "high": "gpt-5.6-sol",
+        "medium": "gpt-5.6-terra",
+        "low": "gpt-5.6-luna",
+    }
+    for tier, expected in expected_browser_tiers.items():
+        assert normalize_browser_use_model(tier, "openai") == expected
+        assert _normalize_browser_model(tier, "openai") == expected
+    assert OPENAI_COMPATIBLE_PRICING["gpt-5.6-sol"] == {
+        "input": 5.0 / 1_000_000,
+        "output": 30.0 / 1_000_000,
+        "cached_input": 0.5 / 1_000_000,
+    }
+    assert anthropic_pricing_table(date(2026, 8, 31))["claude-sonnet-5"]["input"] == 2 / 1_000_000
+    assert anthropic_pricing_table(date(2026, 9, 1))["claude-sonnet-5"]["input"] == 3 / 1_000_000
+    options = kimi_openai_tool_options(fallback_client="client", fallback_model="deepseek-v4-pro")
+    assert options["content_filter_fallback_client"] == "client"
+    assert options["content_filter_fallback_model"] == "deepseek-v4-pro"
+    assert options["extra_body"] == {"reasoning_effort": "max"}
+    assert options["preserve_reasoning_content"] is True
+
+    assert _is_tool_protocol_error(RuntimeError("HTTP 400: missing tool_call_id result"))
+    assert not _is_tool_protocol_error(RuntimeError("HTTP 400: invalid temperature"))
+
+    class APITimeoutError(Exception):
+        pass
+
+    assert _is_transient_transport_error(APITimeoutError("timed out"))
+
+
 def _assert_writer_kimi_catalog_and_resolution() -> None:
     import bot_config
     import claude_loop
@@ -2297,6 +2352,7 @@ async def _assert_diary_unpublish_action() -> None:
 async def main() -> None:
     _assert_prompt_context()
     await _assert_runtime_profiles()
+    _assert_provider_registry_and_recovery_policy()
     _assert_writer_heavy_policy_uses_gateway_defaults()
     _assert_writer_kimi_catalog_and_resolution()
     _assert_openai_input_replay_checkpoint()

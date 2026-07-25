@@ -1,6 +1,6 @@
 """security_gateway — unified tool-call policy, authorization, and audit logging.
 
-Every tool call from every interface funnels through ``tool_loop_common.execute_tool``.
+Every tool call from every interface funnels through ``tool_gateway.dispatcher.execute_tool``.
 This package is the control plane mounted at that seam:
 
 * ``policy``  — single source of truth for tool risk classes and per-caller rules.
@@ -8,8 +8,9 @@ This package is the control plane mounted at that seam:
 * ``gateway`` — ``authorize()`` turns (context, tool, args) into an allow/deny Decision.
 * ``audit``   — append-only security audit log (Postgres + structured journal log).
 
-Design invariant: the gateway is **fail-open on internal error**. A broken gateway
-logs a warning and lets the tool run — it must never take down the agent.
+Design invariant: authorization and dispatcher pre-check errors are **fail-closed**.
+Audit sink failures remain non-fatal, and Redis-backed rate limits retain their
+documented degrade-open behavior.
 """
 
 from security_gateway.context import (

@@ -37,7 +37,7 @@ interface boundary  →  installs CallerContext (contextvar) for its run
   exit (so a nested `run_agent` sub-call doesn't leak its identity back to the
   orchestrator). ContextVars are snapshotted into `asyncio.gather` children, so the
   parallel-batch path inherits the caller for free. Default when unset:
-  `interface="unknown"` — fail-open, but still audited.
+  `interface="unknown"` — policy rules still run and the call is audited.
 - **`policy.py`** — single source of truth. Holds `TOOL_RISK_CLASS` (moved here from
   the smoke test, which now imports it), the per-interface rules, the owner-gated
   classes, and the rate limits. `enforce_mode()` reads `gateway_enforce_mode` from
@@ -45,7 +45,7 @@ interface boundary  →  installs CallerContext (contextvar) for its run
   `config/security_policy.json` overlay tunes owner-required classes and rate limits.
 - **`gateway.py`** — `authorize(ctx, tool) -> Decision`. Pure apart from a
   Redis-backed sliding-window rate counter (degrades open if Redis is down). Fails
-  open on any internal error.
+  closed on internal authorization/policy errors (`deny`, `rule=error`).
 - **`audit.py`** — `audit(...)`: redacts+truncates args, emits a structured JSON log
   line (always), and enqueues a best-effort row to `tool_audit_log` via a single
   background worker thread. Never blocks the event loop, never raises into tool
@@ -79,7 +79,7 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 | `system:writer` | `writer.stream.stream_writer_reply` around the `/writer` model loop | `True` |
 | `unknown` | unannotated direct callers | `False` |
 
-Unannotated callers fall to `unknown`/fail-open and are still audited — they can be
+Unannotated callers fall to `unknown` and are still audited — they can be
 annotated incrementally.
 
 Writer-specific local tools are included in the taxonomy even though they are not
@@ -102,7 +102,8 @@ a fallback, but no local socket is opened before this validation succeeds.
 `tool_audit_log` (applied via `scripts/schema_migrations.py --only tool-audit-log`,
 no startup DDL): `ts, interface, agent_name, user_id, is_owner, task_id, tool_name,
 risk_class, decision, enforced, deny_reason, args_summary (redacted+truncated),
-result_status (ok|error|denied), latency_ms, error_excerpt`. Indexed on `ts`,
+result_status (including `ok`, `error`, `denied`, `deduplicated`), latency_ms,
+`error_excerpt`. Indexed on `ts`,
 `(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`.
 
 The table is append-only at the database layer. The migration installs triggers that
@@ -131,8 +132,10 @@ are enforced from day one.
 
 ## Invariants
 
-- **Fail-open on internal error.** A broken gateway logs a warning and lets the tool
-  run. It must never take down the agent.
+- **Fail-closed on authorization error.** A broken policy/pre-check returns a denied
+  tool result and never calls the handler. Redis-backed rate limiting still degrades
+  open when Redis is unavailable; that compatibility exception is separately audited
+  and remains backlog work.
 - **Audit is non-fatal.** Both sinks swallow errors; a DB outage drops audit rows
   (logged) but never blocks or fails a tool call.
 - **Defense-in-depth, not a replacement.** Pre-filters (orchestrator/agent/web/A2A
@@ -142,7 +145,8 @@ are enforced from day one.
 ## Tests
 
 - `scripts/smoke_security_gateway.py` — policy, interface restriction, owner-gating
-  (shadow vs enforce), rate limiting, redaction, fail-open.
+  (shadow vs enforce), rate limiting, redaction, fail-closed, and run-local
+  side-effect idempotency.
 - `scripts/smoke_tool_allowlists.py` — validates the same `TOOL_RISK_CLASS` and checks
   that orchestrator schemas and executable handlers share one filtered set.
 - `scripts/smoke_url_security.py` — validates unsafe addresses, mixed DNS answers,

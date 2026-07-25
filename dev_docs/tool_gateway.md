@@ -22,6 +22,13 @@ interface / agent context
 
 Read-only/idempotent tools in consecutive batches may run concurrently through the existing parallel-safe list. Other tools run sequentially in model emission order.
 
+Each provider loop also owns one execution-local idempotency cache. Successful
+side-effect calls are selected by security risk class and keyed by canonicalized tool
+name plus arguments; a repeated call in a later normal/continuation/forced-final round reuses
+the first result and is audited as `deduplicated`. Read/fetch calls are deliberately
+not cached. This boundary prevents provider replay inside one run; durable cross-run
+idempotency remains connector work.
+
 ## Package Layout
 
 | Module | Role |
@@ -51,6 +58,8 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 ## Invariants
 
 - Tool visibility remains fail-closed: callers only see explicitly allowed tools.
+- Authorization/pre-check exceptions are fail-closed: no handler may run without a
+  successful `security_gateway.authorize()` decision. Audit sink failure stays non-fatal.
 - Reusable surface allow-lists should be added to `tool_gateway.profiles`; keep agent-specific `AgentSpec.tools` beside agent definitions unless there is a concrete reuse reason.
 - A visible tool must still have a registered handler to execute. The Telegram orchestrator receives the handler map produced by the same allow-list operation as its schemas; the full global handler registry must never be passed to that provider loop.
 - Public webchat and A2A contexts are execution-time read-only boundaries (`read`, `fetch`, `wallet_read`) even if a profile or model output is misconfigured.
@@ -60,6 +69,9 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 - `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
 - Gateway-managed input overflow must not silently drop conversation text. Large results from explicitly replay-safe read-only tools become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source. Side-effecting tools are never marked for replay.
 - Output continuation is bounded by policy and does not consume an ordinary tool round solely because a completion hit its output ceiling.
+- OpenAI-compatible recovery only strips history for a positively identified tool
+  protocol 400 and only before any side-effect succeeded. Malformed JSON arguments
+  receive an error result and are never coerced to an empty handler call.
 
 ## Verification
 

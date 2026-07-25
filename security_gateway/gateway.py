@@ -2,9 +2,8 @@
 
 ``authorize(ctx, tool_name)`` is the decision function called at the
 ``execute_tool`` seam. It is pure apart from the Redis-backed sliding-window
-rate counter, and degrades open if Redis is unavailable. Any internal error
-fails open (the tool runs) and is logged — a broken gateway must never take
-down the agent.
+rate counter, and degrades open if Redis is unavailable. Authorization-policy
+errors fail closed so a broken pre-check can never execute a handler accidentally.
 """
 
 from __future__ import annotations
@@ -134,13 +133,25 @@ def _authorize(ctx: CallerContext, tool_name: str, now: float) -> Decision:
 
 
 def authorize(ctx: CallerContext, tool_name: str, args: dict | None = None) -> Decision:
-    """Authorize a tool call. Fails open (allow) on any internal gateway error."""
+    """Authorize a tool call. Fails closed on any internal gateway error."""
     now = time.time()
     try:
         return _authorize(ctx, tool_name, now)
     except Exception as e:  # pragma: no cover - defensive
-        logger.warning("gateway.authorize failed open for %s: %s", tool_name, e)
+        logger.error("gateway.authorize failed closed for %s: %s", tool_name, e)
+        try:
+            rclass = policy.risk_class(tool_name)
+        except Exception:
+            rclass = policy.UNCATEGORIZED
+        try:
+            mode = policy.enforce_mode()
+        except Exception:
+            mode = policy.ENFORCE
         return Decision(
-            True, ALLOW, policy.risk_class(tool_name),
-            f"gateway error (fail-open): {e}", policy.enforce_mode(), "error",
+            False,
+            DENY,
+            rclass,
+            f"gateway error (fail-closed): {e}",
+            mode,
+            "error",
         )

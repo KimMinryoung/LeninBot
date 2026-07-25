@@ -153,7 +153,7 @@ _AGENT_KEYS = {"provider", "model", "budget_usd", "max_rounds"}
 # provider별 모델 별칭 힌트 (bot_config 티어/별칭 맵 기준; 오타 경고용, 차단 아님)
 _AGENT_MODEL_HINTS = {
     "claude": {"haiku", "sonnet", "opus"},
-    "openai": {"gpt54", "gpt54mini", "gpt54nano"},
+    "openai": {"gpt56", "gpt56terra", "gpt56luna"},
     "deepseek": {"deepseek_pro", "deepseek_flash"},
     "kimi": {"kimi_k3"},
 }

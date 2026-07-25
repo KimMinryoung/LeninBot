@@ -8,6 +8,14 @@ import logging
 import anthropic
 
 from secrets_loader import get_secret
+from llm.provider_registry import (
+    CLAUDE_MODEL_ALIASES,
+    DEEPSEEK_MODEL_MAP,
+    KIMI_MODEL_MAP,
+    MODEL_DISPLAY_NAMES,
+    OPENAI_MODEL_MAP,
+    TIER_MODEL_KEYS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,55 +207,25 @@ _CONFIG_META = {
     "autonomous_tick_critic": _config_meta("자율 틱 크리틱", "", [True, False], ["autonomous-next-tick"]),
 }
 
-_MODEL_ALIAS_MAP = {
-    "haiku":  ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
-    "sonnet": ("claude-sonnet-5", "claude-sonnet-5"),
-    "opus":   ("claude-opus-4-8", "claude-opus-4-8"),
-}
-
-_OPENAI_MODEL_MAP = {
-    "gpt54":     "gpt-5.5",
-    "gpt54mini": "gpt-5.5-mini",
-    "gpt54nano": "gpt-5.5-nano",
-}
-
-_DEEPSEEK_MODEL_MAP = {
-    "deepseek_pro":   "deepseek-v4-pro",
-    "deepseek_flash": "deepseek-v4-flash",
-}
+_MODEL_ALIAS_MAP = CLAUDE_MODEL_ALIASES
+_OPENAI_MODEL_MAP = OPENAI_MODEL_MAP
+_DEEPSEEK_MODEL_MAP = DEEPSEEK_MODEL_MAP
 
 # kimi 모델은 config/llm_call_sites.json("kimi_chat_model")이 관리 (임포트 시점 해석).
 from llm.call_registry import resolve as _resolve_call_site
 
 _KIMI_MODEL_MAP = {
-    "kimi_k3": _resolve_call_site("kimi_chat_model", model="kimi-k3").model,
+    "kimi_k3": _resolve_call_site(
+        "kimi_chat_model", model=KIMI_MODEL_MAP["kimi_k3"]
+    ).model,
 }
 
 # Human-readable display names keyed by API model ID. Used when injecting
 # "current model" context into the orchestrator prompt so the model sees its
-# own official product name ("Claude Opus 4.8") rather than the internal API
-# slug ("claude-opus-4-8"). Match by prefix: pinned date suffixes (e.g.
+# own official product name ("Claude Opus 5") rather than the internal API
+# slug ("claude-opus-5"). Match by prefix: pinned date suffixes (e.g.
 # "-20251001") share the display name of the base family.
-_MODEL_DISPLAY_NAMES = {
-    # Anthropic
-    "claude-opus-4-8":   "Claude Opus 4.8",
-    "claude-sonnet-5":   "Claude Sonnet 5",
-    "claude-haiku-4-5":  "Claude Haiku 4.5",
-    # OpenAI
-    "gpt-5.5":      "GPT-5.5 Pro",
-    "gpt-5.5-mini": "GPT-5.5 mini",
-    "gpt-5.5-nano": "GPT-5.5 nano",
-    # DeepSeek
-    "deepseek-v4-pro":   "DeepSeek V4 Pro",
-    "deepseek-v4-flash": "DeepSeek V4 Flash",
-    # Moonshot AI
-    "kimi-k3": "Kimi K3",
-    # Local (Qwen family — common Ollama/llama.cpp tags)
-    "qwen3.5-9b":   "Qwen 3.5 9B",
-    "qwen3.6-9b":   "Qwen 3.6 9B",
-    "qwen3.5":      "Qwen 3.5",
-    "qwen3.6":      "Qwen 3.6",
-}
+_MODEL_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 def _display_name_for_model_id(model_id: str) -> str:
@@ -267,13 +245,7 @@ def _display_name_for_model_id(model_id: str) -> str:
     return model_id
 
 # Tier → provider-specific model mapping
-_TIER_MAP = {
-    "claude": {"high": "opus",   "medium": "sonnet", "low": "haiku"},
-    "openai": {"high": "gpt54",  "medium": "gpt54mini", "low": "gpt54nano"},
-    "deepseek": {"high": "deepseek_pro", "medium": "deepseek_flash", "low": "deepseek_flash"},
-    "kimi": {"high": "kimi_k3", "medium": "kimi_k3", "low": "kimi_k3"},
-    "local":  {"high": "local",  "medium": "local",  "low": "local"},
-}
+_TIER_MAP = TIER_MODEL_KEYS
 
 # Local LLM model map (single model — all tiers resolve to the same)
 _LOCAL_MODEL_MAP = {"local": None}  # resolved at runtime via llm_client
@@ -352,7 +324,7 @@ async def _get_model_by_alias(alias: str) -> str:
 
 
 def _resolve_openai_model(alias: str) -> str:
-    """Resolve OpenAI model alias (gpt54/gpt54mini/gpt54nano) to actual model ID."""
+    """Resolve an OpenAI tier alias to its canonical GPT-5.6 model ID."""
     return _OPENAI_MODEL_MAP.get(alias, alias)
 
 

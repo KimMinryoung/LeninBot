@@ -14,6 +14,7 @@ import os
 
 from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
+from llm.provider_registry import OPENAI_MODEL_MAP, TIER_MODEL_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ _DEFAULT_BROWSER_USE_PROVIDER = "deepseek"
 _DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
 _DEFAULT_BROWSER_USE_MODELS = {
     "deepseek": "deepseek-v4-flash",
-    "openai": "gpt-5.5-mini",
+    "openai": OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"]["medium"]],
     "google": "gemini-2.5-flash",
 }
 _DEFAULT_VISION_FALLBACK_PROVIDER = "google"
@@ -36,11 +37,7 @@ _DEEPSEEK_MODEL_ALIASES = {
     "deepseek_flash": "deepseek-v4-flash",
 }
 
-_OPENAI_MODEL_ALIASES = {
-    "gpt54": "gpt-5.5",
-    "gpt54mini": "gpt-5.5-mini",
-    "gpt54nano": "gpt-5.5-nano",
-}
+_OPENAI_MODEL_ALIASES = OPENAI_MODEL_MAP
 
 
 class _DeepSeekAnthropicBrowserChat(ChatAnthropic):
@@ -122,12 +119,8 @@ def _normalize_model(model: str | None, provider: str) -> str:
         return _DEEPSEEK_MODEL_ALIASES.get(lowered, value)
 
     if provider == "openai":
-        if lowered == "high":
-            return "gpt-5.5"
-        if lowered == "medium":
-            return "gpt-5.5-mini"
-        if lowered == "low":
-            return "gpt-5.5-nano"
+        if lowered in {"high", "medium", "low"}:
+            return OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"][lowered]]
         return _OPENAI_MODEL_ALIASES.get(lowered, value)
 
     return value

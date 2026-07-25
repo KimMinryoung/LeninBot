@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 import importlib
 
+from llm.provider_registry import OPENAI_MODEL_MAP, TIER_MODEL_KEYS
+
 BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
 BROWSER_PROVIDER_OVERRIDE = os.getenv("BROWSER_PROVIDER", "").strip().lower() or None
 
@@ -26,24 +28,27 @@ _DEEPSEEK_BROWSER_MODEL_ALIASES = {
     "deepseek_flash": "deepseek-v4-flash",
 }
 
-_OPENAI_BROWSER_MODEL_ALIASES = {
-    "gpt54": "gpt-5.5",
-    "gpt54mini": "gpt-5.5-mini",
-    "gpt54nano": "gpt-5.5-nano",
-}
+_OPENAI_BROWSER_MODEL_ALIASES = OPENAI_MODEL_MAP
 
 
 def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") -> str:
     model = str(raw_model or "").strip()
     if not model:
-        return "deepseek-v4-flash" if provider == "deepseek" else "gpt-5.5-mini"
+        return (
+            "deepseek-v4-flash"
+            if provider == "deepseek"
+            else OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"]["medium"]]
+        )
 
     lowered = model.lower()
     if lowered in {"high", "medium", "low"}:
         if provider == "deepseek":
             tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
         elif provider == "openai":
-            tier_map = {"high": "gpt-5.5", "medium": "gpt-5.5-mini", "low": "gpt-5.5-nano"}
+            tier_map = {
+                tier: OPENAI_MODEL_MAP[key]
+                for tier, key in TIER_MODEL_KEYS["openai"].items()
+            }
         else:
             tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
         return tier_map[lowered]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+import asyncio
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,17 @@ def main() -> int:
         if t.get("name") and policy.risk_class(t["name"]) == policy.UNCATEGORIZED
     )
     check("no uncategorized tools in registry", not uncategorized, str(uncategorized))
+    for dynamic_tool, expected_class in {
+        "send_message": "state",
+        "read_user_chat": "read",
+        "read_messages": "read",
+        "edit_public_post": "publish",
+    }.items():
+        check(
+            f"dynamic tool classified: {dynamic_tool}",
+            policy.risk_class(dynamic_tool) == expected_class,
+            policy.risk_class(dynamic_tool),
+        )
 
     print("== webchat interface restriction (always enforced) ==")
     wc = CallerContext(interface="webchat", is_owner=False)
@@ -131,15 +143,107 @@ def main() -> int:
     check("blocks truncate", "BEFORE TRUNCATE ON tool_audit_log" in _IMMUTABILITY_DDL)
     check("requires explicit admin approval setting", "leninbot.audit_log_mutation_approved" in _IMMUTABILITY_DDL)
 
-    print("== gateway fails open on internal error ==")
-    # Passing a context missing attributes shouldn't raise; authorize catches all.
+    print("== gateway fails closed on internal error ==")
+    # Passing a context missing attributes shouldn't raise; authorize denies.
     class Broken:
         interface = "telegram"
         # deliberately missing is_owner etc. to trip an AttributeError inside
         agent_name = None
         user_id = None
     d = authorize(Broken(), "send_email")  # type: ignore[arg-type]
-    check("authorize never raises (fails open)", d.allowed, f"{d.label}/{d.rule}")
+    check(
+        "authorize never raises and denies",
+        d.denied and d.label == "deny" and d.rule == "error",
+        f"{d.label}/{d.rule}",
+    )
+    original_risk_class = policy.risk_class
+    original_enforce_mode = policy.enforce_mode
+    try:
+        policy.risk_class = lambda _name: (_ for _ in ()).throw(RuntimeError("risk down"))
+        policy.enforce_mode = lambda: (_ for _ in ()).throw(RuntimeError("mode down"))
+        d = authorize(wc, "send_email")
+        check(
+            "policy helper failure still returns deny",
+            d.denied and d.rule == "error" and d.mode == policy.ENFORCE,
+            f"{d.label}/{d.rule}/{d.mode}",
+        )
+    finally:
+        policy.risk_class = original_risk_class
+        policy.enforce_mode = original_enforce_mode
+
+    print("== dispatcher fail-closed and run-local idempotency ==")
+
+    async def _dispatcher_checks() -> None:
+        import tool_gateway.security as gateway_adapter
+        from tool_gateway.dispatcher import execute_tool
+        from tool_gateway.security import CallerContext, caller_scope
+
+        original_authorize = gateway_adapter.authorize
+        calls = {"write": 0, "read": 0, "blocked": 0}
+
+        def write_handler(content: str) -> str:
+            calls["write"] += 1
+            return f"saved:{content}"
+
+        def read_handler(query: str) -> str:
+            calls["read"] += 1
+            return f"read:{query}:{calls['read']}"
+
+        def blocked_handler() -> str:
+            calls["blocked"] += 1
+            return "must-not-run"
+
+        with caller_scope(CallerContext(interface="system", is_owner=True)):
+            cache: dict[str, tuple[str, bool]] = {}
+            first = await execute_tool(
+                "save_diary",
+                {"content": "same"},
+                {"save_diary": write_handler},
+                idempotency_cache=cache,
+            )
+            second = await execute_tool(
+                "save_diary",
+                {"content": "same"},
+                {"save_diary": write_handler},
+                idempotency_cache=cache,
+            )
+            check(
+                "duplicate write executes once",
+                calls["write"] == 1 and first == second == ("saved:same", False),
+                str((calls, first, second)),
+            )
+
+            await execute_tool(
+                "vector_search",
+                {"query": "same"},
+                {"vector_search": read_handler},
+                idempotency_cache=cache,
+            )
+            await execute_tool(
+                "vector_search",
+                {"query": "same"},
+                {"vector_search": read_handler},
+                idempotency_cache=cache,
+            )
+            check("duplicate reads still execute", calls["read"] == 2, str(calls))
+
+            def broken_authorize(*_args, **_kwargs):
+                raise RuntimeError("policy unavailable")
+
+            gateway_adapter.authorize = broken_authorize
+            blocked = await execute_tool(
+                "save_diary",
+                {},
+                {"save_diary": blocked_handler},
+            )
+            check(
+                "dispatcher blocks pre-check exception",
+                blocked[1] and calls["blocked"] == 0 and "pre-check failed" in blocked[0],
+                str((calls, blocked)),
+            )
+        gateway_adapter.authorize = original_authorize
+
+    asyncio.run(_dispatcher_checks())
 
     policy.reset_caches()
     print(f"\n== RESULT: {_PASS} passed, {_FAIL} failed ==")

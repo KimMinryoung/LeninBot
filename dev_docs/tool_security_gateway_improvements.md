@@ -42,6 +42,12 @@ truth는 `tool_gateway.md`, `security_gateway.md`,
 - [x] outbound HTTP(S) URL에 공통 SSRF guard를 적용한다. loopback/private/
   link-local/reserved IP, unsafe scheme/port, unsafe redirect를 차단하고
   Playwright subrequest와 failure diagnosis에도 같은 policy를 적용한다.
+- [x] authorization 내부 오류와 dispatcher pre-check 예외를 fail-closed로
+  전환해 handler 실행을 차단한다.
+- [x] 한 provider tool loop 안에서 side-effect risk class의 동일한
+  `tool name + canonical arguments` 호출을 한 번만 실행한다.
+- [x] OpenAI-compatible 오류 복구를 실제 tool protocol 400으로 한정하고,
+  side-effect 실행 뒤에는 메시지 stripping/replay를 하지 않는다.
 
 ## Implemented Changes
 
@@ -77,25 +83,56 @@ truth는 `tool_gateway.md`, `security_gateway.md`,
   fallback은 제거했다. Tavily remote extraction과 guarded requests fallback은
   유지한다.
 
+### 4. Fail-closed authorization boundary
+
+- `security_gateway.authorize()` 내부 policy 예외는 `Decision(deny, rule=error)`를
+  반환한다. `tool_gateway.dispatcher.execute_tool()`의 security import/context/
+  authorization pre-check 예외도 handler를 호출하지 않고 오류 tool result를 반환한다.
+- denial audit 실패는 실행 허용으로 뒤집히지 않는다. audit sink 자체는 기존처럼
+  non-fatal이다.
+- Redis rate-limit 저장소 장애와 uncategorized dynamic tool 허용은 기존 호환 정책을
+  유지한다. 두 항목은 아래 후속 risk-aware policy 작업 범위다.
+
+### 5. Tool-loop replay safety
+
+- `execute_tools_batch()`는 loop-local idempotency cache를 받는다. `state`, `write`,
+  `publish`, `send`, `pay`, `file_write`, `execute`, `admin`, `delegate`, `media`,
+  `browser` class의 성공한 동일 호출은 handler를 다시 실행하지 않고 최초 결과를
+  재사용하며 `result_status=deduplicated`로 감사한다.
+- Claude와 OpenAI-compatible loop는 일반 라운드와 forced-final 라운드에 같은 cache를
+  전달한다. read/fetch 도구는 중복 억제 대상이 아니므로 필요한 재조회가 가능하다.
+- OpenAI-compatible 복구는 tool call/result pairing을 가리키는 400만 protocol
+  recovery 대상으로 분류한다. 일반 400, 인증, schema/parameter 오류는 그대로
+  실패한다. side-effect 성공 뒤 protocol/transport 오류가 발생하면 모델을 다시
+  호출하지 않고 완료된 작업 보고서를 반환한다.
+- JSON이 깨졌거나 object가 아닌 function arguments는 `{}`로 바꿔 handler에 넘기지
+  않고 synthetic error result로 닫는다.
+
 ## Verification and Deployment
 
 - `py_compile`: 변경된 gateway, A2A, Telegram, URL fetch 코드 통과
 - `scripts/smoke_tool_allowlists.py`: 통과
-- `scripts/smoke_security_gateway.py`: 32 passed, 0 failed
+- `scripts/smoke_security_gateway.py`: 40 passed, 0 failed
 - `scripts/smoke_url_security.py`: 통과
 - `scripts/smoke_fetch_url_pagination.py`: 통과
 - `scripts/smoke_webchat_security.py`: 통과
 - `scripts/smoke_mcp_gateway.py`: 통과
 - `scripts/smoke_runtime.py`: 통과
+- `scripts/smoke_deepseek_autonomous_harness.py`: 통과
+- OpenAI/Anthropic/DeepSeek/Moonshot Models API: `gpt-5.6-sol/terra/luna`,
+  `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5` alias,
+  `deepseek-v4-pro/flash`, `kimi-k3` 모두 현재 credential에서 조회 성공
 - `leninbot-telegram.service`, `leninbot-api.service`,
-  `leninbot-a2a-api.service` 재시작 후 모두 active
-- main API와 A2A API `/health`: HTTP 200
+  `leninbot-a2a-api.service`, `leninbot-browser.service`,
+  `leninbot-roleplay.service`, `novel-writer-api.service` 재시작 후 모두 active
+- main API, A2A API, Writer API `/health`: HTTP 200; Telegram/roleplay polling과
+  browser socket listener 시작 로그 확인
 
 ### Next
 
-- [ ] uncategorized tool과 authorization 내부 오류에 대해 risk-aware fail mode를
-  도입한다. read-only는 제한적 fail-open을 허용할 수 있지만
-  write/publish/send/pay/execute/admin은 fail-closed로 처리한다.
+- [ ] uncategorized tool과 Redis rate-limit 장애에 대해 risk-aware fail mode를
+  도입한다. read-only는 제한적 fail-open을 허용할 수 있지만 새 side-effect
+  taxonomy와 rate policy 장애는 fail-closed로 처리한다.
 - [ ] dispatcher에서 JSON Schema를 검증하고 unknown argument를 삭제하지 말고
   거부·감사한다. URL, path, amount, recipient, confirmation nonce 같은
   argument-level policy도 같은 단계에서 평가한다.
@@ -103,8 +140,9 @@ truth는 `tool_gateway.md`, `security_gateway.md`,
   nested authorization header/token/cookie와 민감한 본문을 보호한다.
 - [ ] Redis rate limit의 count/consume을 Lua 또는 transaction으로 원자화하고,
   Redis 장애를 decision/audit에 명시한다.
-- [ ] side-effect tool에 `run_id`, `tool_call_id`, idempotency key를 전달해 provider
-  retry나 continuation이 결제·발송·게시를 중복 실행하지 않게 한다.
+- [ ] loop-local cache를 durable idempotency store로 확장하고 `run_id`,
+  `tool_call_id`, handler/connector idempotency key를 전달해 process crash 뒤 재개나
+  별도 요청 재전송도 결제·발송·게시를 중복 실행하지 않게 한다.
 
 ### MCP and Operations
 

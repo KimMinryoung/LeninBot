@@ -22,6 +22,7 @@ from tool_loop_common import (
     check_cancelled, TaskCancelledError,
 )
 from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
+from llm.provider_registry import anthropic_pricing_table
 
 logger = logging.getLogger(__name__)
 
@@ -97,50 +98,7 @@ _CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 # Per-tier list prices. Cache-creation shown for the **1-hour TTL** tier
 # (matches what this loop writes). cache_read is identical across TTL tiers.
 # Prefix-match picks by base model name so pinned-date variants reuse the row.
-PRICING_TABLE = {
-    "claude-fable-5": {
-        "input":          10.00 / 1_000_000,
-        "output":         50.00 / 1_000_000,
-        "cache_creation": 20.00 / 1_000_000,   # 2.0x input (1h TTL)
-        "cache_read":      1.00 / 1_000_000,
-    },
-    "claude-opus-4-8": {
-        "input":           5.00 / 1_000_000,
-        "output":         25.00 / 1_000_000,
-        "cache_creation": 10.00 / 1_000_000,   # 2.0× input (1h TTL)
-        "cache_read":      0.50 / 1_000_000,
-    },
-    "claude-sonnet-5": {
-        "input":           3.00 / 1_000_000,
-        "output":         15.00 / 1_000_000,
-        "cache_creation":  6.00 / 1_000_000,   # 2.0× input (1h TTL)
-        "cache_read":      0.30 / 1_000_000,
-    },
-    "claude-haiku-4-5": {
-        "input":           1.00 / 1_000_000,
-        "output":          5.00 / 1_000_000,
-        "cache_creation":  2.00 / 1_000_000,   # 2.0× input (1h TTL)
-        "cache_read":      0.10 / 1_000_000,
-    },
-    "deepseek-v4-flash": {
-        "input":           0.14 / 1_000_000,
-        "output":          0.28 / 1_000_000,
-        "cache_creation":  0.14 / 1_000_000,
-        "cache_read":      0.0028 / 1_000_000,
-    },
-    "deepseek-v4-pro": {
-        "input":           0.435 / 1_000_000,
-        "output":          0.87 / 1_000_000,
-        "cache_creation":  0.435 / 1_000_000,
-        "cache_read":      0.003625 / 1_000_000,
-    },
-    "kimi-k3": {
-        "input":            3.00 / 1_000_000,
-        "output":          15.00 / 1_000_000,
-        "cache_creation":   3.00 / 1_000_000,
-        "cache_read":       0.30 / 1_000_000,
-    },
-}
+PRICING_TABLE = anthropic_pricing_table()
 
 # Fallback when the model string doesn't match any known family — use Sonnet
 # (middle tier) so we don't wildly under- or over-report on unknown variants.
@@ -150,19 +108,21 @@ PRICING = PRICING_TABLE["claude-sonnet-5"]
 def _pricing_for(model: str) -> dict:
     """Pick the pricing row for a Claude model id. Matches by prefix so
     pinned-date variants (``claude-haiku-4-5-20251001``) reuse the family."""
+    pricing_table = anthropic_pricing_table()
+    fallback = pricing_table["claude-sonnet-5"]
     if not model:
-        return PRICING
-    if model in PRICING_TABLE:
-        return PRICING_TABLE[model]
-    for base, price in PRICING_TABLE.items():
+        return fallback
+    if model in pricing_table:
+        return pricing_table[model]
+    for base, price in pricing_table.items():
         if model.startswith(base + "-") or model.startswith(base + "."):
             return price
-    return PRICING
+    return fallback
 
 
 def _calculate_cost(usage, model: str | None = None) -> float:
     """Calculate USD cost from a response.usage object for the given model."""
-    p = _pricing_for(model) if model else PRICING
+    p = _pricing_for(model or "")
     cost = 0.0
     cost += getattr(usage, "input_tokens", 0) * p["input"]
     cost += getattr(usage, "output_tokens", 0) * p["output"]
@@ -480,6 +440,7 @@ async def chat_with_tools(
     working_msgs = _normalize_initial_messages(messages)
     tool_call_log = []
     tool_work_details = []  # result snippets for scratchpad
+    tool_execution_cache: dict[str, tuple[str, bool]] = {}
     total_cost = 0.0
     budget_warning_sent = False
     length_continuations = 0
@@ -791,6 +752,7 @@ async def chat_with_tools(
                 on_progress=on_progress,
                 round_num=round_num,
                 log_event=log_event,
+                idempotency_cache=tool_execution_cache,
             )
             for tid, tname, tinput, result, is_error in exec_results:
                 input_summary = json.dumps(tinput, ensure_ascii=False)
@@ -969,6 +931,7 @@ async def chat_with_tools(
             on_progress=on_progress,
             round_num=(round_num if response else 0) + 1,
             log_event=log_event,
+            idempotency_cache=tool_execution_cache,
         )
         final_tool_results = []
         for tid, tname, tinput, result, is_error in exec_results:

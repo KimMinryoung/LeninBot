@@ -19,8 +19,9 @@ from pathlib import Path
 
 from shared import KST
 from bot_config import (
-    _claude, _openai_client, _deepseek_anthropic_client, _kimi_client,
+    _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client, _kimi_client,
 )
+from llm.provider_registry import kimi_openai_tool_options
 from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
@@ -1583,6 +1584,14 @@ async def handle_web_chat(
                 if not _kimi_client:
                     raise RuntimeError("MOONSHOT_API_KEY is not configured for webchat_provider=kimi")
                 from openai_tool_loop import chat_with_tools as openai_chat
+                deepseek_fallback_model = None
+                if _deepseek_client:
+                    deepseek_fallback_profile = await resolve_runtime_profile(
+                        "webchat",
+                        provider_override="deepseek",
+                        tier_override="high",
+                    )
+                    deepseek_fallback_model = deepseek_fallback_profile.model_id
                 result = await openai_chat(
                     history,
                     client=_kimi_client,
@@ -1595,14 +1604,14 @@ async def handle_web_chat(
                     budget_usd=profile.budget_usd,
                     on_progress=on_progress,
                     provider_label=f"{provider}:web",
-                    extra_body={"reasoning_effort": "max"},
-                    sdk_max_token_param="max_tokens",
-                    include_parallel_tool_calls=False,
-                    preserve_reasoning_content=True,
                     continue_on_length=True,
                     max_length_continuations=2,
                     return_metadata=True,
                     budget_tracker=budget_tracker,
+                    **kimi_openai_tool_options(
+                        fallback_client=_deepseek_client,
+                        fallback_model=deepseek_fallback_model,
+                    ),
                 )
             elif provider == "deepseek":
                 if not _deepseek_anthropic_client:

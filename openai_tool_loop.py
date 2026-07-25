@@ -30,30 +30,21 @@ from tool_loop_common import (
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
 )
-from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
+from tool_gateway.dispatcher import (
+    compact_tool_definitions,
+    execute_tool,
+    execute_tools_batch,
+    is_side_effect_tool,
+)
+from llm.provider_registry import (
+    OPENAI_COMPATIBLE_PRICING as OPENAI_PRICING,
+    openai_compatible_pricing,
+)
 
 logger = logging.getLogger(__name__)
 
-_SIDE_EFFECT_TOOL_NAMES = {
-    "delegate",
-    "multi_delegate",
-    "mission",
-    "save_finding",
-    "send_message",
-    "write_kg_structured",
-    "edit_content",
-    "research_document",
-    "edit_public_post",
-    "save_private_research_document",
-    "publish_private_research_document",
-    "save_private_report",
-    "publish_private_report",
-    "broadcast_to_channel",
-}
-
-
 def _is_transient_transport_error(err: Exception) -> bool:
-    return isinstance(
+    if isinstance(
         err,
         (
             httpx.TimeoutException,
@@ -63,7 +54,52 @@ def _is_transient_transport_error(err: Exception) -> bool:
             httpx.PoolTimeout,
             httpx.NetworkError,
         ),
-    )
+    ):
+        return True
+    status = getattr(err, "status_code", None)
+    if status is None:
+        status = getattr(getattr(err, "response", None), "status_code", None)
+    if status in {408, 409, 429, 500, 502, 503, 504, 529}:
+        return True
+    name = type(err).__name__.lower()
+    return any(token in name for token in (
+        "apiconnectionerror",
+        "apitimeouterror",
+        "connecterror",
+        "networkerror",
+        "readerror",
+        "remoteprotocolerror",
+        "pooltimeout",
+    ))
+
+
+_TOOL_PROTOCOL_ERROR_SIGNALS = (
+    "tool_call_id",
+    "tool call id",
+    "tool_calls",
+    "tool result",
+    "tool message",
+    "role 'tool'",
+    'role "tool"',
+    "must be followed by tool",
+    "without a preceding tool call",
+    "messages with role tool",
+)
+
+
+def _is_tool_protocol_error(err: Exception) -> bool:
+    """Match only 400-class tool history/protocol validation failures."""
+    parts = [str(err), type(err).__name__]
+    for attr in ("body", "code", "type", "param", "message", "status_code"):
+        value = getattr(err, attr, None)
+        if value is not None:
+            parts.append(str(value))
+    response = getattr(err, "response", None)
+    if response is not None:
+        parts.extend(str(getattr(response, attr, "")) for attr in ("status_code", "text"))
+    text = " ".join(parts).lower()
+    is_bad_request = "400" in text or "badrequest" in text or "bad request" in text
+    return is_bad_request and any(signal in text for signal in _TOOL_PROTOCOL_ERROR_SIGNALS)
 
 
 def _side_effect_fallback_report(err: Exception, details: list[str]) -> str:
@@ -77,46 +113,8 @@ def _side_effect_fallback_report(err: Exception, details: list[str]) -> str:
     )
 
 
-# ── Pricing Constants (USD per million tokens) ────────────────────────
-OPENAI_PRICING = {
-    "gpt-5.5": {
-        "input": 2.50 / 1_000_000,
-        "output": 15.00 / 1_000_000,
-        "cached_input": 0.25 / 1_000_000,
-    },
-    "gpt-5.5-mini": {
-        "input": 0.75 / 1_000_000,
-        "output": 4.50 / 1_000_000,
-        "cached_input": 0.075 / 1_000_000,
-    },
-    "gpt-5.5-nano": {
-        "input": 0.20 / 1_000_000,
-        "output": 1.25 / 1_000_000,
-        "cached_input": 0.02 / 1_000_000,
-    },
-    # DeepSeek V4 official pricing, per 1M tokens.
-    "deepseek-v4-flash": {
-        "input": 0.14 / 1_000_000,
-        "output": 0.28 / 1_000_000,
-        "cached_input": 0.0028 / 1_000_000,
-    },
-    "deepseek-v4-pro": {
-        "input": 0.435 / 1_000_000,
-        "output": 0.87 / 1_000_000,
-        "cached_input": 0.003625 / 1_000_000,
-    },
-    # Moonshot Kimi K3 official pricing, per 1M tokens.
-    "kimi-k3": {
-        "input": 3.00 / 1_000_000,
-        "output": 15.00 / 1_000_000,
-        "cached_input": 0.30 / 1_000_000,
-    },
-}
-_DEFAULT_PRICING = OPENAI_PRICING["gpt-5.5"]
-
-
 def _pricing_for_model(model: str) -> dict[str, float]:
-    return OPENAI_PRICING.get(model, _DEFAULT_PRICING)
+    return openai_compatible_pricing(model)
 
 
 def _calculate_cost(usage, model: str) -> float:
@@ -719,33 +717,6 @@ async def _call_sdk(
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
 
-# ── GPT-5.5 → GPT-5.4 fallback (temporary; remove once 5.5 is stably live) ──
-# OpenAI has announced 5.5 but availability is flaky pre-GA. On a 400 that
-# looks like "model not found" we retry once with the 5.4 equivalent and
-# cache the unavailability so subsequent rounds skip the failing call.
-_OPENAI_MODEL_FALLBACK = {
-    "gpt-5.5":      "gpt-5.4",
-    "gpt-5.5-mini": "gpt-5.4-mini",
-    "gpt-5.5-nano": "gpt-5.4-nano",
-}
-_OPENAI_FALLBACK_COOLDOWN_SEC = 300
-_openai_unavailable_until: dict[str, float] = {}
-
-_MODEL_NOT_FOUND_SIGNALS = (
-    "model_not_found",
-    "does not exist",
-    "no such model",
-    "the model `",
-)
-
-
-def _looks_like_model_not_found(err: Exception) -> bool:
-    s = str(err).lower() + " " + type(err).__name__.lower()
-    if "400" not in s and "badrequest" not in s and "bad request" not in s:
-        return False
-    return any(sig in s for sig in _MODEL_NOT_FOUND_SIGNALS)
-
-
 def _looks_like_prompt_content_filter(err: Exception) -> bool:
     """Match only prompt-side 400 content-filter rejections.
 
@@ -796,34 +767,12 @@ def _response_model(response, fallback: str) -> str:
     return value if isinstance(value, str) and value else fallback
 
 
-def _resolve_openai_model(requested: str) -> str:
-    """If we recently learned `requested` is unavailable, return its fallback."""
-    import time
-    until = _openai_unavailable_until.get(requested)
-    if until and time.monotonic() < until:
-        return _OPENAI_MODEL_FALLBACK.get(requested, requested)
-    return requested
-
-
-def _mark_openai_unavailable(model: str) -> None:
-    import time
-    _openai_unavailable_until[model] = time.monotonic() + _OPENAI_FALLBACK_COOLDOWN_SEC
-
-
 async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_tokens,
                     parallel_tool_calls=True, enable_thinking=False, on_progress=None,
                     extra_body: dict | None = None,
                     sdk_max_token_param: str = "max_completion_tokens",
                     include_parallel_tool_calls: bool = True):
-    """Dispatch to SDK or httpx based on mode.
-
-    Transparently swaps `model` for a fallback (e.g. gpt-5.5 → gpt-5.4) on
-    model-not-found 400s, and remembers the unavailability for ~5 min to
-    skip the failing call on subsequent rounds.
-    """
-    effective = _resolve_openai_model(model) if sdk_mode else model
-    if effective != model:
-        logger.info("openai model %s in cooldown — using fallback %s", model, effective)
+    """Dispatch to SDK or httpx using the requested canonical model."""
 
     async def _do_call(m: str):
         if sdk_mode:
@@ -836,18 +785,7 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
         return await _call_api(base_url, m, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
 
-    try:
-        return await _do_call(effective)
-    except Exception as e:
-        if not sdk_mode:
-            raise
-        fb = _OPENAI_MODEL_FALLBACK.get(effective)
-        if fb is None or not _looks_like_model_not_found(e):
-            raise
-        logger.warning("openai model %s unavailable (%s) — retrying with fallback %s",
-                       effective, e, fb)
-        _mark_openai_unavailable(effective)
-        return await _do_call(fb)
+    return await _do_call(model)
 
 
 # <think>...</think> emitted by Qwen/Deepseek reasoning models. llama-server
@@ -1232,6 +1170,7 @@ async def chat_with_tools(
     tool_call_log = []
     tool_work_details = []
     side_effect_work_details = []
+    tool_execution_cache: dict[str, tuple[str, bool]] = {}
     total_cost = 0.0
     budget_warning_sent = False
     round_num = 0
@@ -1351,11 +1290,22 @@ async def chat_with_tools(
                 include_parallel_tool_calls=include_parallel_tool_calls,
             )
         except Exception as api_err:
-            err_str = str(api_err)
             _dump_messages_for_debug(working_msgs, round_num, api_err)
 
-            # Auto-recovery: strip tool protocol and retry once
-            if "tool" in err_str.lower() or "400" in err_str or "invalid" in err_str.lower():
+            # Recover only a positively identified tool-history validation
+            # error. Generic 400/auth/schema failures are surfaced unchanged.
+            if _is_tool_protocol_error(api_err):
+                if side_effect_work_details:
+                    if budget_tracker is not None:
+                        budget_tracker.update(build_budget_tracker(
+                            total_cost, round_num, True, tool_work_details))
+                    return _final_result(
+                        _side_effect_fallback_report(api_err, side_effect_work_details),
+                        finish_reason="tool_protocol_error_after_side_effects",
+                        truncated=True,
+                        limit_reason="tool protocol error",
+                        was_still_working=True,
+                    )
                 logger.warning("Auto-recovery (round %d): stripping tool protocol and retrying",
                                round_num)
                 stripped = _strip_tool_protocol(working_msgs)
@@ -1377,39 +1327,36 @@ async def chat_with_tools(
                     working_msgs = stripped
                     break
             elif _is_transient_transport_error(api_err):
+                if side_effect_work_details:
+                    if budget_tracker is not None:
+                        budget_tracker.update(build_budget_tracker(
+                            total_cost, round_num, True, tool_work_details))
+                    return _final_result(
+                        _side_effect_fallback_report(api_err, side_effect_work_details),
+                        finish_reason="api_transport_error_after_side_effects",
+                        truncated=True,
+                        limit_reason="API transport error",
+                        was_still_working=True,
+                    )
                 logger.warning(
-                    "Transient API transport error at round %d — retrying once with stripped tool protocol",
+                    "Transient API transport error at round %d — retrying the unchanged request once",
                     round_num,
                 )
-                stripped = _strip_tool_protocol(working_msgs)
-                stripped = _ensure_system_first(stripped, system_prompt)
                 try:
                     response = await _guarded_api_call(
-                        sdk_mode, client, base_url, model, stripped,
+                        sdk_mode, client, base_url, model, working_msgs,
                         openai_tools, max_tokens,
                         parallel_tool_calls=False, enable_thinking=enable_thinking,
                         on_progress=stream_cb, extra_body=extra_body,
                         sdk_max_token_param=sdk_max_token_param,
                         include_parallel_tool_calls=include_parallel_tool_calls,
                     )
-                    working_msgs = stripped
                     logger.info("Transient API recovery succeeded at round %d", round_num)
                 except Exception as retry_err:
                     logger.error("Transient API retry also failed: %s", retry_err)
-                    if side_effect_work_details:
-                        if budget_tracker is not None:
-                            budget_tracker.update(build_budget_tracker(
-                                total_cost, round_num, True, tool_work_details))
-                        return _final_result(
-                            _side_effect_fallback_report(api_err, side_effect_work_details),
-                            finish_reason="api_transport_recovered_with_side_effects",
-                            truncated=True,
-                            limit_reason="API transport error",
-                            was_still_working=True,
-                        )
                     if log_event:
                         log_event("error", "openai_loop", f"API call failed: {api_err}")
-                    raise
+                    raise retry_err
             else:
                 if log_event:
                     log_event("error", "openai_loop", f"API call failed: {api_err}")
@@ -1550,19 +1497,35 @@ async def chat_with_tools(
 
         # ── Build the batch (id, name, parsed_args) for parallel-aware exec ──
         batch: list[tuple[str, str, dict]] = []
+        malformed_results: list[tuple[str, str, str]] = []
         for tc_item in tc_list:
             tc_id = tc_item["id"]
             func_name = tc_item["function"]["name"]
             try:
                 func_args = json.loads(tc_item["function"]["arguments"])
-            except (json.JSONDecodeError, TypeError):
+                if not isinstance(func_args, dict):
+                    raise TypeError("tool arguments must decode to an object")
+            except (json.JSONDecodeError, TypeError) as exc:
                 logger.warning("Malformed arguments for %s: %s",
                                func_name, tc_item["function"]["arguments"][:200])
-                func_args = {}
+                malformed_results.append((
+                    tc_id,
+                    func_name,
+                    f"Tool execution blocked: malformed JSON arguments ({exc})",
+                ))
+                continue
             batch.append((tc_id, func_name, func_args))
 
         # ── Execute tool calls (parallel for read-only batches) ──
         executed_ids: set[str] = set()
+        for tc_id, func_name, error_result in malformed_results:
+            working_msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": error_result,
+            })
+            executed_ids.add(tc_id)
+            tool_work_details.append(f"  [{round_num}] {func_name}(malformed) → {error_result}")
         if batch:
             exec_results = await execute_tools_batch(
                 batch,
@@ -1570,6 +1533,7 @@ async def chat_with_tools(
                 on_progress=on_progress,
                 round_num=round_num,
                 log_event=log_event,
+                idempotency_cache=tool_execution_cache,
             )
             for tc_id, func_name, func_args, result, is_error in exec_results:
                 input_summary = json.dumps(func_args, ensure_ascii=False)
@@ -1581,7 +1545,7 @@ async def chat_with_tools(
                 executed_ids.add(tc_id)
                 tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
                 tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
-                if func_name in _SIDE_EFFECT_TOOL_NAMES and not is_error:
+                if is_side_effect_tool(func_name) and not is_error:
                     side_effect_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
                 save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
 
@@ -1747,6 +1711,7 @@ async def chat_with_tools(
                     final_exec = await execute_tools_batch(
                         final_batch, tool_handlers,
                         on_progress=on_progress, round_num=round_num + 1, log_event=log_event,
+                        idempotency_cache=tool_execution_cache,
                     )
                     for tc_id, fname, fargs, result, is_error in final_exec:
                         input_summary = json.dumps(fargs, ensure_ascii=False)

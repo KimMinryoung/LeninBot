@@ -35,7 +35,8 @@ def test_telegram_deepseek_routes_to_anthropic_harness() -> None:
     assert "client=_deepseek_anthropic_client" in source
     # Multi-tool loops use the tool-loop thinking policy (default off); a
     # per-call override (tick planner/critic) takes precedence.
-    assert "deepseek_thinking_override or _get_deepseek_tool_thinking_params()" in source
+    assert "deepseek_thinking_override or resolve_inference_extra(" in source
+    assert 'call_inference_policy, "deepseek"' in source
     assert "output_config=deepseek_thinking.get" in source
     assert 'provider_label="deepseek"' not in source
 
@@ -54,7 +55,7 @@ def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
     assert "anthropic.AsyncAnthropic" in source
     assert 'if provider == "deepseek":' in source
-    assert "_get_deepseek_browser_params" in source
+    assert 'resolve_inference_extra(call_policy, "deepseek")' in source
     assert "output_config=deepseek_params.get" in source
     assert "from openai_tool_loop import chat_with_tools as openai_chat" in source
 
@@ -75,7 +76,10 @@ def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> No
     assert 'provider == "deepseek"' in source
     assert "client=_deepseek_anthropic_client" in source
     assert 'thinking={"type": "disabled"}' in source
-    assert "_deepseek_client" not in source
+    # OpenAI-compatible DeepSeek client is present only as the centralized
+    # Kimi content-filter fallback; native DeepSeek web chat stays Anthropic.
+    assert "kimi_openai_tool_options" in source
+    assert "fallback_client=_deepseek_client" in source
     assert 'event == "tool_call"' in source
     assert '"type": "tool_done" if done else "tool_start"' in source
     assert "on_progress=on_progress" in source

@@ -421,7 +421,7 @@ def _current_datetime_str() -> str:
 def _format_current_model_context(kind: str = "chat", provider: str = "claude") -> str:
     """Format runtime-selected model info for prompt/context injection.
 
-    Leads with the human-readable product name ("Claude Opus 4.8", "GPT-5.5 Pro")
+    Leads with the human-readable product name ("Claude Opus 5", "GPT-5.6 Sol")
     so self-identification works cleanly; the raw API id and tier stay available
     as secondary metadata. `provider` controls BOTH the surface form (XML for
     Claude, Markdown elsewhere) AND which tier map the model is resolved from —
@@ -1604,6 +1604,7 @@ async def _chat_with_tools(
 
     if effective_provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.provider_registry import kimi_openai_tool_options
         deepseek_fallback_model = None
         if _deepseek_client:
             deepseek_fallback_profile = await resolve_runtime_profile(
@@ -1635,13 +1636,10 @@ async def _chat_with_tools(
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
             provider_label="kimi",
-            content_filter_fallback_client=_deepseek_client,
-            content_filter_fallback_model=deepseek_fallback_model,
-            content_filter_fallback_label="deepseek",
-            extra_body={"reasoning_effort": "max"},
-            sdk_max_token_param="max_tokens",
-            include_parallel_tool_calls=False,
-            preserve_reasoning_content=True,
+            **kimi_openai_tool_options(
+                fallback_client=_deepseek_client,
+                fallback_model=deepseek_fallback_model,
+            ),
         )
         with caller_scope(_gw_ctx):
             return await _chat_coro

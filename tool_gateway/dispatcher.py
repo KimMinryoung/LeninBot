@@ -20,6 +20,47 @@ logger = logging.getLogger(__name__)
 _TOOL_DESC_LIMIT = 360
 _SCHEMA_DESC_LIMIT = 160
 
+SIDE_EFFECT_RISK_CLASSES = frozenset({
+    "admin",
+    "browser",
+    "delegate",
+    "execute",
+    "file_write",
+    "media",
+    "pay",
+    "publish",
+    "send",
+    "state",
+    "write",
+})
+
+
+def is_side_effect_tool(name: str, risk_class: str | None = None) -> bool:
+    """Return whether a tool may mutate state or cause an external effect.
+
+    If the risk registry itself is unavailable, classify the tool as
+    side-effecting. Recovery and idempotency must degrade toward safety.
+    """
+    if risk_class is None:
+        try:
+            from security_gateway.policy import risk_class as _risk_class
+
+            risk_class = _risk_class(name)
+        except Exception:
+            return True
+    return risk_class in SIDE_EFFECT_RISK_CLASSES
+
+
+def _idempotency_key(name: str, args: dict) -> str:
+    payload = json.dumps(
+        args,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return f"{name}:{payload}"
+
 
 def _compact_text(text: str, limit: int) -> str:
     """Collapse long tool/schema descriptions while preserving their meaning."""
@@ -146,7 +187,12 @@ def _inspect_handler_kwargs(handler: Any) -> tuple[set[str] | None, frozenset[st
 
 
 async def execute_tool(
-    name: str, args: dict, handlers: dict, *, log_event=None,
+    name: str,
+    args: dict,
+    handlers: dict,
+    *,
+    log_event=None,
+    idempotency_cache: dict[str, tuple[str, bool]] | None = None,
 ) -> tuple[str, bool]:
     """Execute a tool handler by name. Returns (result_str, is_error)."""
     handler = handlers.get(name)
@@ -190,19 +236,48 @@ async def execute_tool(
 
         gw_ctx = _gw_caller()
         gw_decision = _gw_authorize(gw_ctx, name, args)
-        if gw_decision.denied:
-            msg = (
-                f"Tool '{name}' denied by security gateway "
-                f"(caller={gw_ctx.label()}): {gw_decision.reason}"
-            )
-            logger.warning(msg)
-            if log_event:
-                log_event("warning", "tool", msg)
-            _gw_audit(gw_ctx, name, args, gw_decision, result_status="denied", latency_ms=0)
-            return msg, True
     except Exception as e:
-        logger.warning("gateway pre-check failed open for %s: %s", name, e)
-        gw_decision = None
+        msg = f"Tool '{name}' blocked: security gateway pre-check failed: {e}"
+        logger.error(msg)
+        if log_event:
+            log_event("error", "tool", msg)
+        return msg, True
+
+    if gw_decision.denied:
+        msg = (
+            f"Tool '{name}' denied by security gateway "
+            f"(caller={gw_ctx.label()}): {gw_decision.reason}"
+        )
+        logger.warning(msg)
+        if log_event:
+            log_event("warning", "tool", msg)
+        try:
+            _gw_audit(gw_ctx, name, args, gw_decision, result_status="denied", latency_ms=0)
+        except Exception as e:
+            logger.warning("gateway denial audit failed (ignored) for %s: %s", name, e)
+        return msg, True
+
+    cache_key = None
+    if idempotency_cache is not None and is_side_effect_tool(name, gw_decision.risk_class):
+        cache_key = _idempotency_key(name, args)
+        cached = idempotency_cache.get(cache_key)
+        if cached is not None:
+            result, is_error = cached
+            logger.warning("Suppressed duplicate side-effect tool call: %s", name)
+            if log_event:
+                log_event("warning", "tool", f"Duplicate side-effect call suppressed: {name}")
+            try:
+                _gw_audit(
+                    gw_ctx,
+                    name,
+                    args,
+                    gw_decision,
+                    result_status="deduplicated",
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
+            except Exception as e:
+                logger.warning("gateway dedupe audit failed (ignored) for %s: %s", name, e)
+            return result, is_error
 
     logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
     try:
@@ -241,19 +316,13 @@ async def execute_tool(
 
     if not is_error:
         _record_tool_provenance(name, args, result)
+        if cache_key is not None and idempotency_cache is not None:
+            idempotency_cache[cache_key] = (result, False)
 
     try:
         if gw_ctx is not None:
             from tool_gateway.security import audit as _gw_audit
 
-            if gw_decision is None:
-                from security_gateway import policy as _gw_policy
-                from security_gateway.gateway import Decision as _GwDecision
-
-                gw_decision = _GwDecision(
-                    True, "allow", _gw_policy.risk_class(name),
-                    "gateway pre-check error", _gw_policy.enforce_mode(), "error",
-                )
             _gw_audit(
                 gw_ctx, name, args, gw_decision,
                 result_status="error" if is_error else "ok",
@@ -299,6 +368,7 @@ async def execute_tools_batch(
     on_progress=None,
     round_num: int,
     log_event=None,
+    idempotency_cache: dict[str, tuple[str, bool]] | None = None,
     parallel_safe: frozenset = PARALLEL_SAFE_TOOLS,
 ) -> list[tuple[str, str, dict, str, bool]]:
     """Execute a sequence of (id, name, input) tool calls."""
@@ -308,7 +378,13 @@ async def execute_tools_batch(
     async def _run_one(idx: int, tid: str, tname: str, tinput: dict):
         input_summary = json.dumps(tinput, ensure_ascii=False)
         await _emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
-        result, is_error = await execute_tool(tname, tinput, handlers, log_event=log_event)
+        result, is_error = await execute_tool(
+            tname,
+            tinput,
+            handlers,
+            log_event=log_event,
+            idempotency_cache=idempotency_cache,
+        )
         await _emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {tname}: {result[:200]}")
         results[idx] = (tid, tname, tinput, result, is_error)
 
@@ -333,7 +409,9 @@ async def execute_tools_batch(
 
 __all__ = [
     "PARALLEL_SAFE_TOOLS",
+    "SIDE_EFFECT_RISK_CLASSES",
     "compact_tool_definitions",
     "execute_tool",
     "execute_tools_batch",
+    "is_side_effect_tool",
 ]
