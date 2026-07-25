@@ -66,7 +66,7 @@ BODY_KO = """## 한 단어, 두 가지 쓰임
 
 하나는 『임박한 파국과 그 대책』(1917)의 국가독점자본주의다. 전쟁을 치르면서 국가가 산업을 직접 틀어쥐게 된 상황을 가리키며, 자본주의가 도달한 마지막 단계라는 뜻이다. 레닌은 이것을 사회주의의 반대말로 보지 않았다. 이미 만들어진 그 거대한 관리 기구를 소수가 아니라 전 인민의 이익에 복무하도록 돌려놓기만 하면 그것이 곧 사회주의라는 것이다.
 
-다른 하나는 『현물세』(1921)의 과도기적 국가자본주의이며, 방향이 반대다. 혁명 직후 러시아 경제는 대부분 자기 땅에서 농사지어 남는 것을 내다 파는 소규모 생산이었다. 레닌은 이런 조건에서 국가자본주의를 사회주의와 견주어 모자란다고 탓할 것이 아니라 흩어진 소규모 생산과 견주어야 하며, 그에 비하면 오히려 진전이라고 주장했다. 그가 든 예가 독일이다. 잘 짜인 대규모 계획 생산 조직에서 융커-부르주아 제국주의 국가를 지우고 그 자리에 노동자의 국가를 놓으면 사회주의에 필요한 조건이 다 갖춰진다는 것이다. 결정적인 것은 경제를 어떤 형태로 운영하는가가 아니라 그 형태를 쥔 국가가 누구의 것인가다.
+다른 하나는 [『현물세』](/commulingo/docs/lenin-tax-in-kind)(1921)의 과도기적 국가자본주의이며, 방향이 반대다. 혁명 직후 러시아 경제는 대부분 자기 땅에서 농사지어 남는 것을 내다 파는 소규모 생산이었다. 레닌은 이런 조건에서 국가자본주의를 사회주의와 견주어 모자란다고 탓할 것이 아니라 흩어진 소규모 생산과 견주어야 하며, 그에 비하면 오히려 진전이라고 주장했다. 그가 든 예가 독일이다. 잘 짜인 대규모 계획 생산 조직에서 융커-부르주아 제국주의 국가를 지우고 그 자리에 노동자의 국가를 놓으면 사회주의에 필요한 조건이 다 갖춰진다는 것이다. 결정적인 것은 경제를 어떤 형태로 운영하는가가 아니라 그 형태를 쥔 국가가 누구의 것인가다.
 
 | 구분 | 국가독점자본주의(1917) | 과도기적 국가자본주의(1921) |
 |---|---|---|
@@ -120,7 +120,7 @@ Lenin used two overlapping names in entirely different contexts, and reading the
 
 The first is the state-monopoly capitalism of *The Impending Catastrophe and How to Combat It* (1917). It names what happened when war drove the state to take direct hold of industry, and it means capitalism at its final stage. Lenin did not treat this as the opposite of socialism. Turn that machinery of administration, already built, towards serving the whole people rather than a few, and you have socialism.
 
-The second is the transitional state capitalism of *The Tax in Kind* (1921), which runs the other way. The Russian economy after the revolution was mostly small-scale production: households farming their own plot and selling what was left over. Lenin argued that under those conditions state capitalism should not be faulted for falling short of socialism but measured against that scattered small production, next to which it was an advance. His example was Germany. Take a well-organised system of large-scale planned production, strike out the Junker-bourgeois imperialist state, put a workers' state in its place, and the conditions for socialism are all present. What decides the matter is not the form in which the economy is run but whose state runs it.
+The second is the transitional state capitalism of [*The Tax in Kind*](/commulingo/docs/lenin-tax-in-kind) (1921), which runs the other way. The Russian economy after the revolution was mostly small-scale production: households farming their own plot and selling what was left over. Lenin argued that under those conditions state capitalism should not be faulted for falling short of socialism but measured against that scattered small production, next to which it was an advance. His example was Germany. Take a well-organised system of large-scale planned production, strike out the Junker-bourgeois imperialist state, put a workers' state in its place, and the conditions for socialism are all present. What decides the matter is not the form in which the economy is run but whose state runs it.
 
 | | State-monopoly capitalism (1917) | Transitional state capitalism (1921) |
 |---|---|---|
