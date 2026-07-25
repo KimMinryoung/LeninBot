@@ -123,19 +123,30 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
     return "enrich"
 
 
-# Prominence tiering scales the bio-length band to a person's historical weight
-# (linked events + offices held). A stub bio for a major figure like Stalin reads as a defect,
-# and an inflated bio for an obscure functionary is equally a defect. The personal band by tier:
-#   major (prominence >= MAJOR_PROMINENCE):   MAJOR_BIO_FLOOR..320   (fill it out)
-#   standard (prominence 2..3):               120..320              (whatever the material warrants)
-#   minor (prominence <= MINOR_PROMINENCE_MAX): MINOR_BIO_FLOOR..MINOR_BIO_CEILING (keep it short, under 120)
+# Length is prescribed as SENTENCES, never as a character band. A writer cannot land
+# natural Korean inside a 30-character window without padding or truncating to hit the
+# number, which is what produced the stilted cards. The character constants below are
+# backstops and selection signals only — they never appear as a target to write toward.
+# Sentence counts come from the corpus: a Korean bio sentence runs ~60-80 characters
+# (2 sentences median 113, 3 sentences median 243), a moment sentence 59-95 (median 79).
+#
+# `moment` is the pull-quote on the person LIST card, so its budget is rendered lines.
+# Measured in the real card at 1280/768/390px: 44-85 chars -> 2 lines, 86-127 -> 3,
+# 128-170 -> 4. It had no hard ceiling at all, which is how 308-character moments got in.
 MAJOR_PROMINENCE = 4
 MINOR_PROMINENCE_MAX = 1
-MAJOR_BIO_FLOOR = 260
-STANDARD_BIO_FLOOR = 120
-BIO_CEILING = 320
-MINOR_BIO_FLOOR = 60
-MINOR_BIO_CEILING = 115
+MAJOR_BIO_SENTENCES = "up to 6 sentences"
+STANDARD_BIO_SENTENCES = "2-4 sentences"
+MINOR_BIO_SENTENCES = "1-2 sentences"
+MOMENT_SENTENCES = "one sentence, two at most"
+# Hard ceilings: refuse past here, do not write toward here.
+BIO_HARD_CEILING = 380
+MOMENT_HARD_CEILING = 140
+# Stub detection for candidate selection: a bio shorter than this for the tier reads as
+# unfinished and moves the card up the enrich queue. Never shown to the curator.
+MAJOR_BIO_STUB = 100
+STANDARD_BIO_STUB = 80
+MINOR_BIO_STUB = 50
 
 # Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # The curator must pick citizenship_code / nationalOrigin code from this set or the card shows no flag.
@@ -158,18 +169,18 @@ def person_tier(candidate: dict) -> dict:
     is_minor = prominence <= MINOR_PROMINENCE_MAX
     tier = "major" if is_major else "minor" if is_minor else "standard"
     if is_major:
-        bio_floor, bio_ceiling = MAJOR_BIO_FLOOR, BIO_CEILING
+        sentences, stub = MAJOR_BIO_SENTENCES, MAJOR_BIO_STUB
     elif is_minor:
-        bio_floor, bio_ceiling = MINOR_BIO_FLOOR, MINOR_BIO_CEILING
+        sentences, stub = MINOR_BIO_SENTENCES, MINOR_BIO_STUB
     else:
-        bio_floor, bio_ceiling = STANDARD_BIO_FLOOR, BIO_CEILING
+        sentences, stub = STANDARD_BIO_SENTENCES, STANDARD_BIO_STUB
     return {
         "tier": tier,
         "is_major": is_major,
         "is_minor": is_minor,
         "prominence": prominence,
-        "bio_floor": bio_floor,
-        "bio_ceiling": bio_ceiling,
+        "bio_sentences": sentences,
+        "bio_stub": stub,
     }
 
 
@@ -185,11 +196,9 @@ def select_sparse_person(
         "forced_id": forced_id.strip(),
         "major_prom": MAJOR_PROMINENCE,
         "minor_max": MINOR_PROMINENCE_MAX,
-        "major_floor": MAJOR_BIO_FLOOR,
-        "std_floor": STANDARD_BIO_FLOOR,
-        "ceiling": BIO_CEILING,
-        "minor_floor": MINOR_BIO_FLOOR,
-        "minor_ceiling": MINOR_BIO_CEILING,
+        "major_stub": MAJOR_BIO_STUB,
+        "std_stub": STANDARD_BIO_STUB,
+        "minor_stub": MINOR_BIO_STUB,
         "enrich_non_soviet_revolutionaries": enrich_non_soviet_revolutionaries,
     }
     rows = db_query(
@@ -241,15 +250,16 @@ def select_sparse_person(
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
                   CASE WHEN COALESCE(p.citizenship_code, '') = '' THEN 0 ELSE 1 END ASC,
+                  -- Stub bios and missing moments move up the queue. A bio that merely
+                  -- runs long does NOT: the shorter standard applies to what the curator
+                  -- writes from now on, and the cards already written stay as they are
+                  -- rather than becoming a trimming campaign.
                   CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) <
                              CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) >= %(major_prom)s
-                                       THEN %(major_floor)s
+                                       THEN %(major_stub)s
                                   WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) <= %(minor_max)s
-                                       THEN %(minor_floor)s
-                                  ELSE %(std_floor)s END
-                         OR LENGTH(COALESCE(p.bio_ko, '')) >
-                             CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) <= %(minor_max)s
-                                  THEN %(minor_ceiling)s ELSE %(ceiling)s END
+                                       THEN %(minor_stub)s
+                                  ELSE %(std_stub)s END
                          OR COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END ASC,
                   CASE WHEN COUNT(DISTINCT ep.event_id) = 0 THEN 0 ELSE 1 END ASC,
                   COUNT(DISTINCT s.id) ASC,
@@ -265,14 +275,19 @@ def select_sparse_person(
 
 CARD_STYLE_GUIDANCE = (
     "LENGTH AND STYLE (keep every card consistent):\n"
-    "- Korean bio length scales with the person's historical weight, and both a too-thin and a "
-    "too-long bio are defects. A MAJOR figure (head of state, party leader, or someone central to "
-    "many events) fills roughly 260-320 characters — a thin 150-180 character bio for that weight "
-    "reads as a defect; 320 is the hard ceiling, never run past it. A STANDARD figure sits in "
-    "120-320 as the material warrants. A MINOR/obscure figure stays short, under 120 characters "
-    "(roughly 60-115) — inflating an obscure functionary's bio is a defect. The enrich task states "
-    "the exact target band for the specific person. Give the English bio comparable substance. "
-    "Never leave a one-line stub.\n"
+    "- `bio` and `moment` are the paragraph and the pull-quote on the person LIST card, not the "
+    "detail page. Anything that needs more room belongs in a person_section, which the detail "
+    "page renders in full.\n"
+    f"- Write bio to a SENTENCE COUNT, never to a character count. A MAJOR figure (head of state, "
+    f"party leader, or someone central to many events) gets {MAJOR_BIO_SENTENCES}; a STANDARD "
+    f"figure {STANDARD_BIO_SENTENCES}; a MINOR/obscure figure {MINOR_BIO_SENTENCES}. These are "
+    f"CEILINGS AND RANGES, NOT QUOTAS. Write the sentences the subject actually warrants and stop "
+    f"there: a major figure with thin documented material gets a short bio, and filling to the "
+    f"limit with restatement is padding. Inflating an obscure functionary's bio is a defect. The "
+    f"enrich task states the tier for the specific person. Never count characters — let the length "
+    f"fall where the sentences leave it. {BIO_HARD_CEILING} Korean characters is a hard ceiling "
+    f"the save rejects, not a target; if a draft trips it, cut a clause or move the material into "
+    f"a person_section. Give the English bio comparable substance. Never leave a one-line stub.\n"
     "- Every new person requires both citizenship and nationalOrigin. nationalOrigin may equal "
     "citizenship; never omit it because the two match or because a distinct background is not "
     "documented. Apply the editorial defaults below instead of storing a blank.\n"
@@ -280,8 +295,11 @@ CARD_STYLE_GUIDANCE = (
     "significance and defining tension. It is NOT a chronological list of posts, dates, and "
     "ministries: the detailed career timeline already lists positions year by year, so do not "
     "duplicate that in the bio. Capture the essence, not the resume.\n"
-    "- `moment`: one or two vivid lines of about 40-140 Korean characters (with an English "
-    "equivalent) capturing a single defining scene or turn; do not exceed ~150 characters.\n"
+    f"- `moment` is a pull-quote, not a paragraph: {MOMENT_SENTENCES} (with an English "
+    f"equivalent), capturing ONE defining scene, line, or turn. One sentence is the norm and the "
+    f"second is for when the scene genuinely needs its turn; if it still needs more to explain "
+    f"itself, the scene is wrong — pick a sharper one rather than adding sentences. "
+    f"{MOMENT_HARD_CEILING} Korean characters is a hard ceiling the save rejects.\n"
     "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it.\n"
     "- nationalOrigin editorial policy for people born in territory now within Ukraine under the "
     "Russian Empire or USSR: `ukraine` requires documented Ukrainian self-identification, "
@@ -300,8 +318,10 @@ Identify one historically important person missing from CommuLingo whose inclusi
 materially improve coverage of revolutionary or Soviet history. Inspect list_groups,
 list_categories and list_offices, then search_people under the proposed name and aliases to
 prove there is no duplicate. Research with the free wiki_search/wiki_get tools first (Russian
-Wikipedia when available); use the paid web_search only for facts Wikipedia lacks. One opened
-source is enough for routine card facts; use a second only for disputed or consequential claims. Create one
+Wikipedia when available), then open at least one source outside Wikipedia — an archive or
+document collection, marxists.org, a journal or university page, or a published reference work —
+before writing. Wikipedia alone is acceptable only for a minor figure whose card is routine dates
+and posts. Never cite cyber-lenin.com or any page on this site. Create one
 complete bilingual person card with a correct group and one primary role, including a bio and a
 one-line `moment` that follow the style rules below, via one `commulingo_person_create` call.
 Then stop. Event links can be added by a later enrichment run. Do not create a section or office
@@ -311,43 +331,44 @@ row in this run.
     if not candidate:
         raise RuntimeError("no eligible sparse person found")
     tier = person_tier(candidate)
-    bio_floor = tier["bio_floor"]
-    bio_ceiling = tier["bio_ceiling"]
+    sentences = tier["bio_sentences"]
+    # A bio that merely runs longer than today's standard is NOT a reason to rewrite it:
+    # the shorter standard governs what gets written from here on, and the cards already
+    # in the dictionary stay as they are. Only a stub or a resume-style bio is a defect.
+    rewrite_trigger = (
+        "reads as a list of posts and dates rather than the person's core significance, or is "
+        "so thin it reads as unfinished"
+    )
     if tier["is_major"]:
         tier_line = (
             f"- prominence tier: MAJOR (linked events + offices = {tier['prominence']}). "
-            f"Target Korean bio {bio_floor}-{bio_ceiling} characters."
+            f"Korean bio: {sentences} — a ceiling, not a quota."
         )
         bio_step = (
-            f"3. BIO DEPTH/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
-            f"characters, or reads as a list of posts and dates rather than the person's core "
-            f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
-            f"essence-first style as one person update. This is a MAJOR figure: a thin bio is a "
-            f"defect, so expand it toward the upper end with added significance, defining tensions, "
-            f"and historical weight — never padding, and never exceed {bio_ceiling}. Keep the facts."
+            f"3. BIO DEPTH/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"languages in essence-first style as one person update. This is a MAJOR figure, so it "
+            f"may carry {sentences}: use the room only for significance, defining tensions, and "
+            f"historical weight the sources actually support. Stop when the subject is covered — "
+            f"restating the career timeline to reach six sentences is padding. Keep the facts."
         )
     elif tier["is_minor"]:
         tier_line = (
             f"- prominence tier: MINOR (linked events + offices = {tier['prominence']}). "
-            f"Target Korean bio {bio_floor}-{bio_ceiling} characters — keep it short."
+            f"Korean bio {sentences} — keep it short."
         )
         bio_step = (
-            f"3. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
-            f"characters, or reads as a list of posts and dates rather than the person's core "
-            f"significance, rewrite it in both languages into the {bio_floor}-{bio_ceiling} band and "
-            f"essence-first style as one person update. This is a MINOR figure: keep the bio short "
-            f"and tight — a long bio here is a defect, so trim to the essentials and do not exceed "
-            f"{bio_ceiling}. Keep the facts."
+            f"3. BIO SIZE/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"languages in essence-first style as one person update. This is a MINOR figure: "
+            f"{sentences} is the whole budget, so trim to the essentials. Keep the facts."
         )
     else:
         tier_line = (
-            f"- prominence tier: standard. Target Korean bio {bio_floor}-{bio_ceiling} characters."
+            f"- prominence tier: standard. Korean bio {sentences} as the material warrants."
         )
         bio_step = (
-            f"3. BIO SIZE/STYLE: else if the Korean bio is under {bio_floor} or over {bio_ceiling} "
-            f"characters, or reads as a list of posts and dates rather than the person's core "
-            f"significance, rewrite the bio in both languages into the target band and essence-first "
-            f"style as one person update — keep the facts, just resize and refocus."
+            f"3. BIO SIZE/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"languages in essence-first style as one person update — {sentences}, keep the facts, "
+            f"just refocus."
         )
     return f"""MODE: ENRICH EXISTING PERSON
 
@@ -402,8 +423,8 @@ use `조지아`.
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
    "nationalOrigin": {{"code": "georgia", "label": {{"ko": "그루지야", "en": "Georgia"}}}}}}.
 {bio_step}
-4. MOMENT: else if `has moment` is false, add a bilingual `moment` (target band) as one person
-   update.
+4. MOMENT: else if `has moment` is false, add a bilingual `moment` as one person update — one
+   sentence, two at most, one scene.
 5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
    get_event records. When one event connection is clearly supported, create exactly one
    `commulingo_event_link`; never force a weak connection.
@@ -411,9 +432,10 @@ use `조지아`.
    section via `commulingo_section_save` (one topic, roughly 350-700 Korean characters plus equivalent English) when
    no section covers it.
 Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
-tools first (Russian Wikipedia when available); use the paid web_search only for facts Wikipedia
-lacks. One opened source is enough for routine card facts; use a second only for disputed or
-consequential claims. Make one narrow write call and stop.
+tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —
+an archive or document collection, marxists.org, a journal or university page, or a published
+reference work — before writing anything beyond routine dates and posts. Never cite
+cyber-lenin.com or any page on this site. Make one narrow write call and stop.
 
 """ + CARD_STYLE_GUIDANCE
 

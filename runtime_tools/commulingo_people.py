@@ -1579,14 +1579,22 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     "a plain string is rejected because the site is bilingual and the "
                     "other language would be silently lost."
                 )
-        for key, ko_max, en_max in (("epithet", 60, 140), ("bio", 320, 750)):
+        # `moment` had no limit at all, which is how 308-character moments reached the
+        # card. These ceilings exist to refuse an overflowing field, not to be written
+        # toward — length is prescribed to the curator as a sentence count.
+        for key, ko_max, en_max, overflow in (
+            ("epithet", 60, 140, "Keep career chronology in career rows."),
+            ("bio", 380, 900, "Keep career chronology in career rows."),
+            ("moment", 140, 300, "A moment is one sentence, two at most — "
+                                 "pick a sharper scene instead of explaining this one."),
+        ):
             value = patch.get(key)
             if not isinstance(value, dict):
                 continue
             if len(value.get("ko") or "") > ko_max or len(value.get("en") or "") > en_max:
                 return (
                     f"Error: {key} is too long; limits are {ko_max} Korean characters "
-                    f"and {en_max} English characters. Keep career chronology in career rows."
+                    f"and {en_max} English characters. {overflow}"
                 )
         for key in ("citizenship", "origin"):
             if key not in patch or patch[key] is None:
@@ -2223,8 +2231,14 @@ _EPITHET_SCHEMA = {
 
 _BIO_SCHEMA = {
     **_BILINGUAL_TEXT_SCHEMA,
-    "properties": {"ko": {"type": "string", "maxLength": 320},
-                   "en": {"type": "string", "maxLength": 750}},
+    "properties": {"ko": {"type": "string", "maxLength": 380},
+                   "en": {"type": "string", "maxLength": 900}},
+}
+
+_MOMENT_SCHEMA = {
+    **_BILINGUAL_TEXT_SCHEMA,
+    "properties": {"ko": {"type": "string", "maxLength": 140},
+                   "en": {"type": "string", "maxLength": 300}},
 }
 
 # Fate label = cause of death only, NO death year (it renders from `years`).
@@ -2284,7 +2298,7 @@ _COMMULINGO_FIELD_SCHEMA = {
         "familyName": _BILINGUAL_TEXT_SCHEMA,
         "epithet": _EPITHET_SCHEMA,
         "bio": _BIO_SCHEMA,
-        "moment": _BILINGUAL_TEXT_SCHEMA,
+        "moment": _MOMENT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
         "citizenship": _NATIONALITY_SCHEMA,
         "origin": _NATIONAL_ORIGIN_SCHEMA,

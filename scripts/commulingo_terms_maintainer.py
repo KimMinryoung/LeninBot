@@ -158,7 +158,10 @@ Workflow:
    Confirm absence with commulingo_people(action='list_terms'), select the first strong gap,
    and stop searching for alternatives.
 2. Pick ONE term. Wikipedia-first research (wiki_search/wiki_get; Russian article for
-   Soviet-era vocabulary). One solid article is enough; pass source URLs in top-level `citations`.
+   Soviet-era vocabulary), then open at least one source outside Wikipedia — an archive or
+   document collection, marxists.org, a journal or university page, or a published reference
+   work. Never cite cyber-lenin.com or any page on this site: citing our own glossary as
+   evidence for our own glossary is circular. Pass source URLs in top-level `citations`.
 3. Register exactly one term with `commulingo_term_create(term_id='<kebab-slug>', fields=...,
    citations=[...])`. Fields include term {{ko,en}}, original (native-script form),
    period, definition {{ko,en}} (2-3 sentences, the card paragraph), aliases {{ko,en}}

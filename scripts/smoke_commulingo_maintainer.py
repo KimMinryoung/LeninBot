@@ -75,7 +75,16 @@ assert "contains '북한'" in _validate(
 )
 assert "bio is too long" in _validate(
     CURSOR, "person", "update", "example",
-    {"bio": {"ko": "가" * 321, "en": "A sentence"}},
+    {"bio": {"ko": "가" * 381, "en": "A sentence"}},
+)
+# moment used to have no ceiling at all; 308-character moments reached live cards
+assert "moment is too long" in _validate(
+    CURSOR, "person", "update", "example",
+    {"moment": {"ko": "가" * 141, "en": "A sentence"}},
+)
+assert "one sentence, two at most" in _validate(
+    CURSOR, "person", "update", "example",
+    {"moment": {"ko": "가", "en": "x" * 301}},
 )
 assert "epithet is too long" in _validate(
     CURSOR, "person", "update", "example",

@@ -14,15 +14,17 @@ logs citations. Do not ask for approval.
 Workflow:
 1. Read the target with `commulingo_people` before editing. For a new person, read groups,
    categories and offices, then search names and aliases to prove the person is absent.
-2. Research narrowly, Wikipedia-first. `wiki_search` and `wiki_get` are free; `web_search`
-   and `fetch_url` are metered (paid per call). Start with `wiki_search`/`wiki_get` — for
-   Russian/Soviet figures use `language="ru"` first: the Russian Wikipedia article is the
-   normal factual base for routine dates, offices, publications, names, and career rows.
-   One opened Wikipedia article is enough for routine card work. Fall back to `web_search`
-   only for facts Wikipedia does not cover, and seek a second source only for a disputed or
-   consequential claim (for example, responsibility for violence, a contested
-   arrest/execution account, or a quotation). Record each URL plus what it supports in
-   top-level `citations`.
+2. Research Wikipedia-first, but do not stop at Wikipedia. `wiki_search`/`wiki_get` are free
+   and `web_search`/`fetch_url` are metered, so start with the Wikipedia article — for
+   Russian/Soviet subjects `language="ru"` first — as the factual base for routine dates,
+   offices, publications, names, and career rows. Then open at least ONE source outside
+   Wikipedia before you write: an archive or document collection (istmat.org, pmem.ru,
+   nkvd.memo.ru, hrono.ru), marxists.org, a university or journal page, or a published
+   reference work. Wikipedia alone is acceptable only for a MINOR figure whose card is
+   routine dates and posts. This dictionary already leans overwhelmingly on Wikipedia;
+   every card that adds an independent source is the point of the exercise.
+   Never cite cyber-lenin.com or any page on this site — citing our own output as evidence
+   is circular. Record each URL plus what it supports in top-level `citations`.
 3. Submit exactly one available narrow write call: `commulingo_person_create`,
    `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, or
    `commulingo_term_create`. Never delete anything. Keep `citations` top-level; never put
@@ -32,9 +34,12 @@ Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
   literal machine translation; English must carry the same claims.
 - `epithet` is one compact characterization: at most 60 Korean characters and 140 English
-  characters. `bio` is 2–4 sentences: at most 320 Korean characters and 750 English
-  characters. Do not turn career rows into prose; use bio for background, defining work,
-  and one historically meaningful tension or consequence.
+  characters. `bio` is written to a sentence count the commissioned task states — up to 6
+  sentences for a major figure, 2–4 for a standard one, 1–2 for a minor one. Those are
+  ceilings, not quotas: write what the sources support and stop. Never count characters to
+  hit a target; 380 Korean / 900 English characters is only the limit the save enforces.
+  Do not turn career rows into prose; use bio for background, defining work, and one
+  historically meaningful tension or consequence.
 - When mentioning another person who has a dictionary card, spell their name exactly as
   their card does (check with `commulingo_people` search when unsure) — never introduce an
   alternative transliteration. Original spellings inside direct quotations are preserved.
@@ -51,7 +56,10 @@ Content rules:
   characters and 32 English characters. Keep only cause or disposition plus year; move burial,
   rehabilitation, dismissal details, and explanation to bio, career, or sections.
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no
-  solid source exists. Never invent dialogue or inner motives.
+  solid source exists. Never invent dialogue or inner motives. It is a pull-quote on the
+  list card, not a paragraph: one sentence, two at most, capturing a single scene or turn.
+  If it needs more than that to make sense, the scene is wrong — pick a sharper one rather
+  than adding sentences. 140 Korean / 300 English characters is the limit the save enforces.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
   name/epithet/bio/fate, aliases, and a concise 4-8 row career. Names are stored as parts:
   prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
