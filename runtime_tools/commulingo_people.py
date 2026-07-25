@@ -155,11 +155,33 @@ _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
 # Glossary terms (frontend /commulingo/terms, tables from frontend migration
 # 061). `aliases` are the exact strings prose uses and feed the auto-linking
 # pipeline; `people`/`events` are lists of related ids.
+#
+# `period` is bilingual and `category`/`startYear`/`endYear` exist because of
+# frontend migration 071: the single free-text period_label leaked Korean onto
+# the English page and back, and nothing could sort chronologically. A term
+# written without a category shows up on the glossary as 'Uncategorized', so
+# both are required on create rather than backfilled later by hand.
 _TERM_PATCH_KEYS = frozenset({
-    "id", "sortOrder", "term", "original", "period",
-    "definition", "body", "aliases", "people", "events", "sources",
+    "id", "sortOrder", "term", "original", "period", "startYear", "endYear",
+    "category", "definition", "body", "aliases", "people", "events", "sources",
 })
-_LOCALIZED_TERM_KEYS = ("term", "definition", "body")
+_LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
+
+# Mirrors data/commulingo/term-categories.js in the frontend repo. Adding a
+# category means adding it in both places; the label text lives there, only the
+# slug is stored.
+_TERM_CATEGORIES = (
+    "theory", "economy", "party-state", "factions", "repression",
+    "nationalities", "culture", "international", "korea", "contemporary",
+)
+_TERM_CATEGORY_HINT = (
+    "theory (ideology and theory), economy (economy and planning), "
+    "party-state (party and state bodies), factions (inner-party factions and "
+    "line struggles), repression (repression and law), nationalities, "
+    "culture (culture and education), international (international movement), "
+    "korea (Korean political economy), contemporary (contemporary capitalism)"
+)
+_YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
 
@@ -644,6 +666,7 @@ def _term_snapshot(cur, term_id: str) -> dict | None:
     """Full glossary term via an existing cursor, in the term patch shape."""
     cur.execute(
         """SELECT id, term_ko, term_en, original, period_label,
+                  period_ko, period_en, start_year, end_year, category,
                   definition_ko, definition_en, body_ko, body_en, sources
            FROM commulingo_terms WHERE id = %s""",
         (term_id,),
@@ -655,7 +678,13 @@ def _term_snapshot(cur, term_id: str) -> dict | None:
         "id": row["id"],
         "term": {"ko": row["term_ko"], "en": row["term_en"]},
         "original": row["original"],
-        "period": row["period_label"],
+        "period": {
+            "ko": row["period_ko"] or row["period_label"],
+            "en": row["period_en"] or row["period_label"],
+        },
+        "startYear": row["start_year"],
+        "endYear": row["end_year"],
+        "category": row["category"],
         "definition": {"ko": row["definition_ko"], "en": row["definition_en"]},
         "body": {"ko": row["body_ko"], "en": row["body_en"]},
         "sources": row["sources"] if isinstance(row["sources"], list) else [],
@@ -1805,7 +1834,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         if "sortOrder" in patch and not isinstance(patch["sortOrder"], int):
             return "Error: sortOrder must be an integer."
     elif target_type == "term":
-        for key in ("id", "original", "period"):
+        for key in ("id", "original"):
             if key in patch and patch[key] is not None and not isinstance(patch[key], str):
                 return f"Error: {key} must be a plain string."
         for key in _LOCALIZED_TERM_KEYS:
@@ -1813,6 +1842,38 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return (
                     f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
                     "a plain string would silently blank the other language."
+                )
+        if "category" in patch:
+            if patch["category"] not in _TERM_CATEGORIES:
+                return (
+                    f"Error: category must be one of {_TERM_CATEGORY_HINT}. Without it "
+                    "the entry shows up on the glossary under 'Uncategorized'."
+                )
+        elif action == "create":
+            return f"Error: category is required on create. One of {_TERM_CATEGORY_HINT}."
+        if action == "create" and not patch.get("period"):
+            return (
+                "Error: period is required on create, as "
+                "{\"ko\": \"1930–1960\", \"en\": \"1930–1960\"} or "
+                "{\"ko\": \"개념\", \"en\": \"Concept\"} when undated."
+            )
+        for key in ("startYear", "endYear"):
+            value = patch.get(key)
+            if key in patch and value is not None and not isinstance(value, int):
+                return f"Error: {key} must be an integer year or null."
+        start, end = patch.get("startYear"), patch.get("endYear")
+        if isinstance(start, int) and isinstance(end, int) and end < start:
+            return f"Error: endYear ({end}) is before startYear ({start})."
+        # A dated label with no startYear sorts to the end of the chronological
+        # view, which is why the years are asked for alongside the label.
+        period = patch.get("period")
+        if action == "create" and isinstance(period, dict) and start is None:
+            labels = f"{period.get('ko') or ''} {period.get('en') or ''}"
+            if _YEAR_RE.search(labels):
+                return (
+                    f"Error: period '{labels.strip()}' names a year, so startYear is "
+                    "required for chronological sorting. Use the decade or century start "
+                    "for a label like 1980년대 (1980) or 19세기 (1800)."
                 )
         definition = patch.get("definition")
         if isinstance(definition, dict):
@@ -1941,17 +2002,25 @@ def _apply_term_create(cur, term_id: str, patch: dict) -> None:
     cur.execute("SELECT COALESCE(MAX(sort_order), -1) + 10 AS next_sort FROM commulingo_terms")
     next_sort = cur.fetchone()["next_sort"]
     term = patch.get("term") or {}
+    period = patch.get("period")
     cur.execute(
         """INSERT INTO commulingo_terms
-              (id, sort_order, term_ko, term_en, original, period_label,
+              (id, sort_order, term_ko, term_en, original,
+               period_label, period_ko, period_en, start_year, end_year, category,
                definition_ko, definition_en, body_ko, body_en, sources, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
         (
             term_id,
             patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
             _localized(term, "ko"), _localized(term, "en"),
             patch.get("original") or "",
-            patch.get("period") or "",
+            # period_label is the frozen pre-071 column; the frontend store reads
+            # period_ko/en and only falls back to it, so keep it populated with
+            # the Korean label for anything that still looks at the old column.
+            _localized(period, "ko"),
+            _localized(period, "ko"), _localized(period, "en"),
+            patch.get("startYear"), patch.get("endYear"),
+            patch.get("category") or "",
             _localized(patch.get("definition"), "ko"), _localized(patch.get("definition"), "en"),
             _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
             json.dumps(patch.get("sources") or [], ensure_ascii=False),
@@ -1977,7 +2046,15 @@ def _apply_term_update(cur, term_id: str, patch: dict) -> None:
     if "original" in patch:
         set_col("original", patch.get("original") or "")
     if "period" in patch:
-        set_col("period_label", patch.get("period") or "")
+        period = patch.get("period")
+        set_col("period_label", _localized(period, "ko"))
+        set_col("period_ko", _localized(period, "ko"))
+        set_col("period_en", _localized(period, "en"))
+    for key, column in (("startYear", "start_year"), ("endYear", "end_year")):
+        if key in patch:
+            set_col(column, patch.get(key))
+    if "category" in patch:
+        set_col("category", patch.get("category") or "")
     if "definition" in patch:
         set_col("definition_ko", _localized(patch.get("definition"), "ko"))
         set_col("definition_en", _localized(patch.get("definition"), "en"))
@@ -2330,7 +2407,33 @@ _COMMULINGO_FIELD_SCHEMA = {
         "nationalOrigin": _NATIONAL_ORIGIN_SCHEMA,
         "term": _BILINGUAL_TEXT_SCHEMA,
         "original": {"type": "string", "description": "term: native-script/original-language form (ГУЛАГ, нэпман)."},
-        "period": {"type": "string", "description": "term: period label ('1930–1960') or '개념' for pure concepts."},
+        "period": {
+            "type": "object", "additionalProperties": False,
+            "properties": {"ko": {"type": "string"}, "en": {"type": "string"}},
+            "description": (
+                "term: bilingual period label, e.g. {\"ko\": \"1930–1960\", \"en\": "
+                "\"1930–1960\"} or {\"ko\": \"1980년대–현재\", \"en\": \"1980s–present\"}. "
+                "Use {\"ko\": \"개념\", \"en\": \"Concept\"} for an undated concept. "
+                "One shared string leaks Korean onto the English page."
+            ),
+        },
+        "startYear": {
+            "type": ["integer", "null"],
+            "description": (
+                "term: first year of the period, for chronological sorting. Required "
+                "whenever the label names a year; null only for undated concepts. "
+                "A decade label resolves to the decade start (1980년대 -> 1980), a "
+                "century label to the century start (19세기 -> 1800)."
+            ),
+        },
+        "endYear": {
+            "type": ["integer", "null"],
+            "description": "term: last year of the period; null if still current or undated.",
+        },
+        "category": {
+            "type": "string", "enum": list(_TERM_CATEGORIES),
+            "description": f"term: which glossary group it belongs to. One of {_TERM_CATEGORY_HINT}.",
+        },
         "definition": _BILINGUAL_TEXT_SCHEMA,
         "body": _BILINGUAL_TEXT_SCHEMA,
         "people": {"type": "array", "items": {"type": "string"}, "description": "term: related person ids."},
@@ -2365,7 +2468,11 @@ _COMMULINGO_FIELD_SCHEMA = {
         "heading": _BILINGUAL_TEXT_SCHEMA,
         "body": _BILINGUAL_TEXT_SCHEMA,
         "sources": {"type": "array", "items": {"type": "string"}},
-        "period": {"type": "string"},
+        # 'period' is defined once above, for terms. A second bare
+        # {"type": "string"} entry used to sit here and, being later in the same
+        # dict literal, silently overrode it, so the term tool advertised an
+        # undocumented string. Office-row patches accept `period` as an alias
+        # for `years` in _validate, not through this schema.
         "personId": {"type": "string"},
         "relationKind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
         "relation": _BILINGUAL_TEXT_SCHEMA,
@@ -2601,8 +2708,8 @@ _PERSON_NARROW_KEYS = (
     "citizenship", "nationalOrigin", "aliases", "career", "role", "fate", "scenes",
 )
 _TERM_NARROW_KEYS = (
-    "sortOrder", "term", "original", "period", "definition", "body",
-    "aliases", "people", "events",
+    "sortOrder", "term", "original", "period", "startYear", "endYear",
+    "category", "definition", "body", "aliases", "people", "events",
 )
 _OFFICE_ROW_NARROW_KEYS = (
     "sortOrder", "years", "body", "personId", "name", "note",
@@ -2711,7 +2818,10 @@ COMMULINGO_TERM_CREATE_TOOL = {
         "type": "object", "additionalProperties": False,
         "properties": {
             "term_id": {"type": "string", "description": "New lowercase kebab-case slug."},
-            "fields": _narrow_fields_schema(_TERM_NARROW_KEYS, required=("term", "definition", "aliases")),
+            "fields": _narrow_fields_schema(
+                _TERM_NARROW_KEYS,
+                required=("term", "definition", "aliases", "period", "category"),
+            ),
             "citations": _CITATIONS_SCHEMA,
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },

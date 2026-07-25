@@ -164,9 +164,21 @@ Workflow:
    evidence for our own glossary is circular. Pass source URLs in top-level `citations`.
 3. Register exactly one term with `commulingo_term_create(term_id='<kebab-slug>', fields=...,
    citations=[...])`. Fields include term {{ko,en}}, original (native-script form),
-   period, definition {{ko,en}} (2-3 sentences, the card paragraph), aliases {{ko,en}}
+   definition {{ko,en}} (2-3 sentences, the card paragraph), aliases {{ko,en}}
    including the EXACT spelling the material uses plus common variants, and related
    people/events ids when clearly applicable (verify ids via search_people/list_events).
+   Also required, because the glossary sorts and groups on them:
+   - period as {{ko,en}}, both languages written out ({{"ko": "1980년대–현재", "en":
+     "1980s–present"}}), or {{"ko": "개념", "en": "Concept"}} for an undated concept.
+   - startYear / endYear as integers whenever the label names a year, so the entry
+     places itself in the chronological view. A decade label takes the decade start
+     (1980년대 -> 1980), a century label the century start (19세기 -> 1800). endYear is
+     null for anything still current.
+   - category, one of: theory, economy, party-state, factions, repression,
+     nationalities, culture, international, korea, contemporary. Pick by what the term
+     primarily is, not by where it was used: a persecution campaign is repression even
+     when its subject is the arts, a Soviet reform-economics debate is economy.
+     An entry left without one shows on the glossary as 'Uncategorized'.
 4. If every concept in the material is already registered, reply with the single line
    NO_CANDIDATE and STOP — do not call commulingo_term_create, do not stretch the definition
    of a term to justify a write.

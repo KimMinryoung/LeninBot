@@ -274,6 +274,46 @@ assert "citizenship" in _validate(
 assert "origin" not in person_fields
 assert "sources" not in person_fields and "term" not in person_fields
 assert "sources" not in term_fields and "bio" not in term_fields
+
+# Glossary metadata: an entry written without a category renders as
+# 'Uncategorized', and a single-string period leaks one language onto the other
+# page, so the schema demands both and the years that sort the entry.
+assert {"category", "startYear", "endYear"} <= set(term_fields)
+assert term_fields["period"]["type"] == "object"
+assert set(term_fields["period"]["properties"]) == {"ko", "en"}
+term_required = set(COMMULINGO_TERM_CREATE_TOOL["input_schema"]["properties"]["fields"]["required"])
+assert {"period", "category"} <= term_required
+_dated_term = {
+    "term": {"ko": "용어", "en": "Term"},
+    "definition": {"ko": "정의.", "en": "Definition."},
+    "aliases": {"ko": ["용어"], "en": ["term"]},
+    "period": {"ko": "1930년대–1991", "en": "1930s–1991"},
+    "startYear": 1930, "endYear": 1991, "category": "economy",
+}
+assert _validate(CURSOR, "term", "create", "ok-term", _dated_term) is None
+assert "category is required" in _validate(
+    CURSOR, "term", "create", "no-category", {k: v for k, v in _dated_term.items() if k != "category"},
+)
+assert "category must be one of" in _validate(
+    CURSOR, "term", "create", "bad-category", {**_dated_term, "category": "misc"},
+)
+assert "period is required" in _validate(
+    CURSOR, "term", "create", "no-period", {k: v for k, v in _dated_term.items() if k != "period"},
+)
+assert "must be an object" in _validate(
+    CURSOR, "term", "create", "string-period", {**_dated_term, "period": "1930-1991"},
+)
+assert "startYear is required" in _validate(
+    CURSOR, "term", "create", "no-start", {**_dated_term, "startYear": None},
+)
+assert "before startYear" in _validate(
+    CURSOR, "term", "create", "reversed-years", {**_dated_term, "endYear": 1900},
+)
+# An undated concept keeps null years without tripping the year guard.
+assert _validate(CURSOR, "term", "create", "concept-term", {
+    **_dated_term, "period": {"ko": "개념", "en": "Concept"},
+    "startYear": None, "endYear": None,
+}) is None
 assert COMMULINGO_PERSON_UPDATE_TOOL["input_schema"]["additionalProperties"] is False
 assert COMMULINGO_SECTION_SAVE_TOOL["input_schema"]["additionalProperties"] is False
 assert COMMULINGO_EVENT_LINK_TOOL["input_schema"]["additionalProperties"] is False
