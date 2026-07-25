@@ -56,7 +56,7 @@ BODY_KO = """## 한 단어, 두 가지 쓰임
 
 '국가자본주의'는 하나의 학설 이름이 아니다. 이 말은 남의 체제를 비판할 때도 쓰이고, 자기편의 전술적 선택을 설명할 때도 쓰인다. 같은 단어가 정반대 방향으로 쓰이는 셈이라, 누가 어느 뜻으로 썼는지를 먼저 가려야 논의가 성립한다.
 
-비판으로 쓰는 쪽의 계보는 엥겔스의 『반뒤링』(1878)에서 시작한다. 국가가 공장과 철도를 소유해도 노동자는 여전히 남에게 고용되어 임금을 받는 처지 그대로이니, 국가는 자본가를 없앤 것이 아니라 자본가 전체를 하나로 합친 '이상적 총자본가'가 되었을 뿐이라는 것이다. 리프크네히트는 1896년 비스마르크의 국가사회주의를 '최악의 형태의 자본주의'라 불렀고, 바쿠닌은 노동자 권력을 세운다는 계획이 결국 관료라는 새로운 지배계급을 낳으리라 경고했다.
+비판으로 쓰는 쪽의 계보는 엥겔스의 『반뒤링』(1878)에서 시작한다. 국가가 공장과 철도를 소유해도 노동자는 여전히 남에게 고용되어 임금을 받는 처지 그대로이니, 국가는 자본가를 없앤 것이 아니라 자본가 전체를 하나로 합친 '이상적 총자본가'가 되었을 뿐이라는 것이다. 빌헬름 리프크네히트는 1896년 이 논지를 한 문장으로 밀어붙여, 비스마르크식 국가사회주의야말로 실은 국가자본주의라 불러야 한다고 했다. 바쿠닌은 노동자 권력을 세운다는 계획이 결국 관료라는 새로운 지배계급을 낳으리라 경고했다.
 
 전술로 쓰는 쪽의 계보는 레닌의 것이다.
 
@@ -110,7 +110,7 @@ BODY_EN = """## One Phrase, Two Uses
 
 'State capitalism' is not the name of a single doctrine. The phrase is used to condemn somebody else's system, and it is also used to explain a tactical choice of one's own. The same words run in opposite directions, so the first thing to establish in any argument about it is which sense the speaker means.
 
-The condemning lineage begins with Engels's *Anti-Dühring* (1878). When the state owns the factories and the railways, workers are still employed by somebody else for a wage, so the state has not abolished the capitalist; it has merged every capitalist into one 'ideal collective capitalist.' In 1896 Liebknecht called Bismarck's state socialism 'the worst form of capitalism,' and Bakunin had warned that a plan to install workers' power would end by producing a new ruling class of officials.
+The condemning lineage begins with Engels's *Anti-Dühring* (1878). When the state owns the factories and the railways, workers are still employed by somebody else for a wage, so the state has not abolished the capitalist; it has merged every capitalist into one 'ideal collective capitalist.' In 1896 Wilhelm Liebknecht pushed the point to its conclusion in a single sentence: Bismarck's state socialism is really state capitalism. Bakunin had warned that a plan to install workers' power would end by producing a new ruling class of officials.
 
 The tactical lineage is Lenin's.
 
@@ -171,6 +171,7 @@ SOURCES = [
     "https://www.marxists.org/reference/archive/mao/selected-works/volume-2/mswv2_26.htm — Mao Zedong, 'On New Democracy' (1940): state capitalism as a component of the New Democratic economy under the joint dictatorship of four classes",
     "https://bolky.jinbo.net — 국제볼셰비키경향(볼셰비키그룹), the Korean Trotskyist organisation whose journal '1917' carries the sustained critique of Cliff: ownership-form materialism, the claim that Kautsky's 'Terrorism and Communism' (1919) is the origin of the 'USSR is capitalist' diagnosis, and the argument that Cliff's dating of 1928 places him closer to Bukharin's Right Opposition than to Trotsky",
     "https://cyber-lenin.com/reports/research/state-capitalism-theory-review — internal review report (2026-07-25) collating the usages, the five discriminating criteria, and the Korean reception; its bibliographic details were re-checked against the primary texts above and corrected where they diverged",
+    "https://www.marxists.org/archive/liebknecht-w/1896/08/our-congress.htm — Wilhelm Liebknecht, 'Our Recent Congress', 10 August 1896: 'Nobody has combatted State Socialism more than we German Socialists, nobody has shown more distinctively than I, that State Socialism is really State capitalism!' The source of the 1896 line, and confirmation that it is Wilhelm rather than his son Karl",
 ]
 
 PEOPLE = [
@@ -182,7 +183,9 @@ PEOPLE = [
     "karl-kautsky",
     "mao-zedong",
     "bukharin",
-    "liebknecht",
+    # Not 'liebknecht': that record is Karl, the Spartacist. The 1896 line is his
+    # father Wilhelm, who is not in the people dictionary, so he is named in prose
+    # rather than linked to the wrong man.
     "osinsky",
     "raya-dunayevskaya",
 ]
