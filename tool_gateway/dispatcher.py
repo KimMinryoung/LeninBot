@@ -258,11 +258,17 @@ async def execute_tool(
                 raise ToolArgumentValidationError(
                     f"unknown arguments {unknown}; accepted: {sorted(accepted)}"
                 )
-            missing = sorted(key for key in required if key not in args)
-            if missing:
-                raise ToolArgumentValidationError(
-                    f"missing required arguments {missing}; accepted: {sorted(accepted)}"
-                )
+        # A **kwargs handler cannot say which names it rejects, but its required
+        # params are still knowable. This check used to sit inside the branch
+        # above, so an empty payload sailed past it and died on a raw TypeError
+        # ("missing 3 required positional arguments") that the model could not act
+        # on — the call was simply lost.
+        missing = sorted(key for key in required if key not in args)
+        if missing:
+            hint = f"; accepted: {sorted(accepted)}" if accepted is not None else ""
+            raise ToolArgumentValidationError(
+                f"missing required arguments {missing}{hint}"
+            )
     except ToolArgumentValidationError as exc:
         msg = f"Tool '{name}' arguments rejected: {exc}"
         logger.warning(msg)

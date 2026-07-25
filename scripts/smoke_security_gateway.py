@@ -311,6 +311,37 @@ def main() -> int:
                 rejected[1] and schema_calls["count"] == 0 and "arguments rejected" in rejected[0],
                 str((rejected, schema_calls)),
             )
+
+            # A **kwargs handler reports no accepted-name set, which used to skip
+            # the required-argument check with it. An empty payload then reached
+            # the handler and came back as a raw TypeError the model could not act
+            # on, losing the call. fetch_url, read_file and broadcast_to_channel
+            # all have this shape.
+            varkw_calls = {"count": 0}
+
+            def varkw_handler(url: str, **kwargs) -> str:
+                varkw_calls["count"] += 1
+                return url
+
+            empty = await execute_tool(
+                "fetch_url", {}, {"fetch_url": varkw_handler},
+            )
+            check(
+                "empty payload to a **kwargs handler is rejected, not a raw TypeError",
+                empty[1]
+                and varkw_calls["count"] == 0
+                and "missing required arguments ['url']" in empty[0],
+                str((empty, varkw_calls)),
+            )
+            passed = await execute_tool(
+                "fetch_url", {"url": "https://example.com", "extra": 1},
+                {"fetch_url": varkw_handler},
+            )
+            check(
+                "**kwargs handler still accepts names it did not declare",
+                not passed[1] and varkw_calls["count"] == 1,
+                str((passed, varkw_calls)),
+            )
             cache = {}
             first = await execute_tool(
                 "save_diary",
