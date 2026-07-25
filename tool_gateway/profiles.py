@@ -64,7 +64,10 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
 }) | COMMULINGO_NARROW_WRITE_TOOLS
 
 ROLEPLAY_TELEGRAM_PROFILE = "telegram.roleplay"
-ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS
+# Read-only CommuLingo dictionary lookup, matching web.roleplay: the personas
+# are Yezhov-era figures and the dictionary is the natural reference for them.
+# The data is already public at /commulingo, and every write tool stays off.
+ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS | frozenset({"commulingo_people"})
 
 # -- Writer workspace profile ---------------------------------------------
 

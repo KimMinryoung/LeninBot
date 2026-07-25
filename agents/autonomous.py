@@ -278,6 +278,11 @@ operator-needed dependency and continue with the work your current tools allow.
         "vector_search", "knowledge_graph_search",
         "read_self", "recall_experience",
         "get_finance_data",
+        # Read-only lookup in our own CommuLingo dictionaries (people, history
+        # events, glossary terms). A tick on Soviet history should consult the
+        # site's own reference before reaching for web search. Every CommuLingo
+        # write tool stays off this surface; curation belongs to the curator.
+        "commulingo_people",
         # Primary-source document pipeline (download → convert → paginated read).
         # read_document is registered per-tick by autonomous_project.py and is
         # sandboxed to data/downloads/ + data/converted/ — NOT general read_file.

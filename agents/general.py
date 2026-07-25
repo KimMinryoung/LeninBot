@@ -43,5 +43,8 @@ GENERAL = AgentSpec(
         "read_file", "write_file", "list_directory", "execute_python",
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2", "get_finance_data",
+        # Read-only lookup in our own CommuLingo dictionaries (people, history
+        # events, glossary terms). Write tools stay off this surface.
+        "commulingo_people",
     ],
 )
