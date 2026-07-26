@@ -164,6 +164,7 @@ _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
 _TERM_PATCH_KEYS = frozenset({
     "id", "sortOrder", "term", "original", "period", "startYear", "endYear",
     "category", "definition", "body", "aliases", "people", "events", "sources",
+    "parentId",
 })
 _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
 
@@ -667,7 +668,8 @@ def _term_snapshot(cur, term_id: str) -> dict | None:
     cur.execute(
         """SELECT id, term_ko, term_en, original, period_label,
                   period_ko, period_en, start_year, end_year, category,
-                  definition_ko, definition_en, body_ko, body_en, sources
+                  definition_ko, definition_en, body_ko, body_en, sources,
+                  parent_id
            FROM commulingo_terms WHERE id = %s""",
         (term_id,),
     )
@@ -688,6 +690,7 @@ def _term_snapshot(cur, term_id: str) -> dict | None:
         "definition": {"ko": row["definition_ko"], "en": row["definition_en"]},
         "body": {"ko": row["body_ko"], "en": row["body_en"]},
         "sources": row["sources"] if isinstance(row["sources"], list) else [],
+        "parentId": row["parent_id"],
     }
     cur.execute(
         """SELECT lang, alias FROM commulingo_term_aliases
@@ -1951,6 +1954,33 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     "Error: aliases must be {\"ko\": [\"굴라크\"], \"en\": [\"Gulag\"]} — the exact "
                     "strings prose uses; they drive site-wide auto-linking."
                 )
+        if "parentId" in patch and patch["parentId"] is not None:
+            parent = str(patch["parentId"]).strip()
+            if not parent:
+                return "Error: parentId must be a term id, or null to detach the entry."
+            if parent == target_id:
+                return f"Error: parentId '{parent}' is the entry itself."
+            cur.execute("SELECT parent_id FROM commulingo_terms WHERE id = %s", (parent,))
+            parent_row = cur.fetchone()
+            if not parent_row:
+                return (
+                    f"Error: parentId '{parent}' is not a registered term. Find it with "
+                    f"{_reader_call('list_terms')}."
+                )
+            # One level only, matching the entry page: a child cannot be a parent.
+            if parent_row["parent_id"]:
+                return (
+                    f"Error: term '{parent}' is itself nested under "
+                    f"'{parent_row['parent_id']}', and the glossary nests one level only. "
+                    f"Use '{parent_row['parent_id']}' as the parent, or leave this entry flat."
+                )
+            cur.execute("SELECT id FROM commulingo_terms WHERE parent_id = %s LIMIT 1", (target_id,))
+            child = cur.fetchone()
+            if child:
+                return (
+                    f"Error: '{target_id}' already has '{child['id']}' nested under it, so it "
+                    "cannot become a child itself (the glossary nests one level only)."
+                )
         for key, table, reader in (("people", "commulingo_people", "search_people"),
                                    ("events", "commulingo_history_events", "list_events")):
             if key not in patch or patch[key] is None:
@@ -2081,8 +2111,8 @@ def _apply_term_create(cur, term_id: str, patch: dict) -> None:
         """INSERT INTO commulingo_terms
               (id, sort_order, term_ko, term_en, original,
                period_label, period_ko, period_en, start_year, end_year, category,
-               definition_ko, definition_en, body_ko, body_en, sources, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
+               definition_ko, definition_en, body_ko, body_en, sources, parent_id, updated_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())""",
         (
             term_id,
             patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
@@ -2098,6 +2128,7 @@ def _apply_term_create(cur, term_id: str, patch: dict) -> None:
             _localized(patch.get("definition"), "ko"), _localized(patch.get("definition"), "en"),
             _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
             json.dumps(patch.get("sources") or [], ensure_ascii=False),
+            (patch.get("parentId") or None),
         ),
     )
     _replace_term_aliases(cur, term_id, patch.get("aliases") or {
@@ -2137,6 +2168,8 @@ def _apply_term_update(cur, term_id: str, patch: dict) -> None:
         set_col("body_en", _localized(patch.get("body"), "en"))
     if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
         set_col("sort_order", patch["sortOrder"])
+    if "parentId" in patch:
+        set_col("parent_id", patch.get("parentId") or None)
     if "sources" in patch and patch.get("sources") is not None:
         values.append(json.dumps(patch["sources"], ensure_ascii=False))
         sets.append("sources = %s::jsonb")
@@ -2508,6 +2541,16 @@ _COMMULINGO_FIELD_SCHEMA = {
             "type": "string", "enum": list(_TERM_CATEGORIES),
             "description": f"term: which glossary group it belongs to. One of {_TERM_CATEGORY_HINT}.",
         },
+        "parentId": {
+            "type": ["string", "null"],
+            "description": (
+                "term: the id of the entry this one is a PART of, so it nests under it "
+                "(예조프시나 -> great-purge). Only for a component of the parent, never for "
+                "a merely adjacent concept — those belong in the flat related-terms list. "
+                "The glossary nests one level: a parent may not itself have a parent. "
+                "null detaches an entry."
+            ),
+        },
         "definition": _BILINGUAL_TEXT_SCHEMA,
         "body": _BILINGUAL_TEXT_SCHEMA,
         "people": {"type": "array", "items": {"type": "string"}, "description": "term: related person ids."},
@@ -2783,7 +2826,7 @@ _PERSON_NARROW_KEYS = (
 )
 _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "startYear", "endYear",
-    "category", "definition", "body", "aliases", "people", "events",
+    "category", "definition", "body", "aliases", "people", "events", "parentId",
 )
 # Create fills the card's source list from the top-level citations. An update
 # is usually partial, so it must leave the stored list alone unless the caller
