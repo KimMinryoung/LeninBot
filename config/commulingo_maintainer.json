@@ -1,12 +1,12 @@
 {
   "enabled": true,
   "mode": "auto",
-  "new_person_every": 0,
+  "new_person_every": 8,
   "recent_days": 30,
   "incomplete_recent_days": 2,
   "new_person_cooldown_runs": 6,
-  "new_lane_enabled": false,
-  "term_lane_enabled": false,
+  "new_lane_enabled": true,
+  "term_lane_enabled": true,
   "enrich_non_soviet_revolutionaries": false,
   "new_person_focus": "soviet_institutions"
 }
