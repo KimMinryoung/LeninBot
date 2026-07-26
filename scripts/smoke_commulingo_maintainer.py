@@ -202,13 +202,24 @@ new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
 assert "Every new person requires both citizenship and nationalOrigin" in new_task
 assert "either the citizenship or nationalOrigin flag code is unset" in task
+_ROSTER_ROWS = [
+    {"group_id": "stalin-era", "title_ko": "스탈린 시대의 사람들", "range_label": "1929–1953",
+     "name_ko": "니콜라이 예조프", "name_en": "Nikolai Yezhov"},
+    {"group_id": "stalin-era", "title_ko": "스탈린 시대의 사람들", "range_label": "1929–1953",
+     "name_ko": "라브렌티 베리야", "name_en": "Lavrentiy Beria"},
+    {"group_id": "international-revolutionary", "title_ko": "비소련 혁명가", "range_label": "1871–2016",
+     "name_ko": "로자 룩셈부르크", "name_en": "Rosa Luxemburg"},
+]
+
 original_db_query = maintainer.db_query
 try:
-    maintainer.db_query = lambda sql, params=None: [
-        {"name_ko": "니콜라이 예조프", "name_en": "Nikolai Yezhov"},
-        {"name_ko": "라브렌티 베리야", "name_en": "Lavrentiy Beria"},
-    ]
+    maintainer.db_query = lambda sql, params=None: _ROSTER_ROWS
     focused_discovery = maintainer.build_discovery_task("soviet_institutions")
+    scoped_discovery = maintainer.build_discovery_task(
+        "soviet_institutions", None, ("stalin-era",),
+    )
+    full_roster = maintainer.registered_person_roster()
+    scoped_roster = maintainer.registered_person_roster(("stalin-era",))
 finally:
     maintainer.db_query = original_db_query
 assert "Do not select a non-Soviet revolutionary" in focused_discovery
@@ -216,6 +227,35 @@ assert "Soviet institution" in focused_discovery and "list_offices" in focused_d
 # discovery must be able to read absence off a roster instead of guessing at it
 assert "ALREADY IN THE DICTIONARY" in focused_discovery
 assert "니콜라이 예조프(Nikolai Yezhov), 라브렌티 베리야(Lavrentiy Beria)" in focused_discovery
+
+# The roster carries an era heading per group so the model can read the one
+# section its candidate belongs to instead of a single undivided wall.
+assert "### 스탈린 시대의 사람들 (1929–1953) — 2명" in full_roster, full_roster
+assert "### 비소련 혁명가 (1871–2016) — 1명" in full_roster, full_roster
+
+# Narrowing keeps the in-focus era in full and NAMES the omitted one with its
+# count, so absence outside the roster is never read as a gap.
+assert "니콜라이 예조프(Nikolai Yezhov)" in scoped_roster
+assert "로자 룩셈부르크" not in scoped_roster, scoped_roster
+assert "비소련 혁명가 1명" in scoped_roster, scoped_roster
+assert "여기 없다는 사실이 빈자리라는 뜻은 아니다" in scoped_roster
+# The omitted era loses its listing, not just its heading. (Char length is not
+# the assertion: on a three-row fixture the omission notice outweighs the two
+# names it replaces, though on the real 1,095-card roster it does not.)
+assert "### 비소련 혁명가 (1871–2016)" not in scoped_roster, scoped_roster
+assert scoped_roster.count("(") < full_roster.count("(")
+assert "비소련 혁명가 1명" in scoped_discovery
+
+# Focus drives the group list; an explicit config list overrides it.
+assert maintainer.roster_groups_for_focus(
+    {"new_person_focus": "soviet_institutions", "roster_groups": []}
+) == ("bolshevik", "stalin-era", "thaw", "perestroika")
+assert maintainer.roster_groups_for_focus(
+    {"new_person_focus": "all", "roster_groups": []}
+) == (), "focus=all must cover every group"
+assert maintainer.roster_groups_for_focus(
+    {"new_person_focus": "soviet_institutions", "roster_groups": ["thaw"]}
+) == ("thaw",)
 
 original_db_query = maintainer.db_query
 captured_selection = {}

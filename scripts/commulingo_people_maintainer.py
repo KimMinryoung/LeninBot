@@ -64,6 +64,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "enrich_non_soviet_revolutionaries": True,
         # New-person discovery is independently focusable.
         "new_person_focus": "all",
+        # Era groups the absence roster covers. Empty derives it from the focus
+        # via ROSTER_GROUPS_BY_FOCUS; an explicit list overrides that, which is
+        # the lever for widening the roster back out if duplicates climb.
+        "roster_groups": [],
     }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -83,6 +87,9 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["enrich_non_soviet_revolutionaries"] = bool(cfg["enrich_non_soviet_revolutionaries"])
     if cfg["new_person_focus"] not in {"all", "soviet_institutions"}:
         raise ValueError("new_person_focus must be all or soviet_institutions")
+    if not isinstance(cfg["roster_groups"], list):
+        raise ValueError("roster_groups must be a list of group ids")
+    cfg["roster_groups"] = [str(g) for g in cfg["roster_groups"]]
     return cfg
 
 
@@ -491,22 +498,70 @@ cyber-lenin.com or any page on this site. Make one narrow write call and stop.
 """ + CARD_STYLE_GUIDANCE
 
 
-def registered_person_roster() -> str:
-    """Every card already in the dictionary, as one comma-joined roster.
+# Which era groups a candidate may be drawn from under each selection focus.
+# The focus text already forbids picking outside these, so the roster does not
+# have to prove absence there and can stop carrying those names.
+ROSTER_GROUPS_BY_FOCUS = {
+    "soviet_institutions": ("bolshevik", "stalin-era", "thaw", "perestroika"),
+}
+
+
+def roster_groups_for_focus(config: dict) -> tuple[str, ...]:
+    """Group ids the roster should cover, from explicit config or the focus."""
+    configured = config.get("roster_groups") or ()
+    if configured:
+        return tuple(str(g) for g in configured)
+    return ROSTER_GROUPS_BY_FOCUS.get(str(config.get("new_person_focus") or "all"), ())
+
+
+def registered_person_roster(groups: tuple[str, ...] | None = None) -> str:
+    """Cards already in the dictionary, grouped by era under a heading each.
 
     Discovery used to prove absence with at most six search_people calls
     against ~700 cards, so it kept proposing people who were already filed:
     85% of the lane's fallbacks were `candidate duplicates existing person`
     after all three attempts, each one a paid agent loop. Showing the roster
     up front turns absence into something the curator can read off.
+
+    One comma-joined block of 1,095 names was 94% of the discovery prompt and
+    still did not stop the duplicates, because a wall that size is not read.
+    Splitting it by era gives the model the one section its candidate would
+    belong to. `groups` narrows it further to the eras the current focus can
+    actually select from; the omitted eras are named, not silently dropped, so
+    absence there is never mistaken for a gap.
     """
     rows = db_query(
-        "SELECT name_ko, name_en FROM commulingo_people ORDER BY name_ko"
+        """SELECT g.id AS group_id, g.title_ko, g.range_label, p.name_ko, p.name_en
+             FROM commulingo_people p
+             JOIN commulingo_people_groups g ON g.id = p.group_id
+            ORDER BY g.sort_order, g.id, p.name_ko"""
     )
-    return ", ".join(
-        f"{row['name_ko']}({row['name_en']})" if row["name_en"] else str(row["name_ko"])
-        for row in rows
-    )
+    wanted = set(groups or ())
+    sections: dict[str, dict] = {}
+    omitted: dict[str, int] = {}
+    for row in rows:
+        gid = row["group_id"]
+        if wanted and gid not in wanted:
+            omitted[row["title_ko"]] = omitted.get(row["title_ko"], 0) + 1
+            continue
+        section = sections.setdefault(
+            gid, {"title": row["title_ko"], "range": row["range_label"], "names": []},
+        )
+        section["names"].append(
+            f"{row['name_ko']}({row['name_en']})" if row["name_en"] else str(row["name_ko"])
+        )
+
+    blocks = [
+        f"### {s['title']} ({s['range']}) — {len(s['names'])}명\n" + ", ".join(s["names"])
+        for s in sections.values()
+    ]
+    if omitted:
+        blocks.append(
+            "### 아래 시대는 지금 선택 대상이 아니므로 명단을 싣지 않는다\n"
+            + ", ".join(f"{title} {count}명" for title, count in omitted.items())
+            + "\n이 시대에서 고르지 말 것. 여기 없다는 사실이 빈자리라는 뜻은 아니다."
+        )
+    return "\n\n".join(blocks)
 
 
 _PERSON_CLAIMS: list = []
@@ -572,7 +627,11 @@ ALREADY PROPOSED AND REJECTED AS DUPLICATES — do not propose any of these agai
 """
 
 
-def build_discovery_task(new_person_focus: str = "all", rejected: list | None = None) -> str:
+def build_discovery_task(
+    new_person_focus: str = "all",
+    rejected: list | None = None,
+    roster_groups: tuple[str, ...] | None = None,
+) -> str:
     focus_instruction = ""
     if new_person_focus == "soviet_institutions":
         focus_instruction = """
@@ -591,9 +650,11 @@ list_offices, then use search_people under a proposed name and aliases to prove 
 is absent. Prefer a historically important gap in revolutionary or Soviet history.
 
 ALREADY IN THE DICTIONARY — anyone below is NOT a gap, and neither is the same person
-under another transliteration. Read this roster first and pick someone who is not on it;
-a candidate that turns out to be registered is rejected and the run is wasted.
-""" + registered_person_roster() + "\n" + focus_instruction + """
+under another transliteration. The roster is split by era: read the section your candidate
+would belong to before proposing them. A candidate that turns out to be registered is
+rejected and the run is wasted.
+
+""" + registered_person_roster(roster_groups) + "\n" + focus_instruction + """
 """ + rejected_candidate_note(rejected) + """
 Do not survey the whole dictionary: consider at most three plausible people, select the first verified
 gap, and stop searching. You have """ + str(DISCOVERY_SEARCH_BUDGET) + """ search_people lookups for the whole stage and each
@@ -956,6 +1017,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 discovery_result, discovery_tracker, candidate = await _call_curator_stage(
                     task=build_discovery_task(
                         config["new_person_focus"], candidate_box["rejected"],
+                        roster_groups_for_focus(config),
                     ), spec=spec, model=model,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
                     stage="new-person discovery", expect_edit=False, before_count=before,

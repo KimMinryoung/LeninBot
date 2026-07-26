@@ -57,11 +57,15 @@ def build_task_with_policy(mode: str, candidate: dict | None) -> str:
     return _base_build_task(mode, candidate) + EDITORIAL_POLICY
 
 
-def build_discovery_task_with_policy(new_person_focus: str = "all", rejected: list | None = None) -> str:
+def build_discovery_task_with_policy(
+    new_person_focus: str = "all",
+    rejected: list | None = None,
+    roster_groups: tuple[str, ...] | None = None,
+) -> str:
     # Mirror the wrapped signature exactly. These three wrappers are installed
     # over the maintainer's builders, so a parameter added there and not here
     # raises TypeError inside the lane rather than at import.
-    return _base_build_discovery_task(new_person_focus, rejected) + EDITORIAL_POLICY
+    return _base_build_discovery_task(new_person_focus, rejected, roster_groups) + EDITORIAL_POLICY
 
 
 def build_new_person_task_with_policy(candidate: dict) -> str:
