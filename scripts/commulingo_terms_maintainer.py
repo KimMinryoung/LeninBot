@@ -184,6 +184,12 @@ Workflow:
      primarily is, not by where it was used: a persecution campaign is repression even
      when its subject is the arts, a Soviet reform-economics debate is economy.
      An entry left without one shows on the glossary as 'Uncategorized'.
+   Optional, and only when it is plainly true: parentId, the id of the registered entry
+   this term is a PART of, which nests it under that entry (예조프시나 -> great-purge).
+   Use it for a component, phase, organ or instrument of a larger campaign already in the
+   glossary. Do not use it for a merely adjacent or contemporary concept, for a target of
+   the parent, or for anything that outlives it — those stay independent entries. The
+   glossary nests one level, so the parent must not itself be nested.
 4. If every concept in the material is already registered, reply with the single line
    NO_CANDIDATE and STOP — do not call commulingo_term_create, do not stretch the definition
    of a term to justify a write.
