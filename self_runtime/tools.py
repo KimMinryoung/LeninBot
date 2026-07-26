@@ -82,7 +82,8 @@ _AGENT_ROUTING_CARDS = {
             "research_document", "edit_content",
             "commulingo_person_create", "commulingo_person_update",
             "commulingo_section_save", "commulingo_event_link",
-            "commulingo_office_row_save", "commulingo_term_create",
+            "commulingo_office_row_save",
+            "commulingo_term_create", "commulingo_term_update",
         ],
     },
     "programmer": {
@@ -140,7 +141,7 @@ _CONTENT_STORE_GUIDE = {
         "write_or_edit": (
             "analyst: commulingo_person_create / commulingo_person_update / "
             "commulingo_section_save / commulingo_event_link / "
-            "commulingo_office_row_save / commulingo_term_create"
+            "commulingo_office_row_save / commulingo_term_create / commulingo_term_update"
         ),
         "not_this": (
             "Not code work — narrow CommUlingo tools write DB content only. Do not route to "

@@ -2711,6 +2711,10 @@ _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "startYear", "endYear",
     "category", "definition", "body", "aliases", "people", "events",
 )
+# Create fills the card's source list from the top-level citations. An update
+# is usually partial, so it must leave the stored list alone unless the caller
+# means to replace it — hence 'sources' is writable only on update.
+_TERM_UPDATE_NARROW_KEYS = _TERM_NARROW_KEYS + ("sources",)
 _OFFICE_ROW_NARROW_KEYS = (
     "sortOrder", "years", "body", "personId", "name", "note",
 )
@@ -2811,23 +2815,46 @@ COMMULINGO_OFFICE_ROW_SAVE_TOOL = {
     },
 }
 
-COMMULINGO_TERM_CREATE_TOOL = {
-    "name": "commulingo_term_create",
-    "description": "Create one sourced bilingual CommuLingo glossary term. Term fields only; citations stay top-level.",
-    "input_schema": {
-        "type": "object", "additionalProperties": False,
-        "properties": {
-            "term_id": {"type": "string", "description": "New lowercase kebab-case slug."},
-            "fields": _narrow_fields_schema(
-                _TERM_NARROW_KEYS,
-                required=("term", "definition", "aliases", "period", "category"),
-            ),
-            "citations": _CITATIONS_SCHEMA,
-            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+def _term_write_tool(name: str, action: str) -> dict:
+    creating = action == "create"
+    return {
+        "name": name,
+        "description": (
+            f"{action.title()} one sourced bilingual CommuLingo glossary term. "
+            "Term fields only; citations stay top-level."
+            + (
+                " New lowercase kebab-case term_id."
+                if creating
+                else " Send only the fields that change; omitted fields keep their stored "
+                "value, and a sent field replaces it whole (aliases/people/events lists "
+                "are replaced, not merged). Read the term with "
+                "commulingo_people(action='get_term') first."
+            )
+        ),
+        "input_schema": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "term_id": {
+                    "type": "string",
+                    "description": (
+                        "New lowercase kebab-case slug." if creating
+                        else "Existing term id — find it with commulingo_people(action='list_terms')."
+                    ),
+                },
+                "fields": _narrow_fields_schema(
+                    _TERM_NARROW_KEYS if creating else _TERM_UPDATE_NARROW_KEYS,
+                    required=("term", "definition", "aliases", "period", "category") if creating else (),
+                ),
+                "citations": _CITATIONS_SCHEMA,
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            "required": ["term_id", "fields", "citations"],
         },
-        "required": ["term_id", "fields", "citations"],
-    },
-}
+    }
+
+
+COMMULINGO_TERM_CREATE_TOOL = _term_write_tool("commulingo_term_create", "create")
+COMMULINGO_TERM_UPDATE_TOOL = _term_write_tool("commulingo_term_update", "update")
 
 
 async def _exec_commulingo_person_create(person_id: str, fields: dict, citations: list, confidence=None) -> str:
@@ -2878,6 +2905,12 @@ async def _exec_commulingo_term_create(term_id: str, fields: dict, citations: li
     return await _exec_commulingo_write("term", "create", term_id, citations, fields, confidence)
 
 
+async def _exec_commulingo_term_update(term_id: str, fields: dict, citations: list, confidence=None) -> str:
+    # No sources default here: an omitted 'sources' must preserve the card's
+    # existing list, not overwrite it with this one edit's citations.
+    return await _exec_commulingo_write("term", "update", term_id, citations, fields, confidence)
+
+
 COMMULINGO_TOOLS = [
     COMMULINGO_PEOPLE_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
@@ -2886,6 +2919,7 @@ COMMULINGO_TOOLS = [
     COMMULINGO_EVENT_LINK_TOOL,
     COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_TERM_CREATE_TOOL,
+    COMMULINGO_TERM_UPDATE_TOOL,
 ]
 COMMULINGO_TOOL_HANDLERS = {
     "commulingo_people": _exec_commulingo_people,
@@ -2895,4 +2929,5 @@ COMMULINGO_TOOL_HANDLERS = {
     "commulingo_event_link": _exec_commulingo_event_link,
     "commulingo_office_row_save": _exec_commulingo_office_row_save,
     "commulingo_term_create": _exec_commulingo_term_create,
+    "commulingo_term_update": _exec_commulingo_term_update,
 }

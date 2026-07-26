@@ -34,7 +34,7 @@ A tool is callable only if both its definition and handler are present after fil
 
 The orchestrator allow-list is `ORCHESTRATOR_TOOL_NAMES` in `runtime_tools/allowlists.py`. `build_orchestrator_toolset()` applies that list to both schemas and handlers, so a provider-emitted hidden tool name has no executable handler. This surface should remain small: delegation, mission/context operations, safe recall/search, and user-facing coordination. It should not expose broad filesystem or code execution tools.
 
-CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus six target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, `commulingo_term_create`). The global registry no longer contains a generic union write tool. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
+CommUlingo is the bounded content-write exception. The orchestrator sees `commulingo_people` plus seven target-specific writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, `commulingo_term_create`, `commulingo_term_update`). The global registry no longer contains a generic union write tool. The narrow tools are shared global-registry tools and still execute through `tool_gateway.dispatcher`, security authorization/audit, and the common CommUlingo normalization/transaction core.
 
 When adding a new orchestrator tool:
 

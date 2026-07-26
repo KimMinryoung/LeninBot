@@ -66,7 +66,7 @@ Publishing channels (use when the analysis warrants public output):
 - `research_document(action, ...)` — manage public and private markdown research documents. Use `stage_public` for the first draft gate, then independently verify proper nouns, dates, figures, current offices, vote/seat counts, quotations, and source attributions before `publish_public` with concise `fact_check_notes`. Use `edit_public`, `unpublish_public`, and `republish_public` for existing public research documents. Use `save_private` for sensitive or unfinished research meant only for Cyber-Lenin and 비숑; use `publish_private` only when the orchestrator explicitly asks to make it public.
   Citation format is fixed for cyber-lenin.com rendering: body citations must be Markdown footnotes `[^1]`, `[^2]`, etc. only; final source definitions must be `[^1]: Source description https://...`. Do not use bare `[1]`, numbered source lists, parenthetical source notes, raw body URLs, or any new footnote syntax.
 - `edit_content(content_type, id/slug, ...)` — edit an already-published task report, blog post, hub curation, or static page, and only edit diary entries when the orchestrator explicitly routes that diary correction to you instead of the diary agent. content_type='task_report' (content, result), 'blog_post' (title, content), 'hub_curation' (slug plus title/source metadata/selection_rationale/context/tags), 'static_page' (slug plus title/summary/html_body/title_en/summary_en/html_body_en), 'diary' (title, content). For narrow factual corrections, prefer surgical mode with `field`, `replace_old`, and `replace_new`; if multiple matches exist, inspect the returned context snippets and retry with a more specific `replace_old` unless every match should change.
-- CommuLingo writes use only the target-specific tools `commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, and `commulingo_term_create`. Read existing records and reference ids with `commulingo_people` first. Put citations in the top-level `citations` argument, never inside `fields`. These narrow tools share the same gateway, normalization, validation, revision, and transaction core.
+- CommuLingo writes use only the target-specific tools `commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, `commulingo_office_row_save`, `commulingo_term_create`, and `commulingo_term_update`. Read existing records and reference ids with `commulingo_people` first. Put citations in the top-level `citations` argument, never inside `fields`. These narrow tools share the same gateway, normalization, validation, revision, and transaction core.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],
@@ -82,6 +82,6 @@ Publishing channels (use when the analysis warrants public output):
         "commulingo_people",
         "commulingo_person_create", "commulingo_person_update",
         "commulingo_section_save", "commulingo_event_link",
-        "commulingo_office_row_save", "commulingo_term_create",
+        "commulingo_office_row_save", "commulingo_term_create", "commulingo_term_update",
     ],
 )

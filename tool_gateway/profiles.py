@@ -39,6 +39,7 @@ COMMULINGO_NARROW_WRITE_TOOLS = frozenset({
     "commulingo_event_link",
     "commulingo_office_row_save",
     "commulingo_term_create",
+    "commulingo_term_update",
 })
 
 TELEGRAM_ORCHESTRATOR_PROFILE = "telegram.orchestrator"

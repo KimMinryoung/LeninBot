@@ -85,6 +85,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "commulingo_event_link": "write",
     "commulingo_office_row_save": "write",
     "commulingo_term_create": "write",
+    "commulingo_term_update": "write",
     "research_document": "publish",
     "edit_content": "publish",
     "edit_public_post": "publish",
@@ -162,6 +163,7 @@ OWNER_REQUIRED_TOOLS = frozenset({
     "commulingo_event_link",
     "commulingo_office_row_save",
     "commulingo_term_create",
+    "commulingo_term_update",
 })
 
 # ── Per-tool caller allow-lists ───────────────────────────────────────
