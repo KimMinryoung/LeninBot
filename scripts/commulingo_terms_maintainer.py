@@ -39,6 +39,8 @@ logger = logging.getLogger("commulingo_terms_maintainer")
 
 LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 MATERIAL_CHARS = 7000
+# Attempts per run before giving the round budget up as barren for this material.
+ATTEMPTS = 2
 
 
 def completed_run_count() -> int:
@@ -155,8 +157,11 @@ ALREADY REGISTERED (never re-register these or their variants):
 Workflow:
 1. Read the material, list candidate terms it actually uses, and drop everything in the
    registered list. Consider at most three plausible terms; do not survey indefinitely.
-   Confirm absence with commulingo_people(action='list_terms'), select the first strong gap,
-   and stop searching for alternatives.
+   Confirm absence with commulingo_people(action='list_terms', q='<candidate>') — one call
+   per candidate, matched against ids, both names, the native-script form and every alias.
+   Never pull the unfiltered glossary; it is long enough to be cut off, so a term you do
+   not see there may still be registered. Select the first strong gap and stop searching
+   for alternatives.
 2. Pick ONE term. Wikipedia-first research (wiki_search/wiki_get; Russian article for
    Soviet-era vocabulary), then open at least one source outside Wikipedia — an archive or
    document collection, marxists.org, a journal or university page, or a published reference
@@ -182,6 +187,11 @@ Workflow:
 4. If every concept in the material is already registered, reply with the single line
    NO_CANDIDATE and STOP — do not call commulingo_term_create, do not stretch the definition
    of a term to justify a write.
+
+If a create is rejected: a duplicate/alias-collision means the concept is not a gap, so go
+straight to your next candidate, or answer NO_CANDIDATE when none is left. An unknown
+people/event id means only that link is wrong — verify it with search_people/list_events, or
+drop the link and send the same term again. Fix and finish; do not restart the survey.
 
 One run, at most one write."""
 
@@ -232,42 +242,75 @@ async def run_once() -> dict:
         label, material, registered_aliases(), registered_events()
     ) + EDITORIAL_POLICY
 
-    tracker: dict = {}
+    # A run that spends its rounds surveying and never reaches the write is a
+    # normal outcome of a 16-round budget, not a broken lane; raising on the
+    # first one failed the unit roughly one run in seven. Give the attempt the
+    # same second chance the people lane gets, and only then call it a failure.
+    attempts = max(1, ATTEMPTS)
+    total_cost = 0.0
+    total_rounds = 0
+    result = ""
     ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
-    with caller_scope(ctx):
-        result = await chat_with_tools(
-            [{"role": "user", "content": task}],
-            client=_deepseek_anthropic_client,
-            model=model,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=spec.render_prompt(provider="deepseek"),
-            max_rounds=policy.max_rounds,
-            max_tokens=policy.max_output_tokens,
-            max_input_tokens=policy.max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=policy.max_output_continuations > 0,
-            max_length_continuations=policy.max_output_continuations,
-            budget_usd=policy.budget_usd,
-            budget_tracker=tracker,
-            agent_name=spec.name,
-            finalization_tools=[write_name],
-            terminal_tools=[write_name],
-            thinking=reasoning.get("thinking"),
-            output_config=reasoning.get("output_config"),
+    for attempt in range(1, attempts + 1):
+        tracker: dict = {}
+        retry_note = "" if attempt == 1 else (
+            "\n\nRETRY: the previous attempt ran out of rounds without registering a term "
+            "or answering NO_CANDIDATE. Spend rounds on the write, not the survey: check "
+            "at most two candidates with commulingo_people(action='list_terms', q=...), "
+            "research the first gap, and call commulingo_term_create. If the material "
+            "genuinely holds no unregistered concept, answer NO_CANDIDATE now."
+        )
+        with caller_scope(ctx):
+            result = await chat_with_tools(
+                [{"role": "user", "content": task + retry_note}],
+                client=_deepseek_anthropic_client,
+                model=model,
+                tools=tools,
+                tool_handlers=handlers,
+                system_prompt=spec.render_prompt(provider="deepseek"),
+                max_rounds=policy.max_rounds,
+                max_tokens=policy.max_output_tokens,
+                max_input_tokens=policy.max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=policy.max_output_continuations > 0,
+                max_length_continuations=policy.max_output_continuations,
+                budget_usd=policy.budget_usd,
+                budget_tracker=tracker,
+                agent_name=spec.name,
+                finalization_tools=[write_name],
+                terminal_tools=[write_name],
+                thinking=reasoning.get("thinking"),
+                output_config=reasoning.get("output_config"),
+            )
+        total_cost += float(tracker.get("total_cost") or 0.0)
+        total_rounds += int(tracker.get("rounds_used") or 0)
+        if completed_run_count() != before or "NO_CANDIDATE" in str(result):
+            break
+        logger.warning(
+            "term attempt %d/%d ended with neither an edit nor NO_CANDIDATE: %s",
+            attempt, attempts, str(result)[:300],
         )
 
     after = completed_run_count()
     summary = {
         "material": label,
         "model": model,
-        "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
-        "rounds": int(tracker.get("rounds_used") or 0),
+        "cost_usd": round(total_cost, 4),
+        "rounds": total_rounds,
+        "attempts": attempt,
     }
     if after == before:
         if "NO_CANDIDATE" in str(result):
             return {"status": "skipped", "reason": "no unregistered term in material", **summary}
-        raise RuntimeError(f"term run ended with neither an edit nor NO_CANDIDATE: {str(result)[:500]}")
+        # Nothing was written and nothing is inconsistent — report the barren run
+        # and exit clean, so the timer's next tick is the retry.
+        logger.warning("term run produced no edit after %d attempt(s)", attempt)
+        return {
+            "status": "no_edit",
+            "reason": "ran out of rounds without a write or NO_CANDIDATE",
+            "result": str(result)[:500],
+            **summary,
+        }
     if after != before + 1:
         raise RuntimeError(f"expected exactly one applied edit, count changed {before} -> {after}")
     edit = latest_lane_edit()

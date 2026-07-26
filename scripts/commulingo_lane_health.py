@@ -38,6 +38,10 @@ MAX_FALLBACK_RATE = 0.35
 
 APPLIED = re.compile(r'^\s*"status": "applied"', re.M)
 SKIPPED = re.compile(r'^\s*"status": "skipped"', re.M)
+# A barren run — rounds spent without a write and without NO_CANDIDATE. It exits
+# clean rather than crashing the unit, so it has to be tallied explicitly or it
+# would leave no trace here at all and a dead lane would read as a quiet one.
+NO_EDIT = re.compile(r'^\s*"status": "no_edit"', re.M)
 FALLBACK = re.compile(r'^\s*"mode": "enrich_fallback"', re.M)
 FAILED = re.compile(r"^(?:\S+ )*(?:RuntimeError|ValueError|Exception):", re.M)
 COST = re.compile(r'"cost_usd": ([0-9.]+)')
@@ -59,11 +63,13 @@ def tally(unit: str, since: str) -> dict:
     applied = len(APPLIED.findall(text))
     skipped = len(SKIPPED.findall(text))
     failed = len(FAILED.findall(text))
-    total = applied + skipped + failed
+    no_edit = len(NO_EDIT.findall(text))
+    total = applied + skipped + failed + no_edit
     return {
         "applied": applied,
         "skipped": skipped,
         "failed": failed,
+        "no_edit": no_edit,
         "fallback": len(FALLBACK.findall(text)),
         "total": total,
         "cost": sum(float(v) for v in COST.findall(text)),
@@ -76,6 +82,11 @@ def problems(lane: str, stats: dict) -> list[str]:
         return [f"{lane}: no runs recorded"]
     if stats["applied"] == 0:
         found.append(f"{lane}: {stats['total']} runs, nothing applied")
+    if stats["no_edit"] / stats["total"] > MAX_FAILURE_RATE:
+        found.append(
+            f"{lane}: {stats['no_edit']}/{stats['total']} runs ended with no edit "
+            f"(rounds exhausted before the write)"
+        )
     failure_rate = stats["failed"] / stats["total"]
     if failure_rate > MAX_FAILURE_RATE:
         found.append(
@@ -103,7 +114,8 @@ def main() -> int:
         total_cost += stats["cost"]
         lines.append(
             f"{lane:7} applied {stats['applied']:4}  skipped {stats['skipped']:3}  "
-            f"failed {stats['failed']:3}  fallback {stats['fallback']:3}  "
+            f"failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
+            f"fallback {stats['fallback']:3}  "
             f"${stats['cost']:.2f}"
         )
         alerts.extend(problems(lane, stats))

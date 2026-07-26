@@ -74,7 +74,8 @@ Content rules:
   has its own office page. `definition` is one card paragraph (2-3 sentences, both
   languages); depth goes in `body` (markdown). `aliases` are the exact strings prose uses
   and drive site-wide auto-linking: include variant spellings, NEVER a string that is also
-  an ordinary everyday word. Check `list_terms` before any term create.
+  an ordinary everyday word. Check `list_terms` with a `q` for the candidate before any
+  term create; the unfiltered list is long enough to be cut off mid-result.
 - Distinguish documented fact from interpretation. Do not sanitize repression, colonial
   violence, political responsibility, or historiographical dispute; do not sensationalize.
 - Confidence below 0.80 means do not write: research more within the run or stop without an

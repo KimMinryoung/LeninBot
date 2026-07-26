@@ -711,7 +711,11 @@ def _term_snapshot(cur, term_id: str) -> dict | None:
     return term
 
 
-def _list_terms() -> list[dict]:
+def _list_terms(q: str = "") -> list[dict]:
+    # Unfiltered this is ~150 terms carrying ~1300 aliases. A curator checking
+    # whether one candidate is already registered used to pull that whole blob,
+    # hit the tool-result cap, and pull it again — three rounds spent to not get
+    # an answer. 'q' answers the same question in one small result.
     rows = db_query(
         """SELECT t.id, t.term_ko, t.term_en, t.original,
                   COALESCE(a.aliases, ARRAY[]::text[]) AS aliases
@@ -720,7 +724,15 @@ def _list_terms() -> list[dict]:
                  SELECT term_id, array_agg(alias ORDER BY lang, sort_order) AS aliases
                    FROM commulingo_term_aliases GROUP BY term_id
              ) a ON a.term_id = t.id
-            ORDER BY t.sort_order, t.id"""
+            WHERE %(q)s = ''
+               OR t.id ILIKE %(like)s
+               OR t.term_ko ILIKE %(like)s
+               OR t.term_en ILIKE %(like)s
+               OR t.original ILIKE %(like)s
+               OR EXISTS (SELECT 1 FROM commulingo_term_aliases x
+                           WHERE x.term_id = t.id AND x.alias ILIKE %(like)s)
+            ORDER BY t.sort_order, t.id""",
+        {"q": q, "like": f"%{q}%"},
     )
     return [
         {
@@ -770,7 +782,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "`list_events` (historical event ids, titles, and linked-person counts), "
         "`get_event` (one event and all current person relationships), "
         "`list_terms` (glossary term ids, names, and every registered alias — "
-        "check this before registering a term), "
+        "check this before registering a term; pass `q` to match one candidate "
+        "instead of listing all of them), "
         "`get_term` (one glossary term in the exact term patch shape), "
         "`list_suggestions` (narrow-write edit history/queue; "
         "optional status filter: pending/approved/rejected/superseded). "
@@ -790,7 +803,11 @@ COMMULINGO_PEOPLE_TOOL = {
             },
             "q": {
                 "type": "string",
-                "description": "search_people: substring matched against id/name/cyrillic.",
+                "description": (
+                    "search_people: substring matched against id/name/cyrillic. "
+                    "list_terms: substring matched against term id/ko/en/original/alias — "
+                    "use it to check one candidate instead of pulling the whole glossary."
+                ),
             },
             "group_id": {
                 "type": "string",
@@ -865,7 +882,7 @@ async def _exec_commulingo_people(
             if result is None:
                 return f"Error: event '{event_id}' not found. Use list_events to find the id."
         elif action == "list_terms":
-            result = await asyncio.to_thread(_list_terms)
+            result = await asyncio.to_thread(_list_terms, (q or "").strip())
         elif action == "get_term":
             if not term_id:
                 return "Error: term_id is required for get_term."
@@ -1502,6 +1519,32 @@ def _person_create_nationality_problem(patch: dict) -> str | None:
     return None
 
 
+# These messages are read by a model that holds one narrow write tool, not the
+# generic commulingo_edit(action=...) tool the narrow ones replaced. Telling it
+# to "use action 'update'" sent it looking for a parameter that no longer exists
+# on any schema, which is exactly how a term rewrite dead-ended. Name the call
+# that does the job instead.
+_WRITE_TOOL_CALLS = {
+    ("person", "create"): "commulingo_person_create",
+    ("person", "update"): "commulingo_person_update",
+    ("term", "create"): "commulingo_term_create",
+    ("term", "update"): "commulingo_term_update",
+    ("person_section", "create"): "commulingo_section_save(action='create')",
+    ("person_section", "update"): "commulingo_section_save(action='update')",
+    ("office_row", "create"): "commulingo_office_row_save(action='create')",
+    ("office_row", "update"): "commulingo_office_row_save(action='update')",
+    ("history_event_person", "create"): "commulingo_event_link",
+}
+
+
+def _write_tool_call(target_type: str, action: str) -> str:
+    return _WRITE_TOOL_CALLS.get((target_type, action)) or f"the {target_type} {action} tool"
+
+
+def _reader_call(action: str) -> str:
+    return f"commulingo_people(action='{action}')"
+
+
 def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -> str | None:
     """Return an error string, or None when the edit is applicable."""
     if _contains_north_korea(patch):
@@ -1692,16 +1735,20 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
             cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
             if cur.fetchone():
-                return f"Error: person '{target_id}' already exists — use action 'update'."
+                return (
+                    f"Error: person '{target_id}' already exists — edit it with "
+                    f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
+                )
             duplicate = _existing_person_match(cur, target_id, patch)
             if duplicate:
                 return (
                     f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
                     f"{duplicate['why']} — this is the same person under a different "
-                    "slug. Use action 'update' on that id, or register the alternate "
-                    "spelling with action 'set_aliases'. If they are genuinely "
-                    "two different people, give the new card an English name and "
-                    "slug that do not collide with the existing one."
+                    f"slug. Call {_write_tool_call('person', 'update')}(person_id="
+                    f"'{duplicate['id']}', ...) on that id, putting any alternate "
+                    "spelling in the 'aliases' field of the same patch. If they are "
+                    "genuinely two different people, give the new card an English name "
+                    "and slug that do not collide with the existing one."
                 )
             group = patch.get("groupId") or patch.get("group") or ""
             cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
@@ -1732,7 +1779,10 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         else:
             cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
             if not cur.fetchone():
-                return f"Error: person '{target_id}' not found. Use search_people to find the id."
+                return (
+                    f"Error: person '{target_id}' not found. Find the id with "
+                    f"{_reader_call('search_people')}."
+                )
             if action == "update" and ("group" in patch or "groupId" in patch):
                 group = patch.get("groupId") or patch.get("group") or ""
                 cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
@@ -1804,26 +1854,36 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     ):
                         return (
                             f"Error: section '{row['slug']}' already covers this topic for "
-                            f"'{target_id}' (heading '{row['heading_ko']}'). Update that "
-                            f"section or choose a different topic."
+                            f"'{target_id}' (heading '{row['heading_ko']}'). Rewrite it with "
+                            f"{_write_tool_call('person_section', 'update')} on slug "
+                            f"'{row['slug']}', or choose a different topic."
                         )
             body = patch.get("body") or {}
             if not (body.get("ko") or body.get("en")):
                 return "Error: body.ko or body.en (markdown) is required for section create."
         elif not exists:
-            return f"Error: section '{slug}' not found for '{target_id}' (get_person lists existing slugs)."
+            return (
+                f"Error: section '{slug}' not found for '{target_id}'. "
+                f"{_reader_call('get_sections')} lists the existing slugs."
+            )
     elif target_type == "history_event_person":
         if action == "delete":
             return "Error: history_event_person deletion is not available to the unattended curator."
         cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
         if not cur.fetchone():
-            return f"Error: history event {target_id} not found. Use list_events."
+            return (
+                f"Error: history event {target_id} not found. Find the id with "
+                f"{_reader_call('list_events')}."
+            )
         person_id = str(patch.get("personId") or "").strip()
         if not person_id:
             return "Error: history_event_person patch.personId is required."
         cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,))
         if not cur.fetchone():
-            return f"Error: person {person_id} not found. Use search_people."
+            return (
+                f"Error: person {person_id} not found. Find the id with "
+                f"{_reader_call('search_people')}."
+            )
         kind = str(patch.get("relationKind") or "").strip()
         if kind not in _HISTORY_RELATION_KINDS:
             return f"Error: relationKind must be one of {', '.join(_HISTORY_RELATION_KINDS)}."
@@ -1901,7 +1961,10 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             for item in value:
                 cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (item,))
                 if not cur.fetchone():
-                    return f"Error: {key} id '{item}' not found. Use {reader}."
+                    return (
+                        f"Error: {key} id '{item}' not found. Find it with "
+                        f"{_reader_call(reader)}."
+                    )
         if action == "create":
             if patch.get("id") and patch["id"] != target_id:
                 return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
@@ -1909,7 +1972,12 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
             cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
             if cur.fetchone():
-                return f"Error: term '{target_id}' already exists — use action 'update'."
+                return (
+                    f"Error: term '{target_id}' already exists — edit it with "
+                    f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
+                    f"sending only the fields that change. Read it first with "
+                    f"{_reader_call('get_term')}."
+                )
             term = patch.get("term") or {}
             if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
                 return "Error: patch.term.ko and patch.term.en are required for term create."
@@ -1936,13 +2004,19 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 if row:
                     return (
                         f"Error: '{candidate}' is already registered on term "
-                        f"'{row['id']}' — this is the same concept. Use action 'update' "
-                        "on that id instead of creating a duplicate."
+                        f"'{row['id']}' — this is the same concept, so it is not a gap. "
+                        "Move to a different candidate (or answer NO_CANDIDATE if the "
+                        f"material has none). To revise that card instead, call "
+                        f"{_write_tool_call('term', 'update')}(term_id='{row['id']}', ...) "
+                        "if you hold that tool."
                     )
         else:
             cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
             if not cur.fetchone():
-                return f"Error: term '{target_id}' not found. Use list_terms to find the id."
+                return (
+                    f"Error: term '{target_id}' not found. Find the id with "
+                    f"{_reader_call('list_terms')}."
+                )
     else:  # office_row
         for key in _LOCALIZED_OFFICE_ROW_KEYS:
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
