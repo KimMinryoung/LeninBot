@@ -1894,8 +1894,11 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             value = patch.get(key)
             if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
                 return f"Error: {key}.ko and {key}.en are required."
-        if "sortOrder" in patch and not isinstance(patch["sortOrder"], int):
-            return "Error: sortOrder must be an integer."
+        # Every other target treats a non-int sortOrder as "append"; this one used
+        # to reject null outright, so the same patch shape passed for a person and
+        # failed for an event link.
+        if patch.get("sortOrder") is not None and not isinstance(patch["sortOrder"], int):
+            return "Error: sortOrder must be an integer, or null to append."
     elif target_type == "term":
         for key in ("id", "original"):
             if key in patch and patch[key] is not None and not isinstance(patch[key], str):
@@ -2432,20 +2435,39 @@ _BILINGUAL_TEXT_SCHEMA = {
     "required": ["ko", "en"],
 }
 
+# The ceilings below are stated in each description because a bare maxLength
+# only reports itself as "'…' is too long at 'fields.bio.ko'" after the call is
+# already spent — 107 of the 625 rejected person_create calls were that error.
+# They are refusal boundaries, NOT targets: length is prescribed to the writer
+# as a sentence count (see CARD_STYLE_GUIDANCE), because a character band
+# produces padded or truncated Korean. Say the ceiling, never ask for it.
+_CEILING = "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed sentence count, not to this number."
+
 _EPITHET_SCHEMA = {
     **_BILINGUAL_TEXT_SCHEMA,
+    "description": _CEILING.format(ko=60, en=140),
     "properties": {"ko": {"type": "string", "maxLength": 60},
                    "en": {"type": "string", "maxLength": 140}},
 }
 
 _BIO_SCHEMA = {
     **_BILINGUAL_TEXT_SCHEMA,
+    "description": (
+        _CEILING.format(ko=380, en=900)
+        + " Minor and standard cards are held to a tighter limit at save time"
+          " (320/750 and below); keep career chronology in career rows, not the bio."
+    ),
     "properties": {"ko": {"type": "string", "maxLength": 380},
                    "en": {"type": "string", "maxLength": 900}},
 }
 
 _MOMENT_SCHEMA = {
     **_BILINGUAL_TEXT_SCHEMA,
+    "description": (
+        _CEILING.format(ko=140, en=300)
+        + " This is the pull-quote on the person LIST card, so it is budgeted in"
+          " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3."
+    ),
     "properties": {"ko": {"type": "string", "maxLength": 140},
                    "en": {"type": "string", "maxLength": 300}},
 }
@@ -2498,7 +2520,15 @@ _COMMULINGO_FIELD_SCHEMA = {
         "id": {"type": "string"},
         "group": {"type": "string"},
         "groupId": {"type": "string"},
-        "sortOrder": {"type": "integer"},
+        # null is the honest way to say "no preference"; every writer below falls
+        # back to MAX(sort_order)+1 when this is not an int, so null already meant
+        # append. Declaring only "integer" made the model discover that by failing:
+        # `None is not of type 'integer' at 'fields.sortOrder'` was the single
+        # largest term_create rejection (31 of 66) and 20 more on person_create.
+        "sortOrder": {
+            "type": ["integer", "null"],
+            "description": "Explicit position. Omit or null to append after the current last row.",
+        },
         "cyrillic": {"type": "string"},
         "cyrillicPatronymic": {"type": "string"},
         "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
@@ -2571,13 +2601,30 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "required": ["y", "r"],
             },
         },
+        # Exactly one key, enforced in the schema rather than only at the write
+        # boundary: "role takes exactly one of officeId or category, not both"
+        # was 41 rejected person_create calls, and min/maxProperties stops those
+        # before the call is spent. null (to clear the role) still validates
+        # because the property constraints only apply to the object form.
         "role": {
             "type": ["object", "null"], "additionalProperties": False,
+            "minProperties": 1, "maxProperties": 1,
+            "description": (
+                "Exactly ONE of officeId or category (categoryId is an alias for "
+                "category) — never both, never neither. Valid category ids come from "
+                "commulingo_people(action='list_categories'), office ids from "
+                "action='list_offices'. null clears the role."
+            ),
             "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}},
         },
         "fate": {
             "type": "object", "additionalProperties": False,
-            "properties": {"kind": {"type": "string"}, "label": _FATE_LABEL_SCHEMA},
+            "properties": {
+                # Enumerated here so the closed vocabulary is readable up front;
+                # it was only discoverable by tripping the write-boundary check.
+                "kind": {"type": "string", "enum": list(_FATE_KINDS)},
+                "label": _FATE_LABEL_SCHEMA,
+            },
             "required": ["kind", "label"],
         },
         "scenes": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
@@ -2888,7 +2935,7 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "slug": {"type": "string"},
             "heading": _BILINGUAL_TEXT_SCHEMA,
             "body": _BILINGUAL_TEXT_SCHEMA,
-            "sort_order": {"type": "integer"},
+            "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
             "citations": _CITATIONS_SCHEMA,
         },
         "required": ["action", "person_id", "slug", "heading", "body", "citations"],
@@ -2906,7 +2953,7 @@ COMMULINGO_EVENT_LINK_TOOL = {
             "relation_kind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
             "relation": _BILINGUAL_TEXT_SCHEMA,
             "note": _BILINGUAL_TEXT_SCHEMA,
-            "sort_order": {"type": "integer"},
+            "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
             "citations": _CITATIONS_SCHEMA,
         },
         "required": ["event_id", "person_id", "relation_kind", "relation", "note", "citations"],

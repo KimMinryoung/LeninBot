@@ -86,12 +86,31 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     return cfg
 
 
+def _clean_rejected(raw) -> list:
+    """Keep only well-formed rejection entries, newest last, bounded."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label") or "").strip()
+        if label:
+            out.append({"label": label, "existing_id": str(entry.get("existing_id") or "")})
+    return out[-REJECTED_MEMORY:]
+
+
 def load_state(path: Path = STATE_PATH) -> dict:
+    # This function is the state whitelist: a key that is not rebuilt here is
+    # dropped on the next run, so anything meant to survive must be listed.
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"new_cooldown_remaining": 0}
-    return {"new_cooldown_remaining": max(0, int(raw.get("new_cooldown_remaining", 0)))}
+        return {"new_cooldown_remaining": 0, "rejected_candidates": []}
+    return {
+        "new_cooldown_remaining": max(0, int(raw.get("new_cooldown_remaining", 0))),
+        "rejected_candidates": _clean_rejected(raw.get("rejected_candidates")),
+    }
 
 
 def save_state(state: dict, path: Path = STATE_PATH) -> None:
@@ -531,7 +550,29 @@ def select_claimable_person(config: dict, candidate_id: str, attempts: int = 5) 
     return None
 
 
-def build_discovery_task(new_person_focus: str = "all") -> str:
+def rejected_candidate_note(rejected: list | None) -> str:
+    """The people this lane already proposed and had rejected as duplicates.
+
+    The full roster is ~700 comma-joined names, and the model kept picking the
+    same handful out of it anyway: chelomey 15 times in 48h, kuzmin 17, novikov
+    15, yangel 9 — 354 rejected commulingo_candidate_select calls, each one a
+    discovery loop paid for and thrown away. Every attempt started from an empty
+    conversation, so nothing carried over. This list is short, specific, and
+    survives the run, which is what the roster cannot be.
+    """
+    if not rejected:
+        return ""
+    lines = "\n".join(
+        f"- {entry['label']}" + (f" — already filed as {entry['existing_id']}" if entry.get("existing_id") else "")
+        for entry in rejected[-REJECTED_MEMORY:]
+    )
+    return f"""
+ALREADY PROPOSED AND REJECTED AS DUPLICATES — do not propose any of these again:
+{lines}
+"""
+
+
+def build_discovery_task(new_person_focus: str = "all", rejected: list | None = None) -> str:
     focus_instruction = ""
     if new_person_focus == "soviet_institutions":
         focus_instruction = """
@@ -553,8 +594,11 @@ ALREADY IN THE DICTIONARY — anyone below is NOT a gap, and neither is the same
 under another transliteration. Read this roster first and pick someone who is not on it;
 a candidate that turns out to be registered is rejected and the run is wasted.
 """ + registered_person_roster() + "\n" + focus_instruction + """
+""" + rejected_candidate_note(rejected) + """
 Do not survey the whole dictionary: consider at most three plausible people, select the first verified
-gap, and stop searching. Open one reliable biographical source. Finish by calling
+gap, and stop searching. You have """ + str(DISCOVERY_SEARCH_BUDGET) + """ search_people lookups for the whole stage and each
+result tells you how many are left; the roster above, not those lookups, is the primary proof of
+absence. Open one reliable biographical source. Finish by calling
 `commulingo_candidate_select` with the missing
 person's id, Korean/English names, coverage reason, and source URL. That typed call is the ONLY
 valid completion of this stage.
@@ -629,11 +673,45 @@ def build_candidate_select_handler(box: dict):
             selected = validate_discovered_candidate(candidate)
         except ValueError as exc:
             box["last_error"] = str(exc)
+            # Remember only "already registered" rejections. A malformed slug or a
+            # non-HTTP source is a fixable mistake about a person who may still be a
+            # real gap; a duplicate is a settled fact worth carrying to the next run.
+            if "duplicates existing person" in str(exc):
+                record_rejected_candidate(box, candidate, str(exc))
             raise
         box["candidate"] = selected
         box.pop("last_error", None)
         return json.dumps({"ok": True, "candidate": selected}, ensure_ascii=False)
     return _select
+
+
+def record_rejected_candidate(box: dict, candidate: dict, reason: str) -> None:
+    """Append one duplicate rejection to this run's list, newest last."""
+    name_ko = str(candidate.get("name_ko") or "").strip()
+    name_en = str(candidate.get("name_en") or "").strip()
+    if not (name_ko or name_en):
+        return
+    rejected = box.setdefault("rejected", [])
+    label = f"{name_ko}({name_en})" if name_ko and name_en else (name_ko or name_en)
+    existing = str(reason).rsplit("existing person ", 1)[-1].split()[0] if "existing person " in reason else ""
+    entry = {"label": label, "existing_id": existing}
+    if entry not in rejected:
+        rejected.append(entry)
+
+
+# Six lookups against ~700 cards, so the roster is the primary absence check and
+# these are for confirming one or two finalists. The cap itself is not the problem;
+# hitting it silently was. `discovery_search_limit` raised on every call past the
+# sixth, and the model answered by calling again — 1,362 rejected commulingo_people
+# calls in 48h, every one a paid round. Now each search reports what is left, and
+# the call past the cap returns a normal payload naming the next action instead of
+# an error, because an error is what invited the retry.
+DISCOVERY_SEARCH_BUDGET = 6
+
+# How many duplicate rejections to carry between runs. Bounded so the note stays
+# short enough to actually be read; the oldest fall off and may be re-proposed
+# once, which is the acceptable cost of not growing the prompt without limit.
+REJECTED_MEMORY = 40
 
 
 def build_bounded_discovery_handlers(read_handlers: dict, box: dict) -> dict:
@@ -642,15 +720,30 @@ def build_bounded_discovery_handlers(read_handlers: dict, box: dict) -> dict:
     people_handler = handlers["commulingo_people"]
 
     async def _bounded_people(**kwargs) -> str:
-        if kwargs.get("action") == "search_people":
-            used = int(box.get("search_count") or 0)
-            if used >= 6:
-                raise ValueError(
-                    "discovery_search_limit: six name/alias lookups already used; "
-                    "stop surveying and call commulingo_candidate_select for the best verified gap"
-                )
-            box["search_count"] = used + 1
-        return await people_handler(**kwargs)
+        if kwargs.get("action") != "search_people":
+            return await people_handler(**kwargs)
+        used = int(box.get("search_count") or 0)
+        if used >= DISCOVERY_SEARCH_BUDGET:
+            return json.dumps({
+                "search_budget_spent": True,
+                "remaining": 0,
+                "next_action": "commulingo_candidate_select",
+                "note": (
+                    f"All {DISCOVERY_SEARCH_BUDGET} name/alias lookups are used. Further "
+                    "search_people calls return this same notice without querying. Absence "
+                    "is already established by the roster in the task; select the best "
+                    "verified gap now."
+                ),
+            }, ensure_ascii=False)
+        box["search_count"] = used + 1
+        body = await people_handler(**kwargs)
+        remaining = DISCOVERY_SEARCH_BUDGET - box["search_count"]
+        return (
+            f"{body}\n\n[discovery budget: {remaining} of {DISCOVERY_SEARCH_BUDGET} "
+            f"name/alias lookups left"
+            + ("; spend the rest on nobody new and call commulingo_candidate_select]"
+               if remaining == 0 else "]")
+        )
 
     handlers["commulingo_people"] = _bounded_people
     return handlers
@@ -745,6 +838,10 @@ async def _call_curator_stage(
             "Do not emit DSML markup or commentary-only output. Complete the required "
             "terminal action now using canonical tool arguments."
             + (f" Prior failure: {prior_detail}" if prior_detail else "")
+            # Each attempt is a fresh conversation, so without this the second
+            # attempt only learns the last rejection and can re-propose the one
+            # before it. Carry every duplicate found so far.
+            + rejected_candidate_note((candidate_box or {}).get("rejected"))
         )
         try:
             last_result = await chat_with_tools(
@@ -846,15 +943,20 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     tracker = {"total_cost": 0.0, "rounds_used": 0}
     with caller_scope(ctx):
         if chosen_mode == "new":
+            # Seeded from disk and merged back below whether or not the stage
+            # succeeds, so a duplicate proved in this run is not re-proposed in
+            # the next one. The box is built outside the try for that reason.
+            candidate_box: dict = {"rejected": list(state.get("rejected_candidates") or [])}
             try:
-                candidate_box: dict = {}
                 discovery_tools = [*read_tools, COMMULINGO_CANDIDATE_SELECT_TOOL]
                 discovery_handlers = {
                     **build_bounded_discovery_handlers(read_handlers, candidate_box),
                     "commulingo_candidate_select": build_candidate_select_handler(candidate_box),
                 }
                 discovery_result, discovery_tracker, candidate = await _call_curator_stage(
-                    task=build_discovery_task(config["new_person_focus"]), spec=spec, model=model,
+                    task=build_discovery_task(
+                        config["new_person_focus"], candidate_box["rejected"],
+                    ), spec=spec, model=model,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
                     stage="new-person discovery", expect_edit=False, before_count=before,
                     finalization_tools=["commulingo_candidate_select"],
@@ -880,8 +982,11 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 fallback_error = str(exc)
                 logger.error("new-person path failed; falling back to enrich: %s", exc)
                 state["new_cooldown_remaining"] = int(config["new_person_cooldown_runs"])
+                state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
                 save_state(state)
                 chosen_mode = "enrich_fallback"
+            else:
+                state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
             candidate = select_claimable_person(config, candidate_id)

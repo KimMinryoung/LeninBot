@@ -9,6 +9,7 @@ the other lane's successful edit for its own.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -56,8 +57,11 @@ def build_task_with_policy(mode: str, candidate: dict | None) -> str:
     return _base_build_task(mode, candidate) + EDITORIAL_POLICY
 
 
-def build_discovery_task_with_policy(new_person_focus: str = "all") -> str:
-    return _base_build_discovery_task(new_person_focus) + EDITORIAL_POLICY
+def build_discovery_task_with_policy(new_person_focus: str = "all", rejected: list | None = None) -> str:
+    # Mirror the wrapped signature exactly. These three wrappers are installed
+    # over the maintainer's builders, so a parameter added there and not here
+    # raises TypeError inside the lane rather than at import.
+    return _base_build_discovery_task(new_person_focus, rejected) + EDITORIAL_POLICY
 
 
 def build_new_person_task_with_policy(candidate: dict) -> str:
@@ -84,6 +88,30 @@ def latest_lane_edit() -> dict | None:
         {"suggested_by": SUGGESTED_BY},
     )
 
+
+def _assert_same_parameters(wrapper, wrapped, name: str) -> None:
+    """Fail at import if a wrapper has drifted from the builder it replaces.
+
+    These wrappers shadow the maintainer's prompt builders by assignment, so the
+    interpreter cannot check them. A parameter added on the maintainer side and
+    missed here surfaces as a TypeError raised inside the paid discovery loop,
+    counted as a failed attempt and retried twice before the lane gives up.
+    """
+    got = list(inspect.signature(wrapper).parameters)
+    want = list(inspect.signature(wrapped).parameters)
+    if got != want:
+        raise TypeError(
+            f"{name} wrapper signature {got} does not match maintainer's {want}; "
+            "update the wrapper in commulingo_people_parallel.py"
+        )
+
+
+for _wrapper, _wrapped, _name in (
+    (build_task_with_policy, _base_build_task, "build_task"),
+    (build_discovery_task_with_policy, _base_build_discovery_task, "build_discovery_task"),
+    (build_new_person_task_with_policy, _base_build_new_person_task, "build_new_person_task"),
+):
+    _assert_same_parameters(_wrapper, _wrapped, _name)
 
 maintainer.LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 maintainer.completed_run_count = completed_run_count

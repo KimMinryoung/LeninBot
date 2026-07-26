@@ -467,20 +467,79 @@ async def assert_structured_retry_error():
 asyncio.run(assert_structured_retry_error())
 
 async def assert_discovery_search_bound():
-    async def fake_people(**_kwargs):
+    calls = []
+
+    async def fake_people(**kwargs):
+        calls.append(kwargs)
         return "[]"
+
     box = {}
     handlers = maintainer.build_bounded_discovery_handlers(
         {"commulingo_people": fake_people}, box,
     )
-    for _ in range(6):
-        assert await handlers["commulingo_people"](action="search_people", q="x") == "[]"
-    try:
-        await handlers["commulingo_people"](action="search_people", q="overflow")
-        raise AssertionError("discovery search limit should fail closed")
-    except ValueError as exc:
-        assert "discovery_search_limit" in str(exc)
+    budget = maintainer.DISCOVERY_SEARCH_BUDGET
+    # Every in-budget search carries the payload plus what is left, counting down.
+    for spent in range(1, budget + 1):
+        body = await handlers["commulingo_people"](action="search_people", q="x")
+        assert body.startswith("[]"), body
+        assert f"{budget - spent} of {budget}" in body, body
+    assert len(calls) == budget
+
+    # Past the cap the call no longer reaches the database and no longer raises:
+    # an error here is what made the model retry instead of moving on.
+    for _ in range(3):
+        body = await handlers["commulingo_people"](action="search_people", q="overflow")
+        payload = json.loads(body)
+        assert payload["search_budget_spent"] is True and payload["remaining"] == 0
+        assert payload["next_action"] == "commulingo_candidate_select"
+    assert len(calls) == budget, "over-budget searches must not hit the handler"
+
+    # Non-search actions are never counted or capped.
+    assert await handlers["commulingo_people"](action="list_groups") == "[]"
+    assert len(calls) == budget + 1
 
 asyncio.run(assert_discovery_search_bound())
+
+def assert_rejected_candidate_memory():
+    # A duplicate rejection is remembered; a malformed-slug rejection is not,
+    # because that person may still be a genuine gap.
+    box = {}
+    maintainer.record_rejected_candidate(
+        box, {"name_ko": "블라디미르 첼로메이", "name_en": "Vladimir Chelomey"},
+        "candidate duplicates existing person vladimir-chelomey",
+    )
+    assert box["rejected"] == [
+        {"label": "블라디미르 첼로메이(Vladimir Chelomey)", "existing_id": "vladimir-chelomey"}
+    ], box
+    # Recording the same person twice must not grow the list.
+    maintainer.record_rejected_candidate(
+        box, {"name_ko": "블라디미르 첼로메이", "name_en": "Vladimir Chelomey"},
+        "candidate duplicates existing person vladimir-chelomey",
+    )
+    assert len(box["rejected"]) == 1, box
+
+    note = maintainer.rejected_candidate_note(box["rejected"])
+    assert "블라디미르 첼로메이(Vladimir Chelomey)" in note and "vladimir-chelomey" in note
+    assert maintainer.rejected_candidate_note([]) == ""
+
+    # The discovery task must actually carry the note, or the memory is inert.
+    task = maintainer.build_discovery_task("all", box["rejected"])
+    assert "ALREADY PROPOSED AND REJECTED" in task and "Vladimir Chelomey" in task
+
+    # load_state is a whitelist; the list has to survive a save/load round trip.
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "state.json"
+        maintainer.save_state(
+            {"new_cooldown_remaining": 3, "rejected_candidates": box["rejected"]}, path,
+        )
+        reloaded = maintainer.load_state(path)
+    assert reloaded["new_cooldown_remaining"] == 3
+    assert reloaded["rejected_candidates"] == box["rejected"], reloaded
+    # Junk entries are dropped rather than crashing the run.
+    assert maintainer._clean_rejected([{"label": ""}, "nope", {"label": "ok"}]) == [
+        {"label": "ok", "existing_id": ""}
+    ]
+
+assert_rejected_candidate_memory()
 
 print("commulingo maintainer smoke ok")

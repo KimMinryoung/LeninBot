@@ -43,6 +43,8 @@ Content rules:
 - When mentioning another person who has a dictionary card, spell their name exactly as
   their card does (check with `commulingo_people` search when unsure) — never introduce an
   alternative transliteration. Original spellings inside direct quotations are preserved.
+- Korean copy never uses `북한`. Write `조선민주주의인민공화국` on first reference and `조선`
+  afterwards. The save rejects the whole patch over this one word, so fix it while writing.
 - Verified nicknames, habits, physical details, and concrete scenes are welcome when they
   make a card memorable. Use them to illuminate the subject, but never let them replace the
   person’s political role, institutional work, or historical responsibility.
