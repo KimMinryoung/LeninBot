@@ -34,14 +34,22 @@ or thin, and this set says so:
   law would survive the abolition of wage labour a hundred times over.
 
 The Korean headword is 임금철칙, not the literal 철의 임금법칙 the English name
-invites — this entry was registered under the literal form first and corrected.
-Korean Wikipedia titles its article 임금의 철칙 and writes 임금철칙 (賃金鐵則)
-elsewhere, while a full-text search there for 철의 임금법칙 returns nothing;
-노동자의 책 files the term as 임금철칙 and socialist.kr's Korean serialisation
-of the Critique uses 임금철칙설 (both cited by the operator — the two sites
-refuse automated fetches, so only the Wikipedia evidence was read directly).
-All the circulating forms are registered as aliases, so prose written any of
-those ways still auto-links here.
+invites — the entry was registered under the literal form first and corrected.
+Evidence, kept here rather than in the entry because it is our editorial
+business and not the reader's:
+
+  ko.wikipedia.org/wiki/임금의_철칙  article title 임금의 철칙; 생존권 writes
+                                     임금철칙 (賃金鐵則); full-text search for
+                                     철의 임금법칙 returns nothing
+  laborsbook.org/dic/view.php?dic_part=dic03&idx=536   filed as 임금철칙
+  socialist.kr/classics-of-socialism-critique-of-the-gotha-program-6/
+                                     Korean serialisation of the Critique,
+                                     uses 임금철칙설
+
+The last two were supplied by the operator; both sites refuse automated fetches
+(406/403, no Wayback snapshot), so only the Wikipedia evidence was read
+directly. All the circulating forms, the wrong one included, stay registered as
+aliases, so prose written any of those ways still auto-links here.
 
 Term↔term relations are not writable through this tool surface (see
 _TERM_PATCH_KEYS); they go in the companion frontend migration
@@ -173,20 +181,6 @@ SRC_CONSTITUTION_1936 = (
     "every able-bodied citizen, in accordance with the principle: \"He who does not "
     "work, neither shall he eat.\" The principle applied in the U.S.S.R. is that of "
     "socialism: \"From each according to his ability, to each according to his work.\"'"
-)
-SRC_KO_IRON_LAW_NAME = (
-    "https://ko.wikipedia.org/wiki/임금의_철칙 — 한국어 위키백과의 표제어는 '임금의 "
-    "철칙'(Ehernes Lohngesetz)이며 라살이 처음 명명했다고 서술한다. '생존권' 문서는 "
-    "'임금철칙(賃金鐵則)', '페르디난트 라살' 문서는 '임금의 철칙'으로 쓰고, 위키백과 전문 "
-    "검색에서 '철의 임금법칙'은 0건이다"
-)
-SRC_KO_IRON_LAW_DICT = (
-    "https://www.laborsbook.org/dic/view.php?dic_part=dic03&idx=536 — 노동자의 책 "
-    "용어사전의 '임금철칙' 항목"
-)
-SRC_KO_IRON_LAW_GOTHA = (
-    "http://socialist.kr/classics-of-socialism-critique-of-the-gotha-program-6/ — "
-    "『고타강령 비판』 한국어 연재 6부. 이 교리를 '임금철칙설'로 옮긴다"
 )
 SRC_LASSALLE = (
     "https://en.wikipedia.org/wiki/Ferdinand_Lassalle — the General German Workers' "
@@ -580,10 +574,7 @@ The undiminished proceeds vanished from the programmes but survived as a habit o
 
 IRON_LAW = {
     "id": "iron-law-of-wages",
-    "sources": [
-        SRC_GOTHA_2, SRC_IRON_LAW, SRC_LASSALLE,
-        SRC_KO_IRON_LAW_NAME, SRC_KO_IRON_LAW_DICT, SRC_KO_IRON_LAW_GOTHA,
-    ],
+    "sources": [SRC_GOTHA_2, SRC_IRON_LAW, SRC_LASSALLE],
     "patch": {
         "term": {"ko": "임금철칙", "en": "Iron Law of Wages"},
         "original": "ehernes Lohngesetz",
@@ -643,10 +634,6 @@ IRON_LAW = {
 
 라살레의 법칙은 1891년 에르푸르트 강령에서 자취를 감춘다. 1875년 고타강령에 남아 있던 라살레주의 공식들을 카우츠키와 베른슈타인이 새로 쓴 강령이 걷어낸 것이다. 『고타강령 비판』이 발표된 것도 바로 그 개정 논의가 진행되던 1891년이었다.
 
-## 한국어 이름
-
-원어는 ehernes Lohngesetz다. 한국어에서 자리 잡은 이름은 임금철칙(賃金鐵則)이고, 임금의 철칙과 임금철칙설도 함께 쓰인다. 영어 iron law of wages를 글자대로 옮긴 '철의 임금법칙'은 통용되는 형태가 아니다. 이 항목은 임금철칙을 표제어로 삼고 나머지를 별칭으로 등록해, 어느 표기로 쓴 글에서든 이 항목으로 이어지게 했다.
-
 ## 왜 여전히 다뤄야 하는가
 
 임금이 생존선으로 눌린다는 서술 자체는 사라지지 않았다. 사라져야 하는 것은 그것을 자연법칙으로 다루는 방식이다. 임금을 노동력의 값으로 보면 그 값은 역사적·도덕적 요소를 포함하고 계급 간 힘 관계에 따라 움직인다. 법칙이 아니라 관계이므로 투쟁의 대상이 된다. 라살레의 법칙이 임금 투쟁을 무의미하게 만들고 그 자리에 국가를 불러들였다면, 마르크스의 정정은 임금 투쟁을 되살리면서 동시에 그것만으로는 임금노동 체제를 넘지 못한다고 말한다.""",
@@ -671,10 +658,6 @@ Marx closes with an image: it is as if, among slaves who have at last got behind
 ## Gone From the Programme
 
 Lassalle's law disappears from the Erfurt Programme of 1891, which Kautsky and Bernstein wrote to clear out the Lassallean formulas left standing at Gotha in 1875. The Critique itself was published in that same year, in the middle of the revision debate.
-
-## The Korean Name
-
-The German is ehernes Lohngesetz. Korean settled on 임금철칙 (賃金鐵則), with 임금의 철칙 and 임금철칙설 also in use; 철의 임금법칙, a word-for-word rendering of the English name, is not current. This entry takes 임금철칙 as its headword and registers the others as aliases, so prose written any of those ways still links here.
 
 ## Why It Still Has to Be Handled
 
