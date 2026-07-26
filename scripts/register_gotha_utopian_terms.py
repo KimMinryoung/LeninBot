@@ -9,7 +9,7 @@ them by parent_id — the same one-level nesting 대숙청 uses for 예조프시
   critique-of-the-gotha-programme   고타강령 비판           (1875 / 1891)
     lower-and-higher-phase-of-communism  공산주의의 낮은 단계와 높은 단계
     undiminished-proceeds-of-labour      노동전수익권
-    iron-law-of-wages                    철의 임금법칙
+    iron-law-of-wages                    임금철칙
   socialism-utopian-and-scientific  공상에서 과학으로       (1880)
     utopian-socialism                    공상적 사회주의
     scientific-socialism                 과학적 사회주의
@@ -32,6 +32,16 @@ or thin, and this set says so:
   with. Marx's actual objection is narrower and sharper: nothing in it is
   Lassalle's except the word 'iron', and if its Malthusian grounding held, the
   law would survive the abolition of wage labour a hundred times over.
+
+The Korean headword is 임금철칙, not the literal 철의 임금법칙 the English name
+invites — this entry was registered under the literal form first and corrected.
+Korean Wikipedia titles its article 임금의 철칙 and writes 임금철칙 (賃金鐵則)
+elsewhere, while a full-text search there for 철의 임금법칙 returns nothing;
+노동자의 책 files the term as 임금철칙 and socialist.kr's Korean serialisation
+of the Critique uses 임금철칙설 (both cited by the operator — the two sites
+refuse automated fetches, so only the Wikipedia evidence was read directly).
+All the circulating forms are registered as aliases, so prose written any of
+those ways still auto-links here.
 
 Term↔term relations are not writable through this tool surface (see
 _TERM_PATCH_KEYS); they go in the companion frontend migration
@@ -164,6 +174,20 @@ SRC_CONSTITUTION_1936 = (
     "work, neither shall he eat.\" The principle applied in the U.S.S.R. is that of "
     "socialism: \"From each according to his ability, to each according to his work.\"'"
 )
+SRC_KO_IRON_LAW_NAME = (
+    "https://ko.wikipedia.org/wiki/임금의_철칙 — 한국어 위키백과의 표제어는 '임금의 "
+    "철칙'(Ehernes Lohngesetz)이며 라살이 처음 명명했다고 서술한다. '생존권' 문서는 "
+    "'임금철칙(賃金鐵則)', '페르디난트 라살' 문서는 '임금의 철칙'으로 쓰고, 위키백과 전문 "
+    "검색에서 '철의 임금법칙'은 0건이다"
+)
+SRC_KO_IRON_LAW_DICT = (
+    "https://www.laborsbook.org/dic/view.php?dic_part=dic03&idx=536 — 노동자의 책 "
+    "용어사전의 '임금철칙' 항목"
+)
+SRC_KO_IRON_LAW_GOTHA = (
+    "http://socialist.kr/classics-of-socialism-critique-of-the-gotha-program-6/ — "
+    "『고타강령 비판』 한국어 연재 6부. 이 교리를 '임금철칙설'로 옮긴다"
+)
 SRC_LASSALLE = (
     "https://en.wikipedia.org/wiki/Ferdinand_Lassalle — the General German Workers' "
     "Association founded at Leipzig on 23 May 1863 with Lassalle as president for five "
@@ -238,8 +262,8 @@ GOTHA = {
             "ko": (
                 "1875년 마르크스가 독일 두 노동자 정당의 통합강령 초안 옆에 달아 보낸 방주(旁註). "
                 "브라케를 거쳐 지도부만 돌려 읽었고 대회는 거의 무시했다. 원고는 15년 넘게 묻혔다가 "
-                "1891년 엥겔스가 축약해 『신시대』에 발표했다. 노동전수익권, 공정한 분배, 철의 "
-                "임금법칙, 국가 보조 협동조합, 자유국가 — 라살레주의 구호를 차례로 해부하고 그 자리에 "
+                "1891년 엥겔스가 축약해 『신시대』에 발표했다. 노동전수익권, 공정한 분배, 임금철칙, "
+                "국가 보조 협동조합, 자유국가 — 라살레주의 구호를 차례로 해부하고 그 자리에 "
                 "공산주의의 두 단계와 '이 시기의 국가는 프롤레타리아트의 혁명적 독재 외의 다른 것일 수 "
                 "없다'는 문장을 놓았다. 국가를 사회주의의 도구로 보는 발상에 대한 마르크스의 마지막 "
                 "답변이다."
@@ -270,7 +294,7 @@ GOTHA = {
 
 **노동전수익권.** 강령 첫 조항은 "노동의 수익은 감소되지 않은 채 평등한 권리로 사회의 모든 구성원에게 귀속된다"고 선언한다. 마르크스는 그 앞 구절부터 잘랐다. "노동은 모든 부의 원천이 아니다. 자연도 노동과 꼭 같이 사용가치의 원천이다." 이어 총생산물에서 무엇을 먼저 떼어야 하는지를 열거한다. 소모된 생산수단의 대체분, 확대재생산 몫, 재해에 대비한 예비기금. 남은 소비 몫에서 다시 일반 관리비, 학교와 보건 같은 공동 수요, 노동 능력을 잃은 사람들을 위한 기금. "감소되지 않은" 수익은 이 목록을 지나며 저절로 "감소된" 수익이 된다.
 
-**철의 임금법칙.** 강령은 임금제도를 "철의 임금법칙과 함께" 폐지하겠다고 썼다. 마르크스는 이 법칙에서 라살레의 것은 괴테에게서 빌려 온 '철의'라는 낱말뿐이라고 못박았다.
+**임금철칙.** 강령은 임금제도를 "임금철칙과 함께" 폐지하겠다고 썼다. 마르크스는 이 법칙에서 라살레의 것은 괴테에게서 빌려 온 '철칙'이라는 낱말뿐이라고 못박았다.
 
 **국가 보조 협동조합.** 강령은 국가의 보조로 생산협동조합을 세워 거기서 사회주의적 노동조직이 "생겨나게" 하자고 요구했다. 대답은 한 문장이다. "국가 융자로 새 철도를 놓듯 새 사회도 지을 수 있다는 것은 라살레의 상상력에나 어울린다." 협동조합은 노동자 자신의 독립적 창조물일 때에만 값이 있지 정부나 부르주아의 피후견물이어서는 안 된다.
 
@@ -552,13 +576,16 @@ The undiminished proceeds vanished from the programmes but survived as a habit o
     },
 }
 
-# ── 4. 철의 임금법칙 ──────────────────────────────────────────────────
+# ── 4. 임금철칙 ──────────────────────────────────────────────────────
 
 IRON_LAW = {
     "id": "iron-law-of-wages",
-    "sources": [SRC_GOTHA_2, SRC_IRON_LAW, SRC_LASSALLE],
+    "sources": [
+        SRC_GOTHA_2, SRC_IRON_LAW, SRC_LASSALLE,
+        SRC_KO_IRON_LAW_NAME, SRC_KO_IRON_LAW_DICT, SRC_KO_IRON_LAW_GOTHA,
+    ],
     "patch": {
-        "term": {"ko": "철의 임금법칙", "en": "Iron Law of Wages"},
+        "term": {"ko": "임금철칙", "en": "Iron Law of Wages"},
         "original": "ehernes Lohngesetz",
         "period": {"ko": "1863–1891", "en": "1863–1891"},
         "startYear": 1863,
@@ -566,14 +593,14 @@ IRON_LAW = {
         "category": "theory",
         "parentId": GOTHA["id"],
         "aliases": {
-            "ko": ["철의 임금법칙", "임금철칙", "철칙 임금론"],
+            "ko": ["임금철칙", "임금의 철칙", "임금철칙설", "철의 임금법칙"],
             "en": ["iron law of wages", "ehernes Lohngesetz"],
         },
         "people": ["ferdinand-lassalle", "karl-marx"],
         "definition": {
             "ko": (
                 "임금은 노동자의 생존과 번식에 필요한 최소한으로 언제나 되돌아간다는 라살레의 주장. "
-                "튀르고와 리카도의 생존임금론, 맬서스의 인구론에서 끌어온 것이고 '철의'라는 낱말은 "
+                "튀르고와 리카도의 생존임금론, 맬서스의 인구론에서 끌어온 것이고 '철칙'이라는 낱말은 "
                 "괴테의 '위대하고 영원한 철의 법칙'에서 빌려 왔다. 임금 인상 투쟁이 무의미하므로 국가 "
                 "보조 생산협동조합으로 임금노동 자체를 벗어나야 한다는 그의 결론을 떠받치는 기둥이었다. "
                 "마르크스는 이 법칙에서 라살레의 것은 낱말 하나뿐이며, 근거가 맬서스라면 임금노동을 백 "
@@ -596,15 +623,15 @@ IRON_LAW = {
         "body": {
             "ko": """## 결론을 떠받치기 위해 필요했던 법칙
 
-라살레의 정치 전략은 단순하다. 노동조합의 임금 투쟁으로는 아무것도 얻지 못하니, 보통선거권으로 국가를 움직여 국가 보조 생산협동조합을 세우고 임금노동 자체에서 걸어 나가야 한다. 이 결론이 성립하려면 임금 투쟁이 원리상 무의미하다는 것이 먼저 증명되어야 한다. 그 증명을 맡은 것이 '철의, 잔혹한 법칙'이었다.
+라살레의 정치 전략은 단순하다. 노동조합의 임금 투쟁으로는 아무것도 얻지 못하니, 보통선거권으로 국가를 움직여 국가 보조 생산협동조합을 세우고 임금노동 자체에서 걸어 나가야 한다. 이 결론이 성립하려면 임금 투쟁이 원리상 무의미하다는 것이 먼저 증명되어야 한다. 그 증명을 맡은 것이 라살레 자신의 표현으로 '철과 같은, 잔혹한 법칙(das eiserne und grausame Gesetz)'이었다.
 
-내용은 라살레의 발명이 아니다. 임금이 생존 수준으로 수렴한다는 생각은 튀르고와 리카도에게 있었고, 그 배후의 인구 압력 논리는 맬서스의 것이다. 라살레가 더한 것은 이름이다. '철의'는 괴테의 시 「신적인 것」에 나오는 "위대하고 영원한 철의 법칙"에서 왔다.
+내용은 라살레의 발명이 아니다. 임금이 생존 수준으로 수렴한다는 생각은 튀르고와 리카도에게 있었고, 그 배후의 인구 압력 논리는 맬서스의 것이다. 라살레가 더한 것은 이름이다. '철칙(鐵則)'의 쇠는 괴테의 시 「신적인 것」에 나오는 "위대하고 영원한 철의 법칙(eherne Gesetze)"에서 왔다.
 
 ## 마르크스의 세 갈래 반박
 
-『고타강령 비판』 2부는 강령이 임금제도를 "철의 임금법칙과 함께" 폐지하겠다고 쓴 대목을 겨눈다.
+『고타강령 비판』 2부는 강령이 임금제도를 "임금철칙과 함께" 폐지하겠다고 쓴 대목을 겨눈다.
 
-**첫째, 낱말뿐이다.** "이 '철의 임금법칙'에서 라살레의 것은 괴테의 '위대하고 영원한 철의 법칙'에서 빌려 온 '철의'라는 낱말뿐이라는 사실은 잘 알려져 있다." 그 낱말은 신도들이 서로를 알아보는 표지일 뿐이라고 마르크스는 덧붙인다.
+**첫째, 낱말뿐이다.** "이 '임금철칙'에서 라살레의 것은 괴테의 '위대하고 영원한 철의 법칙'에서 빌려 온 '철칙'이라는 낱말뿐이라는 사실은 잘 알려져 있다." 그 낱말은 신도들이 서로를 알아보는 표지일 뿐이라고 마르크스는 덧붙인다.
 
 **둘째, 근거를 받아들이면 결론이 뒤집힌다.** 라살레의 뜻대로 이 법칙을 취하면 그 근거인 맬서스 인구론도 함께 취해야 한다. 그런데 그 이론이 옳다면 임금노동을 백 번 폐지해도 법칙은 남는다. 법칙이 지배하는 것이 임금노동 체제만이 아니라 모든 사회 체제가 되기 때문이다. 실제로 경제학자들은 50년 넘게 그 논리로 사회주의는 빈곤을 없애지 못하고 사회 전면에 고루 퍼뜨릴 뿐이라고 논증해 왔다.
 
@@ -615,6 +642,10 @@ IRON_LAW = {
 ## 강령에서 사라지다
 
 라살레의 법칙은 1891년 에르푸르트 강령에서 자취를 감춘다. 1875년 고타강령에 남아 있던 라살레주의 공식들을 카우츠키와 베른슈타인이 새로 쓴 강령이 걷어낸 것이다. 『고타강령 비판』이 발표된 것도 바로 그 개정 논의가 진행되던 1891년이었다.
+
+## 한국어 이름
+
+원어는 ehernes Lohngesetz다. 한국어에서 자리 잡은 이름은 임금철칙(賃金鐵則)이고, 임금의 철칙과 임금철칙설도 함께 쓰인다. 영어 iron law of wages를 글자대로 옮긴 '철의 임금법칙'은 통용되는 형태가 아니다. 이 항목은 임금철칙을 표제어로 삼고 나머지를 별칭으로 등록해, 어느 표기로 쓴 글에서든 이 항목으로 이어지게 했다.
 
 ## 왜 여전히 다뤄야 하는가
 
@@ -640,6 +671,10 @@ Marx closes with an image: it is as if, among slaves who have at last got behind
 ## Gone From the Programme
 
 Lassalle's law disappears from the Erfurt Programme of 1891, which Kautsky and Bernstein wrote to clear out the Lassallean formulas left standing at Gotha in 1875. The Critique itself was published in that same year, in the middle of the revision debate.
+
+## The Korean Name
+
+The German is ehernes Lohngesetz. Korean settled on 임금철칙 (賃金鐵則), with 임금의 철칙 and 임금철칙설 also in use; 철의 임금법칙, a word-for-word rendering of the English name, is not current. This entry takes 임금철칙 as its headword and registers the others as aliases, so prose written any of those ways still links here.
 
 ## Why It Still Has to Be Handled
 
@@ -1076,6 +1111,10 @@ async def main() -> int:
         "--sources-only", action="store_true",
         help="update the sources column of entries that already exist",
     )
+    parser.add_argument(
+        "--update", action="store_true",
+        help="rewrite entries that already exist, sending the whole patch",
+    )
     args = parser.parse_args()
 
     # commulingo_terms.sources is a patch field, not the tool-level citations
@@ -1132,10 +1171,13 @@ async def main() -> int:
 
     from runtime_tools.commulingo_people import _exec_commulingo_write
 
+    # The same patch serves both actions: term update accepts every key create
+    # does, and re-sending the stored parentId is a no-op rather than an error.
+    action = "update" if args.update else "create"
     failed = 0
     for entry in entries:
         result = await _exec_commulingo_write(
-            "term", "create", entry["id"], entry["sources"], entry["patch"], 0.95,
+            "term", action, entry["id"], entry["sources"], entry["patch"], 0.95,
         )
         print(f"\n{entry['id']}: {result}")
         if result.startswith("Error:") or '"error"' in result:

@@ -205,7 +205,10 @@ LASSALLE = {
             ),
         },
         "moment": {
-            "ko": "「철의, 잔혹한 법칙」 — 임금을 노동자의 생존 수준에 묶어 둔다며 라살레가 붙인 이름(1863)",
+            "ko": (
+                "「철과 같은, 잔혹한 법칙(das eiserne und grausame Gesetz)」 — 임금을 생존 "
+                "수준에 묶어 둔다며 라살레가 임금철칙에 붙인 이름(1863)"
+            ),
             "en": (
                 "\"Das eiserne und grausame Gesetz\" — the iron and cruel law Lassalle said held "
                 "wages down to bare subsistence (1863)"
@@ -328,6 +331,10 @@ async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--only", help="register a single id")
+    parser.add_argument(
+        "--update", action="store_true",
+        help="rewrite cards that already exist, sending the whole patch",
+    )
     args = parser.parse_args()
 
     entries = [p for p in PEOPLE if not args.only or p["id"] == args.only]
@@ -347,10 +354,13 @@ async def main() -> int:
 
     from runtime_tools.commulingo_people import _exec_commulingo_write
 
+    # A person update takes the same patch a create does, so re-sending the whole
+    # card is the way to correct one field without hand-writing a partial patch.
+    action = "update" if args.update else "create"
     failed = 0
     for entry in entries:
         result = await _exec_commulingo_write(
-            "person", "create", entry["id"], entry["sources"], entry["patch"], 0.95,
+            "person", action, entry["id"], entry["sources"], entry["patch"], 0.95,
         )
         print(f"\n{entry['id']}: {result}")
         if result.startswith("Error:") or '"error"' in result:
