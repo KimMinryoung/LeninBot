@@ -66,6 +66,21 @@ _PERSON_PATCH_KEYS = frozenset({
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # Must stay in sync with NATIONALITY_CODES in scripts/commulingo_people_maintainer.py.
+# This vocabulary is states, and it renders as a flag on the card. Stateless
+# ethnicities are therefore absent BY DECISION, not by oversight — do not "fix"
+# them in, and do not file their bearers under a neighbouring state:
+#
+#   Jewish  — the Soviet passport did carry еврей on the fifth line, but tagging
+#             Bolsheviks with it here does not reconstruct that category, it
+#             supplies the 'Jewish Bolshevik' conspiracy its raw material. There
+#             is also no flag that is not an anachronism for a person who died
+#             before 1948.
+#   Tatar, Bashkir, Chechen, Buryat, Ossetian and the other peoples of the
+#             RSFSR — no separate state, so no flag.
+#
+# A card whose prose names one of these keeps origin_code 'russia'; the prose is
+# where that identity is carried. An audit that reports these as a gap has
+# rediscovered the policy, not a bug.
 _NATIONALITY_CODES = frozenset({
     "soviet", "russia", "ukraine", "georgia", "armenia", "azerbaijan", "belarus",
     "kazakhstan", "latvia", "lithuania", "estonia", "uzbekistan", "moldova",
