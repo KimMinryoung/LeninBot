@@ -21,6 +21,15 @@ Tool visibility is intentionally split by execution surface. There is no single 
 
 `runtime_tools/registry.py` starts with core tools such as `vector_search`, `knowledge_graph_search`, and `web_search`, then appends focused tool families:
 
+`web_search` keeps one stable tool name and schema across every allow-listed
+surface, while `runtime_tools/web_search.py` owns the provider chain. The default
+order is Tavily then Brave (`WEB_SEARCH_PROVIDERS=tavily,brave`); a provider
+error opens a short process-local circuit and the next configured provider is
+tried once. Empty successful results do not fan out to another billed provider.
+Tavily calls explicitly disable automatic depth promotion, omit answer/raw-page
+payloads, report credit usage to logs, and use two focused chunks per source
+only for explicitly requested advanced searches.
+
 - `runtime_tools/filesystem.py`: programmer-style filesystem and Python execution tools
 - `runtime_tools/fetch.py`: URL/file/document fetch and conversion tools
 - `runtime_tools/media.py`: image generation and browser automation tools

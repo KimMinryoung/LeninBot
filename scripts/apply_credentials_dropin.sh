@@ -31,6 +31,7 @@ LONG_RUNNING=(
   leninbot-a2a-api
   leninbot-telegram
   leninbot-browser
+  leninbot-roleplay
   novel-writer-api
 )
 

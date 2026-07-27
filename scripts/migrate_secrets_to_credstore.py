@@ -29,6 +29,7 @@ TIER_A = [
     "AI_DIARY_API_KEY",
     "ALIBABA_API_KEY",
     "ANTHROPIC_API_KEY",
+    "BRAVE_SEARCH_API_KEY",
     "WRITER_ANTHROPIC_API_KEY",
     "WRITER_ACCESS_KEY",
     "DB_PASSWORD",
@@ -75,6 +76,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "DEEPSEEK_API_KEY",
         "MOONSHOT_API_KEY",
         "DB_PASSWORD",
+        "BRAVE_SEARCH_API_KEY",
         "TAVILY_API_KEY",
     },
 
@@ -101,6 +103,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "MOONSHOT_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
+        "BRAVE_SEARCH_API_KEY",
         "TAVILY_API_KEY",
         "GITHUB_TOKEN",
     },
@@ -126,6 +129,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "DB_PASSWORD",
         "TELEGRAM_BOT_TOKEN",
         "MOLTBOOK_API_KEY",
+        "BRAVE_SEARCH_API_KEY",
         "TAVILY_API_KEY",
         "GITHUB_TOKEN",
         "X_BEARER_TOKEN",
@@ -152,6 +156,24 @@ SERVICE_CREDS: dict[str, set[str]] = {
 
     # KG backup (daily 03:00) — R2 upload + Neo4j dump.
     "leninbot-kg-backup": {"R2_CF_API_TOKEN", "NEO4J_PASSWORD"},
+
+    # Read-only roleplay search surface. The model itself is DeepSeek and the
+    # search provider chain can use either Tavily or Brave.
+    "leninbot-roleplay": {
+        "DEEPSEEK_API_KEY",
+        "DB_PASSWORD",
+        "NEO4J_PASSWORD",
+        "TAVILY_API_KEY",
+        "BRAVE_SEARCH_API_KEY",
+    },
+
+    # These services already load their required DeepSeek/DB/Tavily
+    # credentials in the static unit. The optional Brave credential is emitted
+    # as a drop-in only after it exists in the encrypted credential store.
+    "leninbot-commulingo-maintainer": {"BRAVE_SEARCH_API_KEY"},
+    "leninbot-commulingo-new": {"BRAVE_SEARCH_API_KEY"},
+    "leninbot-commulingo-enrich": {"BRAVE_SEARCH_API_KEY"},
+    "leninbot-commulingo-terms": {"BRAVE_SEARCH_API_KEY"},
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

@@ -13,6 +13,7 @@ from runtime_tools.fetch import FETCH_TOOL_HANDLERS, FETCH_TOOLS
 from runtime_tools.filesystem import FILESYSTEM_TOOL_HANDLERS, FILESYSTEM_TOOLS
 from runtime_tools.media import MEDIA_TOOL_HANDLERS, MEDIA_TOOLS
 from runtime_tools.social import SOCIAL_TOOL_HANDLERS, SOCIAL_TOOLS
+from runtime_tools.web_search import execute_web_search
 
 logger = logging.getLogger(__name__)
 
@@ -330,9 +331,9 @@ TOOLS = [
     {
         "name": "web_search",
         "description": (
-            "Search the web via Tavily API. Returns relevant snippets with URLs. Use for current events, "
-            "real-time data, fact-checking. Snippets are leads, not sources — fetch_url the page before "
-            "citing a specific figure or quotation."
+            "Search the web through the configured Tavily/Brave provider chain. Returns relevant snippets "
+            "with URLs. Use for current events, real-time data, and fact-checking. Snippets are leads, not "
+            "sources — fetch_url the page before citing a specific figure or quotation."
         ),
         "input_schema": {
             "type": "object",
@@ -341,8 +342,12 @@ TOOLS = [
                 "max_results": {"type": "integer", "description": "Number of results (1-10).", "default": 5},
                 "search_depth": {
                     "type": "string",
-                    "enum": ["basic", "advanced"],
-                    "description": "advanced returns longer, more relevant snippets at higher API cost. Use when digging into one specific question.",
+                    "enum": ["ultra-fast", "fast", "basic", "advanced"],
+                    "description": (
+                        "basic is the general default. fast/ultra-fast trade relevance for latency at the "
+                        "same Tavily credit cost. advanced returns focused extra context and costs twice as "
+                        "many Tavily credits, so reserve it for one specific difficult question."
+                    ),
                     "default": "basic",
                 },
                 "topic": {
@@ -487,7 +492,7 @@ def build_mission_handler(user_id: int):
     return _handle
 
 
-# ── Web Search (Tavily) ──────────────────────────────────────────────
+# ── Web Search (Tavily / Brave provider chain) ───────────────────────
 
 async def _exec_web_search(
     query: str,
@@ -496,42 +501,13 @@ async def _exec_web_search(
     topic: str = "general",
     time_range: str | None = None,
 ) -> str:
-    """Search the web via Tavily API."""
-    api_key = get_secret("TAVILY_API_KEY", "") or ""
-    if not api_key:
-        return "Error: TAVILY_API_KEY not set."
-    max_results = max(1, min(max_results, 10))
-    if search_depth not in ("basic", "advanced"):
-        search_depth = "basic"
-    if topic not in ("general", "news", "finance"):
-        topic = "general"
-    if time_range not in ("day", "week", "month", "year"):
-        time_range = None
-    # Advanced search returns longer, query-focused snippets; give them room.
-    snippet_cap = 1000 if search_depth == "advanced" else 500
-    try:
-        from tavily import AsyncTavilyClient
-        from provenance.runtime import _wrap_external
-        client = AsyncTavilyClient(api_key=api_key)
-        kwargs: dict = {"max_results": max_results, "search_depth": search_depth, "topic": topic}
-        if time_range:
-            kwargs["time_range"] = time_range
-        resp = await client.search(query, **kwargs)
-        results = resp.get("results", [])
-        if not results:
-            return f"No results for: {query}"
-        lines = []
-        for r in results:
-            title = r.get("title", "")
-            url = r.get("url", "")
-            content = r.get("content", "")[:snippet_cap]
-            published = r.get("published_date") or ""
-            header = f"### {title}" + (f" ({published})" if published else "")
-            lines.append(f"{header}\n{url}\n{content}")
-        return _wrap_external("\n\n".join(lines), f"web_search:{query}")
-    except Exception as e:
-        logger.error("Tavily search error: %s", e)
-        return f"Web search failed: {e}"
+    return await execute_web_search(
+        query=query,
+        max_results=max_results,
+        search_depth=search_depth,
+        topic=topic,
+        time_range=time_range,
+    )
 
 
 # ── Restart Service Tool ─────────────────────────────────────────────
