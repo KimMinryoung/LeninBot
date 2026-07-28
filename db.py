@@ -62,7 +62,7 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             dbname=dbname,
             user=user,
             password=password,
-            sslmode="require",
+            sslmode=os.getenv("DB_SSL", "require"),
             application_name=_application_name(),
         )
     return _pool

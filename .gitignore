@@ -79,3 +79,4 @@ local_graffiti/
 
 # Playwright 인증 쿠키
 .pw_cookies.json
+.env.bak-*

@@ -2,8 +2,9 @@
 """Daily writer DB backup to Cloudflare R2.
 
 The fiction workspace tables live in the local Docker Postgres
-(leninbot-writer-pg) since the 2026-07-07 migration off Supabase, so this
-box is the only copy — this job is the durability story (mirrors
+(leninbot-pg, `writer` database — consolidated from leninbot-writer-pg on
+2026-07-28, originally migrated off Supabase 2026-07-07), so this box is
+the only copy — this job is the durability story (mirrors
 backup_kg_to_r2.py).
 
 Dumps via `docker exec pg_dump -Fc` (no credentials needed: in-container
@@ -13,7 +14,7 @@ writer-db-backup-YYYY-MM-DD.dump to the cyber-lenin-backups R2 bucket
 under data/writer_db_backups/.
 
 Restore (into a fresh or wiped container):
-  docker exec -i leninbot-writer-pg pg_restore -U writer -d writer \
+  docker exec -i leninbot-pg pg_restore -U writer -d writer \
       --clean --if-exists --no-owner --no-privileges < <backup.dump>
 
 Scheduled by leninbot-writer-backup.timer (daily 03:20 KST).
@@ -47,7 +48,7 @@ import requests
 from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
-CONTAINER = "leninbot-writer-pg"
+CONTAINER = "leninbot-pg"
 KST = timezone(timedelta(hours=9))
 R2_RETENTION_DAYS = 7
 LOCAL_RETENTION_DAYS = 3
