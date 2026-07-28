@@ -37,7 +37,7 @@ _READ_KEYWORDS = ("select", "with", "show", "explain", "values", "table")
 
 # Leading keywords that are unconditionally blocked — bulk destructive ops
 # whose recovery cost massively outweighs their legitimate agent use case.
-# Reserved for the operator via scripts/psql-supabase.
+# Reserved for the operator via scripts/psql-main.
 #   drop      — irreversible; once committed the schema object is gone
 #   truncate  — wipes all rows (and resets sequences); effectively
 #               indistinguishable from DROP+CREATE for a data user
@@ -101,7 +101,7 @@ QUERY_DB_TOOL = {
         "into the SQL string. Each call runs in its own transaction; exceptions "
         "roll back. **Blocked at the tool level**: DROP, TRUNCATE (irreversible), "
         "and any UPDATE/DELETE that would affect ≥10 rows (bulk maintenance — "
-        "operator job). Operator runs blocked ops via scripts/psql-supabase."
+        "operator job). Operator runs blocked ops via scripts/psql-main."
     ),
     "input_schema": {
         "type": "object",
@@ -143,7 +143,7 @@ async def _exec_query_db(
     if kind in _BLOCKED_LEADING_KEYWORDS:
         return (
             f"Error: {kind.upper()} is blocked on query_db — irreversible/bulk-destructive. "
-            "Ask the operator to run this via scripts/psql-supabase after review."
+            "Ask the operator to run this via scripts/psql-main after review."
         )
 
     try:
@@ -177,7 +177,7 @@ async def _exec_query_db(
                 return (
                     f"Error: blocked — {kind.upper()} would affect {e.affected} rows "
                     f"(≥{_MAX_BULK_MUTATION_ROWS}). Transaction rolled back. "
-                    "Bulk maintenance jobs belong to the operator; run via scripts/psql-supabase."
+                    "Bulk maintenance jobs belong to the operator; run via scripts/psql-main."
                 )
             return f"OK. {kind.upper()} executed; {affected} row(s) affected."
         else:

@@ -51,7 +51,7 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             raise RuntimeError(
                 "Missing database configuration: "
                 + ", ".join(missing)
-                + ". For local psql use scripts/psql-supabase; production services "
+                + ". For local psql use scripts/psql-main; production services "
                 "load DB_PASSWORD via systemd LoadCredentialEncrypted."
             )
         _pool = pool.ThreadedConnectionPool(
