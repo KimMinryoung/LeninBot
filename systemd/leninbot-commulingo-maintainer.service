@@ -1,7 +1,9 @@
 [Unit]
 Description=LeninBot CommuLingo people curator (one direct edit)
 Wants=network-online.target
-After=network-online.target
+# Ordering only: when the daily batch queues all four lanes, they run one at a
+# time in new -> enrich -> terms -> maintainer order. No effect when started alone.
+After=network-online.target leninbot-commulingo-terms.service
 
 [Service]
 Type=oneshot

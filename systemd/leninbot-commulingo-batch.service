@@ -1,0 +1,18 @@
+[Unit]
+Description=LeninBot CommuLingo curator batch (runs the four lanes sequentially)
+# Pulls in all four lanes; their mutual After= ordering runs them one at a time
+# (new -> enrich -> terms -> maintainer). Wants, not Requires: one lane failing
+# must not cancel the rest. Each lane keeps its own budget-guard ExecCondition,
+# so a mid-batch cap hit skips the remaining lanes' work.
+Wants=leninbot-commulingo-new.service
+Wants=leninbot-commulingo-enrich.service
+Wants=leninbot-commulingo-terms.service
+Wants=leninbot-commulingo-maintainer.service
+After=leninbot-commulingo-new.service
+After=leninbot-commulingo-enrich.service
+After=leninbot-commulingo-terms.service
+After=leninbot-commulingo-maintainer.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily CommuLingo curator batches (DeepSeek off-peak window)
+
+[Timer]
+# One item per lane per batch; 5 batches inside the DeepSeek off-peak discount
+# window (UTC 16:30-00:30). No Persistent: a missed batch must not run at peak
+# price.
+OnCalendar=*-*-* 17..21:00:00
+
+[Install]
+WantedBy=timers.target
