@@ -594,7 +594,10 @@ def _search_all(q: str, limit: int) -> dict:
 
     Callers (models) routinely guess the wrong category — a faction like
     "노동자 반대파" lives in the glossary, not in history events — so one search
-    over every category removes the guess entirely.
+    over every category removes the guess entirely. A single match includes its
+    full record inline (`detail`): summary rows alone carry no substance, so
+    forcing a follow-up get_* call for an unambiguous hit was pure overhead.
+    Only a multi-match result needs the follow-up, and only then is `hint` sent.
     """
     like = f"%{q}%"
     events = db_query(
@@ -611,13 +614,33 @@ def _search_all(q: str, limit: int) -> dict:
             ORDER BY sort_order, id LIMIT %(limit)s""",
         {"like": like, "limit": limit},
     )
-    return {
+    result = {
         "people": _search_people(q, "", limit),
         "terms": _list_terms(q)[:limit],
         "events": [dict(r) for r in events],
         "offices": [dict(r) for r in offices],
-        "next": "get_person(person_id) / get_term(term_id) / get_event(event_id) / get_office(office_id)",
     }
+    total = sum(len(rows) for rows in result.values())
+    if total == 1:
+        if result["people"]:
+            record = _get_person(result["people"][0]["id"])
+            kind = "person"
+        elif result["terms"]:
+            record = _get_term(result["terms"][0]["id"])
+            kind = "term"
+        elif result["events"]:
+            record = _get_event(result["events"][0]["id"])
+            kind = "event"
+        else:
+            record = _get_office(result["offices"][0]["id"])
+            kind = "office"
+        result["detail"] = {"kind": kind, "record": record}
+    elif total > 1:
+        result["hint"] = (
+            "multiple matches — fetch one in full with get_person(person_id) / "
+            "get_term(term_id) / get_event(event_id) / get_office(office_id)"
+        )
+    return result
 
 
 def _list_offices() -> list[dict]:
@@ -819,7 +842,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "Soviet-history figures with bios, career timelines, and institution "
         "(office) leadership timelines, all bilingual ko/en. Actions: "
         "`search` (q matched across people, glossary terms, historical events, "
-        "and offices at once — use this when the category is uncertain), "
+        "and offices at once — a single match returns its full record inline; "
+        "use this when the category is uncertain), "
         "`list_groups` (era groups + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
         "`get_person` (full record — returned in the canonical person-field shape "
