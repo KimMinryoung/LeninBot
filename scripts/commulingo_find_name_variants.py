@@ -56,6 +56,28 @@ PARTICLES = (
     "만", "랑", "나", "야", "여", "께",
 )
 
+# Single-syllable particles: a candidate that differs from its target only by
+# one of these as its final syllable is noun+particle grammar (레닌이/레닌의,
+# 흐루쇼프가/흐루쇼프카), not a spelling variant. Kept separate from PARTICLES
+# because here only the exact final syllable matters.
+PARTICLE_SYLLABLES = set("은는이가을를의에도와과로만랑나야여께")
+
+
+def title_target(word: str) -> str | None:
+    """Comparison target for an event/term title word, or None.
+
+    Title words arrive with particles attached (레닌의 유언 → 레닌의), and
+    registering those as targets made every ordinary noun+particle in prose a
+    distance-1 "variant" (레닌이 ≈ 레닌의). A particle-ending word yields no
+    target at all — stripping to a stem was tried and minted garbage targets
+    from lexical endings (개발주의 → 개발주, 그루지야 → 그루지). Person
+    surnames are collected separately and are unaffected.
+    """
+    for p in PARTICLES:
+        if word.endswith(p):
+            return None
+    return word
+
 
 def run_psql(stdin: str) -> str:
     result = subprocess.run([str(PSQL), "-t", "-A"], input=stdin, capture_output=True, text=True)
@@ -199,11 +221,15 @@ def main() -> int:
         cleaned = (e["title_ko"] or "").replace("(", " ").replace(")", " ")
         for word in [w for w in cleaned.split() if len(w) >= 3]:
             canonical_words.add(word)
-            surnames[word].add("event:" + e["id"])
+            target = title_target(word)
+            if target:
+                surnames[target].add("event:" + e["id"])
     for t in terms:
         for word in [w for w in f"{t['term_ko'] or ''} {t['aliases'] or ''}".split() if len(w) >= 3]:
             canonical_words.add(word)
-            surnames[word].add("term:" + t["id"])
+            target = title_target(word)
+            if target:
+                surnames[target].add("term:" + t["id"])
     alias_words = {a["alias"] for a in aliases if len(a["alias"] or "") >= 3}
     skip_exact = canonical_words | alias_words | known_variants
 
@@ -236,6 +262,10 @@ def main() -> int:
             max_d = 2 if len(surname) >= 6 else 1
             d = edit_distance(word, surname, cap=max_d)
             if not 1 <= d <= max_d:
+                continue
+            # Noun+particle grammar, not a variant: identical stem with a
+            # particle as the word's differing final syllable.
+            if word[-1] in PARTICLE_SYLLABLES and word[:-1] in (surname[:-1], surname):
                 continue
             # One differing syllable means little on its own; require the
             # sounds to be close too (게르첸/헤르첸 yes, 게바라/게릴라 no).
