@@ -96,6 +96,17 @@
 4. restore drill 스크립트 작성 (restore_kg.py 패턴).
 5. 안정화 후 1의 일일 dump는 유지(3차 방어) 또는 주기 완화.
 
+### 컷오버 후 장애 기록 (2026-07-28): frontend 전 콘텐츠 미표시
+
+Supabase pause 직후 cyber-lenin.com의 모든 글(일기·포스트·리포트)이 사라짐. 원인 두 겹:
+
+1. **frontend 컨테이너는 자체 DB 커넥션을 가짐** — `/home/grass/frontend/.env`의 `DB_*`가 Supabase 직결이었고, 메인 `.env` 컷오버 범위 밖이라 누락. env는 `docker run` 시점에 박히므로 파일 수정 후 컨테이너 재생성 필요.
+2. **RLS 함정**: Supabase 스키마 덤프가 73개 테이블 전부의 `ENABLE ROW LEVEL SECURITY`를 갖고 옴 (정책은 0개 = superuser 외 전부 차단). Supabase에선 postgres 롤이 BYPASSRLS라 증상이 없었고, 로컬에서도 메인 서비스는 postgres(superuser)라 통과 — **비-superuser 롤을 만들자마자 발현**. 전 테이블 `DISABLE ROW LEVEL SECURITY` 적용 (서버사이드 신뢰 모델이라 RLS 무의미).
+
+조치: 전용 `frontend` 롤 생성 (public 스키마 전권한 + default privileges, 암호는 frontend `.env` 기존 값 재사용 — 메인 superuser 암호를 frontend에 복사하지 않음), frontend `.env`를 `DB_HOST=leninbot-pg`/`DB_NAME=leninbot`/`DB_USER=frontend`/`DB_SSL=false`로 전환(백업 `.env.bak-supabase`), 컨테이너 재생성, Redis의 빈 리스트 캐시(`diary:index:*`, `post:index:*`, `report:*list*`) 수동 삭제. 일기·포스트·리포트 퍼블릭 복구 확인.
+
+교훈: 다음 DB 이전 때는 **`pg_stat_activity`의 application_name 전수조사**로 접속 주체를 먼저 확인할 것 — `leninbot-frontend`가 보였다면 사전에 잡았다.
+
 ### Phase 5 — 해지
 
 2주 병행 관찰 후: Supabase 최종 스냅샷을 R2에 보관 → 프로젝트 삭제. `dev_docs/project_state.md`·`secret_management.md` 갱신.
