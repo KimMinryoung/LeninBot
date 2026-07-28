@@ -85,8 +85,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     cfg["term_lane_enabled"] = bool(cfg["term_lane_enabled"])
     cfg["enrich_non_soviet_revolutionaries"] = bool(cfg["enrich_non_soviet_revolutionaries"])
-    if cfg["new_person_focus"] not in {"all", "soviet_institutions"}:
-        raise ValueError("new_person_focus must be all or soviet_institutions")
+    if cfg["new_person_focus"] not in {"all", "soviet_institutions", "old_regime"}:
+        raise ValueError("new_person_focus must be all, soviet_institutions, or old_regime")
     if not isinstance(cfg["roster_groups"], list):
         raise ValueError("roster_groups must be a list of group ids")
     cfg["roster_groups"] = [str(g) for g in cfg["roster_groups"]]
@@ -503,6 +503,10 @@ cyber-lenin.com or any page on this site. Make one narrow write call and stop.
 # have to prove absence there and can stop carrying those names.
 ROSTER_GROUPS_BY_FOCUS = {
     "soviet_institutions": ("bolshevik", "stalin-era", "thaw", "perestroika"),
+    # Era boundaries are fuzzy: an 1905-era activist may already be filed under
+    # the revolution generation or as a non-Soviet revolutionary, so the roster
+    # keeps those groups to prove absence.
+    "old_regime": ("old-regime", "bolshevik", "international-revolutionary"),
 }
 
 
@@ -642,6 +646,19 @@ CURRENT SELECTION FOCUS:
   planning/industry, science/space, or Soviet cultural administration.
 - Prefer a documented office or command that belongs in one of the institution timelines
   returned by list_offices. State that institution and office explicitly in the coverage reason.
+"""
+    elif new_person_focus == "old_regime":
+        focus_instruction = """
+CURRENT SELECTION FOCUS:
+- Select only a person from the world before Bolshevik power, one whose card belongs in
+  the "구체제와 그 도전자들" (old-regime) era group: tsarist statesmen, officials and
+  pillars of the old order, or the revolutionaries and thinkers who fought it —
+  Decembrists, Narodniks, early Russian Marxists, SRs, Mensheviks, anarchists, figures
+  of 1905, and of 1917 before October.
+- If the person's principal historical role lies after the Bolshevik seizure of power,
+  they are out of scope for now.
+- State in the coverage reason why the person matters to pre-October revolutionary or
+  imperial history.
 """
     return """MODE: NEW PERSON DISCOVERY ONLY
 
