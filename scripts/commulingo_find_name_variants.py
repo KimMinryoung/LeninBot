@@ -207,8 +207,53 @@ def main() -> int:
     alias_words = {a["alias"] for a in aliases if len(a["alias"] or "") >= 3}
     skip_exact = canonical_words | alias_words | known_variants
 
+    # Surname index: cuts the word×surname space that made the scan quadratic
+    # in corpus growth. Levenshtein <= 1 on syllables always preserves the
+    # first or the last syllable, so short surnames (max_d=1) are bucketed by
+    # both and a word only meets the union of its two buckets — the filter is
+    # exact, not approximate. Long surnames (>= 6 syllables, max_d=2) don't
+    # get that guarantee but are few, so they stay in a full-scan list.
+    # Bucket indices are merged sorted, preserving the original dict-order
+    # first-match, so the report is unchanged.
+    surname_list = list(surnames)
+    surname_jamo = {s: to_jamo(s) for s in surname_list}
+    by_first: dict[str, list[int]] = defaultdict(list)
+    by_last: dict[str, list[int]] = defaultdict(list)
+    long_idx: list[int] = []
+    for i, s in enumerate(surname_list):
+        if len(s) >= 6:
+            long_idx.append(i)
+        else:
+            by_first[s[0]].append(i)
+            by_last[s[-1]].append(i)
+
+    def match_word(word: str) -> str | None:
+        word_jamo = to_jamo(word)
+        idxs = sorted(set(by_first.get(word[0], ())) | set(by_last.get(word[-1], ()))
+                      | set(long_idx))
+        for i in idxs:
+            surname = surname_list[i]
+            max_d = 2 if len(surname) >= 6 else 1
+            d = edit_distance(word, surname, cap=max_d)
+            if not 1 <= d <= max_d:
+                continue
+            # One differing syllable means little on its own; require the
+            # sounds to be close too (게르첸/헤르첸 yes, 게바라/게릴라 no).
+            if edit_distance(word_jamo, surname_jamo[surname],
+                             cap=args.max_jamo) > args.max_jamo:
+                continue
+            # Longer canonical words that merely contain the surname
+            # (스탈린그라드 vs 스탈린) are container noise.
+            if any(word in w for w in canonical_words if w != surname):
+                continue
+            return surname
+        return None
+
+    match_cache: dict[str, str | None] = {}
     candidates: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for row in texts:
+    for n, row in enumerate(texts, 1):
+        if n % 2000 == 0:
+            print(f"[find-variants] scanned {n}/{len(texts)} texts", file=sys.stderr)
         text = row["txt"] or ""
         for b in blocked:
             text = text.replace(b, " ")
@@ -217,23 +262,11 @@ def main() -> int:
                 # A whole word only — never an arbitrary cut of a longer one.
                 if word in skip_exact or word in surnames:
                     continue  # canonical, alias, or already-known variant
-                word_jamo = to_jamo(word)
-                for surname in surnames:
-                    max_d = 2 if len(surname) >= 6 else 1
-                    d = edit_distance(word, surname, cap=max_d)
-                    if not 1 <= d <= max_d:
-                        continue
-                    # One differing syllable means little on its own; require the
-                    # sounds to be close too (게르첸/헤르첸 yes, 게바라/게릴라 no).
-                    if edit_distance(word_jamo, to_jamo(surname),
-                                     cap=args.max_jamo) > args.max_jamo:
-                        continue
-                    # Longer canonical words that merely contain the surname
-                    # (스탈린그라드 vs 스탈린) are container noise.
-                    if any(word in w for w in canonical_words if w != surname):
-                        continue
+                if word not in match_cache:
+                    match_cache[word] = match_word(word)
+                surname = match_cache[word]
+                if surname is not None:
                     candidates[(word, surname)].append(row["src"])
-                    break
 
     rows = sorted(candidates.items(), key=lambda kv: -len(kv[1]))
     shown: list[tuple[str, str, int, str]] = []
