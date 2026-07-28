@@ -22,6 +22,7 @@
 |---|---|
 | `api_reference.md` | `api.py` FastAPI 라우트와 인증 |
 | `secret_management.md` | systemd credential 기반 시크릿 로딩 |
+| `db_migration_plan.md` | DB 인프라 현황 (로컬 leninbot-pg 구성·백업 체계) + Supabase 이탈 기록과 남은 단계 |
 | `knowledge_graph_design.md` | Neo4j/Graphiti KG 런타임 구조 |
 | `knowledge_graph_schema.md` | KG typed entity/edge schema |
 | `vector_corpus_reingestion_handoff.md` | Windows GPU PC에서 vector corpus 재등록 시 필요한 metadata/chunking 인수인계 |
