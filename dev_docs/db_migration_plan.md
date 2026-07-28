@@ -85,9 +85,12 @@
 3. `leninbot-writer-pg` 컨테이너 제거. **볼륨 `leninbot_writer_pg_data`는 2주 보험으로 유지** — Supabase 해지 시점에 함께 삭제할 것. 포트는 5434 유지.
 4. `backup_writer_db_to_r2.py`는 env가 아니라 **컨테이너명 하드코딩**이었음 → `leninbot-pg`로 수정, 1회 실행으로 R2 업로드 확인 (73.8MB).
 
-### Phase 4 — 백업 체계 (백업 VM 발급 후)
+### Phase 4 — 백업 체계 (1단계 ✅ 완료 2026-07-28, VM 단계 대기)
 
-1. **즉시 (VM 발급 전)**: 메인 DB 일일 dump→R2 타이머 추가 (기존 kg-backup/writer-backup 패턴 복제). 가변 테이블 일 1회 + `lenin_corpus` 월 1회 분리로 용량 절약.
+1. **메인 DB 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 전체 덤프 177MB라 테이블 분리 불필요 (비대화 제거 후 작아짐). 1회 실행·R2 업로드 검증.
+   - **restore drill 통과** (임시 DB 복원→17,046행+HNSW 인덱스 확인→드롭). 드릴이 결함 발견: Docker 기본 `/dev/shm` 64MB로는 병렬 HNSW 인덱스 빌드 실패 → compose에 `shm_size: 1g` 추가로 해결. 프리로드 때 안 걸린 이유: 빈 테이블에 인덱스 생성 후 COPY라 대량 빌드가 없었음.
+   - 유닛 파일은 `systemd/`에 추적 (sudoers가 `cp systemd/* /etc/systemd/system/`만 NOPASSWD 허용).
+   - 참고: R2에 `main-db-backup-2026-07-20.dump`라는 과거 객체가 있었음 (구 백업 규칙 잔재로 추정) — 롤링 삭제에 걸려 제거됨.
 2. **백업 VM 셋업**: WireGuard(또는 Tailscale)로 사설 터널 → 스트리밍 레플리카 구성 (physical replication slot, `wal_keep_size` 설정).
 3. **pgBackRest**: 백업 VM을 리포로, WAL 아카이빙 + 주1 full/일1 incr → **PITR** 확보. (대안: 리포를 R2로 직접 — VM 디스크 절약, 복원 속도는 느림.)
 4. restore drill 스크립트 작성 (restore_kg.py 패턴).

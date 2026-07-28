@@ -3,6 +3,9 @@ services:
     image: pgvector/pgvector:pg17
     container_name: leninbot-pg
     restart: unless-stopped
+    # Docker's default 64MB /dev/shm breaks parallel HNSW index builds during
+    # pg_restore (found by restore drill 2026-07-28).
+    shm_size: 1g
     ports:
       - "127.0.0.1:5434:5432"   # localhost only; serves both `leninbot` and `writer` DBs
     # No POSTGRES_PASSWORD here: initdb already ran (2026-07-28) with the main
