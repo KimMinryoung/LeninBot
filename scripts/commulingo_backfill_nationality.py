@@ -2,7 +2,7 @@
 """Bulk-backfill CommuLingo person citizenship from Wikidata.
 
 Deterministic and credential-free: reads/writes commulingo_people through the
-sanctioned scripts/psql-supabase helper, and resolves each person on Wikidata's
+sanctioned scripts/psql-main helper, and resolves each person on Wikidata's
 public SPARQL endpoint (no API key). It reads P27 country of citizenship for
 the primary flag. P19 place of birth is used only to disambiguate competing
 citizenship claims; it must never populate nationalOrigin (whose legacy DB
@@ -29,7 +29,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-PSQL = Path(__file__).resolve().parent / "psql-supabase"
+PSQL = Path(__file__).resolve().parent / "psql-main"
 WDQS = "https://query.wikidata.org/sparql"
 UA = "BichonWebsite-commulingo/1.0 (https://cyber-lenin.com; minryoung93@gmail.com)"
 
@@ -208,7 +208,7 @@ def run_psql(args: list[str], stdin: str | None = None) -> str:
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"psql-supabase failed: {result.stderr.strip()}")
+        raise RuntimeError(f"psql-main failed: {result.stderr.strip()}")
     return result.stdout
 
 

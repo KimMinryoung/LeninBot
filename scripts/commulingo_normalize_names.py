@@ -4,7 +4,7 @@
 Reads variant -> canonical pairs from config/commulingo_name_normalization.json
 and rewrites every Korean/English text column that uses a variant OUTSIDE
 direct quotation marks (quoted spans keep their original spelling). Writes via
-the sanctioned scripts/psql-supabase helper, like the nationality backfill.
+the sanctioned scripts/psql-main helper, like the nationality backfill.
 
 Excluded on purpose:
   - commulingo_person_aliases: aliases intentionally hold variants (linkify).
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PSQL = ROOT / "scripts" / "psql-supabase"
+PSQL = ROOT / "scripts" / "psql-main"
 CONFIG = ROOT / "config" / "commulingo_name_normalization.json"
 
 QUOTED_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|《[^》]*》')
@@ -40,7 +40,7 @@ REPORT_ONLY_COLUMNS = {("commulingo_people", "name_ko"), ("commulingo_people", "
 def run_psql(args: list[str], stdin: str | None = None) -> str:
     result = subprocess.run([str(PSQL), *args], input=stdin, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"psql-supabase failed: {result.stderr.strip()}")
+        raise RuntimeError(f"psql-main failed: {result.stderr.strip()}")
     return result.stdout
 
 

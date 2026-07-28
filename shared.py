@@ -211,7 +211,7 @@ MODULE_ARCHITECTURE = """\
 ## Architecture
 Modules: web_chat.py (claude_loop web pipeline), telegram_bot.py (multi-agent orchestrator), \
 agents/ (diary, analyst, scout, programmer, browser, visualizer), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
-Data: PostgreSQL (Supabase), Neo4j (local Docker), Redis (live state).
+Data: PostgreSQL (local Docker, leninbot-pg), Neo4j (local Docker), Redis (live state).
 ## Infrastructure
 Server: Hetzner VPS (Ubuntu 24.04, 16 GB RAM), HTTPS via Nginx + Let's Encrypt (leninbot.duckdns.org). \
 Deploy: git pull + systemctl restart, triggered by Telegram /deploy command."""

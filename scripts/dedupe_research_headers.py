@@ -7,7 +7,7 @@ carry the title/author/date block twice. This script removes the inner
 duplicate in-place (Korean markdown and markdown_en independently).
 
 Usage:
-  scripts/psql-supabase -c "\\copy (SELECT id, slug, title, status, markdown,
+  scripts/psql-main -c "\\copy (SELECT id, slug, title, status, markdown,
       coalesce(markdown_en,'') FROM research_documents ORDER BY id)
       TO 'docs.csv' WITH (FORMAT csv)"
   python scripts/dedupe_research_headers.py docs.csv fixed.csv backup.json

@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-PSQL = Path(__file__).resolve().parent / "psql-supabase"
+PSQL = Path(__file__).resolve().parent / "psql-main"
 
 LABELS = {
     "soviet": ("소련", "Soviet Union"), "russia": ("러시아", "Russia"),
@@ -112,7 +112,7 @@ ORIGIN_OVERRIDES = {
 def run_psql(args: list[str], stdin: str | None = None) -> str:
     result = subprocess.run([str(PSQL), *args], input=stdin, text=True, capture_output=True)
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "psql-supabase failed")
+        raise RuntimeError(result.stderr.strip() or "psql-main failed")
     return result.stdout
 
 

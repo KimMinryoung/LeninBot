@@ -1,7 +1,8 @@
 """db.py — Direct PostgreSQL connection pool for AIChatBot.
 
-Replaces Supabase REST API (anon key) with direct pg connection,
-enabling proper per-service access control via PostgreSQL roles.
+Both the main `leninbot` DB and the `writer` DB live in the local
+leninbot-pg Docker container (pgvector/pg17, 127.0.0.1:5434); see
+dev_docs/db_migration_plan.md.
 """
 
 import os
@@ -62,7 +63,7 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             dbname=dbname,
             user=user,
             password=password,
-            sslmode=os.getenv("DB_SSL", "require"),
+            sslmode=os.getenv("DB_SSL", "prefer"),
             application_name=_application_name(),
         )
     return _pool
@@ -74,11 +75,8 @@ def writer_db_configured() -> bool:
 
 
 def _get_writer_pool() -> pool.ThreadedConnectionPool:
-    """Pool for the local writer database (Docker leninbot-writer-pg).
-
-    The writer workspace moved off the remote Supabase instance because its
-    ~560ms RTT made every manuscript operation cost seconds; see
-    dev_docs/project_state.md. Falls back to the main pool when unconfigured.
+    """Pool for the `writer` database (same leninbot-pg instance, separate
+    DB/role). Falls back to the main pool when unconfigured.
     """
     global _writer_pool
     if _writer_pool is None:
@@ -120,7 +118,7 @@ def _conn_from_pool(p: pool.ThreadedConnectionPool):
     """
     conn = p.getconn()
     try:
-        # Detect stale connections (Supabase/cloud DB closes idle connections)
+        # Detect stale connections (e.g. after a leninbot-pg container restart)
         if conn.closed:
             p.putconn(conn, close=True)
             conn = p.getconn()

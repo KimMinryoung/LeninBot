@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXES="${1:?usage: apply_h1_demotion_20260711.sh <fixed2.csv>}"
 
 cd "$(dirname "$FIXES")"
-"$ROOT/scripts/psql-supabase" <<SQL
+"$ROOT/scripts/psql-main" <<SQL
 BEGIN;
 CREATE TABLE _h1_fix (id bigint PRIMARY KEY, markdown text NOT NULL, markdown_en text, sha text NOT NULL);
 \copy _h1_fix FROM '$(basename "$FIXES")' WITH (FORMAT csv)

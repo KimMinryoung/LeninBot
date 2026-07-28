@@ -36,7 +36,7 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PSQL = ROOT / "scripts" / "psql-supabase"
+PSQL = ROOT / "scripts" / "psql-main"
 CONFIG = ROOT / "config" / "commulingo_name_normalization.json"
 
 HANGUL_RUN = re.compile(r"[가-힣]{3,}")
@@ -60,7 +60,7 @@ PARTICLES = (
 def run_psql(stdin: str) -> str:
     result = subprocess.run([str(PSQL), "-t", "-A"], input=stdin, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"psql-supabase failed: {result.stderr.strip()}")
+        raise RuntimeError(f"psql-main failed: {result.stderr.strip()}")
     return result.stdout
 
 

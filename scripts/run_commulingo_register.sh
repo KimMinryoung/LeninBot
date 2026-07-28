@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper: resolve DB_PASSWORD the way scripts/psql-supabase does, then run one
+# Wrapper: resolve DB_PASSWORD the way scripts/psql-main does, then run one
 # of the CommuLingo registration scripts under the venv.
 #
 # Usage:

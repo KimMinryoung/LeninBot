@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # psql-main — connect to the project's main Postgres (follows DB_* in .env).
-# `psql-supabase` remains as a compatibility symlink from the Supabase era.
 #
 # Usage:
 #   scripts/psql-main                 # interactive psql session
@@ -44,7 +43,7 @@ load_runtime_db_password() {
 }
 
 if [ ! -f "$ENV_FILE" ]; then
-    echo "psql-supabase: $ENV_FILE not found" >&2
+    echo "psql-main: $ENV_FILE not found" >&2
     exit 1
 fi
 
@@ -58,14 +57,14 @@ if [ -z "${DB_PASSWORD:-}" ]; then
     load_runtime_db_password || true
 fi
 
-if [ -z "${DB_PASSWORD:-}" ] && [ -z "${PSQL_SUPABASE_IN_SYSTEMD:-}" ] && [ -r "$DB_PASSWORD_CRED" ]; then
+if [ -z "${DB_PASSWORD:-}" ] && [ -z "${PSQL_MAIN_IN_SYSTEMD:-}" ] && [ -r "$DB_PASSWORD_CRED" ]; then
     if [ -t 0 ] && [ -t 1 ]; then
         exec sudo systemd-run --pty --wait --collect \
             -p User="$(id -un)" \
             -p WorkingDirectory="$ROOT" \
             -p EnvironmentFile="$ENV_FILE" \
             -p LoadCredentialEncrypted=db_password:"$DB_PASSWORD_CRED" \
-            -p Environment=PSQL_SUPABASE_IN_SYSTEMD=1 \
+            -p Environment=PSQL_MAIN_IN_SYSTEMD=1 \
             "$0" "$@"
     fi
     exec sudo systemd-run --pipe --wait --collect \
@@ -73,7 +72,7 @@ if [ -z "${DB_PASSWORD:-}" ] && [ -z "${PSQL_SUPABASE_IN_SYSTEMD:-}" ] && [ -r "
         -p WorkingDirectory="$ROOT" \
         -p EnvironmentFile="$ENV_FILE" \
         -p LoadCredentialEncrypted=db_password:"$DB_PASSWORD_CRED" \
-        -p Environment=PSQL_SUPABASE_IN_SYSTEMD=1 \
+        -p Environment=PSQL_MAIN_IN_SYSTEMD=1 \
         "$0" "$@"
 fi
 
@@ -82,11 +81,11 @@ fi
 : "${DB_NAME:=postgres}"
 : "${DB_USER:?DB_USER missing}"
 : "${DB_PASSWORD:?DB_PASSWORD missing}"
-: "${PSQL_APPLICATION_NAME:=psql-supabase}"
+: "${PSQL_APPLICATION_NAME:=psql-main}"
 
 export PGPASSWORD="$DB_PASSWORD"
 
-# sslmode follows DB_SSL from .env, matching db.py (default require).
+# sslmode follows DB_SSL from .env, matching db.py (default prefer).
 exec psql \
-    "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=${DB_SSL:-require} application_name=$PSQL_APPLICATION_NAME" \
+    "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=${DB_SSL:-prefer} application_name=$PSQL_APPLICATION_NAME" \
     "$@"

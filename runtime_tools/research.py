@@ -1,6 +1,6 @@
 """runtime_tools.research — Publish, edit, and unpublish public research documents.
 
-Public research documents are stored as Markdown rows in Supabase/Postgres and
+Public research documents are stored as Markdown rows in Postgres and
 served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
 filename without its .md extension. Legacy files under research/ and
 output/research/ remain readable only as fallback/import sources.

@@ -32,7 +32,7 @@ sudo -u "$DEPLOY_USER" venv/bin/playwright install --with-deps chromium
 echo "=== 5. .env 파일 ==="
 if [ ! -f "$DEPLOY_DIR/.env" ]; then
     echo "⚠️  .env 파일을 직접 생성하세요: $DEPLOY_DIR/.env"
-    echo "필요한 키: TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY, SUPABASE_URL, SUPABASE_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE 등"
+    echo "필요한 키: TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY, DB_HOST, DB_PORT, DB_NAME, DB_USER, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE 등"
 fi
 
 echo "=== 6. systemd 서비스 및 타이머 등록 ==="

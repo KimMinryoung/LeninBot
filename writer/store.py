@@ -14,8 +14,8 @@ from typing import Any
 
 from psycopg2.extras import RealDictCursor, execute_values
 
-# Writer tables live in the dedicated local database (db.get_writer_conn);
-# the remote main DB's ~560ms RTT made every manuscript operation cost seconds.
+# Writer tables live in the dedicated `writer` database (db.get_writer_conn),
+# hosted in the same local leninbot-pg instance as the main DB.
 from db import get_writer_conn as get_conn
 from db import writer_execute as db_execute
 from db import writer_query as db_query

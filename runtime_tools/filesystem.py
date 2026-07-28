@@ -584,7 +584,7 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
             sensitive_keys = {
                 "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "NEO4J_PASSWORD",
                 "GEMINI_API_KEY", "OPENAI_API_KEY", "ADMIN_API_KEY",
-                "DB_PASSWORD", "SUPABASE_KEY", "TAVILY_API_KEY",
+                "DB_PASSWORD", "WRITER_DB_PASSWORD", "TAVILY_API_KEY",
                 "AURA_NEO4J_PASSWORD",
             }
             safe_env = {

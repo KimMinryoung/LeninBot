@@ -94,7 +94,7 @@ def _json_default(o):
 QUERY_DB_TOOL = {
     "name": "query_db",
     "description": (
-        "Run a single SQL statement against the project's Postgres (Supabase). "
+        "Run a single SQL statement against the project's Postgres (local leninbot-pg). "
         "SELECT/WITH/SHOW/EXPLAIN → row list as JSON. INSERT/UPDATE/DELETE → "
         "affected row count. CREATE/ALTER → OK. Use `params` for "
         "parameterized queries (%s placeholders) — never interpolate user input "

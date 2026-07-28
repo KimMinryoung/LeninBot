@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper: resolve DB_PASSWORD the way scripts/psql-supabase does, then run
+# Wrapper: resolve DB_PASSWORD the way scripts/psql-main does, then run
 # register_state_socialism_term.py.
 #
 # Usage:

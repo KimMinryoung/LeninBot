@@ -123,7 +123,7 @@ Operator-only:
 - `bounded_query_db`
 - `kg_maintenance_run`
 
-`readonly_query_db` delegates to `scripts/query-db`, preserving the existing guard that allows only a single `SELECT`, `WITH`, `SHOW`, or `EXPLAIN` diagnostic and runs it in a read-only transaction through `scripts/psql-main` (구 `psql-supabase`, 심링크로 호환 유지 — DB는 2026-07-28부터 로컬 `leninbot-pg`).
+`readonly_query_db` delegates to `scripts/query-db`, preserving the existing guard that allows only a single `SELECT`, `WITH`, `SHOW`, or `EXPLAIN` diagnostic and runs it in a read-only transaction through `scripts/psql-main` (DB는 2026-07-28부터 로컬 `leninbot-pg`; 구 `psql-supabase` 심링크는 제거됨).
 
 `bounded_query_db` delegates to the existing `runtime_tools.db` `query_db` handler. It allows one SQL statement, blocks `DROP` and `TRUNCATE`, and rolls back `UPDATE`/`DELETE` statements that would affect 10 or more rows. This is the MCP path for small operator-approved DB corrections. Use domain-specific tools such as `edit_content` outside MCP when cache invalidation or publication side effects matter.
 

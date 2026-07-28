@@ -120,3 +120,4 @@ Supabase pause 직후 cyber-lenin.com의 모든 글(일기·포스트·리포트
 ## 변경 이력
 
 - 2026-07-28: 최초 작성 (조사 + 계획).
+- 2026-07-28 (심링크 이행 완료): `psql-supabase` 호환 심링크 제거 — 참조 스크립트 10곳 전부 `psql-main`으로 전환. `db.py`/`psql-main`의 sslmode 기본값 `require`→`prefer` (로컬 기준; `.env`가 명시 설정하므로 동작 무변경). 코드·툴 설명·봇 자기소개(shared.py)의 Supabase 잔재 문구 정리, `SUPABASE_KEY` env 레퍼런스 제거.
