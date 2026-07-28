@@ -589,6 +589,37 @@ def _get_person(person_id: str) -> dict | None:
             return person
 
 
+def _search_all(q: str, limit: int) -> dict:
+    """Unified substring search across people, glossary terms, events, and offices.
+
+    Callers (models) routinely guess the wrong category — a faction like
+    "노동자 반대파" lives in the glossary, not in history events — so one search
+    over every category removes the guess entirely.
+    """
+    like = f"%{q}%"
+    events = db_query(
+        """SELECT id, period_label, title_ko, title_en
+             FROM commulingo_history_events
+            WHERE id ILIKE %(like)s OR title_ko ILIKE %(like)s OR title_en ILIKE %(like)s
+            ORDER BY sort_order, id LIMIT %(limit)s""",
+        {"like": like, "limit": limit},
+    )
+    offices = db_query(
+        """SELECT id, range_label, title_ko, title_en
+             FROM commulingo_offices
+            WHERE id ILIKE %(like)s OR title_ko ILIKE %(like)s OR title_en ILIKE %(like)s
+            ORDER BY sort_order, id LIMIT %(limit)s""",
+        {"like": like, "limit": limit},
+    )
+    return {
+        "people": _search_people(q, "", limit),
+        "terms": _list_terms(q)[:limit],
+        "events": [dict(r) for r in events],
+        "offices": [dict(r) for r in offices],
+        "next": "get_person(person_id) / get_term(term_id) / get_event(event_id) / get_office(office_id)",
+    }
+
+
 def _list_offices() -> list[dict]:
     return db_query(
         """SELECT o.id, o.range_label, o.title_ko, o.title_en,
@@ -787,6 +818,8 @@ COMMULINGO_PEOPLE_TOOL = {
         "Read the CommuLingo people dictionary (cyber-lenin.com/commulingo/people): "
         "Soviet-history figures with bios, career timelines, and institution "
         "(office) leadership timelines, all bilingual ko/en. Actions: "
+        "`search` (q matched across people, glossary terms, historical events, "
+        "and offices at once — use this when the category is uncertain), "
         "`list_groups` (era groups + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
         "`get_person` (full record — returned in the canonical person-field shape "
@@ -813,7 +846,7 @@ COMMULINGO_PEOPLE_TOOL = {
             "action": {
                 "type": "string",
                 "enum": [
-                    "list_groups", "search_people", "get_person",
+                    "search", "list_groups", "search_people", "get_person",
                     "list_offices", "get_office", "list_categories",
                     "get_sections", "list_events", "get_event",
                     "list_terms", "get_term", "list_suggestions",
@@ -822,6 +855,8 @@ COMMULINGO_PEOPLE_TOOL = {
             "q": {
                 "type": "string",
                 "description": (
+                    "search: substring matched across people, glossary terms, "
+                    "historical events, and offices at once. "
                     "search_people: substring matched against id/name/cyrillic. "
                     "list_terms: substring matched against term id/ko/en/original/alias — "
                     "use it to check one candidate instead of pulling the whole glossary."
@@ -865,7 +900,11 @@ async def _exec_commulingo_people(
     except (TypeError, ValueError):
         limit = 30
     try:
-        if action == "list_groups":
+        if action == "search":
+            if not (q or "").strip():
+                return "Error: q is required for search."
+            result = await asyncio.to_thread(_search_all, q.strip(), limit)
+        elif action == "list_groups":
             result = await asyncio.to_thread(_list_groups)
         elif action == "search_people":
             result = await asyncio.to_thread(_search_people, (q or "").strip(), (group_id or "").strip(), limit)

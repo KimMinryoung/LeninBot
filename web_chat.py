@@ -720,12 +720,12 @@ async def _format_public_model_config() -> str:
 # model never reaches for it as a research source. Advertise only the read
 # actions and what they return.
 _WEB_COMMULINGO_PEOPLE_DESCRIPTION = (
-    "Read-only lookup of the CommuLingo people dictionary "
+    "Read-only lookup of the CommuLingo dictionary "
     "(cyber-lenin.com/commulingo/people): 1,200+ Soviet/communist-history "
-    "figures — bilingual bios, career timelines, institution leadership "
-    "timelines, events, glossary. Use FIRST for such people, institutions, "
-    "events, or terms: search_people → get_person; also get_office / "
-    "get_event / get_term."
+    "figures plus glossary terms, historical events, and institution "
+    "leadership timelines — bilingual. Use FIRST for such topics: search(q) "
+    "matches people/terms/events/offices at once → then get_person / "
+    "get_term / get_event / get_office."
 )
 
 
