@@ -1,9 +1,10 @@
 [Unit]
-Description=Enrich one existing CommuLingo person every fifteen minutes
+Description=Enrich five existing CommuLingo people daily (DeepSeek off-peak window)
 
 [Timer]
-OnCalendar=*:0/15
-Persistent=true
+# One item per fire; 5 fires inside the DeepSeek off-peak discount window
+# (UTC 16:30-00:30). No Persistent: a missed fire must not run at peak price.
+OnCalendar=*-*-* 17..21:10:00
 
 [Install]
 WantedBy=timers.target

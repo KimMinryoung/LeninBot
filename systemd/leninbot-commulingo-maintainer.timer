@@ -1,9 +1,10 @@
 [Unit]
-Description=Run the CommuLingo people curator every five minutes
+Description=Five CommuLingo people-curator edits daily (DeepSeek off-peak window)
 
 [Timer]
-OnCalendar=*:0/5
-Persistent=true
+# One item per fire; 5 fires inside the DeepSeek off-peak discount window
+# (UTC 16:30-00:30). No Persistent: a missed fire must not run at peak price.
+OnCalendar=*-*-* 17..21:30:00
 
 [Install]
 WantedBy=timers.target
