@@ -1,6 +1,6 @@
 # DB 마이그레이션 계획 — Supabase → 자체 호스팅 Postgres
 
-작성: 2026-07-28. 상태: **Phase 2 컷오버 완료 (2026-07-28) — 프로덕션이 로컬 leninbot-pg에서 가동 중.** 다음: Supabase pause(사용자), Phase 3 writer 통합, Phase 4 백업 VM.
+작성: 2026-07-28. 상태: **Phase 2 컷오버·Phase 3 writer 통합 완료, Supabase pause 완료 (2026-07-28) — 프로덕션이 로컬 leninbot-pg에서 가동 중.** 다음: 2주 관찰 후 Phase 5 해지(~2026-08-11), Phase 4 백업 VM.
 
 ## 목표
 
@@ -109,7 +109,9 @@ Supabase pause 직후 cyber-lenin.com의 모든 글(일기·포스트·리포트
 
 ### Phase 5 — 해지
 
-2주 병행 관찰 후: Supabase 최종 스냅샷을 R2에 보관 → 프로젝트 삭제. `dev_docs/project_state.md`·`secret_management.md` 갱신.
+Supabase pause 완료: 2026-07-28 (사용자 실행). pause 후 ~6시간 시점 헬스 스윕 통과 — pg_stat_activity 전원 로컬, 원격 5432/6543 아웃바운드 없음, 서비스 7개 active·재시작 0, 사이트 일기 20/포스트 20/리포트 171 링크 정상 렌더.
+
+2주 병행 관찰 후 (~2026-08-11): Supabase 최종 스냅샷을 R2에 보관 → 프로젝트 삭제. 그때 함께: `.env.bak-supabase-cutover` 삭제, `leninbot_writer_pg_data` 볼륨 삭제, `dev_docs/project_state.md`·`secret_management.md` 갱신.
 
 ## 미결 사항 (사용자 결정 필요)
 
