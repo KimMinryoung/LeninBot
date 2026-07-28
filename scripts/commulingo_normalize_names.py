@@ -33,7 +33,13 @@ QUOTED_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|
 
 # (table, column, lang) targets are discovered from information_schema; these
 # are the exceptions that must never be auto-rewritten.
-SKIP_TABLES = {"commulingo_person_aliases", "commulingo_person_patronymics"}
+SKIP_TABLES = {
+    "commulingo_person_aliases",
+    "commulingo_person_patronymics",
+    # Term aliases intentionally hold variants too (linkify), same as person
+    # aliases: 소브나르호즈 stays an alias after the term was renamed 소브나르호스.
+    "commulingo_term_aliases",
+}
 REPORT_ONLY_COLUMNS = {("commulingo_people", "name_ko"), ("commulingo_people", "name_en")}
 
 
