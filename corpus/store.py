@@ -13,7 +13,6 @@ def similarity_search(
     query: str,
     k: int = 5,
     layer: str = None,
-    rerank: bool = False,
     *,
     author: str | None = None,
     title: str | None = None,
@@ -22,8 +21,9 @@ def similarity_search(
 ) -> list:
     """Search lenin_corpus via pgvector cosine similarity.
 
-    Returns list of LangChain Document objects with page_content + metadata.
-    When rerank=True, re-scores results with a cross-encoder for better relevance.
+    Returns list of LangChain Document objects with page_content + metadata,
+    in descending cosine-similarity order; each doc's metadata carries a
+    "similarity" score so callers can merge result sets from multiple queries.
 
     Note on recall: when a layer filter is present, the default HNSW ef_search
     is too small to find enough candidates that also satisfy the layer filter —
@@ -39,7 +39,7 @@ def similarity_search(
     emb = _get_exp_embeddings()
     vec = emb.embed_query(query)
     embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
-    fetch_k = k * 3 if rerank else k
+    fetch_k = k
     # Match SP's default threshold (0.4). Kept as a parameter pass-through so
     # the behaviour is visible to the reader without reading the SP.
     threshold = 0.4
@@ -72,10 +72,11 @@ def similarity_search(
                         clauses.append("(content ILIKE %s OR metadata->>'title' ILIKE %s)")
                         kw_pattern = f"%{kw}%"
                         params.extend([kw_pattern, kw_pattern])
-                    params.extend([embedding_str, fetch_k])
+                    params = [embedding_str] + params + [embedding_str, fetch_k]
                     cur.execute(
                         f"""
-                        SELECT content, metadata
+                        SELECT content, metadata,
+                               1 - (embedding <=> %s::vector) AS similarity
                           FROM lenin_corpus
                          WHERE {' AND '.join(clauses)}
                          ORDER BY embedding <=> %s::vector
@@ -97,23 +98,16 @@ def similarity_search(
             logger.warning("[shared] similarity_search error: %s", e)
         return []
 
-    docs = [
-        Document(page_content=row.get("content", ""), metadata=row.get("metadata", {}))
-        for row in rows
-        if row.get("content")
-    ]
+    docs = []
+    for row in rows:
+        if not row.get("content"):
+            continue
+        metadata = dict(row.get("metadata") or {})
+        if row.get("similarity") is not None:
+            metadata["similarity"] = round(float(row["similarity"]), 4)
+        docs.append(Document(page_content=row["content"], metadata=metadata))
 
-    if rerank and len(docs) > 2:
-        try:
-            ranked = emb.rerank(query, [d.page_content for d in docs], top_k=k)
-            docs = [docs[idx] for idx, _score in ranked]
-        except Exception as e:
-            logger.warning("[shared] rerank failed, using original order: %s", e)
-            docs = docs[:k]
-    else:
-        docs = docs[:k]
-
-    return docs
+    return docs[:k]
 
 
 # ── Corpus Ingestion (modern_analysis layer) ─────────────────────────

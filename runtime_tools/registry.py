@@ -86,18 +86,20 @@ def _doc_dedupe_key(doc) -> tuple[str, str]:
     return ("content", str(hash(getattr(doc, "page_content", "") or "")))
 
 
-def _rerank_merged_docs(query: str, docs: list, k: int) -> list:
-    if len(docs) <= 2:
-        return docs[:k]
-    try:
-        from corpus.embeddings import _get_exp_embeddings
+def _merge_docs_by_similarity(docs: list, k: int) -> list:
+    """Order docs merged from parallel searches by their cosine similarity.
 
-        emb = _get_exp_embeddings()
-        ranked = emb.rerank(query, [d.page_content for d in docs], top_k=k)
-        return [docs[idx] for idx, _score in ranked]
-    except Exception as e:
-        logger.warning("vector_search merged rerank failed, using merged order: %s", e)
-        return docs[:k]
+    Scores from the original and translated queries live in the same
+    normalized embedding space, so cross-language mismatches (e.g. a Korean
+    query against the English corpus) score low and sink naturally.
+    """
+    def score(doc) -> float:
+        try:
+            return float((getattr(doc, "metadata", {}) or {}).get("similarity") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return sorted(docs, key=score, reverse=True)[:k]
 
 
 _AUTHOR_ALIASES = [
@@ -191,7 +193,6 @@ async def _search_corpus_multilingual(
                 query,
                 k,
                 layer,
-                True,
                 **search_filters,
             )
 
@@ -201,7 +202,6 @@ async def _search_corpus_multilingual(
                 q,
                 k * 2,
                 search_layer,
-                False,
                 **search_filters,
             )
             for _label, q, search_layer in searches
@@ -219,7 +219,7 @@ async def _search_corpus_multilingual(
                     continue
                 seen.add(key)
                 merged.append(doc)
-        return _rerank_merged_docs(query, merged, k)
+        return _merge_docs_by_similarity(merged, k)
 
     docs = await run_with(filters)
     if docs:

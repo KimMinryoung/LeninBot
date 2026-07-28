@@ -169,6 +169,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - KG maintenance: `scripts/check_kg_integrity.py`, `scripts/kg_enricher.py`, `skills/kg-maintenance/scripts/*`
 - Vector corpus ingestion: `scripts/ingest_literature.py` for ad hoc modern analysis drops; ignored one-off helpers under `scripts/ingest_*` may be used for curated reingestion and should call `corpus.store.ingest_to_corpus` with the intended layer.
 - Embedding runtime: `embedding_server.py` exposes BGE-M3 over HTTP. `EMBEDDING_DEVICE=auto` uses CUDA when available and falls back to CPU; set `EMBEDDING_OFFLINE=1` on Windows GPU ingestion hosts with cached Hugging Face models to avoid startup network checks. `EMBEDDING_PRELOAD_RERANKER=0` lets the embedding service start even when the reranker model is not cached.
+- vector_search는 cross-encoder 리랭크를 쓰지 않는다 (2026-07-28 제거): CPU에서 후보 15개 리랭크에 17~40초가 걸려 p50 30초의 원인이었고, 클라이언트 30초 타임아웃으로 결과가 버려지는 경우도 많았다. pgvector 코사인 순서를 그대로 쓰고, 교차언어 병합은 metadata의 `similarity` 점수 내림차순 정렬. 측정: 단일 검색 ~0.2-0.3초, 이중언어 ~0.4초+번역 LLM. 서버의 `/rerank` 엔드포인트는 남아 있으나 미사용.
 
 ## Design Notes
 

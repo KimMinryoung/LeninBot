@@ -31,10 +31,10 @@ async def _assert_vector_translation_fallbacks() -> None:
 
     original_similarity = store.similarity_search
     original_translate = registry._llm_translate_search_query
-    calls: list[tuple[str, int, str | None, bool]] = []
+    calls: list[tuple[str, int, str | None]] = []
 
-    def fake_similarity(query: str, k: int = 5, layer: str | None = None, rerank: bool = False):
-        calls.append((query, k, layer, rerank))
+    def fake_similarity(query: str, k: int = 5, layer: str | None = None):
+        calls.append((query, k, layer))
         return [_Doc(f"result for {query}", f"src-{len(calls)}", 0, layer or "all")]
 
     try:
@@ -46,12 +46,12 @@ async def _assert_vector_translation_fallbacks() -> None:
         registry._llm_translate_search_query = no_translation
         docs = await registry._search_corpus_multilingual("국가와 혁명", 3, "core_theory")
         assert len(docs) == 1
-        assert calls == [("국가와 혁명", 3, "core_theory", True)]
+        assert calls == [("국가와 혁명", 3, "core_theory")]
 
         calls.clear()
         docs = await registry._search_corpus_multilingual("imperialism finance capital", 3, "modern_analysis")
         assert len(docs) == 1
-        assert calls == [("imperialism finance capital", 3, "modern_analysis", True)]
+        assert calls == [("imperialism finance capital", 3, "modern_analysis")]
     finally:
         store.similarity_search = original_similarity
         registry._llm_translate_search_query = original_translate
@@ -63,11 +63,10 @@ async def _assert_vector_translation_parallel_merge() -> None:
 
     original_similarity = store.similarity_search
     original_translate = registry._llm_translate_search_query
-    original_rerank = registry._rerank_merged_docs
-    calls: list[tuple[str, int, str | None, bool]] = []
+    calls: list[tuple[str, int, str | None]] = []
 
-    def fake_similarity(query: str, k: int = 5, layer: str | None = None, rerank: bool = False):
-        calls.append((query, k, layer, rerank))
+    def fake_similarity(query: str, k: int = 5, layer: str | None = None):
+        calls.append((query, k, layer))
         return [
             _Doc(f"shared {query}", "shared-source", 0, layer or "all"),
             _Doc(f"unique {query}", f"src-{query}", 0, layer or "all"),
@@ -79,17 +78,15 @@ async def _assert_vector_translation_parallel_merge() -> None:
     try:
         store.similarity_search = fake_similarity
         registry._llm_translate_search_query = translate
-        registry._rerank_merged_docs = lambda _query, docs, k: docs[:k]
         docs = await registry._search_corpus_multilingual("국가와 혁명", 4, "core_theory")
         assert calls == [
-            ("국가와 혁명", 8, "core_theory", False),
-            ("state and revolution", 8, "core_theory", False),
+            ("국가와 혁명", 8, "core_theory"),
+            ("state and revolution", 8, "core_theory"),
         ]
         assert len(docs) == 3, "shared source+chunk should be deduped"
     finally:
         store.similarity_search = original_similarity
         registry._llm_translate_search_query = original_translate
-        registry._rerank_merged_docs = original_rerank
 
 
 async def _assert_vector_metadata_filter_inference() -> None:
@@ -104,10 +101,9 @@ async def _assert_vector_metadata_filter_inference() -> None:
         query: str,
         k: int = 5,
         layer: str | None = None,
-        rerank: bool = False,
         **filters,
     ):
-        calls.append({"query": query, "k": k, "layer": layer, "rerank": rerank, **filters})
+        calls.append({"query": query, "k": k, "layer": layer, **filters})
         if filters.get("year"):
             return []
         return [_Doc("stalin national question", "stalin-source", 0, layer or "all")]
