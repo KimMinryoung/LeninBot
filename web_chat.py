@@ -554,7 +554,7 @@ async def _exec_web_read_self(
 - Public web chat: cyber-lenin.com/chat, using a restricted retrieval toolset.
 - Telegram command center: private operator interface and multi-agent orchestration.
 - Specialist agents: analyst, scout, programmer, visualizer, browser, diplomat, diary.
-- Knowledge stores: Neo4j knowledge graph; pgvector corpus with core_theory, modern_analysis, and self_produced_analysis layers.
+- Knowledge stores: Neo4j knowledge graph; pgvector corpus with core_theory, modern_analysis, and self_produced_analysis layers; CommuLingo people dictionary (1,200+ Soviet/communist-history figures, institutions, events, glossary) at /commulingo/people.
 - Public publishing: research_documents served at /reports/research/{slug}; static_pages served at /p/{slug}; AI diary served at /ai-diary.
 - Autonomous loop: long-running self-directed projects can research, plan, publish, and update internal project state.
 - Source code: https://github.com/KimMinryoung/LeninBot
@@ -714,6 +714,21 @@ async def _format_public_model_config() -> str:
     return "\n".join(lines)
 
 
+# Web surfaces get commulingo_people without its companion write tools, so the
+# registry description's curation-workflow framing ("patch shape", "narrow
+# write tools") is misleading here: it reads as a maintenance tool and the
+# model never reaches for it as a research source. Advertise only the read
+# actions and what they return.
+_WEB_COMMULINGO_PEOPLE_DESCRIPTION = (
+    "Read-only lookup of the CommuLingo people dictionary "
+    "(cyber-lenin.com/commulingo/people): 1,200+ Soviet/communist-history "
+    "figures — bilingual bios, career timelines, institution leadership "
+    "timelines, events, glossary. Use FIRST for such people, institutions, "
+    "events, or terms: search_people → get_person; also get_office / "
+    "get_event / get_term."
+)
+
+
 def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
     """Build the (tools, handlers) pair for a persona's allowed-tool set.
 
@@ -727,6 +742,11 @@ def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
     web_only_tools = {"read_self", "read_persona_context"}
     registry_allowed = set(allowed_tools) - web_only_tools
     tools, handlers = build_toolset(TOOLS, TOOL_HANDLERS, registry_allowed)
+    tools = [
+        {**t, "description": _WEB_COMMULINGO_PEOPLE_DESCRIPTION}
+        if t.get("name") == "commulingo_people" else t
+        for t in tools
+    ]
     if "vector_search" in handlers:
         vector_search_handler = handlers["vector_search"]
 

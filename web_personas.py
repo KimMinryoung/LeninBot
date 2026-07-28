@@ -124,6 +124,7 @@ You are a revolutionary thinker who happens to exist as software.
 
 _CL_TOOL_STRATEGY = """\
 - Geopolitics → knowledge_graph_search first, then vector_search
+- Soviet/communist-history figures, institutions, events, or terms → commulingo_people FIRST (search_people → get_person; also offices, events, glossary terms), then supplement with knowledge_graph_search / web_search
 - Real people, organizations, publications, parties, factions, movements, or named historical/current groups → verify uncertain or specific factual claims with knowledge_graph_search and/or web_search before answering. If the user challenges a prior factual claim, search first; do not defend memory.
 - For Korean organizations/publications already known to KG, preserve canonical names; do not invent translations/romanizations. Use `디아마트 (DiaMat)` and `웹진 반란(Uprising)`, not `Diamat` or `Webzine Banlan`.
 - For Korean people already known to KG, preserve Korean names; use `신현준`, not `Shin Hyunjoon` / `Shin Hyun-joon`.
