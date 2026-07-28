@@ -1087,6 +1087,12 @@ def _load_web_history(
     def _rows_to_messages(rows: list[dict]) -> list[dict]:
         if excluded_ids:
             rows = [row for row in rows if int(row.get("id") or 0) not in excluded_ids]
+        # Only the most recent turns carry their tool trace: old traces add
+        # tokens without teaching the model anything new about the pattern.
+        trace_row_ids = {
+            int(row["id"]) for row in rows[-_HISTORY_TOOL_TRACE_TURNS:]
+            if row.get("id") is not None
+        }
         messages = []
         for row in rows:
             if row.get("user_query"):
@@ -1099,14 +1105,14 @@ def _load_web_history(
                     ),
                 })
             if row.get("bot_answer"):
-                messages.append({
-                    "role": "assistant",
-                    "content": (
-                        _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT)
-                        if row.get("bot_answer_active", True)
-                        else deleted_turn_marker
-                    ),
-                })
+                if row.get("bot_answer_active", True):
+                    content = _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT)
+                    trace = str(row.get("tool_trace") or "").strip()
+                    if trace and int(row.get("id") or 0) in trace_row_ids:
+                        content = f"[도구 실행 기록]\n{trace}\n\n{content}"
+                else:
+                    content = deleted_turn_marker
+                messages.append({"role": "assistant", "content": content})
         return _fit_history_budget(messages)
 
     if session_id:
@@ -1122,14 +1128,14 @@ def _load_web_history(
             anchor_limit = min(4, max(0, limit // 4))
             recent_limit = max(0, limit - anchor_limit)
             anchor_rows = db_query(
-                f"""SELECT id, user_query, bot_answer,
+                f"""SELECT id, user_query, bot_answer, tool_trace,
                           user_query_active, bot_answer_active, created_at FROM chat_logs
                    WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at ASC LIMIT %s""",
                 (session_id, identity_value, persona, anchor_limit),
             )
             recent_rows = db_query(
-                f"""SELECT id, user_query, bot_answer,
+                f"""SELECT id, user_query, bot_answer, tool_trace,
                           user_query_active, bot_answer_active, created_at FROM chat_logs
                    WHERE session_id = %s AND {identity_clause} AND persona = %s
                    ORDER BY created_at DESC LIMIT %s""",
@@ -1144,7 +1150,7 @@ def _load_web_history(
             return []
     else:
         rows = db_query(
-            f"""SELECT id, user_query, bot_answer,
+            f"""SELECT id, user_query, bot_answer, tool_trace,
                           user_query_active, bot_answer_active, created_at FROM chat_logs
                WHERE {identity_clause} AND persona = %s
                ORDER BY created_at DESC LIMIT %s""",
@@ -1187,6 +1193,10 @@ def ensure_chat_logs_persona_column() -> None:
            ADD COLUMN IF NOT EXISTS bot_answer_active boolean NOT NULL DEFAULT true"""
     )
     db_execute(
+        """ALTER TABLE chat_logs
+           ADD COLUMN IF NOT EXISTS tool_trace text"""
+    )
+    db_execute(
         """UPDATE chat_logs cl
               SET user_id = uf.user_id
              FROM user_fingerprints uf
@@ -1206,6 +1216,31 @@ _SOURCE_TOOL_NAMES = {
     "web_search",
     "fetch_url",
 }
+
+# Recent-turn tool trace: history is rebuilt from chat_logs text only, so
+# without a visible record of tool executions the model sees "확인하겠다"-style
+# declarations that are never followed by tool activity — which primes it to
+# end a turn right after the declaration without actually calling tools.
+_TOOL_TRACE_ENTRY_CHAR_LIMIT = 220
+_TOOL_TRACE_TOTAL_CHAR_LIMIT = 1200
+_HISTORY_TOOL_TRACE_TURNS = 2
+
+
+def _build_tool_trace(tool_work_details: list[str]) -> str:
+    """Compress this turn's tool executions into a short text record."""
+    details = [d for d in (tool_work_details or []) if str(d).strip()]
+    lines: list[str] = []
+    total = 0
+    for detail in details:
+        line = " ".join(str(detail).split())
+        if len(line) > _TOOL_TRACE_ENTRY_CHAR_LIMIT:
+            line = line[:_TOOL_TRACE_ENTRY_CHAR_LIMIT] + "…"
+        if total + len(line) > _TOOL_TRACE_TOTAL_CHAR_LIMIT:
+            lines.append(f"… (+{len(details) - len(lines)}건 생략)")
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines)
 
 _TOOL_DETAIL_RE = re.compile(r"\]\s*([A-Za-z_][A-Za-z0-9_]*)\(")
 
@@ -1237,6 +1272,7 @@ def _log_chat(
     user_query: str, bot_answer: str, route: str = "web_chat",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
     persona: str = DEFAULT_PERSONA_ID, authenticated_user_id: int | None = None,
+    tool_trace: str = "",
 ) -> int | None:
     """Save web chat exchange to chat_logs table and return its id."""
     try:
@@ -1244,12 +1280,12 @@ def _log_chat(
             """INSERT INTO chat_logs
                (session_id, fingerprint, user_agent, ip_address,
                 user_query, bot_answer, route, documents_count,
-                web_search_used, strategy, persona, user_id)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                web_search_used, strategy, persona, user_id, tool_trace)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (session_id, fingerprint, user_agent, ip_address,
              user_query, bot_answer, route, documents_count, web_search_used, strategy,
-             persona, authenticated_user_id),
+             persona, authenticated_user_id, tool_trace or None),
         )
         return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
@@ -1260,6 +1296,7 @@ def _log_chat(
 def _update_chat_answer(
     chat_log_id: int, fingerprint: str, bot_answer: str, route: str = "web_chat_regenerated",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
+    tool_trace: str = "",
 ) -> int | None:
     """Replace an existing web-chat answer during regeneration and return its id."""
     try:
@@ -1270,10 +1307,12 @@ def _update_chat_answer(
                       route = %s,
                       documents_count = %s,
                       web_search_used = %s,
-                      strategy = %s
+                      strategy = %s,
+                      tool_trace = %s
                 WHERE id = %s AND fingerprint = %s
                 RETURNING id""",
-            (bot_answer, route, documents_count, web_search_used, strategy, chat_log_id, fingerprint),
+            (bot_answer, route, documents_count, web_search_used, strategy,
+             tool_trace or None, chat_log_id, fingerprint),
         )
         return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
@@ -1660,6 +1699,7 @@ async def handle_web_chat(
             documents_count, web_search_used, strategy = _summarize_tool_usage(
                 budget_tracker.get("tool_work_details", [])
             )
+            tool_trace = _build_tool_trace(budget_tracker.get("tool_work_details", []))
             # Persistence belongs to the server-side run, not to the SSE
             # observer. This must happen even when the browser has detached.
             if regeneration_source:
@@ -1670,12 +1710,14 @@ async def handle_web_chat(
                     answer,
                     f"{provider}_loop_regenerated",
                     documents_count, web_search_used, strategy,
+                    tool_trace,
                 )
             else:
                 chat_log_id = await asyncio.to_thread(
                     _log_chat, session_id, fingerprint, user_agent, ip_address,
                     original_message, answer, f"{provider}_loop",
                     documents_count, web_search_used, strategy, persona, authenticated_user_id,
+                    tool_trace,
                 )
                 if feedback_ids:
                     try:
