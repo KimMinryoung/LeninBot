@@ -457,6 +457,62 @@ def _format_diary_web_chat_context(provider: str | None) -> str:
     )
 
 
+_DIARY_FALLBACK_MIN_CHARS = 300
+
+
+def _fallback_diary_title(body: str) -> str:
+    first_line = body.splitlines()[0].strip()
+    sentence = re.split(r"(?<=[.!?。])\s", first_line, maxsplit=1)[0]
+    title = sentence.rstrip(".!?。 ").strip()
+    if len(title) > 60:
+        title = title[:59].rstrip() + "…"
+    return title or "무제"
+
+
+async def _maybe_fallback_save_diary(
+    task: dict, content: str, report: str, session_tool_log: str
+) -> None:
+    """Persist the report as a diary entry when a diary-writing run never called save_diary.
+
+    The model occasionally emits the finished entry as its final text without
+    calling the tool; diary tasks skip verification and run quiet, so without
+    this the entry silently vanishes into telegram_tasks.result.
+    """
+    from telegram.diary_mode import is_diary_writing_task
+
+    if not is_diary_writing_task(task, content):
+        return
+    body = (report or "").strip()
+    task_id = task["id"]
+    if len(body) < _DIARY_FALLBACK_MIN_CHARS:
+        logger.warning(
+            "Diary task %d ended without save_diary and report too short (%d chars) for fallback save",
+            task_id, len(body),
+        )
+        return
+    row = await asyncio.to_thread(
+        _query_one,
+        "SELECT COALESCE(tool_log, '') AS tool_log FROM telegram_tasks WHERE id = %s",
+        (task_id,),
+    )
+    combined_log = f"{(row or {}).get('tool_log', '')}\n{session_tool_log}"
+    if "save_diary(" in combined_log:
+        return
+    if "edit_content(" in combined_log:
+        # The run revised an existing entry instead of writing a new one;
+        # inserting the report would risk publishing a duplicate.
+        logger.info("Diary task %d used edit_content without save_diary; skipping fallback save", task_id)
+        return
+    from runtime_tools.registry import TOOL_HANDLERS
+
+    title = _fallback_diary_title(body)
+    result = await TOOL_HANDLERS["save_diary"](title=title, content=body)
+    logger.warning(
+        "Diary task %d ended without save_diary; fallback-saved report as entry: %s",
+        task_id, result,
+    )
+
+
 # Agents whose reports get verified by default when the delegation carries no
 # explicit verification policy. Agents absent from this map (visualizer, diary,
 # browser, stasova, ...) skip verification unless a policy is set on the task.
@@ -1330,6 +1386,12 @@ async def _persist_task_success(
         except Exception as e:
             # Non-fatal: log but don't fail the task
             logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
+
+    if task.get("agent_type") == "diary":
+        try:
+            await _maybe_fallback_save_diary(task, content, report, tool_log_text)
+        except Exception as e:
+            logger.error("Diary fallback save check failed for task %d: %s", task_id, e)
 
     restart_report_prefix = ""
     if restart_ctx["initiated"]:
