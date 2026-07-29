@@ -89,11 +89,15 @@
 
 1. **메인 DB 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 전체 덤프 177MB라 테이블 분리 불필요 (비대화 제거 후 작아짐). 1회 실행·R2 업로드 검증.
    - **restore drill 통과** (임시 DB 복원→17,046행+HNSW 인덱스 확인→드롭). 드릴이 결함 발견: Docker 기본 `/dev/shm` 64MB로는 병렬 HNSW 인덱스 빌드 실패 → compose에 `shm_size: 1g` 추가로 해결. 프리로드 때 안 걸린 이유: 빈 테이블에 인덱스 생성 후 COPY라 대량 빌드가 없었음.
+   - **2026-07-29 DRI 재검증 통과**: R2에서 당일 main/writer 객체를 실제 재다운로드해 로컬 사본과 SHA-256·바이트 동일성을 확인한 뒤, 격리된 `pgvector/pgvector:pg17` 컨테이너에 둘 다 복원. main 73테이블·200,692행·162 인덱스·47 시퀀스, writer 7테이블·1,225행·16 인덱스·5 시퀀스를 검증했고 invalid/unready 인덱스와 뒤처진 시퀀스는 0건. `lenin_corpus` 17,046행과 HNSW 벡터 질의, writer 본문 8개·441,491자도 확인. 측정 복원 시간은 main 8.3초, writer 9.3초였으며 운영 Postgres restart 0·관련 API health 200으로 무영향 확인.
    - 유닛 파일은 `systemd/`에 추적 (sudoers가 `cp systemd/* /etc/systemd/system/`만 NOPASSWD 허용).
    - 참고: R2에 `main-db-backup-2026-07-20.dump`라는 과거 객체가 있었음 (구 백업 규칙 잔재로 추정) — 롤링 삭제에 걸려 제거됨.
 2. **백업 VM 셋업**: WireGuard(또는 Tailscale)로 사설 터널 → 스트리밍 레플리카 구성 (physical replication slot, `wal_keep_size` 설정).
 3. **pgBackRest**: 백업 VM을 리포로, WAL 아카이빙 + 주1 full/일1 incr → **PITR** 확보. (대안: 리포를 R2로 직접 — VM 디스크 절약, 복원 속도는 느림.)
-4. restore drill 스크립트 작성 (restore_kg.py 패턴).
+4. **Postgres 복구/드릴 스크립트** ✅ (2026-07-29): `scripts/restore_db.py`.
+   - 기본 안전 경로: `venv/bin/python scripts/restore_db.py drill` — 최신 로컬 main/writer 백업을 선택해 `shm_size=1g`인 일회용 Postgres 17 컨테이너를 만들고, TOC 확인→복원→전체 테이블 정확 행수·인덱스·시퀀스·HNSW·writer 소유권/본문 검증 후 컨테이너를 제거한다. `--scope`, `--main-backup`, `--writer-backup`, `--keep-container` 지원.
+   - 실제 복구: 실행 중인 별도 대상 컨테이너에 `restore --target-container <name> --confirm RECREATE_DATABASES`. 선택한 DB를 drop/create하므로 모든 DB client를 먼저 중지해야 하며, 활성 연결이 남아 있으면 거부한다. writer 역할 암호는 기존 `secrets_loader`의 `WRITER_DB_PASSWORD`를 사용하고, 복구 호스트에 `.env`/credential이 없으면 권한 0600인 `--writer-password-file`을 명시한다. main 복원은 `frontend` 로그인 역할과 DB CONNECT·schema USAGE·전체 table/sequence·default privileges도 재구성한다. 새 컨테이너에는 `FRONTEND_DB_PASSWORD` 또는 frontend `.env`의 기존 암호만 담은 0600 `--frontend-password-file`이 필요하다.
+   - 운영 컨테이너 `leninbot-pg`는 `--force-production --confirm RECREATE_LENINBOT_PRODUCTION`을 동시에 주지 않으면 거부한다. 스크립트는 복구 전에 archive TOC, Postgres major version(17), 컨테이너 `/dev/shm` 1GiB 이상을 먼저 확인한다.
 5. 안정화 후 1의 일일 dump는 유지(3차 방어) 또는 주기 완화.
 
 ### 컷오버 후 장애 기록 (2026-07-28): frontend 전 콘텐츠 미표시
