@@ -54,7 +54,7 @@ Content rules:
   history_event_person relation when applicable. Otherwise create one focused person_section.
 - A history_event_person `note` is a caption under the person's name on the event page, not
   a mini-biography: one sentence, two at most, stating what the person did in the event.
-  160 Korean / 360 English characters is the limit the save enforces. Keep the `relation`
+  90 Korean / 200 English characters is the limit the save enforces. Keep the `relation`
   label itself a short role tag (차르, 초대 총리); explanation belongs in the note or a
   person_section, never in the label.
 - `career`, `aliases`, and `scenes` replace the whole stored list. If changing one of them,
