@@ -52,6 +52,11 @@ Content rules:
 - Existing-person work should fill a clearly missing basic card field first. For a complete card
   with no linked historical events, inspect list_events and create one well-supported
   history_event_person relation when applicable. Otherwise create one focused person_section.
+- A history_event_person `note` is a caption under the person's name on the event page, not
+  a mini-biography: one sentence, two at most, stating what the person did in the event.
+  160 Korean / 360 English characters is the limit the save enforces. Keep the `relation`
+  label itself a short role tag (차르, 초대 총리); explanation belongs in the note or a
+  person_section, never in the label.
 - `career`, `aliases`, and `scenes` replace the whole stored list. If changing one of them,
   preserve every existing entry and send the complete new list.
 - `fate.label` is a compact card badge, not a second biography: at most 12 Korean

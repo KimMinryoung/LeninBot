@@ -1972,6 +1972,13 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             value = patch.get(key)
             if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
                 return f"Error: {key}.ko and {key}.en are required."
+        note = patch["note"]
+        if len(note.get("ko") or "") > 160 or len(note.get("en") or "") > 360:
+            return (
+                "Error: note is too long; limits are 160 Korean characters and "
+                "360 English characters. The note is a one-or-two-sentence caption "
+                "under the person on the event page — move depth to a person_section."
+            )
         # Every other target treats a non-int sortOrder as "append"; this one used
         # to reject null outright, so the same patch shape passed for a person and
         # failed for an event link.
@@ -2550,6 +2557,17 @@ _MOMENT_SCHEMA = {
                    "en": {"type": "string", "maxLength": 300}},
 }
 
+_EVENT_NOTE_SCHEMA = {
+    **_BILINGUAL_TEXT_SCHEMA,
+    "description": (
+        _CEILING.format(ko=160, en=360)
+        + " The note is a caption under the person's name on the event page:"
+          " one sentence, two at most, stating what the person did in the event."
+    ),
+    "properties": {"ko": {"type": "string", "maxLength": 160},
+                   "en": {"type": "string", "maxLength": 360}},
+}
+
 # Fate label = cause of death only, NO death year (it renders from `years`).
 # Execution → 처형/Executed; vague natural death → 자연사/Natural causes; keep a
 # specific illness word (심장마비/폐암…); place with " · " (암살 · 멕시코). A
@@ -3030,7 +3048,7 @@ COMMULINGO_EVENT_LINK_TOOL = {
             "person_id": {"type": "string"},
             "relation_kind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
             "relation": _BILINGUAL_TEXT_SCHEMA,
-            "note": _BILINGUAL_TEXT_SCHEMA,
+            "note": _EVENT_NOTE_SCHEMA,
             "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
             "citations": _CITATIONS_SCHEMA,
         },
