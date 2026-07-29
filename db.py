@@ -3,6 +3,9 @@
 Both the main `leninbot` DB and the `writer` DB live in the local
 leninbot-pg Docker container (pgvector/pg17, 127.0.0.1:5434); see
 dev_docs/db_migration_plan.md.
+
+Write guard: processes outside a systemd service get read-only
+connections to production databases (see _writes_allowed).
 """
 
 import os
@@ -10,6 +13,7 @@ import json
 from contextlib import contextmanager
 
 import psycopg2
+from psycopg2 import errors as pg_errors
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 
@@ -25,6 +29,32 @@ def _application_name() -> str:
 
 def _pool_maxconn() -> int:
     return int(os.getenv("DB_POOL_MAX", "10"))
+
+
+_WRITE_GUARD_MSG = (
+    "DB write blocked by read-only guard: this process is not running as a "
+    "systemd service, so production writes are disabled by default. Point "
+    "tests at the test clone (DB_NAME=leninbot_test / WRITER_DB_NAME="
+    "writer_test; refresh with scripts/refresh_test_db.sh), or set "
+    "LENINBOT_ALLOW_WRITE=1 for an explicitly approved production write."
+)
+
+
+def _writes_allowed(dbname: str | None) -> bool:
+    """Production writes are reserved for service processes.
+
+    systemd sets INVOCATION_ID for every unit it spawns (inherited by child
+    processes), so services and their subprocesses pass automatically.
+    LENINBOT_SERVICE=1 marks non-systemd service contexts explicitly;
+    LENINBOT_ALLOW_WRITE=1 is the ad-hoc opt-in for approved production
+    writes. Databases named *_test are not production and stay writable.
+    Blocked writes surface as RuntimeError(_WRITE_GUARD_MSG).
+    """
+    if os.getenv("INVOCATION_ID") or os.getenv("LENINBOT_SERVICE") == "1":
+        return True
+    if os.getenv("LENINBOT_ALLOW_WRITE") == "1":
+        return True
+    return bool(dbname) and dbname.endswith("_test")
 
 
 def _tag_conn(conn) -> None:
@@ -65,6 +95,7 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             password=password,
             sslmode=os.getenv("DB_SSL", "prefer"),
             application_name=_application_name(),
+            options=None if _writes_allowed(dbname) else "-c default_transaction_read_only=on",
         )
     return _pool
 
@@ -80,16 +111,18 @@ def _get_writer_pool() -> pool.ThreadedConnectionPool:
     """
     global _writer_pool
     if _writer_pool is None:
+        writer_dbname = os.getenv("WRITER_DB_NAME", "writer")
         _writer_pool = pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=int(os.getenv("WRITER_DB_POOL_MAX", "5")),
             host=os.getenv("WRITER_DB_HOST"),
             port=int(os.getenv("WRITER_DB_PORT", "5432")),
-            dbname=os.getenv("WRITER_DB_NAME", "writer"),
+            dbname=writer_dbname,
             user=os.getenv("WRITER_DB_USER", "writer"),
             password=get_secret("WRITER_DB_PASSWORD"),
             sslmode=os.getenv("WRITER_DB_SSLMODE", "disable"),
             application_name=_application_name(),
+            options=None if _writes_allowed(writer_dbname) else "-c default_transaction_read_only=on",
         )
     return _writer_pool
 
@@ -136,6 +169,12 @@ def _conn_from_pool(p: pool.ThreadedConnectionPool):
                 _tag_conn(conn)
         yield conn
         conn.commit()
+    except pg_errors.ReadOnlySqlTransaction as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise RuntimeError(_WRITE_GUARD_MSG) from exc
     except Exception:
         try:
             conn.rollback()

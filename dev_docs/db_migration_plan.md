@@ -113,6 +113,16 @@ Supabase pause 완료: 2026-07-28 (사용자 실행). pause 후 ~6시간 시점 
 
 2주 병행 관찰 후 (~2026-08-11): Supabase 최종 스냅샷을 R2에 보관 → 프로젝트 삭제. 그때 함께: `.env.bak-supabase-cutover` 삭제, `leninbot_writer_pg_data` 볼륨 삭제, `dev_docs/project_state.md`·`secret_management.md` 갱신.
 
+## 쓰기 가드 + 테스트 DB (2026-07-29)
+
+ad-hoc 스크립트(테스트, 일회성 CLI)가 프로덕션 DB에 실수로 쓰는 것을 막는 가드레일. 배경: 2026-07-28 tool_trace 테스트 스크립트가 프로덕션 `chat_logs`에 테스트 행 3개를 삽입·삭제(id 2660~2662 공백).
+
+- **메커니즘**: `db.py`가 풀 생성 시 서비스 컨텍스트가 아니면 커넥션을 `default_transaction_read_only=on`으로 내림. 헬퍼 우회(`get_conn()` 직접 사용) 경로까지 Postgres 레벨에서 차단됨. 차단 시 `RuntimeError`로 안내 메시지 표출.
+- **쓰기 허용 조건** (`_writes_allowed`): ① systemd 서비스(`INVOCATION_ID` 자동 주입, 자식 프로세스 상속) ② `LENINBOT_SERVICE=1` (비-systemd 서비스 컨텍스트 명시용) ③ `LENINBOT_ALLOW_WRITE=1` (승인된 프로덕션 쓰기 opt-in) ④ DB 이름이 `*_test`.
+- **테스트 DB**: `leninbot_test`·`writer_test` (같은 leninbot-pg, 스키마 전용 클론). 테스트는 `DB_NAME=leninbot_test` / `WRITER_DB_NAME=writer_test`만 지정하면 됨. 갱신: `scripts/refresh_test_db.sh` (drop→create→schema-only dump 재적재).
+- **한계**: 사고 방지용이며 보안 경계 아님 — `docker exec … psql -U postgres` 직접 경로는 막지 않음. `.env`에 플래그를 넣으면 안 됨(`secrets_loader`의 `load_dotenv()`로 ad-hoc도 물려받아 가드 무력화).
+- 서비스는 재시작 시점부터 신규 코드 적용 — `INVOCATION_ID` 조건으로 유닛 파일 수정 없이 자동 통과. cron `metrics_collector.py`는 DB 미사용이라 무관.
+
 ## 미결 사항 (사용자 결정 필요)
 
 1. **백업 VM**: 어느 프로바이더/스펙으로 발급할지 (권장 2vCPU/4GB/50GB). Phase 4 전까지만 결정하면 됨 — Phase 0~3은 블로킹 없음.
