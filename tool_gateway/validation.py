@@ -77,7 +77,20 @@ def _apply_top_level_defaults(args: dict, schema: dict) -> dict:
 def _format_jsonschema_error(error) -> str:
     path = ".".join(str(part) for part in error.absolute_path)
     location = f" at '{path}'" if path else ""
-    return f"{error.message}{location}"
+    # jsonschema's maxLength message echoes the whole offending value, which
+    # for a card bio is the entire paragraph — the model then re-counts by
+    # hand. State the counts instead so one retry can trim precisely.
+    if error.validator == "maxLength" and isinstance(error.instance, str):
+        limit = int(error.validator_value)
+        length = len(error.instance)
+        return (
+            f"value is {length} characters, {length - limit} over the "
+            f"{limit}-character limit{location}"
+        )
+    message = error.message
+    if len(message) > 300:
+        message = message[:300] + "… [truncated]"
+    return f"{message}{location}"
 
 
 def _validate_url(key: str, value: Any) -> None:

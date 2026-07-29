@@ -34,8 +34,10 @@ Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
   literal machine translation; English must carry the same claims.
 - `epithet` is one compact characterization: at most 60 Korean characters and 140 English
-  characters. `bio` is written to a sentence count the commissioned task states — up to 6
-  sentences for a major figure, 2–4 for a standard one, 1–2 for a minor one. Those are
+  characters. `bio` is written to a sentence count the commissioned task states — 4–5
+  sentences for a major figure (a 6th only when every sentence stays short; six full
+  sentences usually overflow the Korean ceiling), 2–4 for a standard one, 1–2 for a minor
+  one. Those are
   ceilings, not quotas: write what the sources support and stop. Never count characters to
   hit a target; 380 Korean / 900 English characters is only the limit the save enforces.
   Do not turn career rows into prose; use bio for background, defining work, and one

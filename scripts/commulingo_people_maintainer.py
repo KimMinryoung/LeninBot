@@ -161,7 +161,10 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
 # 128-170 -> 4. It had no hard ceiling at all, which is how 308-character moments got in.
 MAJOR_PROMINENCE = 4
 MINOR_PROMINENCE_MAX = 1
-MAJOR_BIO_SENTENCES = "up to 6 sentences"
+MAJOR_BIO_SENTENCES = (
+    "4-5 sentences (a 6th only when every sentence stays short — six full "
+    "sentences usually overflow the 380-character Korean ceiling)"
+)
 STANDARD_BIO_SENTENCES = "2-4 sentences"
 MINOR_BIO_SENTENCES = "1-2 sentences"
 MOMENT_SENTENCES = "one sentence, two at most"

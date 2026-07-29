@@ -1744,10 +1744,13 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             value = patch.get(key)
             if not isinstance(value, dict):
                 continue
-            if len(value.get("ko") or "") > ko_max or len(value.get("en") or "") > en_max:
+            ko_len = len(value.get("ko") or "")
+            en_len = len(value.get("en") or "")
+            if ko_len > ko_max or en_len > en_max:
                 return (
-                    f"Error: {key} is too long; limits are {ko_max} Korean characters "
-                    f"and {en_max} English characters. {overflow}"
+                    f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+                    f"characters). Cut the stated overflow; do not redraft from scratch. "
+                    f"{overflow}"
                 )
         for key in ("citizenship", "origin"):
             if key not in patch or patch[key] is None:
@@ -1796,8 +1799,8 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             if (len(label.get("ko") or "") > 22
                     or len(label.get("en") or "") > 50):
                 return (
-                    "Error: fate.label is too long; limits are 22 Korean characters "
-                    "and 50 English characters. Write the cause of death only, WITHOUT "
+                    f"Error: fate.label is too long (ko {len(label.get('ko') or '')}/22, "
+                    f"en {len(label.get('en') or '')}/50 characters). Write the cause of death only, WITHOUT "
                     "the death year (it renders from `years`): 처형/Executed, 자연사/"
                     "Natural causes, a specific illness (심장마비/Heart attack), place "
                     "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
@@ -1975,9 +1978,10 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         note = patch["note"]
         if len(note.get("ko") or "") > 90 or len(note.get("en") or "") > 200:
             return (
-                "Error: note is too long; limits are 90 Korean characters and "
-                "200 English characters. The note is a one-or-two-sentence caption "
-                "under the person on the event page — move depth to a person_section."
+                f"Error: note is too long (ko {len(note.get('ko') or '')}/90, "
+                f"en {len(note.get('en') or '')}/200 characters). The note is a "
+                "one-or-two-sentence caption under the person on the event page — "
+                "move depth to a person_section."
             )
         # Every other target treats a non-int sortOrder as "append"; this one used
         # to reject null outright, so the same patch shape passed for a person and
@@ -2030,8 +2034,9 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         if isinstance(definition, dict):
             if len(definition.get("ko") or "") > 400 or len(definition.get("en") or "") > 900:
                 return (
-                    "Error: definition is too long; limits are 400 Korean characters and "
-                    "900 English characters. It is the card paragraph — move depth to body (markdown)."
+                    f"Error: definition is too long (ko {len(definition.get('ko') or '')}/400, "
+                    f"en {len(definition.get('en') or '')}/900 characters). It is the card "
+                    "paragraph — move depth to body (markdown)."
                 )
         if "aliases" in patch and patch["aliases"] is not None:
             aliases = patch["aliases"]
@@ -2677,8 +2682,26 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "null detaches an entry."
             ),
         },
-        "definition": _BILINGUAL_TEXT_SCHEMA,
-        "body": _BILINGUAL_TEXT_SCHEMA,
+        "definition": {
+            **_BILINGUAL_TEXT_SCHEMA,
+            "description": (
+                _CEILING.format(ko=400, en=900)
+                + " term: the card paragraph (2-3 sentences); depth goes to body (markdown)."
+            ),
+            "properties": {"ko": {"type": "string", "maxLength": 400},
+                           "en": {"type": "string", "maxLength": 900}},
+        },
+        # Terms accept null at the write boundary to mean "clear the body"; the
+        # schema declaring only "object" made the model discover that by failing
+        # (`None is not of type 'object' at 'fields.body'`).
+        "body": {
+            **_BILINGUAL_TEXT_SCHEMA,
+            "type": ["object", "null"],
+            "description": (
+                "Bilingual markdown body. Omit the key to keep the stored value; "
+                "for terms, null clears it."
+            ),
+        },
         "people": {"type": "array", "items": {"type": "string"}, "description": "term: related person ids."},
         "events": {"type": "array", "items": {"type": "string"}, "description": "term: related history event ids."},
         "aliases": {
@@ -2726,7 +2749,8 @@ _COMMULINGO_FIELD_SCHEMA = {
         "scenes": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
         "slug": {"type": "string"},
         "heading": _BILINGUAL_TEXT_SCHEMA,
-        "body": _BILINGUAL_TEXT_SCHEMA,
+        # 'body' is defined once above (nullable, for terms and sections) — a
+        # second bare entry here would silently override it, like 'period' once did.
         "sources": {"type": "array", "items": {"type": "string"}},
         # 'period' is defined once above, for terms. A second bare
         # {"type": "string"} entry used to sit here and, being later in the same
