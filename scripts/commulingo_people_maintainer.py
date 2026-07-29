@@ -30,7 +30,7 @@ from agents import get_agent
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one
-from runtime_tools.commulingo_people import _dedup_key
+from runtime_tools.commulingo_people import FIELD_LIMITS, _dedup_key
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.security import CallerContext, caller_scope
 
@@ -161,16 +161,18 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
 # 128-170 -> 4. It had no hard ceiling at all, which is how 308-character moments got in.
 MAJOR_PROMINENCE = 4
 MINOR_PROMINENCE_MAX = 1
+# Hard ceilings: refuse past here, do not write toward here. Sourced from the
+# same FIELD_LIMITS table that generates the tool schemas and save checks —
+# never restate these numbers locally.
+BIO_HARD_CEILING = FIELD_LIMITS["bio"][0]
+MOMENT_HARD_CEILING = FIELD_LIMITS["moment"][0]
 MAJOR_BIO_SENTENCES = (
     "4-5 sentences (a 6th only when every sentence stays short — six full "
-    "sentences usually overflow the 380-character Korean ceiling)"
+    f"sentences usually overflow the {BIO_HARD_CEILING}-character Korean ceiling)"
 )
 STANDARD_BIO_SENTENCES = "2-4 sentences"
 MINOR_BIO_SENTENCES = "1-2 sentences"
 MOMENT_SENTENCES = "one sentence, two at most"
-# Hard ceilings: refuse past here, do not write toward here.
-BIO_HARD_CEILING = 380
-MOMENT_HARD_CEILING = 140
 # Stub detection for candidate selection: a bio shorter than this for the tier reads as
 # unfinished and moves the card up the enrich queue. Never shown to the curator.
 MAJOR_BIO_STUB = 100

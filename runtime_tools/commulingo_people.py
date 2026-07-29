@@ -1735,11 +1735,11 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         # `moment` had no limit at all, which is how 308-character moments reached the
         # card. These ceilings exist to refuse an overflowing field, not to be written
         # toward — length is prescribed to the curator as a sentence count.
-        for key, ko_max, en_max, overflow in (
-            ("epithet", 60, 140, "Keep career chronology in career rows."),
-            ("bio", 380, 900, "Keep career chronology in career rows."),
-            ("moment", 140, 300, "A moment is one sentence, two at most — "
-                                 "pick a sharper scene instead of explaining this one."),
+        for key, (ko_max, en_max), overflow in (
+            ("epithet", FIELD_LIMITS["epithet"], "Keep career chronology in career rows."),
+            ("bio", FIELD_LIMITS["bio"], "Keep career chronology in career rows."),
+            ("moment", FIELD_LIMITS["moment"], "A moment is one sentence, two at most — "
+                                               "pick a sharper scene instead of explaining this one."),
         ):
             value = patch.get(key)
             if not isinstance(value, dict):
@@ -1796,11 +1796,12 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             if fate.get("label") is not None and not isinstance(fate["label"], dict):
                 return "Error: fate.label must be {\"ko\": \"처형\", \"en\": \"Executed\"}."
             label = fate.get("label") or {}
-            if (len(label.get("ko") or "") > 22
-                    or len(label.get("en") or "") > 50):
+            fl_ko, fl_en = FIELD_LIMITS["fate_label"]
+            if (len(label.get("ko") or "") > fl_ko
+                    or len(label.get("en") or "") > fl_en):
                 return (
-                    f"Error: fate.label is too long (ko {len(label.get('ko') or '')}/22, "
-                    f"en {len(label.get('en') or '')}/50 characters). Write the cause of death only, WITHOUT "
+                    f"Error: fate.label is too long (ko {len(label.get('ko') or '')}/{fl_ko}, "
+                    f"en {len(label.get('en') or '')}/{fl_en} characters). Write the cause of death only, WITHOUT "
                     "the death year (it renders from `years`): 처형/Executed, 자연사/"
                     "Natural causes, a specific illness (심장마비/Heart attack), place "
                     "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
@@ -1976,10 +1977,11 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
                 return f"Error: {key}.ko and {key}.en are required."
         note = patch["note"]
-        if len(note.get("ko") or "") > 90 or len(note.get("en") or "") > 200:
+        nt_ko, nt_en = FIELD_LIMITS["event_note"]
+        if len(note.get("ko") or "") > nt_ko or len(note.get("en") or "") > nt_en:
             return (
-                f"Error: note is too long (ko {len(note.get('ko') or '')}/90, "
-                f"en {len(note.get('en') or '')}/200 characters). The note is a "
+                f"Error: note is too long (ko {len(note.get('ko') or '')}/{nt_ko}, "
+                f"en {len(note.get('en') or '')}/{nt_en} characters). The note is a "
                 "one-or-two-sentence caption under the person on the event page — "
                 "move depth to a person_section."
             )
@@ -2032,10 +2034,11 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 )
         definition = patch.get("definition")
         if isinstance(definition, dict):
-            if len(definition.get("ko") or "") > 400 or len(definition.get("en") or "") > 900:
+            df_ko, df_en = FIELD_LIMITS["definition"]
+            if len(definition.get("ko") or "") > df_ko or len(definition.get("en") or "") > df_en:
                 return (
-                    f"Error: definition is too long (ko {len(definition.get('ko') or '')}/400, "
-                    f"en {len(definition.get('en') or '')}/900 characters). It is the card "
+                    f"Error: definition is too long (ko {len(definition.get('ko') or '')}/{df_ko}, "
+                    f"en {len(definition.get('en') or '')}/{df_en} characters). It is the card "
                     "paragraph — move depth to body (markdown)."
                 )
         if "aliases" in patch and patch["aliases"] is not None:
@@ -2525,53 +2528,59 @@ _BILINGUAL_TEXT_SCHEMA = {
     "required": ["ko", "en"],
 }
 
-# The ceilings below are stated in each description because a bare maxLength
-# only reports itself as "'…' is too long at 'fields.bio.ko'" after the call is
-# already spent — 107 of the 625 rejected person_create calls were that error.
+# Single source of truth for bilingual text ceilings, as {field: (ko, en)}.
+# The tool schemas (maxLength + description), the save-time _validate checks,
+# and the lane/agent prompts (which import this table) are all generated from
+# here — never write one of these numbers anywhere else. The curator prompt
+# quoting one ceiling while the save enforced another is exactly how runs got
+# spent redrafting cards that were already written.
+FIELD_LIMITS: dict[str, tuple[int, int]] = {
+    "epithet": (60, 140),
+    "bio": (380, 900),
+    "moment": (140, 300),
+    "fate_label": (22, 50),
+    "event_note": (90, 200),
+    "definition": (400, 900),
+}
+
+# The ceilings are stated in each description because a bare maxLength
+# only reports itself after the call is already spent — 107 of the 625
+# rejected person_create calls were that error.
 # They are refusal boundaries, NOT targets: length is prescribed to the writer
 # as a sentence count (see CARD_STYLE_GUIDANCE), because a character band
 # produces padded or truncated Korean. Say the ceiling, never ask for it.
 _CEILING = "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed sentence count, not to this number."
 
-_EPITHET_SCHEMA = {
-    **_BILINGUAL_TEXT_SCHEMA,
-    "description": _CEILING.format(ko=60, en=140),
-    "properties": {"ko": {"type": "string", "maxLength": 60},
-                   "en": {"type": "string", "maxLength": 140}},
-}
 
-_BIO_SCHEMA = {
-    **_BILINGUAL_TEXT_SCHEMA,
-    "description": (
-        _CEILING.format(ko=380, en=900)
-        + " Minor and standard cards are held to a tighter limit at save time"
-          " (320/750 and below); keep career chronology in career rows, not the bio."
-    ),
-    "properties": {"ko": {"type": "string", "maxLength": 380},
-                   "en": {"type": "string", "maxLength": 900}},
-}
+def _capped_bilingual_schema(field: str, extra: str = "") -> dict:
+    ko_max, en_max = FIELD_LIMITS[field]
+    return {
+        **_BILINGUAL_TEXT_SCHEMA,
+        "description": _CEILING.format(ko=ko_max, en=en_max) + extra,
+        "properties": {"ko": {"type": "string", "maxLength": ko_max},
+                       "en": {"type": "string", "maxLength": en_max}},
+    }
 
-_MOMENT_SCHEMA = {
-    **_BILINGUAL_TEXT_SCHEMA,
-    "description": (
-        _CEILING.format(ko=140, en=300)
-        + " This is the pull-quote on the person LIST card, so it is budgeted in"
-          " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3."
-    ),
-    "properties": {"ko": {"type": "string", "maxLength": 140},
-                   "en": {"type": "string", "maxLength": 300}},
-}
 
-_EVENT_NOTE_SCHEMA = {
-    **_BILINGUAL_TEXT_SCHEMA,
-    "description": (
-        _CEILING.format(ko=90, en=200)
-        + " The note is a caption under the person's name on the event page:"
-          " one sentence, two at most, stating what the person did in the event."
-    ),
-    "properties": {"ko": {"type": "string", "maxLength": 90},
-                   "en": {"type": "string", "maxLength": 200}},
-}
+_EPITHET_SCHEMA = _capped_bilingual_schema("epithet")
+
+_BIO_SCHEMA = _capped_bilingual_schema(
+    "bio",
+    " Write to the tier's sentence count (the commissioned task states it);"
+    " keep career chronology in career rows, not the bio.",
+)
+
+_MOMENT_SCHEMA = _capped_bilingual_schema(
+    "moment",
+    " This is the pull-quote on the person LIST card, so it is budgeted in"
+    " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3.",
+)
+
+_EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
+    "event_note",
+    " The note is a caption under the person's name on the event page:"
+    " one sentence, two at most, stating what the person did in the event.",
+)
 
 # Fate label = cause of death only, NO death year (it renders from `years`).
 # Execution → 처형/Executed; vague natural death → 자연사/Natural causes; keep a
@@ -2579,14 +2588,13 @@ _EVENT_NOTE_SCHEMA = {
 # deposed/exile fate keeps its EVENT year (실각 1964) and may append the cause
 # (실각 1964 · 자연사). The death year is stripped automatically on save.
 _FATE_LABEL_SCHEMA = {
-    **_BILINGUAL_TEXT_SCHEMA,
+    **_capped_bilingual_schema("fate_label"),
     "description": (
-        "Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
+        _CEILING.format(ko=FIELD_LIMITS["fate_label"][0], en=FIELD_LIMITS["fate_label"][1])
+        + " Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
         "natural causes). Execution=처형/Executed; natural=자연사/Natural causes; "
         "place with ' · '. The death year is dropped automatically on save."
     ),
-    "properties": {"ko": {"type": "string", "maxLength": 22},
-                   "en": {"type": "string", "maxLength": 50}},
 }
 
 _NATIONALITY_SCHEMA = {
@@ -2682,15 +2690,10 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "null detaches an entry."
             ),
         },
-        "definition": {
-            **_BILINGUAL_TEXT_SCHEMA,
-            "description": (
-                _CEILING.format(ko=400, en=900)
-                + " term: the card paragraph (2-3 sentences); depth goes to body (markdown)."
-            ),
-            "properties": {"ko": {"type": "string", "maxLength": 400},
-                           "en": {"type": "string", "maxLength": 900}},
-        },
+        "definition": _capped_bilingual_schema(
+            "definition",
+            " term: the card paragraph (2-3 sentences); depth goes to body (markdown).",
+        ),
         # Terms accept null at the write boundary to mean "clear the body"; the
         # schema declaring only "object" made the model discover that by failing
         # (`None is not of type 'object' at 'fields.body'`).

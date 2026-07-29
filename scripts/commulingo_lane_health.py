@@ -35,6 +35,13 @@ MAX_FAILURE_RATE = 0.10
 # The new lane falls back to enrichment when discovery cannot find a real gap.
 # Some fallback is normal; a majority means the candidate pool is exhausted.
 MAX_FALLBACK_RATE = 0.35
+# A tool whose calls are rejected this often is burning paid rounds on retries.
+# The July 2026 bulk import spent three days at 56% rejected candidate_select
+# calls before anyone read the audit log — this line exists so the next such
+# pattern shows up in the next morning's digest instead.
+MAX_REJECTION_RATE = 0.20
+# Below this many calls a high rate is just noise (1 rejection out of 2 calls).
+MIN_CALLS_FOR_REJECTION_ALERT = 5
 
 APPLIED = re.compile(r'^\s*"status": "applied"', re.M)
 SKIPPED = re.compile(r'^\s*"status": "skipped"', re.M)
@@ -101,6 +108,51 @@ def problems(lane: str, stats: dict) -> list[str]:
     return found
 
 
+def tool_rejections(since: str) -> tuple[list[str], list[str]]:
+    """Per-tool rejection counts from the audit log, plus threshold alerts.
+
+    The lane tallies above only see whole runs; a run that succeeds after three
+    rejected writes looks healthy there while quietly paying for four calls.
+    Queried through `docker exec` like the journal is queried through
+    journalctl: this unit carries no db_password credential, and the digest
+    must not start needing one. Fail-soft either way.
+    """
+    match = re.fullmatch(r"-(\d+)h", since.strip())
+    hours = int(match.group(1)) if match else 24
+    sql = (
+        "SELECT tool_name,"
+        "       count(*) FILTER (WHERE result_status <> 'ok') AS rejected,"
+        "       count(*) AS total"
+        "  FROM tool_audit_log"
+        " WHERE agent_name = 'commulingo_curator'"
+        f"  AND ts > now() - interval '{hours} hours'"
+        " GROUP BY tool_name"
+        " HAVING count(*) FILTER (WHERE result_status <> 'ok') > 0"
+        " ORDER BY 2 DESC"
+    )
+    result = subprocess.run(
+        ["docker", "exec", "leninbot-pg", "psql", "-U", "postgres", "-d", "leninbot",
+         "-t", "-A", "-F", "|", "-c", sql],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return [f"(tool rejection stats unavailable: {result.stderr.strip()[:200]})"], []
+    lines, alerts = [], []
+    for raw in result.stdout.strip().splitlines():
+        parts = raw.split("|")
+        if len(parts) != 3:
+            continue
+        tool, rejected, total = parts[0], int(parts[1]), int(parts[2])
+        rate = rejected / total
+        lines.append(f"{tool:28} rejected {rejected:4}/{total:<5} ({rate:.0%})")
+        if total >= MIN_CALLS_FOR_REJECTION_ALERT and rate > MAX_REJECTION_RATE:
+            alerts.append(
+                f"tool {tool}: {rejected}/{total} calls rejected ({rate:.0%}) — "
+                f"paid rounds are being burned on retries"
+            )
+    return lines, alerts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--since", default="-24h", help="journalctl --since value")
@@ -119,6 +171,12 @@ def main() -> int:
             f"${stats['cost']:.2f}"
         )
         alerts.extend(problems(lane, stats))
+
+    rejection_lines, rejection_alerts = tool_rejections(args.since)
+    if rejection_lines:
+        lines.append("tool rejections:")
+        lines.extend(f"  {line}" for line in rejection_lines)
+    alerts.extend(rejection_alerts)
 
     header = f"[commulingo-lanes] since {args.since} — total ${total_cost:.2f}"
     print(header)
