@@ -62,6 +62,15 @@ SPECS = {
         "lenin_corpus",
         4,
     ),
+    "legacy": BackupSpec(
+        "legacy",
+        "legacy_game",
+        "postgres",
+        "legacy-game-db-backup-*.dump",
+        ROOT / "data" / "legacy_game_db_backups",
+        "story_scenes",
+        1,
+    ),
     "writer": BackupSpec(
         "writer",
         "writer",
@@ -619,6 +628,37 @@ def _validate_writer(container: str) -> None:
     )
 
 
+def _validate_legacy(container: str) -> None:
+    tables, rows, sequences = _common_validation(
+        container, "legacy_game", "postgres"
+    )
+    summary = _scalar(
+        container,
+        "legacy_game",
+        """
+        SELECT concat_ws(
+          '|',
+          count(*),
+          md5(string_agg(md5(row_to_json(s)::text), '' ORDER BY id)),
+          min(id),
+          max(id)
+        )
+        FROM public.story_scenes s;
+        """,
+    )
+    expected = "415|1b3bdc9d7dac48fafc1e216ffd1066f0|1|831"
+    if tables != 1 or rows != 415 or sequences != 1 or summary != expected:
+        raise RestoreError(
+            f"legacy validation failed: tables={tables}, rows={rows}, "
+            f"sequences={sequences}, summary={summary}"
+        )
+    print(
+        f"PASS legacy: tables={tables}, rows={rows}, sequences={sequences}, "
+        f"story_scenes_digest={summary.split('|')[1]}",
+        flush=True,
+    )
+
+
 def _check_restore_confirmation(args: argparse.Namespace) -> None:
     if args.target_container == PRODUCTION_CONTAINER:
         if not args.force_production or args.confirm != PRODUCTION_CONFIRMATION:
@@ -652,7 +692,26 @@ def _restore_selected(
             print(f"Restored {spec.database} in {elapsed:.1f}s", flush=True)
             if spec.scope == "main":
                 _grant_frontend_access(container)
-            (_validate_main if spec.scope == "main" else _validate_writer)(container)
+            validators = {
+                "main": _validate_main,
+                "legacy": _validate_legacy,
+                "writer": _validate_writer,
+            }
+            validators[spec.scope](container)
+            if spec.scope == "legacy":
+                _psql(
+                    container,
+                    "postgres",
+                    "ALTER DATABASE legacy_game SET default_transaction_read_only=on;",
+                )
+                read_only = _scalar(
+                    container, "legacy_game", "SHOW default_transaction_read_only;"
+                )
+                if read_only != "on":
+                    raise RestoreError(
+                        "legacy_game read-only setting was not restored"
+                    )
+                print("PASS legacy read-only: on", flush=True)
     finally:
         if _container_running(container):
             for path in staged.values():
@@ -668,8 +727,11 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_backup_args(subparser: argparse.ArgumentParser) -> None:
-        subparser.add_argument("--scope", choices=("all", "main", "writer"), default="all")
+        subparser.add_argument(
+            "--scope", choices=("all", "main", "legacy", "writer"), default="all"
+        )
         subparser.add_argument("--main-backup")
+        subparser.add_argument("--legacy-backup")
         subparser.add_argument("--writer-backup")
         subparser.add_argument("--writer-password-file")
         subparser.add_argument("--frontend-password-file")
@@ -695,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
             _check_restore_confirmation(args)
 
         specs = (
-            [SPECS["main"], SPECS["writer"]]
+            [SPECS["main"], SPECS["legacy"], SPECS["writer"]]
             if args.scope == "all"
             else [SPECS[args.scope]]
         )

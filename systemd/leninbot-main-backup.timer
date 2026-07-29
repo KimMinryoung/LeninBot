@@ -1,5 +1,5 @@
 [Unit]
-Description=LeninBot Main DB Backup Timer (daily 03:40 KST)
+Description=LeninBot Main and Legacy Game DB Backup Timer (daily 03:40 KST)
 
 [Timer]
 OnCalendar=*-*-* 03:40:00 Asia/Seoul

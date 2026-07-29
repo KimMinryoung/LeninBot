@@ -1,5 +1,5 @@
 [Unit]
-Description=LeninBot Main DB Backup (daily dump to Cloudflare R2)
+Description=LeninBot Main and Legacy Game DB Backup (daily dump to Cloudflare R2)
 After=network.target docker.service
 
 [Service]

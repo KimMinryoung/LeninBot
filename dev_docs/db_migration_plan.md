@@ -87,18 +87,29 @@
 
 ### Phase 4 — 백업 체계 (1단계 ✅ 완료 2026-07-28, VM 단계 대기)
 
-1. **메인 DB 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 전체 덤프 177MB라 테이블 분리 불필요 (비대화 제거 후 작아짐). 1회 실행·R2 업로드 검증.
+1. **메인 DB + legacy_game 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 2026-07-29 운영 테이블 정리 후 main 덤프는 162.2MB, `legacy_game`은 0.1MB이며 각각 로컬 3일·R2 7일 롤링 보관한다.
    - **restore drill 통과** (임시 DB 복원→17,046행+HNSW 인덱스 확인→드롭). 드릴이 결함 발견: Docker 기본 `/dev/shm` 64MB로는 병렬 HNSW 인덱스 빌드 실패 → compose에 `shm_size: 1g` 추가로 해결. 프리로드 때 안 걸린 이유: 빈 테이블에 인덱스 생성 후 COPY라 대량 빌드가 없었음.
    - **2026-07-29 DRI 재검증 통과**: R2에서 당일 main/writer 객체를 실제 재다운로드해 로컬 사본과 SHA-256·바이트 동일성을 확인한 뒤, 격리된 `pgvector/pgvector:pg17` 컨테이너에 둘 다 복원. main 73테이블·200,692행·162 인덱스·47 시퀀스, writer 7테이블·1,225행·16 인덱스·5 시퀀스를 검증했고 invalid/unready 인덱스와 뒤처진 시퀀스는 0건. `lenin_corpus` 17,046행과 HNSW 벡터 질의, writer 본문 8개·441,491자도 확인. 측정 복원 시간은 main 8.3초, writer 9.3초였으며 운영 Postgres restart 0·관련 API health 200으로 무영향 확인.
+   - **2026-07-29 운영 정리 후 3-DB DRI 통과**: 정리 직후 생성·R2 업로드한 최신 백업을 일회용 Postgres 17에 복원했다. main 59테이블·199,422행·37 시퀀스와 corpus 17,046행/HNSW, `legacy_game` 1테이블·415행·1시퀀스·원본 체크섬, writer 7테이블·1,225행·5시퀀스와 본문 441,491자를 모두 검증했다. 복원 시간은 main 8.3초, legacy 0.2초, writer 9.6초였고 전체 `DRILL PASS`.
    - 유닛 파일은 `systemd/`에 추적 (sudoers가 `cp systemd/* /etc/systemd/system/`만 NOPASSWD 허용).
    - 참고: R2에 `main-db-backup-2026-07-20.dump`라는 과거 객체가 있었음 (구 백업 규칙 잔재로 추정) — 롤링 삭제에 걸려 제거됨.
 2. **백업 VM 셋업**: WireGuard(또는 Tailscale)로 사설 터널 → 스트리밍 레플리카 구성 (physical replication slot, `wal_keep_size` 설정).
 3. **pgBackRest**: 백업 VM을 리포로, WAL 아카이빙 + 주1 full/일1 incr → **PITR** 확보. (대안: 리포를 R2로 직접 — VM 디스크 절약, 복원 속도는 느림.)
 4. **Postgres 복구/드릴 스크립트** ✅ (2026-07-29): `scripts/restore_db.py`.
-   - 기본 안전 경로: `venv/bin/python scripts/restore_db.py drill` — 최신 로컬 main/writer 백업을 선택해 `shm_size=1g`인 일회용 Postgres 17 컨테이너를 만들고, TOC 확인→복원→전체 테이블 정확 행수·인덱스·시퀀스·HNSW·writer 소유권/본문 검증 후 컨테이너를 제거한다. `--scope`, `--main-backup`, `--writer-backup`, `--keep-container` 지원.
+   - 기본 안전 경로: `venv/bin/python scripts/restore_db.py drill` — 최신 로컬 main/legacy/writer 백업을 선택해 `shm_size=1g`인 일회용 Postgres 17 컨테이너를 만들고, TOC 확인→복원→전체 테이블 정확 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문 검증 후 컨테이너를 제거한다. `--scope {all,main,legacy,writer}`, `--main-backup`, `--legacy-backup`, `--writer-backup`, `--keep-container` 지원.
    - 실제 복구: 실행 중인 별도 대상 컨테이너에 `restore --target-container <name> --confirm RECREATE_DATABASES`. 선택한 DB를 drop/create하므로 모든 DB client를 먼저 중지해야 하며, 활성 연결이 남아 있으면 거부한다. writer 역할 암호는 기존 `secrets_loader`의 `WRITER_DB_PASSWORD`를 사용하고, 복구 호스트에 `.env`/credential이 없으면 권한 0600인 `--writer-password-file`을 명시한다. main 복원은 `frontend` 로그인 역할과 DB CONNECT·schema USAGE·전체 table/sequence·default privileges도 재구성한다. 새 컨테이너에는 `FRONTEND_DB_PASSWORD` 또는 frontend `.env`의 기존 암호만 담은 0600 `--frontend-password-file`이 필요하다.
    - 운영 컨테이너 `leninbot-pg`는 `--force-production --confirm RECREATE_LENINBOT_PRODUCTION`을 동시에 주지 않으면 거부한다. 스크립트는 복구 전에 archive TOC, Postgres major version(17), 컨테이너 `/dev/shm` 1GiB 이상을 먼저 확인한다.
 5. 안정화 후 1의 일일 dump는 유지(3차 방어) 또는 주기 완화.
+
+### 운영 테이블 정리 (2026-07-29)
+
+현재 LeninBot·frontend 런타임 코드, FK, DB 뷰 참조를 교차검증하고 사용자에게 테이블별 승인을 받은 뒤 main DB에서 14개 테이블을 `CASCADE` 없이 한 트랜잭션으로 제거했다.
+
+- 삭제: `aicommunism_saves`, `aicommunism_sessions`, `user_sessions`.
+- writer 이전 보험 사본 삭제: `writer_documents_migrated_20260707`, `writer_manuscript_chunks_migrated_20260707`, `writer_manuscript_revisions_migrated_20260707`, `writer_manuscripts_migrated_20260707`, `writer_messages_migrated_20260707`, `writer_projects_migrated_20260707`, `writer_settings_migrated_20260707`. 활성 writer 데이터는 별도 `writer` DB에 있고 백업/복구 검증을 통과했다.
+- 미사용 구독 추적 삭제: `subscriptions`, `receipts`, `usage_snapshots`.
+- `story_scenes`는 새 `legacy_game` DB로 테이블·415행·시퀀스·인덱스 4개를 이전했다. 이전 전후 내용 체크섬 `1b3bdc9d7dac48fafc1e216ffd1066f0`, ID 범위 1–831, 시퀀스 831이 일치한 뒤 main 원본만 삭제하고, `default_transaction_read_only=on`을 강제해 보관 DB의 쓰기를 차단했다.
+- `game_saves`는 승인 범위가 아니므로 main DB에 유지했다. `leninbot_test`·`writer_test`도 변경하지 않았고 운영 백업/DRI scope에는 포함하지 않는다.
 
 ### 컷오버 후 장애 기록 (2026-07-28): frontend 전 콘텐츠 미표시
 
@@ -135,5 +146,6 @@ ad-hoc 스크립트(테스트, 일회성 CLI)가 프로덕션 DB에 실수로 �
 
 ## 변경 이력
 
+- 2026-07-29: 미사용 운영 테이블 13개 삭제, `story_scenes`를 `legacy_game` DB로 분리, main/legacy/writer 3-DB 백업·복구 드릴 통과.
 - 2026-07-28: 최초 작성 (조사 + 계획).
 - 2026-07-28 (심링크 이행 완료): `psql-supabase` 호환 심링크 제거 — 참조 스크립트 10곳 전부 `psql-main`으로 전환. `db.py`/`psql-main`의 sslmode 기본값 `require`→`prefer` (로컬 기준; `.env`가 명시 설정하므로 동작 무변경). 코드·툴 설명·봇 자기소개(shared.py)의 Supabase 잔재 문구 정리, `SUPABASE_KEY` env 레퍼런스 제거.
