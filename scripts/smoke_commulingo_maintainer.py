@@ -14,6 +14,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents.commulingo_curator import COMMULINGO_CURATOR
 from runtime_tools.commulingo_people import (
+    DENSE_SENTENCE_CHARS,
+    FIELD_LIMITS,
+    sentence_budget,
     COMMULINGO_EVENT_LINK_TOOL,
     COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
@@ -84,6 +87,19 @@ assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "Birthplace and work in the Ukrainian SSR alone never suffice" in maintainer.CARD_STYLE_GUIDANCE
 assert "Jewish ancestry alone does not create a separate" in maintainer.CARD_STYLE_GUIDANCE
+# The prescribed sentence count and the ceiling it is written under must agree.
+# When they disagreed by one sentence (4-5 prescribed, 4 affordable), 17 of 19
+# curator tool rejections in a day were a fifth bio sentence overflowing both
+# languages — each a paid round spent discovering the arithmetic.
+_BIO_BUDGET = sentence_budget("bio")
+_KO_COST, _EN_COST = DENSE_SENTENCE_CHARS
+assert _BIO_BUDGET * _KO_COST <= FIELD_LIMITS["bio"][0], "prescription exceeds the Korean ceiling"
+assert _BIO_BUDGET * _EN_COST <= FIELD_LIMITS["bio"][1], "prescription exceeds the English ceiling"
+assert f"{_BIO_BUDGET - 1}-{_BIO_BUDGET} sentences" in maintainer.MAJOR_BIO_SENTENCES
+assert maintainer.MAJOR_BIO_SENTENCES in maintainer.CARD_STYLE_GUIDANCE
+# The curator prompt states the same derived count, and no token is left unfilled.
+assert f"{_BIO_BUDGET - 1}–{_BIO_BUDGET} sentences for a major" in COMMULINGO_CURATOR.prompt_ir.identity
+assert "__" not in COMMULINGO_CURATOR.prompt_ir.identity
 assert "already embeds cyrillicPatronymic" in _validate(
     CURSOR, "person", "update", "example", {
         "cyrillic": "Михаил Петрович Фриновский",

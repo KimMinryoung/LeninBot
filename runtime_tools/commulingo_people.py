@@ -2543,6 +2543,29 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
     "definition": (400, 900),
 }
 
+# What one dense bilingual sentence of this register actually costs, measured
+# over the 1,210 accepted bios: a Korean sentence in a major-figure card runs
+# ~90 characters and its English twin ~200. (Accepted 4-sentence Korean bios
+# average 296 characters, 5-sentence ones 308 — but those are the post-rejection
+# survivors; first drafts of dense old-regime cards came in at 414-480.)
+DENSE_SENTENCE_CHARS = (90, 200)
+
+
+def sentence_budget(field: str) -> int:
+    """How many dense bilingual sentences a field's ceiling actually pays for.
+
+    The prescription and the ceiling used to be set independently, and they
+    disagreed by exactly one sentence: the writer was told 4-5 sentences for a
+    major figure while 380 Korean characters buys 4, so 17 of 19 curator
+    rejections in a 24h window were a fifth sentence overflowing bio. Deriving
+    the count from the table means raising a ceiling raises the prescription
+    with it instead of leaving the two to drift apart again.
+    """
+    ko_max, en_max = FIELD_LIMITS[field]
+    ko_cost, en_cost = DENSE_SENTENCE_CHARS
+    return max(1, min(ko_max // ko_cost, en_max // en_cost))
+
+
 # The ceilings are stated in each description because a bare maxLength
 # only reports itself after the call is already spent — 107 of the 625
 # rejected person_create calls were that error.
@@ -2562,18 +2585,28 @@ def _capped_bilingual_schema(field: str, extra: str = "") -> dict:
     }
 
 
-_EPITHET_SCHEMA = _capped_bilingual_schema("epithet")
+_EPITHET_SCHEMA = _capped_bilingual_schema(
+    "epithet",
+    " One clause. A characterization that needs a second clause after a dash"
+    " belongs in the bio.",
+)
 
 _BIO_SCHEMA = _capped_bilingual_schema(
     "bio",
     " Write to the tier's sentence count (the commissioned task states it);"
-    " keep career chronology in career rows, not the bio.",
+    " keep career chronology in career rows, not the bio."
+    f" A dense sentence of this register costs ~{DENSE_SENTENCE_CHARS[0]} Korean"
+    f" and ~{DENSE_SENTENCE_CHARS[1]} English characters, so the ceiling pays for"
+    f" {sentence_budget('bio')} of them: past that, cut a sentence rather than"
+    " squeezing every clause.",
 )
 
 _MOMENT_SCHEMA = _capped_bilingual_schema(
     "moment",
     " This is the pull-quote on the person LIST card, so it is budgeted in"
-    " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3.",
+    " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3."
+    " A quotation too long to fit is excerpted to its sharpest clause with '…',"
+    " or traded for a shorter one — never padded out to the ceiling.",
 )
 
 _EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
@@ -2692,7 +2725,10 @@ _COMMULINGO_FIELD_SCHEMA = {
         },
         "definition": _capped_bilingual_schema(
             "definition",
-            " term: the card paragraph (2-3 sentences); depth goes to body (markdown).",
+            " term: the card paragraph (2-3 sentences); depth goes to body (markdown)."
+            f" A dense sentence costs ~{DENSE_SENTENCE_CHARS[0]} Korean characters, so a"
+            " third sentence only fits when the first two stay tight — move the"
+            " qualifications and the historiography to body.",
         ),
         # Terms accept null at the write boundary to mean "clear the body"; the
         # schema declaring only "object" made the model discover that by failing

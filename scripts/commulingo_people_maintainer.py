@@ -30,7 +30,9 @@ from agents import get_agent
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one
-from runtime_tools.commulingo_people import FIELD_LIMITS, _dedup_key
+from runtime_tools.commulingo_people import (
+    DENSE_SENTENCE_CHARS, FIELD_LIMITS, _dedup_key, sentence_budget,
+)
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.security import CallerContext, caller_scope
 
@@ -153,8 +155,14 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
 # natural Korean inside a 30-character window without padding or truncating to hit the
 # number, which is what produced the stilted cards. The character constants below are
 # backstops and selection signals only — they never appear as a target to write toward.
-# Sentence counts come from the corpus: a Korean bio sentence runs ~60-80 characters
-# (2 sentences median 113, 3 sentences median 243), a moment sentence 59-95 (median 79).
+#
+# The sentence count is DERIVED from the ceiling (sentence_budget), not chosen next to
+# it. Prescribing 4-5 sentences under a ceiling that pays for 4 made every major
+# old-regime card arrive 15-20% over — 17 of 19 curator rejections in the 2026-07-29
+# window were a fifth bio sentence (bio.ko 414-480 against 380, bio.en 950-1000 against
+# 900), each one a paid round spent to learn the arithmetic. The retry then landed at
+# 342-376 characters, so the four-sentence card was the outcome either way; the fifth
+# sentence only ever bought the rejection.
 #
 # `moment` is the pull-quote on the person LIST card, so its budget is rendered lines.
 # Measured in the real card at 1280/768/390px: 44-85 chars -> 2 lines, 86-127 -> 3,
@@ -166,9 +174,12 @@ MINOR_PROMINENCE_MAX = 1
 # never restate these numbers locally.
 BIO_HARD_CEILING = FIELD_LIMITS["bio"][0]
 MOMENT_HARD_CEILING = FIELD_LIMITS["moment"][0]
+BIO_SENTENCE_BUDGET = sentence_budget("bio")
 MAJOR_BIO_SENTENCES = (
-    "4-5 sentences (a 6th only when every sentence stays short — six full "
-    f"sentences usually overflow the {BIO_HARD_CEILING}-character Korean ceiling)"
+    f"{BIO_SENTENCE_BUDGET - 1}-{BIO_SENTENCE_BUDGET} sentences "
+    f"(a {BIO_SENTENCE_BUDGET + 1}th only when every sentence stays short: at "
+    f"~{DENSE_SENTENCE_CHARS[0]} Korean characters a dense sentence, "
+    f"{BIO_SENTENCE_BUDGET} is what the {BIO_HARD_CEILING}-character ceiling pays for)"
 )
 STANDARD_BIO_SENTENCES = "2-4 sentences"
 MINOR_BIO_SENTENCES = "1-2 sentences"
@@ -347,8 +358,12 @@ CARD_STYLE_GUIDANCE = (
     f"limit with restatement is padding. Inflating an obscure functionary's bio is a defect. The "
     f"enrich task states the tier for the specific person. Never count characters — let the length "
     f"fall where the sentences leave it. {BIO_HARD_CEILING} Korean characters is a hard ceiling "
-    f"the save rejects, not a target; if a draft trips it, cut a clause or move the material into "
-    f"a person_section. Give the English bio comparable substance. Never leave a one-line stub.\n"
+    f"the save rejects, not a target; a draft that trips it is one sentence too many, so drop a "
+    f"whole sentence or move the material into a person_section — trimming clauses out of "
+    f"{BIO_SENTENCE_BUDGET + 1} dense sentences does not recover the overflow, it just produces a "
+    f"cramped card that overflows anyway. Give the English bio comparable substance (its "
+    f"{FIELD_LIMITS['bio'][1]}-character ceiling binds at the same sentence count). Never leave a "
+    f"one-line stub.\n"
     "- Every new person requires both citizenship and nationalOrigin. nationalOrigin may equal "
     "citizenship; never omit it because the two match or because a distinct background is not "
     "documented. Apply the editorial defaults below instead of storing a blank.\n"
@@ -360,8 +375,12 @@ CARD_STYLE_GUIDANCE = (
     f"equivalent), capturing ONE defining scene, line, or turn. One sentence is the norm and the "
     f"second is for when the scene genuinely needs its turn; if it still needs more to explain "
     f"itself, the scene is wrong — pick a sharper one rather than adding sentences. "
-    f"{MOMENT_HARD_CEILING} Korean characters is a hard ceiling the save rejects.\n"
-    "- The epithet stays a short phrase. If any field runs long, tighten it rather than pad it.\n"
+    f"{MOMENT_HARD_CEILING} Korean characters is a hard ceiling the save rejects, and a quotation "
+    f"longer than that is excerpted to its sharpest clause with '…' or traded for a shorter one. "
+    f"Check the length of a quote before building the moment around it.\n"
+    "- The epithet stays a short phrase — one clause. A characterization that needs a second "
+    "clause after a dash belongs in the bio. If any field runs long, tighten it rather than pad "
+    "it.\n"
     "- nationalOrigin editorial policy for people born in territory now within Ukraine under the "
     "Russian Empire or USSR: `ukraine` requires documented Ukrainian self-identification, "
     "Ukrainian parentage/family, or a substantive tie to Ukrainian national culture or autonomy; "

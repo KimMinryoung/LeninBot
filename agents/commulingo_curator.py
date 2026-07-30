@@ -2,7 +2,9 @@
 
 from agents.base import AgentSpec
 from llm.prompt_renderer import SystemPrompt
-from runtime_tools.commulingo_people import FIELD_LIMITS
+from runtime_tools.commulingo_people import (
+    DENSE_SENTENCE_CHARS, FIELD_LIMITS, sentence_budget,
+)
 
 
 _PROMPT = """You are the dedicated curator of Cyber-Lenin's CommuLingo people dictionary.
@@ -34,14 +36,18 @@ Workflow:
 Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a
   literal machine translation; English must carry the same claims.
-- `epithet` is one compact characterization: at most __EPITHET_KO__ Korean characters and
-  __EPITHET_EN__ English characters. `bio` is written to a sentence count the commissioned
-  task states — 4–5 sentences for a major figure (a 6th only when every sentence stays
-  short; six full sentences usually overflow the Korean ceiling), 2–4 for a standard one,
-  1–2 for a minor one. Those are
+- `epithet` is one compact characterization — one clause, at most __EPITHET_KO__ Korean
+  characters and __EPITHET_EN__ English characters. A characterization that needs a second
+  clause after a dash belongs in the bio. `bio` is written to a sentence count the
+  commissioned task states — __BIO_SENTENCES_LOW__–__BIO_SENTENCES__ sentences for a major
+  figure, 2–4 for a standard one, 1–2 for a minor one. Those are
   ceilings, not quotas: write what the sources support and stop. Never count characters to
   hit a target; __BIO_KO__ Korean / __BIO_EN__ English characters is only the limit the
-  save enforces.
+  save enforces. What that limit means in practice: a dense sentence of this register costs
+  ~__DENSE_KO__ Korean and ~__DENSE_EN__ English characters, so it pays for
+  __BIO_SENTENCES__ of them. A __BIO_SENTENCES_OVER__th dense sentence overflows both
+  languages at once — write it and the whole card is rejected, and squeezing clauses will
+  not recover it. Cut the sentence instead, or move the material to a person_section.
   Do not turn career rows into prose; use bio for background, defining work, and one
   historically meaningful tension or consequence.
 - When mentioning another person who has a dictionary card, spell their name exactly as
@@ -72,7 +78,9 @@ Content rules:
   list card, not a paragraph: one sentence, two at most, capturing a single scene or turn.
   If it needs more than that to make sense, the scene is wrong — pick a sharper one rather
   than adding sentences. __MOMENT_KO__ Korean / __MOMENT_EN__ English characters is the
-  limit the save enforces.
+  limit the save enforces. Check a quotation's length before building the moment around it:
+  one too long to fit is excerpted to its sharpest clause with '…' or traded for a shorter
+  one — never trimmed by paraphrase, which stops it being a quotation.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
   name/epithet/bio/fate, aliases, and a concise 4-8 row career. Names are stored as parts:
   prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
@@ -104,6 +112,21 @@ narrow write is the end of the run; do not make a second edit.
 for _field, (_ko_max, _en_max) in FIELD_LIMITS.items():
     _PROMPT = _PROMPT.replace(f"__{_field.upper()}_KO__", str(_ko_max))
     _PROMPT = _PROMPT.replace(f"__{_field.upper()}_EN__", str(_en_max))
+
+# The major-figure sentence count is derived from the bio ceiling, not written
+# next to it: prescribing one more sentence than the ceiling pays for is what
+# made 17 of 19 curator tool rejections in a day a bio overflow.
+_BIO_SENTENCES = sentence_budget("bio")
+for _token, _value in (
+    ("__BIO_SENTENCES__", _BIO_SENTENCES),
+    ("__BIO_SENTENCES_LOW__", _BIO_SENTENCES - 1),
+    ("__BIO_SENTENCES_OVER__", _BIO_SENTENCES + 1),
+    ("__DENSE_KO__", DENSE_SENTENCE_CHARS[0]),
+    ("__DENSE_EN__", DENSE_SENTENCE_CHARS[1]),
+):
+    _PROMPT = _PROMPT.replace(_token, str(_value))
+
+assert "__" not in _PROMPT, "unreplaced token in the CommuLingo curator prompt"
 
 
 COMMULINGO_CURATOR = AgentSpec(

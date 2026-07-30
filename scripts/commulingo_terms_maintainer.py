@@ -32,6 +32,7 @@ from agents import get_agent  # noqa: E402
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
 from claude_loop import chat_with_tools  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
+from runtime_tools.commulingo_people import DENSE_SENTENCE_CHARS, FIELD_LIMITS  # noqa: E402
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402
 from tool_gateway.security import CallerContext, caller_scope  # noqa: E402
 
@@ -41,6 +42,10 @@ LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 MATERIAL_CHARS = 7000
 # Attempts per run before giving the round budget up as barren for this material.
 ATTEMPTS = 2
+# Quoted into the task so "2-3 sentences" carries what the ceiling actually pays
+# for; a definition rejected for length costs the run a paid round to relearn it.
+DENSE_KO = DENSE_SENTENCE_CHARS[0]
+DEFINITION_KO = FIELD_LIMITS["definition"][0]
 
 
 def completed_run_count() -> int:
@@ -169,7 +174,9 @@ Workflow:
    evidence for our own glossary is circular. Pass source URLs in top-level `citations`.
 3. Register exactly one term with `commulingo_term_create(term_id='<kebab-slug>', fields=...,
    citations=[...])`. Fields include term {{ko,en}}, original (native-script form),
-   definition {{ko,en}} (2-3 sentences, the card paragraph), aliases {{ko,en}}
+   definition {{ko,en}} (2-3 sentences, the card paragraph — a dense sentence costs
+   ~{DENSE_KO} Korean characters against a {DEFINITION_KO}-character ceiling, so a third
+   sentence only fits when the first two stay tight; depth goes to body), aliases {{ko,en}}
    including the EXACT spelling the material uses plus common variants, and related
    people/events ids when clearly applicable (verify ids via search_people/list_events).
    Also required, because the glossary sorts and groups on them:
