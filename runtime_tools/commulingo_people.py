@@ -183,20 +183,44 @@ _TERM_PATCH_KEYS = frozenset({
 })
 _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
 
-# Mirrors data/commulingo/term-categories.js in the frontend repo. Adding a
-# category means adding it in both places; the label text lives there, only the
-# slug is stored.
-_TERM_CATEGORIES = (
-    "theory", "economy", "party-state", "factions", "repression",
-    "nationalities", "culture", "international", "korea", "contemporary",
+# The glossary category registry lives in commulingo_term_categories, the same
+# table the site reads (frontend migration 115). It used to be this tuple here
+# and a second copy in the frontend's term-categories.js, so adding a category
+# meant editing two repositories and deploying one of them.
+#
+# Read once per process: the curation lanes are oneshot units, so they pick up a
+# new category on their next run. A long-running service that imported this
+# module keeps the list it started with until it restarts — acceptable for a
+# registry that changes a few times a year, and the fallback below keeps the
+# tool usable if the DB is unreachable at import.
+_TERM_CATEGORY_FALLBACK = (
+    ("theory", "Ideology and theory"), ("economy", "Economy and planning"),
+    ("party-state", "Party and state"), ("factions", "Factions and line struggles"),
+    ("repression", "Repression and law"), ("nationalities", "Nationalities"),
+    ("culture", "Culture and education"), ("international", "International movement"),
+    ("korea", "Korean political economy"), ("contemporary", "Contemporary capitalism"),
 )
-_TERM_CATEGORY_HINT = (
-    "theory (ideology and theory), economy (economy and planning), "
-    "party-state (party and state bodies), factions (inner-party factions and "
-    "line struggles), repression (repression and law), nationalities, "
-    "culture (culture and education), international (international movement), "
-    "korea (Korean political economy), contemporary (contemporary capitalism)"
-)
+
+
+def _load_term_categories() -> tuple[tuple[str, ...], str]:
+    """(slugs, hint line) for the schema enum and the rejection messages."""
+    rows = []
+    try:
+        rows = db_query(
+            """SELECT id, label_en FROM commulingo_term_categories
+               ORDER BY sort_order, id"""
+        ) or []
+    except Exception as exc:  # missing table, no DB, no credentials — all fall back
+        logger.warning("term categories unavailable (%s); using the built-in list", exc)
+    pairs = [(r["id"], r["label_en"]) for r in rows] or list(_TERM_CATEGORY_FALLBACK)
+    hint = ", ".join(
+        slug if slug.replace("-", " ") == label.lower() else f"{slug} ({label.lower()})"
+        for slug, label in pairs
+    )
+    return tuple(slug for slug, _ in pairs), hint
+
+
+_TERM_CATEGORIES, _TERM_CATEGORY_HINT = _load_term_categories()
 _YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
