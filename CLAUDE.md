@@ -39,5 +39,11 @@ Transform tasks into verifiable goals.
 ## Environment
 - Always activate the virtual environment before running Python commands.
 
+## CommuLingo registries (사전 분류값)
+- 역할 범주, 용어 범주, 자동링크 예외, 폐기 id 리다이렉트는 모두 DB 테이블이다 (`commulingo_role_categories`, `commulingo_term_categories`, `commulingo_link_blocklist`, `commulingo_id_redirects`). 값을 바꾸거나 추가할 때는 **코드가 아니라 테이블**에 INSERT/UPDATE 한다 — 양쪽 저장소 어디도 커밋·배포가 필요 없다.
+- `runtime_tools/commulingo_people.py`의 `_TERM_CATEGORY_FALLBACK`은 DB 접근 실패 시에만 쓰이는 사본이다. 여기를 고쳐도 정상 상태에서는 아무 효과가 없다. 폴백이 실제로 쓰이면 경고 로그가 남는다.
+- `_NATIONALITY_CODES`는 예외적으로 코드에 남아 있다: 국기 SVG가 프론트엔드 이미지에 구워져 있어 어디에 두든 배포가 필요하고, 프론트엔드 `data/commulingo/flag-icons.js`와 쌍으로 관리된다. 국적을 추가하면 두 저장소 + SVG 자산 세 곳이다.
+- 코드 사본이 테이블과 어긋났는지는 프론트엔드의 `scripts/check-commulingo-code-db-drift.js`가 검사한다.
+
 ## Testing
 - 테스트 결과는 반드시 사용자가 직접 확인할 수 있도록 CLI에 전체 출력하거나 파일로 저장할 것. 요약만 하지 말 것.

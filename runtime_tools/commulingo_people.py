@@ -81,6 +81,11 @@ _PERSON_PATCH_KEYS = frozenset({
 # A card whose prose names one of these keeps origin_code 'russia'; the prose is
 # where that identity is carried. An audit that reports these as a gap has
 # rediscovered the policy, not a bug.
+# Still code, and knowingly so: a nationality needs a vendored flag SVG under
+# the frontend's public/flags/, which is baked into that image, so a new nation
+# needs a deploy wherever this list lives. The frontend keeps the same set in
+# data/commulingo/flag-icons.js — adding one means both repositories plus the
+# asset. Everything else about a person's nationality is DB.
 _NATIONALITY_CODES = frozenset({
     "soviet", "russia", "ukraine", "georgia", "armenia", "azerbaijan", "belarus",
     "kazakhstan", "latvia", "lithuania", "estonia", "uzbekistan", "moldova",
@@ -193,6 +198,11 @@ _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
 # module keeps the list it started with until it restarts — acceptable for a
 # registry that changes a few times a year, and the fallback below keeps the
 # tool usable if the DB is unreachable at import.
+# FALLBACK ONLY — commulingo_term_categories is the source of truth. Adding or
+# renaming a category is one statement against that table and needs no code
+# change in either repository; editing this tuple changes nothing while the DB
+# is reachable, and the loader logs a warning on every fall back so a stale copy
+# announces itself.
 _TERM_CATEGORY_FALLBACK = (
     ("theory", "Ideology and theory"), ("economy", "Economy and planning"),
     ("party-state", "Party and state"), ("factions", "Factions and line struggles"),
