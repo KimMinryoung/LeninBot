@@ -28,6 +28,7 @@ from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.selection import build_toolset
 from claude_loop import chat_with_tools
+from llm.provider_failover import run_with_provider_failover
 from db import query as db_query, query_one as db_query_one, execute as db_execute
 from web_personas import (
     DEFAULT_PERSONA_ID,
@@ -1675,21 +1676,61 @@ async def handle_web_chat(
             elif provider == "deepseek":
                 if not _deepseek_anthropic_client:
                     raise RuntimeError("DEEPSEEK_API_KEY is not configured for webchat_provider=deepseek")
-                result = await chat_with_tools(
-                    history,
-                    client=_deepseek_anthropic_client,
-                    model=profile.model_id,
-                    tools=web_tools,
-                    tool_handlers=web_handlers,
-                    system_prompt=system_prompt,
-                    max_rounds=profile.max_rounds,
-                    max_tokens=profile.max_tokens,
-                    budget_usd=profile.budget_usd,
-                    on_progress=on_progress,
-                    continue_on_length=True,
-                    max_length_continuations=2,
+
+                def _deepseek_primary():
+                    return chat_with_tools(
+                        history,
+                        client=_deepseek_anthropic_client,
+                        model=profile.model_id,
+                        tools=web_tools,
+                        tool_handlers=web_handlers,
+                        system_prompt=system_prompt,
+                        max_rounds=profile.max_rounds,
+                        max_tokens=profile.max_tokens,
+                        budget_usd=profile.budget_usd,
+                        on_progress=on_progress,
+                        continue_on_length=True,
+                        max_length_continuations=2,
+                        budget_tracker=budget_tracker,
+                        thinking={"type": "disabled"},
+                    )
+
+                failover_model = None
+                if _openai_client:
+                    try:
+                        failover_model = (await resolve_runtime_profile(
+                            "webchat", provider_override="openai", tier_override="medium",
+                        )).model_id
+                    except Exception as exc:
+                        logger.warning("webchat failover model unresolved: %s", exc)
+
+                def _terra_failover():
+                    from openai_tool_loop import chat_with_tools as openai_chat
+                    return openai_chat(
+                        history,
+                        client=_openai_client,
+                        model=failover_model,
+                        tools=web_tools,
+                        tool_handlers=web_handlers,
+                        system_prompt=system_prompt,
+                        max_rounds=profile.max_rounds,
+                        max_tokens=profile.max_tokens,
+                        budget_usd=profile.budget_usd,
+                        on_progress=on_progress,
+                        continue_on_length=True,
+                        max_length_continuations=2,
+                        return_metadata=True,
+                        budget_tracker=budget_tracker,
+                        provider_label="openai:web-failover",
+                    )
+
+                result = await run_with_provider_failover(
+                    _deepseek_primary,
+                    _terra_failover if failover_model else None,
+                    primary_label="deepseek",
+                    fallback_label=failover_model or "openai",
                     budget_tracker=budget_tracker,
-                    thinking={"type": "disabled"},
+                    on_progress=on_progress,
                 )
             else:
                 result = await chat_with_tools(

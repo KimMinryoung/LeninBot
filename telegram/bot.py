@@ -45,6 +45,7 @@ from telegram.schema import hydrate_summary_state
 from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
+from llm.provider_failover import run_with_provider_failover
 from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
 from telegram.tasks import (
     process_task, system_monitor,
@@ -1377,6 +1378,24 @@ def _is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_USER_IDS
 
 
+async def _resolve_deepseek_failover_model(runtime_kind: str) -> str | None:
+    """DeepSeek이 죽었을 때 턴을 다시 돌릴 2차 모델 (GPT-5.6 Terra).
+
+    openai 클라이언트가 없으면 None — 그 경우 페일오버 없이 원래 오류가 그대로
+    올라간다. medium 티어가 곧 Terra다 (llm.provider_registry.TIER_MODEL_KEYS).
+    """
+    if not _openai_client:
+        return None
+    try:
+        profile = await resolve_runtime_profile(
+            runtime_kind, provider_override="openai", tier_override="medium",
+        )
+        return profile.model_id
+    except Exception as exc:
+        logger.warning("DeepSeek failover model unresolved; failover disabled: %s", exc)
+        return None
+
+
 # ── Thin wrapper: _chat_with_tools (injects module-level dependencies) ──
 
 async def _chat_with_tools(
@@ -1648,33 +1667,72 @@ async def _chat_with_tools(
         deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
             call_inference_policy, "deepseek"
         )
-        _chat_coro = chat_with_tools(
-            messages,
-            client=_deepseek_anthropic_client,
-            model=profile.model_id,
-            tools=merged_tools,
-            tool_handlers=merged_handlers,
-            system_prompt=sys_prompt,
-            max_rounds=resolved_max_rounds,
-            max_tokens=resolved_max_tokens,
-            max_input_tokens=resolved_max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=resolved_output_continuations > 0,
-            max_length_continuations=resolved_output_continuations,
-            log_event=_log_event,
-            budget_usd=resolved_budget,
-            on_progress=on_progress,
-            budget_tracker=budget_tracker,
-            task_id=task_id,
-            agent_name=_agent_name,
-            mission_id=_mission_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
-            thinking=deepseek_thinking.get("thinking"),
-            output_config=deepseek_thinking.get("output_config"),
-        )
+
+        def _deepseek_primary():
+            return chat_with_tools(
+                messages,
+                client=_deepseek_anthropic_client,
+                model=profile.model_id,
+                tools=merged_tools,
+                tool_handlers=merged_handlers,
+                system_prompt=sys_prompt,
+                max_rounds=resolved_max_rounds,
+                max_tokens=resolved_max_tokens,
+                max_input_tokens=resolved_max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=resolved_output_continuations > 0,
+                max_length_continuations=resolved_output_continuations,
+                log_event=_log_event,
+                budget_usd=resolved_budget,
+                on_progress=on_progress,
+                budget_tracker=budget_tracker,
+                task_id=task_id,
+                agent_name=_agent_name,
+                mission_id=_mission_id,
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
+                thinking=deepseek_thinking.get("thinking"),
+                output_config=deepseek_thinking.get("output_config"),
+            )
+
+        failover_model = await _resolve_deepseek_failover_model(_runtime_kind)
+
+        def _terra_failover():
+            from openai_tool_loop import chat_with_tools as openai_chat
+            return openai_chat(
+                messages,
+                client=_openai_client,
+                model=failover_model,
+                tools=merged_tools,
+                tool_handlers=merged_handlers,
+                system_prompt=sys_prompt,
+                max_rounds=resolved_max_rounds,
+                max_tokens=resolved_max_tokens,
+                max_input_tokens=resolved_max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=resolved_output_continuations > 0,
+                max_length_continuations=resolved_output_continuations,
+                log_event=_log_event,
+                budget_usd=resolved_budget,
+                on_progress=on_progress,
+                budget_tracker=budget_tracker,
+                task_id=task_id,
+                agent_name=_agent_name,
+                mission_id=_mission_id,
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
+                provider_label="openai:failover",
+            )
+
         with caller_scope(_gw_ctx):
-            return await _chat_coro
+            return await run_with_provider_failover(
+                _deepseek_primary,
+                _terra_failover if failover_model else None,
+                primary_label="deepseek",
+                fallback_label=failover_model or "openai",
+                budget_tracker=budget_tracker,
+                on_progress=on_progress,
+            )
 
     if effective_provider in ("openai", "deepseek", "kimi"):
         missing = {
