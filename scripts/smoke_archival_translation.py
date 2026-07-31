@@ -63,7 +63,7 @@ def main() -> int:
 
     print("source slicing")
     blocks = at.extract_blocks(spec)
-    docs = at.slice_documents(blocks, spec)
+    docs = at.slice_documents(spec)
     check("문서가 스펙 수만큼 잘린다", len(docs) == len(spec["documents"]))
     check("블록이 비지 않는다", all(d["blocks"] for d in docs))
     check("블록 범위가 겹치지 않는다",
@@ -72,7 +72,7 @@ def main() -> int:
 
     drifted = json.loads(json.dumps(spec))
     drifted["documents"][0]["startsWith"] = "이 문자열은 원문에 없다"
-    expect_spec_error("경계가 어긋나면 실패한다", lambda: at.slice_documents(blocks, drifted))
+    expect_spec_error("경계가 어긋나면 실패한다", lambda: at.slice_documents(drifted))
     tampered = json.loads(json.dumps(spec))
     tampered["source"]["sha256"] = "0" * 64
     expect_spec_error("원본이 바뀌면 실패한다", lambda: at.extract_blocks(tampered))

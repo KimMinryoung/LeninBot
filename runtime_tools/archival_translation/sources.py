@@ -21,6 +21,7 @@ import html as htmllib
 import re
 from typing import Callable
 
+CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 BLOCK_RE = re.compile(r"(?is)<(h3|h5|p|blockquote)\b[^>]*>(.*?)</\1>")
 INNER_P_RE = re.compile(r"(?is)<p\b[^>]*>(.*?)</p>")
 
@@ -89,8 +90,19 @@ def wikisource(raw: str) -> list[dict]:
             ]
             rows = [r for r in rows if any(c for c in r)]
             if rows:
-                blocks.append({"tag": "table", "rows": rows,
-                               "lines": [" | ".join(r) for r in rows]})
+                # Only the cells carrying words go to the model, deduplicated
+                # and in order of first appearance; the assembler puts the
+                # translations back into the grid. A quota table sent through
+                # as 133 lines of prose can come back a row short or a digit
+                # different, and nothing downstream would notice — here the
+                # numbers never leave the code.
+                vocab, seen = [], set()
+                for row in rows:
+                    for cell in row:
+                        if cell and CYRILLIC_RE.search(cell) and cell not in seen:
+                            seen.add(cell)
+                            vocab.append(cell)
+                blocks.append({"tag": "table", "rows": rows, "lines": vocab})
             continue
         lines = [ln for ln in _text(inner).split("\n") if ln]
         if lines:

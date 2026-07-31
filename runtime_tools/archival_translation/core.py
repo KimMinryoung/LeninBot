@@ -138,9 +138,15 @@ def load_spec(spec_id: str) -> dict:
         spec = json.loads(spec_path(spec_id).read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise SpecError(f"{spec_id}: malformed JSON ({e})") from e
-    for key in ("id", "title", "source", "documents", "glossary", "output"):
+    for key in ("id", "title", "documents", "glossary", "output"):
         if key not in spec:
             raise SpecError(f"{spec_id}: spec is missing {key!r}")
+    # A spec-level source is the default for its documents; a spec whose
+    # documents each name their own does not need one.
+    missing = [d.get("id") for d in spec["documents"]
+               if not d.get("source") and not spec.get("source")]
+    if missing:
+        raise SpecError(f"{spec_id}: no source for {', '.join(map(str, missing))}")
     return spec
 
 
@@ -169,37 +175,71 @@ def list_specs() -> list[dict]:
 
 # ── source slicing ───────────────────────────────────────────────────
 
-def extract_blocks(spec: dict) -> list[dict]:
-    src = Path(spec["source"]["path"])
+def load_blocks(source: dict) -> list[dict]:
+    """Parse one source archive, checking it still matches its checksum."""
+    src = Path(source["path"])
     if not src.is_file():
         raise SpecError(f"source file missing: {src}")
     digest = hashlib.sha256(src.read_bytes()).hexdigest()
-    if digest != spec["source"]["sha256"]:
+    if digest != source["sha256"]:
         raise SpecError(
-            f"source no longer matches spec\n  spec:   {spec['source']['sha256']}\n"
+            f"{src.name}: source no longer matches spec\n  spec:   {source['sha256']}\n"
             f"  actual: {digest}")
-    adapter = sources.get_adapter(spec["source"].get("format"))
+    adapter = sources.get_adapter(source.get("format"))
     return adapter(src.read_text(encoding="utf-8"))
 
 
-def slice_documents(blocks: list[dict], spec: dict) -> list[dict]:
+def extract_blocks(spec: dict) -> list[dict]:
+    """Blocks of the spec-level source. Specs whose documents each name their
+    own source have no spec-level one; use slice_documents instead."""
+    return load_blocks(spec["source"])
+
+
+def _anchor_offset(blocks: list[dict], source: dict) -> int:
     # An anchor pins ranges to a landmark inside a larger page (militera puts
     # the documents in an appendix). A page that *is* the document has none,
     # and ranges are absolute from the first block.
-    anchor = spec["source"].get("anchor")
-    if anchor:
-        anchor_idx = next(
-            (i for i, b in enumerate(blocks)
-             if b["tag"] == "h3" and b["lines"][0].strip() == anchor),
-            None,
-        )
-        if anchor_idx is None:
-            raise SpecError(f"anchor block not found: {anchor!r}")
-    else:
-        anchor_idx = 0
+    anchor = source.get("anchor")
+    if not anchor:
+        return 0
+    idx = next(
+        (i for i, b in enumerate(blocks)
+         if b["tag"] == "h3" and b["lines"][0].strip() == anchor),
+        None,
+    )
+    if idx is None:
+        raise SpecError(f"anchor block not found: {anchor!r}")
+    return idx
 
+
+def slice_documents(spec: dict) -> list[dict]:
+    """Cut each document out of its own source.
+
+    A document may carry its own ``source``; otherwise the spec-level one is
+    used. One page can therefore gather documents held in different archives —
+    the operational orders live partly on wikisource and partly in a book's
+    appendix, and a reader wants them in one place, in number order.
+    """
+    # Block index doubles as the marker id, so two documents drawn from
+    # different files must not land on the same numbers — 00447 occupies
+    # blocks 6–291 of its page and 00485 blocks 7–41 of its own, which would
+    # collide and silently overwrite each other at assembly. Each distinct
+    # source gets its own numbering band. The first source keeps band 0, so a
+    # single-source spec numbers exactly as before and its cache stays valid.
+    cache: dict[str, list[dict]] = {}
+    bands: dict[str, int] = {}
     docs = []
     for entry in spec["documents"]:
+        source = entry.get("source") or spec.get("source")
+        if not source:
+            raise SpecError(f"{entry['id']}: no source (neither spec nor document)")
+        key = source["path"]
+        if key not in cache:
+            cache[key] = load_blocks(source)
+            bands[key] = len(bands) * 1_000_000
+        blocks = cache[key]
+        anchor_idx = _anchor_offset(blocks, source)
+
         start, end = entry["blocks"]
         chosen = blocks[anchor_idx + start: anchor_idx + end]
         if not chosen:
@@ -218,7 +258,8 @@ def slice_documents(blocks: list[dict], spec: dict) -> list[dict]:
         # one register is defensible — a spoken stenogram came back half 합쇼체,
         # half 한다체, while the written orders were consistent on their own.
         chosen = [{**b, "register": entry.get("register")} for b in chosen]
-        docs.append({**entry, "blocks": chosen, "offset": anchor_idx + start})
+        docs.append({**entry, "blocks": chosen,
+                     "offset": bands[key] + anchor_idx + start})
     return docs
 
 
@@ -616,11 +657,17 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
                     in_list = True
                 out.append(f"<li>{_esc(' '.join(lines))}</li>")
             elif tag == "table":
-                rows = "".join(
-                    "<tr>" + "".join(f"<td>{_esc(c.strip())}</td>"
-                                     for c in ln.split("|")) + "</tr>"
-                    for ln in lines)
-                out.append(f"<table>{rows}</table>")
+                # `lines` holds the translated cell vocabulary, in the same
+                # order the adapter collected it; the grid itself never went
+                # to the model. Cells outside the vocabulary — the numbers —
+                # are emitted exactly as they came out of the source.
+                vocab = dict(zip(block.get("lines", []), lines))
+                body = "".join(
+                    "<tr>" + "".join(
+                        f"<td>{_esc(vocab.get(c, c))}</td>" for c in row
+                    ) + "</tr>"
+                    for row in block.get("rows", []))
+                out.append(f"<table>{body}</table>")
             else:
                 out.append("".join(f"<p>{_esc(ln)}</p>" for ln in lines))
         if in_list:
@@ -784,7 +831,7 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
 def plan(spec: dict, opts: Options | None = None) -> dict:
     """Slice, chunk and price a run without calling the model."""
     opts = opts or Options()
-    docs = slice_documents(extract_blocks(spec), spec)
+    docs = slice_documents(spec)
     glossary = build_glossary(Path(spec["glossary"]["people"]),
                               Path(spec["glossary"]["terms"]),
                               spec["glossary"].get("extra"))
