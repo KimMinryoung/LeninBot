@@ -61,7 +61,10 @@
     "max_tokens": 200,
     "timeout": 12,
     "json_mode": true,
-    "note": "vector_search 질의를 코퍼스 언어로 번역 (실패 시 원문 그대로 검색)"
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "vector_search 질의를 코퍼스 언어로 번역 (실패 시 원문 그대로 검색). thinking을 끈 이유: DeepSeek V4는 기본 ON이라 200토큰 예산에서 추론이 56토큰을 먹고 프롬프트도 서버 스캐폴딩으로 132토큰까지 부푼다(끄면 6/54). json_mode가 필요해 Anthropic 호환으로는 못 옮기고 OpenAI 호환 경로에 extra_body로 넘긴다 — 2026-07-31 실측으로 존중됨을 확인(모르는 키는 조용히 무시되므로 대조군으로 검증)"
   },
   "task_routing_advisor": {
     "provider": "deepseek",
@@ -70,7 +73,10 @@
     "max_tokens": 500,
     "timeout": 12,
     "json_mode": true,
-    "note": "태스크 → 에이전트 라우팅 조언 JSON (실패 시 오케스트레이터 판단만 사용)"
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "태스크 → 에이전트 라우팅 조언 JSON (실패 시 오케스트레이터 판단만 사용). thinking 비활성 이유는 vector_query_translation과 같다 — json_mode 때문에 Anthropic 호환으로 못 옮기고 extra_body로 넘긴다"
   },
   "writer_critic_diagnosis": {
     "provider": "deepseek",
