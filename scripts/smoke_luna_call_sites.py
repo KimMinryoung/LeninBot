@@ -21,25 +21,33 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from llm.call_registry import _EXECUTORS, resolve  # noqa: E402
 
-# 호출부별 max_completion_tokens 목표치 — 추론 토큰까지 포함하는 상한이라
-# 기존 gemini 상한(32~4096)보다 여유를 둔다.
-TARGET_MAX_TOKENS = {
-    "chunk_summary": 2048,
-    "conversation_reflection": 1536,
-    "scout_kg_classify": 512,
-    "experience_extraction": 8192,
-    "research_spelling_proofread": 1024,
+# 호출부별 (max_completion_tokens, reasoning_effort) 목표치.
+#
+# GPT-5.6의 기본 effort는 medium이다. 아래 호출부는 대부분 요약·분류·추출이라
+# 추론이 필요 없어 "none"으로 끈다 (OpenAI reasoning 가이드가 분류·빠른 검색을
+# none 권장 용도로 명시). 추론을 끄면 max_completion_tokens를 본문이 다 쓰므로
+# 상한도 기존 gemini 값 수준으로 되돌린다.
+#
+# 예외는 research_spelling_proofread — 기계 교정이 문맥상 맞는지 판단하는
+# 유일한 판단형 작업이라 low를 준다.
+TARGETS = {
+    "chunk_summary": (1024, "none"),
+    "conversation_reflection": (768, "none"),
+    "scout_kg_classify": (64, "none"),
+    "experience_extraction": (4096, "none"),
+    "research_spelling_proofread": (1024, "low"),
 }
 
 
 def luna_profile(feature: str):
     """레지스트리 전환 전에도 검증할 수 있도록 luna 대상 프로파일을 강제한다."""
+    max_tokens, effort = TARGETS[feature]
     return dataclasses.replace(
         resolve(feature),
         provider="openai",
         model="gpt-5.6-luna",
-        max_tokens=TARGET_MAX_TOKENS[feature],
-        extra={"reasoning_effort": "minimal"},
+        max_tokens=max_tokens,
+        extra={"reasoning_effort": effort},
     )
 
 CASES = {
@@ -77,6 +85,31 @@ CASES = {
 }
 
 
+def reasoning_token_probe() -> str | None:
+    """effort=none이 실제로 추론 토큰을 0으로 만드는지 raw 호출로 확인한다."""
+    from openai import OpenAI
+
+    from llm.call_registry import _api_key
+
+    client = OpenAI(api_key=_api_key("openai"), timeout=60)
+    msgs = [{"role": "user", "content": "다음 리포트의 group_id를 한 단어로만 답하라 "
+                                        "(agent_knowledge / world_events / user_context): "
+                                        "OpenAI가 API 단가를 인하했다."}]
+    for effort in ("none", "medium"):
+        resp = client.chat.completions.create(
+            model="gpt-5.6-luna", messages=msgs,
+            max_completion_tokens=512, reasoning_effort=effort,
+        )
+        u = resp.usage
+        details = getattr(u, "completion_tokens_details", None)
+        reasoning = getattr(details, "reasoning_tokens", None)
+        print(f"  effort={effort:6s} completion={u.completion_tokens:4d} "
+              f"reasoning={reasoning} → {(resp.choices[0].message.content or '').strip()[:40]!r}")
+        if effort == "none" and reasoning:
+            return f"effort=none인데 추론 토큰 {reasoning}개가 계상됐다"
+    return None
+
+
 def main() -> int:
     failures = []
     for feature, (prompt, system) in CASES.items():
@@ -96,12 +129,23 @@ def main() -> int:
             failures.append((feature, "empty output"))
 
     print("=" * 72)
+    print("[reasoning token probe] effort=none이 추론을 실제로 끄는지 확인")
+    try:
+        problem = reasoning_token_probe()
+    except Exception as e:
+        problem = f"{type(e).__name__}: {e}"
+    if problem:
+        print(f"FAIL  {problem}")
+        failures.append(("reasoning_token_probe", problem))
+
+    print("=" * 72)
+    checks = len(CASES) + 1  # 호출부 + 추론 토큰 프로브
     if failures:
-        print(f"FAILED {len(failures)}/{len(CASES)}")
+        print(f"FAILED {len(failures)}/{checks}")
         for feature, why in failures:
             print(f"  - {feature}: {why}")
         return 1
-    print(f"OK {len(CASES)}/{len(CASES)} — luna 경량 호출부 계약 확인")
+    print(f"OK {checks}/{checks} — luna 경량 호출부 계약 + 추론 해제 확인")
     return 0
 
 
