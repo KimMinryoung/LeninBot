@@ -187,13 +187,23 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
     kwargs: dict = {}
     if p.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    # Kimi K3는 temperature=1만 허용 (그 외 400) — 파라미터 자체를 생략한다.
-    if p.provider != "kimi":
-        kwargs["temperature"] = p.temperature
+    if p.provider == "openai":
+        # GPT-5.6은 추론 모델 — max_tokens가 아니라 max_completion_tokens를 받고,
+        # temperature는 기본값만 허용한다 (openai_tool_loop._call_sdk와 같은 계약).
+        # max_completion_tokens는 추론 토큰까지 포함하므로 reasoning_effort로 억제하지
+        # 않으면 짧은 상한에서 본문이 비어 돌아온다.
+        kwargs["max_completion_tokens"] = p.max_tokens
+        effort = p.extra.get("reasoning_effort")
+        if effort:
+            kwargs["reasoning_effort"] = str(effort)
+    else:
+        kwargs["max_tokens"] = p.max_tokens
+        # Kimi K3는 temperature=1만 허용 (그 외 400) — 파라미터 자체를 생략한다.
+        if p.provider != "kimi":
+            kwargs["temperature"] = p.temperature
     response = client.chat.completions.create(
         model=p.model,
         messages=messages,
-        max_tokens=p.max_tokens,
         **kwargs,
     )
     return (response.choices[0].message.content or "").strip()
