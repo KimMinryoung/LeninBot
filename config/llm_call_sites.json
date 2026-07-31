@@ -1,47 +1,47 @@
 {
   "chunk_summary": {
-    "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
-    "temperature": 0.3,
-    "max_tokens": 768,
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "max_tokens": 1024,
+    "reasoning_effort": "none",
     "timeout": 60,
     "env": [
       "LIGHT_LLM_MODEL"
     ],
-    "note": "텔레그램 대화 10메시지 청크 요약 → chat_history_summaries (실패 시 추출식 폴백)"
+    "note": "텔레그램 대화 10메시지 청크 요약 → chat_history_summaries (실패 시 추출식 폴백). 2026-07-31 인하로 gemini-3.5-flash-lite→luna. openai에서 temperature는 안 보내고 max_tokens는 max_completion_tokens로 나간다"
   },
   "conversation_reflection": {
-    "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
-    "temperature": 0.3,
-    "max_tokens": 512,
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "max_tokens": 768,
+    "reasoning_effort": "none",
     "timeout": 60,
     "env": [
       "LIGHT_LLM_MODEL"
     ],
-    "note": "대화 성찰 → experiential_memory(vectorDB) 저장 (실패 시 해당 회차 스킵)"
+    "note": "대화 성찰 → experiential_memory(vectorDB) 저장 (실패 시 해당 회차 스킵). 2026-07-31 gemini-3.5-flash-lite→luna"
   },
   "scout_kg_classify": {
-    "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
-    "temperature": 0.0,
-    "max_tokens": 32,
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "max_tokens": 64,
+    "reasoning_effort": "none",
     "timeout": 30,
     "env": [
       "SCOUT_KG_CLASSIFY_MODEL"
     ],
-    "note": "스카우트 리포트 KG group_id 분류 (실패 시 agent_knowledge)"
+    "note": "스카우트 리포트 KG group_id 분류 (실패 시 agent_knowledge). 2026-07-31 gemini-3.5-flash-lite→luna. 라벨 한 줄이라 상한 64면 충분 (추론 해제 확인함)"
   },
   "experience_extraction": {
-    "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
-    "temperature": 0.3,
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
     "max_tokens": 4096,
+    "reasoning_effort": "none",
     "timeout": 120,
     "env": [
       "EXPERIENCE_WRITER_MODEL"
     ],
-    "note": "일일(00:30 KST) 24시간 활동 → 경험 항목 추출 → experiential_memory(vectorDB)"
+    "note": "일일(00:30 KST) 24시간 활동 → 경험 항목 추출 → experiential_memory(vectorDB). 2026-07-31 gemini-3.5-flash-lite→luna"
   },
   "vector_query_translation": {
     "provider": "deepseek",
@@ -119,14 +119,14 @@
     "note": "KG 임베딩 모델 (graph_memory/service.py에서 조회, KG_EMBED_MAX_RPS 페이싱)"
   },
   "research_spelling_proofread": {
-    "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
-    "temperature": 0.0,
-    "max_tokens": 256,
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "max_tokens": 1024,
+    "reasoning_effort": "low",
     "timeout": 45,
     "env": [
       "LIGHT_LLM_MODEL"
     ],
-    "note": "보고서 표기 자동 교정의 스타소바 문맥 검수 — 잘못된 교정 번호 반환 (실패 시 기계 교정 유지)"
+    "note": "보고서 표기 자동 교정의 스타소바 문맥 검수 — 잘못된 교정 번호 반환 (실패 시 기계 교정 유지). 2026-07-31 gemini-3.5-flash-lite→luna. 다섯 호출부 중 유일한 판단형이라 추론을 끄지 않고 low로 둔다"
   }
 }
