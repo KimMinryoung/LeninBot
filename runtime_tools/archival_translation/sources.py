@@ -53,7 +53,55 @@ def militera(raw: str) -> list[dict]:
     return blocks
 
 
-ADAPTERS: dict[str, Callable[[str], list[dict]]] = {"militera": militera}
+WIKISOURCE_BODY_RE = re.compile(
+    r'<div class="mw-content-ltr mw-parser-output"[^>]*>(.*?)'
+    r'(?=<!--\s*NewPP|<div class="printfooter")', re.S)
+WIKISOURCE_BLOCK_RE = re.compile(
+    r"(?is)<(center|h2|h3|h4|p|dd|li|table)\b[^>]*>(.*?)</\1>")
+TABLE_ROW_RE = re.compile(r"(?is)<tr\b[^>]*>(.*?)</tr>")
+TABLE_CELL_RE = re.compile(r"(?is)<t[hd]\b[^>]*>(.*?)</t[hd]>")
+
+
+def wikisource(raw: str) -> list[dict]:
+    """Parse a saved ru.wikisource.org document page.
+
+    Wikisource wraps the transcription in mw-parser-output together with its
+    own chrome — a header box, a source note, a "Наверх" link, the licence
+    notice. None of it is stripped here: the spec's block range and its
+    startsWith/endsWith guards decide what belongs to the document, the same
+    way they do for militera. A parser that guessed at the boundary would
+    quietly shift when the wiki page is re-saved.
+
+    Tables come back as ``{"tag": "table", "rows": [[cell, …], …]}``. Order
+    00447 carries its regional quotas in one, and a table flattened into prose
+    is a table whose numbers can go missing without anything noticing.
+    """
+    body = WIKISOURCE_BODY_RE.search(raw)
+    if not body:
+        return []
+    blocks: list[dict] = []
+    for m in WIKISOURCE_BLOCK_RE.finditer(body.group(1)):
+        tag, inner = m.group(1).lower(), m.group(2)
+        if tag == "table":
+            rows = [
+                [_text(c) for c in TABLE_CELL_RE.findall(row)]
+                for row in TABLE_ROW_RE.findall(inner)
+            ]
+            rows = [r for r in rows if any(c for c in r)]
+            if rows:
+                blocks.append({"tag": "table", "rows": rows,
+                               "lines": [" | ".join(r) for r in rows]})
+            continue
+        lines = [ln for ln in _text(inner).split("\n") if ln]
+        if lines:
+            blocks.append({"tag": tag, "lines": lines})
+    return blocks
+
+
+ADAPTERS: dict[str, Callable[[str], list[dict]]] = {
+    "militera": militera,
+    "wikisource": wikisource,
+}
 DEFAULT_ADAPTER = "militera"
 
 

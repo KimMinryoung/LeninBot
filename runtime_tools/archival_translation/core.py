@@ -42,7 +42,10 @@ FEATURE = "archival_document_translation"
 PROMPT_VERSION = "2"  # bump to invalidate every cached chunk
 
 _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-MARKER_RE = re.compile(r"\[\[(\d+)\|(h3|h5|p|blockquote)\]\][ \t]*\n?")
+# Any tag an adapter emits, not a fixed list. Pinning it to militera's tags
+# made every wikisource center/dd/li block read as a missing marker — the
+# model had returned them correctly and the parser refused to see them.
+MARKER_RE = re.compile(r"\[\[(\d+)\|([a-z][a-z0-9]*)\]\][ \t]*\n?")
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 HANGUL_RE = re.compile(r"[가-힣]")
 
@@ -180,14 +183,20 @@ def extract_blocks(spec: dict) -> list[dict]:
 
 
 def slice_documents(blocks: list[dict], spec: dict) -> list[dict]:
-    anchor = spec["source"]["anchor"]
-    anchor_idx = next(
-        (i for i, b in enumerate(blocks)
-         if b["tag"] == "h3" and b["lines"][0].strip() == anchor),
-        None,
-    )
-    if anchor_idx is None:
-        raise SpecError(f"anchor block not found: {anchor!r}")
+    # An anchor pins ranges to a landmark inside a larger page (militera puts
+    # the documents in an appendix). A page that *is* the document has none,
+    # and ranges are absolute from the first block.
+    anchor = spec["source"].get("anchor")
+    if anchor:
+        anchor_idx = next(
+            (i for i, b in enumerate(blocks)
+             if b["tag"] == "h3" and b["lines"][0].strip() == anchor),
+            None,
+        )
+        if anchor_idx is None:
+            raise SpecError(f"anchor block not found: {anchor!r}")
+    else:
+        anchor_idx = 0
 
     docs = []
     for entry in spec["documents"]:
@@ -496,6 +505,13 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
 
 # ── assembly ─────────────────────────────────────────────────────────
 
+_DEFAULT_TAG_MAP = {
+    "p": "p", "blockquote": "blockquote", "table": "table", "li": "li",
+    "center": "p", "dd": "blockquote",
+    "h2": "h2", "h3": "h2", "h4": "h3", "h5": "h2",
+}
+
+
 def _esc(s: str) -> str:
     return htmllib.escape(s, quote=False)
 
@@ -573,20 +589,43 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
         out.append(f"<h1>{_esc(doc['titleKo'])}</h1>")
         if doc.get("note"):
             out.append(f"<p>{_esc(doc['note'])}</p>")
+        # What a source tag becomes in the fragment. The default suits
+        # militera (h3/h5 are the appendix's own headings); a wikisource page
+        # where h3 is a region name in a roster overrides it in the spec, so
+        # 51 of them do not flood the reader's table of contents.
+        tag_map = {**_DEFAULT_TAG_MAP, **(doc.get("tagMap") or {})}
+        in_list = False
         for i, block in enumerate(doc["blocks"]):
             idx = doc["offset"] + i
             lines = translated.get(idx)
             if not lines:
                 raise SpecError(f"조립 중 누락된 블록: {idx}")
             lines = [fix(ln) for ln in lines]
-            tag = block["tag"]
-            if tag in ("h3", "h5"):
-                out.append(f"<h2>{_esc(' '.join(lines))}</h2>")
+            tag = tag_map.get(block["tag"], "p")
+            if tag != "li" and in_list:
+                out.append("</ul>")
+                in_list = False
+            if tag in ("h1", "h2", "h3", "h4"):
+                out.append(f"<{tag}>{_esc(' '.join(lines))}</{tag}>")
             elif tag == "blockquote":
                 inner = "".join(f"<p>{_esc(ln)}</p>" for ln in lines)
                 out.append(f"<blockquote>{inner}</blockquote>")
+            elif tag == "li":
+                if not in_list:
+                    out.append("<ul>")
+                    in_list = True
+                out.append(f"<li>{_esc(' '.join(lines))}</li>")
+            elif tag == "table":
+                rows = "".join(
+                    "<tr>" + "".join(f"<td>{_esc(c.strip())}</td>"
+                                     for c in ln.split("|")) + "</tr>"
+                    for ln in lines)
+                out.append(f"<table>{rows}</table>")
             else:
                 out.append("".join(f"<p>{_esc(ln)}</p>" for ln in lines))
+        if in_list:
+            out.append("</ul>")
+            in_list = False
     out.append("</article>")
     return "\n".join(out) + "\n"
 
