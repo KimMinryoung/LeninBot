@@ -63,8 +63,9 @@ def _per_token(input_price: float, output_price: float, cached: float) -> dict[s
 
 OPENAI_COMPATIBLE_PRICING = {
     "gpt-5.6-sol": _per_token(5.00, 30.00, 0.50),
-    "gpt-5.6-terra": _per_token(2.50, 15.00, 0.25),
-    "gpt-5.6-luna": _per_token(1.00, 6.00, 0.10),
+    # 2026-07-30 인하: Terra -20%, Luna -80%. 롱컨텍스트 티어(2x)는 미반영.
+    "gpt-5.6-terra": _per_token(2.00, 12.00, 0.20),
+    "gpt-5.6-luna": _per_token(0.20, 1.20, 0.02),
     "deepseek-v4-flash": _per_token(0.14, 0.28, 0.0028),
     "deepseek-v4-pro": _per_token(0.435, 0.87, 0.003625),
     "kimi-k3": _per_token(3.00, 15.00, 0.30),
