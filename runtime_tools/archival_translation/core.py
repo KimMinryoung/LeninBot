@@ -236,7 +236,15 @@ def slice_documents(spec: dict) -> list[dict]:
         key = source["path"]
         if key not in cache:
             cache[key] = load_blocks(source)
-            bands[key] = len(bands) * 1_000_000
+        # A document may pin its own band. Without one the band falls out of
+        # first-use order, which means inserting a document at the front
+        # renumbers every document behind it — new marker ids, new cache keys,
+        # and the whole page re-translates for nothing. Pin the band once and
+        # adding a document costs only that document.
+        if entry.get("band") is not None:
+            band = int(entry["band"]) * 1_000_000
+        else:
+            band = bands.setdefault(key, len(bands) * 1_000_000)
         blocks = cache[key]
         anchor_idx = _anchor_offset(blocks, source)
 
@@ -259,7 +267,7 @@ def slice_documents(spec: dict) -> list[dict]:
         # half 한다체, while the written orders were consistent on their own.
         chosen = [{**b, "register": entry.get("register")} for b in chosen]
         docs.append({**entry, "blocks": chosen,
-                     "offset": bands[key] + anchor_idx + start})
+                     "offset": band + anchor_idx + start})
     return docs
 
 
@@ -622,14 +630,24 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
             line = line.replace(ru, ko)
         return dedupe(line)
 
+    # 해제와 문서별 주석은 엮은이가 쓴 글이지 사료가 아니다. 같은 <p>로 흘리면
+    # 독자가 명령서 본문과 구분할 수 없다 — 1차 사료를 싣는 페이지에서 이건
+    # 서식 문제가 아니라 정확성 문제다.
+    label = "엮은이 주" if (spec.get("docLang") or "ko") == "ko" else "Editorial note"
+
+    def _aside(paras: list[str]) -> str:
+        body = "".join(f"<p>{_esc(p)}</p>" for p in paras if p)
+        return (f'<aside class="doc-editorial">'
+                f'<p class="doc-editorial-label">{label}</p>{body}</aside>')
+
     out = ["<article>", f"<h1>{_esc(spec['title'])}</h1>"]
-    for para in spec.get("headnote", []):
-        out.append(f"<p>{_esc(para)}</p>")
+    if spec.get("headnote"):
+        out.append(_aside(spec["headnote"]))
 
     for doc in docs:
         out.append(f"<h1>{_esc(doc['titleKo'])}</h1>")
         if doc.get("note"):
-            out.append(f"<p>{_esc(doc['note'])}</p>")
+            out.append(_aside([doc["note"]]))
         # What a source tag becomes in the fragment. The default suits
         # militera (h3/h5 are the appendix's own headings); a wikisource page
         # where h3 is a region name in a roster overrides it in the spec, so

@@ -110,9 +110,38 @@ def wikisource(raw: str) -> list[dict]:
     return blocks
 
 
+STALINISM_BODY_RE = re.compile(
+    r'<div class="com-content-article__body"[^>]*>(.*?)(?=<div class="[^"]*(?:pagenavigation|'
+    r'com-content-article__footer)|</main|<footer)', re.S)
+SCRIPT_LEAK_RE = re.compile(r"(?is)(?:var\s|function\s*\(|document\.|\{|\}|;\s*$)")
+
+
+def stalinism(raw: str) -> list[dict]:
+    """Parse a saved stalinism.ru document page.
+
+    The document sits in ``com-content-article__body`` surrounded by the
+    site's own furniture; a stray inline script also lands inside a <p>, so
+    paragraphs that read as code are dropped. What is *not* dropped here is
+    the modern compiler's apparatus — the publication note, the archival
+    reference — because deciding that is the spec's job, not the parser's.
+    """
+    body = STALINISM_BODY_RE.search(raw)
+    scope = body.group(1) if body else raw
+    blocks: list[dict] = []
+    for m in re.finditer(r"(?is)<p\b[^>]*>(.*?)</p>", scope):
+        text = _text(m.group(1))
+        if not text or not CYRILLIC_RE.search(text):
+            continue
+        if SCRIPT_LEAK_RE.search(text) and not text.endswith((".", "!", "?", "»")):
+            continue
+        blocks.append({"tag": "p", "lines": [ln for ln in text.split("\n") if ln]})
+    return blocks
+
+
 ADAPTERS: dict[str, Callable[[str], list[dict]]] = {
     "militera": militera,
     "wikisource": wikisource,
+    "stalinism": stalinism,
 }
 DEFAULT_ADAPTER = "militera"
 
