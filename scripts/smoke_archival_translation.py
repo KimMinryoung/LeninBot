@@ -101,6 +101,24 @@ def main() -> int:
     if "Ежов" in by_ru:
         check("Ежов가 격변화형에 걸린다", bool(by_ru["Ежов"]["pattern"].search("приказ Ежова")))
 
+    print("gloss dedupe / register")
+    from runtime_tools.archival_translation import core as _core
+    deduped = _core.dedupe_glosses([
+        "필랴르(Пиляр)가 보고했다.",
+        "이후 필랴르(Пиляр)는 체포되었다.",
+        "네스테로프(Nesterov)와 네스테로프(Nesterov)가 함께",
+        "전연방공산당(볼셰비키) 중앙위원회는 전연방공산당(볼셰비키) 소속이다.",
+    ])
+    check("두 번째 원문 병기를 지운다", deduped[1] == "이후 필랴르는 체포되었다.")
+    check("같은 줄 안의 반복도 지운다", deduped[2].count("(Nesterov)") == 1)
+    check("한글 괄호는 이름의 일부라 남긴다", deduped[3].count("(볼셰비키)") == 2)
+    check("첫 병기는 보존한다", "(Пиляр)" in deduped[0])
+    check("문서마다 문체가 지정되어 있다",
+          all(d.get("register") for d in spec["documents"]))
+    check("문체가 블록에 실린다", all(b.get("register") for d in docs for b in d["blocks"]))
+    check("문체가 프롬프트에 들어간다",
+          "문체:" in _core._chunk_prompt(chunks[0], glossary, at.Options()))
+
     print("marker round-trip")
     sample = chunks[0]
     rendered = at.render_chunk(sample)
@@ -133,6 +151,46 @@ def main() -> int:
     if sum(len(l) for l in big[1]["lines"]) > 200:
         check("지나치게 짧은 번역을 잡는다",
               any("짧" in p for p in at.validate(sample, {**got, big[0]: ["짧음"]})))
+
+    print("translate loop (stub provider)")
+    # _translate_chunk is the one path the other checks never enter, because it
+    # is the one that calls the API. Stubbing the executor covers it offline —
+    # without this a refactor can leave an undefined name in the loop and every
+    # check still passes.
+    from llm import call_registry
+
+    from runtime_tools.archival_translation import core
+
+    class _StubCache:
+        def __init__(self):
+            self.written = {}
+
+        def get(self, key):
+            return None
+
+        def put(self, key, blocks, meta):
+            self.written[key] = (blocks, meta)
+
+    original = call_registry.generate_sync
+    call_registry.generate_sync = lambda *a, **k: stub
+    try:
+        cache = _StubCache()
+        stats = core.Stats()
+        got_live = core._translate_chunk(sample, glossary, cache, at.Options(),
+                                         stats, lambda e: None)
+        check("번역 루프가 청크를 반환한다", set(got_live) == {i for i, _ in sample})
+        check("번역 루프가 캐시에 기록한다", len(cache.written) == 1)
+        check("성공이 stats에 반영된다", stats.translated == 1 and stats.failed == 0)
+
+        call_registry.generate_sync = lambda *a, **k: ""  # provider가 빈 응답
+        try:
+            core._translate_chunk(sample, glossary, _StubCache(),
+                                  at.Options(retries=1), core.Stats(), lambda e: None)
+            check("빈 응답이면 실패로 올라온다", False, "예외가 나지 않았다")
+        except RuntimeError as e:
+            check("빈 응답이면 실패로 올라온다", "빈 응답" in str(e), str(e))
+    finally:
+        call_registry.generate_sync = original
 
     print("plan")
     prepared = at.plan(spec, at.Options())

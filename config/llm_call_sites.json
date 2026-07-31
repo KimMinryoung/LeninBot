@@ -1,14 +1,17 @@
 {
   "archival_document_translation": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-v4-pro",
     "temperature": 0.2,
-    "max_tokens": 8000,
-    "timeout": 240,
+    "max_tokens": 20000,
+    "timeout": 300,
     "thinking": {
-      "type": "disabled"
+      "type": "enabled"
     },
-    "note": "러시아어 사료(공문서) 전문 → 한국어 번역. scripts/translate_archival_documents.py 전용. provider가 deepseek_anthropic인 이유는 thinking 토글이 Anthropic 호환 엔드포인트에만 있기 때문 — OpenAI 호환 경로로 부르면 추론이 max_tokens를 다 써서 본문 없이 200이 돌아온다(bot_config의 216/217 틱 사례와 같은 모드). 청크당 마커 형식 검증 후 실패분만 재시도(기본 3회), 결과는 output/archival_translations/*.jsonl에 내용 해시로 캐시"
+    "output_config": {
+      "effort": "high"
+    },
+    "note": "러시아어 사료(공문서) 전문 → 한국어 번역. scripts/translate_archival_documents.py 전용. provider가 deepseek_anthropic인 이유는 thinking 토글이 Anthropic 호환 엔드포인트에만 있기 때문 — OpenAI 호환 경로로 부르면 추론이 max_tokens를 다 써서 본문 없이 200이 돌아온다(bot_config의 216/217 틱 사례와 같은 모드). 2026-07-31 flash→pro, thinking on: flash 산출물에 다의어 오역(«известная осторожность»를 '알려진 신중함'으로)이 반복돼 추론이 필요한 작업으로 판단. thinking을 켠 만큼 청크를 줄여(--max-chars 2000) 8000토큰 예산에 추론 여유를 둔다. 청크당 마커 형식 검증 후 실패분만 재시도(기본 3회), 결과는 output/archival_translations/*.jsonl에 내용 해시로 캐시"
   },
   "chunk_summary": {
     "provider": "openai",

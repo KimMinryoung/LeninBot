@@ -48,7 +48,8 @@ def _print_plan(prepared: dict) -> None:
     print(f"용어표   : {prepared['glossaryEntries']:,}항목")
     print(f"청크     : {prepared['chunks']}개")
     print(f"번역 대상: {prepared['chars']:,}자")
-    print(f"예상 비용: 약 ${prepared['estimatedUsd']:.3f} (deepseek-v4-flash 기준)")
+    think = "추론 on" if prepared.get("thinking") else "추론 off"
+    print(f"예상 비용: 약 ${prepared['estimatedUsd']:.2f} ({prepared.get('model')}, {think} 기준)")
 
 
 def main() -> int:
@@ -70,6 +71,12 @@ def main() -> int:
                     help="모델을 호출하지 않고 계획만 출력")
     ap.add_argument("--probe", action="store_true",
                     help="provider를 직접 한 번 호출해 응답·finish_reason·usage를 그대로 출력")
+    ap.add_argument("--compare",
+                    help="같은 청크를 여러 모델로 번역해 비교. "
+                         "쉼표 구분 'provider/model' (뒤에 +think, +effort=high 가능)")
+    ap.add_argument("--compare-chunks", type=int, default=2, dest="compare_chunks")
+    ap.add_argument("--compare-out", type=Path, dest="compare_out",
+                    help="비교 결과 마크다운 경로")
     args = ap.parse_args()
 
     opts = at.Options(
@@ -84,6 +91,34 @@ def main() -> int:
         print(f"스펙     : {spec['id']} — {spec['title']}")
         if args.plan_only:
             _print_plan(at.plan(spec, opts))
+            return 0
+
+        if args.compare:
+            at.preflight(opts)
+            variants = [v.strip() for v in args.compare.split(",") if v.strip()]
+            report = at.compare(spec, variants, opts, args.compare_chunks)
+            out = args.compare_out or Path(f"/tmp/compare-{spec['id']}.md")
+            lines = [f"# 번역 모델 비교 — {spec['id']}",
+                     f"\n대상 {report['chars']:,}자\n"]
+            for idx in sorted(report["source"]):
+                src = " ".join(report["source"][idx]["lines"])
+                lines.append(f"\n## 블록 {idx} (원문 {len(src)}자)\n\n**RU** {src}\n")
+                for r in report["results"]:
+                    if r.get("error"):
+                        lines.append(f"\n**{r['variant']}** 실패: {r['error']}\n")
+                        continue
+                    got = " ".join(r["blocks"].get(idx, ["(응답 없음)"]))
+                    lines.append(f"\n**{r['variant']}** ({len(got)}자)\n\n{got}\n")
+            out.write_text("\n".join(lines), encoding="utf-8")
+
+            print(f"\n{'변형':44} {'초':>6} {'검증 문제':>9}")
+            for r in report["results"]:
+                if r.get("error"):
+                    print(f"  {r['variant']:42} 실패: {r['error'][:50]}")
+                    continue
+                label = f"{r['variant']} think={r.get('thinking',{}) and r['thinking']['type']}"
+                print(f"  {label:42} {r['seconds']:6.1f} {len(r['problems']):9}")
+            print(f"\n비교 문서: {out}")
             return 0
 
         if args.probe:

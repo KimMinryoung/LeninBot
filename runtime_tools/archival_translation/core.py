@@ -39,7 +39,7 @@ SPEC_DIR = ROOT / "config" / "archival_translation"
 CACHE_DIR = ROOT / "output" / "archival_translations"
 
 FEATURE = "archival_document_translation"
-PROMPT_VERSION = "1"  # bump to invalidate every cached chunk
+PROMPT_VERSION = "2"  # bump to invalidate every cached chunk
 
 _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MARKER_RE = re.compile(r"\[\[(\d+)\|(h3|h5|p|blockquote)\]\][ \t]*\n?")
@@ -54,20 +54,31 @@ SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기�
 참고 문헌으로 공개된다.
 
 번역 원칙
-- 1차 사료다. 요약·생략·의역·완곡화·현대화를 하지 않는다. 문장을 합치거나 나누지 않는다.
-- 원문의 관료적 문체와 완곡어법을 그대로 옮긴다. 예: «первая категория»는 실제 의미를
-  풀어 쓰지 말고 "제1범주"로 옮긴다. 원문이 모호하면 모호한 채로 둔다.
+- 1차 사료다. 내용을 요약·생략·완곡화·현대화하지 않는다. 원문에 있는 정보는 하나도
+  빠뜨리지 않는다.
+- 그러나 러시아어 어순을 한국어에 옮기지 않는다. 러시아어의 긴 복문, 중간에 끼어드는
+  관계절, 명사구 연쇄를 그대로 한 문장에 담으려 하면 한국어로 읽을 수 없는 문장이 된다.
+  필요하면 문장을 나누고 어순을 한국어에 맞게 재배열한다. 정보 보존이 기준이고,
+  문장 경계 보존은 기준이 아니다.
+- 완성된 번역문은 한국어 문어로 자연스럽게 읽혀야 한다. 번역투로 뻣뻣하더라도
+  원문 구조를 흉내 내는 쪽을 택하지 말 것.
+- 원문의 관료적 문체와 완곡어법 자체는 그대로 옮긴다. 예: «первая категория»는 실제
+  의미를 풀어 쓰지 말고 "제1범주"로 옮긴다. 원문이 모호하면 모호한 채로 둔다.
+- 다의어를 사전 첫 번째 뜻으로 기계적으로 옮기지 말 것. 문맥에 맞는 뜻을 고른다.
+  예: «известная осторожность»의 известная는 "알려진"이 아니라 "어느 정도의"다.
 - 문서 번호, 날짜, 조항 번호, 수량, 직위, 서명, 문서보관소 출처 표기는 정확히 보존한다.
 - 원문에 없는 설명·주석·머리말·꼬리말을 절대 덧붙이지 않는다. 번역문만 출력한다.
 - 속기록의 삽입구(«Голос с места. Правильно.» 등)는 괄호와 함께 그대로 옮긴다.
 
 표기
 - 기관·직위 약어는 아래 용어표를 따른다. 용어표에 있는 항목은 반드시 그 표기를 쓴다.
-- 용어표에 없는 인명은 러시아어 발음에 따라 음차하고 처음 나올 때만 괄호로 원문을
-  병기한다. 예: 울메르(Ульмер). 이후에는 한국어 표기만 쓴다.
+- 용어표에 없는 인명은 러시아어 발음에 따라 음차하고, 처음 나올 때만 괄호에 원문을
+  병기한다. 괄호 안에는 반드시 원문 그대로의 키릴 문자를 쓴다. 로마자로 음차해
+  적지 말 것. 예: 울메르(Ульмер) — "울메르(Ulmer)"는 금지. 이후에는 한국어 표기만 쓴다.
 - 기관 약어(НКВД, ГУГБ, ЦК ВКП(б) 등)는 용어표 표기를 쓰되 처음 나올 때만 괄호로
   원어 약어를 병기한다.
-- 우크라이나어로 적힌 문서보관소 출처 표기는 한국어로 옮기고 괄호에 원문을 병기한다.
+- 우크라이나어로 적힌 문서보관소 출처 표기는 한국어로 옮기고, 괄호에 원문을 키릴
+  문자 그대로 병기한다.
 
 출력 형식 (엄격)
 - 입력의 각 단락은 [[번호|태그]] 마커로 시작한다. 같은 마커를 같은 순서로 그대로
@@ -193,6 +204,11 @@ def slice_documents(blocks: list[dict], spec: dict) -> list[dict]:
             raise SpecError(
                 f"{entry['id']}: range end moved\n  expected: {entry['endsWith']!r}\n"
                 f"  found:    {tail[-80:]!r}")
+        # Stamp each block with its document's register so the chunk prompt can
+        # pin it. Left to the model it varies chunk to chunk wherever more than
+        # one register is defensible — a spoken stenogram came back half 합쇼체,
+        # half 한다체, while the written orders were consistent on their own.
+        chosen = [{**b, "register": entry.get("register")} for b in chosen]
         docs.append({**entry, "blocks": chosen, "offset": anchor_idx + start})
     return docs
 
@@ -350,8 +366,14 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]]) -> list[s
         if cyr / max(len(outside.strip()), 1) > 0.15:
             problems.append(f"[[{idx}]] 러시아어가 그대로 남음 ({cyr}자): {outside.strip()[:40]}…")
 
+        # Korean renders Russian in roughly half the characters, but a sentence
+        # dense in long compound nouns (мобилизационная подготовка → 동원 준비)
+        # compresses much further. Measured over 170 blocks of this corpus:
+        # median 0.50, minimum 0.34. A 0.35 floor sat inside the real
+        # distribution and failed a correct translation; 0.25 clears every
+        # observed block while still catching a stub reply to a long paragraph.
         src_len = sum(len(ln) for ln in block["lines"])
-        if src_len > 200 and len(joined) < src_len * 0.35:
+        if src_len > 200 and len(joined) < src_len * 0.25:
             problems.append(f"[[{idx}]] 번역문이 지나치게 짧음 ({len(joined)}자 < 원문 {src_len}자)")
     return problems
 
@@ -391,7 +413,9 @@ def _chunk_prompt(chunk, glossary, opts: Options) -> str:
     body = render_chunk(chunk)
     terms = glossary_for(body, glossary, opts.glossary_limit)
     gloss_text = "\n".join(f"- {ru} → {ko}" for ru, ko in terms) or "(해당 없음)"
-    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n"
+    register = (chunk[0][1].get("register") or "").strip()
+    register_line = f"문체: {register}\n\n" if register else ""
+    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n{register_line}"
             f"아래 단락들을 번역하라.\n\n{body}")
 
 
@@ -408,7 +432,13 @@ def _chunk_key(prompt: str, opts: Options) -> str:
     from llm import call_registry
 
     profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
-    fingerprint = f"{profile.provider}\0{profile.model}\0{profile.extra.get('thinking')}"
+    # The system prompt belongs in the key too. Without it, editing the
+    # translation rules silently reuses output produced under the old ones
+    # unless someone remembers to bump PROMPT_VERSION by hand — and a
+    # constant that has to be remembered is a constant that gets forgotten.
+    system_hash = hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
+    fingerprint = (f"{profile.provider}\0{profile.model}\0"
+                   f"{profile.extra.get('thinking')}\0{system_hash}")
     return hashlib.sha256(
         f"{PROMPT_VERSION}\0{fingerprint}\0{prompt}".encode("utf-8")).hexdigest()
 
@@ -447,7 +477,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         got = parse_response(raw)
         problems = validate(chunk, got)
         if not problems:
-            cache.put(key, got, {"attempt": attempt, "chars": len(body)})
+            cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
             stats.translated += 1
             return got
         correction = (
@@ -468,6 +498,39 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
 
 def _esc(s: str) -> str:
     return htmllib.escape(s, quote=False)
+
+
+# A gloss is a parenthetical holding the source-script original: 필랴르(Пиляр),
+# 네스테로프(Nesterov). Parentheses holding Korean — 전연방공산당(볼셰비키) — are
+# part of the name itself and must survive untouched.
+_GLOSS_RE = re.compile(r"([가-힣]{2,12})\(([^)]{2,40})\)")
+
+
+def gloss_deduper() -> Callable[[str], str]:
+    """Keep each original-script gloss on its first use only, document-wide.
+
+    The prompt says to gloss a name "only on first occurrence", but a chunk is
+    an independent API call that cannot see the ones before it, so the rule
+    can only ever hold inside a chunk. Enforcing it across the document is the
+    assembler's job, not something to keep asking the model for.
+    """
+    seen: set[str] = set()
+
+    def repl(m: re.Match) -> str:
+        korean, inner = m.group(1), m.group(2)
+        if not re.search(r"[А-Яа-яЁёІіЇїЄєA-Za-z]", inner):
+            return m.group(0)  # Korean parenthetical: part of the name
+        if korean in seen:
+            return korean
+        seen.add(korean)
+        return m.group(0)
+
+    return lambda line: _GLOSS_RE.sub(repl, line)
+
+
+def dedupe_glosses(lines: list[str]) -> list[str]:
+    apply = gloss_deduper()
+    return [apply(line) for line in lines]
 
 
 def stray_cyrillic(text: str, allowed: list[str] | None = None) -> list[str]:
@@ -495,11 +558,12 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     # They live in the spec, not in the fragment, so a re-run from cache
     # reproduces the fix instead of silently dropping it.
     edits = spec.get("postEdits") or {}
+    dedupe = gloss_deduper()
 
     def fix(line: str) -> str:
         for ru, ko in edits.items():
             line = line.replace(ru, ko)
-        return line
+        return dedupe(line)
 
     out = ["<article>", f"<h1>{_esc(spec['title'])}</h1>"]
     for para in spec.get("headnote", []):
@@ -613,6 +677,71 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
     return out
 
 
+def compare(spec: dict, variants: list[str], opts: Options | None = None,
+            chunks_wanted: int = 2) -> dict:
+    """Translate the same chunks with several models for side-by-side review.
+
+    Picking a model by argument is guesswork; this runs the candidates over
+    identical input under the current prompt so the choice rests on the
+    output. A variant is "provider/model", optionally "+think" to enable
+    DeepSeek reasoning or "+effort=high" for the OpenAI tiers.
+    """
+    import dataclasses
+
+    from llm import call_registry
+
+    opts = opts or Options()
+    prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
+    chunks, glossary = prepared["_chunks"], prepared["_glossary"]
+    base = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+
+    results = []
+    for variant in variants:
+        spec_str, _, flags = variant.partition("+")
+        provider, _, model = spec_str.strip().partition("/")
+        extra = dict(base.extra)
+        if "think" in flags:
+            extra["thinking"] = {"type": "enabled"}
+        elif provider.startswith("deepseek"):
+            extra["thinking"] = {"type": "disabled"}
+        if "effort=" in flags:
+            extra["reasoning_effort"] = flags.split("effort=")[1].split(",")[0]
+        elif provider == "openai":
+            extra["reasoning_effort"] = "medium"
+
+        executor = call_registry._EXECUTORS.get(provider)
+        if executor is None:
+            results.append({"variant": variant, "error": f"unknown provider {provider!r}"})
+            continue
+        profile = dataclasses.replace(base, provider=provider, model=model or base.model,
+                                      extra=extra)
+
+        blocks: dict[int, list[str]] = {}
+        problems, seconds, error = [], 0.0, None
+        for chunk in chunks:
+            prompt = _chunk_prompt(chunk, glossary, opts)
+            started = time.time()
+            try:
+                raw = executor(profile, prompt, SYSTEM_PROMPT) or ""
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
+                break
+            seconds += time.time() - started
+            got = parse_response(raw)
+            problems.extend(validate(chunk, got))
+            blocks.update(got)
+        results.append({
+            "variant": variant, "provider": provider, "model": profile.model,
+            "thinking": extra.get("thinking"), "effort": extra.get("reasoning_effort"),
+            "error": error, "problems": problems, "seconds": round(seconds, 1),
+            "blocks": blocks,
+        })
+
+    source = {idx: b for chunk in chunks for idx, b in chunk}
+    return {"source": source, "results": results,
+            "chars": sum(len(l) for b in source.values() for l in b["lines"])}
+
+
 def plan(spec: dict, opts: Options | None = None) -> dict:
     """Slice, chunk and price a run without calling the model."""
     opts = opts or Options()
@@ -624,9 +753,23 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     if opts.limit_chunks:
         chunks = chunks[: opts.limit_chunks]
     total = sum(len(ln) for c in chunks for _, b in c for ln in b["lines"])
-    est = (total / 2.2 / 1e6) * _PRICE_IN + (total * 0.9 / 1.6 / 1e6) * _PRICE_OUT
+
+    # Price against the model that will actually run, not a hardcoded tier:
+    # a stale estimate is worse than none once the call site can change model.
+    from llm import call_registry
+    from llm.provider_registry import openai_compatible_pricing
+
+    profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+    price = openai_compatible_pricing(profile.model)
+    thinking_on = (profile.extra.get("thinking") or {}).get("type") == "enabled"
+    tokens_in = total / 2.2
+    # Reasoning tokens bill as output; high effort roughly doubles it.
+    tokens_out = total * 0.9 / 1.6 * (2.0 if thinking_on else 1.0)
+    est = tokens_in * price["input"] + tokens_out * price["output"]
     return {
         "id": spec.get("id"),
+        "model": profile.model,
+        "thinking": thinking_on,
         "documents": [
             {"id": d["id"], "title": d["titleKo"], "blocks": len(d["blocks"]),
              "chars": sum(len(ln) for b in d["blocks"] for ln in b["lines"])}
