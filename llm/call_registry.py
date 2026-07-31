@@ -48,6 +48,7 @@ _PROVIDER_BASE_URLS = {
 _PROVIDER_KEYS = {
     "gemini": "GEMINI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "deepseek_anthropic": "DEEPSEEK_API_KEY",
     "kimi": "MOONSHOT_API_KEY",
     "openai": "OPENAI_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
@@ -201,6 +202,13 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
         # Kimi K3는 temperature=1만 허용 (그 외 400) — 파라미터 자체를 생략한다.
         if p.provider != "kimi":
             kwargs["temperature"] = p.temperature
+        # DeepSeek V4는 thinking이 기본 ON이라, 끄지 않으면 추론이 max_tokens를
+        # 다 쓰고 본문 없이 200이 돌아온다. 토글의 정식 자리는 Anthropic 호환
+        # 엔드포인트(provider="deepseek_anthropic")지만, json_mode처럼 그쪽에
+        # 대응이 없는 호출부를 위해 여기서도 넘길 수 있게 열어둔다. 선언한
+        # 호출부에만 적용되므로 기존 동작은 그대로다.
+        if p.provider == "deepseek" and isinstance(p.extra.get("thinking"), dict):
+            kwargs["extra_body"] = {"thinking": p.extra["thinking"]}
     response = client.chat.completions.create(
         model=p.model,
         messages=messages,
@@ -225,9 +233,52 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> str
     ).strip()
 
 
+def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | None) -> str:
+    """DeepSeek over its Anthropic-compatible endpoint, thinking off by default.
+
+    DeepSeek V4 defaults to thinking mode, and the toggle only exists on this
+    endpoint (see bot_config._get_deepseek_thinking_params). On the plain
+    OpenAI-compatible path a think-heavy response can spend the whole
+    max_tokens budget before emitting any visible text, so the call returns
+    200 with empty content and generate_sync reports it as a failure with no
+    cause — the empty-reply mode bot_config documents for autonomous ticks
+    216/217. One-shot generation call sites want text, not deliberation, so
+    thinking is disabled unless the call site asks for it.
+    """
+    import anthropic
+
+    from bot_config import DEEPSEEK_ANTHROPIC_BASE_URL
+
+    client = anthropic.Anthropic(
+        api_key=_api_key("deepseek"),
+        base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
+        timeout=p.timeout,
+    )
+    kwargs: dict = {"system": system} if system else {}
+    thinking = p.extra.get("thinking")
+    if isinstance(thinking, dict):
+        kwargs["thinking"] = thinking
+        effort = p.extra.get("output_config")
+        if isinstance(effort, dict):
+            kwargs["output_config"] = effort
+    else:
+        kwargs["thinking"] = {"type": "disabled"}
+
+    response = client.messages.create(
+        model=p.model,
+        max_tokens=p.max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+        **kwargs,
+    )
+    return " ".join(
+        b.text for b in response.content if getattr(b, "type", "") == "text"
+    ).strip()
+
+
 _EXECUTORS = {
     "gemini": _generate_gemini,
     "deepseek": _generate_openai_compat,
+    "deepseek_anthropic": _generate_deepseek_anthropic,
     "kimi": _generate_openai_compat,
     "openai": _generate_openai_compat,
     "claude": _generate_claude,

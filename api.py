@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from api_routes.admin_users import router as admin_users_router
+from api_routes.archival_translation import router as archival_translation_router
 from api_routes.chat_history import router as chat_history_router
 from api_routes.private_reports import router as private_reports_router
 from api_routes.task_reports import router as task_reports_router
@@ -70,6 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cyber-Lenin API", lifespan=lifespan)
 app.include_router(admin_users_router)
+app.include_router(archival_translation_router)
 app.include_router(chat_history_router)
 app.include_router(private_reports_router)
 app.include_router(task_reports_router)
