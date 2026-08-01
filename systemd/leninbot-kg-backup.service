@@ -1,17 +1,15 @@
 [Unit]
-Description=LeninBot Postgres streaming replication health check
+Description=LeninBot KG Backup (daily dump to Cloudflare R2)
 After=network.target leninbot-neo4j.service
-Requires=leninbot-neo4j.service
 
 [Service]
 Type=oneshot
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
-ExecStart=/home/grass/leninbot/venv/bin/python scripts/check_replication_health.py --notify
-TimeoutStartSec=120
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/backup_kg_to_r2.py
+TimeoutStartSec=1800
 # Dead-man's switch ping to the off-VM watchdog (Cloudflare Worker). Prefixed
 # with '-' so a watchdog outage can never mark a successful run as failed, and
 # harmlessly a no-op until WATCHDOG_PING_BASE is set in .env after deploy.
-ExecStartPost=-/usr/bin/curl -fsS -m 10 --retry 3 ${WATCHDOG_PING_BASE}/replication-health
+ExecStartPost=-/usr/bin/curl -fsS -m 10 --retry 3 ${WATCHDOG_PING_BASE}/kg-backup

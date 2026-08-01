@@ -1,0 +1,9 @@
+[Unit]
+Description=LeninBot KG Backup Timer (daily 03:00 KST)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

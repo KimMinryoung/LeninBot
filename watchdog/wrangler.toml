@@ -1,0 +1,16 @@
+name = "leninbot-watchdog"
+main = "src/worker.js"
+compatibility_date = "2026-08-01"
+
+# Every 5 minutes. The site check wants to be prompt; the dead-man's switch
+# deadlines are all far coarser than this, so 5 minutes costs nothing extra.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# `id` is filled in by scripts/deploy_watchdog.sh after it creates the namespace.
+[[kv_namespaces]]
+binding = "WATCHDOG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets are NOT set here — they go in with `wrangler secret put`:
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PING_TOKEN
