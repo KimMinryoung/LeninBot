@@ -66,16 +66,93 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 ## 승격 런북
 
 > 자동 failover는 없다. 이 규모에서 자동화는 스플릿브레인 위험만 늘린다.
+>
+> **승격은 최후 수단이다.** 재시작은 되돌릴 수 있고 승격은 되돌릴 수 없다. 아래 분류를 건너뛰고 바로 승격하지 말 것.
 
-### 먼저: 어떤 장애인가
+### 0. 어떤 알림이 왔나
 
-**A. DB만 죽고 이 VM은 살아 있다** (컨테이너 손상, 볼륨 문제, 잘못된 마이그레이션)
-→ 아래 스크립트로 몇 분 안에 복구된다.
+| 텔레그램 | 의미 |
+|---|---|
+| 🔴 `cyber-lenin.com 응답 이상` (5분 내) | 사이트가 안 보인다. 원인은 아직 모름 |
+| 🔴 `... 콘텐츠 이상 — DB 유래 링크 0개` | 응답은 오는데 DB에서 글이 안 나온다 |
+| 🔴 `복제 상태 점검` 실패 (15분 주기) | DB 또는 스탠바이 문제 |
+| 🔴 `복제 상태 점검 무소식 N분` (1시간 내) | **메인 VM이 죽었다** — 데드맨 스위치 |
 
-**B. 메인 VM이 통째로 죽었다**
-→ **승격만으로는 사이트가 살아나지 않는다.** nginx·frontend·API·neo4j·임베딩 서버가 전부 그 VM에 있고, 스탠바이는 RAM 3.8 GB에 그중 아무것도 깔려 있지 않다. 새 호스트를 띄워야 하며, 스탠바이의 역할은 "사이트가 유지된다"가 아니라 **"데이터가 이미 뜨겁게 살아 있어 R2 복원을 기다릴 필요가 없다"**는 것이다. 이 구분을 미리 알고 있어야 한다.
+### 1. 분류: VM이 살아 있나
 
-### A 시나리오: `scripts/promote_standby.sh`
+```bash
+ssh grass@100.122.248.77 'uptime'      # tailnet 경유
+```
+
+붙으면 **A**, 안 붙으면 **B**.
+
+### 2. (A) 정말 DB 문제인지 먼저 확인
+
+```bash
+docker exec leninbot-pg psql -U postgres -c 'SELECT 1;'
+```
+
+**응답이 오면 DB 문제가 아니다. 승격하지 말 것.** 2026-08-01 장애가 그랬듯 방화벽·nginx·frontend 쪽일 가능성이 크다.
+
+```bash
+docker ps
+systemctl status nginx
+curl -sI -k -H "Host: cyber-lenin.com" https://127.0.0.1/    # origin 자체는 사나
+```
+
+origin이 200인데 밖에서 안 보이면 **Hetzner 방화벽**을 본다 (인바운드 80/443, Cloudflare 대역).
+
+### 3. (A) DB가 응답 없으면 — 재시작이 먼저
+
+```bash
+docker logs --tail 50 leninbot-pg
+docker restart leninbot-pg
+```
+
+컨테이너가 엉킨 정도면 여기서 끝난다. 되돌릴 수 있는 조치를 먼저 소진한다.
+
+### 4. (A) 그래도 안 살아나면 — 승격 vs 복원
+
+여기서 갈린다. **둘 다 정답일 수 있다.**
+
+| | 승격 | 백업 복원 (`restore_db.py`) |
+|---|---|---|
+| 데이터 손실 | **0** | 최대 24시간 (03:40 KST 이후분) |
+| 소요 | 몇 분 | 10분 내외 |
+| 이후 상태 | **스탠바이가 없어진다.** 복제 구성 재구축 필요 | 구성 그대로 유지 |
+
+오늘치 쓰기가 아까우면 승격, 어제 상태로 충분하면 복원이다. 참고로 2026-08-01 기준 하루 쓰기는 대화 0건·원고 0건이고 대부분 `tool_audit_log`와 재생성 가능한 큐레이션이었다 — **그런 날에는 복원이 덜 번거롭다.** 승격은 그 대가로 복제 구성을 통째로 다시 세우게 만든다.
+
+### 5. (A) 승격을 택했다면
+
+```bash
+scripts/promote_standby.sh --dry-run                      # 계획 확인
+docker stop leninbot-pg                                   # 스플릿브레인 방지
+scripts/promote_standby.sh --confirm=PROMOTE_STANDBY
+```
+
+두 번째 줄을 건너뛰면 스크립트가 거부한다. primary가 반쯤 살아 쓰기를 받는 상태로 승격하면 데이터가 두 갈래로 갈라지고 합칠 방법이 없다.
+
+승격 직후 반드시:
+
+```bash
+sudo systemctl stop leninbot-replication-health.timer      # 스탠바이가 없으니 계속 알림이 온다
+```
+
+### 6. (B) 메인 VM이 통째로 죽었다
+
+**승격만으로는 사이트가 살아나지 않는다.** nginx·frontend·API·neo4j·임베딩 서버가 전부 그 VM에 있고, 스탠바이는 RAM 3.8 GB에 그중 아무것도 깔려 있지 않다.
+
+1. Hetzner Console에서 VM 상태 확인 — 재부팅으로 살아나면 그게 제일 빠르다
+2. 안 되면 새 VM 발급 → Docker·Tailscale 설치 → 저장소 클론
+3. 데이터는 스탠바이에 뜨겁게 살아 있다. 승격해 새 호스트가 붙게 하거나, 스탠바이에서 덤프를 떠 옮긴다. **R2 복원을 기다릴 필요가 없다는 것이 스탠바이의 실제 값어치다**
+4. Cloudflare DNS를 새 origin IP로, 방화벽에 80/443(Cloudflare 대역) 규칙
+
+몇 시간짜리 작업이다. **스탠바이가 줄이는 것은 복구 시간이 아니라 데이터 손실이다.**
+
+> ⚠️ **사전에 해둘 것**: B에서 SSH가 안 되면 Hetzner Console이 유일한 진입로인데, 메인 VM은 SSH 키로 생성해 **root 비밀번호가 없어 콘솔 로그인이 안 된다**(22번도 방화벽으로 닫혀 있다). Console → Rescue → Reset root password를 **장애 전에** 해둘 것. 정작 필요할 때는 이 조작조차 못 할 수 있다.
+
+### A 시나리오 상세: `scripts/promote_standby.sh`
 
 ```bash
 scripts/promote_standby.sh --dry-run                      # 무엇이 바뀌는지 먼저 본다
