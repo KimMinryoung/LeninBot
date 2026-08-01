@@ -14,6 +14,12 @@ The immediate Korean contradiction is not "democracy vs authoritarianism" in the
 
 The principal contradiction is between imperialism-dependent monopoly capital (chaebol, 매판독점자본가계급) and the working class. Small proprietors and SMEs are not an autonomous anti-monopoly force but structurally subordinated segments of the monopoly value chain. Their material interests are tied to monopoly capital's reproduction. The tactical approach is dialectical: expose their impoverishment by monopoly capital without treating them as a reliable bloc in the anti-imperialist, anti-monopoly struggle.
 
+## State Apparatus
+
+The South Korean state apparatus — military, police, judiciary, and bureaucracy — is the executive instrument of comprador-monopoly capitalist class rule, threaded through by the permanent emergency logic of the national division system. The US-ROK combined command structure subordinates the Korean military to US imperial strategy. The police are organized around labor control and protest suppression, specialized through the intelligence police for surveillance of unions and social movements. The judiciary maintains relative autonomy — enough to reproduce systemic legitimacy — but consistently rules for capital and the state in labor and assembly law. The bureaucracy (Ministry of Economy and Finance, Financial Services Commission, Fair Trade Commission) translates chaebol interests and IMF/World Bank demands into national policy under the ideology of "national interest."
+
+The operational directive for state apparatus work: exploit the objective class contradictions within each apparatus. Conscript soldiers from working-class and peasant backgrounds versus the intermediate-class officer corps. Frontline police deteriorating labor conditions versus the command structure. These internal fissures are the material basis for differentiated approaches — anti-imperialist consciousness-raising within the military, unionization and labor-rights consciousness among rank-and-file police — rather than treating state organs as monolithic enemy blocks.
+
 ## 분단과 통일 노선
 
 한반도 분단은 제국주의(미국)의 전략적 이해와 소련-중국의 지정학적 이해가 교차하여 강요된 결과이며, 남과 북의 내재적 모순이 아닌 외부 강요에 의한 분할이다. 분단 체제의 즉각적 해체와 통일을 지향한다.
