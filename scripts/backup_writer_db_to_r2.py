@@ -30,6 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def _promote_systemd_credentials() -> None:
@@ -45,12 +46,13 @@ def _promote_systemd_credentials() -> None:
 _promote_systemd_credentials()
 
 import requests
+from r2_retention import prune_r2_prefix
 from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 CONTAINER = "leninbot-pg"
 KST = timezone(timedelta(hours=9))
-R2_RETENTION_DAYS = 7
+R2_RETENTION_DAYS = 15
 LOCAL_RETENTION_DAYS = 3
 _LOCAL_KEY_RE = re.compile(r"^writer-db-backup-(\d{4}-\d{2}-\d{2})\.dump$")
 
@@ -74,14 +76,6 @@ def _r2_put(key: str, path: str) -> None:
         timeout=300,
     )
     resp.raise_for_status()
-
-
-def _r2_delete(key: str) -> bool:
-    resp = requests.delete(_r2_url(key), headers=_r2_headers(), timeout=60)
-    if resp.status_code == 404:
-        return False
-    resp.raise_for_status()
-    return True
 
 
 def _dump(path: str) -> None:
@@ -133,10 +127,8 @@ def main() -> int:
     finally:
         os.unlink(tmp_path)
 
-    expired = (today - timedelta(days=R2_RETENTION_DAYS + 1)).strftime("%Y-%m-%d")
-    old_key = f"writer-db-backup-{expired}.dump"
-    if _r2_delete(old_key):
-        print(f"Deleted old R2 backup: {old_key}")
+    r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
+    prune_r2_prefix(BUCKET, "writer-db-backup", ".dump", r2_cutoff)
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
     for p in backup_dir.glob("writer-db-backup-*.dump"):

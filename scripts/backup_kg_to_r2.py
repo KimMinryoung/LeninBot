@@ -3,8 +3,8 @@
 
 Dumps Neo4j entities/edges/mentions via the existing backup_kg.py logic,
 bundles them into kg-backup-YYYY-MM-DD.tar.gz, uploads to the
-cyber-lenin-backups R2 bucket, and deletes the backup from 2 days ago
-(rolling 2-day retention on R2: keep today + yesterday).
+cyber-lenin-backups R2 bucket, and deletes the backup that fell out of the
+rolling R2_RETENTION_DAYS window.
 
 Also keeps a rolling 3-day local copy under data/kg_backups/ for fast
 restore without R2 roundtrip. Raw JSON dumps are deleted after upload
@@ -23,6 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "skills" / "kg-maintenance" / "scripts"))
 
 
@@ -46,10 +47,12 @@ _promote_systemd_credentials()
 
 import requests
 from backup_kg import backup as _dump_kg
+from r2_retention import prune_r2_prefix
 from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 KST = timezone(timedelta(hours=9))
+R2_RETENTION_DAYS = 14  # keep today + the 14 previous days on R2
 LOCAL_RETENTION_DAYS = 3  # keep today + yesterday + day-before under data/kg_backups/
 _LOCAL_KEY_RE = re.compile(r"^kg-backup-(\d{4}-\d{2}-\d{2})\.tar\.gz$")
 
@@ -73,14 +76,6 @@ def _r2_put(key: str, path: str) -> None:
         timeout=300,
     )
     resp.raise_for_status()
-
-
-def _r2_delete(key: str) -> bool:
-    resp = requests.delete(_r2_url(key), headers=_r2_headers(), timeout=60)
-    if resp.status_code == 404:
-        return False
-    resp.raise_for_status()
-    return True
 
 
 def main() -> int:
@@ -115,12 +110,8 @@ def main() -> int:
     finally:
         os.unlink(tmp_path)
 
-    two_days_ago = (today - timedelta(days=2)).strftime("%Y-%m-%d")
-    old_key = f"kg-backup-{two_days_ago}.tar.gz"
-    if _r2_delete(old_key):
-        print(f"Deleted old backup: {old_key}")
-    else:
-        print(f"No old backup to delete: {old_key}")
+    r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
+    prune_r2_prefix(BUCKET, "kg-backup", ".tar.gz", r2_cutoff)
 
     _prune_local_archives(backup_dir, today)
 

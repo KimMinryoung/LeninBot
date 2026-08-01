@@ -87,12 +87,13 @@
 
 ### Phase 4 — 백업 체계 (1단계 ✅ 완료 2026-07-28, VM 단계 대기)
 
-1. **메인 DB + legacy_game 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 2026-07-29 운영 테이블 정리 후 main 덤프는 162.2MB, `legacy_game`은 0.1MB이며 각각 로컬 3일·R2 7일 롤링 보관한다.
+1. **메인 DB + legacy_game 일일 dump→R2** ✅: `scripts/backup_main_db_to_r2.py` + `leninbot-main-backup.timer` (03:40 KST, kg 03:00·writer 03:20와 시차). 2026-07-29 운영 테이블 정리 후 main 덤프는 162.2MB, `legacy_game`은 0.1MB이며 각각 로컬 3일·R2 15일 롤링 보관한다 (2026-08-01 7일→15일 연장, KG는 2일→14일).
    - **restore drill 통과** (임시 DB 복원→17,046행+HNSW 인덱스 확인→드롭). 드릴이 결함 발견: Docker 기본 `/dev/shm` 64MB로는 병렬 HNSW 인덱스 빌드 실패 → compose에 `shm_size: 1g` 추가로 해결. 프리로드 때 안 걸린 이유: 빈 테이블에 인덱스 생성 후 COPY라 대량 빌드가 없었음.
    - **2026-07-29 DRI 재검증 통과**: R2에서 당일 main/writer 객체를 실제 재다운로드해 로컬 사본과 SHA-256·바이트 동일성을 확인한 뒤, 격리된 `pgvector/pgvector:pg17` 컨테이너에 둘 다 복원. main 73테이블·200,692행·162 인덱스·47 시퀀스, writer 7테이블·1,225행·16 인덱스·5 시퀀스를 검증했고 invalid/unready 인덱스와 뒤처진 시퀀스는 0건. `lenin_corpus` 17,046행과 HNSW 벡터 질의, writer 본문 8개·441,491자도 확인. 측정 복원 시간은 main 8.3초, writer 9.3초였으며 운영 Postgres restart 0·관련 API health 200으로 무영향 확인.
    - **2026-07-29 운영 정리 후 3-DB DRI 통과**: 정리 직후 생성·R2 업로드한 최신 백업을 일회용 Postgres 17에 복원했다. main 59테이블·199,422행·37 시퀀스와 corpus 17,046행/HNSW, `legacy_game` 1테이블·415행·1시퀀스·원본 체크섬, writer 7테이블·1,225행·5시퀀스와 본문 441,491자를 모두 검증했다. 복원 시간은 main 8.3초, legacy 0.2초, writer 9.6초였고 전체 `DRILL PASS`.
    - 유닛 파일은 `systemd/`에 추적 (sudoers가 `cp systemd/* /etc/systemd/system/`만 NOPASSWD 허용).
    - 참고: R2에 `main-db-backup-2026-07-20.dump`라는 과거 객체가 있었음 (구 백업 규칙 잔재로 추정) — 롤링 삭제에 걸려 제거됨.
+   - **2026-08-01 롤링 삭제 방식 교체**: 세 잡 모두 만료일 키 1개만 지우는 방식이라, 실행이 실패·누락된 날의 객체는 아무도 다시 지우지 않고 영구히 남았다. 실제로 2일 보관인 KG 버킷에 `kg-backup-2026-04-22/04-23/06-30`(349MB)이 살아 있었다. `scripts/r2_retention.py`의 `prune_r2_prefix()`로 prefix 전체를 커트오프 대비 sweep하도록 바꿔 누락분이 다음 성공 실행에서 자동 회수되게 했다. 안전장치 3종: (1) `<prefix>-YYYY-MM-DD<suffix>` 정확 매칭만 대상 — 날짜 없는 키나 `frontend-archives/` 같은 타 prefix는 인식조차 안 됨, (2) 목록 조회 실패 시 아무것도 삭제하지 않고 경고만, (3) `min_keep=2` — 남는 객체가 2개 미만이 되는 sweep은 커트오프 버그로 보고 전면 중단.
 2. **백업 VM 셋업**: WireGuard(또는 Tailscale)로 사설 터널 → 스트리밍 레플리카 구성 (physical replication slot, `wal_keep_size` 설정).
 3. **pgBackRest**: 백업 VM을 리포로, WAL 아카이빙 + 주1 full/일1 incr → **PITR** 확보. (대안: 리포를 R2로 직접 — VM 디스크 절약, 복원 속도는 느림.)
 4. **Postgres 복구/드릴 스크립트** ✅ (2026-07-29): `scripts/restore_db.py`.
