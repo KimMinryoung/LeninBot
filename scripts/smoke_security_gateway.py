@@ -395,6 +395,98 @@ def main() -> int:
                 str((rejected, schema_calls)),
             )
 
+            # Models serialize a nested object as a JSON *string* often enough
+            # that it was the top source of rejected CommuLingo writes. Parsing
+            # it here costs nothing; the parsed value still faces the schema.
+            container_calls = {"args": None}
+
+            def container_handler(payload: dict, tags: list) -> str:
+                container_calls["args"] = (payload, tags)
+                return "ok"
+
+            container_schema = {
+                "type": "object",
+                "properties": {
+                    "payload": {
+                        "type": "object",
+                        "properties": {"ko": {"type": "string"}, "en": {"type": "string"}},
+                        "required": ["ko", "en"],
+                    },
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["payload", "tags"],
+            }
+            coerced = await execute_tool(
+                "save_diary",
+                {"payload": '{"ko": "한국어", "en": "English"}', "tags": '["a", "b"]'},
+                {"save_diary": container_handler},
+                tool_schema=container_schema,
+            )
+            check(
+                "JSON-string argument is parsed into the container the schema wants",
+                not coerced[1]
+                and container_calls["args"] == ({"ko": "한국어", "en": "English"}, ["a", "b"]),
+                str((coerced, container_calls)),
+            )
+
+            container_calls["args"] = None
+            still_bad = await execute_tool(
+                "save_diary",
+                {"payload": '{"ko": "한국어"}', "tags": "[]"},
+                {"save_diary": container_handler},
+                tool_schema=container_schema,
+            )
+            check(
+                "a parsed container still faces the schema",
+                still_bad[1]
+                and container_calls["args"] is None
+                and "'en' is a required property" in still_bad[0],
+                str((still_bad, container_calls)),
+            )
+
+            # One rejection names every violated field, so a payload that is
+            # over on two of them costs one retry rather than two.
+            multi_schema = {
+                "type": "object",
+                "properties": {
+                    "bio": {"type": "string", "maxLength": 10},
+                    "epithet": {"type": "string", "maxLength": 5},
+                },
+                "required": ["bio", "epithet"],
+            }
+            multi = await execute_tool(
+                "save_diary",
+                {"bio": "x" * 14, "epithet": "y" * 8},
+                {"save_diary": lambda bio, epithet: "ok"},
+                tool_schema=multi_schema,
+            )
+            check(
+                "every schema violation is reported in one rejection",
+                multi[1]
+                and "4 over the 10-character limit at 'bio'" in multi[0]
+                and "3 over the 5-character limit at 'epithet'" in multi[0],
+                str(multi),
+            )
+
+            # A string-typed field that happens to hold JSON must stay a string.
+            string_calls = {"content": None}
+
+            def string_handler(content: str, mode: str = "append") -> str:
+                string_calls["content"] = content
+                return "ok"
+
+            kept = await execute_tool(
+                "save_diary",
+                {"content": '{"ko": "한국어"}'},
+                {"save_diary": string_handler},
+                tool_schema=schema,
+            )
+            check(
+                "a string-typed argument holding JSON is not reinterpreted",
+                not kept[1] and string_calls["content"] == '{"ko": "한국어"}',
+                str((kept, string_calls)),
+            )
+
             # A **kwargs handler reports no accepted-name set, which used to skip
             # the required-argument check with it. An empty payload then reached
             # the handler and came back as a raw TypeError the model could not act

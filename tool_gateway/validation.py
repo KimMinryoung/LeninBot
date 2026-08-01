@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import logging
 import math
 import re
 from email.utils import parseaddr
@@ -11,6 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
+
+logger = logging.getLogger(__name__)
 
 
 class ToolArgumentValidationError(ValueError):
@@ -74,6 +78,70 @@ def _apply_top_level_defaults(args: dict, schema: dict) -> dict:
     return normalized
 
 
+def _schema_types(spec: Any) -> set[str]:
+    if not isinstance(spec, dict):
+        return set()
+    raw = spec.get("type")
+    if isinstance(raw, str):
+        return {raw}
+    if isinstance(raw, list):
+        return {str(item) for item in raw}
+    return set()
+
+
+def _coerce_json_containers(value: Any, spec: Any, path: str, fired: list[str]) -> Any:
+    """Parse a JSON string emitted where the schema wants an object or array.
+
+    Models serialize a nested object as a JSON *string* often enough that it
+    was the single largest source of rejected CommuLingo writes: 78% of
+    `commulingo_section_save` calls in one day died on `'{"ko": …}' is not of
+    type 'object' at 'body'`, each one costing a paid retry round to re-emit
+    the same content unquoted. Parsing it here is not a loosening — the parsed
+    value goes through the same schema below, so anything that was not really
+    the declared container still fails. Coercion is refused when the schema
+    also accepts a string, so a genuinely string-typed field that happens to
+    hold JSON is never reinterpreted.
+    """
+    if not isinstance(spec, dict):
+        return value
+
+    types = _schema_types(spec)
+    wanted = {"object": dict, "array": list}.keys() & types
+    if (
+        wanted
+        and "string" not in types
+        and isinstance(value, str)
+        and value.strip()[:1] in {"{", "["}
+    ):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        if any(isinstance(parsed, {"object": dict, "array": list}[name]) for name in wanted):
+            fired.append(path)
+            value = parsed
+
+    properties = spec.get("properties")
+    if isinstance(value, dict) and isinstance(properties, dict):
+        return {
+            key: (
+                _coerce_json_containers(item, properties[key], f"{path}.{key}", fired)
+                if key in properties
+                else item
+            )
+            for key, item in value.items()
+        }
+
+    items = spec.get("items")
+    if isinstance(value, list) and isinstance(items, dict):
+        return [
+            _coerce_json_containers(item, items, f"{path}[{index}]", fired)
+            for index, item in enumerate(value)
+        ]
+
+    return value
+
+
 def _format_jsonschema_error(error) -> str:
     path = ".".join(str(part) for part in error.absolute_path)
     location = f" at '{path}'" if path else ""
@@ -91,6 +159,21 @@ def _format_jsonschema_error(error) -> str:
     if len(message) > 300:
         message = message[:300] + "… [truncated]"
     return f"{message}{location}"
+
+
+# How many schema violations one rejection reports. Reporting only the first
+# made a card that ran long on both bio and epithet cost two paid retries: the
+# model trimmed the field it was told about, resubmitted, and was rejected on
+# the other. Bounded so the message stays readable when a payload is far off.
+_MAX_REPORTED_ERRORS = 4
+
+
+def _format_jsonschema_errors(errors: list) -> str:
+    reported = [_format_jsonschema_error(error) for error in errors[:_MAX_REPORTED_ERRORS]]
+    remaining = len(errors) - len(reported)
+    if remaining > 0:
+        reported.append(f"and {remaining} more problem(s)")
+    return "; ".join(reported)
 
 
 def _validate_url(key: str, value: Any) -> None:
@@ -210,12 +293,19 @@ def validate_tool_arguments(
     if schema is not None:
         executable_schema = _schema_with_closed_top_level(schema)
         normalized = _apply_top_level_defaults(normalized, executable_schema)
+        coerced: list[str] = []
+        normalized = _coerce_json_containers(normalized, executable_schema, "arguments", coerced)
+        if coerced:
+            logger.info(
+                "%s: parsed JSON-string argument(s) into containers at %s",
+                tool_name, ", ".join(coerced),
+            )
         errors = sorted(
             Draft202012Validator(executable_schema).iter_errors(normalized),
             key=lambda error: list(error.absolute_path),
         )
         if errors:
-            raise ToolArgumentValidationError(_format_jsonschema_error(errors[0]))
+            raise ToolArgumentValidationError(_format_jsonschema_errors(errors))
 
     _validate_json_numbers(normalized)
 

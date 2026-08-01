@@ -56,6 +56,12 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         # where a forced re-pick would just accrete filler edits.
         "incomplete_recent_days": 2,
         "new_person_cooldown_runs": 6,
+        # A card the curator could not enrich steps aside for this many enrich
+        # runs. Only an applied edit writes a revision, so the DB cooldown above
+        # never fires for a failed run: 미하일 코즐롭스키 had no findable sources,
+        # and the hourly lane re-picked him three hours straight, burning nine
+        # 16-round attempts (most of that day's spend) before one finally landed.
+        "enrich_failure_cooldown_runs": 6,
         # Parallel-lane switch: when false, the dedicated new-person lane
         # (COMMULINGO_SUGGESTED_BY=commulingo-maintainer-new) no-ops so all
         # maintenance effort concentrates on enriching existing cards.
@@ -84,6 +90,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["recent_days"] = max(1, int(cfg["recent_days"]))
     cfg["incomplete_recent_days"] = max(1, int(cfg["incomplete_recent_days"]))
     cfg["new_person_cooldown_runs"] = max(0, int(cfg["new_person_cooldown_runs"]))
+    cfg["enrich_failure_cooldown_runs"] = max(0, int(cfg["enrich_failure_cooldown_runs"]))
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     cfg["term_lane_enabled"] = bool(cfg["term_lane_enabled"])
     cfg["enrich_non_soviet_revolutionaries"] = bool(cfg["enrich_non_soviet_revolutionaries"])
@@ -109,16 +116,35 @@ def _clean_rejected(raw) -> list:
     return out[-REJECTED_MEMORY:]
 
 
+def _clean_failed(raw) -> list:
+    """Keep only well-formed enrich-failure cooldown entries."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        person_id = str(entry.get("id") or "").strip()
+        try:
+            runs_left = int(entry.get("runs_left", 0))
+        except (TypeError, ValueError):
+            continue
+        if person_id and runs_left > 0:
+            out.append({"id": person_id, "runs_left": runs_left})
+    return out[-FAILED_MEMORY:]
+
+
 def load_state(path: Path = STATE_PATH) -> dict:
     # This function is the state whitelist: a key that is not rebuilt here is
     # dropped on the next run, so anything meant to survive must be listed.
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"new_cooldown_remaining": 0, "rejected_candidates": []}
+        return {"new_cooldown_remaining": 0, "rejected_candidates": [], "failed_candidates": []}
     return {
         "new_cooldown_remaining": max(0, int(raw.get("new_cooldown_remaining", 0))),
         "rejected_candidates": _clean_rejected(raw.get("rejected_candidates")),
+        "failed_candidates": _clean_failed(raw.get("failed_candidates")),
     }
 
 
@@ -616,9 +642,12 @@ def claim_person(person_id: str) -> bool:
     return True
 
 
-def select_claimable_person(config: dict, candidate_id: str, attempts: int = 5) -> dict | None:
+def select_claimable_person(
+    config: dict, candidate_id: str, attempts: int = 5,
+    exclude_ids: list[str] | None = None,
+) -> dict | None:
     """The sparsest person this run can hold exclusively, or None."""
-    skipped: list[str] = []
+    skipped: list[str] = list(exclude_ids or [])
     for _ in range(attempts):
         candidate = select_sparse_person(
             config["recent_days"], candidate_id, config["incomplete_recent_days"],
@@ -814,6 +843,11 @@ DISCOVERY_SEARCH_BUDGET = 6
 # short enough to actually be read; the oldest fall off and may be re-proposed
 # once, which is the acceptable cost of not growing the prompt without limit.
 REJECTED_MEMORY = 40
+
+# How many people can sit on an enrich-failure cooldown at once. Each entry is a
+# card the queue is stepping over, so the cap keeps a bad stretch from emptying
+# the queue; the oldest entry is dropped rather than growing the list.
+FAILED_MEMORY = 40
 
 
 def build_bounded_discovery_handlers(read_handlers: dict, box: dict) -> dict:
@@ -1092,11 +1126,24 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
 
         if chosen_mode in {"enrich", "enrich_fallback"}:
-            candidate = select_claimable_person(config, candidate_id)
+            # Age the failure cooldowns by one run, then step over whoever is
+            # still serving one. A forced --candidate overrides the cooldown:
+            # it is the operator saying to try this card now.
+            for entry in state["failed_candidates"]:
+                entry["runs_left"] -= 1
+            state["failed_candidates"] = [
+                e for e in state["failed_candidates"] if e["runs_left"] > 0
+            ]
+            cooling = [] if candidate_id else [e["id"] for e in state["failed_candidates"]]
+            if cooling:
+                logger.info("skipping %d card(s) on enrich-failure cooldown: %s",
+                            len(cooling), ", ".join(cooling))
+            candidate = select_claimable_person(config, candidate_id, exclude_ids=cooling)
             if candidate is None:
                 # Every person was already touched within the cooldown window, or the
                 # few that were not are held by the other lane right now. Idling until
                 # candidates age back in is the correct, zero-cost outcome.
+                save_state(state)
                 return {
                     "status": "skipped",
                     "reason": (
@@ -1109,13 +1156,29 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
             task = build_task("enrich", candidate)
             enrich_tools, enrich_handlers = stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
             enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS)
-            result, enrich_tracker, _ = await _call_curator_stage(
-                task=task, spec=spec, model=model,
-                tools=enrich_tools, handlers=enrich_handlers,
-                policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
-                finalization_tools=enrich_terminals,
-                terminal_tools=enrich_terminals,
-            )
+            try:
+                result, enrich_tracker, _ = await _call_curator_stage(
+                    task=task, spec=spec, model=model,
+                    tools=enrich_tools, handlers=enrich_handlers,
+                    policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
+                    finalization_tools=enrich_terminals,
+                    terminal_tools=enrich_terminals,
+                )
+            except Exception:
+                # All attempts are spent and nothing was written. Record the
+                # cooldown before the unit dies on the traceback — otherwise the
+                # run leaves no trace at all and the next hour picks this same
+                # unresearchable card and spends the same rounds on it.
+                cooldown = int(config["enrich_failure_cooldown_runs"])
+                if cooldown > 0 and completed_run_count() == before:
+                    state["failed_candidates"] = (
+                        [e for e in state["failed_candidates"] if e["id"] != candidate["id"]]
+                        + [{"id": candidate["id"], "runs_left": cooldown}]
+                    )[-FAILED_MEMORY:]
+                    save_state(state)
+                    logger.warning("%s is on enrich-failure cooldown for %d run(s)",
+                                   candidate["id"], cooldown)
+                raise
             tracker["total_cost"] += enrich_tracker["total_cost"]
             tracker["rounds_used"] += enrich_tracker["rounds_used"]
             if chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:

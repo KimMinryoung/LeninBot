@@ -185,6 +185,7 @@ with TemporaryDirectory() as tmp:
     assert cfg["new_person_every"] == 4
     assert cfg["recent_days"] == 7
     assert cfg["new_person_cooldown_runs"] == 6
+    assert cfg["enrich_failure_cooldown_runs"] == 6
     assert cfg["enrich_non_soviet_revolutionaries"] is True
     assert cfg["new_person_focus"] == "all"
 
@@ -597,5 +598,54 @@ def assert_rejected_candidate_memory():
     ]
 
 assert_rejected_candidate_memory()
+
+
+def assert_enrich_failure_cooldown():
+    """A card that could not be enriched steps aside instead of being re-picked.
+
+    Only an applied edit writes a revision, so the DB-side cooldown never sees a
+    failed run: without this, the hourly lane re-picks the same unresearchable
+    card every hour and spends the full three attempts on it again.
+    """
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "state.json"
+        maintainer.save_state(
+            {
+                "new_cooldown_remaining": 0,
+                "rejected_candidates": [],
+                "failed_candidates": [
+                    {"id": "mikhail-kozlovsky", "runs_left": 6},
+                    {"id": "expired", "runs_left": 0},
+                ],
+            },
+            path,
+        )
+        reloaded = maintainer.load_state(path)
+    # An entry whose cooldown has run out is dropped on load, not carried at 0.
+    assert reloaded["failed_candidates"] == [{"id": "mikhail-kozlovsky", "runs_left": 6}], reloaded
+    # Junk entries are dropped rather than crashing the run.
+    assert maintainer._clean_failed(
+        [{"id": ""}, "nope", {"id": "x", "runs_left": "abc"}, {"id": "ok", "runs_left": 2}]
+    ) == [{"id": "ok", "runs_left": 2}]
+
+    seen = []
+
+    def fake_select(recent, forced, incomplete, non_soviet, exclude_ids=None):
+        seen.append(list(exclude_ids or []))
+        return None
+
+    original_select = maintainer.select_sparse_person
+    try:
+        maintainer.select_sparse_person = fake_select
+        maintainer.select_claimable_person(
+            maintainer.load_config(Path("/nonexistent")), "",
+            exclude_ids=["mikhail-kozlovsky"],
+        )
+    finally:
+        maintainer.select_sparse_person = original_select
+    assert seen == [["mikhail-kozlovsky"]], seen
+
+
+assert_enrich_failure_cooldown()
 
 print("commulingo maintainer smoke ok")
