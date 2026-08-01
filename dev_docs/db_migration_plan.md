@@ -159,3 +159,18 @@ ad-hoc 스크립트(테스트, 일회성 CLI)가 프로덕션 DB에 실수로 �
 - 2026-07-29: 미사용 운영 테이블 13개 삭제, `story_scenes`를 `legacy_game` DB로 분리, main/legacy/writer 3-DB 백업·복구 드릴 통과.
 - 2026-07-28: 최초 작성 (조사 + 계획).
 - 2026-07-28 (심링크 이행 완료): `psql-supabase` 호환 심링크 제거 — 참조 스크립트 10곳 전부 `psql-main`으로 전환. `db.py`/`psql-main`의 sslmode 기본값 `require`→`prefer` (로컬 기준; `.env`가 명시 설정하므로 동작 무변경). 코드·툴 설명·봇 자기소개(shared.py)의 Supabase 잔재 문구 정리, `SUPABASE_KEY` env 레퍼런스 제거.
+
+### pg_hba 축소 (2026-08-01)
+
+`leninbot-pg`를 tailnet 주소에도 바인딩하면서, 기존 `host all all all scram-sha-256` catch-all의 의미가 "루프백만"에서 "소켓이 묶인 모든 주소"로 조용히 바뀌었다 — tailnet의 모든 기기가 DB 비밀번호만으로 접속 가능해진 것이다. 편의상 tailnet 접속은 **의도적으로 유지**하되, catch-all만 실제 경로 두 개로 좁혔다.
+
+```
+host  all          all         172.16.0.0/12      scram-sha-256   # Docker 네트워크
+host  all          all         100.64.0.0/10      scram-sha-256   # Tailscale (의도적 유지)
+host  replication  replicator  100.124.58.85/32   scram-sha-256
+```
+
+- 사전 확인: Docker 네트워크는 172.17/172.18/172.19뿐이라 `172.16.0.0/12`가 전부 덮는다. `leninbot_ipv6`(`fd00:dead:beef:2::/64`)는 컨테이너 0개인 미사용 네트워크이고 `leninbot-pg`는 IPv6 주소가 없어 IPv6 클라이언트 경로 자체가 없다.
+- 호스트 서비스는 docker-proxy를 거치며 **`127.0.0.1`이 아니라 `172.18.0.1`(브리지 게이트웨이)로 보인다.** 그래서 기존 `127.0.0.1/32 trust` 라인은 호스트 클라이언트에 매칭되지 않는다. 반면 tailnet에서 온 연결은 출발지 IP가 보존된다.
+- 검증(전부 **신규** 연결로 확인 — reload는 기존 연결에 영향이 없어 증거가 되지 않는다): tailnet 경로 `100.124.58.85` 접속 성공, frontend 컨테이너 재시작으로 `frontend` 롤 신규 연결 20개 + 사이트 HTTP 200, 호스트 경로 `127.0.0.1:5434` 신규 접속이 `172.18.0.1`로 보이며 성공, 복제 `streaming`/lag 0 유지.
+- 롤백: 컨테이너 안 `/var/lib/postgresql/data/pg_hba.conf.bak-20260801` 복원 후 `SELECT pg_reload_conf()`.
