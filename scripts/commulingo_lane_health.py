@@ -43,6 +43,26 @@ MAX_REJECTION_RATE = 0.20
 # Below this many calls a high rate is just noise (1 rejection out of 2 calls).
 MIN_CALLS_FOR_REJECTION_ALERT = 5
 
+# Bio-length drift. The curator prompt holds two instructions in tension: write
+# the sentences the subject warrants and stop, and count the draft against the
+# ceiling before calling. The second was added on 2026-08-01 after the curator
+# spent five paid rounds shaving one card (427 -> 401 -> 384 -> 384 against 380).
+# The risk it reintroduces is the one that instruction had been removed to
+# prevent: once the ceiling is a visible number, "what it warrants" quietly
+# becomes "until it is nearly full", and the cards go stilted again. Nothing
+# else notices that — it produces no rejection and no failed run, just worse
+# prose — so it is measured here or not at all.
+BIO_DRIFT_WINDOW_DAYS = 7
+# A day's worth of enrichment is ~6 cards, too few to read a distribution from.
+MIN_BIOS_FOR_DRIFT_ALERT = 20
+# Share of freshly written bios landing in the top tenth of the ceiling. This
+# metric read 32% (median 325/380) on 2026-08-01, measured just before the prompt
+# change, so 32% is the pre-change baseline to compare against and NOT a healthy
+# target — by calendar week the median had already climbed 273 -> 293 -> 312 while
+# the prompt still forbade counting characters. The drift predates the change;
+# the trip point is set above today's reading to catch it getting worse.
+MAX_BIO_TOP_BAND_RATE = 0.40
+
 APPLIED = re.compile(r'^\s*"status": "applied"', re.M)
 SKIPPED = re.compile(r'^\s*"status": "skipped"', re.M)
 # A barren run — rounds spent without a write and without NO_CANDIDATE. It exits
@@ -153,6 +173,64 @@ def tool_rejections(since: str) -> tuple[list[str], list[str]]:
     return lines, alerts
 
 
+def bio_length_drift() -> tuple[list[str], list[str]]:
+    """How close freshly written bios are sitting to their hard ceiling.
+
+    Queried through `docker exec` for the same reason the rejection stats are:
+    this unit carries no db_password credential and must not start needing one.
+    Fail-soft — a digest that cannot reach the DB still reports the lanes.
+    """
+    try:
+        sys.path.insert(0, str(ROOT))
+        from runtime_tools.commulingo_people import FIELD_LIMITS
+        ceiling = FIELD_LIMITS["bio"][0]
+    except Exception as exc:  # never let a stats line break the digest
+        return [f"(bio length stats unavailable: {exc})"], []
+    # The band is derived from the ceiling, never restated: FIELD_LIMITS is the
+    # single source for these numbers and a second copy would drift from it.
+    top_band_floor = ceiling * 9 // 10
+    sql = (
+        "WITH last_touch AS ("
+        "  SELECT p.id, length(p.bio_ko) AS n"
+        "    FROM commulingo_people p"
+        "    JOIN commulingo_people_revisions r ON r.entity_id = p.id"
+        "   WHERE r.changed_by LIKE 'commulingo-maintainer%'"
+        "     AND COALESCE(p.bio_ko, '') <> ''"
+        f"    AND r.created_at > now() - interval '{BIO_DRIFT_WINDOW_DAYS} days'"
+        "   GROUP BY p.id, p.bio_ko)"
+        " SELECT count(*),"
+        "        COALESCE(percentile_disc(0.5) WITHIN GROUP (ORDER BY n), 0),"
+        f"       count(*) FILTER (WHERE n > {top_band_floor})"
+        "   FROM last_touch"
+    )
+    result = subprocess.run(
+        ["docker", "exec", "leninbot-pg", "psql", "-U", "postgres", "-d", "leninbot",
+         "-t", "-A", "-F", "|", "-c", sql],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return [f"(bio length stats unavailable: {result.stderr.strip()[:200]})"], []
+    parts = result.stdout.strip().split("|")
+    if len(parts) != 3:
+        return [], []
+    total, median, top_band = int(parts[0]), int(parts[1]), int(parts[2])
+    if total == 0:
+        return [], []
+    rate = top_band / total
+    lines = [
+        f"bio length ({BIO_DRIFT_WINDOW_DAYS}d, n={total}): median {median} / "
+        f"{ceiling}, {top_band} ({rate:.0%}) in the top band (>{top_band_floor})"
+    ]
+    alerts = []
+    if total >= MIN_BIOS_FOR_DRIFT_ALERT and rate > MAX_BIO_TOP_BAND_RATE:
+        alerts.append(
+            f"bio length: {top_band}/{total} ({rate:.0%}) of bios written in the last "
+            f"{BIO_DRIFT_WINDOW_DAYS} days sit above {top_band_floor} of {ceiling} — "
+            f"the curator may be writing toward the ceiling instead of to the subject"
+        )
+    return lines, alerts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--since", default="-24h", help="journalctl --since value")
@@ -177,6 +255,10 @@ def main() -> int:
         lines.append("tool rejections:")
         lines.extend(f"  {line}" for line in rejection_lines)
     alerts.extend(rejection_alerts)
+
+    drift_lines, drift_alerts = bio_length_drift()
+    lines.extend(drift_lines)
+    alerts.extend(drift_alerts)
 
     header = f"[commulingo-lanes] since {args.since} — total ${total_cost:.2f}"
     print(header)
