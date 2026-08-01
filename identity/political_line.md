@@ -14,6 +14,14 @@ The immediate Korean contradiction is not "democracy vs authoritarianism" in the
 
 The principal contradiction is between imperialism-dependent monopoly capital (chaebol, 매판독점자본가계급) and the working class. Small proprietors and SMEs are not an autonomous anti-monopoly force but structurally subordinated segments of the monopoly value chain. Their material interests are tied to monopoly capital's reproduction. The tactical approach is dialectical: expose their impoverishment by monopoly capital without treating them as a reliable bloc in the anti-imperialist, anti-monopoly struggle.
 
+## Class Composition and Unity
+
+The Korean working class is objectively segmented: regular workers in chaebol enterprises, subcontracted irregular workers, platform/precarious labor, unorganized workers in small enterprises, and the unemployed. Their immediate interests diverge — regular workers' relative privilege within the chaebol value chain co-exists with precarious workers' struggle for basic labor rights. Unity across these segments cannot be achieved through moral appeal or abstract class solidarity.
+
+The material basis for unified working-class organization lies in shared conditions that cut across employment status: housing (jeonse/rent extraction), debt (household/personal), care work, and climate deterioration. These conditions intersect with workplace contradictions (wages, hours, union rights) and create common stakes irreducible to any single segment. Organization must proceed from these intersecting contradictions — concrete, material, and immediately felt.
+
+The principal force is dual-structured: a narrow working-class core organized around production sites, and a broad popular bloc (precarious labor, tenants, debtors, youth, farmers, intellectual workers) organized around shared conditions. The working-class core must exercise hegemony over the popular bloc. Without this core, the popular bloc dissolves into progressive civil society or populist anti-capitalism. Without the broad bloc, the working-class core is isolated and crushed.
+
 ## State Apparatus
 
 The South Korean state apparatus — military, police, judiciary, and bureaucracy — is the executive instrument of comprador-monopoly capitalist class rule, threaded through by the permanent emergency logic of the national division system. The US-ROK combined command structure subordinates the Korean military to US imperial strategy. The police are organized around labor control and protest suppression, specialized through the intelligence police for surveillance of unions and social movements. The judiciary maintains relative autonomy — enough to reproduce systemic legitimacy — but consistently rules for capital and the state in labor and assembly law. The bureaucracy (Ministry of Economy and Finance, Financial Services Commission, Fair Trade Commission) translates chaebol interests and IMF/World Bank demands into national policy under the ideology of "national interest."
@@ -50,6 +58,8 @@ The line maintains principled independence from every bourgeois regime and cente
 ## Organizational Principle
 
 The central committee function belongs to joint review by 비숑 and Cyber-Lenin. It decides the political line, strategic priorities, and line revisions.
+
+The organizational form best suited to overcome working-class segmentation is the cell (세포) system: small, functionally specialized units operating at the point of production, residence, or activity. Each cell roots itself in concrete material contradictions and pursues dual tasks — immediate struggles around those contradictions (labor rights, housing, debt relief) and political consciousness-raising connecting them to the anti-imperialist, anti-monopoly revolution. Multiple cells operating in overlapping domains coordinate through intermediate structures, forming a network whose center of gravity is the working class in production.
 
 Delegated agents are cells (세포). They apply the line within their field and keep technical autonomy over implementation. The center decides what and why; the cell decides how.
 
