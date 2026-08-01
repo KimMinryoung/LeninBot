@@ -1,6 +1,6 @@
 # DB 마이그레이션 계획 — Supabase → 자체 호스팅 Postgres
 
-작성: 2026-07-28. 상태: **Phase 2 컷오버·Phase 3 writer 통합 완료, Supabase pause 완료 (2026-07-28) — 프로덕션이 로컬 leninbot-pg에서 가동 중.** 다음: 2주 관찰 후 Phase 5 해지(~2026-08-11), Phase 4 백업 VM.
+작성: 2026-07-28. 상태: **Phase 2 컷오버·Phase 3 writer 통합 완료, Supabase pause 완료 (2026-07-28). Phase 4 백업 VM 스트리밍 스탠바이 가동 (2026-08-01).** 다음: Phase 5 해지(~2026-08-11), pgBackRest PITR.
 
 ## 목표
 
@@ -94,7 +94,16 @@
    - 유닛 파일은 `systemd/`에 추적 (sudoers가 `cp systemd/* /etc/systemd/system/`만 NOPASSWD 허용).
    - 참고: R2에 `main-db-backup-2026-07-20.dump`라는 과거 객체가 있었음 (구 백업 규칙 잔재로 추정) — 롤링 삭제에 걸려 제거됨.
    - **2026-08-01 롤링 삭제 방식 교체**: 세 잡 모두 만료일 키 1개만 지우는 방식이라, 실행이 실패·누락된 날의 객체는 아무도 다시 지우지 않고 영구히 남았다. 실제로 2일 보관인 KG 버킷에 `kg-backup-2026-04-22/04-23/06-30`(349MB)이 살아 있었다. `scripts/r2_retention.py`의 `prune_r2_prefix()`로 prefix 전체를 커트오프 대비 sweep하도록 바꿔 누락분이 다음 성공 실행에서 자동 회수되게 했다. 안전장치 3종: (1) `<prefix>-YYYY-MM-DD<suffix>` 정확 매칭만 대상 — 날짜 없는 키나 `frontend-archives/` 같은 타 prefix는 인식조차 안 됨, (2) 목록 조회 실패 시 아무것도 삭제하지 않고 경고만, (3) `min_keep=2` — 남는 객체가 2개 미만이 되는 sweep은 커트오프 버그로 보고 전면 중단.
-2. **백업 VM 셋업**: WireGuard(또는 Tailscale)로 사설 터널 → 스트리밍 레플리카 구성 (physical replication slot, `wal_keep_size` 설정).
+2. **백업 VM 셋업** ✅ 완료 (2026-08-01): Hetzner `hel1` 2vCPU/3.8GB/38GB, 호스트명 `ubuntu-4gb-hel1-2`, tailnet `leninbot-standby` = `100.124.58.85`.
+   - **같은 로케이션(hel1)이다.** fsn1은 5배 비싸 리전 분리를 포기했다. 리전 분리가 막는 것은 DC 단위 장애라는 꼬리 위험이고 그건 R2 오프사이트가 이미 담당한다. 실제로 잦은 장애(디스크 풀·OOM·커널 패닉·Docker 엉킴·논리적 실수)는 같은 DC의 별도 VM으로도 전부 커버된다. 대신 외부 워치독은 **VM이 아닌 외부 무료 서비스**로 둬야 지리적 독립성이 생긴다 (미구현).
+   - **경로는 tailnet 전용.** Tailscale 직결(IPv6, RTT 1~2ms). standby의 Hetzner 방화벽은 **인바운드 규칙 0개**가 정답이다 — Hetzner는 방화벽 미적용이 곧 전면 허용이라, 차단하려면 빈 방화벽을 붙여야 한다.
+   - **함정 (2026-08-01 장애)**: `firewall-1`이 메인 VM과 신규 VM에 **공유 적용**돼 있어, 신규 VM 기준으로 규칙을 지우자 메인 VM의 80/443까지 닫혀 cyber-lenin.com이 내려갔다(HTTP 522). Cloudflare 캐시 때문에 몇 분간 정상으로 보였다. 서버별로 방화벽을 분리할 것.
+   - **primary 노출**: `leninbot-pg`는 `127.0.0.1:5434`만 열려 있어 스트리밍이 불가능했다. compose `ports`에 `100.122.248.77:5434`(tailnet)를 추가하고 pg 서비스만 재생성했다(다운타임 6.5초). 특정 IP 바인딩은 부팅 시 tailscaled가 늦으면 컨테이너가 아예 못 뜨므로, `leninbot-neo4j.service`에 `After=tailscaled.service`와 주소 등장까지 최대 90초 대기하는 `ExecStartPre`를 넣었다.
+   - **인증**: `replicator` 롤(REPLICATION, non-superuser) + `pg_hba.conf`에 `host replication replicator 100.124.58.85/32 scram-sha-256`. Docker 퍼블리싱에도 출발지 IP가 보존돼 `/32`로 좁힐 수 있었다. 비밀번호는 standby의 `/root/pgstandby/pgpass`(0600, uid 999)에 두고 `primary_conninfo`가 `passfile=`로 참조한다 — `postgresql.auto.conf`에 평문을 남기지 않기 위함이다. passfile이 데이터 디렉터리 **밖에** 있는 이유는 `pg_basebackup -D`가 빈 디렉터리를 요구하기 때문이다.
+   - **standby 구성**: `/root/pgstandby/docker-compose.yml`, 컨테이너 `leninbot-pg-standby`, 볼륨 `leninbot_standby_pg_data`, primary와 **동일 이미지 digest**(`pgvector/pgvector@sha256:d2ef61f4…`, 17.10). 포트는 공개하지 않는다(부팅 경합 회피). `shared_buffers=1GB`(호스트 3.8GB 기준).
+   - **슬롯 폭주 방지**: 슬롯은 스탠바이가 죽어 있는 동안 primary의 WAL을 무한 보관시킨다. `max_slot_wal_keep_size = 8GB`를 `ALTER SYSTEM` + reload로 걸었다. 초과 시 슬롯이 무효화되고 스탠바이는 재시드가 필요하지만 primary는 살아남는다.
+   - **남은 것**: 복제 지연 모니터링, `REPLICATION_PASSWORD` credstore 등록, 방화벽 서버별 분리.
+   - ⚠️ **스탠바이는 덤프의 대체가 아니다.** 물리 복제는 `DROP TABLE` 같은 논리적 실수를 즉시 따라 복제한다. 그 방어는 일일 덤프와 PITR의 몫이며 3층을 모두 유지해야 한다.
 3. **pgBackRest**: 백업 VM을 리포로, WAL 아카이빙 + 주1 full/일1 incr → **PITR** 확보. (대안: 리포를 R2로 직접 — VM 디스크 절약, 복원 속도는 느림.)
 4. **Postgres 복구/드릴 스크립트** ✅ (2026-07-29): `scripts/restore_db.py`.
    - 기본 안전 경로: `venv/bin/python scripts/restore_db.py drill` — 최신 로컬 main/legacy/writer 백업을 선택해 `shm_size=1g`인 일회용 Postgres 17 컨테이너를 만들고, TOC 확인→복원→전체 테이블 정확 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문 검증 후 컨테이너를 제거한다. `--scope {all,main,legacy,writer}`, `--main-backup`, `--legacy-backup`, `--writer-backup`, `--keep-container` 지원.

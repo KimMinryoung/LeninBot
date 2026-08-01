@@ -8,6 +8,10 @@ services:
     shm_size: 1g
     ports:
       - "127.0.0.1:5434:5432"   # localhost only; serves both `leninbot` and `writer` DBs
+      # Tailnet only, for the leninbot-standby streaming replica (2026-08-01).
+      # Binding a specific IP means the container cannot start before tailscaled
+      # has assigned it — leninbot-neo4j.service waits for the address first.
+      - "100.122.248.77:5434:5432"
     # No POSTGRES_PASSWORD here: initdb already ran (2026-07-28) with the main
     # DB_PASSWORD from the credstore; the data volume carries it from now on.
     environment:

@@ -1,12 +1,21 @@
 [Unit]
-Description=LeninBot Docker services (Neo4j + Redis)
+Description=LeninBot Docker services (Neo4j + Postgres + Redis)
 Requires=docker.service
 After=docker.service
+# leninbot-pg publishes on the tailnet address for the standby replica, and
+# Docker cannot bind an address that does not exist yet. Without this ordering a
+# reboot can start the compose project before tailscaled has restored the
+# interface, and the main DB then fails to come up at all.
+Wants=tailscaled.service
+After=tailscaled.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/grass/leninbot
+# After= only guarantees tailscaled was started, not that the address is
+# assigned, so wait for the address itself before touching Docker.
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do ip -4 -o addr show dev tailscale0 2>/dev/null | grep -q " 100\\.122\\.248\\.77/" && exit 0; sleep 1; done; echo "tailscale0 has no 100.122.248.77 after 90s; leninbot-pg cannot bind it" >&2; exit 1'
 ExecStart=/usr/bin/docker compose -f docker-compose.neo4j.yml up -d --wait
 ExecStop=/usr/bin/docker compose -f docker-compose.neo4j.yml down
 EnvironmentFile=/home/grass/leninbot/.env
