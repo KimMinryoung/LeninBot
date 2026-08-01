@@ -13,7 +13,7 @@
 | 볼륨 | `leninbot_standby_pg_data` |
 | passfile | `/root/pgstandby/pgpass` (0600, uid 999) |
 | 슬롯 | primary의 `standby_hel1` |
-| 퍼블리시 포트 | **없음** — `docker exec`로만 접근 |
+| 퍼블리시 포트 | `100.124.58.85:5434` (tailnet 전용) |
 
 ```bash
 # 조회는 항상 이 형태
@@ -60,38 +60,42 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 - **쓰기 불가.** 읽기 전용이다. 스테이징으로 쓰려면 스탠바이 자체가 아니라 별도 사본을 떠야 한다.
 - **논리적 실수를 막지 못한다.** `DROP TABLE`은 1초 뒤 스탠바이에도 반영된다. 그 방어는 일일 덤프와 (도입한다면) PITR의 몫이다.
 - **같은 DC(hel1)다.** DC 단위 장애에는 primary와 함께 죽는다. 그 층은 R2 오프사이트가 담당한다.
-- **승격은 되돌리기 어렵다.** 승격하면 타임라인이 갈라져 원래 primary로 복제를 되돌리려면 `pg_rewind`나 재시드가 필요하다. 훈련 삼아 승격하지 말 것.
+- **승격은 되돌리기 어렵다.** 자세한 것은 아래 런북.
+- **메인 VM이 통째로 죽으면 승격만으로 사이트가 살아나지 않는다.** 앱 계층이 전부 거기 있다. 아래 런북의 시나리오 B 참고.
 
-## 승격 런북 (primary 소실 시)
+## 승격 런북
 
 > 자동 failover는 없다. 이 규모에서 자동화는 스플릿브레인 위험만 늘린다.
 
-**0. 정말 primary가 죽었는지 확인.** 살아 있는 primary와 승격된 스탠바이가 동시에 쓰기를 받으면 데이터가 갈라진다. 확실하지 않으면 primary를 먼저 확실히 정지시킨다.
+### 먼저: 어떤 장애인가
 
-**1. 스탠바이에 포트를 연다.** 현재 퍼블리시 포트가 없어 앱이 붙을 수 없다. `/root/pgstandby/docker-compose.yml`에 추가:
+**A. DB만 죽고 이 VM은 살아 있다** (컨테이너 손상, 볼륨 문제, 잘못된 마이그레이션)
+→ 아래 스크립트로 몇 분 안에 복구된다.
 
-```yaml
-    ports:
-      - "100.124.58.85:5434:5432"
-```
+**B. 메인 VM이 통째로 죽었다**
+→ **승격만으로는 사이트가 살아나지 않는다.** nginx·frontend·API·neo4j·임베딩 서버가 전부 그 VM에 있고, 스탠바이는 RAM 3.8 GB에 그중 아무것도 깔려 있지 않다. 새 호스트를 띄워야 하며, 스탠바이의 역할은 "사이트가 유지된다"가 아니라 **"데이터가 이미 뜨겁게 살아 있어 R2 복원을 기다릴 필요가 없다"**는 것이다. 이 구분을 미리 알고 있어야 한다.
+
+### A 시나리오: `scripts/promote_standby.sh`
+
 ```bash
-cd /root/pgstandby && docker compose up -d
+scripts/promote_standby.sh --dry-run                      # 무엇이 바뀌는지 먼저 본다
+scripts/promote_standby.sh --confirm=PROMOTE_STANDBY      # 실행
 ```
 
-**2. 승격.**
-```bash
-docker exec leninbot-pg-standby psql -U postgres -c "SELECT pg_promote();"
-docker exec leninbot-pg-standby psql -U postgres -tAc "SELECT pg_is_in_recovery();"  # f 여야 한다
-```
+스크립트가 하는 일: 사전 점검 → `.env` 2개 백업 → `pg_promote()` → 메인 `.env`와 frontend `.env`를 스탠바이 주소로 → **frontend 컨테이너 재생성** → 서비스 재시작 → 사후 체크리스트 출력.
 
-**3. 앱을 새 주소로.** 메인 VM이 살아 있다면 `/home/grass/leninbot/.env`의 `DB_HOST=100.124.58.85`, `WRITER_DB_HOST`도 같이. frontend는 **자체 `.env`를 갖는다**(`/home/grass/frontend/.env`) — 2026-07-28에 이걸 놓쳐 사이트 콘텐츠가 전부 사라진 적이 있다. 컨테이너는 재생성해야 env가 반영된다.
+안전장치:
 
-**4. 서비스 재시작.**
-```bash
-sudo systemctl restart leninbot-api leninbot-telegram leninbot-a2a-api leninbot-email-api leninbot-roleplay novel-writer-api
-```
+- **스플릿브레인 차단** — primary가 아직 쓰기를 받고 있으면 거부한다. 양쪽이 각자 쓰기를 받으면 데이터가 갈라지고 합칠 방법이 없다. 넘길 것이면 `docker stop leninbot-pg`로 먼저 확실히 정지시킨다.
+- **`--confirm=PROMOTE_STANDBY`** 없이는 실행되지 않는다 (`restore_db.py`와 같은 패턴).
+- `--dry-run`은 primary가 살아 있어도 계획 전체를 보여준다. 차분할 때 읽어두는 용도다.
+- 스탠바이가 복구 모드가 아니면 (이미 승격됐거나 이상 상태) 거부한다.
 
-**5. 승격 후 정리.** 이제 스탠바이가 없는 상태다. `max_slot_wal_keep_size`, 슬롯 `standby_hel1`, 백업 타이머, 워치독 핑이 모두 옛 primary를 가리키고 있으니 새 구성에 맞게 다시 세운다.
+**frontend를 재생성하는 이유**: 자체 `.env`를 갖고 있고 컨테이너명(`leninbot-pg`)으로 DB에 붙는다. env는 `docker run` 시점에 박히므로 **restart로는 안 바뀐다.** 2026-07-28에 정확히 이걸 놓쳐 사이트 콘텐츠가 전부 사라졌다. 재생성 명령은 그림자 컨테이너로 검증해 둔 것이다(본문 바이트수까지 프로덕션과 일치 확인).
+
+### 승격은 되돌리기 어렵다
+
+승격하면 타임라인이 갈라진다. 옛 primary는 재기동만으로는 복제에 합류하지 못하고 `pg_rewind`나 새 base backup이 필요하다. **훈련 삼아 승격하지 말 것.**
 
 ## 재시드 (슬롯이 무효화됐을 때)
 
