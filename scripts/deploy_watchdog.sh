@@ -15,6 +15,20 @@ cd "$ROOT/watchdog"
 WRANGLER="${WRANGLER:-wrangler@3}"
 run_wrangler() { npx --yes "$WRANGLER" "$@"; }
 
+# wrangler discovers the account by calling /memberships, which needs a
+# User-scope permission that the "Edit Cloudflare Workers" template does not
+# grant — the token works fine for every account-scoped call we actually make.
+# Pinning the account id skips that lookup. The id is not a secret; it is
+# already in .env as R2_CF_ACCOUNT_ID.
+if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  CLOUDFLARE_ACCOUNT_ID="$(grep -E '^R2_CF_ACCOUNT_ID=' "$ROOT/.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"' ' || true)"
+fi
+if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  echo "ERROR: CLOUDFLARE_ACCOUNT_ID is not set and R2_CF_ACCOUNT_ID is not in .env" >&2
+  exit 1
+fi
+export CLOUDFLARE_ACCOUNT_ID
+
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "ERROR: CLOUDFLARE_API_TOKEN is not set." >&2
   echo "  Create one with the 'Edit Cloudflare Workers' template, then:" >&2

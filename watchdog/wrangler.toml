@@ -10,7 +10,7 @@ crons = ["*/5 * * * *"]
 # `id` is filled in by scripts/deploy_watchdog.sh after it creates the namespace.
 [[kv_namespaces]]
 binding = "WATCHDOG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "2bd07d4e2bff4f29979864c35dd8fdb9"
 
 # Secrets are NOT set here — they go in with `wrangler secret put`:
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PING_TOKEN
