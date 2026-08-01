@@ -1,0 +1,13 @@
+[Unit]
+Description=LeninBot Postgres streaming replication health check
+After=network.target leninbot-neo4j.service
+Requires=leninbot-neo4j.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
+ExecStart=/home/grass/leninbot/venv/bin/python scripts/check_replication_health.py --notify
+TimeoutStartSec=120

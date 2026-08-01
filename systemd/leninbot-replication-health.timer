@@ -1,0 +1,13 @@
+[Unit]
+Description=LeninBot Postgres replication health check timer
+
+[Timer]
+# Every 15 minutes: the slot pins WAL on the primary the moment the standby
+# drops off, so this should be noticed well inside the max_slot_wal_keep_size
+# budget rather than at the next daily job.
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
