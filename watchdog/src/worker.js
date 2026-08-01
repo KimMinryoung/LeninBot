@@ -23,6 +23,32 @@
 const SITE_URL = "https://cyber-lenin.com/";
 const SITE_TIMEOUT_MS = 20000;
 
+// A 200 is not proof the site works. On 2026-07-28 the frontend kept answering
+// 200 while every post had vanished — its container still pointed at the old
+// database. Status-only monitoring would have called that healthy, so assert on
+// the body too. Thresholds are deliberately loose (the homepage currently shows
+// 4 reports and 1 term in ~33KB); a redesign should not trip these, and when
+// one does fire the message names the exact assertion so it is obvious whether
+// the site broke or the check needs updating.
+const DB_LINK_RE = /href="\/(?:reports|commulingo)\//g;
+const CONTENT_CHECKS = [
+  {
+    name: "본문 길이",
+    ok: (body) => body.length >= 5000,
+    detail: (body) => `${body.length} bytes (기준 5000)`,
+  },
+  {
+    name: "타이틀",
+    ok: (body) => /<title>[^<]*Cyber-Lenin/i.test(body),
+    detail: () => "<title>에 Cyber-Lenin 없음",
+  },
+  {
+    name: "DB 유래 링크",
+    ok: (body) => (body.match(DB_LINK_RE) || []).length >= 3,
+    detail: (body) => `${(body.match(DB_LINK_RE) || []).length}개 (기준 3)`,
+  },
+];
+
 // periodMin is how often the job is supposed to report; graceMin is how long
 // past that we stay quiet before calling it overdue. replication-health runs
 // every 15 minutes, which makes it the de facto VM heartbeat.
@@ -70,6 +96,7 @@ async function checkSite(env) {
   const url = `${SITE_URL}?watchdog=${Date.now()}`;
   let status = 0;
   let detail = "";
+  let healthy = false;
   try {
     const resp = await fetch(url, {
       cache: "no-store",
@@ -78,18 +105,30 @@ async function checkSite(env) {
       headers: { "User-Agent": "leninbot-watchdog/1" },
     });
     status = resp.status;
-    detail = `HTTP ${status}`;
+    if (status < 200 || status >= 300) {
+      // 3xx counts as unhealthy here: the site serves 200 directly, so a
+      // redirect means something changed that a human should look at.
+      detail = `HTTP ${status}`;
+    } else {
+      const body = await resp.text();
+      const failed = CONTENT_CHECKS.filter((c) => !c.ok(body));
+      healthy = failed.length === 0;
+      detail = healthy
+        ? `HTTP ${status}, 콘텐츠 검사 통과`
+        : `HTTP ${status}이지만 콘텐츠 이상 — ` +
+          failed.map((c) => `${c.name}: ${c.detail(body)}`).join(", ");
+    }
   } catch (err) {
     detail = `요청 실패: ${err && err.name ? err.name : "error"}`;
   }
-  const healthy = status >= 200 && status < 400;
   await transition(
     env,
     "site",
     healthy,
     `🔴 cyber-lenin.com 응답 이상\n\n${detail}\n\n` +
-      `522면 Cloudflare가 origin에 못 닿는 것입니다. ` +
-      `방화벽 인바운드 80/443과 nginx를 확인하세요.`,
+      `522면 Cloudflare가 origin에 못 닿는 것입니다 — 방화벽 인바운드 80/443과 nginx를 보세요.\n` +
+      `콘텐츠 이상이면 응답은 오는데 DB에서 글이 안 나오는 것입니다 — ` +
+      `frontend 컨테이너의 DB 접속과 leninbot-pg를 보세요.`,
     `🟢 cyber-lenin.com 복구 (${detail})`,
   );
   return { healthy, detail };

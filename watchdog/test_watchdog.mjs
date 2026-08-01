@@ -3,6 +3,14 @@ import worker from "/home/grass/leninbot/watchdog/src/worker.js";
 
 const PING_TOKEN = "testtoken";
 let kv, sent, siteStatus, siteThrows;
+import { readFileSync } from "node:fs";
+// 실제 cyber-lenin.com 홈 응답. 검사 기준이 현실의 페이지를 통과하는지 보려면
+// 합성 문자열이 아니라 진짜 응답이어야 한다.
+const GOOD_BODY = readFileSync(new URL("./home.html", import.meta.url), "utf8");
+// 2026-07-28 재현: 200은 그대로인데 DB 유래 콘텐츠만 사라진 셸.
+const EMPTY_BODY = GOOD_BODY.replace(/href="\/(reports|commulingo)\//g, 'href="/x/');
+let siteBody = GOOD_BODY;
+
 
 function makeEnv() {
   const store = new Map();
@@ -27,7 +35,7 @@ globalThis.fetch = async (url, init) => {
   if (u.startsWith("https://cyber-lenin.com/")) {
     if (!u.includes("watchdog=")) throw new Error("site fetched without cache-buster!");
     if (siteThrows) throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
-    return new Response("body", { status: siteStatus });
+    return new Response(siteBody, { status: siteStatus });
   }
   throw new Error("unexpected fetch: " + u);
 };
@@ -76,6 +84,28 @@ console.log("═══ 사이트 감시 ═══");
   msgs = await run(env);
   check("타임아웃도 이상으로 감지", msgs.length === 1 && msgs[0].includes("🔴"), JSON.stringify(msgs));
   siteThrows = false; siteStatus = 200;
+  await run(env);   // 직전 타임아웃으로 bad 상태이므로 복구 알림을 먼저 소진시킨다
+
+  console.log("─── 콘텐츠 검사 ───");
+  siteBody = GOOD_BODY;
+  check("실제 홈 응답은 통과", (await run(env)).length === 0);
+
+  siteBody = EMPTY_BODY;   // 200 + 글 사라짐 (7-28 재현)
+  msgs = await run(env);
+  check("200인데 DB 링크 0개 → 이상 감지", msgs.length === 1 && msgs[0].includes("콘텐츠 이상"), JSON.stringify(msgs).slice(0,200));
+  check("어느 검사가 깨졌는지 메시지에 명시", msgs[0] && msgs[0].includes("DB 유래 링크"));
+  check("원인 안내에 frontend/DB 언급", msgs[0] && msgs[0].includes("frontend"));
+
+  siteBody = "<html><title>nginx</title></html>";
+  await run(env);          // 이미 bad 상태이므로 알림 없음
+  siteBody = GOOD_BODY;
+  msgs = await run(env);
+  check("콘텐츠 복구 시 복구 알림", msgs.length === 1 && msgs[0].includes("🟢"), JSON.stringify(msgs));
+
+  siteStatus = 301;
+  msgs = await run(env);
+  check("3xx는 이상으로 취급", msgs.length === 1 && msgs[0].includes("301"), JSON.stringify(msgs));
+  siteStatus = 200; siteBody = GOOD_BODY; await run(env);
 }
 
 console.log("═══ 데드맨 스위치 ═══");
