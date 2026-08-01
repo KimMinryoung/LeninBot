@@ -144,13 +144,31 @@ sudo systemctl stop leninbot-replication-health.timer      # 스탠바이가 없
 **승격만으로는 사이트가 살아나지 않는다.** nginx·frontend·API·neo4j·임베딩 서버가 전부 그 VM에 있고, 스탠바이는 RAM 3.8 GB에 그중 아무것도 깔려 있지 않다.
 
 1. Hetzner Console에서 VM 상태 확인 — 재부팅으로 살아나면 그게 제일 빠르다
-2. 안 되면 새 VM 발급 → Docker·Tailscale 설치 → 저장소 클론
-3. 데이터는 스탠바이에 뜨겁게 살아 있다. 승격해 새 호스트가 붙게 하거나, 스탠바이에서 덤프를 떠 옮긴다. **R2 복원을 기다릴 필요가 없다는 것이 스탠바이의 실제 값어치다**
+2. 안 되면 **스탠바이에서 단독 승격**한다. `scripts/promote_standby.sh`는 메인 VM에 있어서 이 상황에서는 접근조차 못 한다:
+   ```bash
+   ssh root@100.124.58.85 /root/pgstandby/promote.sh --dry-run
+   ssh root@100.124.58.85 /root/pgstandby/promote.sh --confirm=PROMOTE_STANDBY
+   ```
+   이 스크립트는 승격만 하고 멈춘다. 그 시점에는 앱이 돌 호스트가 아직 없을 수 있기 때문이다. 다음 할 일을 마지막에 출력한다.
+3. 새 VM 발급 → Docker·Tailscale 설치 → 저장소 클론 → DB 주소를 `100.124.58.85:5434`로
 4. Cloudflare DNS를 새 origin IP로, 방화벽에 80/443(Cloudflare 대역) 규칙
 
 몇 시간짜리 작업이다. **스탠바이가 줄이는 것은 복구 시간이 아니라 데이터 손실이다.**
 
 > ⚠️ **사전에 해둘 것**: B에서 SSH가 안 되면 Hetzner Console이 유일한 진입로인데, 메인 VM은 SSH 키로 생성해 **root 비밀번호가 없어 콘솔 로그인이 안 된다**(22번도 방화벽으로 닫혀 있다). Console → Rescue → Reset root password를 **장애 전에** 해둘 것. 정작 필요할 때는 이 조작조차 못 할 수 있다.
+
+### 승격 스크립트가 둘인 이유
+
+| 상황 | 쓸 것 | 하는 일 |
+|---|---|---|
+| 메인 VM 살아 있음, DB만 이상 | **메인 VM**의 `scripts/promote_standby.sh` | 승격 + 앱 재배선 + 서비스 재시작 |
+| 메인 VM 사망 | **스탠바이**의 `/root/pgstandby/promote.sh` | 승격만. 앱 재배선은 이후 별도 |
+
+두 번째가 필요한 이유는 단순하다 — 첫 번째는 메인 VM에 있다. **승격이 가장 절실한 상황이 바로 그 스크립트에 닿을 수 없는 상황이다.** 스탠바이 쪽 사본은 아무것에도 의존하지 않는다.
+
+저장소 원본은 `scripts/standby/promote_self.sh`이고 스탠바이의 `/root/pgstandby/promote.sh`로 배포한다. **고치면 다시 배포해야 한다.**
+
+둘 다 스플릿브레인을 차단하고, `--dry-run`은 primary가 건강해도 계획 전체를 보여준다.
 
 ### A 시나리오 상세: `scripts/promote_standby.sh`
 
