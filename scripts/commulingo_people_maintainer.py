@@ -177,10 +177,17 @@ def choose_mode(config: dict, requested: str | None = None, state: dict | None =
     return "enrich"
 
 
-# Length is prescribed as SENTENCES, never as a character band. A writer cannot land
-# natural Korean inside a 30-character window without padding or truncating to hit the
-# number, which is what produced the stilted cards. The character constants below are
-# backstops and selection signals only — they never appear as a target to write toward.
+# Length is PRESCRIBED as SENTENCES and VERIFIED in characters. Prescribing a character
+# band produced the stilted cards: a writer cannot land natural Korean inside a
+# 30-character window without padding or truncating to hit the number, so the character
+# constants below are backstops, never a target to write toward.
+#
+# Forbidding the count outright was the overcorrection. The curator could not tell a
+# 4-character overflow from a whole surplus sentence, so it shaved and resubmitted at the
+# same length: on 2026-07-31 one card went 427 -> 401 -> 384 -> 384 against the 380
+# ceiling, five paid rounds to place one card, and person_create sat at 57% rejected for
+# the day. The prompt now says to count before calling and scales the remedy to the size
+# of the overflow — cut a sentence when it is a sentence, cut a clause when it is a clause.
 #
 # The sentence count is DERIVED from the ceiling (sentence_budget), not chosen next to
 # it. Prescribing 4-5 sentences under a ceiling that pays for 4 made every major
@@ -376,20 +383,28 @@ CARD_STYLE_GUIDANCE = (
     "- `bio` and `moment` are the paragraph and the pull-quote on the person LIST card, not the "
     "detail page. Anything that needs more room belongs in a person_section, which the detail "
     "page renders in full.\n"
-    f"- Write bio to a SENTENCE COUNT, never to a character count. A MAJOR figure (head of state, "
-    f"party leader, or someone central to many events) gets {MAJOR_BIO_SENTENCES}; a STANDARD "
-    f"figure {STANDARD_BIO_SENTENCES}; a MINOR/obscure figure {MINOR_BIO_SENTENCES}. These are "
-    f"CEILINGS AND RANGES, NOT QUOTAS. Write the sentences the subject actually warrants and stop "
-    f"there: a major figure with thin documented material gets a short bio, and filling to the "
-    f"limit with restatement is padding. Inflating an obscure functionary's bio is a defect. The "
-    f"enrich task states the tier for the specific person. Never count characters — let the length "
-    f"fall where the sentences leave it. {BIO_HARD_CEILING} Korean characters is a hard ceiling "
-    f"the save rejects, not a target; a draft that trips it is one sentence too many, so drop a "
-    f"whole sentence or move the material into a person_section — trimming clauses out of "
-    f"{BIO_SENTENCE_BUDGET + 1} dense sentences does not recover the overflow, it just produces a "
-    f"cramped card that overflows anyway. Give the English bio comparable substance (its "
-    f"{FIELD_LIMITS['bio'][1]}-character ceiling binds at the same sentence count). Never leave a "
-    f"one-line stub.\n"
+    "- COUNT THE CHARACTERS OF EVERY CAPPED FIELD BEFORE YOU CALL THE TOOL, and fix an "
+    "over-length draft in the same turn you wrote it. The ceilings are stated with each field in "
+    "the tool schema. A rejected write costs a full paid round and teaches you nothing you could "
+    "not have checked yourself, so the count is part of drafting, not something the save "
+    "discovers for you.\n"
+    f"- Compose bio to a SENTENCE COUNT, then check it against the ceiling. A MAJOR figure (head "
+    f"of state, party leader, or someone central to many events) gets {MAJOR_BIO_SENTENCES}; a "
+    f"STANDARD figure {STANDARD_BIO_SENTENCES}; a MINOR/obscure figure {MINOR_BIO_SENTENCES}. "
+    f"These are CEILINGS AND RANGES, NOT QUOTAS. Write the sentences the subject actually "
+    f"warrants and stop there: a major figure with thin documented material gets a short bio, and "
+    f"filling to the limit with restatement is padding. Inflating an obscure functionary's bio is "
+    f"a defect. The enrich task states the tier for the specific person. {BIO_HARD_CEILING} "
+    f"Korean characters is a hard ceiling the save rejects, not a target. How you fix an "
+    f"over-length draft depends on how far over it is. Over by roughly a sentence "
+    f"(~{DENSE_SENTENCE_CHARS[0]} Korean characters) or more: it is one sentence too many, so "
+    f"drop a whole sentence or move the material into a person_section — trimming clauses out of "
+    f"{BIO_SENTENCE_BUDGET + 1} dense sentences does not recover that much, it just produces a "
+    f"cramped card that overflows anyway. Over by less: it is one clause too long, so delete the "
+    f"weakest clause outright. Do NOT reword at the same length and resubmit — rephrasing a "
+    f"384-character bio into a different 384 characters spends a round and changes nothing. Give "
+    f"the English bio comparable substance (its {FIELD_LIMITS['bio'][1]}-character ceiling binds "
+    f"at the same sentence count and is counted the same way). Never leave a one-line stub.\n"
     "- Every new person requires both citizenship and nationalOrigin. nationalOrigin may equal "
     "citizenship; never omit it because the two match or because a distinct background is not "
     "documented. Apply the editorial defaults below instead of storing a blank.\n"

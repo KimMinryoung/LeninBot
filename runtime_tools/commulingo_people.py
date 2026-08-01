@@ -2606,7 +2606,11 @@ def sentence_budget(field: str) -> int:
 # They are refusal boundaries, NOT targets: length is prescribed to the writer
 # as a sentence count (see CARD_STYLE_GUIDANCE), because a character band
 # produces padded or truncated Korean. Say the ceiling, never ask for it.
-_CEILING = "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed sentence count, not to this number."
+_CEILING = (
+    "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed sentence"
+    " count, not to this number, but COUNT YOUR DRAFT AGAINST IT BEFORE CALLING: a rejected"
+    " write costs a full round."
+)
 
 
 def _capped_bilingual_schema(field: str, extra: str = "") -> dict:
@@ -2631,8 +2635,9 @@ _BIO_SCHEMA = _capped_bilingual_schema(
     " keep career chronology in career rows, not the bio."
     f" A dense sentence of this register costs ~{DENSE_SENTENCE_CHARS[0]} Korean"
     f" and ~{DENSE_SENTENCE_CHARS[1]} English characters, so the ceiling pays for"
-    f" {sentence_budget('bio')} of them: past that, cut a sentence rather than"
-    " squeezing every clause.",
+    f" {sentence_budget('bio')} of them. Over by about that much or more: cut a"
+    " sentence rather than squeezing every clause. Over by only a little: delete"
+    " the weakest clause — do not reword at the same length.",
 )
 
 _MOMENT_SCHEMA = _capped_bilingual_schema(

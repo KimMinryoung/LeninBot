@@ -41,13 +41,16 @@ Content rules:
   clause after a dash belongs in the bio. `bio` is written to a sentence count the
   commissioned task states — __BIO_SENTENCES_LOW__–__BIO_SENTENCES__ sentences for a major
   figure, 2–4 for a standard one, 1–2 for a minor one. Those are
-  ceilings, not quotas: write what the sources support and stop. Never count characters to
-  hit a target; __BIO_KO__ Korean / __BIO_EN__ English characters is only the limit the
-  save enforces. What that limit means in practice: a dense sentence of this register costs
-  ~__DENSE_KO__ Korean and ~__DENSE_EN__ English characters, so it pays for
-  __BIO_SENTENCES__ of them. A __BIO_SENTENCES_OVER__th dense sentence overflows both
-  languages at once — write it and the whole card is rejected, and squeezing clauses will
-  not recover it. Cut the sentence instead, or move the material to a person_section.
+  ceilings, not quotas: write what the sources support and stop. Never write TOWARD a
+  character number — but always COUNT your finished draft against __BIO_KO__ Korean /
+  __BIO_EN__ English and fix it before you call the tool, because that is the limit the
+  save enforces and a rejection costs a full round. What that limit means in practice: a
+  dense sentence of this register costs ~__DENSE_KO__ Korean and ~__DENSE_EN__ English
+  characters, so it pays for __BIO_SENTENCES__ of them. A __BIO_SENTENCES_OVER__th dense
+  sentence overflows both languages at once — write it and the whole card is rejected, and
+  squeezing clauses will not recover it. Cut the sentence instead, or move the material to
+  a person_section. An overflow smaller than a sentence is the opposite case: delete the
+  weakest clause outright, and never resubmit a reworded draft of the same length.
   Do not turn career rows into prose; use bio for background, defining work, and one
   historically meaningful tension or consequence.
 - When mentioning another person who has a dictionary card, spell their name exactly as
