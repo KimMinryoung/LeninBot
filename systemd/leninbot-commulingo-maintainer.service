@@ -15,7 +15,7 @@ Environment=COMMULINGO_SUGGESTED_BY=commulingo-maintainer
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
-Environment=COMMULINGO_DAILY_CAP_USD=1.0
+Environment=COMMULINGO_DAILY_CAP_USD=2.5
 ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_budget_guard.py
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_people_maintainer.py --mode auto
 TimeoutStartSec=900

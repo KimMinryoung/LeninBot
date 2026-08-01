@@ -2,10 +2,19 @@
 Description=Daily CommuLingo curator batches (DeepSeek off-peak window)
 
 [Timer]
-# One item per lane per batch; 5 batches inside the DeepSeek off-peak discount
+# One item per lane per batch; 20 batches inside the DeepSeek off-peak discount
 # window (UTC 16:30-00:30). No Persistent: a missed batch must not run at peak
 # price.
-OnCalendar=*-*-* 17..21:00:00
+#
+# 20 minutes apart, not tighter. A batch runs the four lanes sequentially and
+# takes 5-15 minutes depending on retries — the 2026-07-31 18:00 batch spent 10
+# minutes in the enrich lane alone on three failed attempts. Overlap is not an
+# error the digest would show: the second run takes the maintainer lock, logs
+# "another maintainer run is active", and exits 0 with no result JSON, so it is
+# counted nowhere and a packed schedule would quietly deliver fewer items than
+# it claims. Leave the headroom.
+OnCalendar=*-*-* 17..22:00/20:00
+OnCalendar=*-*-* 23:00,20:00
 
 [Install]
 WantedBy=timers.target
