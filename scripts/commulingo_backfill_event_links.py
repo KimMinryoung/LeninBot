@@ -43,11 +43,28 @@ VALID_KINDS = {"leader", "participant", "executor", "target", "opponent", "witne
 FALLBACK_KIND = "unclassified"
 
 PROMPT = """You are auditing the people-links of one historical event card on a Soviet/revolutionary
-history site. Below are the event and the site's full roster of people. List ONLY people from the
-roster who were clearly and materially involved in this event — participants, drivers, principal
-victims, or figures whose card meaningfully intersects it. Judge from the roster line itself; do
-not speculate beyond it. A weak, generic, or merely-contemporary connection must be omitted:
-missing a marginal link is fine, inventing one is not.
+history site. Below are the event and the site's full roster of people. List every person from the
+roster whose card shows they took part in this event. Judge from the roster line itself; do not
+speculate beyond it. Never invent a connection the line does not support: missing a link is fine,
+inventing one is not. But do not omit a real one for being ordinary. Ordinary service in a mass
+event IS a link, because the reader learns as much from who was there as from who was not, and a
+missing link would otherwise be indistinguishable from an absence.
+
+The WEIGHT of an involvement is carried by the length of relation_ko/relation_en, not by whether
+the link exists:
+  - Decisive involvement (led it, commanded a named formation, made a documented turning act, or
+    the event is the centre of this person's card): a short role phrase, as specific as the roster
+    line supports. e.g. "백군 총사령관", "제7군 사령관 · 만네르헤임 선 돌파".
+  - Ordinary involvement (enlisted, served, was mobilized, held a routine post while it happened):
+    the BARE role noun and nothing else, at most a few characters. e.g. "정찰병", "기병학교 생도",
+    "군수보급". No verbs, no explanation, no clause. If the roster line says only that they served,
+    "붉은 군대 복무" is the whole label.
+A generation of Soviet officers served in the Civil War; the page must show that plainly without
+dressing each one up as a protagonist.
+
+Never put an em dash (—) in a label: this site does not use them. Join two parts with a middle
+dot ( · ) as the rest of the dictionary does, e.g. "제7군 사령관 · 만네르헤임 선 돌파".
+A label needing more than one such join is too long for a label; cut it back to the role.
 
 For each person also classify HOW they were involved in THIS event, as one "kind":
   leader      — directed or led the event from the top
@@ -78,6 +95,21 @@ Answer with ONLY a JSON object, no other text:
 "relation_en": "<same in English>", "kind": "<leader|participant|executor|target|opponent|witness>",
 "confidence": <0.0-1.0>, "reason": "<one short sentence>"}}]}}
 Use an empty list when nobody qualifies."""
+
+
+def normalize_label(value) -> str:
+    """Strip an em dash out of a relation label.
+
+    The site does not use em dashes in written content, and the model puts them
+    in anyway: 56 stored labels carried one by 2026-08-02, 7 of them from that
+    day's civil-war pass. The prompt now forbids it, but a prompt rule is a
+    request and this is the boundary, so normalize here too. ' — ' becomes the
+    middle dot the rest of the dictionary joins with; a bare '—' becomes a
+    space, since it was standing in for a break rather than a join.
+    """
+    text = str(value or "").strip()
+    text = text.replace(" — ", " · ").replace("—", " ")
+    return " ".join(text.split())
 
 
 def resolve_person_id(pid: str, name_ko: str, roster: list[dict]) -> tuple[str, str] | None:
@@ -241,8 +273,8 @@ def main() -> int:
             pid = str(prop.get("person_id") or "").strip()
             kind = str(prop.get("kind") or "").strip().lower()
             entry = {"event": event["id"], "person": pid,
-                     "relation_ko": str(prop.get("relation_ko") or "").strip(),
-                     "relation_en": str(prop.get("relation_en") or "").strip(),
+                     "relation_ko": normalize_label(prop.get("relation_ko")),
+                     "relation_en": normalize_label(prop.get("relation_en")),
                      "kind": kind if kind in VALID_KINDS else FALLBACK_KIND,
                      "confidence": prop.get("confidence"), "reason": prop.get("reason")}
             try:
