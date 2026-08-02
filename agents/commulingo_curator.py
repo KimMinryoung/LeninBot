@@ -3,7 +3,7 @@
 from agents.base import AgentSpec
 from llm.prompt_renderer import SystemPrompt
 from runtime_tools.commulingo_people import (
-    DENSE_SENTENCE_CHARS, FIELD_LIMITS, sentence_budget,
+    DENSE_SENTENCE_CHARS, FIELD_LIMITS, sentence_budget, sentence_prescription,
 )
 
 
@@ -66,7 +66,7 @@ Content rules:
   with no linked historical events, inspect list_events and create one well-supported
   history_event_person relation when applicable. Otherwise create one focused person_section.
 - A history_event_person `note` is a caption under the person's name on the event page, not
-  a mini-biography: one sentence, two at most, stating what the person did in the event.
+  a mini-biography. State what the person did in the event: __EVENT_NOTE_SENTENCES__.
   __EVENT_NOTE_KO__ Korean / __EVENT_NOTE_EN__ English characters is the limit the save
   enforces. Keep the `relation`
   label itself a short role tag (차르, 초대 총리); explanation belongs in the note or a
@@ -78,7 +78,7 @@ Content rules:
   rehabilitation, dismissal details, and explanation to bio, career, or sections.
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no
   solid source exists. Never invent dialogue or inner motives. It is a pull-quote on the
-  list card, not a paragraph: one sentence, two at most, capturing a single scene or turn.
+  list card, not a paragraph. Capture a single scene or turn: __MOMENT_SENTENCES__.
   If it needs more than that to make sense, the scene is wrong — pick a sharper one rather
   than adding sentences. __MOMENT_KO__ Korean / __MOMENT_EN__ English characters is the
   limit the save enforces. Check a quotation's length before building the moment around it:
@@ -115,6 +115,16 @@ narrow write is the end of the run; do not make a second edit.
 for _field, (_ko_max, _en_max) in FIELD_LIMITS.items():
     _PROMPT = _PROMPT.replace(f"__{_field.upper()}_KO__", str(_ko_max))
     _PROMPT = _PROMPT.replace(f"__{_field.upper()}_EN__", str(_en_max))
+    # ...and the sentence count that ceiling pays for, by the same rule. Written
+    # by hand, `moment` and `event_note` both said "one sentence, two at most"
+    # under ceilings that buy one.
+    #
+    # bio is excluded: it carries the tiered __BIO_SENTENCES_LOW__/__BIO_SENTENCES__
+    # pair below, and the generic form would consume the shared prefix first.
+    if _field != "bio":
+        _PROMPT = _PROMPT.replace(
+            f"__{_field.upper()}_SENTENCES__", sentence_prescription(_field)
+        )
 
 # The major-figure sentence count is derived from the bio ceiling, not written
 # next to it: prescribing one more sentence than the ceiling pays for is what

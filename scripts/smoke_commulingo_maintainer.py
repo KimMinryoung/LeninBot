@@ -16,7 +16,9 @@ from agents.commulingo_curator import COMMULINGO_CURATOR
 from runtime_tools.commulingo_people import (
     DENSE_SENTENCE_CHARS,
     FIELD_LIMITS,
+    SECTION_BODY_TARGET,
     sentence_budget,
+    sentence_prescription,
     COMMULINGO_EVENT_LINK_TOOL,
     COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
@@ -100,6 +102,37 @@ assert maintainer.MAJOR_BIO_SENTENCES in maintainer.CARD_STYLE_GUIDANCE
 # The curator prompt states the same derived count, and no token is left unfilled.
 assert f"{_BIO_BUDGET - 1}–{_BIO_BUDGET} sentences for a major" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "__" not in COMMULINGO_CURATOR.prompt_ir.identity
+# The same rule for every OTHER field, not just bio. `moment` and `event_note`
+# each have a one-sentence budget, and six hand-written copies of "one sentence,
+# two at most" prescribed a second one anyway: note.ko/note.en alone were 19 of
+# 48 length rejections in the 2026-07-30..08-02 window. No prose may state a
+# sentence count that its own ceiling does not pay for.
+for _field in ("moment", "event_note"):
+    assert sentence_budget(_field) == 1, f"{_field} budget changed — revisit the prescriptions"
+_ONE_SENTENCE_SOURCES = {
+    "curator prompt": COMMULINGO_CURATOR.prompt_ir.identity,
+    "maintainer guidance": maintainer.CARD_STYLE_GUIDANCE,
+    "moment tool schema": json.dumps(COMMULINGO_PERSON_UPDATE_TOOL, ensure_ascii=False),
+    "event_note tool schema": json.dumps(COMMULINGO_EVENT_LINK_TOOL, ensure_ascii=False),
+    "section tool schema": json.dumps(COMMULINGO_SECTION_SAVE_TOOL, ensure_ascii=False),
+}
+for _where, _text in _ONE_SENTENCE_SOURCES.items():
+    assert "two at most" not in _text, (
+        f"{_where} prescribes two sentences under a ceiling that pays for one"
+    )
+assert maintainer.MOMENT_SENTENCES == sentence_prescription("moment")
+# section body was the one long-form field outside FIELD_LIMITS entirely: no
+# maxLength on the schema, no save-time check, only a character band typed into
+# the maintainer prompt.
+assert "section_body" in FIELD_LIMITS
+_SECTION_BODY_PROPS = COMMULINGO_SECTION_SAVE_TOOL["input_schema"]["properties"]["body"]["properties"]
+assert _SECTION_BODY_PROPS["ko"]["maxLength"] == FIELD_LIMITS["section_body"][0]
+assert _SECTION_BODY_PROPS["en"]["maxLength"] == FIELD_LIMITS["section_body"][1]
+# The target is the number the writer aims at; the ceiling only refuses. A
+# target at or above the ceiling would make every on-target section a rejection.
+assert SECTION_BODY_TARGET[1] < FIELD_LIMITS["section_body"][0]
+assert str(SECTION_BODY_TARGET[0]) in maintainer.SECTION_BODY_RANGE
+assert "350-700" not in maintainer.CARD_STYLE_GUIDANCE, "section range restated by hand"
 assert "already embeds cyrillicPatronymic" in _validate(
     CURSOR, "person", "update", "example", {
         "cyrillic": "Михаил Петрович Фриновский",
@@ -120,7 +153,7 @@ assert "moment is too long" in _validate(
     CURSOR, "person", "update", "example",
     {"moment": {"ko": "가" * 141, "en": "A sentence"}},
 )
-assert "one sentence, two at most" in _validate(
+assert sentence_prescription("moment") in _validate(
     CURSOR, "person", "update", "example",
     {"moment": {"ko": "가", "en": "x" * 301}},
 )
@@ -140,6 +173,20 @@ assert not _validate(
     SECTION_CURSOR, "person_section", "create", "example",
     {"slug": "a-different-slug", "heading": {"ko": "새 제목", "en": "New Heading"},
      "body": {"ko": "본문", "en": "Body"}},
+)
+# The save side of the section ceiling, mirroring bio/epithet/moment. Without
+# it the schema was the only guard, and any writer path reaching _validate
+# directly had none at all.
+assert "section body is too long" in _validate(
+    SECTION_CURSOR, "person_section", "create", "example",
+    {"slug": "a-different-slug", "heading": {"ko": "새 제목", "en": "New Heading"},
+     "body": {"ko": "가" * (FIELD_LIMITS["section_body"][0] + 1), "en": "Body"}},
+)
+# ...and a body written to the stated target passes both.
+assert not _validate(
+    SECTION_CURSOR, "person_section", "create", "example",
+    {"slug": "a-different-slug", "heading": {"ko": "새 제목", "en": "New Heading"},
+     "body": {"ko": "가" * SECTION_BODY_TARGET[1], "en": "x" * (SECTION_BODY_TARGET[1] * 2)}},
 )
 assert "epithet is too long" in _validate(
     CURSOR, "person", "update", "example",

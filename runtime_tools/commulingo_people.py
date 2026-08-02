@@ -1772,7 +1772,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         for key, (ko_max, en_max), overflow in (
             ("epithet", FIELD_LIMITS["epithet"], "Keep career chronology in career rows."),
             ("bio", FIELD_LIMITS["bio"], "Keep career chronology in career rows."),
-            ("moment", FIELD_LIMITS["moment"], "A moment is one sentence, two at most — "
+            ("moment", FIELD_LIMITS["moment"], f"A moment is {sentence_prescription('moment')} — "
                                                "pick a sharper scene instead of explaining this one."),
         ):
             value = patch.get(key)
@@ -1943,6 +1943,23 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         for key in ("heading", "body"):
             if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
                 return f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}}."
+        # body was the one long-form field with no ceiling on either side of the
+        # call — not in the tool schema, not here. The tool schema now carries a
+        # maxLength; this mirrors it for the writer paths that reach _validate
+        # without going through the schema, exactly as bio/epithet/moment do.
+        body_patch = patch.get("body")
+        if isinstance(body_patch, dict):
+            ko_max, en_max = FIELD_LIMITS["section_body"]
+            ko_len = len(body_patch.get("ko") or "")
+            en_len = len(body_patch.get("en") or "")
+            if ko_len > ko_max or en_len > en_max:
+                return (
+                    f"Error: section body is too long (ko {ko_len}/{ko_max}, en "
+                    f"{en_len}/{en_max} characters). The target is "
+                    f"{SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters; "
+                    f"a body this size is two topics — file the second one as its own "
+                    f"section instead of trimming this one to fit."
+                )
         cur.execute(
             "SELECT 1 FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
             (target_id, slug),
@@ -2575,7 +2592,30 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
     "fate_label": (22, 50),
     "event_note": (90, 200),
     "definition": (400, 900),
+    # A section body is the one long-form field, and it was the one field left
+    # out of this table: no maxLength on the tool schema, no save-time check,
+    # only a character band written into the maintainer prompt. This ceiling is
+    # a runaway guard, not a target — it sits ~30% above SECTION_BODY_TARGET so
+    # an on-target section never lands on it. (Corpus on 2026-08-02, 1,346
+    # stored sections: ko p50 724 / p95 1203 / max 2071, en p50 1579 / p95 2574
+    # / max 3938 — the whole corpus stays writable under this.)
+    "section_body": (2600, 5800),
 }
+
+# What a section body should actually be written to, as (min, max) Korean
+# characters; the English twin follows at the DENSE_SENTENCE_CHARS ratio
+# (~2.2x), so 2000 Korean is ~4400 English. A section is the one field whose
+# target cannot be derived from its ceiling the way sentence_budget() derives
+# the others — the ceiling is a runaway guard well above the target, so
+# deriving would prescribe dozens of sentences. It lives here, in the same
+# table region as the ceiling, so the schema description and the maintainer
+# prompt read one number instead of restating it.
+#
+# The upper bound was 700 while the corpus median was already 724 and the 95th
+# percentile 1203: the prescription described nothing anyone wrote, and nothing
+# enforced it either way. Raised to 2000 (2026-08-02) so a substantial section
+# is written on purpose rather than over an unstated line.
+SECTION_BODY_TARGET = (350, 2000)
 
 # What one dense bilingual sentence of this register actually costs, measured
 # over the 1,210 accepted bios: a Korean sentence in a major-figure card runs
@@ -2600,24 +2640,50 @@ def sentence_budget(field: str) -> int:
     return max(1, min(ko_max // ko_cost, en_max // en_cost))
 
 
+def sentence_prescription(field: str) -> str:
+    """The sentence count for a short field, as the phrase the prompts use.
+
+    Same rule as sentence_budget, one layer up: the phrase itself is generated
+    so a ceiling change rewrites every prompt that quotes it. "one sentence,
+    two at most" was written by hand into six places (two curator prompt
+    bullets, the event-note and moment tool descriptions, the moment save
+    error, the maintainer prompt) under ceilings that pay for exactly one —
+    90 Korean characters is one dense sentence, and 200 English is too. Those
+    six strings made note.ko/note.en the largest single rejection bucket on the
+    site: 19 of 48 length rejections in the 2026-07-30..08-02 window, every one
+    of them a second sentence the ceiling never had room for.
+    """
+    budget = sentence_budget(field)
+    if budget == 1:
+        # No character counts in the phrase: every caller states the ceiling on
+        # its own line already, and repeating it inside the prescription is how
+        # a prompt ends up with two numbers to keep in step.
+        return "exactly one sentence — a second one does not fit"
+    return f"{budget - 1}-{budget} sentences"
+
+
 # The ceilings are stated in each description because a bare maxLength
 # only reports itself after the call is already spent — 107 of the 625
 # rejected person_create calls were that error.
 # They are refusal boundaries, NOT targets: length is prescribed to the writer
 # as a sentence count (see CARD_STYLE_GUIDANCE), because a character band
 # produces padded or truncated Korean. Say the ceiling, never ask for it.
+# `target` names what the writer aims at instead of this ceiling: a sentence
+# count for the short fields, a character range for the one long-form field
+# (a section is markdown and may run to paragraphs, so counting its sentences
+# prescribes nothing).
 _CEILING = (
-    "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed sentence"
-    " count, not to this number, but COUNT YOUR DRAFT AGAINST IT BEFORE CALLING: a rejected"
+    "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed {target},"
+    " not to this number, but COUNT YOUR DRAFT AGAINST IT BEFORE CALLING: a rejected"
     " write costs a full round."
 )
 
 
-def _capped_bilingual_schema(field: str, extra: str = "") -> dict:
+def _capped_bilingual_schema(field: str, extra: str = "", target: str = "sentence count") -> dict:
     ko_max, en_max = FIELD_LIMITS[field]
     return {
         **_BILINGUAL_TEXT_SCHEMA,
-        "description": _CEILING.format(ko=ko_max, en=en_max) + extra,
+        "description": _CEILING.format(ko=ko_max, en=en_max, target=target) + extra,
         "properties": {"ko": {"type": "string", "maxLength": ko_max},
                        "en": {"type": "string", "maxLength": en_max}},
     }
@@ -2650,8 +2716,20 @@ _MOMENT_SCHEMA = _capped_bilingual_schema(
 
 _EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
     "event_note",
-    " The note is a caption under the person's name on the event page:"
-    " one sentence, two at most, stating what the person did in the event.",
+    " The note is a caption under the person's name on the event page, stating what"
+    f" the person did in the event: {sentence_prescription('event_note')}.",
+)
+
+# The section body is markdown and may carry paragraphs, so its guidance is a
+# character target rather than a sentence count. Both numbers come from
+# SECTION_BODY_TARGET; the ceiling in _CEILING comes from FIELD_LIMITS.
+_SECTION_BODY_SCHEMA = _capped_bilingual_schema(
+    "section_body",
+    f" One topic, {SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters"
+    " plus the equivalent English. The ceiling above is a runaway guard: a body"
+    " approaching it is a section that should have been two, or a topic the bio"
+    " already covers.",
+    target="length",
 )
 
 # Fate label = cause of death only, NO death year (it renders from `years`).
@@ -2659,15 +2737,14 @@ _EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
 # specific illness word (심장마비/폐암…); place with " · " (암살 · 멕시코). A
 # deposed/exile fate keeps its EVENT year (실각 1964) and may append the cause
 # (실각 1964 · 자연사). The death year is stripped automatically on save.
-_FATE_LABEL_SCHEMA = {
-    **_capped_bilingual_schema("fate_label"),
-    "description": (
-        _CEILING.format(ko=FIELD_LIMITS["fate_label"][0], en=FIELD_LIMITS["fate_label"][1])
-        + " Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
-        "natural causes). Execution=처형/Executed; natural=자연사/Natural causes; "
-        "place with ' · '. The death year is dropped automatically on save."
-    ),
-}
+_FATE_LABEL_SCHEMA = _capped_bilingual_schema(
+    "fate_label",
+    " Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
+    "natural causes). Execution=처형/Executed; natural=자연사/Natural causes; "
+    "place with ' · '. The death year is dropped automatically on save.",
+    # A badge, not prose: there is no sentence to count.
+    target="length",
+)
 
 _NATIONALITY_SCHEMA = {
     "type": "object",
@@ -3132,7 +3209,7 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "person_id": {"type": "string"},
             "slug": {"type": "string"},
             "heading": _BILINGUAL_TEXT_SCHEMA,
-            "body": _BILINGUAL_TEXT_SCHEMA,
+            "body": _SECTION_BODY_SCHEMA,
             "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
             "citations": _CITATIONS_SCHEMA,
         },

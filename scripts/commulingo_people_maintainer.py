@@ -31,7 +31,8 @@ from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one
 from runtime_tools.commulingo_people import (
-    DENSE_SENTENCE_CHARS, FIELD_LIMITS, _dedup_key, sentence_budget,
+    DENSE_SENTENCE_CHARS, FIELD_LIMITS, SECTION_BODY_TARGET, _dedup_key,
+    sentence_budget, sentence_prescription,
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.security import CallerContext, caller_scope
@@ -216,7 +217,14 @@ MAJOR_BIO_SENTENCES = (
 )
 STANDARD_BIO_SENTENCES = "2-4 sentences"
 MINOR_BIO_SENTENCES = "1-2 sentences"
-MOMENT_SENTENCES = "one sentence, two at most"
+# Derived, like MAJOR_BIO_SENTENCES above. This constant existed and still got
+# bypassed: step 4 of the commissioned task restated "one sentence, two at most"
+# as a literal, so the constant guarded nothing.
+MOMENT_SENTENCES = sentence_prescription("moment")
+SECTION_BODY_RANGE = (
+    f"{SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters "
+    f"plus equivalent English"
+)
 # Stub detection for candidate selection: a bio shorter than this for the tier reads as
 # unfinished and moves the card up the enrich queue. Never shown to the curator.
 MAJOR_BIO_STUB = 100
@@ -544,14 +552,14 @@ use `조지아`.
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
    "nationalOrigin": {{"code": "georgia", "label": {{"ko": "그루지야", "en": "Georgia"}}}}}}.
 {bio_step}
-4. MOMENT: else if `has moment` is false, add a bilingual `moment` as one person update — one
-   sentence, two at most, one scene.
+4. MOMENT: else if `has moment` is false, add a bilingual `moment` as one person update —
+   {MOMENT_SENTENCES}, one scene.
 5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
    get_event records. When one event connection is clearly supported, create exactly one
    `commulingo_event_link`; never force a weak connection.
 6. SECTION: else, if this card has fewer than {MAX_SECTIONS} sections, find the single most
    valuable missing topic and add one substantial bilingual section via `commulingo_section_save`
-   (one topic, roughly 350-700 Korean characters plus equivalent English) when no section covers
+   (one topic, roughly {SECTION_BODY_RANGE}) when no section covers
    it. A card already at {MAX_SECTIONS} sections is finished: say so and make no write rather than
    splitting a covered topic to have something to add. This card has {candidate['section_count']}.
 Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get

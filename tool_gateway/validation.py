@@ -157,7 +157,13 @@ def _format_jsonschema_error(error) -> str:
         )
     message = error.message
     if len(message) > 300:
-        message = message[:300] + "… [truncated]"
+        # jsonschema writes the offending value FIRST and the violated rule
+        # LAST ("'{\"ko\": ...}' is not of type 'object'"), so cutting the tail
+        # threw away the only actionable half. A section body rejected for
+        # being a JSON string came back as its own text, echoed and cut, with
+        # no reason attached at all — the curator reshaped the same payload six
+        # times on 2026-08-01 trying to guess the rule. Keep both ends.
+        message = f"{message[:200]}… [truncated] …{message[-90:]}"
     return f"{message}{location}"
 
 
