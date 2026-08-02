@@ -374,7 +374,21 @@ def select_sparse_person(
                                        THEN %(minor_stub)s
                                   ELSE %(std_stub)s END
                          OR COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END ASC,
-                  CASE WHEN COUNT(DISTINCT ep.event_id) = 0 THEN 0 ELSE 1 END ASC,
+                  -- No event-count term here. Promoting cards with zero event
+                  -- links put them at the head of the queue for the one step
+                  -- least able to satisfy them: on 2026-08-02, 488 of 1,236
+                  -- cards were complete except for an event link, and the
+                  -- events dictionary held 25 entries, all political peaks,
+                  -- with nothing an oil, shipbuilding or radar administrator
+                  -- could honestly attach to. The checklist forbids forcing a
+                  -- weak connection, so the promoted card reached step 5,
+                  -- found nothing, and had to spend rounds getting past it.
+                  -- The same reasoning already kept the event test out of the
+                  -- HAVING clause above, where a card leaves the queue; it was
+                  -- only ever inconsistent that promotion still used it.
+                  -- Cards with no event link are still served: enrich_step()
+                  -- commissions EVENTS whenever event_count is zero. They now
+                  -- arrive at their own turn instead of jumping the line.
                   COUNT(DISTINCT s.id) ASC,
                   CASE WHEN COUNT(DISTINCT c.id) <= 1 THEN 0 ELSE 1 END ASC,
                   CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END ASC,
