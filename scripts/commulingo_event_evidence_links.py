@@ -44,11 +44,15 @@ from scripts.commulingo_backfill_event_links import (
 MODEL = "deepseek-v4-pro"
 CHANGED_BY = "operator:claude-code"
 REPORT_DIR = PROJECT_ROOT / "logs" / "commulingo"
-# Wikipedia throttled the first run at 8. Three is polite and the pass is
-# not time-critical.
-FETCH_CONCURRENCY = 3
+# Wikimedia asks bots to go serial rather than parallel. Concurrency 8 took
+# five 429s over 205 people; concurrency 3 took 251 over 451, so more than half
+# the Great Patriotic War cohort was never actually read. One at a time with a
+# second between calls is the rate the API is documented to accept, and this
+# pass has no deadline.
+FETCH_CONCURRENCY = 1
+FETCH_DELAY_S = 1.0
 FETCH_RETRIES = 3
-FETCH_BACKOFF_S = 2.0
+FETCH_BACKOFF_S = 10.0
 LABEL_BATCH = 40
 
 # Per-event: who is even a candidate, and what counts as evidence in the article.
@@ -63,6 +67,31 @@ EVENTS = {
         "markers": r"\b(Red Army|Civil War|White Army|Whites|Cheka|Red Guards)\b",
         "years": r"\b(191[7-9]|192[0-2])\b",
         "label_hint": "the Russian Civil War of 1918-1922",
+    },
+    "great-patriotic-war": {
+        # The thaw generation is in: many of them were at the front as young men
+        # and the war is the first thing their card can be linked to.
+        "groups": ("bolshevik", "stalin-era", "thaw"),
+        "born_by": 1925,
+        "alive_from": 1941,
+        "markers": r"\b(Red Army|Great Patriotic War|World War II|Eastern Front|Soviet Army|"
+                   r"Wehrmacht|partisan|Stalingrad|Leningrad blockade|siege of Leningrad)\b",
+        "years": r"\b(194[1-5])\b",
+        "label_hint": "the Great Patriotic War of 1941-1945",
+    },
+    "great-terror": {
+        # Not a mobilization: here "took part" splits into being purged, running
+        # the purge, or presiding over it, and the evidence decides which. The
+        # prompt's warning against defaulting to `target` matters most here,
+        # because for this event `target` is frequently the true answer and the
+        # temptation is to apply it to everyone the years touch.
+        "groups": ("bolshevik", "stalin-era"),
+        "born_by": 1915,
+        "alive_from": 1936,
+        "markers": r"\b(Great Purge|Great Terror|NKVD|purge[sd]?|arrested|executed|"
+                   r"shot|show trial|rehabilitated|Gulag)\b",
+        "years": r"\b(193[6-9])\b",
+        "label_hint": "the Great Purge of 1937-1938",
     },
 }
 
@@ -85,6 +114,14 @@ Do not default to "target": that means a victim of the event.
 
 Write only from the evidence given. If the evidence does not actually place the person in the
 event, omit them entirely rather than guessing.
+
+Being affected by an event is not taking part in it. Promotion into posts the event emptied,
+holding office while it happened, or a career that merely overlaps its years are all reasons to
+OMIT the person. On 2026-08-02 this produced two wrong links on the Great Purge, 보즈네센스키
+and 즈베레프, both on evidence that read "was promoted rapidly during the Great Purge": they
+rose into the vacancies, they did not make them. The tell is that there is nothing to write in
+the label except the person's job title. If the label you want to write is a post rather than a
+relation to the event, that is the signal to leave them out.
 
 PEOPLE
 {people}
@@ -136,6 +173,7 @@ async def evidence_for(person: dict, cfg: dict, sem: asyncio.Semaphore) -> dict:
         error = (text or error or "empty response")[:120]
         text = ""
         await asyncio.sleep(FETCH_BACKOFF_S * (attempt + 1))
+    await asyncio.sleep(FETCH_DELAY_S)
     hits = [m.group(0).strip() for m in marker.finditer(text) if years.search(m.group(0))]
     return {**person, "hits": hits[:3], "error": error}
 
