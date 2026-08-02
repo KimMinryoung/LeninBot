@@ -461,6 +461,37 @@ EDITORIAL POLICY FOR PERSON CARDS (MANDATORY):
 """
 
 
+def enrich_step(candidate: dict) -> int:
+    """Which enrich step this card is actually on. 0 = nothing left to commission.
+
+    Decided here, from the values select_sparse_person already computed, rather
+    than shipped as a six-step checklist for the model to walk. Measured over
+    the 1,236 cards on 2026-08-02, steps 1, 2 and 4 together applied to ONE of
+    them: every other card was on 5 (488) or 6 (744). The other five branches
+    were read, narrated and skipped on every paid run for nothing.
+
+    Step 3 (bio depth/style) is deliberately absent — it is a judgment on the
+    prose, not a count, so it stays a gate the model evaluates. It is offered
+    only when steps 1 and 2 have passed, preserving the checklist's order.
+    """
+    if (
+        candidate["bio_chars"] == 0
+        or not candidate["has_epithet"]
+        or candidate["career_count"] == 0
+        or not candidate["has_role"]
+    ):
+        return 1
+    if not (candidate.get("citizenship_code") or "") or not (candidate.get("origin_code") or ""):
+        return 2
+    if not candidate["has_moment"]:
+        return 4
+    if candidate["event_count"] == 0:
+        return 5
+    if candidate["section_count"] < MAX_SECTIONS:
+        return 6
+    return 0
+
+
 def build_task(mode: str, candidate: dict | None) -> str:
     return _build_task(mode, candidate) + PEOPLE_EDITORIAL_POLICY
 
@@ -514,7 +545,7 @@ row in this run.
             f"Korean bio: {sentences} — a ceiling, not a quota."
         )
         bio_step = (
-            f"3. BIO DEPTH/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"BIO DEPTH/STYLE — if the Korean bio {rewrite_trigger}, rewrite it in both "
             f"languages in essence-first style as one person update. This is a MAJOR figure, so it "
             f"may carry {sentences}: use the room only for significance, defining tensions, and "
             f"historical weight the sources actually support. Stop when the subject is covered — "
@@ -526,7 +557,7 @@ row in this run.
             f"Korean bio {sentences} — keep it short."
         )
         bio_step = (
-            f"3. BIO SIZE/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"BIO SIZE/STYLE — if the Korean bio {rewrite_trigger}, rewrite it in both "
             f"languages in essence-first style as one person update. This is a MINOR figure: "
             f"{sentences} is the whole budget, so trim to the essentials. Keep the facts."
         )
@@ -535,10 +566,38 @@ row in this run.
             f"- prominence tier: standard. Korean bio {sentences} as the material warrants."
         )
         bio_step = (
-            f"3. BIO SIZE/STYLE: else if the Korean bio {rewrite_trigger}, rewrite it in both "
+            f"BIO SIZE/STYLE — if the Korean bio {rewrite_trigger}, rewrite it in both "
             f"languages in essence-first style as one person update — {sentences}, keep the facts, "
             f"just refocus."
         )
+
+    # The step this card is on, and only that step. Reads are scoped to it too:
+    # get_sections was mandatory on every run while only the section step ever
+    # uses it, and the counts the model used to re-derive from those two calls
+    # are already listed above.
+    step = enrich_step(candidate)
+    step_text = {
+        1: _STEP_BASIC,
+        2: _STEP_NATIONALITY_TEMPLATE.format(NATIONALITY_CODES=NATIONALITY_CODES),
+        4: _STEP_MOMENT_TEMPLATE.format(MOMENT_SENTENCES=MOMENT_SENTENCES),
+        5: _STEP_EVENTS,
+        6: _STEP_SECTION_TEMPLATE.format(
+            section_count=candidate["section_count"],
+            max_sections=MAX_SECTIONS,
+            section_range=SECTION_BODY_RANGE,
+        ),
+        0: "NOTHING LEFT: this card is complete and at its section ceiling. Say so and make no "
+           "write.",
+    }[step]
+    # Steps 1 and 2 outrank the bio judgment, exactly as they did in the old
+    # checklist order; 4, 5 and 6 sat below it.
+    bio_gate = _BIO_GATE_TEMPLATE.format(bio_step=bio_step) if step in (4, 5, 6) else ""
+    reads_line = (
+        "Call get_person and get_sections first"
+        if step == 6
+        else "Call get_person first"
+    )
+
     return f"""MODE: ENRICH EXISTING PERSON
 
 Target exactly this person and no one else:
@@ -557,8 +616,7 @@ Target exactly this person and no one else:
 - national/ethnic background flag code: {candidate.get('origin_code') or '(unset)'}
 {tier_line}
 
-Call get_person and get_sections first, then make exactly one available narrow write, choosing the
-first step below that applies.
+{reads_line}, then make exactly the one narrow write commissioned below.
 
 CONTENT PRESERVATION: before writing anything, compare your draft against what the card
 already holds. Default to building on the existing content — keep accurate, in-style facts and
@@ -569,11 +627,22 @@ an accidental side effect of a rewrite. If the existing content already satisfie
 step does not apply; move to the next one.
 Korean Soviet-history prose uses `그루지야`, not `조지아`; modern citizenship labels may still
 use `조지아`.
-1. BASIC COMPLETENESS: if bio or epithet is empty, career has no rows, or the primary role is
-   missing, one `commulingo_person_update` that fills every such missing basic field (bio and moment written
-   to the style rules below). Do not create a section in that case.
-2. NATIONALITY: else if either the citizenship or nationalOrigin flag code is unset,
-   set both in one
+{bio_gate}COMMISSIONED STEP — {step_text}
+Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
+tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —
+an archive or document collection, marxists.org, a journal or university page, or a published
+reference work — before writing anything beyond routine dates and posts. Never cite
+cyber-lenin.com or any page on this site. Make one narrow write call and stop.
+
+""" + CARD_STYLE_GUIDANCE
+
+
+_STEP_BASIC = """BASIC COMPLETENESS: bio or epithet is empty, career has no rows, or the primary
+   role is missing. Make one `commulingo_person_update` that fills every such missing basic field
+   (bio and moment written to the style rules below). Do not create a section."""
+
+_STEP_NATIONALITY_TEMPLATE = """NATIONALITY: either the citizenship or nationalOrigin flag code is
+   unset. Set both in one
    `commulingo_person_update`. Provide `citizenship` — the state whose citizenship the person actually held
    (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
    state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
@@ -590,25 +659,29 @@ use `조지아`.
    script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
    {{"ko": "...", "en": "..."}}}}. Never invent a code outside that list. Example:
    patch={{"citizenship": {{"code": "soviet", "label": {{"ko": "소련", "en": "Soviet Union"}}}},
-   "nationalOrigin": {{"code": "georgia", "label": {{"ko": "그루지야", "en": "Georgia"}}}}}}.
-{bio_step}
-4. MOMENT: else if `has moment` is false, add a bilingual `moment` as one person update —
-   {MOMENT_SENTENCES}, one scene.
-5. EVENTS: else if linked historical events is zero, inspect list_events and the most plausible
-   get_event records. When one event connection is clearly supported, create exactly one
-   `commulingo_event_link`; never force a weak connection.
-6. SECTION: else, if this card has fewer than {MAX_SECTIONS} sections, find the single most
-   valuable missing topic and add one substantial bilingual section via `commulingo_section_save`
-   (one topic, roughly {SECTION_BODY_RANGE}) when no section covers
-   it. A card already at {MAX_SECTIONS} sections is finished: say so and make no write rather than
-   splitting a covered topic to have something to add. This card has {candidate['section_count']}.
-Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
-tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —
-an archive or document collection, marxists.org, a journal or university page, or a published
-reference work — before writing anything beyond routine dates and posts. Never cite
-cyber-lenin.com or any page on this site. Make one narrow write call and stop.
+   "nationalOrigin": {{"code": "georgia", "label": {{"ko": "그루지야", "en": "Georgia"}}}}}}."""
 
-""" + CARD_STYLE_GUIDANCE
+_STEP_MOMENT_TEMPLATE = """MOMENT: this card has no `moment`. Add a bilingual one as a single
+   person update — {MOMENT_SENTENCES}, one scene."""
+
+_STEP_EVENTS = """EVENTS: this card has no linked historical event. Inspect list_events and the
+   most plausible get_event records. When one event connection is clearly supported, create
+   exactly one `commulingo_event_link`. Never force a weak connection — if nothing in the events
+   dictionary honestly fits this person, say so and make no write rather than inventing a link."""
+
+_STEP_SECTION_TEMPLATE = """SECTION: this card has {section_count} of {max_sections} sections.
+   Find the single most valuable missing topic and add one substantial bilingual section via
+   `commulingo_section_save` (one topic, roughly {section_range}) when no section covers it.
+   Split nothing already covered just to have something to add."""
+
+# The bio judgment cannot be precomputed — it is a read of the prose, not a
+# count — so it stays a gate the model evaluates. It is offered only when the
+# mechanical step is 4, 5 or 6, which is exactly where step 3 sat in the old
+# checklist order.
+_BIO_GATE_TEMPLATE = """FIRST, A JUDGMENT: {bio_step}
+If that applies, the bio rewrite IS your one write and you are done. Otherwise:
+
+"""
 
 
 # Which era groups a candidate may be drawn from under each selection focus.

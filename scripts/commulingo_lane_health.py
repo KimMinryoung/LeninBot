@@ -72,6 +72,7 @@ NO_EDIT = re.compile(r'^\s*"status": "no_edit"', re.M)
 FALLBACK = re.compile(r'^\s*"mode": "enrich_fallback"', re.M)
 FAILED = re.compile(r"^(?:\S+ )*(?:RuntimeError|ValueError|Exception):", re.M)
 COST = re.compile(r'"cost_usd": ([0-9.]+)')
+ROUNDS = re.compile(r'"rounds": ([0-9]+)')
 
 
 def journal(unit: str, since: str) -> str:
@@ -100,6 +101,14 @@ def tally(unit: str, since: str) -> dict:
         "fallback": len(FALLBACK.findall(text)),
         "total": total,
         "cost": sum(float(v) for v in COST.findall(text)),
+        # Waste, not failure. Everything above counts runs that went wrong; a
+        # run can also succeed and still spend most of itself on nothing —
+        # walking checklist branches that cannot apply, re-fetching state the
+        # commission already stated. Nothing in this digest saw that until a
+        # six-step enrich checklist whose first four steps applied to 1 card in
+        # 1,236 was found by hand on 2026-08-02. Rounds are the unit that costs
+        # money, so rounds-per-applied-edit is the number to watch.
+        "rounds": [int(v) for v in ROUNDS.findall(text)],
     }
 
 
@@ -239,6 +248,7 @@ def main() -> int:
     args = parser.parse_args()
 
     lines, alerts, total_cost = [], [], 0.0
+    waste_lines = []
     for lane, unit in LANES.items():
         stats = tally(unit, args.since)
         total_cost += stats["cost"]
@@ -249,6 +259,17 @@ def main() -> int:
             f"${stats['cost']:.2f}"
         )
         alerts.extend(problems(lane, stats))
+        if stats["applied"]:
+            rounds = sorted(stats["rounds"])
+            median = rounds[len(rounds) // 2] if rounds else 0
+            waste_lines.append(
+                f"{lane:7} {stats['cost'] / stats['applied']:.4f} $/edit  "
+                f"{sum(rounds) / stats['applied']:5.1f} rounds/edit  "
+                f"(median {median} per run)"
+            )
+    if waste_lines:
+        lines.append("cost of what worked:")
+        lines.extend(f"  {line}" for line in waste_lines)
 
     rejection_lines, rejection_alerts = tool_rejections(args.since)
     if rejection_lines:

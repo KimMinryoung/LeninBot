@@ -274,13 +274,37 @@ candidate = {
     "has_role": 1,
 }
 task = maintainer.build_task("enrich", candidate)
-assert "example" in task and "get_person" in task and "one available narrow write" in task
-assert "Do not create a section" in task and "has epithet: False" in task
-assert "commulingo_event_link" in task and "linked historical events: 0" in task
+assert "example" in task and "get_person" in task and "narrow write commissioned below" in task
+assert "has epithet: False" in task and "linked historical events: 0" in task
+# One step is commissioned, not six walked. This candidate is missing an epithet,
+# so it is on step 1 — and the steps it is NOT on must be absent. Shipping all
+# six cost every run the rounds to read and narrate five that could not apply;
+# measured 2026-08-02, steps 1/2/4 applied to 1 of 1,236 cards.
+assert maintainer.enrich_step(candidate) == 1
+assert "Do not create a section" in task
+assert "commulingo_event_link" not in task, "uncommissioned step shipped"
+assert "either the citizenship or nationalOrigin flag code is" not in task
+assert "FIRST, A JUDGMENT" not in task, "bio gate outranks basic completeness"
+# ...and each later step routes to its own commission, with reads scoped to it.
+_complete = dict(candidate, bio_chars=300, has_epithet=1, career_count=5, has_moment=1,
+                 citizenship_code="soviet", origin_code="russia")
+_events_task = maintainer.build_task("enrich", dict(_complete, event_count=0))
+assert maintainer.enrich_step(dict(_complete, event_count=0)) == 5
+assert "commulingo_event_link" in _events_task
+assert "get_sections" not in _events_task, "section read charged to a card not on the section step"
+assert "FIRST, A JUDGMENT" in _events_task
+_section_task = maintainer.build_task("enrich", dict(_complete, event_count=3, section_count=2))
+assert maintainer.enrich_step(dict(_complete, event_count=3, section_count=2)) == 6
+assert "get_sections" in _section_task and "commulingo_section_save" in _section_task
+assert "commulingo_event_link" not in _section_task
+# Nationality still reaches the card that actually needs it.
+_nat_task = maintainer.build_task("enrich", dict(_complete, citizenship_code="", event_count=3))
+assert maintainer.enrich_step(dict(_complete, citizenship_code="", event_count=3)) == 2
+assert "either the citizenship or nationalOrigin flag code is" in _nat_task
+assert "soviet" in _nat_task and "Karl Radek" in _nat_task
 new_task = maintainer.build_task("new", None)
 assert "search_people" in new_task and "commulingo_person_create" in new_task
 assert "Every new person requires both citizenship and nationalOrigin" in new_task
-assert "either the citizenship or nationalOrigin flag code is unset" in task
 _ROSTER_ROWS = [
     {"group_id": "stalin-era", "title_ko": "스탈린 시대의 사람들", "range_label": "1929–1953",
      "name_ko": "니콜라이 예조프", "name_en": "Nikolai Yezhov"},
