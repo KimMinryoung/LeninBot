@@ -439,7 +439,47 @@ CARD_STYLE_GUIDANCE = (
 )
 
 
+# The people lane's own editorial bullets. The shared rule against a polemical
+# anti-Soviet frame is NOT here — it sits in the curator agent's identity
+# (agents/commulingo_curator.py), which every caller of this module loads. These
+# four are people-specific, so they stay with the module that builds people
+# tasks rather than with the parallel wrapper that used to monkey-patch them in:
+# that put the policy on one entry point and left `--candidate` runs, the
+# documented way to force a card, writing with none.
+PEOPLE_EDITORIAL_POLICY = """
+
+EDITORIAL POLICY FOR PERSON CARDS (MANDATORY):
+- The core account of a person must prioritize achievements, political positions,
+  theoretical contributions, institutional work, organizing, and historical significance.
+- Do not choose death, execution, suicide, repression, imprisonment, or personal tragedy
+  as the main topic merely because it is dramatic. Use such material only when genuinely
+  indispensable to understanding the person's historical role, and never as a substitute
+  for explaining what the person did and stood for.
+- For an existing person, prefer the most important missing achievement, political debate,
+  policy, body of work, or organizational contribution. For a new card, lead with historical
+  contribution and political identity rather than manner of death.
+"""
+
+
 def build_task(mode: str, candidate: dict | None) -> str:
+    return _build_task(mode, candidate) + PEOPLE_EDITORIAL_POLICY
+
+
+def build_discovery_task(
+    new_person_focus: str = "all",
+    rejected: list | None = None,
+    roster_groups: tuple[str, ...] | None = None,
+) -> str:
+    return _build_discovery_task(
+        new_person_focus, rejected, roster_groups
+    ) + PEOPLE_EDITORIAL_POLICY
+
+
+def build_new_person_task(candidate: dict) -> str:
+    return _build_new_person_task(candidate) + PEOPLE_EDITORIAL_POLICY
+
+
+def _build_task(mode: str, candidate: dict | None) -> str:
     if mode == "new":
         return """MODE: NEW PERSON
 
@@ -707,7 +747,7 @@ ALREADY PROPOSED AND REJECTED AS DUPLICATES — do not propose any of these agai
 """
 
 
-def build_discovery_task(
+def _build_discovery_task(
     new_person_focus: str = "all",
     rejected: list | None = None,
     roster_groups: tuple[str, ...] | None = None,
@@ -908,7 +948,7 @@ def build_bounded_discovery_handlers(read_handlers: dict, box: dict) -> dict:
     return handlers
 
 
-def build_new_person_task(candidate: dict) -> str:
+def _build_new_person_task(candidate: dict) -> str:
     return f"""MODE: NEW PERSON CREATION
 
 Create exactly this pre-verified missing person and no one else:

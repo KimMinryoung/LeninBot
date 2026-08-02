@@ -34,6 +34,7 @@ from runtime_tools.commulingo_people import (
     normalize_commulingo_write,
 )
 import scripts.commulingo_people_maintainer as maintainer
+import scripts.commulingo_terms_maintainer as terms_maintainer
 
 
 class EmptyCursor:
@@ -133,6 +134,20 @@ assert _SECTION_BODY_PROPS["en"]["maxLength"] == FIELD_LIMITS["section_body"][1]
 assert SECTION_BODY_TARGET[1] < FIELD_LIMITS["section_body"][0]
 assert str(SECTION_BODY_TARGET[0]) in maintainer.SECTION_BODY_RANGE
 assert "350-700" not in maintainer.CARD_STYLE_GUIDANCE, "section range restated by hand"
+# Editorial policy, same rule: one layer, no per-entry-point copies. The shared
+# sentence used to be appended by a monkey-patch installed only in
+# commulingo_people_parallel.py, so `commulingo_people_maintainer.py --candidate X`
+# — the documented way to force a card — wrote with no policy at all.
+from agents.commulingo_curator import EDITORIAL_CORE  # noqa: E402
+assert EDITORIAL_CORE in COMMULINGO_CURATOR.prompt_ir.identity
+for _lane_text in (maintainer.PEOPLE_EDITORIAL_POLICY, terms_maintainer.EDITORIAL_POLICY):
+    assert "anti-Soviet" not in _lane_text, "lane restates the shared editorial rule"
+# Every people entry point carries the person-card bullets, not just the wrapper's.
+assert "manner of death" in maintainer.build_task("new", None)
+assert "manner of death" in maintainer.build_new_person_task(
+    {"id": "x", "name_ko": "ㄱ", "name_en": "X", "reason": "r",
+     "source_url": "https://example.org", "group": "bolsheviks"}
+)
 assert "already embeds cyrillicPatronymic" in _validate(
     CURSOR, "person", "update", "example", {
         "cyrillic": "Михаил Петрович Фриновский",

@@ -105,9 +105,26 @@ Content rules:
 - Confidence below 0.80 means do not write: research more within the run or stop without an
   edit. Never call a write tool with weak or contradictory evidence.
 
+EDITORIAL POLICY (MANDATORY, applies to every field you write):
+- Do not default to a hostile or reductively anti-Soviet frame. Describe the subject in
+  historically grounded terms and preserve factual complexity; criticism is allowed when it
+  is relevant and sourced, but polemical anti-Soviet framing is not the voice of this site.
+
 The commissioning message identifies the mode and target. Follow it exactly. A successful
 narrow write is the end of the run; do not make a second edit.
 """
+
+# The one sentence both lanes were carrying separately. It lives in the agent
+# identity, not in a task builder, because a task builder can be bypassed: the
+# people lane's copy was appended by a monkey-patch installed only in
+# commulingo_people_parallel.py, so running commulingo_people_maintainer.py
+# directly — the documented way to force one candidate — wrote cards with no
+# editorial policy at all. Lane-specific bullets still live with their lane;
+# this is the part that must reach every caller.
+EDITORIAL_CORE = (
+    "polemical anti-Soviet framing is not the voice of this site"
+)
+assert EDITORIAL_CORE in _PROMPT
 
 # The ceilings quoted above come from the single FIELD_LIMITS table that also
 # generates the tool schemas and the save-time checks. Token replacement, not

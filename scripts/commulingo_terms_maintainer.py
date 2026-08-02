@@ -209,11 +209,13 @@ drop the link and send the same term again. Fix and finish; do not restart the s
 One run, at most one write."""
 
 
+# The rule against a polemical anti-Soviet frame is NOT restated here: it lives
+# in the curator agent's identity (agents/commulingo_curator.py), which this
+# lane loads via get_agent("commulingo_curator"). This constant carries only
+# what is specific to writing a glossary term.
 EDITORIAL_POLICY = """
 
-EDITORIAL POLICY (MANDATORY):
-- Definitions are historically grounded and factually complex; criticism is allowed when
-  relevant and sourced, but polemical anti-Soviet framing is not the voice of this glossary.
+EDITORIAL POLICY FOR GLOSSARY TERMS (MANDATORY):
 - Lead with what the concept was and how it functioned; repression statistics belong in the
   definition only when they are the historical point of the term itself.
 """

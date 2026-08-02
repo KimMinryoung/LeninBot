@@ -9,7 +9,6 @@ the other lane's successful edit for its own.
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import sys
@@ -29,47 +28,13 @@ os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
 
 
-EDITORIAL_POLICY = """
-
-EDITORIAL POLICY (MANDATORY):
-- Do not default to a hostile or reductively anti-Soviet frame. Describe the subject
-  in historically grounded terms and preserve factual complexity; criticism is allowed
-  when it is relevant and sourced, but polemical anti-Soviet framing is not the voice of
-  this dictionary.
-- The core account of a person must prioritize achievements, political positions,
-  theoretical contributions, institutional work, organizing, and historical significance.
-- Do not choose death, execution, suicide, repression, imprisonment, or personal tragedy
-  as the main topic merely because it is dramatic. Use such material only when genuinely
-  indispensable to understanding the person's historical role, and never as a substitute
-  for explaining what the person did and stood for.
-- For an existing person, prefer the most important missing achievement, political debate,
-  policy, body of work, or organizational contribution. For a new card, lead with historical
-  contribution and political identity rather than manner of death.
-"""
-
-
-_base_build_task = maintainer.build_task
-_base_build_discovery_task = maintainer.build_discovery_task
-_base_build_new_person_task = maintainer.build_new_person_task
-
-
-def build_task_with_policy(mode: str, candidate: dict | None) -> str:
-    return _base_build_task(mode, candidate) + EDITORIAL_POLICY
-
-
-def build_discovery_task_with_policy(
-    new_person_focus: str = "all",
-    rejected: list | None = None,
-    roster_groups: tuple[str, ...] | None = None,
-) -> str:
-    # Mirror the wrapped signature exactly. These three wrappers are installed
-    # over the maintainer's builders, so a parameter added there and not here
-    # raises TypeError inside the lane rather than at import.
-    return _base_build_discovery_task(new_person_focus, rejected, roster_groups) + EDITORIAL_POLICY
-
-
-def build_new_person_task_with_policy(candidate: dict) -> str:
-    return _base_build_new_person_task(candidate) + EDITORIAL_POLICY
+# The editorial policy used to be appended here, by monkey-patching the
+# maintainer's three task builders from this wrapper. That made the policy a
+# property of ONE entry point: `commulingo_people_maintainer.py --candidate X`,
+# the documented way to force a card, produced tasks with no policy at all. The
+# shared rule now lives in the curator agent's identity and the people-specific
+# bullets in the maintainer's own builders, so every caller gets both and this
+# wrapper is back to what its docstring says it is — locking and provenance.
 
 
 def completed_run_count() -> int:
@@ -93,36 +58,9 @@ def latest_lane_edit() -> dict | None:
     )
 
 
-def _assert_same_parameters(wrapper, wrapped, name: str) -> None:
-    """Fail at import if a wrapper has drifted from the builder it replaces.
-
-    These wrappers shadow the maintainer's prompt builders by assignment, so the
-    interpreter cannot check them. A parameter added on the maintainer side and
-    missed here surfaces as a TypeError raised inside the paid discovery loop,
-    counted as a failed attempt and retried twice before the lane gives up.
-    """
-    got = list(inspect.signature(wrapper).parameters)
-    want = list(inspect.signature(wrapped).parameters)
-    if got != want:
-        raise TypeError(
-            f"{name} wrapper signature {got} does not match maintainer's {want}; "
-            "update the wrapper in commulingo_people_parallel.py"
-        )
-
-
-for _wrapper, _wrapped, _name in (
-    (build_task_with_policy, _base_build_task, "build_task"),
-    (build_discovery_task_with_policy, _base_build_discovery_task, "build_discovery_task"),
-    (build_new_person_task_with_policy, _base_build_new_person_task, "build_new_person_task"),
-):
-    _assert_same_parameters(_wrapper, _wrapped, _name)
-
 maintainer.LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 maintainer.completed_run_count = completed_run_count
 maintainer.latest_maintainer_edit = latest_lane_edit
-maintainer.build_task = build_task_with_policy
-maintainer.build_discovery_task = build_discovery_task_with_policy
-maintainer.build_new_person_task = build_new_person_task_with_policy
 
 
 if __name__ == "__main__":
