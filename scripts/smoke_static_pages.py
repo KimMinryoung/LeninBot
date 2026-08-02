@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Smoke checks for localized static page publishing and rendering."""
+"""Smoke checks for localized static page selection.
+
+Rendering is deliberately not covered here any more. 4275c42 (2026-04-29)
+moved static pages into the database and the HTML is now produced by the
+frontend repo (frontend/routes/pages.js serves /p/:slug and sanitizes the body
+client-side), so api._render_static_page_html no longer exists. This file kept
+importing it and has failed at import since — three months of a green-looking
+suite that never ran. What stays here is the part this repo still owns: which
+language variant localize_static_page hands out, and what it falls back to.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +19,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from api import _render_static_page_html
 from site_publishing import localize_static_page
 
 
@@ -40,15 +48,17 @@ def main() -> int:
     assert fallback["language"] == "ko"
     assert fallback["available_languages"] == ["ko"]
 
-    rendered_en = _render_static_page_html(page, "en")
-    assert '<html lang="en">' in rendered_en
-    assert "English Body" in rendered_en
-    assert "Cyber-Lenin Reports" in rendered_en
-    assert "한국어 본문" not in rendered_en
+    # The two rendering assertions that used to live here are gone with the
+    # function they called. Their surviving intent — a language variant must not
+    # leak the other language's body — belongs on the selector, so it is checked
+    # here instead.
+    assert "한국어 본문" not in en["html_body"]
+    assert "English Body" not in ko["html_body"]
 
-    rendered_ko = _render_static_page_html(page, "ko")
-    assert '<html lang="ko">' in rendered_ko
-    assert "한국어 본문" in rendered_ko
+    # An unknown or missing language falls back to Korean rather than erroring.
+    for lang in (None, "", "fr"):
+        picked = localize_static_page(page, lang)
+        assert picked["language"] == "ko", f"{lang!r} should fall back to ko"
 
     print("static page localization smoke checks passed")
     return 0

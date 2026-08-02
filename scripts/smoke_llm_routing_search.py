@@ -129,37 +129,70 @@ async def _assert_vector_metadata_filter_inference() -> None:
 
 
 async def _assert_route_task_fallbacks() -> None:
+    """route_task's contract when the LLM classifier is unavailable.
+
+    Until 2026-07-11 an unavailable classifier fell back to substring keyword
+    matching, and this check asserted the guesses it produced ('analyst' for a
+    public-writing task, 'programmer' for a traceback). d567fd0 removed the
+    heuristics on purpose — substring matching kept overruling the
+    orchestrator's own judgment, and a CommuLingo brief that said "이것은
+    소스코드 작업이 아니다" tripped the CODE term list and bounced three
+    legitimate delegations in a row. That commit said "smoke updated to the
+    new" contract but left this function asserting the old one, so it has been
+    failing since. The contract now: no guess, hand back the curated routing
+    cards and let the orchestrator decide.
+    """
     import self_runtime.tools as tools
 
     original_classifier = tools._classify_route_with_llm
     try:
-        async def invalid_json_fallback(_task: str, _candidates=None):
+        async def unavailable_classifier(_task: str, _candidates=None):
             return None
 
-        tools._classify_route_with_llm = invalid_json_fallback
-        public = json.loads(await tools._exec_route_task("이 공개 연구 글의 오타를 고쳐줘", include_store_guide=False))
-        assert public["recommendation"]["recommended_agent"] == "analyst"
-        assert public["classifier"]["fallback"] == "heuristic"
+        tools._classify_route_with_llm = unavailable_classifier
+        for task in ("이 공개 연구 글의 오타를 고쳐줘", "서비스 traceback 고치고 테스트 돌려줘"):
+            out = json.loads(await tools._exec_route_task(task, include_store_guide=False))
+            rec = out["recommendation"]
+            assert out["status"] == "ok"
+            # No guess of any kind — this is the whole point of d567fd0.
+            assert rec["recommended_agent"] is None, f"keyword guessing came back for {task!r}"
+            assert rec["confidence"] is None
+            assert rec["source"] == "none"
+            assert out["classifier"]["attempted"] is True
+            assert out["classifier"]["used"] is False
+            assert out["classifier"]["fallback"] is None
+            # ...and the orchestrator is handed what it needs to decide instead.
+            assert rec["routing_cards"], "routing cards must replace the removed guess"
+            assert set(rec["routing_cards"]) <= set(out["delegatable_agents"])
 
-        code = json.loads(await tools._exec_route_task("서비스 traceback 고치고 테스트 돌려줘", include_store_guide=False))
-        assert code["recommendation"]["recommended_agent"] == "programmer"
+        # Narrowing to candidates narrows the cards, and an undelegatable name
+        # is an error rather than a silent drop.
+        narrowed = json.loads(await tools._exec_route_task(
+            "공개 연구 글의 문구를 수정해줘",
+            candidates=[tools._DELEGATABLE_AGENTS[0]],
+            include_store_guide=False,
+        ))
+        assert list(narrowed["recommendation"]["routing_cards"]) == [tools._DELEGATABLE_AGENTS[0]]
+        bad = json.loads(await tools._exec_route_task(
+            "아무 작업", candidates=["not_an_agent"], include_store_guide=False))
+        assert bad["status"] == "error" and "non-delegatable" in bad["error"]
 
-        async def programmer_misroute(_task: str, _candidates=None):
+        # A classifier result is advisory and passes through unmodified:
+        # delegate() no longer second-guesses the agent choice either.
+        async def classifier_result(_task: str, _candidates=None):
             return {
                 "recommended_agent": "programmer",
                 "confidence": "high",
-                "reason": "bad classifier result",
-                "content_type": "research_document",
-                "needs_identifier": True,
-                "required_capabilities": [],
-                "forbidden_assumptions": [],
+                "reason": "classifier said so",
                 "source": "llm_classifier",
             }
 
-        tools._classify_route_with_llm = programmer_misroute
-        guarded = json.loads(await tools._exec_route_task("공개 연구 글의 문구를 수정해줘", include_store_guide=False))
-        assert guarded["recommendation"]["recommended_agent"] == "programmer"
-        assert "Probable misroute" in guarded["recommendation"]["warning"]
+        tools._classify_route_with_llm = classifier_result
+        passed = json.loads(await tools._exec_route_task(
+            "공개 연구 글의 문구를 수정해줘", include_store_guide=False))
+        assert passed["recommendation"]["recommended_agent"] == "programmer"
+        assert passed["recommendation"]["source"] == "llm_classifier"
+        assert passed["classifier"]["used"] is True
     finally:
         tools._classify_route_with_llm = original_classifier
 
