@@ -66,6 +66,15 @@ Never put an em dash (—) in a label: this site does not use them. Join two par
 dot ( · ) as the rest of the dictionary does, e.g. "제7군 사령관 · 만네르헤임 선 돌파".
 A label needing more than one such join is too long for a label; cut it back to the role.
 
+Holding a post while the event happened is not taking part in it, and neither is being promoted
+into posts the event emptied. The tell is that there is nothing to write in the label except the
+person's job title. On 2026-08-02 a pass over the Kosygin reform returned 24 people labelled
+운송건설장관, 중공업장관, 해운장관, 체신장관 and so on: ministers who were in office from 1965
+to 1970 and nothing more. Compare the ones that belonged: 코시긴 "개혁 주도", 리베르만 "이론적
+촉매", 브레즈네프 "개혁을 제한", 스타롭스키 "OGAS 반대 · 통계 기관의 기득권 방어". Each of
+those says what the person did to the event. If the only honest label is a post, OMIT the person.
+A post plus what they did with it is fine: "고스플란 의장으로 계획경제 개혁을 집행".
+
 For each person also classify HOW they were involved in THIS event, as one "kind":
   leader      — directed or led the event from the top
   participant — took active part (commanders, officials, organizers, designers, soldiers)
