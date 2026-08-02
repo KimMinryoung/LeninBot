@@ -67,11 +67,59 @@ PEOPLE ALREADY LINKED (do not repeat): {already}
 ROSTER (id | names | epithet | group | career)
 {roster}
 
+person_id MUST be COPIED VERBATIM from the id column of the ROSTER above. Never build one
+from the person's name: the roster's ids do not follow a rule you can guess (some carry a given
+name, some do not; transliteration varies). Copy the string, and also echo the roster's Korean
+name in name_ko so a copy error can be repaired.
+
 Answer with ONLY a JSON object, no other text:
-{{"links": [{{"person_id": "<roster id>", "relation_ko": "<간결한 역할, 예: 진압 지휘>",
+{{"links": [{{"person_id": "<roster id, copied verbatim>", "name_ko": "<roster Korean name>",
+"relation_ko": "<간결한 역할, 예: 진압 지휘>",
 "relation_en": "<same in English>", "kind": "<leader|participant|executor|target|opponent|witness>",
 "confidence": <0.0-1.0>, "reason": "<one short sentence>"}}]}}
 Use an empty list when nobody qualifies."""
+
+
+def resolve_person_id(pid: str, name_ko: str, roster: list[dict]) -> tuple[str, str] | None:
+    """Repair an id the model constructed instead of copying, or give up.
+
+    Two real misses on 2026-08-02, both id-shaped rather than wrong people:
+    'sergei-kruglov' for roster 'sergey-kruglov' (transliteration), and
+    'boris-ponomarev' for roster 'ponomarev' (a given name the roster id does
+    not carry). Both were correct identifications thrown away over spelling.
+
+    Only unambiguous repairs are accepted. A name matching two roster people,
+    or a suffix matching two ids, stays rejected: a wrong link is far worse
+    than a missing one, which is the rule the prompt itself states.
+    """
+    ids = {p["id"] for p in roster}
+    if pid in ids:
+        return pid, "exact"
+
+    name = (name_ko or "").strip()
+    if name:
+        by_name = [p["id"] for p in roster if (p.get("name_ko") or "").strip() == name]
+        if len(by_name) == 1:
+            return by_name[0], "name_ko"
+
+    if pid:
+        # 'boris-ponomarev' -> 'ponomarev': the model prepended a given name.
+        tail = pid.split("-", 1)[-1]
+        if tail != pid and tail in ids:
+            return tail, "dropped-given-name"
+        # 'ponomarev' -> 'boris-ponomarev': or omitted one the roster carries.
+        by_suffix = [i for i in ids if i.endswith("-" + pid)]
+        if len(by_suffix) == 1:
+            return by_suffix[0], "added-given-name"
+        # 'sergei-kruglov' -> 'sergey-kruglov': i/y and similar transliteration.
+        squashed = pid.replace("-", "").replace("i", "y").replace("j", "y")
+        by_translit = [
+            i for i in ids
+            if i.replace("-", "").replace("i", "y").replace("j", "y") == squashed
+        ]
+        if len(by_translit) == 1:
+            return by_translit[0], "transliteration"
+    return None
 
 
 def fetch_events(only: list[str]) -> list[dict]:
@@ -173,7 +221,6 @@ def main() -> int:
     only = [e.strip() for e in args.events.split(",") if e.strip()]
     events = fetch_events(only)
     roster = fetch_roster()
-    roster_ids = {p["id"] for p in roster}
     linked = existing_links()
     print(f"[event-links] {len(events)} events, roster {len(roster)}, existing links {len(linked)}", file=sys.stderr)
 
@@ -202,7 +249,12 @@ def main() -> int:
                 conf = float(prop.get("confidence") or 0.0)
             except (TypeError, ValueError):
                 conf = 0.0
-            if pid not in roster_ids:
+            resolved = resolve_person_id(pid, str(prop.get("name_ko") or ""), roster)
+            if resolved and resolved[0] != pid:
+                entry["person_id_as_proposed"] = pid
+                entry["id_repair"] = resolved[1]
+                pid = entry["person"] = resolved[0]
+            if resolved is None:
                 entry["verdict"] = "rejected: unknown person_id"
             elif (event["id"], pid) in linked:
                 entry["verdict"] = "rejected: already linked"
