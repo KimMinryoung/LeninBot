@@ -265,6 +265,30 @@ def _assert_web_chat(tool_names: set[str]) -> None:
     assert not unexpected, f"web chat exposes unexpected risk classes: {unexpected}"
     assert web_risks.get("check_wallet") == "wallet_read"
     assert "check_wallet" in _WEB_ALLOWED_TOOLS
+    _assert_web_personas()
+
+
+def _assert_web_personas() -> None:
+    """Every persona's resolved toolset, not just the default one.
+
+    _web_tools above only covers Cyber-Lenin. Tools injected for a non-default
+    persona (read_persona_context for Gramsci) never reached this check, so an
+    unregistered risk class shipped as a tool the model could see and the
+    gateway always denied — observed 2026-07-26 in production web chat.
+    """
+    from web_chat import _build_persona_tools
+    from web_personas import _REGISTRY
+
+    for persona_id, spec in _REGISTRY.items():
+        tools, _handlers = _build_persona_tools(spec)
+        risks = {name: _risk_class(name) for name in _tool_names(tools)}
+        unexpected = sorted(
+            name for name, risk in risks.items()
+            if risk in WEB_FORBIDDEN_RISK_CLASSES or risk not in WEB_ALLOWED_RISK_CLASSES
+        )
+        assert not unexpected, (
+            f"persona '{persona_id}' exposes tools the web gateway would deny: {unexpected}"
+        )
 
 
 def _assert_mcp_profiles() -> None:

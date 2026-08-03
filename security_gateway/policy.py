@@ -56,6 +56,9 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "download_image": "fetch",
     "get_finance_data": "read",
     "read_self": "read",
+    # web-only, injected per persona by web_chat: reads that persona's own
+    # dossier directory and never crosses into another persona's files.
+    "read_persona_context": "read",
     "recall_experience": "read",
     "search_manuscript": "read",
     "read_manuscript": "read",
