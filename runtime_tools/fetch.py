@@ -10,6 +10,7 @@ import re
 import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +146,9 @@ async def _exec_fetch_url(
             from content_fetch.urls import diagnose_url_fetch_failure
 
             diagnosis = diagnose_url_fetch_failure(url, [str(exc)])
-            return f"URL fetch failed: {exc}\n{diagnosis}"
+            return ToolFailure(f"URL fetch failed: {exc}\n{diagnosis}")
         except Exception:
-            return f"URL fetch failed: {exc}"
+            return ToolFailure(f"URL fetch failed: {exc}")
 
 
 async def _exec_download_file(url: str, filename: str = "") -> str:
@@ -197,7 +198,7 @@ async def _exec_download_file(url: str, filename: str = "") -> str:
         return await asyncio.to_thread(_download)
     except Exception as exc:
         logger.error("download_file error: %s", exc)
-        return f"❌ Download failed: {exc}"
+        return ToolFailure(f"❌ Download failed: {exc}")
 
 
 async def _exec_download_image(url: str, filename: str = "") -> str:
@@ -232,7 +233,7 @@ async def _exec_download_image(url: str, filename: str = "") -> str:
         return await asyncio.to_thread(_download)
     except Exception as exc:
         logger.error("download_image error: %s", exc)
-        return f"❌ Download failed: {exc}"
+        return ToolFailure(f"❌ Download failed: {exc}")
 
 
 async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str:
@@ -248,7 +249,7 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
             text = await asyncio.to_thread(convert_document, file_path, 0)
         except Exception as conv_err:
             logger.error("convert_document inner error: %s", conv_err)
-            return f"❌ Conversion failed: {conv_err}"
+            return ToolFailure(f"❌ Conversion failed: {conv_err}")
         if not text:
             return "❌ Conversion produced empty content."
 
@@ -273,7 +274,7 @@ async def _exec_convert_document(file_path: str, preview_lines: int = 60) -> str
         )
     except Exception as exc:
         logger.error("convert_document error: %s", exc)
-        return f"❌ Document conversion failed: {exc}"
+        return ToolFailure(f"❌ Document conversion failed: {exc}")
 
 
 FETCH_TOOL_HANDLERS = {

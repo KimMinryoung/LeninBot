@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_task
 from secrets_loader import get_secret
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +297,7 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
                 "is unavailable; using direct Cypher fallback.\n"
                 + fallback
             )
-        return (
+        return ToolFailure(
             "Knowledge graph search failed; do not treat this as no KG data. "
             "Graphiti service unavailable and direct Cypher fallback found no exact text matches."
         )
@@ -352,7 +353,7 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
                 f"Graphiti error: {search_errors[-1][:500]}\n"
                 + fallback
             )
-        return (
+        return ToolFailure(
             "Knowledge graph search failed; do not treat this as no KG data. "
             "Direct Cypher fallback found no exact text matches. "
             f"Graphiti error: {search_errors[-1][:500]}"

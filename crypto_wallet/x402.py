@@ -29,6 +29,7 @@ from eth_account.messages import encode_typed_data
 from web3 import Web3
 
 from crypto_wallet.wallet import get_addresses
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -627,7 +628,7 @@ async def _exec_pay_and_fetch(
         result = await pay_and_fetch(url, max_usdc=max_usdc, method=method, body=body)
     except Exception as e:
         logger.error("pay_and_fetch error: %s", e)
-        return f"x402 error: {e}"
+        return ToolFailure(f"x402 error: {e}")
 
     status = result.get("status")
     if status == "ok" and result.get("paid"):

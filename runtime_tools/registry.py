@@ -14,6 +14,7 @@ from runtime_tools.filesystem import FILESYSTEM_TOOL_HANDLERS, FILESYSTEM_TOOLS
 from runtime_tools.media import MEDIA_TOOL_HANDLERS, MEDIA_TOOLS
 from runtime_tools.social import SOCIAL_TOOL_HANDLERS, SOCIAL_TOOLS
 from runtime_tools.web_search import execute_web_search
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +427,7 @@ async def _exec_vector_search(
         return "\n\n".join(results)
     except Exception as e:
         logger.error("vector_search error: %s", e)
-        return f"Vector search failed: {e}"
+        return ToolFailure(f"Vector search failed: {e}")
 
 
 async def _exec_kg_search(query: str, num_results: int = 10) -> str:
@@ -437,7 +438,7 @@ async def _exec_kg_search(query: str, num_results: int = 10) -> str:
         return result or "No knowledge graph results found."
     except Exception as e:
         logger.error("kg_search error: %s", e)
-        return f"Knowledge graph search failed; do not treat this as no KG data: {e}"
+        return ToolFailure(f"Knowledge graph search failed; do not treat this as no KG data: {e}")
 
 
 # ── Research publish/edit/unpublish tools live in runtime_tools.research ──
@@ -488,7 +489,7 @@ def build_mission_handler(user_id: int):
                 return close_mission(mission["id"])
             return f"Unknown mission action: {action}"
         except Exception as e:
-            return f"Mission error: {e}"
+            return ToolFailure(f"Mission error: {e}")
     return _handle
 
 
@@ -569,7 +570,7 @@ async def _exec_restart_service(service: str = "telegram") -> str:
             if line.endswith(".py"):
                 changed_files.add(line)
     except Exception as e:
-        return f"❌ Failed to detect changed files: {e}"
+        return ToolFailure(f"❌ Failed to detect changed files: {e}")
 
     errors = []
 
@@ -636,7 +637,7 @@ async def _exec_restart_service(service: str = "telegram") -> str:
                 mark_completed=False,
             )
         except Exception as e:
-            return f"❌ Restart blocked — failed to persist durable restart state: {e}"
+            return ToolFailure(f"❌ Restart blocked — failed to persist durable restart state: {e}")
 
     # 4. All checks passed — daemon-reload (picks up any unit file changes), then restart
     try:
@@ -1036,7 +1037,7 @@ async def _exec_send_email(
                 "UPDATE email_messages SET status = 'failed', metadata = jsonb_build_object('error', %s), updated_at = NOW() WHERE id = %s",
                 (str(e)[:500], message_id),
             )
-        return f"Email send failed: {e}"
+        return ToolFailure(f"Email send failed: {e}")
 
     if message_id:
         await asyncio.to_thread(
@@ -1466,7 +1467,7 @@ async def _exec_check_inbox(
     try:
         result = await asyncio.to_thread(_fetch)
     except Exception as e:
-        return f"IMAP error: {e}"
+        return ToolFailure(f"IMAP error: {e}")
 
     if isinstance(result, str):
         return result
@@ -1572,7 +1573,7 @@ async def _exec_allowlist_sender(sender_filter: str) -> str:
     try:
         return await asyncio.to_thread(_move)
     except Exception as e:
-        return f"IMAP error: {e}"
+        return ToolFailure(f"IMAP error: {e}")
 
 
 TOOLS.append(CHECK_INBOX_TOOL)
@@ -1658,7 +1659,7 @@ async def _exec_save_diary(title: str, content: str) -> str:
             risk_note = " / publication guard: advisory warning logged"
         return f"Diary saved: {title}{broadcast_note}{risk_note}"
     except Exception as e:
-        return f"Failed to save diary: {e}"
+        return ToolFailure(f"Failed to save diary: {e}")
 
 
 TOOLS.append(SAVE_DIARY_TOOL)

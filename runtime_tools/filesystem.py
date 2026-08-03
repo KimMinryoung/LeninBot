@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from tool_gateway.results import ToolFailure
 
 FILESYSTEM_TOOLS = [
     {
@@ -196,7 +197,7 @@ async def _exec_read_file(
         with open(path, "r", encoding="utf-8", errors="replace") as file:
             text = file.read()
     except Exception as exc:
-        return f"Error reading file: {exc}"
+        return ToolFailure(f"Error reading file: {exc}")
 
     lines = text.splitlines(keepends=True)
     total = len(lines)
@@ -307,7 +308,7 @@ async def _exec_search_files(
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
-            return "Error: search timed out"
+            return ToolFailure("Error: search timed out")
         if proc.returncode not in (0, 1):
             return f"Error: rg exited {proc.returncode}: {proc.stderr.strip()}"
         files = [
@@ -345,7 +346,7 @@ async def _exec_search_files(
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
-        return "Error: search timed out"
+        return ToolFailure("Error: search timed out")
     if proc.returncode == 1:
         return f"[search /{pattern}/ in {search_path}] 0 matches"
     if proc.returncode != 0:
@@ -395,7 +396,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
             try:
                 ast.parse(content)
             except SyntaxError as exc:
-                return f"❌ Syntax error in new content: {exc}"
+                return ToolFailure(f"❌ Syntax error in new content: {exc}")
 
             if os.path.isfile(abs_path):
                 commit_hash = git_backup_before_modification(abs_path)
@@ -420,7 +421,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
                 os.unlink(commit_hash)
             return f"✅ Written {len(content)} chars to {rel_path} (size: {size}B{backup_info}, tests: PASS)"
         except Exception as exc:
-            return f"Error writing .py file safely: {exc}"
+            return ToolFailure(f"Error writing .py file safely: {exc}")
 
     rel_parts = rel_path.replace("\\", "/").split("/")
     in_allowed_dir = any(rel_parts[0] == directory for directory in _WRITE_ALLOWED_DIRS) if rel_parts else False
@@ -442,7 +443,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
         size = os.path.getsize(abs_path)
         return f"Written {len(content)} chars to {rel_path} (size: {size}B, mode: {mode})"
     except Exception as exc:
-        return f"Error writing file: {exc}"
+        return ToolFailure(f"Error writing file: {exc}")
 
 
 async def _exec_patch_file(path: str, old_str: str, new_str: str) -> str:
@@ -475,13 +476,13 @@ async def _exec_patch_file(path: str, old_str: str, new_str: str) -> str:
                 bak_path = abs_path + ".bak"
                 if os.path.isfile(bak_path):
                     shutil.copy2(bak_path, abs_path)
-                return f"❌ Syntax error after patch — rolled back: {exc}"
+                return ToolFailure(f"❌ Syntax error after patch — rolled back: {exc}")
 
         diff_preview = result["diff"][:1000] if result["diff"] else "(no diff)"
         return f"✅ Patched {rel_path}\n{diff_preview}"
 
     except Exception as exc:
-        return f"Error patching file: {exc}"
+        return ToolFailure(f"Error patching file: {exc}")
 
 
 async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bool = False) -> str:
@@ -517,7 +518,7 @@ async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bo
             header += " (showing first 200)"
         return header + "\n" + "\n".join(lines)
     except Exception as exc:
-        return f"Error listing directory: {exc}"
+        return ToolFailure(f"Error listing directory: {exc}")
 
 
 def _check_code_safety(code: str) -> str | None:
@@ -527,7 +528,7 @@ def _check_code_safety(code: str) -> str | None:
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
-        return f"Syntax error: {exc}"
+        return ToolFailure(f"Syntax error: {exc}")
 
     for pattern in _BLOCKED_CODE_PATTERNS:
         if pattern in code:
@@ -605,7 +606,7 @@ async def _exec_execute_python(code: str, timeout: int = 30) -> str:
                 parts.append(f"[stderr]\n{result.stderr.strip()}")
             return "\n".join(parts) if parts else "(no output)"
         except subprocess.TimeoutExpired:
-            return f"Execution timed out after {timeout}s."
+            return ToolFailure(f"Execution timed out after {timeout}s.")
         finally:
             os.unlink(tmp_path)
 

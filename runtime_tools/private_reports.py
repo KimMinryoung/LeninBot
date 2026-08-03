@@ -16,6 +16,7 @@ from typing import Any
 
 from db import query as db_query, query_one as db_query_one
 import research_store
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ async def _exec_save_private_report(
         )
     except Exception as e:
         logger.warning("save_private_research_document failed: %s", e)
-        return f"Error: failed to save private research document: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to save private research document: {type(e).__name__}: {e}")
     return (
         f"Saved private research document: id={row['id']} slug={row['slug']}\n"
         f"title: {row['title']}\n"
@@ -260,7 +261,7 @@ async def _exec_read_private_report(
     try:
         row = await asyncio.to_thread(get_private_report_sync, report_id=document_id, slug=slug)
     except Exception as e:
-        return f"Error: failed to read private research document: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to read private research document: {type(e).__name__}: {e}")
     if not row:
         return "No private research document found."
     markdown = row.get("markdown") or ""
@@ -278,7 +279,7 @@ async def _exec_list_private_reports(limit: int = 20, keyword: str | None = None
     try:
         rows = await asyncio.to_thread(list_private_reports_sync, limit=limit, keyword=keyword)
     except Exception as e:
-        return f"Error: failed to list private research documents: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to list private research documents: {type(e).__name__}: {e}")
     if not rows:
         return "No private research documents found."
     lines = [
@@ -304,7 +305,7 @@ async def _exec_publish_private_report(
     try:
         result = await asyncio.to_thread(publish_private_report_sync, slug=slug, body=body, title=title)
     except Exception as e:
-        return f"Error: failed to publish private research document: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to publish private research document: {type(e).__name__}: {e}")
 
     row = result["research_document"]
     public_url = result["public_url"]

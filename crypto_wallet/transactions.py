@@ -14,6 +14,7 @@ import httpx
 from web3 import Web3
 
 from crypto_wallet.wallet import get_addresses, _rpc
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,7 @@ async def _exec_swap(amount_eth: float, slippage_pct: float = 1.0) -> str:
         return f"Swap failed. TX: {result.get('tx_hash', 'N/A')}"
     except Exception as e:
         logger.error("swap_eth_to_usdc failed: %s", e)
-        return f"Swap error: {e}"
+        return ToolFailure(f"Swap error: {e}")
 
 
 async def _exec_transfer(to_address: str, amount_usdc: float) -> str:
@@ -363,7 +364,7 @@ async def _exec_transfer(to_address: str, amount_usdc: float) -> str:
         return f"Transfer failed. TX: {result.get('tx_hash', 'N/A')}"
     except Exception as e:
         logger.error("transfer_usdc failed: %s", e)
-        return f"Transfer error: {e}"
+        return ToolFailure(f"Transfer error: {e}")
 
 
 SWAP_TOOL_HANDLER = _exec_swap

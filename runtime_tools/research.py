@@ -42,6 +42,7 @@ from autonomous_publication_controls import (
     was_staged_this_tick,
 )
 import research_store
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +617,7 @@ async def _exec_research_document_publish_public(
         try:
             staged_fname = _validate_filename(filename)
         except ValueError as e:
-            return f"Error: {e}."
+            return ToolFailure(f"Error: {e}.")
         staged_doc = await asyncio.to_thread(
             research_store.get_document, staged_fname, include_private=True
         )
@@ -673,7 +674,7 @@ async def _exec_research_document_publish_public(
         try:
             fname = _validate_filename(filename)
         except ValueError as e:
-            return f"Error: {e}."
+            return ToolFailure(f"Error: {e}.")
     elif is_autonomous_publication_context():
         return (
             "Error: autonomous research_document public actions require an explicit stable slug. "
@@ -696,7 +697,7 @@ async def _exec_research_document_publish_public(
         )
     except Exception as e:
         logger.error("publication draft backup failed for %s: %s", fname, e)
-        return f"Error: failed to back up draft before publication: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to back up draft before publication: {type(e).__name__}: {e}")
 
     if fact_check_passed is not True:
         existing_before = await asyncio.to_thread(
@@ -722,7 +723,7 @@ async def _exec_research_document_publish_public(
             )
         except Exception as e:
             logger.error("research_document stage_public DB write error for %s: %s", fname, e)
-            return (
+            return ToolFailure(
                 "Error: failed to store staged draft after backup.\n"
                 f"Draft backup: {draft_path}\n"
                 f"Storage error: {type(e).__name__}: {e}"
@@ -858,7 +859,7 @@ async def _exec_research_document_publish_public(
         )
     except Exception as e:
         logger.error("research_document publish_public DB write error for %s: %s", fname, e)
-        return f"Error: failed to store {fname}: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to store {fname}: {type(e).__name__}: {e}")
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
@@ -928,7 +929,7 @@ async def _exec_research_document_edit_staged(
     try:
         fname = _validate_filename(filename)
     except ValueError as e:
-        return f"Error: {e}."
+        return ToolFailure(f"Error: {e}.")
     if not edits:
         return "Error: edits is required — a list of {find, replace} objects."
     doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
@@ -976,7 +977,7 @@ async def _exec_research_document_edit_staged(
         )
     except Exception as e:
         logger.error("edit_staged draft backup failed for %s: %s", fname, e)
-        return f"Error: failed to back up revised draft: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to back up revised draft: {type(e).__name__}: {e}")
     try:
         row, _ = await asyncio.to_thread(
             research_store.upsert_document,
@@ -988,7 +989,7 @@ async def _exec_research_document_edit_staged(
         )
     except Exception as e:
         logger.error("edit_staged DB write error for %s: %s", fname, e)
-        return f"Error: failed to store revised staged draft: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: failed to store revised staged draft: {type(e).__name__}: {e}")
     record_autonomous_staged_draft(
         publication_kind="research",
         title=new_title,
@@ -1045,7 +1046,7 @@ async def _exec_research_document_edit_public(
     try:
         fname = _validate_filename(filename)
     except ValueError as e:
-        return f"Error: {e}."
+        return ToolFailure(f"Error: {e}.")
 
     existing_doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
     existing = None if existing_doc else _resolve_existing(fname)
@@ -1103,7 +1104,7 @@ async def _exec_research_document_edit_public(
                 )
             except Exception as e:
                 logger.error("publication edit draft backup failed for %s: %s", fname, e)
-                return f"Error: failed to back up edited draft before publication: {type(e).__name__}: {e}"
+                return ToolFailure(f"Error: failed to back up edited draft before publication: {type(e).__name__}: {e}")
             review_note = await review_autonomous_publication(
                 publication_kind="research_edit",
                 title=new_title,
@@ -1121,7 +1122,7 @@ async def _exec_research_document_edit_public(
             )
         except Exception as e:
             logger.error("research_document edit_public DB write error for %s: %s", fname, e)
-            return f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}")
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
         cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
@@ -1160,7 +1161,7 @@ async def _exec_research_document_edit_public(
                 return f"Error: no private research document named '{fname}' in DB."
         except Exception as e:
             logger.error("research_document republish_public DB error for %s: %s", fname, e)
-            return f"Error: failed to mark {fname} public: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error: failed to mark {fname} public: {type(e).__name__}: {e}")
 
         cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
         cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
@@ -1212,14 +1213,14 @@ async def _exec_research_document_edit_public(
             backup_note = f"Storage: research_documents id={row['id']} status=private"
         except Exception as e:
             logger.error("research_document unpublish_public DB error for %s: %s", fname, e)
-            return f"Error: failed to mark {fname} private: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error: failed to mark {fname} private: {type(e).__name__}: {e}")
     else:
         try:
             new_path = await asyncio.to_thread(_unpublish_sync, existing)
             backup_note = f"Backup path: {new_path}"
         except Exception as e:
             logger.error("research_document unpublish_public error for %s: %s", fname, e)
-            return f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}")
 
     cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
@@ -1372,7 +1373,7 @@ async def _exec_research_document(
         try:
             filename = _filename_from_slug(slug)
         except ValueError as e:
-            return f"Error: {e}."
+            return ToolFailure(f"Error: {e}.")
         return await _exec_research_document_edit_public(
             operation="edit",
             filename=filename or "",
@@ -1385,13 +1386,13 @@ async def _exec_research_document(
         try:
             filename = _filename_from_slug(slug)
         except ValueError as e:
-            return f"Error: {e}."
+            return ToolFailure(f"Error: {e}.")
         return await _exec_research_document_edit_public(operation="unpublish", filename=filename or "", broadcast=broadcast)
     if op == "republish_public":
         try:
             filename = _filename_from_slug(slug)
         except ValueError as e:
-            return f"Error: {e}."
+            return ToolFailure(f"Error: {e}.")
         return await _exec_research_document_edit_public(
             operation="publish",
             filename=filename or "",
@@ -1419,7 +1420,7 @@ async def _exec_research_document(
             try:
                 private = await asyncio.to_thread(get_private_report_sync, slug=clean_slug)
             except Exception as e:
-                return f"Error: failed to read private research document before autonomous publication: {type(e).__name__}: {e}"
+                return ToolFailure(f"Error: failed to read private research document before autonomous publication: {type(e).__name__}: {e}")
             if not private:
                 return f"Error: no private research document found for slug={clean_slug!r}."
             markdown_source = body if body is not None and body.strip() else (content if content is not None and content.strip() else private.get("markdown") or "")

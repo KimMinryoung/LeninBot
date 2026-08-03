@@ -39,6 +39,7 @@ from decimal import Decimal
 from psycopg2.extras import RealDictCursor
 
 from db import query as db_query, query_one as db_query_one, get_conn
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -1014,7 +1015,7 @@ async def _exec_commulingo_people(
         return body
     except Exception as e:
         logger.warning("commulingo_people error: %s", e)
-        return f"Error: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: {type(e).__name__}: {e}")
 
 
 # ── Patch application (Python port of the frontend admin store) ──────

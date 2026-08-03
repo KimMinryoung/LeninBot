@@ -8,6 +8,7 @@ import subprocess
 from datetime import datetime
 
 from secrets_loader import get_secret
+from tool_gateway.results import ToolFailure
 
 MOLTBOOK_TOOL = {
     "name": "moltbook",
@@ -331,7 +332,7 @@ async def _exec_moltbook(
                 return f"[ERROR] Moltbook {action} failed: HTTP {resp.status_code}\n{json.dumps(data, ensure_ascii=False, indent=2)}"
             return json.dumps(data, ensure_ascii=False, indent=2)
         except Exception as exc:
-            return f"[ERROR] Failed to run Moltbook {action}: {exc}"
+            return ToolFailure(f"[ERROR] Failed to run Moltbook {action}: {exc}")
 
     cmd = [
         os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "venv/bin/python"),
@@ -369,9 +370,9 @@ async def _exec_moltbook(
             output += f"\n[EXIT CODE {result.returncode}]\nSTDERR: {stderr}"
         return output or "(no output)"
     except subprocess.TimeoutExpired:
-        return "[ERROR] Moltbook script timed out after 180 seconds."
+        return ToolFailure("[ERROR] Moltbook script timed out after 180 seconds.")
     except Exception as exc:
-        return f"[ERROR] Failed to run Moltbook script: {exc}"
+        return ToolFailure(f"[ERROR] Failed to run Moltbook script: {exc}")
 
 
 def _mersoom_credentials(
@@ -692,7 +693,7 @@ async def _exec_mersoom(
 
         return f"[ERROR] Unknown Mersoom action: {action}"
     except Exception as exc:
-        return f"[ERROR] Failed to run Mersoom {action}: {exc}"
+        return ToolFailure(f"[ERROR] Failed to run Mersoom {action}: {exc}")
     finally:
         client.close()
 

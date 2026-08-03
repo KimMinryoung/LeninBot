@@ -20,6 +20,7 @@ import httpx
 
 from provenance.runtime import _wrap_external
 from secrets_loader import get_secret
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -303,4 +304,4 @@ async def execute_web_search(
             )
             errors.append(f"{provider}{status}: {exc}")
 
-    return "Web search failed across configured providers: " + "; ".join(errors)
+    return ToolFailure("Web search failed across configured providers: " + "; ".join(errors))

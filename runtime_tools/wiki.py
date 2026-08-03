@@ -13,6 +13,7 @@ import logging
 import re
 import urllib.parse
 import urllib.request
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ async def _exec_wiki_search(query: str, language: str = "en", limit: int = 5) ->
         return f"[wiki_search] {lang}.wikipedia.org — open a result with wiki_get(title=..., language='{lang}')\n\n{body}"
     except Exception as e:
         logger.error("wiki_search error: %s", e)
-        return f"Wikipedia search failed: {e}"
+        return ToolFailure(f"Wikipedia search failed: {e}")
 
 
 async def _exec_wiki_get(
@@ -180,7 +181,7 @@ async def _exec_wiki_get(
         return header + _wrap_external(text[start:end], f"url:{url}")
     except Exception as e:
         logger.error("wiki_get error: %s", e)
-        return f"Wikipedia fetch failed: {e}"
+        return ToolFailure(f"Wikipedia fetch failed: {e}")
 
 
 WIKI_TOOL_HANDLERS = {

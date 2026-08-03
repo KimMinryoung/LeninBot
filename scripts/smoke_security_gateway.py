@@ -273,6 +273,7 @@ def main() -> int:
     async def _dispatcher_checks() -> None:
         import tool_gateway.security as gateway_adapter
         from tool_gateway.dispatcher import execute_tool
+        from tool_gateway.results import ToolFailure
         from tool_gateway.security import CallerContext, caller_scope
 
         original_authorize = gateway_adapter.authorize
@@ -362,6 +363,44 @@ def main() -> int:
                     "blocked pre-check is audited as a deny",
                     ("save_diary", "deny", "gateway_error") in audited,
                     str(audited),
+                )
+
+                # A handler that catches its own exception and returns the
+                # explanation used to be audited as a success: eight Tavily
+                # quota rejections on 2026-07-27 all read `ok`.
+                gateway_adapter.authorize = original_authorize
+                audited.clear()
+
+                def failing_read(query: str) -> str:
+                    return ToolFailure(f"Web search failed across configured providers: {query}")
+
+                def plain_read(query: str) -> str:
+                    return "No documents found."
+
+                failed = await execute_tool(
+                    "web_search",
+                    {"query": "quota"},
+                    {"web_search": failing_read},
+                )
+                check(
+                    "handler-reported failure is audited as an error",
+                    ("web_search", "allow", "error") in audited,
+                    str(audited),
+                )
+                check(
+                    "handler-reported failure reaches the model as an error, text intact",
+                    failed[1] and "Web search failed across configured providers" in failed[0],
+                    str(failed),
+                )
+                empty = await execute_tool(
+                    "vector_search",
+                    {"query": "nothing"},
+                    {"vector_search": plain_read},
+                )
+                check(
+                    "an empty but successful lookup is still audited ok",
+                    ("vector_search", "allow", "ok") in audited and not empty[1],
+                    str((audited, empty)),
                 )
             finally:
                 gateway_adapter.audit = original_audit

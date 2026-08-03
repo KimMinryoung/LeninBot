@@ -27,6 +27,7 @@ from typing import Any
 
 from db import execute_returning_rowcount as db_exec, get_conn, query_one as db_query_one
 from psycopg2.extras import RealDictCursor
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -596,7 +597,7 @@ async def _exec_edit_public_post(
             )
         except Exception as e:
             logger.warning("edit_public_post SELECT failed (%s %s=%s): %s", kind, where_field, target, e)
-            return f"Error: DB read failed: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error: DB read failed: {type(e).__name__}: {e}")
         if not row:
             return f"Error: no {kind} row found with {where_field}={target!r} — nothing updated."
 
@@ -668,7 +669,7 @@ async def _exec_edit_public_post(
         affected = await asyncio.to_thread(db_exec, sql, params)
     except Exception as e:
         logger.warning("edit_public_post UPDATE failed (%s id=%s): %s", kind, post_id, e)
-        return f"Error: DB update failed: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: DB update failed: {type(e).__name__}: {e}")
 
     if not affected:
         return f"Error: no {kind} row found with {where_field}={target!r} — nothing updated."

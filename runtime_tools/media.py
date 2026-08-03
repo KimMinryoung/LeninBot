@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from tool_gateway.results import ToolFailure
 
 
 def _build_generate_image_description() -> str:
@@ -226,7 +227,7 @@ async def _exec_generate_image(
         return "\n".join(lines)
     except Exception as exc:
         _last_image_gen_time = _time.monotonic()
-        return f"Image generation failed: {exc}"
+        return ToolFailure(f"Image generation failed: {exc}")
 
 
 async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
@@ -288,10 +289,10 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
             task_urls = extract_urls(task)
             target_url = start_url or (task_urls[0] if task_urls else None)
             if target_url:
-                return f"browse_web error: {exc}\n{diagnose_url_fetch_failure(target_url, [str(exc)])}"
+                return ToolFailure(f"browse_web error: {exc}\n{diagnose_url_fetch_failure(target_url, [str(exc)])}")
         except Exception:
             pass
-        return f"browse_web error: {exc}"
+        return ToolFailure(f"browse_web error: {exc}")
 
 
 MEDIA_TOOL_HANDLERS = {

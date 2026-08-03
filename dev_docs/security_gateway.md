@@ -133,6 +133,22 @@ fail-closed blocks where the gateway or the idempotency store was itself
 unavailable; they are recorded as a synthetic `deny` because the caller was
 refused whatever the preflight decision had said.
 
+`error` used to mean only "the handler raised". Handlers that catch their own
+exception and return the explanation as text — most of `runtime_tools/` does,
+so the model gets a readable message instead of a stack trace — were audited as
+`ok`, and the eight Tavily quota rejections of 2026-07-27 were indistinguishable
+from real search hits. A handler now reports that verdict by returning
+`tool_gateway.results.ToolFailure(...)`, a `str` subclass: every consumer still
+sees the same text, the dispatcher audits `error` and flags the tool_result as
+an error for the model, and a side-effect tool holding a durable reservation
+falls back to `outcome_unknown` exactly as a raised exception would.
+
+Use `ToolFailure` for a call that could not do its job (external system failed,
+dependency unavailable, exception swallowed). Do NOT use it for a well-formed
+call with a negative answer — "no documents found", "person not in the
+registry" — those are successful lookups, and marking them errors would bury
+the real failures.
+
 The table is append-only at the database layer. The migration installs triggers that
 block `UPDATE`, `DELETE`, and `TRUNCATE`. A direct administrator maintenance
 transaction can override this only by explicitly setting

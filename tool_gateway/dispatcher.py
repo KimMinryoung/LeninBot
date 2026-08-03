@@ -15,6 +15,7 @@ import logging
 import time
 from typing import Any
 
+from tool_gateway.results import is_failure
 from tool_gateway.validation import (
     ToolArgumentValidationError,
     tool_schema_map,
@@ -500,7 +501,25 @@ async def execute_tool(
             result = await raw
         else:
             result = raw
-        is_error = False
+        # A handler that caught its own exception and returned an explanation
+        # used to reach the audit log as a success. ToolFailure carries that
+        # verdict out of the handler without giving up the readable message.
+        handler_reported_failure = is_failure(result)
+        is_error = handler_reported_failure
+        if handler_reported_failure:
+            logger.warning("Tool %s reported failure: %s", name, str(result)[:200])
+            if log_event:
+                log_event("warning", "tool", f"Tool {name} failed: {str(result)[:200]}")
+            if durable_record is not None and durable_record.acquired:
+                # The handler knows the call failed, but a side effect may have
+                # landed before it did. Same conservative verdict as a raised
+                # exception: do not let a retry double-fire.
+                try:
+                    from security_gateway.idempotency import mark_outcome_unknown
+
+                    await asyncio.to_thread(mark_outcome_unknown, durable_record, str(result))
+                except Exception as store_exc:
+                    logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
     except Exception as exc:
         logger.error("Tool %s execution error: %s", name, exc)
         if log_event:

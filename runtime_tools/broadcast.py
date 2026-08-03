@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ async def broadcast_to_channel(title: str, summary: str, url: str, **_kw) -> str
         result = await send_broadcast(title=title, summary=summary, url=url)
     except Exception as e:
         logger.error("broadcast_to_channel failed: %s", e)
-        return f"채널 브로드캐스트 실패: {e}"
+        return ToolFailure(f"채널 브로드캐스트 실패: {e}")
 
     tracking_note = ""
     if result.ok and getattr(result, "message_ids", None):

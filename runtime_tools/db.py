@@ -30,6 +30,7 @@ from db import (
     execute_returning_rowcount as db_exec,
     get_conn,
 )
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def _exec_query_db(
             return f"OK. {verb} executed; {affected} row(s) affected."
     except Exception as e:
         logger.warning("query_db error: %s\nSQL: %s", e, sql[:500])
-        return f"Error: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error: {type(e).__name__}: {e}")
 
 
 DB_TOOLS = [QUERY_DB_TOOL]

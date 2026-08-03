@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from tool_gateway.results import ToolFailure
 
 A2A_SEND_TOOL = {
     "name": "a2a_send",
@@ -79,9 +80,9 @@ async def _exec_a2a_send(
                     f"Full card:\n{json.dumps(card, indent=2, ensure_ascii=False)}"
                 )
             except httpx.HTTPStatusError as exc:
-                return f"❌ Agent card fetch failed: HTTP {exc.response.status_code}"
+                return ToolFailure(f"❌ Agent card fetch failed: HTTP {exc.response.status_code}")
             except Exception as exc:
-                return f"❌ Agent card fetch failed: {exc}"
+                return ToolFailure(f"❌ Agent card fetch failed: {exc}")
 
         if not message.strip():
             return "❌ message is required when discover=false"
@@ -113,9 +114,9 @@ async def _exec_a2a_send(
             resp = r.json()
         except httpx.HTTPStatusError as exc:
             body = exc.response.text[:500]
-            return f"❌ A2A request failed: HTTP {exc.response.status_code}\n{body}"
+            return ToolFailure(f"❌ A2A request failed: HTTP {exc.response.status_code}\n{body}")
         except Exception as exc:
-            return f"❌ A2A request failed: {exc}"
+            return ToolFailure(f"❌ A2A request failed: {exc}")
 
         if "error" in resp:
             err = resp["error"]
