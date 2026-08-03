@@ -15,6 +15,8 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 
+from tool_gateway.results import ToolFailure
+
 logger = logging.getLogger(__name__)
 
 _KST = timezone(timedelta(hours=9))
@@ -961,7 +963,7 @@ async def _exec_read_blog_posts(
             tuple(params),
         )
     except Exception as e:
-        return f"Error reading blog posts: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error reading blog posts: {type(e).__name__}: {e}")
     if not rows:
         if post_id is not None:
             return f"No blog post found with id={post_id}."
@@ -1404,7 +1406,7 @@ async def _exec_read_private_research_documents(
         try:
             row = await asyncio.to_thread(private_reports.get_private_report_sync, slug=slug)
         except Exception as e:
-            return f"Error reading private research document: {type(e).__name__}: {e}"
+            return ToolFailure(f"Error reading private research document: {type(e).__name__}: {e}")
         if not row:
             return f"No private research document found for slug: {slug}"
         markdown = row.get("markdown") or ""
@@ -1431,7 +1433,7 @@ async def _exec_read_private_research_documents(
             keyword=keyword,
         )
     except Exception as e:
-        return f"Error listing private research documents: {type(e).__name__}: {e}"
+        return ToolFailure(f"Error listing private research documents: {type(e).__name__}: {e}")
     if not rows:
         return "No private research documents found."
     lines = [
@@ -1831,7 +1833,7 @@ async def _exec_write_kg(
             msg += " (trust_tier=anchor — trusted operator chat/task context; no public URL source required)"
         return f"Knowledge stored successfully: {msg}"
     else:
-        return f"Failed to store knowledge: {result['message']}"
+        return ToolFailure(f"Failed to store knowledge: {result['message']}")
 
 
 async def _exec_write_kg_structured(
@@ -1930,7 +1932,7 @@ async def _exec_write_kg_structured(
                 indent=2,
             )
             msg += f"\nRejected facts JSON for retry:\n{rejected_json}"
-        return f"Failed to store structured facts: {msg}"
+        return ToolFailure(f"Failed to store structured facts: {msg}")
 
 
 def _compact_tool(tool: dict, *, include_descriptions: bool, include_schemas: bool) -> dict:
@@ -2080,11 +2082,11 @@ async def _exec_list_agent_tools(
             orchestrator_tools=None,
         )
     except Exception as e:
-        return json.dumps(
+        return ToolFailure(json.dumps(
             {"status": "error", "error": f"{type(e).__name__}: {e}"},
             ensure_ascii=False,
             indent=2,
-        )
+        ))
     return json.dumps(manifest, ensure_ascii=False, indent=2)
 
 
@@ -2152,11 +2154,11 @@ async def _exec_route_task(
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
     except Exception as e:
-        return json.dumps(
+        return ToolFailure(json.dumps(
             {"status": "error", "error": f"{type(e).__name__}: {e}"},
             ensure_ascii=False,
             indent=2,
-        )
+        ))
 
 
 def build_list_agent_tools_handler(orchestrator_tools: list[dict]):
@@ -2176,11 +2178,11 @@ def build_list_agent_tools_handler(orchestrator_tools: list[dict]):
                 orchestrator_tools=list(orchestrator_tools),
             )
         except Exception as e:
-            return json.dumps(
+            return ToolFailure(json.dumps(
                 {"status": "error", "error": f"{type(e).__name__}: {e}"},
                 ensure_ascii=False,
                 indent=2,
-            )
+            ))
         return json.dumps(manifest, ensure_ascii=False, indent=2)
 
     return _exec_list_agent_tools_with_orchestrator
@@ -2570,7 +2572,7 @@ def build_run_agent_handler(chat_with_tools_fn):
 
         except Exception as e:
             logger.error("run_agent failed: %s", e)
-            return f"run_agent error: {e}"
+            return ToolFailure(f"run_agent error: {e}")
 
     return _exec_run_agent
 
@@ -2752,7 +2754,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             return f"Saved {event_type} to mission #{mission_id} ({len(truncated)} chars)."
         except Exception as e:
             logger.error("save_finding error (task %d): %s", task_id, e)
-            return f"Failed to save finding: {e}"
+            return ToolFailure(f"Failed to save finding: {e}")
 
     async def _exec_read_user_chat(limit: int = 10) -> str:
         """Fetch the user's actual chat messages with timestamps."""
@@ -2787,7 +2789,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             return "\n".join(lines) if lines else "No user messages found."
         except Exception as e:
             logger.error("read_user_chat error (task %d): %s", task_id, e)
-            return f"Failed to read chat: {e}"
+            return ToolFailure(f"Failed to read chat: {e}")
 
     async def _exec_send_message(message: str | None = None, content: str | None = None, event_type: str | None = None) -> str:
         """Post to mission bulletin board."""
@@ -2811,7 +2813,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             return f"Message posted to mission #{mission_id} board."
         except Exception as e:
             logger.error("send_message error (task %d): %s", task_id, e)
-            return f"Failed to post message: {e}"
+            return ToolFailure(f"Failed to post message: {e}")
 
     async def _exec_read_messages() -> str:
         """Read mission bulletin board messages from sibling agents."""
@@ -2833,7 +2835,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             return "\n".join(lines)
         except Exception as e:
             logger.error("read_messages error (task %d): %s", task_id, e)
-            return f"Failed to read messages: {e}"
+            return ToolFailure(f"Failed to read messages: {e}")
 
     handlers = {
         "save_finding": _exec_save_finding,
@@ -2975,7 +2977,7 @@ async def _exec_read_autonomous_project(
                 tuple(params),
             )
         except Exception as e:
-            return f"=== AUTONOMOUS PROJECTS ===\n(error: {e})"
+            return ToolFailure(f"=== AUTONOMOUS PROJECTS ===\n(error: {e})")
         if not rows:
             return "=== AUTONOMOUS PROJECTS ===\n(none)"
         lines = ["=== AUTONOMOUS PROJECTS ===",
@@ -3000,7 +3002,7 @@ async def _exec_read_autonomous_project(
             (project_id,),
         )
     except Exception as e:
-        return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(error: {e})"
+        return ToolFailure(f"=== AUTONOMOUS PROJECT #{project_id} ===\n(error: {e})")
     if not proj:
         return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(not found)"
 
