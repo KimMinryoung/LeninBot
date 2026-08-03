@@ -273,7 +273,7 @@ def main() -> int:
     async def _dispatcher_checks() -> None:
         import tool_gateway.security as gateway_adapter
         from tool_gateway.dispatcher import execute_tool
-        from tool_gateway.results import ToolFailure
+        from tool_gateway.results import ToolFailure, ToolRejection
         from tool_gateway.security import CallerContext, caller_scope
 
         original_authorize = gateway_adapter.authorize
@@ -401,6 +401,44 @@ def main() -> int:
                     "an empty but successful lookup is still audited ok",
                     ("vector_search", "allow", "ok") in audited and not empty[1],
                     str((audited, empty)),
+                )
+
+                # The mirror case: a tool enforcing its own rule is working,
+                # not breaking. 4,025 CommuLingo curator rows in 30 days read
+                # `error` for duplicate candidates and over-length bios.
+                audited.clear()
+
+                def refusing_write(content: str) -> str:
+                    raise ToolRejection("candidate duplicates existing person podgorny")
+
+                def broken_write(content: str) -> str:
+                    raise RuntimeError("disk on fire")
+
+                refused = await execute_tool(
+                    "save_diary",
+                    {"content": "dupe"},
+                    {"save_diary": refusing_write},
+                )
+                check(
+                    "designed refusal is audited as rejected, not error",
+                    ("save_diary", "allow", "rejected") in audited,
+                    str(audited),
+                )
+                check(
+                    "refusal text reaches the model verbatim, still flagged an error",
+                    refused[1] and refused[0] == "candidate duplicates existing person podgorny",
+                    str(refused),
+                )
+                broke = await execute_tool(
+                    "save_diary",
+                    {"content": "boom"},
+                    {"save_diary": broken_write},
+                )
+                check(
+                    "a real exception is still audited as an error",
+                    ("save_diary", "allow", "error") in audited
+                    and "external outcome may be unknown" in broke[0],
+                    str((audited, broke)),
                 )
             finally:
                 gateway_adapter.audit = original_audit

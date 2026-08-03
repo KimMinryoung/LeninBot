@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from tool_gateway.results import is_failure
+from tool_gateway.results import ToolRejection, is_failure
 from tool_gateway.validation import (
     ToolArgumentValidationError,
     tool_schema_map,
@@ -495,6 +495,7 @@ async def execute_tool(
             return result, is_error
 
     logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
+    rejected = False
     try:
         raw = handler(**args)
         if asyncio.iscoroutine(raw) or asyncio.isfuture(raw):
@@ -520,6 +521,26 @@ async def execute_tool(
                     await asyncio.to_thread(mark_outcome_unknown, durable_record, str(result))
                 except Exception as store_exc:
                     logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
+    except ToolRejection as exc:
+        # A rule the tool exists to enforce, not a malfunction. It is raised
+        # before any side effect, so nothing about the external world is in
+        # doubt and the generic failure prefix would only mislead.
+        logger.info("Tool %s rejected the call: %s", name, exc)
+        result = str(exc)
+        is_error = True
+        rejected = True
+        if durable_record is not None and durable_record.acquired:
+            # One exception to trusting the handler: a reservation is only
+            # released by a terminal status, and the safe terminal status for
+            # an irreversible tool is the one that refuses a blind retry. A
+            # rejection that got this far is audited like any other exception.
+            rejected = False
+            try:
+                from security_gateway.idempotency import mark_outcome_unknown
+
+                await asyncio.to_thread(mark_outcome_unknown, durable_record, result)
+            except Exception as store_exc:
+                logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
     except Exception as exc:
         logger.error("Tool %s execution error: %s", name, exc)
         if log_event:
@@ -573,6 +594,7 @@ async def execute_tool(
                 result_status=(
                     "outcome_unknown"
                     if is_error and durable_record is not None
+                    else "rejected" if rejected
                     else "error" if is_error else "ok"
                 ),
                 latency_ms=int((time.perf_counter() - started) * 1000),

@@ -125,7 +125,7 @@ result_status, latency_ms, `error_excerpt`. Indexed on `ts`,
 `(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`.
 
 Every exit from `execute_tool` writes exactly one row, including the ones that
-never reach the handler. `result_status` is one of `ok`, `error`,
+never reach the handler. `result_status` is one of `ok`, `error`, `rejected`,
 `outcome_unknown`, `denied`, `invalid_args`, `deduplicated`,
 `deduplicated_durable`, `idempotency_unavailable`, `unknown_tool`, or
 `gateway_error`. The last two, plus `idempotency_unavailable`, cover the
@@ -148,6 +148,20 @@ dependency unavailable, exception swallowed). Do NOT use it for a well-formed
 call with a negative answer — "no documents found", "person not in the
 registry" — those are successful lookups, and marking them errors would bury
 the real failures.
+
+`rejected` is the mirror correction. Handlers that enforce their own domain
+rules raise to unwind, and the generic `except` filed all of it as `error`:
+4,025 CommuLingo curator rows over 30 days — duplicate candidates, bios past
+the length limit — sat next to genuine breakage. `tool_gateway.results.
+ToolRejection` (a `ValueError` subclass, so the `except ValueError` catches
+that already sit between handler and dispatcher keep working) audits `rejected`
+and hands the model the message verbatim, without the "external outcome may be
+unknown" prefix a real exception earns. The tool_result stays flagged as an
+error so the model changes course instead of repeating the call. Raise it only
+when the refusal preceded any side effect; a tool holding a durable
+reservation still falls back to `outcome_unknown`, because only a terminal
+status releases the reservation and the safe terminal status for an
+irreversible tool is the one that refuses a blind retry.
 
 The table is append-only at the database layer. The migration installs triggers that
 block `UPDATE`, `DELETE`, and `TRUNCATE`. A direct administrator maintenance

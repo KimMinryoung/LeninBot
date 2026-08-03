@@ -1,4 +1,10 @@
-"""Handler-reported tool failures.
+"""Handler-reported tool outcomes the dispatcher cannot infer on its own.
+
+Two verdicts live here, and they are opposites. `ToolFailure` promotes a
+swallowed failure out of `ok`; `ToolRejection` rescues a designed refusal out
+of `error`. Both exist because the dispatcher can only see "the handler
+returned" or "the handler raised", and neither says whether the tool worked.
+
 
 Most tool handlers catch their own exceptions and return an explanatory string
 so the model gets a useful message instead of a generic stack trace. That made
@@ -35,3 +41,28 @@ class ToolFailure(str):
 def is_failure(result: object) -> bool:
     """True when a handler flagged its own result as a failure."""
     return isinstance(result, ToolFailure)
+
+
+class ToolRejection(ValueError):
+    """A designed refusal: the tool worked and is turning the caller away.
+
+    The mirror image of `ToolFailure`. Handlers that enforce their own domain
+    rules — a duplicate candidate, a bio over the length limit, a survey budget
+    spent — raise to unwind, and the dispatcher's generic `except` recorded all
+    of it as `error`. 4,025 CommuLingo curator rows in 30 days were that: the
+    tool doing exactly its job, filed next to genuine breakage.
+
+    Raising this audits the call as `rejected` and hands the model the message
+    verbatim, without the "external outcome may be unknown" prefix that a real
+    exception earns. The tool_result is still flagged as an error so the model
+    changes course rather than repeating the call.
+
+    Raise it only when the refusal happened BEFORE any side effect — that is
+    what makes it safe to say nothing about the external world is in doubt. A
+    handler that already wrote something and then failed owes the caller a
+    plain exception (or `ToolFailure`), not a rejection.
+
+    It subclasses `ValueError` because every site being converted already
+    raised one, and callers in between catch it by that name; inheriting keeps
+    them working instead of trading an audit fix for a swallowed exception.
+    """

@@ -12,6 +12,7 @@ import re
 from urllib.parse import urlparse
 
 from secrets_loader import get_secret
+from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -628,7 +629,7 @@ async def _exec_fetch_x_post(
         return _wrap_external(content, f"x_post:{tweet_id}")
     except Exception as exc:
         logger.exception("fetch_x_post error")
-        return f"X post fetch failed: {exc}"
+        return ToolFailure(f"X post fetch failed: {exc}")
 
 
 X_TOOLS = [X_POST_TOOL]

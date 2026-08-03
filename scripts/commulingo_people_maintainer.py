@@ -35,6 +35,7 @@ from runtime_tools.commulingo_people import (
     sentence_budget, sentence_prescription,
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from tool_gateway.results import ToolRejection
 from tool_gateway.security import CallerContext, caller_scope
 
 logger = logging.getLogger("commulingo_people_maintainer")
@@ -889,12 +890,12 @@ valid completion of this stage.
 def validate_discovered_candidate(candidate: dict) -> dict:
     required = ("id", "name_ko", "name_en", "reason", "source_url")
     if not isinstance(candidate, dict) or any(not str(candidate.get(k) or "").strip() for k in required):
-        raise ValueError("discovery candidate is missing required fields")
+        raise ToolRejection("discovery candidate is missing required fields")
     candidate = {k: str(candidate[k]).strip() for k in required}
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", candidate["id"]):
-        raise ValueError("candidate id is not lowercase kebab-case")
+        raise ToolRejection("candidate id is not lowercase kebab-case")
     if not candidate["source_url"].startswith(("https://", "http://")):
-        raise ValueError("candidate source_url must be HTTP(S)")
+        raise ToolRejection("candidate source_url must be HTTP(S)")
     duplicate = db_query_one(
         """SELECT p.id FROM commulingo_people p
              WHERE p.id = %(id)s
@@ -911,7 +912,7 @@ def validate_discovered_candidate(candidate: dict) -> dict:
         candidate,
     )
     if duplicate:
-        raise ValueError(f"candidate duplicates existing person {duplicate['id']}")
+        raise ToolRejection(f"candidate duplicates existing person {duplicate['id']}")
 
     # The SQL above compares raw strings, so a different transliteration reads
     # as a different person (C.L.R. James over C. L. R. James). Re-check on the
@@ -920,7 +921,7 @@ def validate_discovered_candidate(candidate: dict) -> dict:
     key_ko, key_en = _dedup_key(candidate["name_ko"]), _dedup_key(candidate["name_en"])
     for row in db_query("SELECT id, name_ko, name_en FROM commulingo_people"):
         if _dedup_key(row["name_ko"]) == key_ko or _dedup_key(row["name_en"]) == key_en:
-            raise ValueError(
+            raise ToolRejection(
                 f"candidate duplicates existing person {row['id']} "
                 f"({row['name_ko']}) under a different spelling"
             )
@@ -1085,7 +1086,7 @@ def build_retrying_write_handler(handler):
             message = str(error.get("message") or raw)
         except (json.JSONDecodeError, AttributeError):
             code, retryable, message = "legacy_error", True, raw
-        raise ValueError(
+        raise ToolRejection(
             f"commulingo_write[{code}; retryable={str(retryable).lower()}]: {message}"
         )
     return _validated_write
