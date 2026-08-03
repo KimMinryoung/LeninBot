@@ -185,7 +185,10 @@ are enforced from day one.
   side-effect idempotency, schema/default normalization, nested non-finite number rejection, atomic rate-store failures,
   durable success reuse, and `outcome_unknown` replay suppression.
 - `scripts/smoke_tool_allowlists.py` — validates the same `TOOL_RISK_CLASS` and checks
-  that orchestrator schemas and executable handlers share one filtered set.
+  that orchestrator schemas and executable handlers share one filtered set. Web chat is
+  checked per persona, not only for the default one: a tool injected for a single
+  persona (`read_persona_context` for Gramsci) shipped unregistered, so the model saw it
+  and the gateway denied every call (2026-07-26 → fixed 2026-08-03).
 - `scripts/smoke_url_security.py` — validates unsafe addresses, mixed DNS answers,
   redirects, and diagnostic fail-closed behavior.
 
