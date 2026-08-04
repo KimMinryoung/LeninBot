@@ -21,7 +21,6 @@ from shared import KST
 from bot_config import (
     _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client, _kimi_client,
 )
-from llm.provider_registry import kimi_openai_tool_options
 from chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
 from runtime_profile import resolve_runtime_profile
@@ -1621,57 +1620,43 @@ async def handle_web_chat(
                 session_id=session_id,
                 is_owner=False,
             ))
+            # Kwargs shared verbatim by every loop call below; per-provider
+            # branches add only client/model and provider-specific extras.
+            loop_kwargs = dict(
+                tools=web_tools,
+                tool_handlers=web_handlers,
+                system_prompt=system_prompt,
+                max_rounds=profile.max_rounds,
+                max_tokens=profile.max_tokens,
+                budget_usd=profile.budget_usd,
+                on_progress=on_progress,
+                continue_on_length=True,
+                max_length_continuations=2,
+                budget_tracker=budget_tracker,
+            )
             if provider == "openai":
                 from openai_tool_loop import chat_with_tools as openai_chat
                 result = await openai_chat(
                     history,
                     client=_openai_client,
                     model=profile.model_id,
-                    tools=web_tools,
-                    tool_handlers=web_handlers,
-                    system_prompt=system_prompt,
-                    max_rounds=profile.max_rounds,
-                    max_tokens=profile.max_tokens,
-                    budget_usd=profile.budget_usd,
-                    on_progress=on_progress,
+                    **loop_kwargs,
                     provider_label=f"{provider}:web",
-                    continue_on_length=True,
-                    max_length_continuations=2,
                     return_metadata=True,
-                    budget_tracker=budget_tracker,
                 )
             elif provider == "kimi":
                 if not _kimi_client:
                     raise RuntimeError("MOONSHOT_API_KEY is not configured for webchat_provider=kimi")
                 from openai_tool_loop import chat_with_tools as openai_chat
-                deepseek_fallback_model = None
-                if _deepseek_client:
-                    deepseek_fallback_profile = await resolve_runtime_profile(
-                        "webchat",
-                        provider_override="deepseek",
-                        tier_override="high",
-                    )
-                    deepseek_fallback_model = deepseek_fallback_profile.model_id
+                from llm.provider_failover import resolve_kimi_fallback_options
                 result = await openai_chat(
                     history,
                     client=_kimi_client,
                     model=profile.model_id,
-                    tools=web_tools,
-                    tool_handlers=web_handlers,
-                    system_prompt=system_prompt,
-                    max_rounds=profile.max_rounds,
-                    max_tokens=profile.max_tokens,
-                    budget_usd=profile.budget_usd,
-                    on_progress=on_progress,
+                    **loop_kwargs,
                     provider_label=f"{provider}:web",
-                    continue_on_length=True,
-                    max_length_continuations=2,
                     return_metadata=True,
-                    budget_tracker=budget_tracker,
-                    **kimi_openai_tool_options(
-                        fallback_client=_deepseek_client,
-                        fallback_model=deepseek_fallback_model,
-                    ),
+                    **await resolve_kimi_fallback_options("webchat", _deepseek_client),
                 )
             elif provider == "deepseek":
                 if not _deepseek_anthropic_client:
@@ -1682,27 +1667,12 @@ async def handle_web_chat(
                         history,
                         client=_deepseek_anthropic_client,
                         model=profile.model_id,
-                        tools=web_tools,
-                        tool_handlers=web_handlers,
-                        system_prompt=system_prompt,
-                        max_rounds=profile.max_rounds,
-                        max_tokens=profile.max_tokens,
-                        budget_usd=profile.budget_usd,
-                        on_progress=on_progress,
-                        continue_on_length=True,
-                        max_length_continuations=2,
-                        budget_tracker=budget_tracker,
+                        **loop_kwargs,
                         thinking={"type": "disabled"},
                     )
 
-                failover_model = None
-                if _openai_client:
-                    try:
-                        failover_model = (await resolve_runtime_profile(
-                            "webchat", provider_override="openai", tier_override="medium",
-                        )).model_id
-                    except Exception as exc:
-                        logger.warning("webchat failover model unresolved: %s", exc)
+                from llm.provider_failover import resolve_deepseek_failover_model
+                failover_model = await resolve_deepseek_failover_model("webchat", _openai_client)
 
                 def _terra_failover():
                     from openai_tool_loop import chat_with_tools as openai_chat
@@ -1710,17 +1680,8 @@ async def handle_web_chat(
                         history,
                         client=_openai_client,
                         model=failover_model,
-                        tools=web_tools,
-                        tool_handlers=web_handlers,
-                        system_prompt=system_prompt,
-                        max_rounds=profile.max_rounds,
-                        max_tokens=profile.max_tokens,
-                        budget_usd=profile.budget_usd,
-                        on_progress=on_progress,
-                        continue_on_length=True,
-                        max_length_continuations=2,
+                        **loop_kwargs,
                         return_metadata=True,
-                        budget_tracker=budget_tracker,
                         provider_label="openai:web-failover",
                     )
 
@@ -1737,16 +1698,7 @@ async def handle_web_chat(
                     history,
                     client=_claude,
                     model=profile.model_id,
-                    tools=web_tools,
-                    tool_handlers=web_handlers,
-                    system_prompt=system_prompt,
-                    max_rounds=profile.max_rounds,
-                    max_tokens=profile.max_tokens,
-                    budget_usd=profile.budget_usd,
-                    on_progress=on_progress,
-                    continue_on_length=True,
-                    max_length_continuations=2,
-                    budget_tracker=budget_tracker,
+                    **loop_kwargs,
                 )
             metadata = result if isinstance(result, dict) else {}
             answer = str((metadata.get("text") or "") if metadata else result)

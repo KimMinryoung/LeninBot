@@ -19,12 +19,51 @@ from __future__ import annotations
 
 import logging
 
-# 같은 판정을 두 벌 유지하면 어긋난다 — claude_loop의 재시도 루프가 쓰는
-# 술어를 그대로 재사용한다 (429/5xx/타임아웃/커넥션 계열).
-from claude_loop import _is_transient_provider_error as is_transient_provider_error
-from tool_loop_common import emit_progress
+# 같은 판정을 두 벌 유지하면 어긋난다 — 두 루프가 공유하는 술어를 그대로
+# 재사용한다 (429/5xx/타임아웃/커넥션 계열).
+from tool_loop_common import emit_progress, is_transient_provider_error
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_kimi_fallback_options(runtime_kind: str, deepseek_client) -> dict:
+    """Kimi 콘텐츠필터 폴백용 kimi_openai_tool_options kwargs를 해상.
+
+    폴백 모델은 DeepSeek high 티어. deepseek_client가 없으면 폴백 없이
+    Kimi 단독 옵션을 돌려준다. bot/web_chat/a2a에 복붙돼 있던 4줄 통합.
+    """
+    from runtime_profile import resolve_runtime_profile
+    from llm.provider_registry import kimi_openai_tool_options
+
+    fallback_model = None
+    if deepseek_client:
+        profile = await resolve_runtime_profile(
+            runtime_kind, provider_override="deepseek", tier_override="high",
+        )
+        fallback_model = profile.model_id
+    return kimi_openai_tool_options(
+        fallback_client=deepseek_client,
+        fallback_model=fallback_model,
+    )
+
+
+async def resolve_deepseek_failover_model(runtime_kind: str, openai_client) -> str | None:
+    """DeepSeek 장애 시 턴을 다시 돌릴 2차 모델 (OpenAI medium 티어 = Terra).
+
+    openai 클라이언트가 없거나 해상 실패면 None — 페일오버 없이 원래 오류가
+    그대로 올라간다.
+    """
+    if not openai_client:
+        return None
+    from runtime_profile import resolve_runtime_profile
+    try:
+        profile = await resolve_runtime_profile(
+            runtime_kind, provider_override="openai", tier_override="medium",
+        )
+        return profile.model_id
+    except Exception as exc:
+        logger.warning("DeepSeek failover model unresolved; failover disabled: %s", exc)
+        return None
 
 
 async def run_with_provider_failover(

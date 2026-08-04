@@ -18,6 +18,16 @@ from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
+# restart_service import-preflight targets. Dotted module names — the systemd
+# units run `python -m telegram.bot` / `python -m browser.worker`; the flat
+# telegram_bot.py/browser_worker.py names this map once held stopped existing
+# and the preflight silently skipped those services via its isfile guard.
+RESTART_PREFLIGHT_ENTRY_POINTS = {
+    "telegram": "telegram.bot",
+    "api": "api",
+    "browser": "browser.worker",
+}
+
 
 def _looks_korean(text: str) -> bool:
     return bool(re.search(r"[\uac00-\ud7af]", text or ""))
@@ -576,17 +586,19 @@ async def _exec_restart_service(service: str = "telegram") -> str:
         return "❌ Restart blocked — syntax errors found:\n" + "\n".join(errors)
 
     # 3. Import-level validation: try importing the entry points in a subprocess
-    entry_points = {
-        "telegram": "telegram_bot",
-        "api": "api",
-        "browser": "browser_worker",
-    }
     targets = ["telegram", "api", "browser"] if service == "all" else [service]
 
     for target in targets:
-        module = entry_points[target]
-        module_path = os.path.join(project_root, f"{module}.py")
+        module = RESTART_PREFLIGHT_ENTRY_POINTS[target]
+        module_path = os.path.join(project_root, module.replace(".", os.sep) + ".py")
         if not os.path.isfile(module_path):
+            # A missing entry file means the map rotted (this exact guard
+            # silently skipped telegram/browser for months when the flat
+            # telegram_bot.py/browser_worker.py modules became packages).
+            logger.warning(
+                "restart_service preflight: entry module %s not found at %s — import check skipped",
+                module, module_path,
+            )
             continue
         try:
             # Run a quick import check in isolated subprocess

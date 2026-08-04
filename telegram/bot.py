@@ -1306,24 +1306,6 @@ def _is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_USER_IDS
 
 
-async def _resolve_deepseek_failover_model(runtime_kind: str) -> str | None:
-    """DeepSeek이 죽었을 때 턴을 다시 돌릴 2차 모델 (GPT-5.6 Terra).
-
-    openai 클라이언트가 없으면 None — 그 경우 페일오버 없이 원래 오류가 그대로
-    올라간다. medium 티어가 곧 Terra다 (llm.provider_registry.TIER_MODEL_KEYS).
-    """
-    if not _openai_client:
-        return None
-    try:
-        profile = await resolve_runtime_profile(
-            runtime_kind, provider_override="openai", tier_override="medium",
-        )
-        return profile.model_id
-    except Exception as exc:
-        logger.warning("DeepSeek failover model unresolved; failover disabled: %s", exc)
-        return None
-
-
 # ── Thin wrapper: _chat_with_tools (injects module-level dependencies) ──
 
 async def _chat_with_tools(
@@ -1473,6 +1455,29 @@ async def _chat_with_tools(
         task_id=str(task_id) if task_id is not None else None,
     )
 
+    # Kwargs shared verbatim by every loop call below — the per-provider
+    # branches add only client/model and provider-specific extras.
+    loop_kwargs = dict(
+        tools=merged_tools,
+        tool_handlers=merged_handlers,
+        system_prompt=sys_prompt,
+        max_rounds=resolved_max_rounds,
+        max_tokens=resolved_max_tokens,
+        max_input_tokens=resolved_max_input_tokens,
+        recover_input_via_tools=True,
+        continue_on_length=resolved_output_continuations > 0,
+        max_length_continuations=resolved_output_continuations,
+        log_event=_log_event,
+        budget_usd=resolved_budget,
+        on_progress=on_progress,
+        budget_tracker=budget_tracker,
+        task_id=task_id,
+        agent_name=_agent_name,
+        mission_id=_mission_id,
+        finalization_tools=finalization_tools,
+        terminal_tools=terminal_tools,
+    )
+
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
     # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
@@ -1486,32 +1491,14 @@ async def _chat_with_tools(
         # The 4096 default shared with Claude truncates Qwen3 responses
         # mid-<think> on Q4 quantizations, so the tool_call is never
         # emitted and the loop returns an empty answer.
-        local_max_tokens = max(resolved_max_tokens, LOCAL_MAX_TOKENS)
         _chat_coro = openai_chat(
             messages,
             client=None,
             base_url=backend["base"],
             model=profile.model_id or backend["model"],
-            tools=merged_tools,
-            tool_handlers=merged_handlers,
-            system_prompt=sys_prompt,
-            max_rounds=resolved_max_rounds,
-            max_tokens=local_max_tokens,
-            max_input_tokens=resolved_max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=resolved_output_continuations > 0,
-            max_length_continuations=resolved_output_continuations,
-            log_event=_log_event,
-            budget_usd=resolved_budget,
-            on_progress=on_progress,
-            budget_tracker=budget_tracker,
-            task_id=task_id,
+            **{**loop_kwargs, "max_tokens": max(resolved_max_tokens, LOCAL_MAX_TOKENS)},
             context_limit=LOCAL_CONTEXT_LIMIT,
             enable_thinking=is_orchestrator and LOCAL_ENABLE_THINKING,
-            agent_name=_agent_name,
-            mission_id=_mission_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
             api_semaphore=LOCAL_SEMAPHORE,
             provider_label=f"local:{backend['base']}",
         )
@@ -1525,24 +1512,7 @@ async def _chat_with_tools(
             messages,
             client=_openai_client,
             model=profile.model_id,
-            tools=merged_tools,
-            tool_handlers=merged_handlers,
-            system_prompt=sys_prompt,
-            max_rounds=resolved_max_rounds,
-            max_tokens=resolved_max_tokens,
-            max_input_tokens=resolved_max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=resolved_output_continuations > 0,
-            max_length_continuations=resolved_output_continuations,
-            log_event=_log_event,
-            budget_usd=resolved_budget,
-            on_progress=on_progress,
-            budget_tracker=budget_tracker,
-            task_id=task_id,
-            agent_name=_agent_name,
-            mission_id=_mission_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
+            **loop_kwargs,
             provider_label="openai",
             extra_body=openai_inference.get("extra_body"),
         )
@@ -1551,42 +1521,14 @@ async def _chat_with_tools(
 
     if effective_provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm.provider_registry import kimi_openai_tool_options
-        deepseek_fallback_model = None
-        if _deepseek_client:
-            deepseek_fallback_profile = await resolve_runtime_profile(
-                _runtime_kind,
-                provider_override="deepseek",
-                tier_override="high",
-            )
-            deepseek_fallback_model = deepseek_fallback_profile.model_id
+        from llm.provider_failover import resolve_kimi_fallback_options
         _chat_coro = openai_chat(
             messages,
             client=_kimi_client,
             model=profile.model_id,
-            tools=merged_tools,
-            tool_handlers=merged_handlers,
-            system_prompt=sys_prompt,
-            max_rounds=resolved_max_rounds,
-            max_tokens=resolved_max_tokens,
-            max_input_tokens=resolved_max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=resolved_output_continuations > 0,
-            max_length_continuations=resolved_output_continuations,
-            log_event=_log_event,
-            budget_usd=resolved_budget,
-            on_progress=on_progress,
-            budget_tracker=budget_tracker,
-            task_id=task_id,
-            agent_name=_agent_name,
-            mission_id=_mission_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
+            **loop_kwargs,
             provider_label="kimi",
-            **kimi_openai_tool_options(
-                fallback_client=_deepseek_client,
-                fallback_model=deepseek_fallback_model,
-            ),
+            **await resolve_kimi_fallback_options(_runtime_kind, _deepseek_client),
         )
         with caller_scope(_gw_ctx):
             return await _chat_coro
@@ -1601,29 +1543,13 @@ async def _chat_with_tools(
                 messages,
                 client=_deepseek_anthropic_client,
                 model=profile.model_id,
-                tools=merged_tools,
-                tool_handlers=merged_handlers,
-                system_prompt=sys_prompt,
-                max_rounds=resolved_max_rounds,
-                max_tokens=resolved_max_tokens,
-                max_input_tokens=resolved_max_input_tokens,
-                recover_input_via_tools=True,
-                continue_on_length=resolved_output_continuations > 0,
-                max_length_continuations=resolved_output_continuations,
-                log_event=_log_event,
-                budget_usd=resolved_budget,
-                on_progress=on_progress,
-                budget_tracker=budget_tracker,
-                task_id=task_id,
-                agent_name=_agent_name,
-                mission_id=_mission_id,
-                finalization_tools=finalization_tools,
-                terminal_tools=terminal_tools,
+                **loop_kwargs,
                 thinking=deepseek_thinking.get("thinking"),
                 output_config=deepseek_thinking.get("output_config"),
             )
 
-        failover_model = await _resolve_deepseek_failover_model(_runtime_kind)
+        from llm.provider_failover import resolve_deepseek_failover_model
+        failover_model = await resolve_deepseek_failover_model(_runtime_kind, _openai_client)
 
         def _terra_failover():
             from openai_tool_loop import chat_with_tools as openai_chat
@@ -1631,24 +1557,7 @@ async def _chat_with_tools(
                 messages,
                 client=_openai_client,
                 model=failover_model,
-                tools=merged_tools,
-                tool_handlers=merged_handlers,
-                system_prompt=sys_prompt,
-                max_rounds=resolved_max_rounds,
-                max_tokens=resolved_max_tokens,
-                max_input_tokens=resolved_max_input_tokens,
-                recover_input_via_tools=True,
-                continue_on_length=resolved_output_continuations > 0,
-                max_length_continuations=resolved_output_continuations,
-                log_event=_log_event,
-                budget_usd=resolved_budget,
-                on_progress=on_progress,
-                budget_tracker=budget_tracker,
-                task_id=task_id,
-                agent_name=_agent_name,
-                mission_id=_mission_id,
-                finalization_tools=finalization_tools,
-                terminal_tools=terminal_tools,
+                **loop_kwargs,
                 provider_label="openai:failover",
             )
 
@@ -1678,24 +1587,7 @@ async def _chat_with_tools(
         messages,
         client=_claude,
         model=profile.model_id,
-        tools=merged_tools,
-        tool_handlers=merged_handlers,
-        system_prompt=sys_prompt,
-        max_rounds=resolved_max_rounds,
-        max_tokens=resolved_max_tokens,
-        max_input_tokens=resolved_max_input_tokens,
-        recover_input_via_tools=True,
-        continue_on_length=resolved_output_continuations > 0,
-        max_length_continuations=resolved_output_continuations,
-        log_event=_log_event,
-        budget_usd=resolved_budget,
-        on_progress=on_progress,
-        budget_tracker=budget_tracker,
-        task_id=task_id,
-        agent_name=_agent_name,
-        mission_id=_mission_id,
-        finalization_tools=finalization_tools,
-        terminal_tools=terminal_tools,
+        **loop_kwargs,
         thinking=claude_inference.get("thinking"),
     )
     with caller_scope(_gw_ctx):

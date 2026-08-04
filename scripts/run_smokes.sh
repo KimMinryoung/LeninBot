@@ -52,6 +52,22 @@ PY="$ROOT/venv/bin/python"
 pass=0
 fail=0
 failed_names=""
+
+# Hermetic unit suite first (tests/, no secrets/DB needed, ~0.01s). A unit
+# failure is reported like any other suite but doesn't block the smokes —
+# they may localize the breakage further.
+if [ -z "$FILTER" ] || case unit_tests in *"$FILTER"*) true ;; *) false ;; esac; then
+    unit_out="$(timeout 60 "$PY" -m unittest discover tests 2>&1)"
+    if [ $? -eq 0 ]; then
+        printf 'PASS  unit_tests (%s)\n' "$(printf '%s' "$unit_out" | grep -oE 'Ran [0-9]+ tests' | head -1)"
+        pass=$((pass + 1))
+    else
+        printf 'FAIL  unit_tests\n'
+        printf '%s\n' "$unit_out" | grep -vE '^\s*$' | tail -6 | sed 's/^/        /'
+        fail=$((fail + 1))
+        failed_names="$failed_names unit_tests"
+    fi
+fi
 for f in scripts/smoke_*.py; do
     name="$(basename "$f" .py)"
     case "$name" in
