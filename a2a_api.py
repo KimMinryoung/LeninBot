@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 from pathlib import Path
 
@@ -8,14 +7,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
-logging.basicConfig(level=_LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-logging.getLogger().setLevel(_LOG_LEVEL)
-logging.getLogger("neo4j").setLevel(logging.WARNING)
-logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
+from api_common import parse_cors_origins, setup_service_logging
 
-_DEFAULT_CORS_ORIGINS = "https://cyber-lenin.com,http://localhost:3000"
+setup_service_logging(quiet_neo4j=True)
+
 AGENT_CARD_DIR = Path(__file__).parent / "research"
 
 
@@ -30,22 +25,11 @@ def _a2a_enabled() -> bool:
     return _env_flag("A2A_ENABLED", default=True)
 
 
-def _parse_cors_origins() -> list[str]:
-    raw = (
-        os.getenv("A2A_CORS_ORIGINS")
-        or os.getenv("WEBCHAT_CORS_ORIGINS")
-        or os.getenv("CORS_ALLOW_ORIGINS")
-        or _DEFAULT_CORS_ORIGINS
-    )
-    origins = [item.strip() for item in raw.split(",") if item.strip()]
-    return origins or [item.strip() for item in _DEFAULT_CORS_ORIGINS.split(",")]
-
-
 app = FastAPI(title="Cyber-Lenin A2A API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_parse_cors_origins(),
+    allow_origins=parse_cors_origins("A2A_CORS_ORIGINS"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

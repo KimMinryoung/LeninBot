@@ -24,12 +24,9 @@ from api_security import (
 )
 from db import query as db_query, query_one as db_query_one
 
-_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
-logging.basicConfig(level=_LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-logging.getLogger().setLevel(_LOG_LEVEL)
-logging.getLogger("neo4j").setLevel(logging.WARNING)
-logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
+from api_common import parse_cors_origins, setup_service_logging
+
+setup_service_logging(quiet_neo4j=True)
 logger = logging.getLogger(__name__)
 
 
@@ -87,13 +84,7 @@ _webchat_active_count = 0
 _WEBCHAT_RATE_LIMIT = max(1, int(os.getenv("WEBCHAT_RATE_LIMIT", "20") or "20"))
 _WEBCHAT_RATE_WINDOW_SECONDS = max(10, int(os.getenv("WEBCHAT_RATE_WINDOW_SECONDS", "300") or "300"))
 _WEBCHAT_GLOBAL_ACTIVE_LIMIT = max(1, int(os.getenv("WEBCHAT_GLOBAL_ACTIVE_LIMIT", "8") or "8"))
-_DEFAULT_CORS_ORIGINS = "https://cyber-lenin.com,http://localhost:3000"
-
-def _parse_cors_origins() -> list[str]:
-    """Read comma-separated CORS origins from env, preserving safe defaults."""
-    raw = os.getenv("WEBCHAT_CORS_ORIGINS") or os.getenv("CORS_ALLOW_ORIGINS") or _DEFAULT_CORS_ORIGINS
-    origins = [item.strip() for item in raw.split(",") if item.strip()]
-    return origins or [item.strip() for item in _DEFAULT_CORS_ORIGINS.split(",")]
+_parse_cors_origins = parse_cors_origins
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
