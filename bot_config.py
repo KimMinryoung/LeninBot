@@ -24,41 +24,85 @@ ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", "") or ""
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "") or ""
 DEEPSEEK_API_KEY = get_secret("DEEPSEEK_API_KEY", "") or ""
 MOONSHOT_API_KEY = get_secret("MOONSHOT_API_KEY", "") or ""
-MOONSHOT_BASE_URL = os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1").rstrip("/")
-MOONSHOT_ANTHROPIC_BASE_URL = os.getenv(
-    "MOONSHOT_ANTHROPIC_BASE_URL", "https://api.moonshot.ai/anthropic"
-).rstrip("/")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEEPSEEK_ANTHROPIC_BASE_URL = os.getenv(
-    "DEEPSEEK_ANTHROPIC_BASE_URL",
-    "https://api.deepseek.com/anthropic",
-).rstrip("/")
+
+
+def _provider_base(env_name: str, proxy_path: str, direct_default: str) -> str:
+    """Provider base URL: explicit env override > llm_proxy (when configured) > direct.
+
+    With config/llm_gateway.json "proxy_base" set, clients talk to the local
+    key-injection proxy (llm_proxy/) and the real API keys can be absent from
+    this service's credentials — the placeholder key below satisfies the SDKs.
+    """
+    env_val = (os.getenv(env_name) or "").strip()
+    if env_val:
+        return env_val.rstrip("/")
+    from llm.gateway import proxy_base
+    base = proxy_base()
+    if base:
+        return f"{base}/{proxy_path}"
+    return direct_default
+
+
+MOONSHOT_BASE_URL = _provider_base(
+    "MOONSHOT_BASE_URL", "moonshot/v1", "https://api.moonshot.ai/v1")
+MOONSHOT_ANTHROPIC_BASE_URL = _provider_base(
+    "MOONSHOT_ANTHROPIC_BASE_URL", "moonshot/anthropic", "https://api.moonshot.ai/anthropic")
+DEEPSEEK_BASE_URL = _provider_base(
+    "DEEPSEEK_BASE_URL", "deepseek", "https://api.deepseek.com")
+DEEPSEEK_ANTHROPIC_BASE_URL = _provider_base(
+    "DEEPSEEK_ANTHROPIC_BASE_URL", "deepseek/anthropic", "https://api.deepseek.com/anthropic")
+ANTHROPIC_BASE_URL = _provider_base(
+    "ANTHROPIC_BASE_URL", "anthropic", "https://api.anthropic.com")
+OPENAI_BASE_URL_EFFECTIVE = _provider_base(
+    "OPENAI_BASE_URL", "openai/v1", "https://api.openai.com/v1")
 DEEPSEEK_THINKING_MODE = os.getenv("DEEPSEEK_THINKING_MODE", "thinking").strip().lower()
 DEEPSEEK_THINKING_EFFORT = os.getenv("DEEPSEEK_THINKING_EFFORT", "high").strip().lower()
 
 # ── LLM Clients ──────────────────────────────────────────────────────
-_claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+# When the llm_proxy is routing (proxy_base set), a provider client exists
+# even without a local key — the proxy holds the real one and swaps the
+# placeholder out. Without the proxy, keys gate creation exactly as before.
+from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base as _llm_proxy_base
 
-# OpenAI-compatible clients (lazy — only created if keys exist)
+_via_proxy = _llm_proxy_base() is not None
+
+# Exported for modules that build their own SDK clients (browser worker,
+# writer): the local key when present, else the proxy placeholder.
+ANTHROPIC_CLIENT_KEY = ANTHROPIC_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
+OPENAI_CLIENT_KEY = OPENAI_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
+DEEPSEEK_CLIENT_KEY = DEEPSEEK_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
+MOONSHOT_CLIENT_KEY = MOONSHOT_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
+
+_claude = anthropic.AsyncAnthropic(
+    api_key=ANTHROPIC_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else ""),
+    base_url=ANTHROPIC_BASE_URL,
+)
+
+# OpenAI-compatible clients (lazy — only created if keys exist or proxied)
 _openai_client = None
 _deepseek_client = None
 _deepseek_anthropic_client = None
 _kimi_client = None
 _kimi_anthropic_client = None
-if OPENAI_API_KEY or DEEPSEEK_API_KEY or MOONSHOT_API_KEY:
+if OPENAI_API_KEY or DEEPSEEK_API_KEY or MOONSHOT_API_KEY or _via_proxy:
     from openai import AsyncOpenAI
-if OPENAI_API_KEY:
-    _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-if DEEPSEEK_API_KEY:
-    _deepseek_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+if OPENAI_API_KEY or _via_proxy:
+    _openai_client = AsyncOpenAI(
+        api_key=OPENAI_API_KEY or PROXY_PLACEHOLDER_KEY,
+        base_url=OPENAI_BASE_URL_EFFECTIVE,
+    )
+if DEEPSEEK_API_KEY or _via_proxy:
+    _deepseek_client = AsyncOpenAI(
+        api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=DEEPSEEK_BASE_URL)
     _deepseek_anthropic_client = anthropic.AsyncAnthropic(
-        api_key=DEEPSEEK_API_KEY,
+        api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY,
         base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
     )
-if MOONSHOT_API_KEY:
-    _kimi_client = AsyncOpenAI(api_key=MOONSHOT_API_KEY, base_url=MOONSHOT_BASE_URL)
+if MOONSHOT_API_KEY or _via_proxy:
+    _kimi_client = AsyncOpenAI(
+        api_key=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=MOONSHOT_BASE_URL)
     _kimi_anthropic_client = anthropic.AsyncAnthropic(
-        auth_token=MOONSHOT_API_KEY,
+        auth_token=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY,
         base_url=MOONSHOT_ANTHROPIC_BASE_URL,
     )
 _CLAUDE_MAX_TOKENS = 4096
@@ -300,7 +344,10 @@ async def _resolve_model(alias: str, fallback: str) -> str:
     """Resolve a Claude model alias to its actual ID via the Models API (non-blocking)."""
     try:
         resolved = await asyncio.to_thread(
-            lambda: anthropic.Anthropic(api_key=ANTHROPIC_API_KEY).models.retrieve(model_id=alias).id
+            lambda: anthropic.Anthropic(
+                api_key=ANTHROPIC_API_KEY or PROXY_PLACEHOLDER_KEY,
+                base_url=ANTHROPIC_BASE_URL,
+            ).models.retrieve(model_id=alias).id
         )
         logger.info("Resolved model %s => %s", alias, resolved)
         return resolved

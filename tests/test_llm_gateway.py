@@ -203,6 +203,71 @@ class TestLoopStateSeam(unittest.TestCase):
         self.assertAlmostEqual(state.total_cost, 0.05)
 
 
+class TestProxyRouting(unittest.TestCase):
+    def test_direct_mode_passthrough(self):
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            base, key = gw.provider_endpoint(
+                "deepseek/anthropic", "https://api.deepseek.com/anthropic", "realkey",
+            )
+        self.assertEqual(base, "https://api.deepseek.com/anthropic")
+        self.assertEqual(key, "realkey")
+
+    def test_direct_mode_missing_key_stays_empty(self):
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            _base, key = gw.provider_endpoint("anthropic", None, "")
+        self.assertEqual(key, "")
+
+    def test_proxy_mode_routes_and_placeholder(self):
+        pol = _policy(proxy_base="http://127.0.0.1:8100")
+        with patch.object(gw, "load_policy", return_value=pol):
+            base, key = gw.provider_endpoint("moonshot/v1", "https://api.moonshot.ai/v1", "")
+        self.assertEqual(base, "http://127.0.0.1:8100/moonshot/v1")
+        self.assertEqual(key, gw.PROXY_PLACEHOLDER_KEY)
+
+    def test_proxy_mode_keeps_real_key_when_present(self):
+        pol = _policy(proxy_base="http://127.0.0.1:8100/")
+        with patch.object(gw, "load_policy", return_value=pol):
+            base, key = gw.provider_endpoint("anthropic", None, "realkey")
+        self.assertEqual(base, "http://127.0.0.1:8100/anthropic")
+        self.assertEqual(key, "realkey")
+
+
+class TestProxyHeaderInjection(unittest.TestCase):
+    """llm_proxy must strip client auth and inject the real key, untouched rest."""
+
+    def test_anthropic_style(self):
+        from llm_proxy.app import PROVIDERS, build_forward_headers
+
+        headers = build_forward_headers(
+            {
+                "x-api-key": "via-llm-proxy", "anthropic-version": "2023-06-01",
+                "content-type": "application/json", "host": "127.0.0.1:8100",
+                "content-length": "42",
+            },
+            PROVIDERS["anthropic"], "REALKEY",
+        )
+        self.assertEqual(headers["x-api-key"], "REALKEY")
+        self.assertEqual(headers["anthropic-version"], "2023-06-01")
+        self.assertNotIn("host", headers)
+        self.assertNotIn("content-length", headers)
+
+    def test_bearer_style_replaces_placeholder(self):
+        from llm_proxy.app import PROVIDERS, build_forward_headers
+
+        headers = build_forward_headers(
+            {"authorization": "Bearer via-llm-proxy", "content-type": "application/json"},
+            PROVIDERS["moonshot"], "REALKEY",
+        )
+        self.assertEqual(headers["authorization"], "Bearer REALKEY")
+
+    def test_deepseek_gets_both_auth_styles(self):
+        from llm_proxy.app import PROVIDERS, build_forward_headers
+
+        headers = build_forward_headers({}, PROVIDERS["deepseek"], "K")
+        self.assertEqual(headers["x-api-key"], "K")
+        self.assertEqual(headers["authorization"], "Bearer K")
+
+
 class TestPolicyLoading(unittest.TestCase):
     def test_missing_config_uses_defaults(self):
         with patch.object(gw, "CONFIG_PATH", Path("/nonexistent/llm_gateway.json")):

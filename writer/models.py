@@ -94,10 +94,21 @@ _writer_client: anthropic.AsyncAnthropic | None = None
 def _client() -> anthropic.AsyncAnthropic:
     global _writer_client
     if _writer_client is None:
+        from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base
+
+        # Caveat: with the llm_proxy routing, the proxy injects the shared
+        # ANTHROPIC_API_KEY — a separate WRITER_ANTHROPIC_API_KEY would need
+        # its own named credential in the proxy before it can take effect.
         api_key = get_secret("WRITER_ANTHROPIC_API_KEY", "") or get_secret("ANTHROPIC_API_KEY", "")
+        base = proxy_base()
         if not api_key:
-            raise RuntimeError("WRITER_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY is required")
-        _writer_client = anthropic.AsyncAnthropic(api_key=api_key)
+            if not base:
+                raise RuntimeError("WRITER_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY is required")
+            api_key = PROXY_PLACEHOLDER_KEY
+        _writer_client = anthropic.AsyncAnthropic(
+            api_key=api_key,
+            **({"base_url": f"{base}/anthropic"} if base else {}),
+        )
     return _writer_client
 
 
