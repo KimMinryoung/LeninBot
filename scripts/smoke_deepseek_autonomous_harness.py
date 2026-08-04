@@ -76,11 +76,10 @@ def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> No
     assert 'provider == "deepseek"' in source
     assert "client=_deepseek_anthropic_client" in source
     assert 'thinking={"type": "disabled"}' in source
-    # OpenAI-compatible DeepSeek client is present only as the centralized
-    # Kimi content-filter fallback (resolved via the shared helper); native
-    # DeepSeek web chat stays Anthropic.
-    assert "resolve_kimi_fallback_options" in source
-    assert '_deepseek_client)' in source
+    # Kimi content-filter fallback machinery was removed 2026-08-04 — the
+    # OpenAI-compatible DeepSeek client must no longer be wired into the
+    # Kimi path; native DeepSeek web chat stays Anthropic.
+    assert "content_filter_fallback" not in source
     assert 'event == "tool_call"' in source
     assert '"type": "tool_done" if done else "tool_start"' in source
     assert "on_progress=on_progress" in source

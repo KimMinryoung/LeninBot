@@ -267,9 +267,8 @@ def _assert_provider_registry_and_recovery_policy() -> None:
     }
     assert anthropic_pricing_table(date(2026, 8, 31))["claude-sonnet-5"]["input"] == 2 / 1_000_000
     assert anthropic_pricing_table(date(2026, 9, 1))["claude-sonnet-5"]["input"] == 3 / 1_000_000
-    options = kimi_openai_tool_options(fallback_client="client", fallback_model="deepseek-v4-pro")
-    assert options["content_filter_fallback_client"] == "client"
-    assert options["content_filter_fallback_model"] == "deepseek-v4-pro"
+    options = kimi_openai_tool_options()
+    assert "content_filter_fallback_client" not in options  # 스위칭 계약 제거됨 (2026-08-04)
     assert options["extra_body"] == {"reasoning_effort": "max"}
     assert options["preserve_reasoning_content"] is True
 
@@ -479,198 +478,6 @@ async def _assert_kimi_preserves_reasoning_for_tool_replay() -> None:
     assert seen[0]["max_tokens"] == 128
     assert "parallel_tool_calls" not in seen[0]
 
-
-async def _assert_kimi_content_filter_falls_back_in_forced_final() -> None:
-    from types import SimpleNamespace
-    from openai_tool_loop import (
-        chat_with_tools,
-        _looks_like_content_filter_response,
-        _looks_like_prompt_content_filter,
-    )
-
-    class _FilterError(Exception):
-        status_code = 400
-        body = {
-            "error": {
-                "message": "The request was rejected because it was considered high risk",
-                "param": "prompt",
-                "type": "content_filter",
-            }
-        }
-
-    assert _looks_like_prompt_content_filter(_FilterError("Error code: 400"))
-    assert not _looks_like_prompt_content_filter(
-        ValueError("Error code: 400 - invalid max_tokens parameter")
-    )
-    assert not _looks_like_prompt_content_filter(
-        ValueError("Error code: 500 - content_filter backend unavailable")
-    )
-
-    primary_seen: list[dict] = []
-    fallback_seen: list[dict] = []
-    saved: list[str] = []
-
-    class _PrimaryCompletions:
-        async def create(self, **kwargs):
-            primary_seen.append(kwargs)
-            if len(primary_seen) == 1:
-                tool_call = SimpleNamespace(
-                    id="call-work",
-                    function=SimpleNamespace(name="lookup", arguments='{"query":"x"}'),
-                )
-                return SimpleNamespace(
-                    model="kimi-k3",
-                    choices=[SimpleNamespace(
-                        finish_reason="tool_calls",
-                        message=SimpleNamespace(
-                            content="", reasoning_content="kimi reasoning",
-                            tool_calls=[tool_call], refusal=None,
-                        ),
-                    )],
-                    usage=None,
-                )
-            raise _FilterError("Error code: 400 - content_filter prompt high risk")
-
-    class _FallbackCompletions:
-        async def create(self, **kwargs):
-            fallback_seen.append(kwargs)
-            if len(fallback_seen) == 1:
-                tool_call = SimpleNamespace(
-                    id="call-save",
-                    function=SimpleNamespace(name="save_diary", arguments='{"content":"entry"}'),
-                )
-                return SimpleNamespace(
-                    model="deepseek-v4-pro",
-                    choices=[SimpleNamespace(
-                        finish_reason="tool_calls",
-                        message=SimpleNamespace(content="", tool_calls=[tool_call], refusal=None),
-                    )],
-                    usage=None,
-                )
-            return SimpleNamespace(
-                model="deepseek-v4-pro",
-                choices=[SimpleNamespace(
-                    finish_reason="stop",
-                    message=SimpleNamespace(content="saved", tool_calls=None, refusal=None),
-                )],
-                usage=None,
-            )
-
-    primary = SimpleNamespace(chat=SimpleNamespace(completions=_PrimaryCompletions()))
-    fallback = SimpleNamespace(chat=SimpleNamespace(completions=_FallbackCompletions()))
-
-    def _save_diary(content: str):
-        saved.append(content)
-        return "ok"
-
-    result = await chat_with_tools(
-        [{"role": "user", "content": "sensitive diary context"}],
-        client=primary,
-        model="kimi-k3",
-        tools=[
-            {
-                "name": "lookup",
-                "description": "Lookup",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "save_diary",
-                "description": "Save diary",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"content": {"type": "string"}},
-                    "required": ["content"],
-                },
-            },
-        ],
-        tool_handlers={"lookup": lambda query: f"found {query}", "save_diary": _save_diary},
-        system_prompt="system",
-        max_rounds=1,
-        max_tokens=128,
-        budget_usd=1.0,
-        finalization_tools=["save_diary"],
-        provider_label="kimi",
-        extra_body={"reasoning_effort": "max"},
-        sdk_max_token_param="max_tokens",
-        include_parallel_tool_calls=False,
-        preserve_reasoning_content=True,
-        content_filter_fallback_client=fallback,
-        content_filter_fallback_model="deepseek-v4-pro",
-        content_filter_fallback_label="deepseek",
-    )
-    assert result == "saved"
-    assert saved == ["entry"]
-    assert len(primary_seen) == 2
-    assert len(fallback_seen) == 2
-    assert primary_seen[1]["messages"] == fallback_seen[0]["messages"]
-    assert fallback_seen[0]["model"] == "deepseek-v4-pro"
-    assert "extra_body" not in fallback_seen[0]
-    assert _looks_like_content_filter_response(SimpleNamespace(
-        choices=[SimpleNamespace(
-            finish_reason="content_filter",
-            message=SimpleNamespace(refusal=None),
-        )],
-    ))
-
-    refusal_seen: list[dict] = []
-    billed_fallback_seen: list[dict] = []
-
-    class _RefusalCompletions:
-        async def create(self, **kwargs):
-            refusal_seen.append(kwargs)
-            return SimpleNamespace(
-                model="kimi-k3",
-                choices=[SimpleNamespace(
-                    finish_reason="stop",
-                    message=SimpleNamespace(
-                        content="", tool_calls=None, refusal="request refused",
-                    ),
-                )],
-                usage=None,
-            )
-
-    class _BilledFallbackCompletions:
-        async def create(self, **kwargs):
-            billed_fallback_seen.append(kwargs)
-            return SimpleNamespace(
-                model="deepseek-v4-pro",
-                choices=[SimpleNamespace(
-                    finish_reason="stop",
-                    message=SimpleNamespace(content="fallback answer", tool_calls=None, refusal=None),
-                )],
-                usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=1000),
-            )
-
-    refusal_primary = SimpleNamespace(
-        chat=SimpleNamespace(completions=_RefusalCompletions())
-    )
-    billed_fallback = SimpleNamespace(
-        chat=SimpleNamespace(completions=_BilledFallbackCompletions())
-    )
-    billed_result = await chat_with_tools(
-        [{"role": "user", "content": "refused prompt"}],
-        client=refusal_primary,
-        model="kimi-k3",
-        tools=[],
-        tool_handlers={},
-        system_prompt="system",
-        max_rounds=1,
-        max_tokens=128,
-        budget_usd=1.0,
-        provider_label="kimi",
-        return_metadata=True,
-        content_filter_fallback_client=billed_fallback,
-        content_filter_fallback_model="deepseek-v4-pro",
-        content_filter_fallback_label="deepseek",
-    )
-    assert billed_result["text"] == "fallback answer"
-    assert len(refusal_seen) == 1
-    assert len(billed_fallback_seen) == 1
-    assert abs(billed_result["cost_usd"] - 0.001305) < 1e-12
 
 
 def _assert_agent_runtime_config() -> None:
@@ -2359,7 +2166,6 @@ async def main() -> None:
     _assert_inference_reasoning_policy()
     await _assert_openai_continuation_extends_round_limit()
     await _assert_kimi_preserves_reasoning_for_tool_replay()
-    await _assert_kimi_content_filter_falls_back_in_forced_final()
     _assert_agent_runtime_config()
     _assert_autonomous_base_finalization_tools()
     _assert_agent_runtime_dynamic_reload()

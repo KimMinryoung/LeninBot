@@ -9,10 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import runtime_profile
-from llm.provider_failover import (
-    resolve_deepseek_failover_model,
-    resolve_kimi_fallback_options,
-)
+from llm.provider_failover import resolve_deepseek_failover_model
+from llm.provider_registry import kimi_openai_tool_options
 
 
 def _fake_profile(model_id):
@@ -21,23 +19,15 @@ def _fake_profile(model_id):
     return _resolve
 
 
-class TestKimiFallbackOptions(unittest.TestCase):
-    def test_no_deepseek_client_means_no_fallback(self):
-        opts = asyncio.run(resolve_kimi_fallback_options("chat", None))
-        self.assertIsNone(opts["content_filter_fallback_client"])
-        self.assertIsNone(opts["content_filter_fallback_model"])
-        # Kimi contract fields still present
+class TestKimiToolOptions(unittest.TestCase):
+    def test_contract_has_no_content_filter_fallback(self):
+        # The Kimi→DeepSeek content-filter switching machinery was removed
+        # 2026-08-04; the contract is now static provider options only.
+        opts = kimi_openai_tool_options()
+        self.assertNotIn("content_filter_fallback_client", opts)
         self.assertEqual(opts["sdk_max_token_param"], "max_tokens")
         self.assertFalse(opts["include_parallel_tool_calls"])
-
-    def test_fallback_resolved_at_deepseek_high_tier(self):
-        client = object()
-        with patch.object(runtime_profile, "resolve_runtime_profile",
-                          _fake_profile("deepseek-v4-pro")):
-            opts = asyncio.run(resolve_kimi_fallback_options("webchat", client))
-        self.assertIs(opts["content_filter_fallback_client"], client)
-        self.assertEqual(opts["content_filter_fallback_model"], "deepseek-v4-pro")
-        self.assertEqual(opts["content_filter_fallback_label"], "deepseek")
+        self.assertTrue(opts["preserve_reasoning_content"])
 
 
 class TestDeepseekFailoverModel(unittest.TestCase):

@@ -1521,14 +1521,14 @@ async def _chat_with_tools(
 
     if effective_provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm.provider_failover import resolve_kimi_fallback_options
+        from llm.provider_registry import kimi_openai_tool_options
         _chat_coro = openai_chat(
             messages,
             client=_kimi_client,
             model=profile.model_id,
             **loop_kwargs,
             provider_label="kimi",
-            **await resolve_kimi_fallback_options(_runtime_kind, _deepseek_client),
+            **kimi_openai_tool_options(),
         )
         with caller_scope(_gw_ctx):
             return await _chat_coro

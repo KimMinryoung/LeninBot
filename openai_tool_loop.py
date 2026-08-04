@@ -29,6 +29,8 @@ from tool_loop_common import (
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
+    call_with_transient_retry,
+    estimate_text_tokens,
     is_transient_provider_error,
 )
 from tool_gateway.dispatcher import (
@@ -351,22 +353,8 @@ def _ensure_system_first(msgs: list[dict], system_prompt: str) -> list[dict]:
 
 
 def _estimate_tokens(msgs: list[dict]) -> int:
-    """Rough token estimate for context trimming.
-
-    The old flat ``len(text) // 4`` heuristic badly under-counted Korean-heavy
-    research/tool transcripts. DeepSeek then saw prompts near its limit while
-    our local estimator thought there was still plenty of room. Count CJK/Hangul
-    codepoints closer to one token each and keep the 4-char approximation for
-    ASCII-ish text.
-    """
-    cjk_re = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u3040-\u30ff\u3400-\u9fff]")
-
-    def _estimate_text(text: str) -> int:
-        if not text:
-            return 0
-        cjk = len(cjk_re.findall(text))
-        other = len(text) - cjk
-        return cjk + (other // 4)
+    """Rough token estimate for context trimming (CJK-aware, shared)."""
+    _estimate_text = estimate_text_tokens
 
     total = 0
     for m in msgs:
@@ -547,13 +535,19 @@ def _to_tool_call_namespace(tc: dict) -> SimpleNamespace:
     )
 
 
-async def _call_sdk_raw_stream(kwargs: dict, on_progress) -> SimpleNamespace:
+async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: float | None = None) -> SimpleNamespace:
     """Stream Chat Completions chunks without the SDK auto-parse helper.
 
     ``client.chat.completions.stream()`` rejects non-strict tools before the
     request is sent. The lower-level ``create(stream=True)`` path yields raw
     chunks and lets us accumulate text/tool deltas ourselves, so permissive
     LeninBot tool schemas can still stream final answer text.
+
+    idle_timeout_sec: when set, genuine chunk silence for that long raises
+    TimeoutError (transient → the shared retry re-runs the call). Mirrors
+    claude_loop._drain_stream_with_idle_guard, added after the 2026-07-07
+    writer-critic stream stalls; without it a stalled stream hangs until the
+    SDK's own multi-minute read timeout.
     """
     client = kwargs.pop("_client")
     request = dict(kwargs)
@@ -579,7 +573,19 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress) -> SimpleNamespace:
         request.pop("stream_options", None)
         stream = await client.chat.completions.create(**request)
 
-    async for chunk in stream:
+    chunk_iter = stream.__aiter__()
+    while True:
+        try:
+            if idle_timeout_sec:
+                chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=idle_timeout_sec)
+            else:
+                chunk = await chunk_iter.__anext__()
+        except StopAsyncIteration:
+            break
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Provider stream produced no chunks for {int(idle_timeout_sec)}s"
+            ) from exc
         response_id = response_id or _obj_get(chunk, "id")
         created = created or _obj_get(chunk, "created")
         model = _obj_get(chunk, "model", model)
@@ -665,6 +671,7 @@ async def _call_sdk(
     on_progress=None,
     extra_body: dict | None = None,
     max_token_param: str = "max_completion_tokens",
+    idle_timeout_sec: float | None = None,
 ):
     """Single call via openai.AsyncOpenAI SDK.
 
@@ -690,56 +697,17 @@ async def _call_sdk(
             kwargs["parallel_tool_calls"] = parallel_tool_calls
 
     if on_progress is None:
-        return await client.chat.completions.create(**kwargs)
+        call = client.chat.completions.create(**kwargs)
+        if idle_timeout_sec:
+            return await asyncio.wait_for(call, timeout=idle_timeout_sec)
+        return await call
 
-    return await _call_sdk_raw_stream({"_client": client, **kwargs}, on_progress)
+    return await _call_sdk_raw_stream(
+        {"_client": client, **kwargs}, on_progress, idle_timeout_sec=idle_timeout_sec,
+    )
 
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
-
-def _looks_like_prompt_content_filter(err: Exception) -> bool:
-    """Match only prompt-side 400 content-filter rejections.
-
-    Moonshot's OpenAI-compatible API currently reports these as a 400 with
-    ``type=content_filter``, ``param=prompt``, and/or a ``high risk`` message.
-    Keep this deliberately narrower than the generic 400 recovery path so
-    schema, authentication, and invalid-parameter failures are not rerouted.
-    """
-    parts = [str(err), type(err).__name__]
-    for attr in ("body", "code", "type", "param", "message", "status_code"):
-        value = getattr(err, attr, None)
-        if value is not None:
-            parts.append(str(value))
-    response = getattr(err, "response", None)
-    if response is not None:
-        for attr in ("status_code", "text"):
-            value = getattr(response, attr, None)
-            if value is not None:
-                parts.append(str(value))
-    text = " ".join(parts).lower()
-    is_bad_request = (
-        "400" in text
-        or "badrequest" in text
-        or "bad request" in text
-    )
-    if not is_bad_request:
-        return False
-    if "content_filter" in text or "content filter" in text:
-        return True
-    return "high risk" in text and "prompt" in text
-
-
-def _looks_like_content_filter_response(response) -> bool:
-    """Match provider safety refusals returned as a successful completion."""
-    choices = _obj_get(response, "choices", None) or []
-    if not choices:
-        return False
-    choice = choices[0]
-    if str(_obj_get(choice, "finish_reason", "") or "").lower() == "content_filter":
-        return True
-    message = _obj_get(choice, "message", None) or {}
-    return bool(_obj_get(message, "refusal", None))
-
 
 def _response_model(response, fallback: str) -> str:
     """Return the model that actually served a completion for billing/logging."""
@@ -751,7 +719,8 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                     parallel_tool_calls=True, enable_thinking=False, on_progress=None,
                     extra_body: dict | None = None,
                     sdk_max_token_param: str = "max_completion_tokens",
-                    include_parallel_tool_calls: bool = True):
+                    include_parallel_tool_calls: bool = True,
+                    idle_timeout_sec: float | None = None):
     """Dispatch to SDK or httpx using the requested canonical model."""
 
     async def _do_call(m: str):
@@ -761,7 +730,8 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                                    include_parallel_tool_calls=include_parallel_tool_calls,
                                    on_progress=on_progress,
                                    extra_body=extra_body,
-                                   max_token_param=sdk_max_token_param)
+                                   max_token_param=sdk_max_token_param,
+                                   idle_timeout_sec=idle_timeout_sec)
         return await _call_api(base_url, m, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
 
@@ -1006,13 +976,11 @@ async def chat_with_tools(
     sdk_max_token_param: str = "max_completion_tokens",
     include_parallel_tool_calls: bool = True,
     provider_label: str | None = None,
-    content_filter_fallback_client=None,
-    content_filter_fallback_model: str | None = None,
-    content_filter_fallback_label: str | None = None,
     preserve_reasoning_content: bool = False,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
     return_metadata: bool = False,
+    provider_idle_timeout_sec: float | None = None,
 ) -> str | dict:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -1022,21 +990,14 @@ async def chat_with_tools(
     API call (not the entire tool loop).  This prevents deadlocks when a tool
     handler (e.g. run_agent) recursively invokes chat_with_tools on the same
     single-slot backend.
-
-    content_filter_fallback_*: optional OpenAI-compatible provider used for
-    the same individual request when the primary returns a prompt-side 400
-    content-filter rejection. Other 400s are never routed to it.
     """
     sdk_mode = client is not None
-    primary_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
-    active_usage_label = primary_usage_label
+    active_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
     active_model = model
-    content_filter_fallback_active = False
 
     # Wrap _api_call with per-call semaphore so the lock is held only during
     # the HTTP POST, not during tool execution between rounds.
     async def _guarded_api_call(*a, **kw):
-        nonlocal content_filter_fallback_active, active_usage_label, active_model
         if max_input_tokens is not None and len(a) > 4:
             request_args = list(a)
             request_messages = list(request_args[4])
@@ -1058,76 +1019,21 @@ async def chat_with_tools(
                 )
             request_args[4] = request_messages
             a = tuple(request_args)
-        async def _call_primary():
+        kw.setdefault("idle_timeout_sec", provider_idle_timeout_sec)
+
+        async def _do_call():
+            # Semaphore is acquired per attempt so it isn't held across
+            # backoff sleeps.
             if api_semaphore is not None:
                 async with api_semaphore:
                     return await _api_call(*a, **kw)
             return await _api_call(*a, **kw)
 
-        async def _call_content_filter_fallback():
-            fallback_args = list(a)
-            fallback_args[0] = True
-            fallback_args[1] = content_filter_fallback_client
-            fallback_args[2] = None
-            fallback_args[3] = content_filter_fallback_model
-            fallback_kw = dict(kw)
-            # Do not leak provider-specific request extensions (Kimi's
-            # reasoning_effort) into the DeepSeek-compatible retry.
-            fallback_kw["extra_body"] = None
-            fallback_kw["sdk_max_token_param"] = "max_tokens"
-            fallback_kw["include_parallel_tool_calls"] = True
-            if api_semaphore is not None:
-                async with api_semaphore:
-                    return await _api_call(*fallback_args, **fallback_kw)
-            return await _api_call(*fallback_args, **fallback_kw)
-
-        # Once a prompt has tripped the provider filter, every later request
-        # in this same tool loop contains that context too. Stay on the
-        # fallback so an assistant tool call produced by DeepSeek is replayed
-        # to the same provider and no provider-specific reasoning protocol is
-        # mixed mid-turn.
-        if content_filter_fallback_active:
-            return await _call_content_filter_fallback()
-
-        try:
-            response = await _call_primary()
-        except Exception as err:
-            if not (
-                content_filter_fallback_client is not None
-                and content_filter_fallback_model
-                and _looks_like_prompt_content_filter(err)
-            ):
-                raise
-
-            primary_label = provider_label or model
-            fallback_label = content_filter_fallback_label or content_filter_fallback_model
-            logger.warning(
-                "Prompt content filter from %s model=%s (%s: %s); "
-                "retrying same request with %s model=%s",
-                primary_label, model, type(err).__name__, err,
-                fallback_label, content_filter_fallback_model,
-            )
-            content_filter_fallback_active = True
-            active_usage_label = fallback_label
-            active_model = content_filter_fallback_model
-            return await _call_content_filter_fallback()
-
-        if not (
-            content_filter_fallback_client is not None
-            and content_filter_fallback_model
-            and _looks_like_content_filter_response(response)
-        ):
-            return response
-
-        fallback_label = content_filter_fallback_label or content_filter_fallback_model
-        logger.warning(
-            "Safety refusal response from %s model=%s; retrying same request with %s model=%s",
-            primary_usage_label, model, fallback_label, content_filter_fallback_model,
+        return await call_with_transient_retry(
+            _do_call,
+            label=active_usage_label,
+            on_progress=on_progress,
         )
-        content_filter_fallback_active = True
-        active_usage_label = fallback_label
-        active_model = content_filter_fallback_model
-        return await _call_content_filter_fallback()
 
     budget_usd = validate_budget(budget_usd)
 

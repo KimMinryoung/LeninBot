@@ -261,9 +261,16 @@ class TestBudgetTrackerUpdate(unittest.TestCase):
 
 
 class TestEstimateTokens(unittest.TestCase):
-    def test_three_chars_per_token(self):
-        self.assertEqual(estimate_tokens("x" * 30), 10)
+    def test_cjk_counts_one_per_char(self):
+        self.assertEqual(estimate_tokens("한" * 40), 40)
+
+    def test_ascii_counts_four_chars_per_token(self):
+        self.assertEqual(estimate_tokens("x" * 40), 10)
         self.assertEqual(estimate_tokens(""), 0)
+
+    def test_shared_with_openai_loop(self):
+        from tool_loop_common import estimate_text_tokens
+        self.assertIs(estimate_tokens, estimate_text_tokens)
 
 
 if __name__ == "__main__":

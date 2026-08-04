@@ -383,14 +383,14 @@ async def _run_llm(
         )
     elif provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        from llm.provider_failover import resolve_kimi_fallback_options
+        from llm.provider_registry import kimi_openai_tool_options
         return await openai_chat(
             history,
             client=_kimi_client,
             model=profile.model_id,
             **loop_kwargs,
             provider_label="kimi:a2a",
-            **await resolve_kimi_fallback_options("chat", _deepseek_client),
+            **kimi_openai_tool_options(),
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
         from claude_loop import chat_with_tools

@@ -129,16 +129,13 @@ def anthropic_pricing_table(today: date | None = None) -> dict[str, dict[str, fl
     }
 
 
-def kimi_openai_tool_options(
-    *,
-    fallback_client=None,
-    fallback_model: str | None = None,
-) -> dict:
-    """Return the shared Kimi K3 OpenAI-compatible tool-loop contract."""
+def kimi_openai_tool_options() -> dict:
+    """Return the shared Kimi K3 OpenAI-compatible tool-loop contract.
+
+    (콘텐츠필터 시 DeepSeek으로 요청 단위 스위칭하던 fallback 계약은
+    2026-08-04 제거 — Kimi 미사용 상태에서 루프 복잡도만 키우고 있었다.)
+    """
     return {
-        "content_filter_fallback_client": fallback_client,
-        "content_filter_fallback_model": fallback_model,
-        "content_filter_fallback_label": "deepseek",
         "extra_body": {"reasoning_effort": "max"},
         "sdk_max_token_param": "max_tokens",
         "include_parallel_tool_calls": False,
