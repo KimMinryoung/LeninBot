@@ -175,6 +175,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 ## Design Notes
 
 - Telegram is the only full orchestrator path. Web chat has a narrower tool set and separate webchat provider settings.
+- **Agent tool loop (2026-08-04)**: the round-loop/forced-final control flow shared by every provider lives once in `agent_loop.run_tool_loop`; `claude_loop.py` (Anthropic protocol: Claude, DeepSeek) and `openai_tool_loop.py` (OpenAI protocol: GPT, Kimi, local) are protocol adapters with unchanged public `chat_with_tools` signatures. Loop control-flow fixes go in the engine once — never mirrored across the two adapter files. Contract regressions are caught by `tests/test_agent_loop_engine.py` + the two `test_*_loop_rounds.py` suites; details in `llm_provider_architecture.md`.
 - `config.json` stores mutable runtime config. `config/agent_runtime.json` overlays per-agent execution settings.
 - Prompt text under `identity/agent_prompts/` hot-reloads on the next prompt render. Python code, tool definitions, and systemd credentials require service restart.
 - Public web chat provider is pinned independently with `webchat_provider` and `webchat_model`; Telegram `/config` changes do not necessarily affect API until `leninbot-api` restarts.

@@ -16,6 +16,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/security_gateway.md` — 툴 보안 게이트웨이 — execute_tool 단일 seam, 통합 정책/권한 통제, tool_audit_log 감사 로깅, shadow→enforce 롤아웃, 운영 CLI
 - `dev_docs/agent_improvement_roadmap.md` — 에이전트 지능(CLAW/Reflexion/Plan-and-Execute) + 메모리 개선 단계별 로드맵
 - `dev_docs/llm_call_registry.md` — LLM 원샷 호출 통합 레지스트리 (config/llm_call_sites.json, 핫리로드, 운영 CLI)
+- `dev_docs/llm_provider_architecture.md` — 프로바이더 라우팅, agent_loop 공유 엔진 + 프로토콜 어댑터 구조, 모델/가격/추론 정책
 - `dev_docs/standby_operations.md` — 스트리밍 스탠바이(hel1) 활용법·승격 런북·재시드 절차
 - `dev_docs/monitoring.md` — 감시·알림 체계 (VM 밖 워치독 Worker, 복제 점검, 알림 채널, 사각지대)
 
@@ -37,6 +38,22 @@ Touch only what you must. Clean up only your own mess.
 Define success criteria. Loop until verified.
 Transform tasks into verifiable goals.
 
+
+## Agent Loop Architecture (2026-08-04)
+
+에이전트 툴-사용 루프는 3층 구조다:
+
+```
+agent_loop.run_tool_loop          ← 제어 흐름 (라운드 루프, 예산/경고, safety net,
+  │                                  terminal tool, forced-final, followup-skip, continuation)
+  ├─ claude_loop._ClaudeProtocolAdapter    ← Anthropic 프로토콜 (Claude·DeepSeek·Kimi Writer)
+  └─ openai_tool_loop._OpenAIProtocolAdapter ← OpenAI 프로토콜 (GPT·Kimi·로컬 llama-server)
+```
+
+- **제어 흐름 수정은 `agent_loop.py` 한 곳에만.** 두 어댑터 파일에 루프 로직을 미러링하지 말 것 — 그 미러링을 없애려고 통합한 것이다.
+- 프로바이더 메시지 형식·스트리밍·과금·프로토콜 복구는 해당 어댑터 파일에.
+- 공개 진입점은 여전히 `claude_loop.chat_with_tools` / `openai_tool_loop.chat_with_tools` (시그니처 불변, 호출부는 이 둘만 안다).
+- 루프를 건드리면 `tests/test_agent_loop_engine.py` + `test_*_loop_rounds.py`가 계약 회귀를 잡는다. 상세: `dev_docs/llm_provider_architecture.md`.
 
 ## Environment
 - Always activate the virtual environment before running Python commands.
