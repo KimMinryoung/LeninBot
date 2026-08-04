@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -356,7 +357,8 @@ async def _exec_moltbook(
     env = {**os.environ, "PYTHONPATH": os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")}
 
     try:
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             cmd,
             capture_output=True,
             text=True,

@@ -306,7 +306,7 @@ async def _exec_search_files(
             search_path,
         ]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
             return ToolFailure("Error: search timed out")
         if proc.returncode not in (0, 1):
@@ -344,7 +344,7 @@ async def _exec_search_files(
     cmd += ["-e", pattern, search_path]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         return ToolFailure("Error: search timed out")
     if proc.returncode == 1:
