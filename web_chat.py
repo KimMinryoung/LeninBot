@@ -1648,7 +1648,7 @@ async def handle_web_chat(
                 if not _kimi_client:
                     raise RuntimeError("MOONSHOT_API_KEY is not configured for webchat_provider=kimi")
                 from openai_tool_loop import chat_with_tools as openai_chat
-                from llm.provider_failover import resolve_kimi_fallback_options
+                from llm.provider_registry import kimi_openai_tool_options
                 result = await openai_chat(
                     history,
                     client=_kimi_client,
@@ -1656,7 +1656,7 @@ async def handle_web_chat(
                     **loop_kwargs,
                     provider_label=f"{provider}:web",
                     return_metadata=True,
-                    **await resolve_kimi_fallback_options("webchat", _deepseek_client),
+                    **kimi_openai_tool_options(),
                 )
             elif provider == "deepseek":
                 if not _deepseek_anthropic_client:

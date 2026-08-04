@@ -26,27 +26,6 @@ from tool_loop_common import emit_progress, is_transient_provider_error
 logger = logging.getLogger(__name__)
 
 
-async def resolve_kimi_fallback_options(runtime_kind: str, deepseek_client) -> dict:
-    """Kimi 콘텐츠필터 폴백용 kimi_openai_tool_options kwargs를 해상.
-
-    폴백 모델은 DeepSeek high 티어. deepseek_client가 없으면 폴백 없이
-    Kimi 단독 옵션을 돌려준다. bot/web_chat/a2a에 복붙돼 있던 4줄 통합.
-    """
-    from runtime_profile import resolve_runtime_profile
-    from llm.provider_registry import kimi_openai_tool_options
-
-    fallback_model = None
-    if deepseek_client:
-        profile = await resolve_runtime_profile(
-            runtime_kind, provider_override="deepseek", tier_override="high",
-        )
-        fallback_model = profile.model_id
-    return kimi_openai_tool_options(
-        fallback_client=deepseek_client,
-        fallback_model=fallback_model,
-    )
-
-
 async def resolve_deepseek_failover_model(runtime_kind: str, openai_client) -> str | None:
     """DeepSeek 장애 시 턴을 다시 돌릴 2차 모델 (OpenAI medium 티어 = Terra).
 

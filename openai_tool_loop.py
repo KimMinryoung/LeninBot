@@ -697,50 +697,6 @@ async def _call_sdk(
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
 
-def _looks_like_prompt_content_filter(err: Exception) -> bool:
-    """Match only prompt-side 400 content-filter rejections.
-
-    Moonshot's OpenAI-compatible API currently reports these as a 400 with
-    ``type=content_filter``, ``param=prompt``, and/or a ``high risk`` message.
-    Keep this deliberately narrower than the generic 400 recovery path so
-    schema, authentication, and invalid-parameter failures are not rerouted.
-    """
-    parts = [str(err), type(err).__name__]
-    for attr in ("body", "code", "type", "param", "message", "status_code"):
-        value = getattr(err, attr, None)
-        if value is not None:
-            parts.append(str(value))
-    response = getattr(err, "response", None)
-    if response is not None:
-        for attr in ("status_code", "text"):
-            value = getattr(response, attr, None)
-            if value is not None:
-                parts.append(str(value))
-    text = " ".join(parts).lower()
-    is_bad_request = (
-        "400" in text
-        or "badrequest" in text
-        or "bad request" in text
-    )
-    if not is_bad_request:
-        return False
-    if "content_filter" in text or "content filter" in text:
-        return True
-    return "high risk" in text and "prompt" in text
-
-
-def _looks_like_content_filter_response(response) -> bool:
-    """Match provider safety refusals returned as a successful completion."""
-    choices = _obj_get(response, "choices", None) or []
-    if not choices:
-        return False
-    choice = choices[0]
-    if str(_obj_get(choice, "finish_reason", "") or "").lower() == "content_filter":
-        return True
-    message = _obj_get(choice, "message", None) or {}
-    return bool(_obj_get(message, "refusal", None))
-
-
 def _response_model(response, fallback: str) -> str:
     """Return the model that actually served a completion for billing/logging."""
     value = _obj_get(response, "model", None)
@@ -1006,9 +962,6 @@ async def chat_with_tools(
     sdk_max_token_param: str = "max_completion_tokens",
     include_parallel_tool_calls: bool = True,
     provider_label: str | None = None,
-    content_filter_fallback_client=None,
-    content_filter_fallback_model: str | None = None,
-    content_filter_fallback_label: str | None = None,
     preserve_reasoning_content: bool = False,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
@@ -1022,21 +975,14 @@ async def chat_with_tools(
     API call (not the entire tool loop).  This prevents deadlocks when a tool
     handler (e.g. run_agent) recursively invokes chat_with_tools on the same
     single-slot backend.
-
-    content_filter_fallback_*: optional OpenAI-compatible provider used for
-    the same individual request when the primary returns a prompt-side 400
-    content-filter rejection. Other 400s are never routed to it.
     """
     sdk_mode = client is not None
-    primary_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
-    active_usage_label = primary_usage_label
+    active_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
     active_model = model
-    content_filter_fallback_active = False
 
     # Wrap _api_call with per-call semaphore so the lock is held only during
     # the HTTP POST, not during tool execution between rounds.
     async def _guarded_api_call(*a, **kw):
-        nonlocal content_filter_fallback_active, active_usage_label, active_model
         if max_input_tokens is not None and len(a) > 4:
             request_args = list(a)
             request_messages = list(request_args[4])
@@ -1058,76 +1004,10 @@ async def chat_with_tools(
                 )
             request_args[4] = request_messages
             a = tuple(request_args)
-        async def _call_primary():
-            if api_semaphore is not None:
-                async with api_semaphore:
-                    return await _api_call(*a, **kw)
-            return await _api_call(*a, **kw)
-
-        async def _call_content_filter_fallback():
-            fallback_args = list(a)
-            fallback_args[0] = True
-            fallback_args[1] = content_filter_fallback_client
-            fallback_args[2] = None
-            fallback_args[3] = content_filter_fallback_model
-            fallback_kw = dict(kw)
-            # Do not leak provider-specific request extensions (Kimi's
-            # reasoning_effort) into the DeepSeek-compatible retry.
-            fallback_kw["extra_body"] = None
-            fallback_kw["sdk_max_token_param"] = "max_tokens"
-            fallback_kw["include_parallel_tool_calls"] = True
-            if api_semaphore is not None:
-                async with api_semaphore:
-                    return await _api_call(*fallback_args, **fallback_kw)
-            return await _api_call(*fallback_args, **fallback_kw)
-
-        # Once a prompt has tripped the provider filter, every later request
-        # in this same tool loop contains that context too. Stay on the
-        # fallback so an assistant tool call produced by DeepSeek is replayed
-        # to the same provider and no provider-specific reasoning protocol is
-        # mixed mid-turn.
-        if content_filter_fallback_active:
-            return await _call_content_filter_fallback()
-
-        try:
-            response = await _call_primary()
-        except Exception as err:
-            if not (
-                content_filter_fallback_client is not None
-                and content_filter_fallback_model
-                and _looks_like_prompt_content_filter(err)
-            ):
-                raise
-
-            primary_label = provider_label or model
-            fallback_label = content_filter_fallback_label or content_filter_fallback_model
-            logger.warning(
-                "Prompt content filter from %s model=%s (%s: %s); "
-                "retrying same request with %s model=%s",
-                primary_label, model, type(err).__name__, err,
-                fallback_label, content_filter_fallback_model,
-            )
-            content_filter_fallback_active = True
-            active_usage_label = fallback_label
-            active_model = content_filter_fallback_model
-            return await _call_content_filter_fallback()
-
-        if not (
-            content_filter_fallback_client is not None
-            and content_filter_fallback_model
-            and _looks_like_content_filter_response(response)
-        ):
-            return response
-
-        fallback_label = content_filter_fallback_label or content_filter_fallback_model
-        logger.warning(
-            "Safety refusal response from %s model=%s; retrying same request with %s model=%s",
-            primary_usage_label, model, fallback_label, content_filter_fallback_model,
-        )
-        content_filter_fallback_active = True
-        active_usage_label = fallback_label
-        active_model = content_filter_fallback_model
-        return await _call_content_filter_fallback()
+        if api_semaphore is not None:
+            async with api_semaphore:
+                return await _api_call(*a, **kw)
+        return await _api_call(*a, **kw)
 
     budget_usd = validate_budget(budget_usd)
 
