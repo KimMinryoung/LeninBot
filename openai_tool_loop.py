@@ -548,13 +548,19 @@ def _to_tool_call_namespace(tc: dict) -> SimpleNamespace:
     )
 
 
-async def _call_sdk_raw_stream(kwargs: dict, on_progress) -> SimpleNamespace:
+async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: float | None = None) -> SimpleNamespace:
     """Stream Chat Completions chunks without the SDK auto-parse helper.
 
     ``client.chat.completions.stream()`` rejects non-strict tools before the
     request is sent. The lower-level ``create(stream=True)`` path yields raw
     chunks and lets us accumulate text/tool deltas ourselves, so permissive
     LeninBot tool schemas can still stream final answer text.
+
+    idle_timeout_sec: when set, genuine chunk silence for that long raises
+    TimeoutError (transient → the shared retry re-runs the call). Mirrors
+    claude_loop._drain_stream_with_idle_guard, added after the 2026-07-07
+    writer-critic stream stalls; without it a stalled stream hangs until the
+    SDK's own multi-minute read timeout.
     """
     client = kwargs.pop("_client")
     request = dict(kwargs)
@@ -580,7 +586,19 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress) -> SimpleNamespace:
         request.pop("stream_options", None)
         stream = await client.chat.completions.create(**request)
 
-    async for chunk in stream:
+    chunk_iter = stream.__aiter__()
+    while True:
+        try:
+            if idle_timeout_sec:
+                chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=idle_timeout_sec)
+            else:
+                chunk = await chunk_iter.__anext__()
+        except StopAsyncIteration:
+            break
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Provider stream produced no chunks for {int(idle_timeout_sec)}s"
+            ) from exc
         response_id = response_id or _obj_get(chunk, "id")
         created = created or _obj_get(chunk, "created")
         model = _obj_get(chunk, "model", model)
@@ -666,6 +684,7 @@ async def _call_sdk(
     on_progress=None,
     extra_body: dict | None = None,
     max_token_param: str = "max_completion_tokens",
+    idle_timeout_sec: float | None = None,
 ):
     """Single call via openai.AsyncOpenAI SDK.
 
@@ -691,9 +710,14 @@ async def _call_sdk(
             kwargs["parallel_tool_calls"] = parallel_tool_calls
 
     if on_progress is None:
-        return await client.chat.completions.create(**kwargs)
+        call = client.chat.completions.create(**kwargs)
+        if idle_timeout_sec:
+            return await asyncio.wait_for(call, timeout=idle_timeout_sec)
+        return await call
 
-    return await _call_sdk_raw_stream({"_client": client, **kwargs}, on_progress)
+    return await _call_sdk_raw_stream(
+        {"_client": client, **kwargs}, on_progress, idle_timeout_sec=idle_timeout_sec,
+    )
 
 
 # ── Helper: unified API call with mode dispatch ──────────────────────
@@ -708,7 +732,8 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                     parallel_tool_calls=True, enable_thinking=False, on_progress=None,
                     extra_body: dict | None = None,
                     sdk_max_token_param: str = "max_completion_tokens",
-                    include_parallel_tool_calls: bool = True):
+                    include_parallel_tool_calls: bool = True,
+                    idle_timeout_sec: float | None = None):
     """Dispatch to SDK or httpx using the requested canonical model."""
 
     async def _do_call(m: str):
@@ -718,7 +743,8 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                                    include_parallel_tool_calls=include_parallel_tool_calls,
                                    on_progress=on_progress,
                                    extra_body=extra_body,
-                                   max_token_param=sdk_max_token_param)
+                                   max_token_param=sdk_max_token_param,
+                                   idle_timeout_sec=idle_timeout_sec)
         return await _call_api(base_url, m, messages, tools, max_tokens,
                                enable_thinking=enable_thinking)
 
@@ -967,6 +993,7 @@ async def chat_with_tools(
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
     return_metadata: bool = False,
+    provider_idle_timeout_sec: float | None = None,
 ) -> str | dict:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
@@ -1005,6 +1032,7 @@ async def chat_with_tools(
                 )
             request_args[4] = request_messages
             a = tuple(request_args)
+        kw.setdefault("idle_timeout_sec", provider_idle_timeout_sec)
 
         async def _do_call():
             # Semaphore is acquired per attempt so it isn't held across

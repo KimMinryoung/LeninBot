@@ -253,6 +253,64 @@ class TestProtocolErrorRecovery(unittest.TestCase):
                             for m in retry_msgs))
 
 
+class TestStreamIdleGuard(unittest.TestCase):
+    class _HangingStreamClient:
+        """create(stream=True) returns an async iterator that never yields."""
+
+        def __init__(self):
+            outer = self
+
+            class _Completions:
+                async def create(self, **kwargs):
+                    class _Stream:
+                        def __aiter__(self):
+                            return self
+
+                        async def __anext__(self):
+                            await asyncio.sleep(3600)
+
+                    return _Stream()
+
+            self.chat = SimpleNamespace(completions=_Completions())
+
+    def test_stalled_stream_times_out(self):
+        async def _run():
+            await openai_tool_loop._call_sdk_raw_stream(
+                {"_client": self._HangingStreamClient(), "model": "m", "messages": []},
+                on_progress=None,
+                idle_timeout_sec=0.05,
+            )
+
+        with self.assertRaises(TimeoutError) as ctx:
+            asyncio.run(_run())
+        self.assertIn("no chunks", str(ctx.exception))
+
+    def test_no_guard_by_default_still_completes(self):
+        class _EmptyStreamClient:
+            def __init__(self):
+                class _Completions:
+                    async def create(self, **kwargs):
+                        class _Stream:
+                            def __aiter__(self):
+                                return self
+
+                            async def __anext__(self):
+                                raise StopAsyncIteration
+
+                        return _Stream()
+
+                self.chat = SimpleNamespace(completions=_Completions())
+
+        async def _run():
+            return await openai_tool_loop._call_sdk_raw_stream(
+                {"_client": _EmptyStreamClient(), "model": "m", "messages": []},
+                on_progress=None,
+            )
+
+        result = asyncio.run(_run())
+        self.assertEqual(result.choices[0].message.content, "")
+
+
 class TestRefusal(unittest.TestCase):
     def test_refusal_surfaces_with_reason(self):
         client = FakeSDKClient([_resp("", refusal="정책 위반")])
