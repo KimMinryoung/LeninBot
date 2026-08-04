@@ -5,7 +5,9 @@ Two modes:
   2. **httpx mode** (base_url=...): llama-server, vLLM 등 로컬 LLM. 비용 무시.
 
 claude_loop.py와 동일한 인터페이스를 제공하되, OpenAI 호환 API
-(/v1/chat/completions with function calling)를 사용한다.
+(/v1/chat/completions with function calling)를 사용한다. 라운드/forced-final
+제어 흐름은 agent_loop.run_tool_loop 공유 엔진이 소유하고, 이 모듈은 OpenAI
+프로토콜 메커니즘(_OpenAIProtocolAdapter)을 제공한다.
 
 Error recovery strategy (ported from claude_loop.py):
   - Pre-API validation: check message integrity each round
@@ -23,12 +25,10 @@ import uuid
 import httpx
 from types import SimpleNamespace
 
+from agent_loop import FinalTurn, LoopEarlyReturn, Turn, run_tool_loop
 from tool_loop_common import (
-    validate_budget, build_budget_tracker, emit_progress,
-    update_redis_state, save_redis_progress,
-    build_limit_message, build_budget_warning, build_round_warning,
+    build_budget_tracker, emit_progress,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
-    check_cancelled, TaskCancelledError,
     call_with_transient_retry,
     estimate_text_tokens,
     is_transient_provider_error,
@@ -947,6 +947,617 @@ def _checkpoint_tool_results_for_replay(
 
 # ── Tool-use loop ────────────────────────────────────────────────────
 
+class _OpenAIProtocolAdapter:
+    """OpenAI-protocol mechanics for agent_loop.run_tool_loop.
+
+    Owns message shapes (role:"tool" results, tool_calls arrays), the two
+    transport modes (AsyncOpenAI SDK vs raw httpx for local llama-server),
+    context trimming, the input-token ceiling with replay checkpoints,
+    <think>/<tool_call> rescue parsing, refusal handling, and the tool-history
+    protocol recovery (strip-and-retry). Control flow lives in
+    agent_loop.run_tool_loop.
+    """
+
+    def __init__(
+        self, *, client, base_url, model, tools, tool_handlers, system_prompt,
+        max_tokens, context_limit, max_input_tokens, recover_input_via_tools,
+        enable_thinking, api_semaphore, extra_body, sdk_max_token_param,
+        include_parallel_tool_calls, provider_label, preserve_reasoning_content,
+        return_metadata, on_progress, log_event, provider_idle_timeout_sec,
+    ):
+        self.client = client
+        self.base_url = base_url
+        self.model = model
+        self.sdk_mode = client is not None
+        self.tool_handlers = tool_handlers
+        self.system_prompt = system_prompt
+        self.max_tokens = max_tokens
+        self.context_limit = context_limit
+        self.max_input_tokens = max_input_tokens
+        self.recover_input_via_tools = recover_input_via_tools
+        self.enable_thinking = enable_thinking
+        self.api_semaphore = api_semaphore
+        self.extra_body = extra_body
+        self.sdk_max_token_param = sdk_max_token_param
+        self.include_parallel_tool_calls = include_parallel_tool_calls
+        self.preserve_reasoning_content = preserve_reasoning_content
+        self.return_metadata = return_metadata
+        self.on_progress = on_progress
+        self.log_event = log_event
+        self.provider_idle_timeout_sec = provider_idle_timeout_sec
+        self.active_usage_label = provider_label or (
+            "openai-sdk" if self.sdk_mode else f"httpx:{base_url}"
+        )
+        self.openai_tools = _convert_tools(compact_tool_definitions(tools))
+        self.side_effect_work_details: list[str] = []
+        self.tool_execution_cache: dict[str, tuple[str, bool]] = {}
+        self.state = None
+
+    def bind(self, state):
+        self.state = state
+
+    def normalize(self, messages):
+        # Root-cause fix: start from text-only canonical history. Tool
+        # protocol blocks are generated only within this call.
+        working = _normalize_messages(messages)
+        working = _ensure_system_first(working, self.system_prompt)
+        # Legacy local-only trimming remains for unmanaged calls. Gateway-
+        # managed agent calls use replay checkpoints so source text is never
+        # silently lost.
+        if self.context_limit > 0 and self.max_input_tokens is None:
+            working = _truncate_to_context(working, self.context_limit, self.max_tokens)
+        return working
+
+    # ── API calls ────────────────────────────────────────────────────
+
+    async def _guarded(self, messages, tools, max_tokens, *, parallel_tool_calls=True):
+        """One guarded API call: input ceiling, per-attempt semaphore, retry."""
+        request_messages = list(messages)
+        if self.max_input_tokens is not None:
+            schema_tokens = _estimate_tokens([{
+                "role": "user",
+                "content": json.dumps(tools or [], ensure_ascii=False),
+            }])
+            if self.recover_input_via_tools:
+                request_messages, estimated_input = _checkpoint_tool_results_for_replay(
+                    request_messages, int(self.max_input_tokens), schema_tokens,
+                )
+            else:
+                estimated_input = _estimate_tokens(request_messages) + schema_tokens
+            if estimated_input > int(self.max_input_tokens):
+                raise RuntimeError(
+                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
+                    f"{int(self.max_input_tokens)}; persist a durable summary and use anchored tool reads."
+                )
+
+        # Streaming is enabled in SDK mode when the caller provides
+        # on_progress — text deltas are pushed through the callback so the UI
+        # can render the answer token-by-token. httpx path stays non-streaming.
+        stream_cb = self.on_progress if self.sdk_mode else None
+
+        async def _do_call():
+            # Semaphore is acquired per attempt so it isn't held across
+            # backoff sleeps, and only around the HTTP POST — not tool
+            # execution between rounds (prevents deadlocks when a tool
+            # handler recursively invokes chat_with_tools on the same
+            # single-slot backend).
+            if self.api_semaphore is not None:
+                async with self.api_semaphore:
+                    return await self._api_call_once(
+                        request_messages, tools, max_tokens, parallel_tool_calls, stream_cb,
+                    )
+            return await self._api_call_once(
+                request_messages, tools, max_tokens, parallel_tool_calls, stream_cb,
+            )
+
+        return await call_with_transient_retry(
+            _do_call,
+            label=self.active_usage_label,
+            on_progress=self.on_progress,
+        )
+
+    async def _api_call_once(self, messages, tools, max_tokens, parallel_tool_calls, stream_cb):
+        return await _api_call(
+            self.sdk_mode, self.client, self.base_url, self.model, messages,
+            tools, max_tokens,
+            parallel_tool_calls=parallel_tool_calls,
+            enable_thinking=self.enable_thinking,
+            on_progress=stream_cb,
+            extra_body=self.extra_body,
+            sdk_max_token_param=self.sdk_max_token_param,
+            include_parallel_tool_calls=self.include_parallel_tool_calls,
+            idle_timeout_sec=self.provider_idle_timeout_sec,
+        )
+
+    async def call_model(self, msgs, round_num):
+        # ── Context window management ──
+        # Tool-heavy research tasks can grow past provider context after many
+        # rounds. Re-check before every API call, not just at startup.
+        if self.context_limit > 0 and self.max_input_tokens is None:
+            msgs[:] = _truncate_to_context(msgs, self.context_limit, self.max_tokens)
+
+        if self.max_input_tokens is not None:
+            tool_schema_tokens = _estimate_tokens([{
+                "role": "user",
+                "content": json.dumps(self.openai_tools, ensure_ascii=False),
+            }])
+            if self.recover_input_via_tools:
+                checkpointed, estimated_input = _checkpoint_tool_results_for_replay(
+                    msgs, int(self.max_input_tokens), tool_schema_tokens,
+                )
+                msgs[:] = checkpointed
+            else:
+                estimated_input = _estimate_tokens(msgs) + tool_schema_tokens
+            if estimated_input > int(self.max_input_tokens):
+                raise RuntimeError(
+                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
+                    f"{int(self.max_input_tokens)}; persist a durable summary and use anchored tool reads."
+                )
+
+        # ── Pre-API validation: check tool result completeness ──
+        missing_ids = _validate_tool_results(msgs)
+        if missing_ids:
+            logger.error("Pre-API check (round %d): %d missing tool results: %s",
+                         round_num, len(missing_ids), missing_ids)
+            # Inject synthetic error results for missing IDs
+            for mid in missing_ids:
+                msgs.append({
+                    "role": "tool",
+                    "tool_call_id": mid,
+                    "content": "[tool result unavailable — auto-injected]",
+                })
+            still_missing = _validate_tool_results(msgs)
+            if still_missing:
+                logger.error("Still missing after injection: %s — stripping tool protocol",
+                             still_missing)
+                msgs[:] = _ensure_system_first(_strip_tool_protocol(msgs), self.system_prompt)
+
+        # ── API call with auto-recovery ──
+        try:
+            return await self._guarded(msgs, self.openai_tools, self.max_tokens)
+        except Exception as api_err:
+            _dump_messages_for_debug(msgs, round_num, api_err)
+
+            # Recover only a positively identified tool-history validation
+            # error. Generic 400/auth/schema failures are surfaced unchanged.
+            if _is_tool_protocol_error(api_err):
+                if self.side_effect_work_details:
+                    raise LoopEarlyReturn(
+                        _side_effect_fallback_report(api_err, self.side_effect_work_details),
+                        finish_reason="tool_protocol_error_after_side_effects",
+                        truncated=True,
+                        limit_reason="tool protocol error",
+                        was_still_working=True,
+                        interrupted=True,
+                    )
+                logger.warning("Auto-recovery (round %d): stripping tool protocol and retrying",
+                               round_num)
+                stripped = _ensure_system_first(_strip_tool_protocol(msgs), self.system_prompt)
+                try:
+                    response = await self._guarded(
+                        stripped, self.openai_tools, self.max_tokens,
+                        parallel_tool_calls=False,
+                    )
+                    msgs[:] = stripped
+                    logger.info("Auto-recovery succeeded at round %d", round_num)
+                    return response
+                except Exception as retry_err:
+                    logger.error("Auto-recovery retry also failed: %s", retry_err)
+                    # Force final response path with no tools
+                    msgs[:] = stripped
+                    return None
+            if _is_transient_transport_error(api_err):
+                if self.side_effect_work_details:
+                    raise LoopEarlyReturn(
+                        _side_effect_fallback_report(api_err, self.side_effect_work_details),
+                        finish_reason="api_transport_error_after_side_effects",
+                        truncated=True,
+                        limit_reason="API transport error",
+                        was_still_working=True,
+                        interrupted=True,
+                    )
+                logger.warning(
+                    "Transient API transport error at round %d — retrying the unchanged request once",
+                    round_num,
+                )
+                try:
+                    response = await self._guarded(
+                        msgs, self.openai_tools, self.max_tokens,
+                        parallel_tool_calls=False,
+                    )
+                    logger.info("Transient API recovery succeeded at round %d", round_num)
+                    return response
+                except Exception as retry_err:
+                    logger.error("Transient API retry also failed: %s", retry_err)
+                    if self.log_event:
+                        self.log_event("error", "openai_loop", f"API call failed: {api_err}")
+                    raise retry_err
+            if self.log_event:
+                self.log_event("error", "openai_loop", f"API call failed: {api_err}")
+            raise
+
+    # ── Cost tracking ────────────────────────────────────────────────
+
+    def _log_sdk_usage(self, label, usage, call_cost, current_total, billed_model):
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+        miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details and not cached_tokens:
+            cached_tokens = getattr(details, "cached_tokens", 0) or 0
+        non_cached = miss_tokens or (prompt_tokens - cached_tokens)
+        logger.info(
+            "%s usage [%s model=%s]: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
+            label, self.active_usage_label, billed_model, prompt_tokens, cached_tokens,
+            non_cached, completion_tokens, call_cost, current_total, self.state.budget_usd,
+        )
+
+    def track_cost(self, response, label):
+        # OpenAI caching is automatic (no cache_control markers) — we just
+        # need a stable prefix. Log cached vs non-cached input at INFO so we
+        # can see in journald whether the prefix is actually hitting.
+        if not self.sdk_mode:
+            return False
+        usage = _obj_get(response, "usage", None)
+        if not usage:
+            return False
+        billed_model = _response_model(response, self.model)
+        call_cost = _calculate_cost(usage, billed_model)
+        self.state.add_cost(call_cost)
+        self._log_sdk_usage(label, usage, call_cost, self.state.total_cost, billed_model)
+        return True
+
+    # ── Round parsing / message building ─────────────────────────────
+
+    def parse_turn(self, response, round_num):
+        finish_reason, content_text, tool_calls, message_obj, _usage = _extract_response(
+            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+        )
+
+        # ── Handle refusal (OpenAI safety filter) ──
+        refusal = None
+        if self.sdk_mode and hasattr(message_obj, "refusal"):
+            refusal = message_obj.refusal
+        elif not self.sdk_mode and isinstance(message_obj, dict):
+            refusal = message_obj.get("refusal")
+        if refusal:
+            logger.warning("Model refused request at round %d: %s", round_num, refusal)
+            raise LoopEarlyReturn(
+                f"⚠️ 모델이 요청을 거부했습니다: {refusal}",
+                finish_reason="refusal",
+            )
+
+        if finish_reason != "tool_calls" or not tool_calls:
+            if finish_reason == "content_filter":
+                logger.warning("Response blocked by content filter at round %d", round_num)
+            return Turn(
+                is_tool_round=False,
+                text_parts=[content_text],
+                truncated_by_length=(finish_reason == "length"),
+                finish_reason=finish_reason,
+                raw=response,
+                extra={"message_obj": message_obj},
+            )
+
+        # ── Build normalized tool_calls list (with malformed block skipping) ──
+        tc_list = _build_tc_list(self.sdk_mode, tool_calls)
+        if not tc_list:
+            # All tool calls were malformed — return text content if any
+            logger.warning("All tool_calls malformed at round %d — returning text", round_num)
+            raise LoopEarlyReturn(
+                content_text.strip(),
+                finish_reason="malformed_tool_calls",
+            )
+
+        batch: list[tuple[str, str, dict]] = []
+        malformed: list[tuple[str, str, str]] = []
+        for tc_item in tc_list:
+            tc_id = tc_item["id"]
+            func_name = tc_item["function"]["name"]
+            try:
+                func_args = json.loads(tc_item["function"]["arguments"])
+                if not isinstance(func_args, dict):
+                    raise TypeError("tool arguments must decode to an object")
+            except (json.JSONDecodeError, TypeError) as exc:
+                logger.warning("Malformed arguments for %s: %s",
+                               func_name, tc_item["function"]["arguments"][:200])
+                malformed.append((
+                    tc_id,
+                    func_name,
+                    f"Tool execution blocked: malformed JSON arguments ({exc})",
+                ))
+                continue
+            batch.append((tc_id, func_name, func_args))
+
+        return Turn(
+            is_tool_round=True,
+            text_parts=[content_text],
+            tool_calls=batch,
+            malformed=malformed,
+            finish_reason="tool_calls",
+            raw=response,
+            extra={"tc_list": tc_list, "message_obj": message_obj},
+        )
+
+    def append_assistant(self, msgs, turn):
+        content_text = turn.text_parts[0] if turn.text_parts else ""
+        assistant_msg = {
+            "role": "assistant",
+            "content": content_text if content_text.strip() else None,
+            "tool_calls": turn.extra["tc_list"],
+        }
+        if self.preserve_reasoning_content:
+            reasoning_content = _message_reasoning_content(turn.extra.get("message_obj"))
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+        msgs.append(assistant_msg)
+
+    async def run_batch(self, batch, round_num):
+        # Read-only batches run in parallel via execute_tools_batch. Resolved
+        # by bare name so test patches on this module's attribute keep working.
+        return await execute_tools_batch(
+            batch,
+            self.tool_handlers,
+            on_progress=self.on_progress,
+            round_num=round_num,
+            log_event=self.log_event,
+            idempotency_cache=self.tool_execution_cache,
+            tool_definitions=self.openai_tools,
+        )
+
+    def note_exec_results(self, round_num, exec_results):
+        # Side-effect tool results back the fallback report used when a later
+        # API call fails after state has already been changed.
+        for _tid, tname, tinput, result, is_error in exec_results:
+            if is_side_effect_tool(tname) and not is_error:
+                input_summary = json.dumps(tinput, ensure_ascii=False)
+                self.side_effect_work_details.append(
+                    f"  [{round_num}] {tname}({input_summary}) → {result}"
+                )
+
+    def append_tool_results(self, msgs, turn, exec_results, missing, warning_texts):
+        for tc_id, _func_name, error_result in turn.malformed:
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": error_result,
+            })
+        for tc_id, _func_name, _func_args, result, _is_error in exec_results:
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": result,
+            })
+        for tc_id, func_name in missing:
+            logger.warning("Safety net: missing result for tool_call id=%s name=%s",
+                           tc_id, func_name)
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": f"Tool execution skipped (internal error): "
+                           f"no result for {func_name}",
+            })
+        for text in warning_texts:
+            msgs.append({"role": "user", "content": text})
+        return True
+
+    async def append_length_continuation(self, msgs, turn, partial_text, next_index, max_count):
+        if not partial_text:
+            return False
+        await emit_progress(
+            self.on_progress,
+            "warning",
+            (
+                f"응답이 {self.max_tokens} 토큰 한도에서 끊겨 이어서 생성합니다 "
+                f"({next_index}/{max_count})."
+            ),
+        )
+        continuation_msg = {
+            "role": "assistant",
+            "content": partial_text,
+        }
+        if self.preserve_reasoning_content:
+            reasoning_content = _message_reasoning_content(turn.extra.get("message_obj"))
+            if reasoning_content:
+                continuation_msg["reasoning_content"] = reasoning_content
+        msgs.append(continuation_msg)
+        msgs.append({
+            "role": "user",
+            "content": (
+                "Continue exactly from where the previous answer stopped. "
+                "Do not restart, summarize, or repeat earlier text."
+            ),
+        })
+        return True
+
+    async def on_truncated_final(self):
+        await emit_progress(
+            self.on_progress,
+            "warning",
+            "응답이 토큰 한도에서 멈췄고 continuation 한도를 모두 사용했습니다.",
+        )
+
+    # ── Forced-final phase ───────────────────────────────────────────
+
+    def was_still_working(self, response):
+        return _extract_response(
+            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+        )[0] == "tool_calls"
+
+    def build_finalization_tools(self, finalization_tools):
+        if not finalization_tools:
+            return [], None
+        allowed_set = set(finalization_tools)
+        final_openai_tools = [
+            t for t in self.openai_tools
+            if t.get("function", {}).get("name") in allowed_set
+        ]
+        if not final_openai_tools:
+            return [], None
+        finalization_names = [t["function"]["name"] for t in final_openai_tools]
+        return finalization_names, final_openai_tools
+
+    def append_user_text(self, msgs, text):
+        msgs.append({"role": "user", "content": text})
+
+    async def call_final(self, msgs, final_tools, limit_reason):
+        if self.context_limit > 0 and self.max_input_tokens is None:
+            msgs[:] = _truncate_to_context(msgs, self.context_limit, self.max_tokens)
+
+        # ── Preflight: validate tool result completeness ──
+        missing_ids = _validate_tool_results(msgs)
+        if missing_ids:
+            logger.error("Forced-final preflight: %d missing tool results — stripping",
+                         len(missing_ids))
+            stripped = _ensure_system_first(_strip_tool_protocol(msgs), self.system_prompt)
+            # Re-append the limit message (was lost in strip)
+            stripped.append({
+                "role": "user",
+                "content": build_stripped_limit_message(limit_reason),
+            })
+            msgs[:] = stripped
+
+        return await self._guarded(msgs, final_tools, self.max_tokens)
+
+    def parse_final(self, final_response, final_tool_names):
+        _, text, final_tool_calls, final_message, _usage = _extract_response(
+            self.sdk_mode, final_response,
+            surface_reasoning=not self.preserve_reasoning_content,
+        )
+        if final_tool_calls and final_tool_names:
+            final_tc_list = _build_tc_list(self.sdk_mode, final_tool_calls)
+            if final_tc_list:
+                allowed = set(final_tool_names)
+                batch: list[tuple[str, str, dict]] = []
+                blocked: list[tuple[str, str]] = []
+                for tc_item in final_tc_list:
+                    fname = tc_item["function"]["name"]
+                    if fname not in allowed:
+                        blocked.append((tc_item["id"], fname))
+                        continue
+                    try:
+                        fargs = json.loads(tc_item["function"]["arguments"])
+                    except (json.JSONDecodeError, TypeError):
+                        fargs = {}
+                    batch.append((tc_item["id"], fname, fargs))
+                return FinalTurn(
+                    text_parts=[text],
+                    batch=batch,
+                    has_protocol=True,
+                    raw=final_response,
+                    extra={
+                        "tc_list": final_tc_list,
+                        "message_obj": final_message,
+                        "blocked": blocked,
+                        "text": text,
+                    },
+                )
+        return FinalTurn(text_parts=[text], batch=[], has_protocol=False, raw=final_response)
+
+    def append_final_assistant(self, msgs, final_turn):
+        text = final_turn.extra.get("text") or ""
+        final_assistant_msg = {
+            "role": "assistant",
+            "content": text if text.strip() else None,
+            "tool_calls": final_turn.extra["tc_list"],
+        }
+        if self.preserve_reasoning_content:
+            reasoning_content = _message_reasoning_content(final_turn.extra.get("message_obj"))
+            if reasoning_content:
+                final_assistant_msg["reasoning_content"] = reasoning_content
+        msgs.append(final_assistant_msg)
+        for tc_id, fname in final_turn.extra.get("blocked", []):
+            # Inject an error result so the protocol stays valid.
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": f"Tool {fname} blocked: budget exhausted.",
+            })
+
+    def append_final_results(self, msgs, final_turn, exec_results):
+        for tc_id, _fname, _fargs, result, _is_error in exec_results:
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": result,
+            })
+
+    async def call_followup(self, msgs):
+        # Plain text follow-up to collect the final answer.
+        if self.context_limit > 0 and self.max_input_tokens is None:
+            msgs[:] = _truncate_to_context(msgs, self.context_limit, min(self.max_tokens, 2048))
+        return await self._guarded(msgs, None, min(self.max_tokens, 2048))
+
+    def extract_text_parts(self, response):
+        _, text, _tc, _msg, _usage = _extract_response(
+            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+        )
+        return [text] if text else []
+
+    async def recover_final_failure(self, msgs, err, limit_reason, was_still_working):
+        # ── Last resort: strip all tool protocol and retry ──
+        _dump_messages_for_debug(msgs, -1, err)
+        logger.warning("Forced response failed — retrying with stripped messages")
+        stripped = _strip_tool_protocol(msgs)
+        if self.system_prompt:
+            stripped.insert(0, {"role": "system", "content": self.system_prompt})
+        stripped.append({
+            "role": "user",
+            "content": build_stripped_limit_message(limit_reason),
+        })
+        try:
+            last_response = await self._guarded(stripped, None, self.max_tokens)
+        except Exception as e2:
+            logger.error("Final stripped response also failed: %s", e2)
+            if self.log_event:
+                self.log_event("error", "final_response",
+                               f"Final response failed even after strip: {e2}")
+            raise LoopEarlyReturn(
+                f"⚠️ {limit_reason} 후 응답 생성 실패: {err}",
+                finish_reason="final_response_failed",
+                truncated=True,
+                limit_reason=limit_reason,
+                was_still_working=was_still_working,
+                interrupted=was_still_working,
+            )
+        _, text, _tc, _msg, _usage = _extract_response(
+            self.sdk_mode, last_response,
+            surface_reasoning=not self.preserve_reasoning_content,
+        )
+        self.track_cost(last_response, "Forced-final stripped")
+        return [text]
+
+    # ── Results ──────────────────────────────────────────────────────
+
+    def update_tracker(self, tracker, *, rounds_used, was_interrupted, tool_work_details, response):
+        if tracker is None:
+            return
+        tracker.update(build_budget_tracker(
+            self.state.total_cost, rounds_used, was_interrupted, tool_work_details,
+        ))
+
+    def make_result(self, parts, *, finish_reason="stop", truncated=False,
+                    limit_reason=None, was_still_working=False,
+                    continuations_used=0, rounds_used=0):
+        clean = [p.strip() for p in parts if p and p.strip()]
+        text = "\n".join(clean)
+        final_text = text if text else EMPTY_RESPONSE_FALLBACK
+        if not self.return_metadata:
+            return final_text
+        return {
+            "text": final_text,
+            "finish_reason": finish_reason,
+            "complete": not truncated,
+            "truncated": truncated,
+            "continuations_used": continuations_used,
+            "limit_reason": limit_reason,
+            "was_still_working": was_still_working,
+            "cost_usd": self.state.total_cost,
+            "rounds": rounds_used,
+        }
+
+
 async def chat_with_tools(
     messages: list[dict],
     *,
@@ -984,719 +1595,52 @@ async def chat_with_tools(
 ) -> str | dict:
     """Call OpenAI-compatible LLM with tools, execute tool calls, loop until text response.
 
-    Interface mirrors claude_loop.chat_with_tools() for drop-in use.
+    Interface mirrors claude_loop.chat_with_tools() for drop-in use. Control
+    flow is the shared engine in agent_loop.run_tool_loop; this module
+    contributes the OpenAI protocol adapter.
 
     api_semaphore: if provided, acquired/released around each individual LLM
     API call (not the entire tool loop).  This prevents deadlocks when a tool
     handler (e.g. run_agent) recursively invokes chat_with_tools on the same
     single-slot backend.
     """
-    sdk_mode = client is not None
-    active_usage_label = provider_label or ("openai-sdk" if sdk_mode else f"httpx:{base_url}")
-    active_model = model
-
-    # Wrap _api_call with per-call semaphore so the lock is held only during
-    # the HTTP POST, not during tool execution between rounds.
-    async def _guarded_api_call(*a, **kw):
-        if max_input_tokens is not None and len(a) > 4:
-            request_args = list(a)
-            request_messages = list(request_args[4])
-            request_tools = request_args[5] if len(request_args) > 5 else None
-            schema_tokens = _estimate_tokens([{
-                "role": "user",
-                "content": json.dumps(request_tools or [], ensure_ascii=False),
-            }])
-            if recover_input_via_tools:
-                request_messages, estimated_input = _checkpoint_tool_results_for_replay(
-                    request_messages, int(max_input_tokens), schema_tokens,
-                )
-            else:
-                estimated_input = _estimate_tokens(request_messages) + schema_tokens
-            if estimated_input > int(max_input_tokens):
-                raise RuntimeError(
-                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
-                    f"{int(max_input_tokens)}; persist a durable summary and use anchored tool reads."
-                )
-            request_args[4] = request_messages
-            a = tuple(request_args)
-        kw.setdefault("idle_timeout_sec", provider_idle_timeout_sec)
-
-        async def _do_call():
-            # Semaphore is acquired per attempt so it isn't held across
-            # backoff sleeps.
-            if api_semaphore is not None:
-                async with api_semaphore:
-                    return await _api_call(*a, **kw)
-            return await _api_call(*a, **kw)
-
-        return await call_with_transient_retry(
-            _do_call,
-            label=active_usage_label,
-            on_progress=on_progress,
-        )
-
-    budget_usd = validate_budget(budget_usd)
-
-    # Per-agent-run provenance buffer for KG write/read trust tracking.
-    from provenance.runtime import init_provenance_buffer
-    init_provenance_buffer(agent=agent_name, mission_id=mission_id)
-
-    openai_tools = _convert_tools(compact_tool_definitions(tools))
-
-    # ── Root-cause fix: start from text-only canonical history ──
-    # Tool protocol blocks are generated only within this call.
-    working_msgs = _normalize_messages(messages)
-    working_msgs = _ensure_system_first(working_msgs, system_prompt)
-
-    # Legacy local-only trimming remains for unmanaged calls. Gateway-managed
-    # agent calls use replay checkpoints so source text is never silently lost.
-    if context_limit > 0 and max_input_tokens is None:
-        working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
-
-    tool_call_log = []
-    tool_work_details = []
-    side_effect_work_details = []
-    tool_execution_cache: dict[str, tuple[str, bool]] = {}
-    total_cost = 0.0
-    budget_warning_sent = False
-    round_num = 0
-    accumulated_text_parts: list[str] = []  # Collect text from tool_calls rounds
-    length_continuations = 0
-
-    def _final_result(
-        text: str,
-        *,
-        finish_reason: str = "stop",
-        truncated: bool = False,
-        limit_reason: str | None = None,
-        was_still_working: bool = False,
-    ):
-        final_text = text if text else EMPTY_RESPONSE_FALLBACK
-        if not return_metadata:
-            return final_text
-        return {
-            "text": final_text,
-            "finish_reason": finish_reason,
-            "complete": not truncated,
-            "truncated": truncated,
-            "continuations_used": length_continuations,
-            "limit_reason": limit_reason,
-            "was_still_working": was_still_working,
-            "cost_usd": total_cost,
-            "rounds": round_num,
-        }
-
-    def _log_sdk_usage(
-        label: str,
-        usage,
-        call_cost: float,
-        current_total: float,
-        billed_model: str,
-    ) -> None:
-        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-        miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
-        details = getattr(usage, "prompt_tokens_details", None)
-        if details and not cached_tokens:
-            cached_tokens = getattr(details, "cached_tokens", 0) or 0
-        non_cached = miss_tokens or (prompt_tokens - cached_tokens)
-        logger.info(
-            "%s usage [%s model=%s]: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
-            label, active_usage_label, billed_model, prompt_tokens, cached_tokens, non_cached,
-            completion_tokens, call_cost, current_total, budget_usd,
-        )
-
-    continuation_rounds = (
-        max(0, int(max_length_continuations or 0)) if continue_on_length else 0
+    adapter = _OpenAIProtocolAdapter(
+        client=client,
+        base_url=base_url,
+        model=model,
+        tools=tools,
+        tool_handlers=tool_handlers,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens,
+        context_limit=context_limit,
+        max_input_tokens=max_input_tokens,
+        recover_input_via_tools=recover_input_via_tools,
+        enable_thinking=enable_thinking,
+        api_semaphore=api_semaphore,
+        extra_body=extra_body,
+        sdk_max_token_param=sdk_max_token_param,
+        include_parallel_tool_calls=include_parallel_tool_calls,
+        provider_label=provider_label,
+        preserve_reasoning_content=preserve_reasoning_content,
+        return_metadata=return_metadata,
+        on_progress=on_progress,
+        log_event=log_event,
+        provider_idle_timeout_sec=provider_idle_timeout_sec,
     )
-    max_total_round_limit = max_rounds + continuation_rounds
-    total_round_limit = max_rounds
-    while round_num < total_round_limit:
-        round_num += 1
-
-        # ── Cancel check ──
-        check_cancelled(task_id)
-
-        # ── Context window management ──
-        # Tool-heavy research tasks can grow past provider context after many
-        # rounds. Re-check before every API call, not just at startup.
-        if context_limit > 0 and max_input_tokens is None:
-            working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
-
-        if max_input_tokens is not None:
-            tool_schema_tokens = _estimate_tokens([{
-                "role": "user",
-                "content": json.dumps(openai_tools, ensure_ascii=False),
-            }])
-            if recover_input_via_tools:
-                working_msgs, estimated_input = _checkpoint_tool_results_for_replay(
-                    working_msgs, int(max_input_tokens), tool_schema_tokens,
-                )
-            else:
-                estimated_input = _estimate_tokens(working_msgs) + tool_schema_tokens
-            if estimated_input > int(max_input_tokens):
-                raise RuntimeError(
-                    f"Estimated input tokens {estimated_input} exceed configured ceiling "
-                    f"{int(max_input_tokens)}; persist a durable summary and use anchored tool reads."
-                )
-
-        # ── Pre-API validation: check tool result completeness ──
-        missing_ids = _validate_tool_results(working_msgs)
-        if missing_ids:
-            logger.error("Pre-API check (round %d): %d missing tool results: %s",
-                         round_num, len(missing_ids), missing_ids)
-            # Inject synthetic error results for missing IDs
-            for mid in missing_ids:
-                working_msgs.append({
-                    "role": "tool",
-                    "tool_call_id": mid,
-                    "content": "[tool result unavailable — auto-injected]",
-                })
-            # Re-check after injection
-            still_missing = _validate_tool_results(working_msgs)
-            if still_missing:
-                logger.error("Still missing after injection: %s — stripping tool protocol",
-                             still_missing)
-                working_msgs = _strip_tool_protocol(working_msgs)
-                working_msgs = _ensure_system_first(working_msgs, system_prompt)
-
-        # ── API call with auto-recovery ──
-        # Streaming is enabled in SDK mode when the caller provides on_progress
-        # — text deltas are pushed through the callback so the UI can render
-        # the answer token-by-token. Non-SDK (httpx) path stays non-streaming.
-        stream_cb = on_progress if sdk_mode else None
-        response = None
-        try:
-            response = await _guarded_api_call(
-                sdk_mode, client, base_url, model, working_msgs,
-                openai_tools, max_tokens, enable_thinking=enable_thinking,
-                on_progress=stream_cb, extra_body=extra_body,
-                sdk_max_token_param=sdk_max_token_param,
-                include_parallel_tool_calls=include_parallel_tool_calls,
-            )
-        except Exception as api_err:
-            _dump_messages_for_debug(working_msgs, round_num, api_err)
-
-            # Recover only a positively identified tool-history validation
-            # error. Generic 400/auth/schema failures are surfaced unchanged.
-            if _is_tool_protocol_error(api_err):
-                if side_effect_work_details:
-                    if budget_tracker is not None:
-                        budget_tracker.update(build_budget_tracker(
-                            total_cost, round_num, True, tool_work_details))
-                    return _final_result(
-                        _side_effect_fallback_report(api_err, side_effect_work_details),
-                        finish_reason="tool_protocol_error_after_side_effects",
-                        truncated=True,
-                        limit_reason="tool protocol error",
-                        was_still_working=True,
-                    )
-                logger.warning("Auto-recovery (round %d): stripping tool protocol and retrying",
-                               round_num)
-                stripped = _strip_tool_protocol(working_msgs)
-                stripped = _ensure_system_first(stripped, system_prompt)
-                try:
-                    response = await _guarded_api_call(
-                        sdk_mode, client, base_url, model, stripped,
-                        openai_tools, max_tokens,
-                        parallel_tool_calls=False, enable_thinking=enable_thinking,
-                        on_progress=stream_cb, extra_body=extra_body,
-                        sdk_max_token_param=sdk_max_token_param,
-                        include_parallel_tool_calls=include_parallel_tool_calls,
-                    )
-                    working_msgs = stripped
-                    logger.info("Auto-recovery succeeded at round %d", round_num)
-                except Exception as retry_err:
-                    logger.error("Auto-recovery retry also failed: %s", retry_err)
-                    # Force final response path with no tools
-                    working_msgs = stripped
-                    break
-            elif _is_transient_transport_error(api_err):
-                if side_effect_work_details:
-                    if budget_tracker is not None:
-                        budget_tracker.update(build_budget_tracker(
-                            total_cost, round_num, True, tool_work_details))
-                    return _final_result(
-                        _side_effect_fallback_report(api_err, side_effect_work_details),
-                        finish_reason="api_transport_error_after_side_effects",
-                        truncated=True,
-                        limit_reason="API transport error",
-                        was_still_working=True,
-                    )
-                logger.warning(
-                    "Transient API transport error at round %d — retrying the unchanged request once",
-                    round_num,
-                )
-                try:
-                    response = await _guarded_api_call(
-                        sdk_mode, client, base_url, model, working_msgs,
-                        openai_tools, max_tokens,
-                        parallel_tool_calls=False, enable_thinking=enable_thinking,
-                        on_progress=stream_cb, extra_body=extra_body,
-                        sdk_max_token_param=sdk_max_token_param,
-                        include_parallel_tool_calls=include_parallel_tool_calls,
-                    )
-                    logger.info("Transient API recovery succeeded at round %d", round_num)
-                except Exception as retry_err:
-                    logger.error("Transient API retry also failed: %s", retry_err)
-                    if log_event:
-                        log_event("error", "openai_loop", f"API call failed: {api_err}")
-                    raise retry_err
-            else:
-                if log_event:
-                    log_event("error", "openai_loop", f"API call failed: {api_err}")
-                raise
-
-        if response is None:
-            break
-
-        finish_reason, content_text, tool_calls, message_obj, usage = _extract_response(
-            sdk_mode, response, surface_reasoning=not preserve_reasoning_content,
-        )
-
-        # ── Cost tracking (SDK mode) ──
-        # OpenAI caching is automatic (no cache_control markers) — we just
-        # need a stable prefix. Log cached vs non-cached input at INFO so
-        # we can see in journald whether the prefix is actually hitting.
-        if sdk_mode and usage:
-            billed_model = _response_model(response, active_model)
-            round_cost = _calculate_cost(usage, billed_model)
-            total_cost += round_cost
-            _log_sdk_usage(f"Round {round_num}", usage, round_cost, total_cost, billed_model)
-            await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
-            update_redis_state(task_id, round_num, total_cost)
-
-        # ── Handle refusal (OpenAI safety filter) ──
-        refusal = None
-        if sdk_mode and hasattr(message_obj, "refusal"):
-            refusal = message_obj.refusal
-        elif not sdk_mode and isinstance(message_obj, dict):
-            refusal = message_obj.get("refusal")
-        if refusal:
-            logger.warning("Model refused request at round %d: %s", round_num, refusal)
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            return _final_result(
-                f"⚠️ 모델이 요청을 거부했습니다: {refusal}",
-                finish_reason="refusal",
-            )
-
-        # ── No tool calls → return text response ──
-        if finish_reason != "tool_calls" or not tool_calls:
-            if finish_reason == "length":
-                logger.warning("Response truncated by max_completion_tokens (%d) at round %d",
-                               max_tokens, round_num)
-                if log_event:
-                    log_event("warning", "chat",
-                              f"Response truncated ({max_tokens} tokens) at round {round_num}")
-                if (
-                    continue_on_length
-                    and length_continuations < max(0, int(max_length_continuations or 0))
-                    and content_text.strip()
-                ):
-                    length_continuations += 1
-                    total_round_limit = min(max_total_round_limit, total_round_limit + 1)
-                    await emit_progress(
-                        on_progress,
-                        "warning",
-                        (
-                            f"응답이 {max_tokens} 토큰 한도에서 끊겨 이어서 생성합니다 "
-                            f"({length_continuations}/{max_length_continuations})."
-                        ),
-                    )
-                    accumulated_text_parts.append(content_text.strip())
-                    continuation_msg = {
-                        "role": "assistant",
-                        "content": content_text.strip(),
-                    }
-                    if preserve_reasoning_content:
-                        reasoning_content = _message_reasoning_content(message_obj)
-                        if reasoning_content:
-                            continuation_msg["reasoning_content"] = reasoning_content
-                    working_msgs.append(continuation_msg)
-                    working_msgs.append({
-                        "role": "user",
-                        "content": (
-                            "Continue exactly from where the previous answer stopped. "
-                            "Do not restart, summarize, or repeat earlier text."
-                        ),
-                    })
-                    continue
-            elif finish_reason == "content_filter":
-                logger.warning("Response blocked by content filter at round %d", round_num)
-            # Combine accumulated text from tool_calls rounds with final response
-            all_parts = accumulated_text_parts + ([content_text.strip()] if content_text.strip() else [])
-            final_text = "\n".join(all_parts)
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            truncated = finish_reason == "length"
-            if truncated:
-                await emit_progress(
-                    on_progress,
-                    "warning",
-                    "응답이 토큰 한도에서 멈췄고 continuation 한도를 모두 사용했습니다.",
-                )
-            return _final_result(
-                final_text,
-                finish_reason=finish_reason,
-                truncated=truncated,
-            )
-
-        # ── Budget check (matches claude_loop.py) ──
-        budget_exceeded = total_cost >= budget_usd
-        if budget_exceeded:
-            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d — "
-                           "processing final tool calls before exit",
-                           total_cost, budget_usd, round_num)
-
-        # ── Build normalized tool_calls list (with malformed block skipping) ──
-        tc_list = _build_tc_list(sdk_mode, tool_calls)
-        if not tc_list:
-            # All tool calls were malformed — return text content if any
-            logger.warning("All tool_calls malformed at round %d — returning text", round_num)
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-            return _final_result(
-                content_text.strip(),
-                finish_reason="malformed_tool_calls",
-            )
-
-        # Accumulate substantial text from tool_calls rounds for final result
-        if content_text.strip() and len(content_text.strip()) > 20:
-            accumulated_text_parts.append(content_text.strip())
-
-        # ── Append assistant message with tool_calls ──
-        assistant_msg = {
-            "role": "assistant",
-            "content": content_text if content_text.strip() else None,
-            "tool_calls": tc_list,
-        }
-        if preserve_reasoning_content:
-            reasoning_content = _message_reasoning_content(message_obj)
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
-        working_msgs.append(assistant_msg)
-
-        if content_text.strip():
-            await emit_progress(on_progress, "thinking", f"[{round_num}] {content_text.strip()}")
-
-        # ── Build the batch (id, name, parsed_args) for parallel-aware exec ──
-        batch: list[tuple[str, str, dict]] = []
-        malformed_results: list[tuple[str, str, str]] = []
-        for tc_item in tc_list:
-            tc_id = tc_item["id"]
-            func_name = tc_item["function"]["name"]
-            try:
-                func_args = json.loads(tc_item["function"]["arguments"])
-                if not isinstance(func_args, dict):
-                    raise TypeError("tool arguments must decode to an object")
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed arguments for %s: %s",
-                               func_name, tc_item["function"]["arguments"][:200])
-                malformed_results.append((
-                    tc_id,
-                    func_name,
-                    f"Tool execution blocked: malformed JSON arguments ({exc})",
-                ))
-                continue
-            batch.append((tc_id, func_name, func_args))
-
-        # ── Execute tool calls (parallel for read-only batches) ──
-        executed_ids: set[str] = set()
-        for tc_id, func_name, error_result in malformed_results:
-            working_msgs.append({
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": error_result,
-            })
-            executed_ids.add(tc_id)
-            tool_work_details.append(f"  [{round_num}] {func_name}(malformed) → {error_result}")
-        if batch:
-            exec_results = await execute_tools_batch(
-                batch,
-                tool_handlers,
-                on_progress=on_progress,
-                round_num=round_num,
-                log_event=log_event,
-                idempotency_cache=tool_execution_cache,
-                tool_definitions=openai_tools,
-            )
-            for tc_id, func_name, func_args, result, is_error in exec_results:
-                input_summary = json.dumps(func_args, ensure_ascii=False)
-                working_msgs.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": result,
-                })
-                executed_ids.add(tc_id)
-                tool_call_log.append(f"  [{round_num}/{max_rounds}] {func_name}({input_summary})")
-                tool_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
-                if is_side_effect_tool(func_name) and not is_error:
-                    side_effect_work_details.append(f"  [{round_num}] {func_name}({input_summary}) → {result}")
-                save_redis_progress(task_id, round_num, func_name, input_summary, result, is_error)
-
-        # ── Safety net: ensure EVERY tool_call has a result ──
-        for tc_item in tc_list:
-            if tc_item["id"] not in executed_ids:
-                logger.warning("Safety net: missing result for tool_call id=%s name=%s",
-                               tc_item["id"], tc_item["function"]["name"])
-                working_msgs.append({
-                    "role": "tool",
-                    "tool_call_id": tc_item["id"],
-                    "content": f"Tool execution skipped (internal error): "
-                               f"no result for {tc_item['function']['name']}",
-                })
-
-        # Terminal-tool short-circuit (see claude_loop.py for rationale).
-        if terminal_tools and batch:
-            terminal_hit = next(
-                (
-                    (fname, result)
-                    for tc_id, fname, fargs, result, is_error in exec_results
-                    if fname in terminal_tools and not is_error
-                ),
-                None,
-            )
-            if terminal_hit:
-                _tname, _tresult = terminal_hit
-                if budget_tracker is not None:
-                    budget_tracker.update(build_budget_tracker(total_cost, round_num, False, tool_work_details))
-                terminal_report = str(_tresult).strip() or f"{_tname} completed"
-                all_parts = accumulated_text_parts + [terminal_report]
-                return _final_result(
-                    "\n".join(p for p in all_parts if p),
-                    finish_reason="terminal_tool",
-                )
-
-        # ── Budget break AFTER tool results are properly appended ──
-        if budget_exceeded:
-            break
-
-        # ── Budget warning at 80% ──
-        if not budget_warning_sent and total_cost > budget_usd * 0.8:
-            budget_warning_sent = True
-            working_msgs.append({"role": "user", "content": build_budget_warning(total_cost, budget_usd)})
-
-        # ── Round limit warning 2 rounds before max ──
-        if round_num == max_rounds - 2:
-            working_msgs.append({"role": "user", "content": build_round_warning(round_num, max_rounds)})
-
-    # ══════════════════════════════════════════════════════════════════
-    # Forced final response: max_rounds or budget exhausted
-    # ══════════════════════════════════════════════════════════════════
-    budget_exhausted = total_cost >= budget_usd
-    was_still_working = (
-        response is not None
-        and _extract_response(
-            sdk_mode, response, surface_reasoning=not preserve_reasoning_content,
-        )[0] == "tool_calls"
-    ) if response else False
-
-    limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
-    log_detail = "\n".join(tool_call_log) if tool_call_log else ""
-    logger.warning(
-        "Limit reached (rounds=%d/%d, budget=$%.4f/$%.2f, still_working=%s). "
-        "Forcing final response. Calls:\n%s",
-        round_num, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
-    )
-
-    # Build the finalization tool whitelist so the agent can still persist its
-    # work (e.g. save_diary) on the way out. Filter by name against the
-    # already-converted OpenAI tool list.
-    finalization_names: list[str] = []
-    final_openai_tools = None
-    if finalization_tools:
-        allowed_set = set(finalization_tools)
-        final_openai_tools = [
-            t for t in openai_tools
-            if t.get("function", {}).get("name") in allowed_set
-        ]
-        finalization_names = [
-            t["function"]["name"] for t in final_openai_tools
-        ]
-        if not final_openai_tools:
-            final_openai_tools = None
-
-    working_msgs.append({
-        "role": "user",
-        "content": build_limit_message(
-            limit_reason, total_cost, budget_usd,
-            round_num, max_rounds, was_still_working,
-            finalization_tools=finalization_names or None,
-        ),
-    })
-    if context_limit > 0 and max_input_tokens is None:
-        working_msgs = _truncate_to_context(working_msgs, context_limit, max_tokens)
-
-    # ── Preflight: validate tool result completeness ──
-    missing_ids = _validate_tool_results(working_msgs)
-    if missing_ids:
-        logger.error("Forced-final preflight: %d missing tool results — stripping",
-                     len(missing_ids))
-        working_msgs = _strip_tool_protocol(working_msgs)
-        working_msgs = _ensure_system_first(working_msgs, system_prompt)
-        # Re-append the limit message (was lost in strip)
-        working_msgs.append({
-            "role": "user",
-            "content": build_stripped_limit_message(limit_reason),
-        })
-
-    # ── Final API call: expose finalization tools if any, else plain text ──
-    stream_cb = on_progress if sdk_mode else None
-    try:
-        final_response = await _guarded_api_call(
-            sdk_mode, client, base_url, model, working_msgs, final_openai_tools, max_tokens,
-            on_progress=stream_cb, extra_body=extra_body,
-            sdk_max_token_param=sdk_max_token_param,
-            include_parallel_tool_calls=include_parallel_tool_calls,
-        )
-        _, text, final_tool_calls, final_message, final_usage = _extract_response(
-            sdk_mode, final_response, surface_reasoning=not preserve_reasoning_content,
-        )
-        if sdk_mode and final_usage:
-            billed_model = _response_model(final_response, active_model)
-            call_cost = _calculate_cost(final_usage, billed_model)
-            total_cost += call_cost
-            _log_sdk_usage("Forced-final", final_usage, call_cost, total_cost, billed_model)
-
-        # If the agent called finalization tools, execute them and do a
-        # text-only follow-up to collect the final answer.
-        if final_tool_calls and finalization_names:
-            final_tc_list = _build_tc_list(sdk_mode, final_tool_calls)
-            if final_tc_list:
-                final_assistant_msg = {
-                    "role": "assistant",
-                    "content": text if text.strip() else None,
-                    "tool_calls": final_tc_list,
-                }
-                if preserve_reasoning_content:
-                    reasoning_content = _message_reasoning_content(final_message)
-                    if reasoning_content:
-                        final_assistant_msg["reasoning_content"] = reasoning_content
-                working_msgs.append(final_assistant_msg)
-                allowed = set(finalization_names)
-                final_batch: list[tuple[str, str, dict]] = []
-                for tc_item in final_tc_list:
-                    fname = tc_item["function"]["name"]
-                    if fname not in allowed:
-                        # Inject an error result so the protocol stays valid.
-                        working_msgs.append({
-                            "role": "tool",
-                            "tool_call_id": tc_item["id"],
-                            "content": f"Tool {fname} blocked: budget exhausted.",
-                        })
-                        continue
-                    try:
-                        fargs = json.loads(tc_item["function"]["arguments"])
-                    except (json.JSONDecodeError, TypeError):
-                        fargs = {}
-                    final_batch.append((tc_item["id"], fname, fargs))
-
-                if final_batch:
-                    logger.info("Forced-final: executing %d finalization tool call(s)", len(final_batch))
-                    final_exec = await execute_tools_batch(
-                        final_batch, tool_handlers,
-                        on_progress=on_progress, round_num=round_num + 1, log_event=log_event,
-                        idempotency_cache=tool_execution_cache,
-                        tool_definitions=openai_tools,
-                    )
-                    for tc_id, fname, fargs, result, is_error in final_exec:
-                        input_summary = json.dumps(fargs, ensure_ascii=False)
-                        working_msgs.append({
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "content": result,
-                        })
-                        tool_call_log.append(f"  [final] {fname}({input_summary})")
-                        tool_work_details.append(f"  [final] {fname}({input_summary}) → {result}")
-                        save_redis_progress(task_id, round_num + 1, fname, input_summary, result, is_error)
-
-                # Skip the expensive follow-up when the forced-final already
-                # produced substantive text and the finalization tool has run.
-                # This mirrors claude_loop.py and prevents autonomous ticks
-                # from paying a second full-input call just to collect "done".
-                pre_tool_text = (text or "").strip()
-                if final_batch and len(pre_tool_text) >= 200:
-                    tool_summary = ", ".join(fname for (_tid, fname, _fargs) in final_batch)
-                    logger.info(
-                        "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
-                        len(pre_tool_text), tool_summary,
-                    )
-                else:
-                    # Plain text follow-up to collect the final answer.
-                    if context_limit > 0 and max_input_tokens is None:
-                        working_msgs = _truncate_to_context(working_msgs, context_limit, min(max_tokens, 2048))
-                    followup = await _guarded_api_call(
-                        sdk_mode, client, base_url, model, working_msgs, None, min(max_tokens, 2048),
-                        on_progress=stream_cb, extra_body=extra_body,
-                        sdk_max_token_param=sdk_max_token_param,
-                        include_parallel_tool_calls=include_parallel_tool_calls,
-                    )
-                    _, followup_text, _, _, followup_usage = _extract_response(
-                        sdk_mode, followup, surface_reasoning=not preserve_reasoning_content,
-                    )
-                    if sdk_mode and followup_usage:
-                        billed_model = _response_model(followup, active_model)
-                        call_cost = _calculate_cost(followup_usage, billed_model)
-                        total_cost += call_cost
-                        _log_sdk_usage(
-                            "Forced-final followup", followup_usage, call_cost, total_cost, billed_model,
-                        )
-                    text = (text or "") + ("\n" if text and followup_text else "") + (followup_text or "")
-    except Exception as final_err:
-        # ── Last resort: strip all tool protocol and retry ──
-        _dump_messages_for_debug(working_msgs, -1, final_err)
-        logger.warning("Forced response failed — retrying with stripped messages")
-        stripped = _strip_tool_protocol(working_msgs)
-        if system_prompt:
-            stripped.insert(0, {"role": "system", "content": system_prompt})
-        stripped.append({
-            "role": "user",
-            "content": build_stripped_limit_message(limit_reason),
-        })
-        try:
-            last_response = await _guarded_api_call(
-                sdk_mode, client, base_url, model, stripped, None, max_tokens,
-                on_progress=stream_cb, extra_body=extra_body,
-                sdk_max_token_param=sdk_max_token_param,
-                include_parallel_tool_calls=include_parallel_tool_calls,
-            )
-            _, text, _, _, last_usage = _extract_response(
-                sdk_mode, last_response, surface_reasoning=not preserve_reasoning_content,
-            )
-            if sdk_mode and last_usage:
-                billed_model = _response_model(last_response, active_model)
-                call_cost = _calculate_cost(last_usage, billed_model)
-                total_cost += call_cost
-                _log_sdk_usage(
-                    "Forced-final stripped", last_usage, call_cost, total_cost, billed_model,
-                )
-        except Exception as e2:
-            logger.error("Final stripped response also failed: %s", e2)
-            if log_event:
-                log_event("error", "final_response",
-                          f"Final response failed even after strip: {e2}")
-            if budget_tracker is not None:
-                budget_tracker.update(build_budget_tracker(
-                    total_cost, round_num, was_still_working, tool_work_details))
-            return _final_result(
-                f"⚠️ {limit_reason} 후 응답 생성 실패: {final_err}",
-                finish_reason="final_response_failed",
-                truncated=True,
-                limit_reason=limit_reason,
-                was_still_working=was_still_working,
-            )
-
-    all_parts = accumulated_text_parts + ([text.strip()] if text.strip() else [])
-    final_text = "\n".join(all_parts)
-    if budget_tracker is not None:
-        budget_tracker.update(build_budget_tracker(
-            total_cost, round_num, was_still_working, tool_work_details))
-    return _final_result(
-        final_text,
-        finish_reason="forced_final" if was_still_working or budget_exhausted else "stop",
-        truncated=was_still_working,
-        limit_reason=limit_reason,
-        was_still_working=was_still_working,
+    return await run_tool_loop(
+        adapter,
+        messages,
+        max_rounds=max_rounds,
+        max_tokens=max_tokens,
+        budget_usd=budget_usd,
+        budget_tracker=budget_tracker,
+        on_progress=on_progress,
+        task_id=task_id,
+        log_event=log_event,
+        agent_name=agent_name,
+        mission_id=mission_id,
+        finalization_tools=finalization_tools,
+        terminal_tools=terminal_tools,
+        continue_on_length=continue_on_length,
+        max_length_continuations=max_length_continuations,
     )

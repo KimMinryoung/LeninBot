@@ -1,7 +1,9 @@
-"""claude_loop.py — Claude tool-use loop.
+"""claude_loop.py — Claude tool-use loop (Anthropic protocol adapter).
 
 Extracted from telegram_bot.py. Dependencies injected via function parameters
-to avoid circular imports.
+to avoid circular imports. The round/forced-final control flow is the shared
+engine in agent_loop.run_tool_loop; this module contributes the Anthropic
+protocol mechanics (_ClaudeProtocolAdapter).
 
 Strict-at-source policy: inputs are normalized once via `_normalize_initial_messages`
 (flattened to text-only alternating history) before the loop starts. Tool protocol
@@ -14,12 +16,10 @@ import asyncio
 import json
 import logging
 
+from agent_loop import FinalTurn, Turn, run_tool_loop
 from tool_loop_common import (
-    validate_budget, build_budget_tracker, emit_progress,
-    update_redis_state, save_redis_progress,
-    build_limit_message, build_budget_warning, build_round_warning,
+    build_budget_tracker, emit_progress,
     EMPTY_RESPONSE_FALLBACK,
-    check_cancelled, TaskCancelledError,
     call_with_transient_retry,
     dedupe_tools_by_name,
     estimate_text_tokens,
@@ -332,91 +332,81 @@ async def _drain_stream_with_idle_guard(stream, idle_timeout_sec: float, on_prog
         ) from exc
 
 
-async def chat_with_tools(
-    messages: list[dict],
-    *,
-    client,
-    model: str,
-    tools: list[dict],
-    tool_handlers: dict,
-    system_prompt: str | list[dict],
-    max_rounds: int = 50,
-    max_tokens: int = 4096,
-    max_input_tokens: int | None = None,
-    recover_input_via_tools: bool = False,
-    log_event=None,
-    budget_usd: float = 0.30,
-    budget_tracker: dict | None = None,
-    on_progress=None,
-    task_id: int | None = None,
-    agent_name: str = "agent",
-    mission_id: int | None = None,
-    finalization_tools: list[str] | None = None,
-    terminal_tools: list[str] | None = None,
-    continue_on_length: bool = False,
-    max_length_continuations: int = 1,
-    thinking: dict | None = None,
-    output_config: dict | None = None,
-    provider_idle_timeout_sec: float | None = None,
-) -> str:
-    """Call Claude with tools, execute tool calls, loop until text response.
+class _ClaudeProtocolAdapter:
+    """Anthropic-protocol mechanics for agent_loop.run_tool_loop.
 
-    Args:
-        messages: Conversation history.
-        client: Anthropic AsyncAnthropic client.
-        model: Model ID string.
-        tools: Tool definitions (Anthropic API format).
-        tool_handlers: Dict mapping tool name → async handler function.
-        system_prompt: System prompt text or Anthropic system content blocks.
-        max_rounds: Max tool-use rounds before forcing response.
-        max_tokens: Max tokens for one response.
-        max_input_tokens: Estimated request-input ceiling.
-        recover_input_via_tools: Replace old large tool results with replay instructions before failing the ceiling.
-        log_event: Optional callable(level, source, message, detail=None, task_id=None)
-            for persistent error logging.
-        budget_usd: Maximum USD budget for this call (default 0.30).
-        budget_tracker: Optional dict — filled with {"total_cost", "rounds_used"} after return.
-        on_progress: Optional async callable(event: str, detail: str) for live progress.
-            Events: "thinking" (model's intermediate text), "tool_call" (tool invoked),
-            "tool_result" (tool finished), "budget" (budget status update).
+    Owns message shapes (content blocks, tool_use/tool_result pairing,
+    replayed thinking blocks), prompt-cache breakpoints, the input-token
+    ceiling with replay checkpointing, streaming with the idle guard, and
+    Anthropic pricing. Control flow lives in agent_loop.run_tool_loop.
     """
-    budget_usd = validate_budget(budget_usd)
 
-    # Per-agent-run provenance buffer for KG write/read trust tracking.
-    from provenance.runtime import init_provenance_buffer
-    init_provenance_buffer(agent=agent_name, mission_id=mission_id)
+    def __init__(
+        self, *, client, model, tools, tool_handlers, system_prompt,
+        max_tokens, max_input_tokens, recover_input_via_tools,
+        on_progress, log_event, thinking, output_config,
+        provider_idle_timeout_sec,
+    ):
+        self.client = client
+        self.model = model
+        self.tool_handlers = tool_handlers
+        self.system_prompt = system_prompt
+        self.max_tokens = max_tokens
+        self.max_input_tokens = max_input_tokens
+        self.recover_input_via_tools = recover_input_via_tools
+        self.on_progress = on_progress
+        self.log_event = log_event
+        self.thinking = thinking
+        self.output_config = output_config
+        self.provider_idle_timeout_sec = provider_idle_timeout_sec
+        self.tool_execution_cache: dict[str, tuple[str, bool]] = {}
+        self.state = None
 
-    # Root-cause fix: start from text-only canonical history.
-    # Tool protocol blocks are generated only within this call.
-    working_msgs = _normalize_initial_messages(messages)
-    tool_call_log = []
-    tool_work_details = []  # result snippets for scratchpad
-    tool_execution_cache: dict[str, tuple[str, bool]] = {}
-    total_cost = 0.0
-    budget_warning_sent = False
-    length_continuations = 0
+        # Prompt caching: mark system prompt and tools as cacheable with the
+        # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above). Most callers
+        # use a single text prompt; writer can pass multiple cacheable system
+        # blocks so stable project instructions and manuscript context can hit
+        # independently.
+        if isinstance(system_prompt, list):
+            self.cached_system = [dict(block) for block in system_prompt]
+        else:
+            self.cached_system = [
+                {"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}
+            ]
 
-    # Prompt caching: mark system prompt and tools as cacheable with the
-    # 1-hour TTL tier (see _CACHE_CONTROL_1H rationale above). Most callers use
-    # a single text prompt; writer can pass multiple cacheable system blocks so
-    # stable project instructions and manuscript context can hit independently.
-    if isinstance(system_prompt, list):
-        cached_system = [dict(block) for block in system_prompt]
-    else:
-        cached_system = [{"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}]
+        # Compact verbose tool/schema descriptions before sending them to the
+        # model. Names, parameter types, required keys, enums, and defaults
+        # are preserved.
+        cached_tools = compact_tool_definitions(tools)
+        if cached_tools:
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
+        self.cached_tools = cached_tools
 
-    # Compact verbose tool/schema descriptions before sending them to the model.
-    # Names, parameter types, required keys, enums, and defaults are preserved.
-    cached_tools = compact_tool_definitions(tools)
-    if cached_tools:
-        cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
+        # The Messages API allows at most 4 cache_control blocks per request;
+        # system blocks and the tools block already consume their share, so
+        # message-level breakpoints only get whatever slots remain.
+        _system_cache_blocks = sum(
+            1 for b in self.cached_system if isinstance(b, dict) and b.get("cache_control")
+        )
+        _tools_cache_blocks = 1 if cached_tools else 0
+        self.message_cache_marks = max(0, 4 - _system_cache_blocks - _tools_cache_blocks)
 
-    # When on_progress is wired, route API calls through the streaming
-    # interface so text deltas flow to the caller as they're generated.
-    # Callers that don't care about text_delta (e.g. Telegram) simply drop
-    # the event — the final Message object is identical either way.
-    async def _claude_call_once(**kwargs):
-        if max_input_tokens is not None:
+    def bind(self, state):
+        self.state = state
+
+    def normalize(self, messages):
+        # Root-cause fix: start from text-only canonical history.
+        # Tool protocol blocks are generated only within this call.
+        return _normalize_initial_messages(messages)
+
+    # ── API calls ────────────────────────────────────────────────────
+
+    async def _call_once(self, **kwargs):
+        # When on_progress is wired, route API calls through the streaming
+        # interface so text deltas flow to the caller as they're generated.
+        # Callers that don't care about text_delta (e.g. Telegram) simply drop
+        # the event — the final Message object is identical either way.
+        if self.max_input_tokens is not None:
             request_blob = json.dumps(
                 {
                     "system": kwargs.get("system", []),
@@ -427,7 +417,7 @@ async def chat_with_tools(
                 default=str,
             )
             estimated_input = estimate_tokens(request_blob)
-            if estimated_input > int(max_input_tokens) and recover_input_via_tools:
+            if estimated_input > int(self.max_input_tokens) and self.recover_input_via_tools:
                 compacted = [dict(message) for message in kwargs.get("messages", [])]
                 from tool_gateway.inference import is_replay_safe_tool
                 tool_names_by_id = {}
@@ -475,173 +465,99 @@ async def chat_with_tools(
                             ensure_ascii=False, default=str,
                         )
                         estimated_input = estimate_tokens(request_blob)
-                        if estimated_input <= int(max_input_tokens):
+                        if estimated_input <= int(self.max_input_tokens):
                             break
                 kwargs["messages"] = compacted
-            if estimated_input > int(max_input_tokens):
+            if estimated_input > int(self.max_input_tokens):
                 raise ValueError(
                     f"Estimated input {estimated_input} tokens exceeds policy limit "
-                    f"{int(max_input_tokens)}; compact to durable summary and anchor-based reads first."
+                    f"{int(self.max_input_tokens)}; compact to durable summary and anchor-based reads first."
                 )
-        if thinking is not None:
-            kwargs["thinking"] = thinking
-        if output_config is not None:
-            kwargs["output_config"] = output_config
-        if on_progress is None:
-            call = client.messages.create(**kwargs)
-            if provider_idle_timeout_sec:
-                return await asyncio.wait_for(call, timeout=provider_idle_timeout_sec)
+        if self.thinking is not None:
+            kwargs["thinking"] = self.thinking
+        if self.output_config is not None:
+            kwargs["output_config"] = self.output_config
+        if self.on_progress is None:
+            call = self.client.messages.create(**kwargs)
+            if self.provider_idle_timeout_sec:
+                return await asyncio.wait_for(call, timeout=self.provider_idle_timeout_sec)
             return await call
-        async with client.messages.stream(**kwargs) as stream:
-            if provider_idle_timeout_sec:
+        async with self.client.messages.stream(**kwargs) as stream:
+            if self.provider_idle_timeout_sec:
                 return await _drain_stream_with_idle_guard(
-                    stream, provider_idle_timeout_sec, on_progress
+                    stream, self.provider_idle_timeout_sec, self.on_progress
                 )
             async for text in stream.text_stream:
                 if text:
-                    await emit_progress(on_progress, "text_delta", text)
+                    await emit_progress(self.on_progress, "text_delta", text)
             return await stream.get_final_message()
 
-    async def _claude_call(**kwargs):
+    async def _call(self, **kwargs):
         return await call_with_transient_retry(
-            lambda: _claude_call_once(**kwargs),
-            label=model,
-            on_progress=on_progress,
+            lambda: self._call_once(**kwargs),
+            label=self.model,
+            on_progress=self.on_progress,
         )
 
-    # The Messages API allows at most 4 cache_control blocks per request;
-    # system blocks and the tools block already consume their share, so
-    # message-level breakpoints only get whatever slots remain.
-    _system_cache_blocks = sum(
-        1 for b in cached_system if isinstance(b, dict) and b.get("cache_control")
-    )
-    _tools_cache_blocks = 1 if cached_tools else 0
-    message_cache_marks = max(0, 4 - _system_cache_blocks - _tools_cache_blocks)
-
-    response = None
-    round_num = 0
-    accumulated_text_parts: list[str] = []  # Collect text from tool_use rounds
-    # A max-token continuation needs a fresh model round even when the
-    # truncation happened on the final normal tool round. Reserve those rounds
-    # up front; they are reachable only after an actual max_tokens stop.
-    continuation_rounds = (
-        max(0, int(max_length_continuations or 0)) if continue_on_length else 0
-    )
-    max_total_round_limit = max_rounds + continuation_rounds
-    total_round_limit = max_rounds
-    while round_num < total_round_limit:
-        round_num += 1
-        # ── Cancel check ──
-        check_cancelled(task_id)
-
+    async def call_model(self, msgs, round_num):
         create_kwargs = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "system": cached_system,
-            "messages": _with_message_cache_breakpoint(working_msgs, message_cache_marks),
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": self.cached_system,
+            "messages": _with_message_cache_breakpoint(msgs, self.message_cache_marks),
         }
-        if cached_tools:
-            create_kwargs["tools"] = cached_tools
-        response = await _claude_call(**create_kwargs)
+        if self.cached_tools:
+            create_kwargs["tools"] = self.cached_tools
+        return await self._call(**create_kwargs)
 
-        # Track cost. Log cache-token breakdown at INFO so prompt-caching
-        # effectiveness is visible in journald without a debug rebuild — if
-        # cache_read stays at 0 across rounds, something in the prefix is
-        # drifting and the ephemeral cache can't latch on.
-        if hasattr(response, "usage") and response.usage:
-            usage = response.usage
-            round_cost = _calculate_cost(usage, model)
-            total_cost += round_cost
-            logger.info(
-                "Round %d usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
-                round_num,
-                getattr(usage, "input_tokens", 0),
-                getattr(usage, "output_tokens", 0),
-                getattr(usage, "cache_creation_input_tokens", 0),
-                getattr(usage, "cache_read_input_tokens", 0),
-                round_cost, total_cost, budget_usd,
+    # ── Cost tracking ────────────────────────────────────────────────
+
+    def track_cost(self, response, label):
+        # Log cache-token breakdown at INFO so prompt-caching effectiveness
+        # is visible in journald without a debug rebuild — if cache_read
+        # stays at 0 across rounds, something in the prefix is drifting and
+        # the ephemeral cache can't latch on.
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return False
+        cost = _calculate_cost(usage, self.model)
+        self.state.add_cost(cost)
+        logger.info(
+            "%s usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
+            label,
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0),
+            getattr(usage, "cache_creation_input_tokens", 0),
+            getattr(usage, "cache_read_input_tokens", 0),
+            cost, self.state.total_cost, self.state.budget_usd,
+        )
+        return True
+
+    # ── Round parsing / message building ─────────────────────────────
+
+    def parse_turn(self, response, round_num):
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason not in ("tool_use", "pause_turn"):
+            return Turn(
+                is_tool_round=False,
+                text_parts=[b.text for b in response.content if b.type == "text"],
+                truncated_by_length=(stop_reason == "max_tokens"),
+                finish_reason=str(stop_reason or "stop"),
+                raw=response,
             )
-            await emit_progress(on_progress, "budget", f"[{round_num}] ${total_cost:.3f}/${budget_usd:.2f}")
-            update_redis_state(task_id, round_num, total_cost)
 
-        # If no custom tool use, extract and return text (check BEFORE budget)
-        if response.stop_reason not in ("tool_use", "pause_turn"):
-            text_parts = [b.text for b in response.content if b.type == "text"]
-            if response.stop_reason == "max_tokens":
-                logger.warning("Response truncated by max_tokens (%d) at round %d/%d", max_tokens, round_num, max_rounds)
-                if log_event:
-                    log_event("warning", "chat", f"Response truncated by max_tokens ({max_tokens}) at round {round_num}/{max_rounds}")
-                partial_text = "\n".join(t.strip() for t in text_parts if t.strip()).strip()
-                if (
-                    continue_on_length
-                    and length_continuations < max(0, int(max_length_continuations or 0))
-                ):
-                    length_continuations += 1
-                    # Extend only after an actual max-token stop. Tool-use
-                    # rounds alone must still respect max_rounds.
-                    total_round_limit = min(max_total_round_limit, total_round_limit + 1)
-                    if partial_text:
-                        accumulated_text_parts.append(partial_text)
-                        working_msgs.append({
-                            "role": "assistant",
-                            "content": [{"type": "text", "text": partial_text}],
-                        })
-                        _append_user_text_message(
-                            working_msgs,
-                            "Continue exactly from where the previous answer stopped. "
-                            "Do not restart, summarize, or repeat earlier text.",
-                        )
-                    else:
-                        # Truncation landed mid-tool_use: no text block survived,
-                        # so there is nothing to stitch — the whole round would
-                        # otherwise be dropped on the floor (2026-07-11 writer
-                        # incident: a manuscript rewrite inside one huge
-                        # replace_in_manuscript call was lost this way). Ask for
-                        # a retry in smaller steps instead.
-                        _append_user_text_message(
-                            working_msgs,
-                            "Your previous response was cut off by the output-length "
-                            "limit before any usable content arrived — likely inside "
-                            "a large tool call. Redo that work in smaller steps: "
-                            "split big tool inputs into several smaller calls, and "
-                            "keep each call comfortably under the limit.",
-                        )
-                    continue
-            # Combine accumulated text from tool_use rounds with final response
-            all_text = accumulated_text_parts + text_parts
-            _update_budget_tracker(
-                budget_tracker,
-                total_cost=total_cost,
-                rounds_used=round_num,
-                was_interrupted=False,
-                tool_work_details=tool_work_details,
-                response=response,
-                model=model,
-            )
-            return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK
-
-        # Budget exceeded → process this response's tool calls, then break
-        budget_exceeded_this_round = total_cost >= budget_usd
-        if budget_exceeded_this_round:
-            logger.warning("Budget exhausted: $%.4f >= $%.2f at round %d — processing final tool calls before exit", total_cost, budget_usd, round_num)
-
-        # First pass: build assistant_content and collect tool_uses to execute.
         assistant_content = []
-        tool_uses_to_execute: list[tuple[str, str, dict]] = []
+        tool_calls: list[tuple[str, str, dict]] = []
+        text_parts: list[str] = []
         for block in response.content:
             b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
             btype = b.get("type")
 
             if btype == "text":
                 replay_block = _content_block_for_replay(b)
-                text = str(b.get("text", ""))
                 if replay_block:
                     assistant_content.append(replay_block)
-                # Accumulate substantial text from tool_use rounds for final result
-                if text.strip() and len(text.strip()) > 20:
-                    accumulated_text_parts.append(text.strip())
-                if text.strip():
-                    await emit_progress(on_progress, "thinking", f"[{round_num}] {text.strip()}")
+                text_parts.append(str(b.get("text", "")))
             elif btype in _REPLAY_ONLY_BLOCK_TYPES:
                 replay_block = _content_block_for_replay(b)
                 if replay_block:
@@ -660,281 +576,323 @@ async def chat_with_tools(
                 if not tid or not tname:
                     logger.warning("Skipping malformed tool_use block: %s", b)
                     continue
-
                 assistant_content.append({
                     "type": "tool_use",
                     "id": tid,
                     "name": tname,
                     "input": tinput,
                 })
-                tool_uses_to_execute.append((tid, tname, tinput))
+                tool_calls.append((tid, tname, tinput))
             else:
                 # Preserve unknown future block types as text context.
                 assistant_content.append({"type": "text", "text": _coerce_text(b)})
 
-        # Second pass: execute tool calls. Consecutive read-only tools run in
-        # parallel via execute_tools_batch; everything else stays sequential.
+        return Turn(
+            is_tool_round=True,
+            text_parts=text_parts,
+            tool_calls=tool_calls,
+            finish_reason=str(stop_reason or "tool_use"),
+            raw=response,
+            extra={"assistant_content": assistant_content},
+        )
+
+    def append_assistant(self, msgs, turn):
+        # Note: server_tool blocks are already converted to text in
+        # parse_turn, so working messages never contain
+        # server_tool_use/web_search_tool_result.
+        msgs.append({"role": "assistant", "content": turn.extra["assistant_content"]})
+
+    async def run_batch(self, batch, round_num):
+        # Consecutive read-only tools run in parallel via execute_tools_batch;
+        # everything else stays sequential. Resolved by bare name so test
+        # patches on this module's execute_tools_batch keep working.
+        return await execute_tools_batch(
+            batch,
+            self.tool_handlers,
+            on_progress=self.on_progress,
+            round_num=round_num,
+            log_event=self.log_event,
+            idempotency_cache=self.tool_execution_cache,
+            tool_definitions=self.cached_tools,
+        )
+
+    def note_exec_results(self, round_num, exec_results):
+        pass
+
+    def append_tool_results(self, msgs, turn, exec_results, missing, warning_texts):
         tool_results = []
-        if tool_uses_to_execute:
-            exec_results = await execute_tools_batch(
-                tool_uses_to_execute,
-                tool_handlers,
-                on_progress=on_progress,
-                round_num=round_num,
-                log_event=log_event,
-                idempotency_cache=tool_execution_cache,
-                tool_definitions=cached_tools,
-            )
-            for tid, tname, tinput, result, is_error in exec_results:
-                input_summary = json.dumps(tinput, ensure_ascii=False)
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tid,
-                    "content": result,
-                }
-                if is_error:
-                    tool_result_block["is_error"] = True
-                tool_results.append(tool_result_block)
-                # Log for diagnostics (post-execution, in input order)
-                tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
-                tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result}")
-                save_redis_progress(task_id, round_num, tname, input_summary, result, is_error)
+        for tid, _tname, _tinput, result, is_error in exec_results:
+            tool_result_block = {
+                "type": "tool_result",
+                "tool_use_id": tid,
+                "content": result,
+            }
+            if is_error:
+                tool_result_block["is_error"] = True
+            tool_results.append(tool_result_block)
 
-        # Safety net: ensure EVERY tool_use block has a matching tool_result
-        resolved_ids = {r["tool_use_id"] for r in tool_results}
-        for block in assistant_content:
-            if isinstance(block, dict) and block.get("type") == "tool_use" and block["id"] not in resolved_ids:
-                logger.warning("Safety net: missing tool_result for tool_use id=%s name=%s", block["id"], block.get("name"))
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block["id"],
-                    "content": f"Tool execution skipped (internal error): no result was produced for {block.get('name', 'unknown')}",
-                    "is_error": True,
-                })
-
-        # Append assistant message with tool_use + user message with tool_results
-        # Note: server_tool blocks are already converted to text above,
-        # so working_msgs never contain server_tool_use/web_search_tool_result.
-        working_msgs.append({"role": "assistant", "content": assistant_content})
+        for tid, tname in missing:
+            logger.warning("Safety net: missing tool_result for tool_use id=%s name=%s", tid, tname)
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tid,
+                "content": f"Tool execution skipped (internal error): no result was produced for {tname}",
+                "is_error": True,
+            })
 
         if tool_results:
             # Warnings must be appended AFTER tool_result blocks, not prepended.
             # Claude requires tool_use ids to have tool_result blocks immediately
             # after in the next user turn — a text block before them triggers
             # "tool_use ids without tool_result blocks immediately after".
-            if not budget_warning_sent and total_cost > budget_usd * 0.8:
-                budget_warning_sent = True
-                tool_results.append({"type": "text", "text": build_budget_warning(total_cost, budget_usd)})
-            if round_num == total_round_limit - 2:
-                tool_results.append({"type": "text", "text": build_round_warning(round_num, max_rounds)})
-            working_msgs.append({"role": "user", "content": tool_results})
-        elif response.stop_reason == "pause_turn":
-            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
+            for text in warning_texts:
+                tool_results.append({"type": "text", "text": text})
+            msgs.append({"role": "user", "content": tool_results})
+            return bool(warning_texts)
+        if getattr(turn.raw, "stop_reason", None) == "pause_turn":
+            msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
         else:
-            logger.warning("No tool_results and not pause_turn (stop_reason=%s); appending fallback user message", response.stop_reason)
-            working_msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
-
-        # Terminal-tool short-circuit: if any spec-declared terminal tool
-        # succeeded in this round, end the loop without a trailing
-        # assistant text turn. The tool's return value (already in
-        # tool_work_details) becomes the report — no extra LLM call.
-        if terminal_tools and tool_uses_to_execute:
-            terminal_hit = next(
-                (
-                    (tname, result)
-                    for tid, tname, tinput, result, is_error in exec_results
-                    if tname in terminal_tools and not is_error
-                ),
-                None,
+            logger.warning(
+                "No tool_results and not pause_turn (stop_reason=%s); appending fallback user message",
+                getattr(turn.raw, "stop_reason", None),
             )
-            if terminal_hit:
-                _tname, _tresult = terminal_hit
-                _update_budget_tracker(
-                    budget_tracker,
-                    total_cost=total_cost,
-                    rounds_used=round_num,
-                    was_interrupted=False,
-                    tool_work_details=tool_work_details,
-                    response=response,
-                    model=model,
-                )
-                terminal_report = str(_tresult).strip() or f"{_tname} completed"
-                all_text = accumulated_text_parts + [terminal_report]
-                return "\n".join(p for p in all_text if p)
+            msgs.append({"role": "user", "content": [{"type": "text", "text": "continue"}]})
+        return False
 
-        # Budget break AFTER tool results are properly appended
-        if budget_exceeded_this_round:
-            break
+    async def append_length_continuation(self, msgs, turn, partial_text, next_index, max_count):
+        if partial_text:
+            msgs.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": partial_text}],
+            })
+            _append_user_text_message(
+                msgs,
+                "Continue exactly from where the previous answer stopped. "
+                "Do not restart, summarize, or repeat earlier text.",
+            )
+        else:
+            # Truncation landed mid-tool_use: no text block survived, so there
+            # is nothing to stitch — the whole round would otherwise be dropped
+            # on the floor (2026-07-11 writer incident: a manuscript rewrite
+            # inside one huge replace_in_manuscript call was lost this way).
+            # Ask for a retry in smaller steps instead.
+            _append_user_text_message(
+                msgs,
+                "Your previous response was cut off by the output-length "
+                "limit before any usable content arrived — likely inside "
+                "a large tool call. Redo that work in smaller steps: "
+                "split big tool inputs into several smaller calls, and "
+                "keep each call comfortably under the limit.",
+            )
+        return True
 
-    # Limit reached (rounds or budget) — force final response
-    budget_exhausted = total_cost >= budget_usd
-    log_detail = "\n".join(tool_call_log) if tool_call_log else ""
-    was_still_working = response.stop_reason in ("tool_use", "pause_turn") if response else False
-    logger.warning(
-        "Limit reached (rounds=%d/%d, normal_rounds=%d, budget=$%.4f/$%.2f, still_working=%s). Forcing final response. Calls:\n%s",
-        round_num if response else 0, total_round_limit, max_rounds, total_cost, budget_usd, was_still_working, log_detail,
-    )
+    async def on_truncated_final(self):
+        pass
 
-    limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
+    # ── Forced-final phase ───────────────────────────────────────────
 
-    # Build the finalization tool whitelist (subset of the agent's allowed
-    # tools). If provided, expose only these tools on the forced-final call so
-    # the agent can persist its work (e.g. save_diary) on the way out.
-    final_tools = None
-    final_tool_names: list[str] = []
-    if finalization_tools:
-        final_tool_names = [t["name"] for t in cached_tools if t.get("name") in set(finalization_tools)]
-        if final_tool_names:
-            final_tools = [dict(t) for t in cached_tools if t.get("name") in set(final_tool_names)]
-            # Preserve prompt caching semantics on the filtered list. Must
-            # use the same 1h TTL as cached_system — Anthropic processes
-            # `tools` before `system`, and a longer TTL cannot follow a
-            # shorter one, so mixing 5m (default ephemeral) here with a 1h
-            # system block raises a 400 (the diary task forced-final path
-            # hit this).
-            final_tools[-1] = {**final_tools[-1], "cache_control": _CACHE_CONTROL_1H}
+    def was_still_working(self, response):
+        return getattr(response, "stop_reason", None) in ("tool_use", "pause_turn")
 
-    _append_user_text_message(
-        working_msgs,
-        build_limit_message(
-            limit_reason, total_cost, budget_usd,
-            round_num if response else 0, total_round_limit, was_still_working,
-            finalization_tools=final_tool_names or None,
-        ),
-    )
-    create_kwargs = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": cached_system,
-        "messages": _with_message_cache_breakpoint(working_msgs, message_cache_marks),
-    }
-    if final_tools:
-        create_kwargs["tools"] = final_tools
-    final = await _claude_call(**create_kwargs)
+    def build_finalization_tools(self, finalization_tools):
+        if not finalization_tools:
+            return [], None
+        allowed = set(finalization_tools)
+        final_tool_names = [t["name"] for t in self.cached_tools if t.get("name") in allowed]
+        if not final_tool_names:
+            return [], None
+        final_tools = [dict(t) for t in self.cached_tools if t.get("name") in set(final_tool_names)]
+        # Preserve prompt caching semantics on the filtered list. Must
+        # use the same 1h TTL as cached_system — Anthropic processes
+        # `tools` before `system`, and a longer TTL cannot follow a
+        # shorter one, so mixing 5m (default ephemeral) here with a 1h
+        # system block raises a 400 (the diary task forced-final path
+        # hit this).
+        final_tools[-1] = {**final_tools[-1], "cache_control": _CACHE_CONTROL_1H}
+        return final_tool_names, final_tools
 
-    if hasattr(final, "usage") and final.usage:
-        usage = final.usage
-        call_cost = _calculate_cost(usage, model)
-        total_cost += call_cost
-        logger.info(
-            "Forced-final usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
-            getattr(usage, "input_tokens", 0),
-            getattr(usage, "output_tokens", 0),
-            getattr(usage, "cache_creation_input_tokens", 0),
-            getattr(usage, "cache_read_input_tokens", 0),
-            call_cost, total_cost, budget_usd,
+    def append_user_text(self, msgs, text):
+        _append_user_text_message(msgs, text)
+
+    async def call_final(self, msgs, final_tools, limit_reason):
+        create_kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": self.cached_system,
+            "messages": _with_message_cache_breakpoint(msgs, self.message_cache_marks),
+        }
+        if final_tools:
+            create_kwargs["tools"] = final_tools
+        return await self._call(**create_kwargs)
+
+    def parse_final(self, final, final_tool_names):
+        if getattr(final, "stop_reason", None) == "max_tokens":
+            logger.warning("Forced final response truncated by max_tokens (%d)", self.max_tokens)
+
+        allowed = set(final_tool_names or [])
+        final_assistant_content: list[dict] = []
+        batch: list[tuple[str, str, dict]] = []
+        text_parts: list[str] = []
+        for block in final.content:
+            b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
+            btype = b.get("type")
+            if btype == "text":
+                replay_block = _content_block_for_replay(b)
+                if replay_block:
+                    final_assistant_content.append(replay_block)
+                text_parts.append(str(b.get("text", "")))
+            elif btype in _REPLAY_ONLY_BLOCK_TYPES:
+                replay_block = _content_block_for_replay(b)
+                if replay_block:
+                    final_assistant_content.append(replay_block)
+            elif btype == "tool_use":
+                tid = str(b.get("id", "")).strip()
+                tname = str(b.get("name", "")).strip()
+                tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
+                if tid and tname and tname in allowed:
+                    final_assistant_content.append({
+                        "type": "tool_use", "id": tid, "name": tname, "input": tinput,
+                    })
+                    batch.append((tid, tname, tinput))
+                else:
+                    logger.warning("Forced-final: ignoring non-finalization tool_use name=%s", tname)
+
+        return FinalTurn(
+            text_parts=text_parts,
+            batch=batch,
+            has_protocol=bool(batch),
+            raw=final,
+            extra={"assistant_content": final_assistant_content},
         )
-    if final.stop_reason == "max_tokens":
-        logger.warning("Forced final response truncated by max_tokens (%d)", max_tokens)
 
-    # If the finalization call returned tool_use blocks, execute them once
-    # and then make a plain text follow-up call to collect the final answer.
-    final_tool_uses: list[tuple[str, str, dict]] = []
-    final_assistant_content: list[dict] = []
-    for block in final.content:
-        b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
-        btype = b.get("type")
-        if btype == "text":
-            replay_block = _content_block_for_replay(b)
-            if replay_block:
-                final_assistant_content.append(replay_block)
-        elif btype in _REPLAY_ONLY_BLOCK_TYPES:
-            replay_block = _content_block_for_replay(b)
-            if replay_block:
-                final_assistant_content.append(replay_block)
-        elif btype == "tool_use":
-            tid = str(b.get("id", "")).strip()
-            tname = str(b.get("name", "")).strip()
-            tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
-            if tid and tname and tname in set(final_tool_names):
-                final_assistant_content.append({
-                    "type": "tool_use", "id": tid, "name": tname, "input": tinput,
-                })
-                final_tool_uses.append((tid, tname, tinput))
-            else:
-                logger.warning("Forced-final: ignoring non-finalization tool_use name=%s", tname)
+    def append_final_assistant(self, msgs, final_turn):
+        msgs.append({"role": "assistant", "content": final_turn.extra["assistant_content"]})
 
-    if final_tool_uses:
-        logger.info("Forced-final: executing %d finalization tool call(s)", len(final_tool_uses))
-        exec_results = await execute_tools_batch(
-            final_tool_uses,
-            tool_handlers,
-            on_progress=on_progress,
-            round_num=(round_num if response else 0) + 1,
-            log_event=log_event,
-            idempotency_cache=tool_execution_cache,
-            tool_definitions=cached_tools,
-        )
+    def append_final_results(self, msgs, final_turn, exec_results):
         final_tool_results = []
-        for tid, tname, tinput, result, is_error in exec_results:
-            input_summary = json.dumps(tinput, ensure_ascii=False)
+        for tid, _tname, _tinput, result, is_error in exec_results:
             tr = {"type": "tool_result", "tool_use_id": tid, "content": result}
             if is_error:
                 tr["is_error"] = True
             final_tool_results.append(tr)
-            tool_call_log.append(f"  [final] {tname}({input_summary})")
-            tool_work_details.append(f"  [final] {tname}({input_summary}) → {result}")
-            save_redis_progress(task_id, (round_num if response else 0) + 1, tname, input_summary, result, is_error)
+        msgs.append({"role": "user", "content": final_tool_results})
 
-        # Skip the followup roundtrip when the forced-final already produced
-        # substantive closing text. The finalization tool ran (durable
-        # persistence). The model's pre-tool text typically already contains
-        # the self-critique the agent was prompted for. Re-sending the entire
-        # conversation just to collect a "done" line at full input pricing is
-        # the dominant cost in autonomous_project ticks (cf. project #2 turn
-        # 50: $1.73 forced-final + followup combined).
-        pre_tool_text = "\n".join(
-            tp["text"] for tp in final_assistant_content if tp.get("type") == "text"
-        ).strip()
-        FOLLOWUP_SKIP_MIN_CHARS = 200
+    async def call_followup(self, msgs):
+        # Cap output at 2K — closing remarks after a finalization tool don't
+        # need the orchestrator's full max_tokens (typically 16K).
+        return await self._call(
+            model=self.model,
+            max_tokens=min(self.max_tokens, 2048),
+            system=self.cached_system,
+            messages=_with_message_cache_breakpoint(msgs, self.message_cache_marks),  # no tools — force text
+        )
 
-        if len(pre_tool_text) >= FOLLOWUP_SKIP_MIN_CHARS:
-            tool_summary = ", ".join(
-                f"{tn}{'(error)' if is_err else ''}"
-                for (_tid, tn, _ti, _r, is_err) in exec_results
-            )
-            logger.info(
-                "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
-                len(pre_tool_text), tool_summary,
-            )
-            text_parts = [pre_tool_text]
-        else:
-            working_msgs.append({"role": "assistant", "content": final_assistant_content})
-            working_msgs.append({"role": "user", "content": final_tool_results})
-            # Cap output at 2K — closing remarks after a finalization tool don't
-            # need the orchestrator's full max_tokens (typically 16K).
-            followup = await _claude_call(
-                model=model,
-                max_tokens=min(max_tokens, 2048),
-                system=cached_system,
-                messages=_with_message_cache_breakpoint(working_msgs, message_cache_marks),  # no tools — force text
-            )
-            if hasattr(followup, "usage") and followup.usage:
-                usage = followup.usage
-                call_cost = _calculate_cost(usage, model)
-                total_cost += call_cost
-                logger.info(
-                    "Forced-final followup usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
-                    getattr(usage, "input_tokens", 0),
-                    getattr(usage, "output_tokens", 0),
-                    getattr(usage, "cache_creation_input_tokens", 0),
-                    getattr(usage, "cache_read_input_tokens", 0),
-                    call_cost, total_cost, budget_usd,
-                )
-            followup_text_parts = [b.text for b in followup.content if b.type == "text"]
-            text_parts = [tp["text"] for tp in final_assistant_content if tp.get("type") == "text"] + followup_text_parts
-    else:
-        text_parts = [b.text for b in final.content if b.type == "text"]
+    def extract_text_parts(self, response):
+        return [b.text for b in response.content if b.type == "text"]
 
-    all_text = accumulated_text_parts + text_parts
-    tracker_response = locals().get("followup") or final
-    _update_budget_tracker(
-        budget_tracker,
-        total_cost=total_cost,
-        rounds_used=round_num if response else 0,
-        was_interrupted=was_still_working,
-        tool_work_details=tool_work_details,
-        response=tracker_response,
+    async def recover_final_failure(self, msgs, err, limit_reason, was_still_working):
+        # No protocol-strip recovery on the Anthropic path: this loop's own
+        # parsing guarantees id/name correctness and 1:1 pairing, so a failed
+        # forced-final call surfaces unchanged.
+        raise err
+
+    # ── Results ──────────────────────────────────────────────────────
+
+    def update_tracker(self, tracker, *, rounds_used, was_interrupted, tool_work_details, response):
+        _update_budget_tracker(
+            tracker,
+            total_cost=self.state.total_cost,
+            rounds_used=rounds_used,
+            was_interrupted=was_interrupted,
+            tool_work_details=tool_work_details,
+            response=response,
+            model=self.model,
+        )
+
+    def make_result(self, parts, **_meta):
+        return "\n".join(parts) if parts else EMPTY_RESPONSE_FALLBACK
+
+
+async def chat_with_tools(
+    messages: list[dict],
+    *,
+    client,
+    model: str,
+    tools: list[dict],
+    tool_handlers: dict,
+    system_prompt: str | list[dict],
+    max_rounds: int = 50,
+    max_tokens: int = 4096,
+    max_input_tokens: int | None = None,
+    recover_input_via_tools: bool = False,
+    log_event=None,
+    budget_usd: float = 0.30,
+    budget_tracker: dict | None = None,
+    on_progress=None,
+    task_id: int | None = None,
+    agent_name: str = "agent",
+    mission_id: int | None = None,
+    finalization_tools: list[str] | None = None,
+    terminal_tools: list[str] | None = None,
+    continue_on_length: bool = False,
+    max_length_continuations: int = 1,
+    thinking: dict | None = None,
+    output_config: dict | None = None,
+    provider_idle_timeout_sec: float | None = None,
+) -> str:
+    """Call Claude with tools, execute tool calls, loop until text response.
+
+    Control flow is the shared engine in agent_loop.run_tool_loop; this module
+    contributes the Anthropic protocol adapter.
+
+    Args:
+        messages: Conversation history.
+        client: Anthropic AsyncAnthropic client.
+        model: Model ID string.
+        tools: Tool definitions (Anthropic API format).
+        tool_handlers: Dict mapping tool name → async handler function.
+        system_prompt: System prompt text or Anthropic system content blocks.
+        max_rounds: Max tool-use rounds before forcing response.
+        max_tokens: Max tokens for one response.
+        max_input_tokens: Estimated request-input ceiling.
+        recover_input_via_tools: Replace old large tool results with replay instructions before failing the ceiling.
+        log_event: Optional callable(level, source, message, detail=None, task_id=None)
+            for persistent error logging.
+        budget_usd: Maximum USD budget for this call (default 0.30).
+        budget_tracker: Optional dict — filled with {"total_cost", "rounds_used"} after return.
+        on_progress: Optional async callable(event: str, detail: str) for live progress.
+            Events: "thinking" (model's intermediate text), "tool_call" (tool invoked),
+            "tool_result" (tool finished), "budget" (budget status update).
+    """
+    adapter = _ClaudeProtocolAdapter(
+        client=client,
         model=model,
+        tools=tools,
+        tool_handlers=tool_handlers,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens,
+        max_input_tokens=max_input_tokens,
+        recover_input_via_tools=recover_input_via_tools,
+        on_progress=on_progress,
+        log_event=log_event,
+        thinking=thinking,
+        output_config=output_config,
+        provider_idle_timeout_sec=provider_idle_timeout_sec,
     )
-    return "\n".join(all_text) if all_text else EMPTY_RESPONSE_FALLBACK
+    return await run_tool_loop(
+        adapter,
+        messages,
+        max_rounds=max_rounds,
+        max_tokens=max_tokens,
+        budget_usd=budget_usd,
+        budget_tracker=budget_tracker,
+        on_progress=on_progress,
+        task_id=task_id,
+        log_event=log_event,
+        agent_name=agent_name,
+        mission_id=mission_id,
+        finalization_tools=finalization_tools,
+        terminal_tools=terminal_tools,
+        continue_on_length=continue_on_length,
+        max_length_continuations=max_length_continuations,
+    )

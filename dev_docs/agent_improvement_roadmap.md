@@ -14,7 +14,7 @@ The CLAUDE.md goal (CLAW / Reflexion / LATS / Plan-and-Execute) is mostly unreal
 
 | CLAW component | Existing seed | Roadmap move |
 |---|---|---|
-| Executor (ReAct) | `claude_loop.py:418` / `openai_tool_loop.py:959` `chat_with_tools` — live everywhere | Keep as-is |
+| Executor (ReAct) | `chat_with_tools` in `claude_loop.py` / `openai_tool_loop.py` — live everywhere; since 2026-08-04 both are protocol adapters over the shared engine `agent_loop.run_tool_loop` | Keep as-is (loop upgrades now land once, in the engine) |
 | Critic | **Dead** task verifier (below); writer `run_diagnose_revise_pass` (`writer/stream.py`, blind-eval 12/12); Stasova (advisory, publication-only) | Phase 1 wires the verifier; Phase 2 generalizes diagnose→revise |
 | Planner | `multi_delegate` `plan_id`/`plan_role` machinery; `autonomous_projects.plan` + `revise_plan` — static data, no planner component | Phase 3 adds dependency DAGs; Phase 4 adds per-tick objective selection |
 | Reflexion | Writer diagnose_revise; chat `_reflect_on_recent`; tick self-critique paragraph (dies with chat text) | Phases 2/4/5 make critique durable and general |

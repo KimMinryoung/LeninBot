@@ -137,7 +137,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | Area | Modules |
 |---|---|
 | Identity and prompt rendering | `identity/prompts.py`, `identity/agent_prompts/*.md`, `llm/prompt_renderer.py`, `agents/base.py` |
-| LLM provider config | `bot_config.py`, `claude_loop.py`, `openai_tool_loop.py`, `llm/client.py` |
+| LLM provider config | `bot_config.py`, `agent_loop.py` (shared loop engine), `claude_loop.py`, `openai_tool_loop.py`, `llm/client.py` |
 | Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream; `creative_writer.py` compat shim), `frontend/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `novel_writer_api.py` |
 | Agents | `agents/*.py`, `config/agent_runtime.json`, `api_routes/task_reports.py` |
 | Tools | `runtime_tools/*`, `self_runtime/tools.py`, `crypto_wallet/*` |
