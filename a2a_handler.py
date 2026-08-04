@@ -23,7 +23,6 @@ from bot_config import (
     _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client,
     _kimi_client, _config,
 )
-from llm.provider_registry import kimi_openai_tool_options
 from runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import (
@@ -365,45 +364,33 @@ async def _run_llm(
     except Exception:
         pass
     provider = profile.provider
+    loop_kwargs = dict(
+        tools=tools,
+        tool_handlers=handlers,
+        system_prompt=system_prompt,
+        max_rounds=profile.max_rounds,
+        max_tokens=profile.max_tokens,
+        budget_usd=profile.budget_usd,
+    )
     if provider == "openai" and _openai_client:
         from openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             history,
             client=_openai_client,
             model=profile.model_id,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=system_prompt,
-            max_rounds=profile.max_rounds,
-            max_tokens=profile.max_tokens,
-            budget_usd=profile.budget_usd,
+            **loop_kwargs,
             provider_label="openai:a2a",
         )
     elif provider == "kimi" and _kimi_client:
         from openai_tool_loop import chat_with_tools as openai_chat
-        deepseek_fallback_model = None
-        if _deepseek_client:
-            deepseek_fallback_profile = await resolve_runtime_profile(
-                "chat",
-                provider_override="deepseek",
-                tier_override="high",
-            )
-            deepseek_fallback_model = deepseek_fallback_profile.model_id
+        from llm.provider_failover import resolve_kimi_fallback_options
         return await openai_chat(
             history,
             client=_kimi_client,
             model=profile.model_id,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=system_prompt,
-            max_rounds=profile.max_rounds,
-            max_tokens=profile.max_tokens,
-            budget_usd=profile.budget_usd,
+            **loop_kwargs,
             provider_label="kimi:a2a",
-            **kimi_openai_tool_options(
-                fallback_client=_deepseek_client,
-                fallback_model=deepseek_fallback_model,
-            ),
+            **await resolve_kimi_fallback_options("chat", _deepseek_client),
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
         from claude_loop import chat_with_tools
@@ -415,12 +402,7 @@ async def _run_llm(
             history,
             client=_deepseek_anthropic_client,
             model=profile.model_id,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=system_prompt,
-            max_rounds=profile.max_rounds,
-            max_tokens=profile.max_tokens,
-            budget_usd=profile.budget_usd,
+            **loop_kwargs,
             thinking=deepseek_thinking.get("thinking"),
             output_config=deepseek_thinking.get("output_config"),
         )
@@ -430,10 +412,5 @@ async def _run_llm(
             history,
             client=_claude,
             model=profile.model_id,
-            tools=tools,
-            tool_handlers=handlers,
-            system_prompt=system_prompt,
-            max_rounds=profile.max_rounds,
-            max_tokens=profile.max_tokens,
-            budget_usd=profile.budget_usd,
+            **loop_kwargs,
         )
