@@ -5,16 +5,68 @@ Run from repo root:  venv/bin/python -m unittest discover tests -v
 import asyncio
 import unittest
 
+from types import SimpleNamespace
+
+import httpx
+
 from tool_loop_common import (
+    TRANSIENT_PROVIDER_STATUSES,
     validate_budget,
     build_budget_tracker,
     build_limit_message,
     build_budget_warning,
     build_round_warning,
     build_stripped_limit_message,
+    dedupe_tools_by_name,
     emit_progress,
     check_cancelled,
+    is_transient_provider_error,
+    provider_status_code,
 )
+
+
+class TestTransientClassifier(unittest.TestCase):
+    def test_all_transient_statuses(self):
+        for code in TRANSIENT_PROVIDER_STATUSES:
+            exc = Exception()
+            exc.status_code = code
+            self.assertTrue(is_transient_provider_error(exc), code)
+
+    def test_status_via_response_object(self):
+        exc = Exception()
+        exc.response = SimpleNamespace(status_code=502)
+        self.assertEqual(provider_status_code(exc), 502)
+        self.assertTrue(is_transient_provider_error(exc))
+
+    def test_4xx_not_transient(self):
+        for code in (400, 401, 403, 404, 422):
+            exc = Exception()
+            exc.status_code = code
+            self.assertFalse(is_transient_provider_error(exc), code)
+
+    def test_every_httpx_transport_class_matched_by_name(self):
+        # The openai loop's old isinstance() check is now redundant with the
+        # shared name tokens — this pins that equivalence.
+        for cls in (httpx.TimeoutException, httpx.ReadError, httpx.ConnectError,
+                    httpx.RemoteProtocolError, httpx.PoolTimeout, httpx.NetworkError):
+            self.assertTrue(is_transient_provider_error(cls("x")), cls.__name__)
+
+    def test_sdk_error_names(self):
+        class APIConnectionError(Exception):
+            pass
+
+        class APITimeoutError(Exception):
+            pass
+
+        self.assertTrue(is_transient_provider_error(APIConnectionError()))
+        self.assertTrue(is_transient_provider_error(APITimeoutError()))
+        self.assertFalse(is_transient_provider_error(ValueError("nope")))
+
+
+class TestDedupeToolsShared(unittest.TestCase):
+    def test_first_occurrence_wins(self):
+        out = dedupe_tools_by_name([{"name": "a", "v": 1}, {"name": "a", "v": 2}])
+        self.assertEqual(out, [{"name": "a", "v": 1}])
 
 
 class TestValidateBudget(unittest.TestCase):
