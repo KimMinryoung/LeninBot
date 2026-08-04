@@ -12,6 +12,73 @@ logger = logging.getLogger(__name__)
 from tool_gateway.dispatcher import compact_tool_definitions
 
 
+# ── Transient provider-error classification ──────────────────────────
+# Shared by both agent loops. The name-token list subsumes every httpx
+# transport error class name (TimeoutException, ConnectError, ReadError,
+# RemoteProtocolError, PoolTimeout, NetworkError) as well as the OpenAI/
+# Anthropic SDK connection error classes.
+
+TRANSIENT_PROVIDER_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
+_TRANSIENT_ERROR_NAME_TOKENS = (
+    "timeout",
+    "connection",
+    "network",
+    "connecterror",
+    "readerror",
+    "remoteprotocolerror",
+    "pooltimeout",
+    "apierror",
+    "apiconnectionerror",
+    "apitimeouterror",
+)
+
+
+def provider_status_code(exc: Exception) -> int | None:
+    """HTTP status from an SDK exception (direct attr or via .response)."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def is_transient_provider_error(exc: Exception) -> bool:
+    """Whether an API failure is worth retrying (rate limit, 5xx, transport)."""
+    status = provider_status_code(exc)
+    if status in TRANSIENT_PROVIDER_STATUSES:
+        return True
+    name = exc.__class__.__name__.lower()
+    return any(token in name for token in _TRANSIENT_ERROR_NAME_TOKENS)
+
+
+# ── Tool schema helpers ──────────────────────────────────────────────
+
+def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
+    """Deduplicate tool schemas by name while preserving first occurrence.
+
+    Both Anthropic and OpenAI reject duplicated tool names; sharing one
+    dedupe path removes repeated failure classes across providers.
+    """
+    if not tools:
+        return []
+
+    deduped: list[dict] = []
+    seen_names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            deduped.append(tool)
+            continue
+        name = str(tool.get("name", "") or "").strip()
+        if name and name in seen_names:
+            logger.warning("Dropping duplicate tool definition: %s", name)
+            continue
+        if name:
+            seen_names.add(name)
+        deduped.append(tool)
+    return deduped
+
+
 # ── Budget ───────────────────────────────────────────────────────────
 
 def validate_budget(budget_usd) -> float:

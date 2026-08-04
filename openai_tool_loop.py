@@ -29,6 +29,7 @@ from tool_loop_common import (
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
+    is_transient_provider_error,
 )
 from tool_gateway.dispatcher import (
     compact_tool_definitions,
@@ -44,33 +45,12 @@ from llm.provider_registry import (
 logger = logging.getLogger(__name__)
 
 def _is_transient_transport_error(err: Exception) -> bool:
-    if isinstance(
-        err,
-        (
-            httpx.TimeoutException,
-            httpx.ReadError,
-            httpx.ConnectError,
-            httpx.RemoteProtocolError,
-            httpx.PoolTimeout,
-            httpx.NetworkError,
-        ),
-    ):
+    # httpx transport types are kept as an explicit fast path; the shared
+    # classifier's name tokens already cover every one of them, plus the
+    # transient HTTP statuses and SDK connection-error class names.
+    if isinstance(err, (httpx.TransportError, httpx.TimeoutException)):
         return True
-    status = getattr(err, "status_code", None)
-    if status is None:
-        status = getattr(getattr(err, "response", None), "status_code", None)
-    if status in {408, 409, 429, 500, 502, 503, 504, 529}:
-        return True
-    name = type(err).__name__.lower()
-    return any(token in name for token in (
-        "apiconnectionerror",
-        "apitimeouterror",
-        "connecterror",
-        "networkerror",
-        "readerror",
-        "remoteprotocolerror",
-        "pooltimeout",
-    ))
+    return is_transient_provider_error(err)
 
 
 _TOOL_PROTOCOL_ERROR_SIGNALS = (

@@ -20,6 +20,9 @@ from tool_loop_common import (
     build_limit_message, build_budget_warning, build_round_warning,
     EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
+    dedupe_tools_by_name,
+    is_transient_provider_error as _is_transient_provider_error,
+    provider_status_code as _provider_status_code,
 )
 from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
 from llm.provider_registry import anthropic_pricing_table
@@ -27,61 +30,6 @@ from llm.provider_registry import anthropic_pricing_table
 logger = logging.getLogger(__name__)
 
 _REPLAY_ONLY_BLOCK_TYPES = {"thinking", "redacted_thinking"}
-_TRANSIENT_PROVIDER_STATUSES = {408, 409, 429, 500, 502, 503, 504, 529}
-_TRANSIENT_PROVIDER_ERROR_TOKENS = (
-    "timeout",
-    "connection",
-    "network",
-    "connecterror",
-    "readerror",
-    "remoteprotocolerror",
-    "pooltimeout",
-    "apierror",
-    "apiconnectionerror",
-    "apitimeouterror",
-)
-
-
-def _provider_status_code(exc: Exception) -> int | None:
-    status = getattr(exc, "status_code", None)
-    if isinstance(status, int):
-        return status
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    return status if isinstance(status, int) else None
-
-
-def _is_transient_provider_error(exc: Exception) -> bool:
-    status = _provider_status_code(exc)
-    if status in _TRANSIENT_PROVIDER_STATUSES:
-        return True
-    name = exc.__class__.__name__.lower()
-    return any(token in name for token in _TRANSIENT_PROVIDER_ERROR_TOKENS)
-
-
-def dedupe_tools_by_name(tools: list[dict] | None) -> list[dict]:
-    """Deduplicate tool schemas by name while preserving first occurrence.
-
-    Anthropic can also reject malformed tool payloads, and sharing one dedupe
-    path with OpenAI removes repeated failure classes across providers.
-    """
-    if not tools:
-        return []
-
-    deduped: list[dict] = []
-    seen_names: set[str] = set()
-    for tool in tools:
-        if not isinstance(tool, dict):
-            deduped.append(tool)
-            continue
-        name = str(tool.get("name", "") or "").strip()
-        if name and name in seen_names:
-            logger.warning("Dropping duplicate tool definition: %s", name)
-            continue
-        if name:
-            seen_names.add(name)
-        deduped.append(tool)
-    return deduped
 
 
 # ── Cache TTL ────────────────────────────────────────────────────────
