@@ -12,7 +12,7 @@ Qwopus는 Qwen3.5-9B를 Claude 4.6 Opus 추론 스타일로 증류한 모델. `<
 
 ## 1. llama-server 실행
 
-`doc/run_llama.bat` 실행 (아래는 참고용 원본 명령어):
+`dev_docs/run_llama.bat` 실행 (아래는 참고용 원본 명령어):
 
 ```cmd
 C:\Users\DESKTOP\llama-cpp\bin\llama-server.exe ^
@@ -49,6 +49,8 @@ curl http://localhost:8080/health
 ---
 
 ## 2. SSH 리버스 터널 연결
+
+> **낡음 주의 (2026-08-04):** 현재 코드(`llm/client.py`)는 Tailscale magic DNS `http://moon:8080`으로 직접 접속한다. 아래 SSH 리버스 터널은 Tailscale 도입 이전 방식으로, Tailscale이 안 될 때의 비상 수단으로만 남겨둔다.
 
 llama-server가 뜬 후 실행:
 
