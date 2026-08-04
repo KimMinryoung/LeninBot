@@ -36,7 +36,7 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 
 from db import query as db_query, query_one as db_query_one, get_conn
 from tool_gateway.results import ToolFailure
@@ -1350,23 +1350,32 @@ def _replace_patronymic(cur, person_id: str, state: dict):
 
 def _replace_aliases(cur, person_id: str, aliases: dict):
     cur.execute("DELETE FROM commulingo_person_aliases WHERE person_id = %s", (person_id,))
+    # Dedupe on the conflict key keeping the LAST occurrence: a single
+    # execute_values statement may not touch the same row twice
+    # (CardinalityViolation), while the old per-row loop let the later
+    # duplicate win via ON CONFLICT.
+    rows: dict[tuple, tuple] = {}
     for lang in ("ko", "en"):
         values = aliases.get(lang) if isinstance(aliases, dict) else None
         for index, alias in enumerate(values or []):
             alias = alias.strip() if isinstance(alias, str) else ""
             if not alias:
                 continue
-            cur.execute(
-                """INSERT INTO commulingo_person_aliases (person_id, lang, alias, sort_order)
-                   VALUES (%s, %s, %s, %s)
-                   ON CONFLICT (person_id, lang, alias)
-                   DO UPDATE SET sort_order = EXCLUDED.sort_order""",
-                (person_id, lang, alias, index),
-            )
+            rows[(person_id, lang, alias)] = (person_id, lang, alias, index)
+    if rows:
+        execute_values(
+            cur,
+            """INSERT INTO commulingo_person_aliases (person_id, lang, alias, sort_order)
+               VALUES %s
+               ON CONFLICT (person_id, lang, alias)
+               DO UPDATE SET sort_order = EXCLUDED.sort_order""",
+            list(rows.values()),
+        )
 
 
 def _replace_scenes(cur, person_id: str, scenes: list):
     cur.execute("DELETE FROM commulingo_person_scenes WHERE person_id = %s", (person_id,))
+    rows = []
     for index, scene in enumerate(scenes or []):
         if not isinstance(scene, (list, tuple)) or len(scene) < 2:
             continue
@@ -1374,11 +1383,14 @@ def _replace_scenes(cur, person_id: str, scenes: list):
         episode_id = scene[1].strip() if isinstance(scene[1], str) else ""
         if not collection_id or not episode_id:
             continue
-        cur.execute(
+        rows.append((person_id, collection_id, episode_id, index))
+    if rows:
+        execute_values(
+            cur,
             """INSERT INTO commulingo_person_scenes
                   (person_id, collection_id, episode_id, sort_order)
-               VALUES (%s, %s, %s, %s)""",
-            (person_id, collection_id, episode_id, index),
+               VALUES %s""",
+            rows,
         )
 
 
@@ -1409,19 +1421,24 @@ def _apply_person_role(cur, person_id: str, role):
 
 def _replace_career(cur, person_id: str, career: list):
     cur.execute("DELETE FROM commulingo_person_career_entries WHERE person_id = %s", (person_id,))
+    rows = []
     for index, entry in enumerate(career or []):
         if not isinstance(entry, dict):
             continue
         label = entry.get("y") or entry.get("period") or ""
         sy, sm, ey, em = _period_columns(label)
         role = entry.get("r") or entry.get("role") or {}
-        cur.execute(
+        rows.append((person_id, index, label, sy, sm, ey, em,
+                     _localized(role, "ko"), _localized(role, "en")))
+    if rows:
+        execute_values(
+            cur,
             """INSERT INTO commulingo_person_career_entries
                   (person_id, sort_order, period_label, start_year, start_month,
                    end_year, end_month, role_ko, role_en, updated_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
-            (person_id, index, label, sy, sm, ey, em,
-             _localized(role, "ko"), _localized(role, "en")),
+               VALUES %s""",
+            rows,
+            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())",
         )
 
 
@@ -2224,29 +2241,38 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
 
 def _replace_term_aliases(cur, term_id: str, aliases: dict):
     cur.execute("DELETE FROM commulingo_term_aliases WHERE term_id = %s", (term_id,))
+    # Dedupe keeping the last occurrence — see _replace_aliases.
+    rows: dict[tuple, tuple] = {}
     for lang in ("ko", "en"):
         for index, alias in enumerate((aliases or {}).get(lang) or []):
             value = alias.strip() if isinstance(alias, str) else ""
             if not value:
                 continue
-            cur.execute(
-                """INSERT INTO commulingo_term_aliases (term_id, lang, alias, sort_order)
-                   VALUES (%s, %s, %s, %s)
-                   ON CONFLICT (term_id, lang, alias) DO UPDATE SET sort_order = EXCLUDED.sort_order""",
-                (term_id, lang, value, index),
-            )
+            rows[(term_id, lang, value)] = (term_id, lang, value, index)
+    if rows:
+        execute_values(
+            cur,
+            """INSERT INTO commulingo_term_aliases (term_id, lang, alias, sort_order)
+               VALUES %s
+               ON CONFLICT (term_id, lang, alias) DO UPDATE SET sort_order = EXCLUDED.sort_order""",
+            list(rows.values()),
+        )
 
 
 def _replace_term_links(cur, term_id: str, table: str, column: str, ids: list):
     cur.execute(f"DELETE FROM {table} WHERE term_id = %s", (term_id,))
+    rows = []
     for index, item in enumerate(ids or []):
         value = item.strip() if isinstance(item, str) else ""
         if not value:
             continue
-        cur.execute(
+        rows.append((term_id, value, index))
+    if rows:
+        execute_values(
+            cur,
             f"""INSERT INTO {table} (term_id, {column}, sort_order)
-                VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
-            (term_id, value, index),
+                VALUES %s ON CONFLICT DO NOTHING""",
+            rows,
         )
 
 
