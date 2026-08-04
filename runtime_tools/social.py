@@ -319,7 +319,8 @@ async def _exec_moltbook(
                 path = f"/notifications/read-by-post/{post_id}" if post_id else "/notifications/read-all"
                 payload = {}
 
-            resp = httpx.request(
+            resp = await asyncio.to_thread(
+                httpx.request,
                 method,
                 f"{base}{path}",
                 headers=headers,
