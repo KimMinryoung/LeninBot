@@ -7,8 +7,24 @@ here for compatibility with older smoke tests and helper scripts.
 
 import asyncio
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+# CJK/Hangul codepoints tokenize at roughly one token per character on every
+# provider we use; ASCII-ish text at ~4 chars/token. A flat chars//N heuristic
+# badly under-counts Korean-heavy transcripts — DeepSeek once saw prompts near
+# its real limit while the flat estimator thought there was plenty of room.
+_CJK_RE = re.compile(r"[ᄀ-ᇿ㄰-㆏가-힯぀-ヿ㐀-鿿]")
+
+
+def estimate_text_tokens(text: str) -> int:
+    """Rough token estimate for mixed Korean/English text (CJK≈1/char, other≈4 chars)."""
+    if not text:
+        return 0
+    cjk = len(_CJK_RE.findall(text))
+    other = len(text) - cjk
+    return cjk + (other // 4)
 
 from tool_gateway.dispatcher import compact_tool_definitions
 

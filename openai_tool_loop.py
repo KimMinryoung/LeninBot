@@ -30,6 +30,7 @@ from tool_loop_common import (
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
     call_with_transient_retry,
+    estimate_text_tokens,
     is_transient_provider_error,
 )
 from tool_gateway.dispatcher import (
@@ -352,22 +353,8 @@ def _ensure_system_first(msgs: list[dict], system_prompt: str) -> list[dict]:
 
 
 def _estimate_tokens(msgs: list[dict]) -> int:
-    """Rough token estimate for context trimming.
-
-    The old flat ``len(text) // 4`` heuristic badly under-counted Korean-heavy
-    research/tool transcripts. DeepSeek then saw prompts near its limit while
-    our local estimator thought there was still plenty of room. Count CJK/Hangul
-    codepoints closer to one token each and keep the 4-char approximation for
-    ASCII-ish text.
-    """
-    cjk_re = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u3040-\u30ff\u3400-\u9fff]")
-
-    def _estimate_text(text: str) -> int:
-        if not text:
-            return 0
-        cjk = len(cjk_re.findall(text))
-        other = len(text) - cjk
-        return cjk + (other // 4)
+    """Rough token estimate for context trimming (CJK-aware, shared)."""
+    _estimate_text = estimate_text_tokens
 
     total = 0
     for m in msgs:

@@ -22,6 +22,7 @@ from tool_loop_common import (
     check_cancelled, TaskCancelledError,
     call_with_transient_retry,
     dedupe_tools_by_name,
+    estimate_text_tokens,
     is_transient_provider_error as _is_transient_provider_error,
     provider_status_code as _provider_status_code,
 )
@@ -291,10 +292,11 @@ def _append_user_text_message(msgs: list[dict], text: str):
 
 
 # ── Token Estimation ─────────────────────────────────────────────────
-
-def estimate_tokens(text: str) -> int:
-    """Rough token estimate for multilingual text (~3 chars/token for Korean+English mix)."""
-    return len(text) // 3
+# CJK-aware (tool_loop_common.estimate_text_tokens). The old flat len//3
+# under-counted Korean ~3×, so the max_input_tokens ceiling and the replay
+# checkpointing both fired far later than policy intended on Korean-heavy
+# transcripts.
+estimate_tokens = estimate_text_tokens
 
 
 # ── Chat with Tools Loop ─────────────────────────────────────────────
