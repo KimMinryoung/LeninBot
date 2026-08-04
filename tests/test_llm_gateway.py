@@ -1,0 +1,220 @@
+"""Hermetic unit tests for llm/gateway.py — the LLM-call seam.
+
+No DB, no API keys: the DB sink is disabled via LENINBOT_LLM_AUDIT_DB=0
+(set here defensively as well as in run_unit_tests.sh) and policy/spend
+lookups are patched.
+"""
+
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import llm.gateway as gw  # noqa: E402
+from llm.gateway import (  # noqa: E402
+    LLMGatewayDenied,
+    check_llm_call,
+    estimate_cost_usd,
+    infer_provider,
+    record_llm_call,
+)
+
+
+def _policy(**overrides):
+    return {**gw._DEFAULTS, **overrides}
+
+
+class TestInferProvider(unittest.TestCase):
+    def test_known_prefixes(self):
+        self.assertEqual(infer_provider("claude-fable-5"), "claude")
+        self.assertEqual(infer_provider("gpt-5.6-terra"), "openai")
+        self.assertEqual(infer_provider("deepseek-v4-pro"), "deepseek")
+        self.assertEqual(infer_provider("kimi-k3"), "kimi")
+        self.assertEqual(infer_provider("qwen3.6-9b"), "local")
+        self.assertEqual(infer_provider("gemini-3.1-flash-lite"), "gemini")
+
+    def test_unknown_and_empty(self):
+        self.assertIsNone(infer_provider("llama-8b"))
+        self.assertIsNone(infer_provider(None))
+        self.assertIsNone(infer_provider(""))
+
+
+class TestEstimateCost(unittest.TestCase):
+    def test_anthropic_semantics_input_excludes_cache(self):
+        # deepseek-v4-flash: in 0.14, out 0.28, cache_read 0.0028 per M
+        cost = estimate_cost_usd(
+            "deepseek-v4-flash",
+            tokens_in=1_000_000, tokens_out=1_000_000, cache_read=1_000_000,
+        )
+        self.assertAlmostEqual(cost, 0.14 + 0.28 + 0.0028, places=6)
+
+    def test_dated_model_prefix_match(self):
+        exact = estimate_cost_usd("claude-haiku-4-5", tokens_in=1000, tokens_out=100)
+        dated = estimate_cost_usd(
+            "claude-haiku-4-5-20251001", tokens_in=1000, tokens_out=100,
+        )
+        self.assertIsNotNone(exact)
+        self.assertEqual(exact, dated)
+
+    def test_openai_semantics_input_includes_cache(self):
+        # gpt-5.6-luna: in 0.20, cached 0.02, out 1.20 per M; prompt_tokens
+        # includes the cached share, which must be re-priced, not double-billed.
+        cost = estimate_cost_usd(
+            "gpt-5.6-luna",
+            tokens_in=2_000_000, tokens_out=0, cache_read=1_000_000,
+        )
+        self.assertAlmostEqual(cost, 0.20 + 0.02, places=6)
+
+    def test_unknown_model_returns_none_not_fabricated(self):
+        self.assertIsNone(estimate_cost_usd("mystery-9000", tokens_in=1000))
+        self.assertIsNone(estimate_cost_usd(None, tokens_in=1000))
+
+
+class TestCheckLLMCall(unittest.TestCase):
+    def test_default_policy_allows(self):
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            with patch.object(gw, "_emit") as emit:
+                check_llm_call(surface="loop", caller="analyst", model="claude-fable-5")
+        emit.assert_not_called()
+
+    def test_block_all_shadow_records_but_allows(self):
+        with patch.object(gw, "load_policy", return_value=_policy(block_all=True)):
+            with patch.object(gw, "_emit") as emit:
+                check_llm_call(surface="loop", caller="analyst", model="claude-fable-5")
+        row = emit.call_args[0][0]
+        self.assertEqual(row["status"], "would_deny")
+
+    def test_block_all_enforce_raises(self):
+        with patch.object(
+            gw, "load_policy", return_value=_policy(block_all=True, enforce=True)
+        ):
+            with patch.object(gw, "_emit"):
+                with self.assertRaises(LLMGatewayDenied):
+                    check_llm_call(surface="loop", caller="analyst", model="claude-fable-5")
+
+    def test_blocked_provider_inferred_from_model(self):
+        pol = _policy(blocked_providers=["openai"], enforce=True)
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(gw, "_emit"):
+                with self.assertRaises(LLMGatewayDenied):
+                    check_llm_call(surface="oneshot", caller="x", model="gpt-5.6-terra")
+                # Other providers pass.
+                check_llm_call(surface="oneshot", caller="x", model="deepseek-v4-flash")
+
+    def test_daily_budget_enforced(self):
+        pol = _policy(daily_budget_usd=10.0, enforce=True)
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(gw, "_today_spend", return_value={"claude": 11.5}):
+                with patch.object(gw, "_emit"):
+                    with self.assertRaises(LLMGatewayDenied):
+                        check_llm_call(surface="loop", caller="x", model="claude-fable-5")
+            with patch.object(gw, "_today_spend", return_value={"claude": 3.0}):
+                check_llm_call(surface="loop", caller="x", model="claude-fable-5")
+
+    def test_per_provider_budget(self):
+        pol = _policy(daily_budget_per_provider={"deepseek": 1.0}, enforce=True)
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(
+                gw, "_today_spend", return_value={"deepseek": 2.0, "claude": 50.0}
+            ):
+                with patch.object(gw, "_emit"):
+                    with self.assertRaises(LLMGatewayDenied):
+                        check_llm_call(surface="loop", caller="x", model="deepseek-v4-pro")
+                # Uncapped provider unaffected by its own spend.
+                check_llm_call(surface="loop", caller="x", model="claude-fable-5")
+
+    def test_budget_fails_open_when_spend_unknown(self):
+        pol = _policy(daily_budget_usd=0.01, enforce=True)
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(gw, "_today_spend", return_value=None):
+                check_llm_call(surface="loop", caller="x", model="claude-fable-5")
+
+    def test_internal_error_fails_open(self):
+        with patch.object(gw, "load_policy", side_effect=RuntimeError("boom")):
+            check_llm_call(surface="loop", caller="x", model="claude-fable-5")
+
+
+class TestRecordLLMCall(unittest.TestCase):
+    def test_records_with_explicit_cost(self):
+        with patch.object(gw, "_emit") as emit:
+            record_llm_call(
+                surface="loop", caller="analyst", model="claude-fable-5",
+                label="Round 1", tokens_in=100, tokens_out=50,
+                cache_read=200, cache_create=10, cost_usd=0.0123,
+            )
+        row = emit.call_args[0][0]
+        self.assertEqual(row["provider"], "claude")
+        self.assertEqual(row["cost_usd"], 0.0123)
+        self.assertEqual(row["status"], "ok")
+
+    def test_cost_autofilled_from_pricing(self):
+        with patch.object(gw, "_emit") as emit:
+            record_llm_call(
+                surface="oneshot", caller="chunk_summary", model="deepseek-v4-flash",
+                tokens_in=1_000_000, tokens_out=0,
+            )
+        self.assertAlmostEqual(emit.call_args[0][0]["cost_usd"], 0.14, places=6)
+
+    def test_never_raises(self):
+        with patch.object(gw, "estimate_cost_usd", side_effect=RuntimeError("boom")):
+            record_llm_call(surface="loop", caller="x", model="m")  # must not raise
+
+    def test_error_excerpt_truncated(self):
+        with patch.object(gw, "_emit") as emit:
+            record_llm_call(
+                surface="oneshot", caller="x", model="deepseek-v4-flash",
+                status="error", error_excerpt="e" * 2000,
+            )
+        self.assertLessEqual(len(emit.call_args[0][0]["error_excerpt"]), 510)
+
+
+class TestLoopStateSeam(unittest.TestCase):
+    """LoopState.add_cost is the loop-side seam: it must forward usage."""
+
+    def test_add_cost_forwards_to_gateway(self):
+        import agent_loop
+
+        with patch.object(agent_loop, "record_llm_call") as rec:
+            state = agent_loop.LoopState(0.5, agent_name="analyst")
+            state.add_cost(
+                0.01, model="deepseek-v4-pro", label="Round 3",
+                tokens_in=1000, tokens_out=200, cache_read=5000, cache_create=0,
+            )
+        self.assertAlmostEqual(state.total_cost, 0.01)
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs["surface"], "loop")
+        self.assertEqual(kwargs["caller"], "analyst")
+        self.assertEqual(kwargs["model"], "deepseek-v4-pro")
+        self.assertEqual(kwargs["cost_usd"], 0.01)
+        self.assertEqual(kwargs["cache_read"], 5000)
+
+    def test_add_cost_bare_still_works(self):
+        # Compatibility: cost-only calls (older call shape) must still count.
+        import agent_loop
+
+        with patch.object(agent_loop, "record_llm_call"):
+            state = agent_loop.LoopState(0.5)
+            state.add_cost(0.02)
+            state.add_cost(0.03)
+        self.assertAlmostEqual(state.total_cost, 0.05)
+
+
+class TestPolicyLoading(unittest.TestCase):
+    def test_missing_config_uses_defaults(self):
+        with patch.object(gw, "CONFIG_PATH", Path("/nonexistent/llm_gateway.json")):
+            pol = gw.load_policy()
+        self.assertFalse(pol["enforce"])
+        self.assertFalse(pol["block_all"])
+
+    def test_repo_config_is_valid_shadow_default(self):
+        pol = gw.load_policy()
+        self.assertIn("enforce", pol)
+        self.assertFalse(pol["block_all"], "repo default must not block calls")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

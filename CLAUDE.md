@@ -16,6 +16,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/security_gateway.md` — 툴 보안 게이트웨이 — execute_tool 단일 seam, 통합 정책/권한 통제, tool_audit_log 감사 로깅, shadow→enforce 롤아웃, 운영 CLI
 - `dev_docs/agent_improvement_roadmap.md` — 에이전트 지능(CLAW/Reflexion/Plan-and-Execute) + 메모리 개선 단계별 로드맵
 - `dev_docs/llm_call_registry.md` — LLM 원샷 호출 통합 레지스트리 (config/llm_call_sites.json, 핫리로드, 운영 CLI)
+- `dev_docs/llm_gateway.md` — LLM 게이트웨이 — 모든 LLM 호출의 단일 seam (정책 게이트 + llm_audit_log 스펜드 감사, shadow→enforce, 운영 CLI)
 - `dev_docs/llm_provider_architecture.md` — 프로바이더 라우팅, agent_loop 공유 엔진 + 프로토콜 어댑터 구조, 모델/가격/추론 정책
 - `dev_docs/standby_operations.md` — 스트리밍 스탠바이(hel1) 활용법·승격 런북·재시드 절차
 - `dev_docs/monitoring.md` — 감시·알림 체계 (VM 밖 워치독 Worker, 복제 점검, 알림 채널, 사각지대)

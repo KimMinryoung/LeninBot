@@ -22,6 +22,10 @@ Two ways to consume the registry:
                                     KG/graphiti, razvedchik, writer critic)
   - generate(feature, prompt)     → run the call through the shared executor
     generate_sync(feature, prompt)  (gemini / deepseek / openai / claude)
+
+Executor calls pass through the LLM gateway (llm/gateway.py): policy check
+before the request, spend/usage audit after. model-only sites bypass it —
+they execute with their own clients (a documented gap in llm_gateway.md).
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import json
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -157,7 +162,38 @@ def _api_key(provider: str) -> str:
     return key
 
 
-def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> str:
+def _gemini_usage(response) -> dict:
+    meta = getattr(response, "usage_metadata", None)
+    return {
+        "tokens_in": getattr(meta, "prompt_token_count", 0) or 0,
+        "tokens_out": getattr(meta, "candidates_token_count", 0) or 0,
+    }
+
+
+def _openai_usage(response) -> dict:
+    usage = getattr(response, "usage", None)
+    cached = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    if details and not cached:
+        cached = getattr(details, "cached_tokens", 0) or 0
+    return {
+        "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
+        "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
+        "cache_read": cached,
+    }
+
+
+def _anthropic_usage(response) -> dict:
+    usage = getattr(response, "usage", None)
+    return {
+        "tokens_in": getattr(usage, "input_tokens", 0) or 0,
+        "tokens_out": getattr(usage, "output_tokens", 0) or 0,
+        "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+        "cache_create": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+    }
+
+
+def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     from google import genai
     from google.genai.types import GenerateContentConfig
 
@@ -171,10 +207,10 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> str
     response = client.models.generate_content(
         model=p.model, contents=prompt, config=config,
     )
-    return (response.text or "").strip()
+    return (response.text or "").strip(), _gemini_usage(response)
 
 
-def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None) -> str:
+def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     from openai import OpenAI
 
     client = OpenAI(
@@ -214,10 +250,10 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
         messages=messages,
         **kwargs,
     )
-    return (response.choices[0].message.content or "").strip()
+    return (response.choices[0].message.content or "").strip(), _openai_usage(response)
 
 
-def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> str:
+def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=_api_key("claude"), timeout=p.timeout)
@@ -228,12 +264,13 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> str
         messages=[{"role": "user", "content": prompt}],
         **kwargs,
     )
-    return " ".join(
+    text = " ".join(
         b.text for b in response.content if getattr(b, "type", "") == "text"
     ).strip()
+    return text, _anthropic_usage(response)
 
 
-def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | None) -> str:
+def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     """DeepSeek over its Anthropic-compatible endpoint, thinking off by default.
 
     DeepSeek V4 defaults to thinking mode, and the toggle only exists on this
@@ -270,9 +307,10 @@ def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | 
         messages=[{"role": "user", "content": prompt}],
         **kwargs,
     )
-    return " ".join(
+    text = " ".join(
         b.text for b in response.content if getattr(b, "type", "") == "text"
     ).strip()
+    return text, _anthropic_usage(response)
 
 
 _EXECUTORS = {
@@ -291,6 +329,8 @@ def generate_sync(feature: str, prompt: str, *, system: str | None = None, **def
     Returns None on any failure — call sites keep their own fallbacks
     (extractive summary, skip, default label) instead of blocking.
     """
+    from llm.gateway import LLMGatewayDenied, check_llm_call, record_llm_call
+
     profile = resolve(feature, **defaults)
     executor = _EXECUTORS.get(profile.provider)
     if executor is None:
@@ -299,12 +339,36 @@ def generate_sync(feature: str, prompt: str, *, system: str | None = None, **def
     if not profile.model:
         logger.error("[llm-registry] %s: no model configured", feature)
         return None
+    # deepseek_anthropic is a protocol variant, not a distinct provider.
+    provider = "deepseek" if profile.provider == "deepseek_anthropic" else profile.provider
     try:
-        return executor(profile, prompt, system) or None
+        check_llm_call(
+            surface="oneshot", caller=feature,
+            provider=provider, model=profile.model,
+        )
+    except LLMGatewayDenied as e:
+        # Denial behaves like any other failure: the call site's own
+        # fallback (extractive summary, default label, skip) takes over.
+        logger.warning("[llm-registry] %s denied by llm gateway: %s", feature, e)
+        return None
+    started = time.monotonic()
+    try:
+        text, usage = executor(profile, prompt, system)
     except Exception as e:
+        record_llm_call(
+            surface="oneshot", caller=feature, provider=provider,
+            model=profile.model, status="error", error_excerpt=str(e),
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
         logger.warning("[llm-registry] %s (%s/%s) failed: %s",
                        feature, profile.provider, profile.model, e)
         return None
+    record_llm_call(
+        surface="oneshot", caller=feature, provider=provider,
+        model=profile.model, latency_ms=int((time.monotonic() - started) * 1000),
+        **usage,
+    )
+    return text or None
 
 
 async def generate(feature: str, prompt: str, *, system: str | None = None, **defaults) -> str | None:
