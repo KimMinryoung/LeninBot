@@ -33,6 +33,7 @@ from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import CallerContext, caller_scope
 from tool_gateway.selection import build_toolset
 from identity.prompts import EXTERNAL_SOURCE_RULE
+from telegram._send_utils import make_progress_callback, split_message
 
 logging.basicConfig(
     level=logging.INFO,
@@ -149,68 +150,16 @@ class OwnerOnlyMiddleware(BaseMiddleware):
         return None
 
 
-def _split_message(text: str, max_len: int = 4096) -> list[str]:
-    """Split text into chunks respecting Telegram's 4096 char limit."""
-    if len(text) <= max_len:
-        return [text]
-    chunks: list[str] = []
-    while text:
-        if len(text) <= max_len:
-            chunks.append(text)
-            break
-        split_pos = text.rfind("\n", 0, max_len)
-        if split_pos <= 0:
-            split_pos = text.rfind(" ", 0, max_len)
-        if split_pos <= 0:
-            split_pos = max_len
-        chunks.append(text[:split_pos])
-        text = text[split_pos:].lstrip("\n")
-    return chunks
+_split_message = split_message
 
 
 def _make_progress_callback(bot: Bot, chat_id: int):
-    """on_progress callback that streams reasoning/tool steps as separate messages.
-
-    Mirrors the Cyber-Lenin bot: buffer events per round, flush one code-block
-    message per round so the final answer stays clean prose. Expose ``.flush``
-    for the trailing round after the loop returns.
-    """
-    _buf: list[str] = []
-    _current_round = [0]
-
-    async def _flush():
-        if not _buf:
-            return
-        text = "\n".join(_buf)
-        _buf.clear()
-        try:
-            for chunk in _split_message(f"```\n{text}\n```"):
-                await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
-        except Exception as e:
-            logger.debug("progress send failed: %s", e)
-
-    async def _on_progress(event: str, detail: str):
-        round_num = 0
-        if detail.startswith("["):
-            try:
-                round_num = int(detail[1:detail.index("]")])
-            except (ValueError, IndexError):
-                pass
-        if round_num > _current_round[0] and _current_round[0] > 0:
-            await _flush()
-        if round_num > 0:
-            _current_round[0] = round_num
-
-        # Stream ONLY tool steps. The model's in-character prose arrives as
-        # "thinking"/"text_delta" but is also folded into the final reply by
-        # the loop — streaming it here would duplicate it. Budget ("💰") is
-        # mechanics noise. So a plain chat turn sends no progress at all (just
-        # the reply); a tool turn shows the 🔧 steps, then the clean answer.
-        if event in ("tool_call", "tool_result"):
-            _buf.append(detail)
-
-    _on_progress.flush = _flush
-    return _on_progress
+    # Stream ONLY tool steps. The model's in-character prose arrives as
+    # "thinking"/"text_delta" but is also folded into the final reply by
+    # the loop — streaming it here would duplicate it. Budget ("💰") is
+    # mechanics noise. So a plain chat turn sends no progress at all (just
+    # the reply); a tool turn shows the 🔧 steps, then the clean answer.
+    return make_progress_callback(lambda: bot, chat_id, events=("tool_call", "tool_result"))
 
 
 router = Router()

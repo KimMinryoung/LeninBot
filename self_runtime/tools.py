@@ -251,23 +251,7 @@ def _slice_text(text: str, max_chars: int | None = None, offset: int | None = No
     return text[start:end], start, end, end < len(text)
 
 
-def _extract_json_object(text: str) -> dict | None:
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        return None
+from llm.json_utils import extract_json_object as _extract_json_object
 
 
 def _normalize_llm_route(parsed: dict, task: str, candidates: list[str] | None) -> dict | None:
@@ -1058,20 +1042,7 @@ async def _exec_read_chat_logs(
                 current += note
         return current, omitted
 
-    def _sort_key(ts) -> float:
-        if ts is None:
-            return 0.0
-        if hasattr(ts, "timestamp"):
-            try:
-                return float(ts.timestamp())
-            except Exception:
-                return 0.0
-        if isinstance(ts, str):
-            try:
-                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-            except Exception:
-                return 0.0
-        return 0.0
+    from ops.time_utils import timestamp_sort_key as _sort_key
 
     results = []
     if normalized_source == "web":

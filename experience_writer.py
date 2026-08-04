@@ -169,20 +169,7 @@ def _format_tasks(rows: list[dict]) -> str:
     return "\n---\n".join(lines)
 
 
-def _sort_key(ts) -> float:
-    if ts is None:
-        return 0.0
-    if hasattr(ts, "timestamp"):
-        try:
-            return float(ts.timestamp())
-        except Exception:
-            return 0.0
-    if isinstance(ts, str):
-        try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-        except Exception:
-            return 0.0
-    return 0.0
+from ops.time_utils import timestamp_sort_key as _sort_key
 
 
 def _format_ts(ts) -> str:

@@ -1,5 +1,3 @@
-import logging
-import os
 
 import uvicorn
 from fastapi import FastAPI
@@ -7,31 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_routes.email import router as email_router
 
-_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
-logging.basicConfig(level=_LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-logging.getLogger().setLevel(_LOG_LEVEL)
+from api_common import parse_cors_origins, setup_service_logging
 
-_DEFAULT_CORS_ORIGINS = "https://cyber-lenin.com,http://localhost:3000"
-
-
-def _parse_cors_origins() -> list[str]:
-    raw = (
-        os.getenv("EMAIL_CORS_ORIGINS")
-        or os.getenv("WEBCHAT_CORS_ORIGINS")
-        or os.getenv("CORS_ALLOW_ORIGINS")
-        or _DEFAULT_CORS_ORIGINS
-    )
-    origins = [item.strip() for item in raw.split(",") if item.strip()]
-    return origins or [item.strip() for item in _DEFAULT_CORS_ORIGINS.split(",")]
-
+setup_service_logging()
 
 app = FastAPI(title="Cyber-Lenin Email API")
 app.include_router(email_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_parse_cors_origins(),
+    allow_origins=parse_cors_origins("EMAIL_CORS_ORIGINS"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

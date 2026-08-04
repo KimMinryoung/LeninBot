@@ -13,7 +13,6 @@ restore without R2 roundtrip. Raw JSON dumps are deleted after upload
 Scheduled by leninbot-kg-backup.timer (daily 03:00 KST).
 """
 import os
-import re
 import shutil
 import sys
 import tarfile
@@ -27,55 +26,20 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "skills" / "kg-maintenance" / "scripts"))
 
 
-def _promote_systemd_credentials() -> None:
-    """Expose LoadCredentialEncrypted secrets to legacy env-based helpers."""
-    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
-    if not cred_dir:
-        return
-    for cred_name, env_name in (
-        ("neo4j_password", "NEO4J_PASSWORD"),
-        ("r2_cf_api_token", "R2_CF_API_TOKEN"),
-    ):
-        if os.environ.get(env_name):
-            continue
-        path = Path(cred_dir) / cred_name
-        if path.is_file():
-            os.environ[env_name] = path.read_text().rstrip("\n")
+from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
 
+promote_systemd_credentials((
+    ("neo4j_password", "NEO4J_PASSWORD"),
+    ("r2_cf_api_token", "R2_CF_API_TOKEN"),
+))
 
-_promote_systemd_credentials()
-
-import requests
 from backup_kg import backup as _dump_kg
 from r2_retention import prune_r2_prefix
-from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 KST = timezone(timedelta(hours=9))
 R2_RETENTION_DAYS = 14  # keep today + the 14 previous days on R2
 LOCAL_RETENTION_DAYS = 3  # keep today + yesterday + day-before under data/kg_backups/
-_LOCAL_KEY_RE = re.compile(r"^kg-backup-(\d{4}-\d{2}-\d{2})\.tar\.gz$")
-
-
-def _r2_url(key: str) -> str:
-    acct = os.environ["R2_CF_ACCOUNT_ID"]
-    return f"https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{BUCKET}/objects/{key}"
-
-
-def _r2_headers() -> dict:
-    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
-
-
-def _r2_put(key: str, path: str) -> None:
-    with open(path, "rb") as f:
-        data = f.read()
-    resp = requests.put(
-        _r2_url(key),
-        headers={**_r2_headers(), "Content-Type": "application/gzip"},
-        data=data,
-        timeout=300,
-    )
-    resp.raise_for_status()
 
 
 def main() -> int:
@@ -100,7 +64,7 @@ def main() -> int:
         size_mb = os.path.getsize(tmp_path) / 1024 / 1024
         print(f"Archive built: {archive_key} ({size_mb:.1f} MB)")
 
-        _r2_put(archive_key, tmp_path)
+        r2_put(BUCKET, archive_key, tmp_path, content_type="application/gzip")
         print(f"Uploaded to R2: {BUCKET}/{archive_key}")
 
         # Keep a local copy for fast restore (rolling LOCAL_RETENTION_DAYS).
@@ -113,28 +77,13 @@ def main() -> int:
     r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
     prune_r2_prefix(BUCKET, "kg-backup", ".tar.gz", r2_cutoff)
 
-    _prune_local_archives(backup_dir, today)
+    local_cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
+    prune_local_backups(backup_dir, "kg-backup", ".tar.gz", local_cutoff)
 
     for f in dump_files:
         f.unlink(missing_ok=True)
 
     return 0
-
-
-def _prune_local_archives(backup_dir: Path, today: datetime) -> None:
-    """Delete local kg-backup-YYYY-MM-DD.tar.gz files older than LOCAL_RETENTION_DAYS."""
-    cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
-    for p in backup_dir.glob("kg-backup-*.tar.gz"):
-        m = _LOCAL_KEY_RE.match(p.name)
-        if not m:
-            continue
-        try:
-            file_date = datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if file_date < cutoff:
-            p.unlink(missing_ok=True)
-            print(f"Pruned local archive: {p.name}")
 
 
 if __name__ == "__main__":

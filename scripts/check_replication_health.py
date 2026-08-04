@@ -32,34 +32,7 @@ CONTAINER = "leninbot-pg"
 SLOT = "standby_hel1"
 EXPECTED_CLIENT = "100.124.58.85"
 
-
-def _notify_telegram(message: str) -> bool:
-    """Send `message` to the configured Telegram chat (stale-secrets pattern)."""
-    import os
-    import urllib.parse
-    import urllib.request
-
-    try:
-        from secrets_loader import get_secret
-    except Exception as exc:
-        print(f"WARNING: cannot import secrets_loader ({exc}); skipping notify", file=sys.stderr)
-        return False
-    token = get_secret("TELEGRAM_BOT_TOKEN") or ""
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        print("WARNING: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skipping notify",
-              file=sys.stderr)
-        return False
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
-    try:
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage", data=data, method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return 200 <= resp.status < 300
-    except Exception as exc:
-        print(f"WARNING: telegram notify failed: {exc}", file=sys.stderr)
-        return False
+from _notify import notify_telegram as _notify_telegram  # noqa: E402
 
 
 def _query(sql: str) -> list[list[str]]:

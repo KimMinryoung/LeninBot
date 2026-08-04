@@ -390,17 +390,7 @@ async def execute_browser_task(task: dict) -> dict:
         }
 
 
-def _log_event(level, source, message, detail=None, task_id=None):
-    """Persist error/warning to DB (same as telegram_bot._log_event)."""
-    try:
-        from db import execute as db_execute
-        db_execute(
-            "INSERT INTO telegram_error_log (level, source, message, detail, task_id) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (level[:10], source[:100], message[:2000], detail[:4000] if detail else None, task_id),
-        )
-    except Exception as e:
-        logger.warning("_log_event DB write failed: %s", e)
+from ops.logs import log_event as _log_event
 
 
 # ── Unix Domain Socket Server ────────────────────────────────────────

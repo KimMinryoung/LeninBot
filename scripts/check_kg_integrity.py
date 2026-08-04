@@ -7,10 +7,7 @@ Use after any manual KG correction, merge, delete, or restore:
 from __future__ import annotations
 
 import json
-import os
 import sys
-import urllib.parse
-import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -22,30 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from _notify import notify_telegram as _notify_telegram
 from kg_runtime.integrity import check_kg_integrity, format_integrity_status
-
-
-def _notify_telegram(message: str) -> bool:
-    from secrets_loader import get_secret
-
-    token = get_secret("TELEGRAM_BOT_TOKEN") or ""
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        print("WARNING: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skipping notify", file=sys.stderr)
-        return False
-
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
-    try:
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=data,
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return 200 <= resp.status < 300
-    except Exception as e:
-        print(f"WARNING: telegram notify failed: {e}", file=sys.stderr)
-        return False
 
 
 def _run_smoke_search(query: str) -> dict:

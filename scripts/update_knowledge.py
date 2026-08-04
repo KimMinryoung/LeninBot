@@ -8,6 +8,7 @@ from tqdm import tqdm
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from db import get_conn
+from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -140,14 +141,18 @@ def _insert_documents_batch(splits):
     metadatas = [doc.metadata for doc in splits]
     vectors = embeddings.embed_documents(texts)
 
+    rows = [
+        (text, json.dumps(metadata), "[" + ",".join(str(v) for v in vec) + "]")
+        for text, metadata, vec in zip(texts, metadatas, vectors)
+    ]
     with get_conn() as conn:
         with conn.cursor() as cur:
-            for text, metadata, vec in zip(texts, metadatas, vectors):
-                embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
-                cur.execute(
-                    "INSERT INTO lenin_corpus (content, metadata, embedding) VALUES (%s, %s, %s::vector)",
-                    (text, json.dumps(metadata), embedding_str),
-                )
+            execute_values(
+                cur,
+                "INSERT INTO lenin_corpus (content, metadata, embedding) VALUES %s",
+                rows,
+                template="(%s, %s, %s::vector)",
+            )
 
 
 def update_knowledge(layer="core_theory"):

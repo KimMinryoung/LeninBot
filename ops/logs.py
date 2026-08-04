@@ -4,6 +4,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def log_event(
+    level: str,        # "error" | "warning"
+    source: str,       # e.g. "chat", "task", "tool", "final_response"
+    message: str,
+    detail: str | None = None,
+    task_id: int | None = None,
+) -> None:
+    """Persist an error or warning event to telegram_error_log."""
+    try:
+        from db import execute as db_execute
+        db_execute(
+            "INSERT INTO telegram_error_log (level, source, message, detail, task_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (level[:10], source[:100], message[:2000], detail[:4000] if detail else None, task_id),
+        )
+    except Exception as e:
+        logger.warning("log_event DB write failed: %s", e)
+
 def _normalize_grep_terms(grep) -> list[str]:
     """Normalize grep input into a clean list of lowercase terms.
 

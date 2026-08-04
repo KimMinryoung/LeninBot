@@ -27,23 +27,7 @@ def _looks_english(text: str) -> bool:
     return bool(re.search(r"[A-Za-z]", text or "")) and not _looks_korean(text)
 
 
-def _extract_json_object(text: str) -> dict | None:
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        return None
+from llm.json_utils import extract_json_object as _extract_json_object
 
 
 async def _llm_translate_search_query(query: str, target_language: str, layer: str) -> str | None:
@@ -555,12 +539,14 @@ async def _exec_restart_service(service: str = "telegram") -> str:
 
     # 1. Find .py files with uncommitted changes (staged + unstaged)
     try:
-        diff_result = subprocess.run(
+        diff_result = await asyncio.to_thread(
+            subprocess.run,
             ["git", "diff", "--name-only", "HEAD", "--diff-filter=ACMR"],
             capture_output=True, text=True, cwd=project_root, timeout=10,
         )
         # Also include untracked .py files that might be new
-        untracked = subprocess.run(
+        untracked = await asyncio.to_thread(
+            subprocess.run,
             ["git", "ls-files", "--others", "--exclude-standard"],
             capture_output=True, text=True, cwd=project_root, timeout=10,
         )
@@ -608,7 +594,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
                 f"import sys; sys.path.insert(0, {project_root!r}); "
                 f"import importlib; importlib.import_module({module!r})"
             )
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [sys.executable, "-c", check_code],
                 capture_output=True, text=True, timeout=30,
                 cwd=project_root,
@@ -641,7 +628,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
 
     # 4. All checks passed — daemon-reload (picks up any unit file changes), then restart
     try:
-        subprocess.run(
+        await asyncio.to_thread(
+            subprocess.run,
             ["sudo", "-n", "systemctl", "daemon-reload"],
             capture_output=True, text=True, timeout=10,
         )
@@ -658,7 +646,8 @@ async def _exec_restart_service(service: str = "telegram") -> str:
     restart_failed = False
     for svc in svc_map[service]:
         try:
-            proc = subprocess.run(
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 ["sudo", "-n", "systemctl", "restart", svc],
                 capture_output=True, text=True, timeout=15,
                 start_new_session=True,
