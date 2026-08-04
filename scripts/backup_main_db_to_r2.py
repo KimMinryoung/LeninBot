@@ -11,7 +11,6 @@ Scheduled by leninbot-main-backup.timer (daily 03:40 KST).
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -23,23 +22,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
 
-def _promote_systemd_credentials() -> None:
-    """Expose LoadCredentialEncrypted secrets to legacy env-based helpers."""
-    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
-    if not cred_dir:
-        return
-    path = Path(cred_dir) / "r2_cf_api_token"
-    if path.is_file() and not os.environ.get("R2_CF_API_TOKEN"):
-        os.environ["R2_CF_API_TOKEN"] = path.read_text().rstrip("\n")
-
-
-_promote_systemd_credentials()
-
-import requests
+promote_systemd_credentials()
 
 from r2_retention import prune_r2_prefix
-from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 CONTAINER = "leninbot-pg"
@@ -60,30 +47,6 @@ BACKUP_SPECS = (
         "story_scenes",
     ),
 )
-
-
-def _r2_url(key: str) -> str:
-    account = os.environ["R2_CF_ACCOUNT_ID"]
-    return (
-        f"https://api.cloudflare.com/client/v4/accounts/{account}"
-        f"/r2/buckets/{BUCKET}/objects/{key}"
-    )
-
-
-def _r2_headers() -> dict:
-    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
-
-
-def _r2_put(key: str, path: str) -> None:
-    with open(path, "rb") as source:
-        data = source.read()
-    response = requests.put(
-        _r2_url(key),
-        headers={**_r2_headers(), "Content-Type": "application/octet-stream"},
-        data=data,
-        timeout=300,
-    )
-    response.raise_for_status()
 
 
 def _dump(path: str, database: str) -> None:
@@ -145,23 +108,12 @@ def _build_upload_and_save(
             f"Dump built and verified: {archive_key} "
             f"({size_mb:.1f} MB, {entries} TOC entries)"
         )
-        _r2_put(archive_key, tmp_path)
+        r2_put(BUCKET, archive_key, tmp_path)
         print(f"Uploaded to R2: {BUCKET}/{archive_key}")
         shutil.copyfile(tmp_path, backup_dir / archive_key)
         print(f"Saved local copy: {backup_dir / archive_key}")
     finally:
         os.unlink(tmp_path)
-
-
-def _prune_local(backup_dir: Path, key_prefix: str, cutoff) -> None:
-    key_re = re.compile(
-        rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})\.dump$"
-    )
-    for path in backup_dir.glob(f"{key_prefix}-*.dump"):
-        match = key_re.match(path.name)
-        if match and datetime.strptime(match.group(1), "%Y-%m-%d").date() < cutoff:
-            path.unlink()
-            print(f"Pruned local copy: {path.name}")
 
 
 def main() -> int:
@@ -177,7 +129,7 @@ def main() -> int:
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
     for _database, key_prefix, backup_dir, _marker in BACKUP_SPECS:
-        _prune_local(backup_dir, key_prefix, cutoff)
+        prune_local_backups(backup_dir, key_prefix, ".dump", cutoff)
 
     return 0
 

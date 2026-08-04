@@ -20,7 +20,6 @@ Restore (into a fresh or wiped container):
 Scheduled by leninbot-writer-backup.timer (daily 03:20 KST).
 """
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -32,50 +31,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
 
-def _promote_systemd_credentials() -> None:
-    """Expose LoadCredentialEncrypted secrets to legacy env-based helpers."""
-    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
-    if not cred_dir:
-        return
-    path = Path(cred_dir) / "r2_cf_api_token"
-    if path.is_file() and not os.environ.get("R2_CF_API_TOKEN"):
-        os.environ["R2_CF_API_TOKEN"] = path.read_text().rstrip("\n")
+promote_systemd_credentials()
 
-
-_promote_systemd_credentials()
-
-import requests
 from r2_retention import prune_r2_prefix
-from secrets_loader import require_secret
 
 BUCKET = "cyber-lenin-backups"
 CONTAINER = "leninbot-pg"
 KST = timezone(timedelta(hours=9))
 R2_RETENTION_DAYS = 15
 LOCAL_RETENTION_DAYS = 3
-_LOCAL_KEY_RE = re.compile(r"^writer-db-backup-(\d{4}-\d{2}-\d{2})\.dump$")
-
-
-def _r2_url(key: str) -> str:
-    acct = os.environ["R2_CF_ACCOUNT_ID"]
-    return f"https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{BUCKET}/objects/{key}"
-
-
-def _r2_headers() -> dict:
-    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
-
-
-def _r2_put(key: str, path: str) -> None:
-    with open(path, "rb") as f:
-        data = f.read()
-    resp = requests.put(
-        _r2_url(key),
-        headers={**_r2_headers(), "Content-Type": "application/octet-stream"},
-        data=data,
-        timeout=300,
-    )
-    resp.raise_for_status()
 
 
 def _dump(path: str) -> None:
@@ -118,7 +84,7 @@ def main() -> int:
         size_mb = os.path.getsize(tmp_path) / 1024 / 1024
         print(f"Dump built and verified: {archive_key} ({size_mb:.1f} MB, {entries} TOC entries)")
 
-        _r2_put(archive_key, tmp_path)
+        r2_put(BUCKET, archive_key, tmp_path)
         print(f"Uploaded to R2: {BUCKET}/{archive_key}")
 
         # Local copy after successful upload (fast restore without R2 roundtrip).
@@ -131,11 +97,7 @@ def main() -> int:
     prune_r2_prefix(BUCKET, "writer-db-backup", ".dump", r2_cutoff)
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
-    for p in backup_dir.glob("writer-db-backup-*.dump"):
-        m = _LOCAL_KEY_RE.match(p.name)
-        if m and datetime.strptime(m.group(1), "%Y-%m-%d").date() < cutoff:
-            p.unlink()
-            print(f"Pruned local copy: {p.name}")
+    prune_local_backups(backup_dir, "writer-db-backup", ".dump", cutoff)
 
     return 0
 
