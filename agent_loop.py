@@ -55,6 +55,7 @@ _OpenAIProtocolAdapter for the two implementations):
 import json
 import logging
 
+from llm.gateway import check_llm_call, record_llm_call
 from tool_loop_common import (
     build_budget_warning,
     build_limit_message,
@@ -123,14 +124,28 @@ class FinalTurn:
 
 
 class LoopState:
-    """Cost state shared between the engine and its adapter."""
+    """Cost state shared between the engine and its adapter.
 
-    def __init__(self, budget_usd: float):
+    add_cost doubles as the LLM-gateway seam for loop calls: both protocol
+    adapters already report every model round's cost here, so recording the
+    audit event in this one place covers every provider without mirroring.
+    """
+
+    def __init__(self, budget_usd: float, *, agent_name: str = "agent"):
         self.budget_usd = budget_usd
         self.total_cost = 0.0
+        self.agent_name = agent_name
 
-    def add_cost(self, cost: float):
+    def add_cost(self, cost: float, *, model: str | None = None, label: str | None = None,
+                 tokens_in: int = 0, tokens_out: int = 0,
+                 cache_read: int = 0, cache_create: int = 0):
         self.total_cost += cost
+        record_llm_call(
+            surface="loop", caller=self.agent_name, model=model, label=label,
+            tokens_in=tokens_in, tokens_out=tokens_out,
+            cache_read=cache_read, cache_create=cache_create,
+            cost_usd=cost,
+        )
 
 
 async def run_tool_loop(
@@ -154,11 +169,18 @@ async def run_tool_loop(
     """Drive the tool-use loop for one agent turn through a protocol adapter."""
     budget_usd = validate_budget(budget_usd)
 
+    # LLM-gateway policy gate: one check per agent turn (kill switch,
+    # blocked provider/model, daily budget). Raises only in enforce mode.
+    check_llm_call(
+        surface="loop", caller=agent_name,
+        model=getattr(adapter, "model", None),
+    )
+
     # Per-agent-run provenance buffer for KG write/read trust tracking.
     from provenance.runtime import init_provenance_buffer
     init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
-    state = LoopState(budget_usd)
+    state = LoopState(budget_usd, agent_name=agent_name)
     adapter.bind(state)
 
     working_msgs = adapter.normalize(messages)

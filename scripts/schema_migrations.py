@@ -104,6 +104,12 @@ def _writer_tables() -> None:
     ensure_writer_tables()
 
 
+def _llm_audit_log() -> None:
+    from llm.gateway import ensure_llm_audit_log_table
+
+    ensure_llm_audit_log_table()
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
@@ -119,6 +125,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("chat-logs-persona", _chat_logs_persona),
     ("web-chat-feedback", _web_chat_feedback),
     ("writer-tables", _writer_tables),
+    ("llm-audit-log", _llm_audit_log),
 ]
 
 

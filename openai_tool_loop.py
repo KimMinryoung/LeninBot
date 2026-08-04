@@ -1204,7 +1204,16 @@ class _OpenAIProtocolAdapter:
             return False
         billed_model = _response_model(response, self.model)
         call_cost = _calculate_cost(usage, billed_model)
-        self.state.add_cost(call_cost)
+        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details and not cached_tokens:
+            cached_tokens = getattr(details, "cached_tokens", 0) or 0
+        self.state.add_cost(
+            call_cost, model=billed_model, label=label,
+            tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
+            tokens_out=getattr(usage, "completion_tokens", 0) or 0,
+            cache_read=cached_tokens,
+        )
         self._log_sdk_usage(label, usage, call_cost, self.state.total_cost, billed_model)
         return True
 

@@ -1,0 +1,8 @@
+{
+  "enforce": false,
+  "block_all": false,
+  "blocked_providers": [],
+  "blocked_models": [],
+  "daily_budget_usd": null,
+  "daily_budget_per_provider": {}
+}

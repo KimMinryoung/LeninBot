@@ -59,6 +59,8 @@ Local
   -> OpenAI-compatible local server
 ```
 
+2026-08-04부터 모든 루프 라운드와 registry 원샷 호출은 LLM 게이트웨이(`llm/gateway.py`)를 지난다 — 턴당 정책 체크 + `llm_audit_log` 스펜드 감사. 계측 지점과 정책은 `llm_gateway.md`.
+
 OpenAI-compatible providers share `openai_tool_loop.py`. Claude uses `claude_loop.py` because Anthropic tool-use message structure is different. Since 2026-08-04 both modules are protocol adapters over the single loop engine `agent_loop.run_tool_loop`, which owns the shared control flow (round loop, cancel checks, budget accounting/warnings, tool-batch execution and the missing-result safety net, terminal-tool short-circuit, length continuation, forced-final with finalization tools and the followup-skip heuristic). Provider mechanics — message shapes, streaming/idle guards, cost math, protocol recovery — stay per-module, so control-flow fixes now land once instead of being mirrored by hand. Kimi K3 uses `MOONSHOT_API_KEY`, defaults to `https://api.moonshot.ai/v1`, and sends model ID `kimi-k3`. K3 always reasons and currently accepts only `reasoning_effort=max`; the Kimi path preserves the API's `reasoning_content` in replayed assistant messages across tool and continuation rounds while keeping it out of the user-facing answer, as required by Moonshot's multi-turn/tool-call protocol. Budget accounting uses Moonshot's launch pricing ($3/M cache-miss input, $0.30/M cache-hit input, $15/M output). The official API reference is [Kimi API Quickstart](https://platform.kimi.ai/docs/api/quickstart).
 
 (Kimi content-filter 시 DeepSeek으로 요청 단위 스위칭하던 폴백 계약은 2026-08-04 제거됨 — Kimi 미사용 상태에서 루프 복잡도만 키우고 있었다. Kimi의 `reasoning_effort=max`, `max_tokens`, reasoning replay 옵션은 여전히 `llm.provider_registry.kimi_openai_tool_options()`가 소유하며 Telegram, public web chat, A2A가 같은 설정을 사용한다.)

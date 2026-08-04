@@ -521,7 +521,13 @@ class _ClaudeProtocolAdapter:
         if not usage:
             return False
         cost = _calculate_cost(usage, self.model)
-        self.state.add_cost(cost)
+        self.state.add_cost(
+            cost, model=self.model, label=label,
+            tokens_in=getattr(usage, "input_tokens", 0) or 0,
+            tokens_out=getattr(usage, "output_tokens", 0) or 0,
+            cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_create=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        )
         logger.info(
             "%s usage: in=%d out=%d cache_create=%d cache_read=%d → $%.4f (total: $%.4f / $%.2f)",
             label,
