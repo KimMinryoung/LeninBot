@@ -601,8 +601,8 @@ row in this run.
             max_sections=MAX_SECTIONS,
             section_range=SECTION_BODY_RANGE,
         ),
-        0: "NOTHING LEFT: this card is complete and at its section ceiling. Say so and make no "
-           "write.",
+        0: "NOTHING LEFT: this card is complete and at its section ceiling. Finish with one "
+           "`commulingo_no_edit` call saying so; make no write.",
     }[step]
     # Steps 1 and 2 outrank the bio judgment, exactly as they did in the old
     # checklist order; 4, 5 and 6 sat below it.
@@ -647,7 +647,9 @@ Preserve every wholesale field exactly when updating. Research with the free wik
 tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —
 an archive or document collection, marxists.org, a journal or university page, or a published
 reference work — before writing anything beyond routine dates and posts. Never cite
-cyber-lenin.com or any page on this site. Make one narrow write call and stop.
+cyber-lenin.com or any page on this site. Make one narrow write call and stop. If after the
+commissioned reads and research the step honestly needs no write, finish with one
+`commulingo_no_edit` call instead — never force a write to have something to submit.
 
 """ + CARD_STYLE_GUIDANCE
 
@@ -682,7 +684,8 @@ _STEP_MOMENT_TEMPLATE = """MOMENT: this card has no `moment`. Add a bilingual on
 _STEP_EVENTS = """EVENTS: this card has no linked historical event. Inspect list_events and the
    most plausible get_event records. When one event connection is clearly supported, create
    exactly one `commulingo_event_link`. Never force a weak connection — if nothing in the events
-   dictionary honestly fits this person, say so and make no write rather than inventing a link."""
+   dictionary honestly fits this person, finish with one `commulingo_no_edit` call rather than
+   inventing a link."""
 
 _STEP_SECTION_TEMPLATE = """SECTION: this card has {section_count} of {max_sections} sections.
    Find the single most valuable missing topic and add one substantial bilingual section via
@@ -981,6 +984,38 @@ def record_rejected_candidate(box: dict, candidate: dict, reason: str) -> None:
         rejected.append(entry)
 
 
+COMMULINGO_NO_EDIT_TOOL = {
+    "name": "commulingo_no_edit",
+    "description": (
+        "Finish the enrich run by declaring that the commissioned step honestly needs no "
+        "write — the card already satisfies it, or no supportable content exists (e.g. no "
+        "listed event genuinely fits this person). Only call this after completing the "
+        "commissioned reads and research; it is a judged conclusion, not a shortcut."
+    ),
+    "input_schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "One or two sentences: what was checked and why no write is warranted.",
+            },
+        },
+        "required": ["reason"],
+    },
+}
+
+
+def build_no_edit_handler(box: dict):
+    async def _no_edit(reason: str = "") -> str:
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("reason is required")
+        box["reason"] = reason
+        return json.dumps({"ok": True}, ensure_ascii=False)
+    return _no_edit
+
+
 # Six lookups against ~700 cards, so the roster is the primary absence check and
 # these are for confirming one or two finalists. The cap itself is not the problem;
 # hitting it silently was. `discovery_search_limit` raised on every call past the
@@ -1105,7 +1140,7 @@ async def _call_curator_stage(
     *, task: str, spec, model: str, tools: list, handlers: dict,
     policy, stage: str, expect_edit: bool, before_count: int,
     finalization_tools: list[str], terminal_tools: list[str],
-    candidate_box: dict | None = None,
+    candidate_box: dict | None = None, no_edit_box: dict | None = None,
 ) -> tuple[str, dict, dict | None]:
     from tool_gateway.inference import resolve_inference_extra
 
@@ -1119,6 +1154,8 @@ async def _call_curator_stage(
         tracker: dict = {}
         if candidate_box is not None:
             candidate_box["search_count"] = 0
+        if no_edit_box is not None:
+            no_edit_box.pop("reason", None)
         prior_detail = str(last_error or "")[:800]
         retry_note = "" if attempt == 1 else (
             "\n\nRETRY: The prior attempt produced no usable terminal edit/candidate. "
@@ -1165,6 +1202,11 @@ async def _call_curator_stage(
                     raise RuntimeError(
                         f"unexpected edit count change during {stage}: {before_count} -> {after}"
                     )
+                if no_edit_box is not None and no_edit_box.get("reason"):
+                    # The curator judged the commissioned step needs no write and
+                    # said so through the typed terminal — a completed run, not a
+                    # failure.
+                    return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, None
                 raise RuntimeError(f"{stage} produced no edit: {last_result[:500]}")
             candidate = (candidate_box or {}).get("candidate")
             if not candidate:
@@ -1306,7 +1348,13 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 }
             task = build_task("enrich", candidate)
             enrich_tools, enrich_handlers = stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
-            enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS)
+            no_edit_box: dict = {}
+            enrich_tools = [*enrich_tools, COMMULINGO_NO_EDIT_TOOL]
+            enrich_handlers = {
+                **enrich_handlers,
+                "commulingo_no_edit": build_no_edit_handler(no_edit_box),
+            }
+            enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS) + ["commulingo_no_edit"]
             try:
                 result, enrich_tracker, _ = await _call_curator_stage(
                     task=task, spec=spec, model=model,
@@ -1314,6 +1362,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
                     finalization_tools=enrich_terminals,
                     terminal_tools=enrich_terminals,
+                    no_edit_box=no_edit_box,
                 )
             except Exception:
                 # All attempts are spent and nothing was written. Record the
@@ -1334,6 +1383,33 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
             tracker["rounds_used"] += enrich_tracker["rounds_used"]
             if chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:
                 state["new_cooldown_remaining"] -= 1
+            no_edit_reason = no_edit_box.get("reason")
+            if no_edit_reason:
+                # A judged "nothing to write" completes the run without an edit, so
+                # the DB recency cooldown never fires — step over this card for the
+                # same window a failed one gets, or the next hour re-picks it.
+                cooldown = int(config["enrich_failure_cooldown_runs"])
+                if cooldown > 0:
+                    state["failed_candidates"] = (
+                        [e for e in state["failed_candidates"] if e["id"] != candidate["id"]]
+                        + [{"id": candidate["id"], "runs_left": cooldown}]
+                    )[-FAILED_MEMORY:]
+                    logger.info("%s declared complete for its step; stepping over it for %d run(s)",
+                                candidate["id"], cooldown)
+                save_state(state)
+                return {
+                    "status": "no_edit",
+                    "mode": chosen_mode,
+                    "candidate": candidate.get("id"),
+                    "model": model,
+                    "reason": no_edit_reason,
+                    "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
+                    "rounds": int(tracker.get("rounds_used") or 0),
+                    "discovery": discovery,
+                    "fallback_error": fallback_error,
+                    "cooldown_remaining": state.get("new_cooldown_remaining", 0),
+                    "result": result,
+                }
 
     after = completed_run_count()
     # Every completed stage lands exactly one write (the burst-bug guard).
