@@ -5,6 +5,7 @@ Runtime tool execution now lives in tool_gateway.dispatcher and is re-exported
 here for compatibility with older smoke tests and helper scripts.
 """
 
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,36 @@ def is_transient_provider_error(exc: Exception) -> bool:
         return True
     name = exc.__class__.__name__.lower()
     return any(token in name for token in _TRANSIENT_ERROR_NAME_TOKENS)
+
+
+async def call_with_transient_retry(call_fn, *, label: str, on_progress=None, max_attempts: int = 3):
+    """Run an async provider call with backoff retries on transient failures.
+
+    Non-transient errors and the final attempt's error propagate unchanged.
+    Delays: 1.5s, 3.0s, ... capped at 8s. Both agent loops share this so
+    OpenAI/Kimi/local turns get the same resilience as Claude/DeepSeek ones.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await call_fn()
+        except Exception as exc:
+            if attempt >= max_attempts or not is_transient_provider_error(exc):
+                raise
+            delay = min(8.0, 1.5 * attempt)
+            logger.warning(
+                "Transient provider error on %s attempt %d/%d; retrying in %.1fs: %s",
+                label, attempt, max_attempts, delay, exc,
+            )
+            await emit_progress(
+                on_progress,
+                "provider_retry",
+                (
+                    f"Provider stream stalled; retrying ({attempt}/{max_attempts})."
+                    if "stream" in str(exc).lower()
+                    else f"Provider connection failed; retrying ({attempt}/{max_attempts})."
+                ),
+            )
+            await asyncio.sleep(delay)
 
 
 # ── Tool schema helpers ──────────────────────────────────────────────

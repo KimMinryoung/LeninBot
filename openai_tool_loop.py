@@ -29,6 +29,7 @@ from tool_loop_common import (
     build_limit_message, build_budget_warning, build_round_warning,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
+    call_with_transient_retry,
     is_transient_provider_error,
 )
 from tool_gateway.dispatcher import (
@@ -1004,10 +1005,20 @@ async def chat_with_tools(
                 )
             request_args[4] = request_messages
             a = tuple(request_args)
-        if api_semaphore is not None:
-            async with api_semaphore:
-                return await _api_call(*a, **kw)
-        return await _api_call(*a, **kw)
+
+        async def _do_call():
+            # Semaphore is acquired per attempt so it isn't held across
+            # backoff sleeps.
+            if api_semaphore is not None:
+                async with api_semaphore:
+                    return await _api_call(*a, **kw)
+            return await _api_call(*a, **kw)
+
+        return await call_with_transient_retry(
+            _do_call,
+            label=active_usage_label,
+            on_progress=on_progress,
+        )
 
     budget_usd = validate_budget(budget_usd)
 

@@ -20,6 +20,7 @@ from tool_loop_common import (
     build_limit_message, build_budget_warning, build_round_warning,
     EMPTY_RESPONSE_FALLBACK,
     check_cancelled, TaskCancelledError,
+    call_with_transient_retry,
     dedupe_tools_by_name,
     is_transient_provider_error as _is_transient_provider_error,
     provider_status_code as _provider_status_code,
@@ -500,32 +501,11 @@ async def chat_with_tools(
             return await stream.get_final_message()
 
     async def _claude_call(**kwargs):
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                return await _claude_call_once(**kwargs)
-            except Exception as exc:
-                if attempt >= max_attempts or not _is_transient_provider_error(exc):
-                    raise
-                delay = min(8.0, 1.5 * attempt)
-                logger.warning(
-                    "Transient provider error on %s attempt %d/%d; retrying in %.1fs: %s",
-                    model,
-                    attempt,
-                    max_attempts,
-                    delay,
-                    exc,
-                )
-                await emit_progress(
-                    on_progress,
-                    "provider_retry",
-                    (
-                        f"Provider stream stalled; retrying ({attempt}/{max_attempts})."
-                        if "stream" in str(exc).lower()
-                        else f"Provider connection failed; retrying ({attempt}/{max_attempts})."
-                    ),
-                )
-                await asyncio.sleep(delay)
+        return await call_with_transient_retry(
+            lambda: _claude_call_once(**kwargs),
+            label=model,
+            on_progress=on_progress,
+        )
 
     # The Messages API allows at most 4 cache_control blocks per request;
     # system blocks and the tools block already consume their share, so

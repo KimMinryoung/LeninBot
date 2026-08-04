@@ -6,11 +6,14 @@ import asyncio
 import unittest
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
+import tool_loop_common
 from tool_loop_common import (
     TRANSIENT_PROVIDER_STATUSES,
+    call_with_transient_retry,
     validate_budget,
     build_budget_tracker,
     build_limit_message,
@@ -61,6 +64,69 @@ class TestTransientClassifier(unittest.TestCase):
         self.assertTrue(is_transient_provider_error(APIConnectionError()))
         self.assertTrue(is_transient_provider_error(APITimeoutError()))
         self.assertFalse(is_transient_provider_error(ValueError("nope")))
+
+
+class TestCallWithTransientRetry(unittest.TestCase):
+    @staticmethod
+    def _transient(msg="rate limited"):
+        exc = Exception(msg)
+        exc.status_code = 429
+        return exc
+
+    def test_succeeds_on_third_attempt_with_backoff(self):
+        attempts = []
+
+        async def flaky():
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise self._transient()
+            return "ok"
+
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()) as sleep:
+            result = asyncio.run(call_with_transient_retry(flaky, label="m"))
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual([c.args[0] for c in sleep.await_args_list], [1.5, 3.0])
+
+    def test_non_transient_raises_immediately(self):
+        async def bad():
+            raise ValueError("schema error")
+
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()) as sleep:
+            with self.assertRaises(ValueError):
+                asyncio.run(call_with_transient_retry(bad, label="m"))
+        sleep.assert_not_awaited()
+
+    def test_exhausted_attempts_raise_last_error(self):
+        attempts = []
+
+        async def always_transient():
+            attempts.append(1)
+            raise self._transient(f"fail {len(attempts)}")
+
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()):
+            with self.assertRaises(Exception) as ctx:
+                asyncio.run(call_with_transient_retry(always_transient, label="m"))
+        self.assertEqual(len(attempts), 3)
+        self.assertIn("fail 3", str(ctx.exception))
+
+    def test_progress_event_emitted(self):
+        seen = []
+
+        async def cb(event, detail):
+            seen.append((event, detail))
+
+        calls = []
+
+        async def flaky():
+            calls.append(1)
+            if len(calls) == 1:
+                raise self._transient()
+            return "ok"
+
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()):
+            asyncio.run(call_with_transient_retry(flaky, label="m", on_progress=cb))
+        self.assertEqual(seen[0][0], "provider_retry")
 
 
 class TestDedupeToolsShared(unittest.TestCase):

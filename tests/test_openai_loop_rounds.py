@@ -16,9 +16,10 @@ Run from repo root:  venv/bin/python -m unittest discover tests -v
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import openai_tool_loop
+import tool_loop_common
 from openai_tool_loop import chat_with_tools
 
 
@@ -197,13 +198,31 @@ class TestTransientRetry(unittest.TestCase):
         err = Exception("service unavailable")
         err.status_code = 503
         client = FakeSDKClient([err, _resp("살아남")])
-        result = asyncio.run(chat_with_tools(
-            [{"role": "user", "content": "q"}],
-            client=client, model="deepseek-chat",
-            **BASE_KWARGS,
-        ))
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()):
+            result = asyncio.run(chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="deepseek-chat",
+                **BASE_KWARGS,
+            ))
         self.assertEqual(result, "살아남")
         self.assertEqual(len(client.calls), 2)
+
+    def test_two_transient_errors_then_success_with_backoff(self):
+        def _err():
+            e = Exception("rate limited")
+            e.status_code = 429
+            return e
+
+        client = FakeSDKClient([_err(), _err(), _resp("3수만에")])
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()) as sleep:
+            result = asyncio.run(chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="deepseek-chat",
+                **BASE_KWARGS,
+            ))
+        self.assertEqual(result, "3수만에")
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual([c.args[0] for c in sleep.await_args_list], [1.5, 3.0])
 
     def test_non_transient_error_raises(self):
         err = Exception("401 invalid api key")
