@@ -43,6 +43,8 @@ from bot_config import (
 from runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
 from telegram._send_utils import make_progress_callback, split_message
+from ops.logs import log_event
+from llm.json_utils import extract_json_object
 from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
@@ -361,22 +363,7 @@ async def _handle_guest_update(update, bot: Bot):
 
 
 # ── Error/Warning Logger ────────────────────────────────────────────
-def _log_event(
-    level: str,        # "error" | "warning"
-    source: str,       # e.g. "chat", "task", "tool", "final_response"
-    message: str,
-    detail: str | None = None,
-    task_id: int | None = None,
-) -> None:
-    """Persist an error or warning event to telegram_error_log."""
-    try:
-        _execute(
-            "INSERT INTO telegram_error_log (level, source, message, detail, task_id) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (level[:10], source[:100], message[:2000], detail[:4000] if detail else None, task_id),
-        )
-    except Exception as _le:
-        logger.warning("_log_event DB write failed: %s", _le)
+_log_event = log_event
 
 
 def _append_email_audit_entry(message_id: int, event: str, actor: str, metadata: dict | None = None) -> None:
@@ -1937,26 +1924,7 @@ async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str
     )
 
 
-def _extract_json_object(text: str) -> dict | None:
-    raw = str(text or "").strip()
-    if not raw:
-        return None
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw).strip()
-    candidates = [raw]
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start >= 0 and end > start:
-        candidates.append(raw[start:end + 1])
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except Exception:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
+_extract_json_object = extract_json_object
 
 
 async def _apply_stasova_diary_review(

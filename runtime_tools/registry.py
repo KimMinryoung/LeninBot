@@ -27,23 +27,7 @@ def _looks_english(text: str) -> bool:
     return bool(re.search(r"[A-Za-z]", text or "")) and not _looks_korean(text)
 
 
-def _extract_json_object(text: str) -> dict | None:
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        return None
+from llm.json_utils import extract_json_object as _extract_json_object
 
 
 async def _llm_translate_search_query(query: str, target_language: str, layer: str) -> str | None:

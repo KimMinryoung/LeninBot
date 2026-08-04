@@ -95,12 +95,7 @@ def _tag_sequence(html: str) -> list[str]:
     return [tag.lower() for tag in tags]
 
 
-def _hangul_ratio(text: str) -> float:
-    letters = [ch for ch in text if ch.isalpha()]
-    if not letters:
-        return 0.0
-    hangul = sum(1 for ch in letters if "\uac00" <= ch <= "\ud7a3")
-    return hangul / len(letters)
+from _translation_common import hangul_ratio as _hangul_ratio
 
 
 def _split_edge_whitespace(text: str) -> tuple[str, str, str]:

@@ -72,12 +72,7 @@ def _slug_to_path(slug_or_path: str) -> Path:
     return path
 
 
-def _hangul_ratio(text: str) -> float:
-    letters = [ch for ch in text if ch.isalpha()]
-    if not letters:
-        return 0.0
-    hangul = sum(1 for ch in letters if "\uac00" <= ch <= "\ud7a3")
-    return hangul / len(letters)
+from _translation_common import hangul_ratio as _hangul_ratio
 
 
 def _heading_signature(markdown: str) -> list[str]:
