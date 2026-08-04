@@ -42,6 +42,7 @@ from bot_config import (
 )
 from runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
+from telegram._send_utils import make_progress_callback, split_message
 from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from claude_loop import chat_with_tools, dedupe_tools_by_name
@@ -1302,23 +1303,7 @@ async def _persist_assistant_turn_after_send(user_id: int, reply: str) -> None:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
-def _split_message(text: str, max_len: int = 4096) -> list[str]:
-    """Split text into chunks respecting Telegram's 4096 char limit."""
-    if len(text) <= max_len:
-        return [text]
-    chunks: list[str] = []
-    while text:
-        if len(text) <= max_len:
-            chunks.append(text)
-            break
-        split_pos = text.rfind("\n", 0, max_len)
-        if split_pos <= 0:
-            split_pos = text.rfind(" ", 0, max_len)
-        if split_pos <= 0:
-            split_pos = max_len
-        chunks.append(text[:split_pos])
-        text = text[split_pos:].lstrip("\n")
-    return chunks
+_split_message = split_message
 
 
 # ── Progress Callback (live tool progress via Telegram) ──────────────
@@ -1327,51 +1312,7 @@ _bot_instance: Bot | None = None  # set in bot_main()
 
 
 def _make_progress_callback(chat_id: int):
-    """Create an on_progress callback that sends tool execution progress via Telegram.
-
-    Collects events per round, sends one message per round to avoid flood.
-    """
-    _buf: list[str] = []
-    _current_round = [0]
-
-    async def _flush():
-        if not _buf or not _bot_instance:
-            return
-        text = "\n".join(_buf)
-        _buf.clear()
-        try:
-            for chunk in _split_message(f"```\n{text}\n```"):
-                await _bot_instance.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
-        except Exception as e:
-            logger.debug("Progress message send failed: %s", e)
-
-    async def _on_progress(event: str, detail: str):
-        # Extract round number from detail prefix "[N] ..."
-        round_num = 0
-        if detail.startswith("["):
-            try:
-                round_num = int(detail[1:detail.index("]")])
-            except (ValueError, IndexError):
-                pass
-
-        # New round started → flush previous round's buffer
-        if round_num > _current_round[0] and _current_round[0] > 0:
-            await _flush()
-        if round_num > 0:
-            _current_round[0] = round_num
-
-        if event == "thinking":
-            _buf.append(f"💭 {detail}")
-        elif event == "tool_call":
-            _buf.append(detail)
-        elif event == "tool_result":
-            _buf.append(detail)
-        elif event == "budget":
-            _buf.append(f"💰 {detail}")
-
-    # Expose flush for final cleanup
-    _on_progress.flush = _flush
-    return _on_progress
+    return make_progress_callback(lambda: _bot_instance, chat_id)
 
 
 def _is_allowed(user_id: int) -> bool:
