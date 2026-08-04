@@ -35,10 +35,9 @@ Policy (config/llm_gateway.json, hot-reloaded on mtime):
 Budget checks read today's SUM(cost_usd) from llm_audit_log (cached 60s).
 A DB failure fails OPEN: availability of the bot outranks enforcement.
 
-Known gaps (calls that do not pass this seam): graphiti-core's internal
-OpenAI client (KG extraction), browser-use's internal calls, razvedchik's
-own cloud client, and the Codex CLI delegation. Documented in
-dev_docs/llm_gateway.md; migrate them by pointing their call paths here.
+This module is the observation/policy half; the enforcement half is the
+key-injection passthrough proxy (llm_proxy/, switched on via "proxy_base").
+Known gaps and the remaining enforcement runbook: dev_docs/llm_gateway.md.
 """
 
 from __future__ import annotations
@@ -64,6 +63,11 @@ _DEFAULTS = {
     "blocked_models": [],
     "daily_budget_usd": None,
     "daily_budget_per_provider": {},
+    # When set (e.g. "http://127.0.0.1:8110"), managed clients route through
+    # the key-injection passthrough proxy (llm_proxy/, the enforcement half
+    # of the gateway) instead of calling providers directly. Applied at
+    # client construction — a service restart picks it up.
+    "proxy_base": None,
 }
 
 
@@ -98,6 +102,37 @@ def load_policy() -> dict:
         _config_cache = {**_DEFAULTS, **data}
         _config_mtime = mtime
         return _config_cache
+
+
+# ── Proxy routing (enforcement half — see llm_proxy/app.py) ──────────
+
+# Placeholder API key clients present when the real key lives only in the
+# proxy. Never a secret; the proxy strips and replaces it.
+PROXY_PLACEHOLDER_KEY = "via-llm-proxy"
+
+
+def proxy_base() -> str | None:
+    """The llm_proxy base URL, or None when clients call providers directly."""
+    base = load_policy().get("proxy_base")
+    return str(base).rstrip("/") if base else None
+
+
+def provider_endpoint(
+    proxy_path: str, direct_base: str | None, api_key: str | None,
+) -> tuple[str | None, str]:
+    """Resolve (base_url, api_key) for one provider client.
+
+    proxy_path is the path prefix on the proxy that maps to the provider's
+    upstream host (e.g. "deepseek/anthropic" → api.deepseek.com/anthropic).
+    Precedence: explicit env override in direct_base stays authoritative at
+    the call site; this only swaps in the proxy when configured. With the
+    proxy on, a missing real key is fine — the placeholder satisfies SDK
+    constructors and the proxy injects the real one.
+    """
+    base = proxy_base()
+    if base:
+        return f"{base}/{proxy_path}", (api_key or PROXY_PLACEHOLDER_KEY)
+    return direct_base, (api_key or "")
 
 
 # ── Provider inference / cost estimation ─────────────────────────────

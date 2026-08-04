@@ -99,15 +99,14 @@ def _init_provider_client(provider: str):
 
     if provider == "openai":
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=get_secret("OPENAI_API_KEY", "") or "")
+        from bot_config import OPENAI_BASE_URL_EFFECTIVE, OPENAI_CLIENT_KEY
+        client = AsyncOpenAI(api_key=OPENAI_CLIENT_KEY, base_url=OPENAI_BASE_URL_EFFECTIVE)
     else:
         import anthropic
+        from bot_config import DEEPSEEK_ANTHROPIC_BASE_URL, DEEPSEEK_CLIENT_KEY
         client = anthropic.AsyncAnthropic(
-            api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
-            base_url=os.getenv(
-                "DEEPSEEK_ANTHROPIC_BASE_URL",
-                "https://api.deepseek.com/anthropic",
-            ).rstrip("/"),
+            api_key=DEEPSEEK_CLIENT_KEY,
+            base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
         )
     _provider_clients[provider] = client
     return client

@@ -126,6 +126,20 @@ def _normalize_model(model: str | None, provider: str) -> str:
     return value
 
 
+def _deepseek_key() -> str:
+    from bot_config import DEEPSEEK_CLIENT_KEY
+    return DEEPSEEK_CLIENT_KEY
+
+
+def _deepseek_anthropic_base() -> str:
+    # Explicit env keeps priority; otherwise bot_config resolves llm_proxy vs direct.
+    env_val = (os.getenv("DEEPSEEK_ANTHROPIC_BASE_URL") or "").strip()
+    if env_val:
+        return env_val.rstrip("/")
+    from bot_config import DEEPSEEK_ANTHROPIC_BASE_URL
+    return DEEPSEEK_ANTHROPIC_BASE_URL
+
+
 def _build_llm(model: str | None = None, provider: str | None = None):
     """Build browser-use LLM based on current runtime provider config.
 
@@ -169,11 +183,8 @@ def _build_llm(model: str | None = None, provider: str | None = None):
     if provider == "deepseek":
         llm = _DeepSeekAnthropicBrowserChat(
             model=model,
-            api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
-            base_url=os.getenv(
-                "DEEPSEEK_ANTHROPIC_BASE_URL",
-                "https://api.deepseek.com/anthropic",
-            ).rstrip("/"),
+            api_key=_deepseek_key(),
+            base_url=_deepseek_anthropic_base(),
             timeout=120,
         )
         logger.info("browser-use LLM: DeepSeek Anthropic-compatible %s", model)
@@ -184,11 +195,8 @@ def _build_llm(model: str | None = None, provider: str | None = None):
 
     llm = _DeepSeekAnthropicBrowserChat(
         model="deepseek-v4-flash",
-        api_key=get_secret("DEEPSEEK_API_KEY", "") or "",
-        base_url=os.getenv(
-            "DEEPSEEK_ANTHROPIC_BASE_URL",
-            "https://api.deepseek.com/anthropic",
-        ).rstrip("/"),
+        api_key=_deepseek_key(),
+        base_url=_deepseek_anthropic_base(),
         timeout=120,
     )
     logger.info("browser-use LLM: DeepSeek Anthropic-compatible deepseek-v4-flash")

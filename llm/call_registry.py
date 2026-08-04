@@ -45,10 +45,13 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "llm_call_sites.json"
 
-_PROVIDER_BASE_URLS = {
-    "deepseek": "https://api.deepseek.com",
-    "kimi": "https://api.moonshot.ai/v1",
-    "openai": None,
+# (direct_default, proxy_path) per provider — see llm/gateway.provider_endpoint.
+_PROVIDER_ROUTES = {
+    "deepseek": ("https://api.deepseek.com", "deepseek"),
+    "kimi": ("https://api.moonshot.ai/v1", "moonshot/v1"),
+    "openai": (None, "openai/v1"),
+    "claude": (None, "anthropic"),
+    "gemini": (None, "gemini"),
 }
 _PROVIDER_KEYS = {
     "gemini": "GEMINI_API_KEY",
@@ -58,6 +61,15 @@ _PROVIDER_KEYS = {
     "openai": "OPENAI_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
 }
+
+
+def _base_url(provider: str) -> str | None:
+    """Executor base URL for a provider: llm_proxy when configured, else direct."""
+    from llm.gateway import proxy_base
+
+    direct_default, proxy_path = _PROVIDER_ROUTES[provider]
+    base = proxy_base()
+    return f"{base}/{proxy_path}" if base else direct_default
 
 
 @dataclass(frozen=True)
@@ -157,9 +169,15 @@ def resolve(feature: str, **defaults) -> CallSiteProfile:
 def _api_key(provider: str) -> str:
     name = _PROVIDER_KEYS.get(provider)
     key = (get_secret(name, "") or "").strip() if name else ""
-    if not key:
-        raise RuntimeError(f"{name or provider} not configured")
-    return key
+    if key:
+        return key
+    # Proxy mode: the real key lives only in llm_proxy; the placeholder
+    # satisfies the SDK and is stripped/replaced at the proxy.
+    from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base
+
+    if proxy_base():
+        return PROXY_PLACEHOLDER_KEY
+    raise RuntimeError(f"{name or provider} not configured")
 
 
 def _gemini_usage(response) -> dict:
@@ -197,7 +215,11 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     from google import genai
     from google.genai.types import GenerateContentConfig
 
-    client = genai.Client(api_key=_api_key("gemini"))
+    base = _base_url("gemini")
+    client = genai.Client(
+        api_key=_api_key("gemini"),
+        **({"http_options": {"base_url": base}} if base else {}),
+    )
     config = GenerateContentConfig(
         temperature=p.temperature,
         max_output_tokens=p.max_tokens,
@@ -215,7 +237,7 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
 
     client = OpenAI(
         api_key=_api_key(p.provider),
-        base_url=_PROVIDER_BASE_URLS.get(p.provider),
+        base_url=_base_url(p.provider),
         timeout=p.timeout,
     )
     messages = ([{"role": "system", "content": system}] if system else []) + [
@@ -256,7 +278,11 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
 def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     import anthropic
 
-    client = anthropic.Anthropic(api_key=_api_key("claude"), timeout=p.timeout)
+    base = _base_url("claude")
+    client = anthropic.Anthropic(
+        api_key=_api_key("claude"), timeout=p.timeout,
+        **({"base_url": base} if base else {}),
+    )
     kwargs: dict = {"system": system} if system else {}
     response = client.messages.create(
         model=p.model,

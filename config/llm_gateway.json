@@ -4,5 +4,6 @@
   "blocked_providers": [],
   "blocked_models": [],
   "daily_budget_usd": null,
-  "daily_budget_per_provider": {}
+  "daily_budget_per_provider": {},
+  "proxy_base": "http://127.0.0.1:8110"
 }

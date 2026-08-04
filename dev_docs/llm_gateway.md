@@ -1,12 +1,20 @@
-# LLM 게이트웨이 (llm/gateway.py)
+# LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-04 (도입).
+최종 확인: 2026-08-04 (도입, 같은 날 키 격리 프록시 추가).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
-데이터 모델은 LiteLLM proxy의 spend-log/예산 설계를 차용하되 **in-process**로 구현했다 —
-프록시 홉을 두면 스트리밍 idle guard·prompt cache 브레이크포인트·thinking 리플레이가
-전부 그 홉을 통과해야 해서 어댑터가 지키는 프로바이더 계약에 회귀 위험이 크다.
+두 절반으로 구성된다:
+
+- **관찰/정책 절반** — `llm/gateway.py` (in-process): 호출 전 정책 체크, 호출 후
+  토큰/비용 감사. LiteLLM proxy의 spend-log/예산 데이터 모델 차용.
+- **강제 절반** — `llm_proxy/` (`leninbot-llm-proxy.service`, 127.0.0.1:8110):
+  **바이트 패스스루 키 주입 프록시**. 프로바이더 API 키는 이 서비스의 systemd
+  credential에만 있고, 다른 서비스의 클라이언트는 placeholder 키(`via-llm-proxy`) +
+  프록시 base_url로 구성된다. 요청/응답 본문은 건드리지 않고(스트리밍은 `aiter_raw`
+  원시 바이트 그대로) auth 헤더만 교체하므로, LiteLLM 같은 *번역형* 프록시와 달리
+  SSE·prompt cache·thinking 블록 계약에 회귀 여지가 없다. 최종 단계(아래 "남은
+  enforcement 단계")까지 가면 키 없는 코드는 프로바이더를 직접 호출할 수 없게 된다.
 
 ## Seam이 되는 세 지점
 
@@ -81,16 +89,41 @@ DB 명령은 자격증명 필요: `DB_PASSWORD="$(cat /run/credentials/leninbot-
 
 `scripts/schema_migrations.py --only llm-audit-log` (2026-08-04 프로덕션 적용 완료).
 
+## 프록시 라우팅 (2026-08-04 가동)
+
+`config/llm_gateway.json`의 `"proxy_base": "http://127.0.0.1:8110"`이 스위치다.
+설정되면 (env의 명시적 base URL 오버라이드가 없는 한) 관리형 클라이언트 전부가
+프록시 경유로 구성된다: bot_config의 6개 클라이언트(Claude·OpenAI·DeepSeek 양栈·
+Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언트, browser
+워커/browser-use의 DeepSeek 챗. `null`로 되돌리고 재시작하면 직접 호출로 복귀한다
+(롤백 경로). 클라이언트 구성이 임포트 시점이라 반영은 서비스 재시작.
+
+라우트: `/{provider}/{path}` → upstream `/{path}`. provider는 anthropic / deepseek /
+moonshot / openai / gemini. 프록시가 죽으면 모든 프록시 경유 호출이 실패한다 —
+`Restart=always RestartSec=2` + 루프의 3회 transient 재시도가 재시작 순단을 흡수한다.
+
+## 남은 enforcement 단계 (root 필요 — 사용자 실행)
+
+지금은 다른 서비스들도 여전히 LLM 키 credential을 갖고 있다(전환기 안전망).
+우회를 물리적으로 막으려면, 소크 기간 후:
+
+1. KG 쓰는 서비스의 `.env`/env에 `OPENAI_BASE_URL=http://127.0.0.1:8110/openai/v1` +
+   `OPENAI_API_KEY=via-llm-proxy` 설정 (graphiti-core 내부 클라이언트를 프록시로).
+2. 각 `/etc/systemd/system/leninbot-*.service.d/credentials.conf`에서
+   `anthropic/deepseek/moonshot/openai/gemini_api_key` 라인 제거 (db_password 등은 유지).
+   **razvedchik 제외** — 아래 참조.
+3. `systemctl daemon-reload` + 서비스 재시작, 스모크.
+
 ## Seam 밖에 남은 호출 (알려진 사각지대)
 
-- **graphiti-core 내부 OpenAI 호출** (KG 추출/임베딩) — 라이브러리 내부 클라이언트
-- **browser-use 내부 호출** — 라이브러리가 자체 클라이언트 소유
-- **razvedchik의 자체 cloud 클라이언트** (`agents/razvedchik/cloud_llm.py`)
+- **graphiti-core 내부 OpenAI 호출** (KG 추출/임베딩) — enforcement 1단계의 env로 편입 예정
+- **browser-use의 vision 폴백** (ChatGoogle/ChatOpenAI 직접 구성) — 주 경로(DeepSeek 챗)는
+  프록시 경유, 폴백만 직접
+- **razvedchik** (`agents/razvedchik/cloud_llm.py`) — **의도적 제외**: 로컬 URL을 거부하는
+  자체 보안 가드(로컬 모델 바꿔치기 방지)가 프록시(127.0.0.1)와 충돌한다. 편입하려면
+  가드에 프록시 허용 예외를 넣는 결정이 먼저다. 그때까지 razvedchik 서비스는 deepseek 키 유지.
 - **Codex CLI 위임** (GPT Pro 구독 — 과금 자체가 API 밖)
-- 로컬 임베딩 서버 (BGE-M3 — LLM 아님, 비용 없음)
-
-razvedchik은 registry executor로 옮기면 seam에 들어온다. graphiti/browser-use는
-env base_url로 로컬 프록시를 세워야만 잡히는데, 그 비용이 현재로선 수확보다 크다.
+- 로컬 임베딩 서버 (BGE-M3, :8100 — LLM 아님, 비용 없음. 프록시는 :8110)
 
 ## 테스트
 
