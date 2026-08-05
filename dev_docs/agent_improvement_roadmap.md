@@ -130,15 +130,15 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 6 (P1, parallel ops track) — KG embedding resilience completion
 
-**Status: SHIPPED code-side (2026-07-16), key provisioning pending.** Client-side pacer `_EmbedRateLimiter` in `graph_memory/service.py` (`KG_EMBED_MAX_RPS`, default 2 req/s, env re-read per request, 0 disables) wraps every embedder attempt; `KG_GEMINI_API_KEY` plumbing live via `_resolve_kg_gemini_key()` with fallback to the shared `GEMINI_API_KEY`. Read-path degradation turned out to be **already implemented** before this phase: `kg_runtime/search.py` falls back to direct-Cypher text match on any Graphiti search failure (including embedding errors) and otherwise returns an explicit "do not treat as no KG data" message — verified by code audit, no change needed. Smoke: `scripts/smoke_kg_embed_limiter.py` (11/11). Remaining: the dedicated key itself — must come from a **separate Google project/account** (same-project keys share quota); operator decision, optionally skippable if the limiter alone zeroes the 429 warnings over a month.
+**Status: SHIPPED (2026-07-16; shared-key decision 2026-08-05).** Client-side pacer `_EmbedRateLimiter` in `graph_memory/service.py` (`KG_EMBED_MAX_RPS`, default 2 req/s, env re-read per request, 0 disables) wraps every embedder attempt. KG uses the shared proxy-owned `GEMINI_API_KEY`; the unprovisioned dedicated-key option was removed to keep provider credentials centralized. Read-path degradation was already implemented: `kg_runtime/search.py` falls back to direct-Cypher text match on Graphiti search failure. Smoke: `scripts/smoke_kg_embed_limiter.py` (9/9).
 
 **Goal**: finish what the retry wrapper started; eliminate remaining 429/503 impact per `knowledge_graph_design.md` Maintenance guidance.
 
 **Design** (retry/backoff already exists — do not rebuild):
-- **Key separation**: `KG_GEMINI_API_KEY` (falls back to the main Gemini key) consumed by `graph_memory/config.py`/`service.py`, provisioned via the systemd-creds flow in `secret_management.md`.
+- **Shared key**: KG extraction and embeddings use the proxy-owned `GEMINI_API_KEY`; rate limiting provides workload protection without a separate credential.
 - **Client-side rate limiter**: small async token bucket inside `GeminiEmbedderWithRetry` (`KG_EMBED_MAX_RPS`), so batch producers (scout→KG ingest, `kg_enricher`, curation ingest) don't burst into 429s that retries then paper over.
 - **Read-path degradation**: when `knowledge_graph_search` fails on embeddings after retries, fall back to Neo4j full-text/BM25 (Graphiti hybrid search has keyword components) or, minimally, return a clean "KG search degraded (rate limit) — retry shortly or use vector_search" message. Callers already tolerate `get_kg_service() is None`; extend that discipline to per-query embedding failures.
-- Optional stretch (only if failures persist after key separation): deferred-write retry queue for failed episode ingestion, drained by `leninbot-kg-integrity.timer`.
+- Optional stretch (only if failures persist): deferred-write retry queue for failed episode ingestion, drained by `leninbot-kg-integrity.timer`.
 
 **Files**: `graph_memory/service.py`, `graph_memory/config.py`, `kg_runtime/search.py`, `dev_docs/knowledge_graph_design.md`, secret provisioning.
 
@@ -185,7 +185,7 @@ Every phase ships behind a flag, starts in shadow/log-only mode where output rea
 2. **Cross-provider critique**: when tasks run on DeepSeek, is a DeepSeek verifier independent *enough*, or should the Critic deliberately be a different provider than the Executor? (Writer precedent: DeepSeek diagnoses Fable's prose successfully — the reverse pairing is untested.)
 3. **Autonomous tick cost ceiling** (Phase 4): is +2 flash calls per hourly tick (~+10%) acceptable, and should the tick Critic run on `tick_error` ticks too?
 4. **Phase 3 shape**: extend `multi_delegate` with `depends_on` (recommended, minimal) vs. a new `plan_mission` planner tool — is an explicit Planner component wanted for its own sake, or only if orchestrator-authored plans prove weak?
-5. **KG key separation** (Phase 6) is an operator/billing decision (second Google AI Studio key or Cloud project), not just code — needs a go-ahead before the phase is fully effective.
+5. **KG provider key** (Phase 6): **Resolved 2026-08-05 — use the shared proxy-owned Gemini key.** Quota resilience is handled by client pacing and retry, not credential separation.
 6. **Mao reingestion** (Phase 7) needs the Windows GPU host and manual curation — who/when? The only backlog item requiring off-server work.
 7. **Web chat memory**: should the public surface also get experience auto-recall? Risk: leaking operator-context lessons publicly. Recommendation: no (or category-filtered) unless explicitly wanted.
 8. **CLAUDE.md goal text**: once the LATS-defer verdict is accepted, update the project-goal line to point at this roadmap so future sessions don't re-litigate it.

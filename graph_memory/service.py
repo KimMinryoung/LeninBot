@@ -136,11 +136,11 @@ _EMBED_LIMITER = _EmbedRateLimiter()
 def _resolve_kg_gemini_key() -> str:
     """Gemini key for the KG service (LLM extraction + embeddings).
 
-    In proxy mode this is only a constructor placeholder; the dedicated
-    ``gemini-kg`` route chooses the scoped credential inside the proxy."""
+    In proxy mode this is only a constructor placeholder; the shared Gemini
+    credential is owned and injected by the proxy."""
     from secrets_loader import get_secret
 
-    return (get_secret("KG_GEMINI_API_KEY", "") or "").strip() or (get_secret("GEMINI_API_KEY", "") or "")
+    return (get_secret("GEMINI_API_KEY", "") or "").strip()
 
 
 class RetryingGeminiEmbedder(GeminiEmbedder):
@@ -224,7 +224,7 @@ class GraphMemoryService:
             from llm.instrumented_clients import AuditedGenAIClient
 
             gemini_base, gemini_client_key = provider_endpoint(
-                "gemini-kg", None, gemini_api_key,
+                "gemini", None, gemini_api_key,
             )
 
             def _proxied_genai_client():

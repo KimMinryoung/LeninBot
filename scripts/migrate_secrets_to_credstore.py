@@ -30,7 +30,6 @@ TIER_A = [
     "ALIBABA_API_KEY",
     "ANTHROPIC_API_KEY",
     "BRAVE_SEARCH_API_KEY",
-    "WRITER_ANTHROPIC_API_KEY",
     "WRITER_ACCESS_KEY",
     "DB_PASSWORD",
     "DEEPL_API_KEY",
@@ -38,7 +37,6 @@ TIER_A = [
     "EMAIL_IMAP_PASSWORD",
     "EMAIL_SMTP_PASSWORD",
     "GEMINI_API_KEY",
-    "KG_GEMINI_API_KEY",
     "GITHUB_TOKEN",
     "GRAFFITI_API_KEY",
     "HF_TOKEN",
@@ -61,17 +59,15 @@ TIER_A = [
 # Narrower services list only the application/tool secrets they actually use.
 # ═══════════════════════════════════════════════════════════════════════════
 _LLM_PROVIDER_KEYS = {
-    "ANTHROPIC_API_KEY", "WRITER_ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "GEMINI_API_KEY",
-    "KG_GEMINI_API_KEY",
 }
-_SCOPED_PROXY_KEYS = {"WRITER_ANTHROPIC_API_KEY", "KG_GEMINI_API_KEY"}
 _FULL = set(TIER_A) - _LLM_PROVIDER_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
-    # Base keys are declared in the static proxy unit. Scoped keys are optional
-    # and therefore emitted through this generated drop-in only when present.
-    "leninbot-llm-proxy": _SCOPED_PROXY_KEYS,
+    # Base provider keys are declared in the static proxy unit. Keep emitting
+    # an empty generated drop-in so a prior scoped-key mount is overwritten.
+    "leninbot-llm-proxy": set(),
 
     # Agent hosts — broad tool access, all non-provider Tier A secrets.
     "leninbot-api": _FULL,

@@ -23,13 +23,11 @@ Credential filename is the lowercased env var name:
 | Env var | Credential file |
 |---|---|
 | `ANTHROPIC_API_KEY` | `anthropic_api_key` |
-| `WRITER_ANTHROPIC_API_KEY` | `writer_anthropic_api_key` |
 | `WRITER_ACCESS_KEY` | `writer_access_key` |
 | `OPENAI_API_KEY` | `openai_api_key` |
 | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
 | `MOONSHOT_API_KEY` | `moonshot_api_key` |
 | `GEMINI_API_KEY` | `gemini_api_key` |
-| `KG_GEMINI_API_KEY` | `kg_gemini_api_key` |
 | `TAVILY_API_KEY` | `tavily_api_key` |
 | `BRAVE_SEARCH_API_KEY` | `brave_search_api_key` |
 | `ADMIN_API_KEY` | `admin_api_key` |
@@ -60,9 +58,9 @@ Relevant implementation files:
 
 ## Per-Service Notes
 
-- `leninbot-llm-proxy.service` is the sole production custodian for `anthropic_api_key`, `deepseek_api_key`, `moonshot_api_key`, `openai_api_key`, and `gemini_api_key`. LLM-consuming services receive placeholders and start after the proxy is ready; `scripts/remove_llm_provider_keys.sh` removes stale provider-key mounts. When present in credstore, `scripts/migrate_secrets_to_credstore.py` mounts `writer_anthropic_api_key` and `kg_gemini_api_key` only on the proxy; scoped routes prefer them and fall back to the corresponding shared key.
+- `leninbot-llm-proxy.service` is the sole production custodian for `anthropic_api_key`, `deepseek_api_key`, `moonshot_api_key`, `openai_api_key`, and `gemini_api_key`. LLM-consuming services receive placeholders and start after the proxy is ready; `scripts/remove_llm_provider_keys.sh` removes stale provider-key mounts. KG and Writer do not have separate provider credentials: they use the shared Gemini and Anthropic keys.
 - `leninbot-roleplay.service` no longer mounts `deepseek_api_key`; its tool/database/search credentials remain service-local and model traffic uses the proxy.
-- `novel-writer-api.service` mounts application/tool credentials such as `admin_api_key`, `writer_access_key`, `db_password`, and search keys, but not provider keys. Claude uses proxy route `anthropic-writer`, while DeepSeek/Kimi use their proxy routes. `WRITER_ACCESS_KEY` can protect direct writer API calls separately; if unset, `/writer/*` accepts `ADMIN_API_KEY` through `X-Writer-Key`.
+- `novel-writer-api.service` mounts application/tool credentials such as `admin_api_key`, `writer_access_key`, `db_password`, and search keys, but not provider keys. Claude uses the proxy's shared `anthropic` route, while DeepSeek/Kimi use their provider routes. `WRITER_ACCESS_KEY` can protect direct writer API calls separately; if unset, `/writer/*` accepts `ADMIN_API_KEY` through `X-Writer-Key`.
 - `leninbot-email-api.service` mounts `admin_api_key`, `db_password`, `email_imap_password`, `email_smtp_password`, and `resend_api_key` for admin-gated `/email/*` review, draft, approval, manual poll, and outbound send paths. The public frontend uses the existing admin login session and injects the backend admin key server-side through `/api/proxy/email/*`.
 - `leninbot-email-poller.service` mounts only `db_password` and `email_imap_password`; it runs `scripts/email_poll_once.py` from `leninbot-email-poller.timer` and stores unseen inbound messages in the email bridge tables.
 - `leninbot-a2a-api.service` mounts only its non-provider application/tool credentials (`db_password`, `neo4j_password`, `tavily_api_key`, `github_token`, etc.); all LLM provider credentials stay in the proxy. `A2A_ENABLED` remains non-secret config from `.env`/systemd environment.

@@ -96,10 +96,10 @@ def _client() -> anthropic.AsyncAnthropic:
     if _writer_client is None:
         from llm.gateway import provider_endpoint
 
-        api_key = get_secret("WRITER_ANTHROPIC_API_KEY", "") or get_secret("ANTHROPIC_API_KEY", "")
-        base, api_key = provider_endpoint("anthropic-writer", None, api_key)
+        api_key = get_secret("ANTHROPIC_API_KEY", "") or ""
+        base, api_key = provider_endpoint("anthropic", None, api_key)
         if not api_key:
-            raise RuntimeError("WRITER_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY is required")
+            raise RuntimeError("ANTHROPIC_API_KEY is required")
         _writer_client = anthropic.AsyncAnthropic(
             api_key=api_key,
             **({"base_url": base} if base else {}),

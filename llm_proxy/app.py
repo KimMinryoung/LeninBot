@@ -64,9 +64,7 @@ def _credential(name: str) -> str:
 # daily_budget_per_provider). Routes not listed map to themselves.
 POLICY_PROVIDER = {
     "anthropic": "claude",
-    "anthropic-writer": "claude",
     "moonshot": "kimi",
-    "gemini-kg": "gemini",
 }
 
 # auth styles: "x-api-key" (Anthropic protocol), "bearer" (OpenAI protocol),
@@ -75,11 +73,6 @@ POLICY_PROVIDER = {
 PROVIDERS: dict[str, dict] = {
     "anthropic": {"upstream": "https://api.anthropic.com", "secrets": ("ANTHROPIC_API_KEY",),
                   "auth": ("x-api-key",)},
-    # Dedicated routes prefer a scoped credential when an operator mounts it
-    # into this unit, and otherwise retain the shared-provider credential.
-    "anthropic-writer": {"upstream": "https://api.anthropic.com",
-                  "secrets": ("WRITER_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
-                  "auth": ("x-api-key",)},
     "deepseek": {"upstream": "https://api.deepseek.com", "secrets": ("DEEPSEEK_API_KEY",),
                  "auth": ("x-api-key", "bearer")},
     "moonshot": {"upstream": "https://api.moonshot.ai", "secrets": ("MOONSHOT_API_KEY",),
@@ -87,9 +80,6 @@ PROVIDERS: dict[str, dict] = {
     "openai": {"upstream": "https://api.openai.com", "secrets": ("OPENAI_API_KEY",),
                "auth": ("bearer",)},
     "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secrets": ("GEMINI_API_KEY",),
-               "auth": ("x-goog-api-key",)},
-    "gemini-kg": {"upstream": "https://generativelanguage.googleapis.com",
-               "secrets": ("KG_GEMINI_API_KEY", "GEMINI_API_KEY"),
                "auth": ("x-goog-api-key",)},
 }
 
@@ -138,7 +128,7 @@ def model_from_request(provider: str, path: str, body: bytes) -> str | None:
     model = model_from_body(body)
     if model:
         return model
-    if provider in {"gemini", "gemini-kg"}:
+    if provider == "gemini":
         decoded = unquote(path)
         match = re.search(r"(?:^|/)models/([^/:]+)(?::|/|$)", decoded)
         if match:

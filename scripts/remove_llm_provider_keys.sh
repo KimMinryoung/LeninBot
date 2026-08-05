@@ -21,6 +21,8 @@
 
 set -euo pipefail
 
+# The two scoped names remain here only to clean up legacy host drop-ins; the
+# application and credential generator no longer define or consume them.
 PATTERN='^(LoadCredentialEncrypted=(anthropic|writer_anthropic|deepseek|moonshot|openai|gemini|kg_gemini)_api_key.*)$'
 MARK='# key moved to leninbot-llm-proxy (2026-08-05)'
 

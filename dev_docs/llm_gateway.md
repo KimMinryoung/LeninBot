@@ -86,7 +86,7 @@ OpenAI 호환과 Gemini는 prompt_tokens가 캐시 히트를 **포함**한다. D
 있으므로 클라이언트가 이 판정을 건너뛸 방법이 없다. OpenAI/Anthropic은 요청 본문,
 Gemini는 `models/{model}:method` URL 경로(퍼센트 인코딩 포함)에서 모델을 읽는다.
 원본 바이트는 그대로 전달한다. 라우트명은 정책 프로바이더명으로 매핑한다
-(anthropic/anthropic-writer→claude, moonshot→kimi, gemini-kg→gemini). enforce 시
+(anthropic→claude, moonshot→kimi). enforce 시
 403 + `surface=proxy` 거부 행을 기록한다. 허용된 upstream 요청도 `surface=proxy`의
 비과금 transport 행(`estimate_cost=False`)을 남겨 in-process 감사와 대조할 수 있다.
 
@@ -115,9 +115,8 @@ Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언�
 (롤백 경로). 클라이언트 구성이 임포트 시점이라 반영은 서비스 재시작.
 
 라우트: `/{provider}/{path}` → upstream `/{path}`. provider는 anthropic / deepseek /
-moonshot / openai / gemini와 scoped alias `anthropic-writer` / `gemini-kg`다. alias는
-전용 credential이 proxy unit에 mount되면 우선 사용하고, 없으면 공유 provider key로
-fallback한다. `/health`는 모든 route에 쓸 키가 있을 때만 200, 아니면 503이다.
+moonshot / openai / gemini다. KG와 Writer도 각각 공용 gemini/anthropic route와 key를
+사용한다. `/health`는 모든 route에 쓸 키가 있을 때만 200, 아니면 503이다.
 proxy unit의 `ExecStartPost=wait_llm_proxy_ready.py`가 200까지 기다리므로 소비 unit의
 `Wants/After=leninbot-llm-proxy.service`는 실제 readiness 뒤 시작을 보장한다.
 

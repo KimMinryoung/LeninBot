@@ -1,8 +1,8 @@
-"""Smoke test — Phase 6 KG embedding resilience (client limiter + key separation).
+"""Smoke test — Phase 6 KG embedding resilience (client limiter + shared key).
 
 Hermetic: no network, no Neo4j, no real Gemini key. Exercises
 graph_memory.service._EmbedRateLimiter pacing, the retry wrapper's
-limiter integration, and _resolve_kg_gemini_key fallback order.
+limiter integration, and shared Gemini key resolution.
 
 Run: venv/bin/python scripts/smoke_kg_embed_limiter.py
 """
@@ -92,10 +92,10 @@ def main():
         check("retry wrapper: non-retryable error raises immediately", calls["n"] == 1,
               f"attempts={calls['n']}")
 
-    # ── 3) Key resolution: KG_GEMINI_API_KEY > GEMINI_API_KEY ───────
+    # ── 3) Shared Gemini key resolution ──────────────────────────────
     import secrets_loader
 
-    saved = {k: os.environ.get(k) for k in ("KG_GEMINI_API_KEY", "GEMINI_API_KEY", "CREDENTIALS_DIRECTORY")}
+    saved = {k: os.environ.get(k) for k in ("GEMINI_API_KEY", "CREDENTIALS_DIRECTORY")}
     try:
         os.environ.pop("CREDENTIALS_DIRECTORY", None)  # force env-var path in secrets_loader
 
@@ -107,14 +107,7 @@ def main():
             return svc._resolve_kg_gemini_key()
 
         os.environ["GEMINI_API_KEY"] = "main-key"
-        os.environ.pop("KG_GEMINI_API_KEY", None)
-        check("key: falls back to GEMINI_API_KEY", resolve_fresh() == "main-key")
-
-        os.environ["KG_GEMINI_API_KEY"] = "kg-key"
-        check("key: KG_GEMINI_API_KEY wins when set", resolve_fresh() == "kg-key")
-
-        os.environ["KG_GEMINI_API_KEY"] = "   "
-        check("key: blank KG key treated as unset", resolve_fresh() == "main-key")
+        check("key: uses GEMINI_API_KEY", resolve_fresh() == "main-key")
     finally:
         for k, v in saved.items():
             if v is None:

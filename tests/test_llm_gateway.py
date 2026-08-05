@@ -298,7 +298,7 @@ class TestProxyPolicyGate(unittest.TestCase):
         )
         self.assertEqual(
             model_from_request(
-                "gemini-kg", "v1beta/models/gemini-embedding-001:embedContent", b"",
+                "gemini", "v1beta/models/gemini-embedding-001:embedContent", b"",
             ),
             "gemini-embedding-001",
         )
