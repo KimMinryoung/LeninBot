@@ -111,21 +111,26 @@ Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언�
 moonshot / openai / gemini. 프록시가 죽으면 모든 프록시 경유 호출이 실패한다 —
 `Restart=always RestartSec=2` + 루프의 3회 transient 재시도가 재시작 순단을 흡수한다.
 
-## 남은 enforcement 단계 (root 필요 — 사용자 실행)
+## Enforcement — 키 제거 완료 (2026-08-05)
 
-지금은 다른 서비스들도 여전히 LLM 키 credential을 갖고 있다(전환기 안전망).
-우회를 물리적으로 막으려면, 소크 기간 후:
+`scripts/remove_llm_provider_keys.sh`(root)로 13개 서비스에서 anthropic/deepseek/
+moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninbot-llm-proxy에만
+있고, 키 없는 코드는 프로바이더를 직접 호출할 수 없다.** 검증: keyless 서비스 전부
+정상 기동, KG init 성공, 웹챗 라이브 스트리밍이 프록시 로그(`POST
+/deepseek/anthropic/v1/messages → 200`)와 `llm_audit_log` 라운드 행으로 확인됨.
 
-1. KG 쓰는 서비스의 `.env`/env에 `OPENAI_BASE_URL=http://127.0.0.1:8110/openai/v1` +
-   `OPENAI_API_KEY=via-llm-proxy` 설정 (graphiti-core 내부 클라이언트를 프록시로).
-2. 각 `/etc/systemd/system/leninbot-*.service.d/credentials.conf`에서
-   `anthropic/deepseek/moonshot/openai/gemini_api_key` 라인 제거 (db_password 등은 유지).
-   **razvedchik 제외** — 아래 참조.
-3. `systemctl daemon-reload` + 서비스 재시작, 스모크.
+- 사전 조치: `.env`의 `OPENAI_API_KEY=via-llm-proxy` + `OPENAI_BASE_URL=프록시`
+  (graphiti-core 내부 reranker — env로 AsyncOpenAI를 만드는 경로 — 를 프록시로).
+  프록시 자신은 credential 파일 직독이라 이 env에 오염되지 않는다.
+- **롤백**: 각 파일 옆의 `.bak-llmkeys` 백업 복원 + `systemctl daemon-reload` + 재시작.
+- 키를 유지하는 예외: `leninbot-llm-proxy`(보관소), `leninbot-event-backfill`·
+  `research-document-translation`(직접 클라이언트 일회성 스크립트), 그리고
+  **gemini_api_key는 KG 서비스들에 유지** — graphiti 추출·임베딩이 명시 키로 직접
+  호출한다. graphiti의 Gemini 클라이언트를 프록시로 편입하는 것이 다음 단계다.
 
 ## Seam 밖에 남은 호출 (알려진 사각지대)
 
-- **graphiti-core 내부 OpenAI 호출** (KG 추출/임베딩) — enforcement 1단계의 env로 편입 예정
+- **graphiti-core의 Gemini 클라이언트** (KG 추출/임베딩) — 명시 gemini 키로 직접 호출 (프록시 편입이 남은 과제). 내부 OpenAI reranker는 env로 프록시 편입 완료
 - **browser-use의 vision 폴백** (ChatGoogle/ChatOpenAI 직접 구성) — 주 경로(DeepSeek 챗)는
   프록시 경유, 폴백만 직접
 - **razvedchik** (`agents/razvedchik/cloud_llm.py`) — **의도적 제외**: 로컬 URL을 거부하는
