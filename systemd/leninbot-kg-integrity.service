@@ -11,6 +11,8 @@ WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 # LoadCredentialEncrypted=gemini_api_key:/etc/credstore.encrypted/gemini_api_key.cred  # key moved to leninbot-llm-proxy (2026-08-05)
 LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.cred
+# db_password: llm_audit_log in-process 감사 행 기록용 (없으면 매 실행 drop 경고)
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 # LoadCredentialEncrypted=openai_api_key:/etc/credstore.encrypted/openai_api_key.cred  # key moved to leninbot-llm-proxy (2026-08-05)
 LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
 ExecStart=/home/grass/leninbot/venv/bin/python scripts/check_kg_integrity.py --smoke-query DiaMat --notify
