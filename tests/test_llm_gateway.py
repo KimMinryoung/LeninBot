@@ -232,6 +232,52 @@ class TestProxyRouting(unittest.TestCase):
         self.assertEqual(key, "realkey")
 
 
+class TestEvaluatePolicy(unittest.TestCase):
+    """The shared decision function both evaluation points call."""
+
+    def test_allow_returns_none(self):
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            reason, enforce = gw.evaluate_policy(provider="claude", model="claude-fable-5")
+        self.assertIsNone(reason)
+        self.assertFalse(enforce)
+
+    def test_deny_reason_with_enforce_flag(self):
+        pol = _policy(blocked_providers=["kimi"], enforce=True)
+        with patch.object(gw, "load_policy", return_value=pol):
+            reason, enforce = gw.evaluate_policy(provider="kimi", model="kimi-k3")
+        self.assertIn("kimi", reason)
+        self.assertTrue(enforce)
+
+    def test_never_raises(self):
+        with patch.object(gw, "load_policy", side_effect=RuntimeError("boom")):
+            reason, enforce = gw.evaluate_policy(provider="claude", model=None)
+        self.assertIsNone(reason)
+        self.assertFalse(enforce)
+
+
+class TestProxyPolicyGate(unittest.TestCase):
+    def test_model_from_body(self):
+        from llm_proxy.app import model_from_body
+
+        self.assertEqual(
+            model_from_body(b'{"model": "deepseek-v4-flash", "messages": []}'),
+            "deepseek-v4-flash",
+        )
+        self.assertIsNone(model_from_body(b""))
+        self.assertIsNone(model_from_body(b"not json"))
+        self.assertIsNone(model_from_body(b'{"messages": []}'))
+
+    def test_route_to_policy_provider_mapping(self):
+        from llm_proxy.app import POLICY_PROVIDER, PROVIDERS
+
+        self.assertEqual(POLICY_PROVIDER["anthropic"], "claude")
+        self.assertEqual(POLICY_PROVIDER["moonshot"], "kimi")
+        # Unmapped routes are their own policy names.
+        for route in PROVIDERS:
+            name = POLICY_PROVIDER.get(route, route)
+            self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini"})
+
+
 class TestProxyHeaderInjection(unittest.TestCase):
     """llm_proxy must strip client auth and inject the real key, untouched rest."""
 

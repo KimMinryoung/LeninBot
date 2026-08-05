@@ -74,6 +74,15 @@ OpenAI 호환은 prompt_tokens가 캐시 히트를 **포함**한다. 비용 추�
 - 롤아웃은 툴 게이트웨이와 동일: shadow로 데이터를 쌓고, would_deny가 오탐 없음이
   확인되면 enforce로 올린다.
 
+**판정 지점은 둘, 로직은 하나, 권위는 프록시** (2026-08-05). 판정 로직은
+`evaluate_policy()` 한 곳이고, in-process `check_llm_call`(빠른 실패 + caller 태깅)과
+**프록시**가 같은 함수를 부른다. 프록시 쪽 판정이 권위다 — 키가 프록시 건너편에만
+있으므로 클라이언트가 이 판정을 건너뛸 방법이 없다. 프록시는 요청 본문에서 `model`만
+읽고(원본 바이트는 무변형 전달) 라우트명을 정책 프로바이더명으로 매핑한다
+(anthropic→claude, moonshot→kimi). enforce 시 403 + `llm_audit_log`에 `surface=proxy`
+거부 행. 라이브 검증: shadow 통과+would_deny 기록 / enforce 403 / 원복, 모두 통과
+(2026-08-05).
+
 ## 운영 CLI
 
 ```bash

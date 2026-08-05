@@ -5,12 +5,16 @@ After=network.target
 [Service]
 User=grass
 WorkingDirectory=/home/grass/leninbot
+# .env + db_password: the authoritative policy gate reads today's spend
+# from llm_audit_log for the daily budget caps (fail-open on DB errors).
+EnvironmentFile=/home/grass/leninbot/.env
 ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn llm_proxy.app:app --host 127.0.0.1 --port 8110
 Restart=always
 RestartSec=2
 # Provider keys live HERE and (after the enforcement step) nowhere else.
 # The blobs are host-key encrypted with name binding, shared with the
 # credstore layout in dev_docs/secret_management.md.
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key.cred
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=moonshot_api_key:/etc/credstore.encrypted/moonshot_api_key.cred
