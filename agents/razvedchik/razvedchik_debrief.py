@@ -149,7 +149,7 @@ def run_debrief(report: dict) -> list[dict]:
     Returns:
         대화 메시지 리스트 [{"speaker": ..., "content": ...}, ...]
     """
-    from agents.razvedchik.cloud_llm import ask_chat
+    from llm.call_registry import generate_sync
 
     report_summary = _summarize_report(report)
     prev_context = get_last_debrief_summary()
@@ -170,13 +170,13 @@ def run_debrief(report: dict) -> list[dict]:
         "Stick to facts from the report above. Under 300 words."
     )
 
-    razvedchik_history = [
-        {"role": "system", "content": RAZVEDCHIK_DEBRIEF_PROMPT},
-        {"role": "user", "content": opening_prompt},
-    ]
-
     try:
-        opening = ask_chat(razvedchik_history)
+        opening = generate_sync(
+            "razvedchik_debrief_scout", opening_prompt,
+            system=RAZVEDCHIK_DEBRIEF_PROMPT,
+        )
+        if not opening:
+            raise RuntimeError("empty LLM response")
         conversation.append({"speaker": "Razvedchik", "content": opening})
         logger.info("[debrief] Razvedchik: %s", opening[:120])
     except Exception as e:
@@ -184,17 +184,19 @@ def run_debrief(report: dict) -> list[dict]:
         return conversation
 
     # ── Cyber-Lenin 분석 + 지시 ────────────────────────────────────────────────
-    lenin_history = [
-        {"role": "system", "content": LENIN_DEBRIEF_PROMPT},
-        {"role": "user", "content": (
-            f"Scout's report:\n\n{opening}\n\n"
-            f"Raw patrol data for reference:\n{report_summary}\n\n"
-            'Analyze and give directives. End with "KEY INSIGHTS:" section.'
-        )},
-    ]
+    lenin_prompt = (
+        f"Scout's report:\n\n{opening}\n\n"
+        f"Raw patrol data for reference:\n{report_summary}\n\n"
+        'Analyze and give directives. End with "KEY INSIGHTS:" section.'
+    )
 
     try:
-        lenin_reply = ask_chat(lenin_history)
+        lenin_reply = generate_sync(
+            "razvedchik_debrief_commander", lenin_prompt,
+            system=LENIN_DEBRIEF_PROMPT,
+        )
+        if not lenin_reply:
+            raise RuntimeError("empty LLM response")
         conversation.append({"speaker": "Cyber-Lenin", "content": lenin_reply})
         logger.info("[debrief] Lenin: %s", lenin_reply[:120])
     except Exception as e:

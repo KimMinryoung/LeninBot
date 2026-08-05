@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot API (FastAPI + Uvicorn)
-After=network.target leninbot-neo4j.service
+After=network.target leninbot-neo4j.service leninbot-llm-proxy.service
+Wants=leninbot-llm-proxy.service
 Requires=leninbot-neo4j.service
 
 [Service]

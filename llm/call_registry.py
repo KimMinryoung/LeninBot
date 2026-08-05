@@ -19,13 +19,13 @@ llm_registry_cli.py set`) take effect without a service restart.
 Two ways to consume the registry:
 
   - resolve(feature)              → CallSiteProfile (model-only integration —
-                                    KG/graphiti, razvedchik, writer critic)
+                                    KG/graphiti model selection, writer critic)
   - generate(feature, prompt)     → run the call through the shared executor
     generate_sync(feature, prompt)  (gemini / deepseek / openai / claude)
 
 Executor calls pass through the LLM gateway (llm/gateway.py): policy check
-before the request, spend/usage audit after. model-only sites bypass it —
-they execute with their own clients (a documented gap in llm_gateway.md).
+before the request, spend/usage audit after. Third-party model-only clients
+must use the audited wrappers documented in dev_docs/llm_gateway.md.
 """
 
 from __future__ import annotations
@@ -65,11 +65,11 @@ _PROVIDER_KEYS = {
 
 def _base_url(provider: str) -> str | None:
     """Executor base URL for a provider: llm_proxy when configured, else direct."""
-    from llm.gateway import proxy_base
+    from llm.gateway import provider_endpoint
 
     direct_default, proxy_path = _PROVIDER_ROUTES[provider]
-    base = proxy_base()
-    return f"{base}/{proxy_path}" if base else direct_default
+    base, _ = provider_endpoint(proxy_path, direct_default, None)
+    return base
 
 
 @dataclass(frozen=True)
@@ -184,7 +184,11 @@ def _gemini_usage(response) -> dict:
     meta = getattr(response, "usage_metadata", None)
     return {
         "tokens_in": getattr(meta, "prompt_token_count", 0) or 0,
-        "tokens_out": getattr(meta, "candidates_token_count", 0) or 0,
+        "tokens_out": (
+            (getattr(meta, "candidates_token_count", 0) or 0)
+            + (getattr(meta, "thoughts_token_count", 0) or 0)
+        ),
+        "cache_read": getattr(meta, "cached_content_token_count", 0) or 0,
     }
 
 
@@ -367,6 +371,11 @@ def generate_sync(feature: str, prompt: str, *, system: str | None = None, **def
         return None
     # deepseek_anthropic is a protocol variant, not a distinct provider.
     provider = "deepseek" if profile.provider == "deepseek_anthropic" else profile.provider
+    token_semantics = {
+        "deepseek_anthropic": "anthropic",
+        "claude": "anthropic",
+        "gemini": "gemini",
+    }.get(profile.provider, "openai")
     try:
         check_llm_call(
             surface="oneshot", caller=feature,
@@ -385,6 +394,7 @@ def generate_sync(feature: str, prompt: str, *, system: str | None = None, **def
             surface="oneshot", caller=feature, provider=provider,
             model=profile.model, status="error", error_excerpt=str(e),
             latency_ms=int((time.monotonic() - started) * 1000),
+            token_semantics=token_semantics, estimate_cost=False,
         )
         logger.warning("[llm-registry] %s (%s/%s) failed: %s",
                        feature, profile.provider, profile.model, e)
@@ -392,6 +402,7 @@ def generate_sync(feature: str, prompt: str, *, system: str | None = None, **def
     record_llm_call(
         surface="oneshot", caller=feature, provider=provider,
         model=profile.model, latency_ms=int((time.monotonic() - started) * 1000),
+        token_semantics=token_semantics,
         **usage,
     )
     return text or None

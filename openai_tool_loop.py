@@ -1440,6 +1440,7 @@ class _OpenAIProtocolAdapter:
                 allowed = set(final_tool_names)
                 batch: list[tuple[str, str, dict]] = []
                 blocked: list[tuple[str, str]] = []
+                malformed: list[tuple[str, str, str]] = []
                 for tc_item in final_tc_list:
                     fname = tc_item["function"]["name"]
                     if fname not in allowed:
@@ -1447,8 +1448,14 @@ class _OpenAIProtocolAdapter:
                         continue
                     try:
                         fargs = json.loads(tc_item["function"]["arguments"])
-                    except (json.JSONDecodeError, TypeError):
-                        fargs = {}
+                        if not isinstance(fargs, dict):
+                            raise TypeError("tool arguments must decode to an object")
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        malformed.append((
+                            tc_item["id"], fname,
+                            f"Tool execution blocked: malformed JSON arguments ({exc})",
+                        ))
+                        continue
                     batch.append((tc_item["id"], fname, fargs))
                 return FinalTurn(
                     text_parts=[text],
@@ -1459,6 +1466,7 @@ class _OpenAIProtocolAdapter:
                         "tc_list": final_tc_list,
                         "message_obj": final_message,
                         "blocked": blocked,
+                        "malformed": malformed,
                         "text": text,
                     },
                 )
@@ -1482,6 +1490,12 @@ class _OpenAIProtocolAdapter:
                 "role": "tool",
                 "tool_call_id": tc_id,
                 "content": f"Tool {fname} blocked: budget exhausted.",
+            })
+        for tc_id, _fname, error_result in final_turn.extra.get("malformed", []):
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": error_result,
             })
 
     def append_final_results(self, msgs, final_turn, exec_results):

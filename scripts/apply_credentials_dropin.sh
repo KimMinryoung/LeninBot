@@ -27,6 +27,7 @@ if [[ ! -d "$DROPIN_SRC_DIR" ]]; then
 fi
 
 LONG_RUNNING=(
+  leninbot-llm-proxy
   leninbot-api
   leninbot-a2a-api
   leninbot-telegram

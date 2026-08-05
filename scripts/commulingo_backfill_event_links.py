@@ -7,8 +7,8 @@ were clearly involved. Proposals are validated against the roster, filtered by
 confidence, deduplicated against existing links, and applied with a revision
 row per link (changed_by 'operator:claude-code') for post-hoc review.
 
-Runs under a systemd oneshot unit (leninbot-event-backfill.service) because
-the DeepSeek and DB credentials only exist in the systemd credstore.
+Runs under a systemd oneshot unit (leninbot-event-backfill.service); DB access
+is service-scoped and DeepSeek is routed through the local LLM proxy.
 
 Usage:
   ... commulingo_backfill_event_links.py --dry-run           # propose only
@@ -203,11 +203,39 @@ def propose(client, event: dict, roster: list[dict], linked_ids: list[str]) -> l
         already=", ".join(linked_ids) or "(none)",
         roster=roster_lines,
     )
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.1,
+    from llm.gateway import check_llm_call, record_llm_call
+
+    check_llm_call(
+        surface="oneshot", caller="commulingo_event_backfill",
+        provider="deepseek", model=MODEL,
+    )
+    started = time.monotonic()
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+    except Exception as exc:
+        record_llm_call(
+            surface="oneshot", caller="commulingo_event_backfill",
+            provider="deepseek", model=MODEL, status="error",
+            error_excerpt=str(exc),
+            latency_ms=int((time.monotonic() - started) * 1000),
+            token_semantics="openai", estimate_cost=False,
+        )
+        raise
+    usage = getattr(resp, "usage", None)
+    details = getattr(usage, "prompt_tokens_details", None)
+    record_llm_call(
+        surface="oneshot", caller="commulingo_event_backfill",
+        provider="deepseek", model=MODEL,
+        tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
+        tokens_out=getattr(usage, "completion_tokens", 0) or 0,
+        cache_read=getattr(details, "cached_tokens", 0) or 0,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        token_semantics="openai",
     )
     payload = json.loads(resp.choices[0].message.content or "{}")
     links = payload.get("links")
@@ -253,11 +281,16 @@ def main() -> int:
 
     from openai import OpenAI
 
-    api_key = get_secret("DEEPSEEK_API_KEY", "") or ""
+    from llm.gateway import provider_endpoint
+
+    base_url, api_key = provider_endpoint(
+        "deepseek", "https://api.deepseek.com",
+        get_secret("DEEPSEEK_API_KEY", "") or "",
+    )
     if not api_key:
-        print("DEEPSEEK_API_KEY unavailable (run under the systemd unit)", file=sys.stderr)
+        print("DEEPSEEK_API_KEY unavailable and LLM proxy disabled", file=sys.stderr)
         return 1
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
     only = [e.strip() for e in args.events.split(",") if e.strip()]
     events = fetch_events(only)

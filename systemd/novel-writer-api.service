@@ -1,6 +1,7 @@
 [Unit]
 Description=Novel Writer API (FastAPI + Uvicorn)
-After=network.target
+After=network.target leninbot-llm-proxy.service
+Wants=leninbot-llm-proxy.service
 
 [Service]
 User=grass

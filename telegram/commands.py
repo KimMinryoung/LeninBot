@@ -1408,10 +1408,18 @@ async def handle_photo(message: Message):
 
     # Vision API 호출 — provider에 따라 분기
     t_start = _time.monotonic()
+    llm_started = False
+    audit_provider = None
+    token_semantics = None
+    model_id = None
     try:
+        from llm.gateway import check_llm_call, record_llm_call
+
         config = _ctx["config"]
         if config.get("provider") in {"openai", "kimi"}:
             provider = config["provider"]
+            audit_provider = provider
+            token_semantics = "openai"
             vision_client = _ctx.get(f"{provider}_client")
             if not vision_client:
                 raise RuntimeError(f"{provider} API key is not configured")
@@ -1440,12 +1448,24 @@ async def handle_photo(message: Message):
             )
             if provider == "kimi":
                 request["extra_body"] = {"reasoning_effort": "max"}
+            check_llm_call(
+                surface="vision", caller="telegram_photo",
+                provider=audit_provider, model=model_id,
+            )
+            llm_started = True
             response = await vision_client.chat.completions.create(**request)
             reply_text = response.choices[0].message.content or ""
             usage = response.usage
             in_tok = getattr(usage, "prompt_tokens", "?") if usage else "?"
             out_tok = getattr(usage, "completion_tokens", "?") if usage else "?"
+            details = getattr(usage, "prompt_tokens_details", None) if usage else None
+            cache_read = getattr(details, "cached_tokens", 0) or 0
+            cache_create = 0
         else:
+            audit_provider = (
+                "deepseek" if config.get("provider") == "deepseek" else "claude"
+            )
+            token_semantics = "anthropic"
             model_id = await _ctx["get_model"]() if config.get("provider") == "claude" else await _ctx["get_model_light"]()
             # Claude Vision: base64 image source
             messages = context_msgs + [
@@ -1467,6 +1487,11 @@ async def handle_photo(message: Message):
                     ],
                 }
             ]
+            check_llm_call(
+                surface="vision", caller="telegram_photo",
+                provider=audit_provider, model=model_id,
+            )
+            llm_started = True
             response = await _ctx["claude_client"].messages.create(
                 model=model_id,
                 max_tokens=1024,
@@ -1476,13 +1501,31 @@ async def handle_photo(message: Message):
             usage = getattr(response, "usage", None)
             in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
             out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
         elapsed = _time.monotonic() - t_start
+        record_llm_call(
+            surface="vision", caller="telegram_photo",
+            provider=audit_provider, model=model_id,
+            tokens_in=in_tok if isinstance(in_tok, int) else 0,
+            tokens_out=out_tok if isinstance(out_tok, int) else 0,
+            cache_read=cache_read, cache_create=cache_create,
+            latency_ms=int(elapsed * 1000), token_semantics=token_semantics,
+        )
         logger.info("photo vision done: user_id=%s elapsed=%.2fs in_tokens=%s out_tokens=%s",
                     user_id, elapsed, in_tok, out_tok)
 
         await message.reply(reply_text)
         asyncio.create_task(_persist_assistant_turn(user_id, reply_text))
     except Exception as e:
+        if llm_started:
+            record_llm_call(
+                surface="vision", caller="telegram_photo",
+                provider=audit_provider, model=model_id,
+                status="error", error_excerpt=str(e),
+                latency_ms=int((_time.monotonic() - t_start) * 1000),
+                token_semantics=token_semantics, estimate_cost=False,
+            )
         logger.error("handle_photo error: %s", e)
         await message.reply(f"❌ 이미지 분석 중 오류: {e}")
 

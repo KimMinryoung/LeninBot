@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot LLM Proxy (key-injection passthrough; sole holder of provider API keys)
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=grass
@@ -8,9 +9,22 @@ WorkingDirectory=/home/grass/leninbot
 # .env + db_password: the authoritative policy gate reads today's spend
 # from llm_audit_log for the daily budget caps (fail-open on DB errors).
 EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn llm_proxy.app:app --host 127.0.0.1 --port 8110
+ExecStartPost=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/wait_llm_proxy_ready.py
 Restart=always
 RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+UMask=0077
 # Provider keys live HERE and (after the enforcement step) nowhere else.
 # The blobs are host-key encrypted with name binding, shared with the
 # credstore layout in dev_docs/secret_management.md.

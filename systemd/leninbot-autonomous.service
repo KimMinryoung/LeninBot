@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot Autonomous Project Tick (one-shot, T0 pilot)
-After=network.target leninbot-neo4j.service leninbot-embedding.service
+After=network.target leninbot-neo4j.service leninbot-embedding.service leninbot-llm-proxy.service
+Wants=leninbot-llm-proxy.service
 
 [Service]
 Type=oneshot

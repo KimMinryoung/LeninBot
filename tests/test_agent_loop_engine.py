@@ -174,6 +174,31 @@ class TestClaudeFinalizationTools(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)  # no followup roundtrip
         self.assertIn(long_text.strip(), result)
 
+    def test_malformed_forced_final_input_is_not_executed(self):
+        executed = []
+
+        async def fake_batch(tool_uses, tool_handlers, **kwargs):
+            executed.extend(name for _tid, name, _input in tool_uses)
+            return [(tid, name, inp, "ok", False) for tid, name, inp in tool_uses]
+
+        client = FakeAnthropicClient([
+            _response([_tool_use_block("t1", "echo")], stop_reason="tool_use",
+                      usage=EXPENSIVE),
+            _response([_tool_use_block("t2", "save_diary", ["not", "object"])],
+                      stop_reason="tool_use"),
+            _response([_text_block("malformed 호출은 실행하지 않았다")]),
+        ])
+        with patch.object(claude_loop, "execute_tools_batch", fake_batch):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=0.01, finalization_tools=["save_diary"],
+            ))
+        self.assertEqual(executed, ["echo"])
+        self.assertIn("tool input must be an object", str(client.calls[2]["messages"]))
+        self.assertIn("실행하지 않았다", result)
+
 
 class TestClaudeLengthContinuation(unittest.TestCase):
     def test_partial_text_stitched_across_continuation(self):
@@ -284,6 +309,32 @@ class TestOpenAIFinalizationTools(unittest.TestCase):
         self.assertEqual(result["continuations_used"], 1)
         self.assertIn("앞부분 텍스트", result["text"])
         self.assertIn("뒷부분 텍스트", result["text"])
+
+    def test_malformed_forced_final_arguments_are_not_executed(self):
+        executed = []
+
+        async def fake_batch(tool_uses, tool_handlers, **kwargs):
+            executed.extend(name for _tid, name, _input in tool_uses)
+            return [(tid, name, inp, "ok", False) for tid, name, inp in tool_uses]
+
+        expensive = _oai_usage(prompt=10_000_000, completion=1_000_000)
+        client = FakeSDKClient([
+            _oai_resp("", finish="tool_calls", tool_calls=[_tc("t1", "echo")],
+                      usage=expensive),
+            _oai_resp("", finish="tool_calls",
+                      tool_calls=[_tc("t2", "save_diary", "[]")]),
+            _oai_resp("malformed 호출은 실행하지 않았다"),
+        ])
+        with patch.object(openai_tool_loop, "execute_tools_batch", fake_batch):
+            result = asyncio.run(openai_tool_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="deepseek-chat",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=0.01, finalization_tools=["save_diary"],
+            ))
+        self.assertEqual(executed, ["echo"])
+        self.assertIn("malformed JSON arguments", str(client.calls[2]["messages"]))
+        self.assertIn("실행하지 않았다", result)
 
 
 if __name__ == "__main__":

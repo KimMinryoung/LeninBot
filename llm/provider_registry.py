@@ -72,6 +72,19 @@ OPENAI_COMPATIBLE_PRICING = {
 }
 
 
+# Google AI Gemini Developer API standard-tier pricing (USD/token).  Keep
+# this separate from the OpenAI-compatible table: Gemini reports prompt and
+# cached prompt tokens with OpenAI-like semantics, but has its own models and
+# prices.  See dev_docs/llm_gateway.md for the pricing-source link/date.
+GEMINI_PRICING = {
+    "gemini-3.5-flash-lite": _per_token(0.30, 2.50, 0.03),
+    "gemini-3.1-flash-lite": _per_token(0.25, 1.50, 0.025),
+    "gemini-2.5-flash-lite": _per_token(0.10, 0.40, 0.01),
+    "gemini-2.5-flash": _per_token(0.30, 2.50, 0.03),
+    "gemini-embedding-001": _per_token(0.15, 0.0, 0.15),
+}
+
+
 def openai_compatible_pricing(model: str) -> dict[str, float]:
     """Return pricing for an exact or provider-pinned model ID."""
     if model in OPENAI_COMPATIBLE_PRICING:

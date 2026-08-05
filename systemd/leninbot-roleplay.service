@@ -1,7 +1,7 @@
 [Unit]
 Description=LeninBot Roleplay Bot (aiogram, DeepSeek)
-After=network.target leninbot-neo4j.service leninbot-embedding.service
-Wants=leninbot-neo4j.service leninbot-embedding.service
+After=network.target leninbot-neo4j.service leninbot-embedding.service leninbot-llm-proxy.service
+Wants=leninbot-neo4j.service leninbot-embedding.service leninbot-llm-proxy.service
 
 [Service]
 User=grass

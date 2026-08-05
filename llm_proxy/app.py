@@ -28,8 +28,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 import httpx
 from fastapi import FastAPI, Request
@@ -60,21 +62,34 @@ def _credential(name: str) -> str:
 
 # Route names → the provider names policy config uses (blocked_providers,
 # daily_budget_per_provider). Routes not listed map to themselves.
-POLICY_PROVIDER = {"anthropic": "claude", "moonshot": "kimi"}
+POLICY_PROVIDER = {
+    "anthropic": "claude",
+    "anthropic-writer": "claude",
+    "moonshot": "kimi",
+    "gemini-kg": "gemini",
+}
 
 # auth styles: "x-api-key" (Anthropic protocol), "bearer" (OpenAI protocol),
 # "x-goog-api-key" (Gemini). DeepSeek serves both protocol families from one
 # host, so both headers are injected; the endpoint reads whichever it wants.
 PROVIDERS: dict[str, dict] = {
-    "anthropic": {"upstream": "https://api.anthropic.com", "secret": "ANTHROPIC_API_KEY",
+    "anthropic": {"upstream": "https://api.anthropic.com", "secrets": ("ANTHROPIC_API_KEY",),
                   "auth": ("x-api-key",)},
-    "deepseek": {"upstream": "https://api.deepseek.com", "secret": "DEEPSEEK_API_KEY",
+    # Dedicated routes prefer a scoped credential when an operator mounts it
+    # into this unit, and otherwise retain the shared-provider credential.
+    "anthropic-writer": {"upstream": "https://api.anthropic.com",
+                  "secrets": ("WRITER_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+                  "auth": ("x-api-key",)},
+    "deepseek": {"upstream": "https://api.deepseek.com", "secrets": ("DEEPSEEK_API_KEY",),
                  "auth": ("x-api-key", "bearer")},
-    "moonshot": {"upstream": "https://api.moonshot.ai", "secret": "MOONSHOT_API_KEY",
+    "moonshot": {"upstream": "https://api.moonshot.ai", "secrets": ("MOONSHOT_API_KEY",),
                  "auth": ("bearer",)},
-    "openai": {"upstream": "https://api.openai.com", "secret": "OPENAI_API_KEY",
+    "openai": {"upstream": "https://api.openai.com", "secrets": ("OPENAI_API_KEY",),
                "auth": ("bearer",)},
-    "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secret": "GEMINI_API_KEY",
+    "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secrets": ("GEMINI_API_KEY",),
+               "auth": ("x-goog-api-key",)},
+    "gemini-kg": {"upstream": "https://generativelanguage.googleapis.com",
+               "secrets": ("KG_GEMINI_API_KEY", "GEMINI_API_KEY"),
                "auth": ("x-goog-api-key",)},
 }
 
@@ -113,6 +128,32 @@ def model_from_body(body: bytes) -> str | None:
         return None
 
 
+def model_from_request(provider: str, path: str, body: bytes) -> str | None:
+    """Extract a model from either protocol's canonical location.
+
+    OpenAI/Anthropic put it in JSON.  Gemini puts it in the URL, including
+    percent-encoded ``:generateContent`` suffixes emitted by the SDK.  Policy
+    must inspect both or Gemini ``blocked_models`` is silently bypassed.
+    """
+    model = model_from_body(body)
+    if model:
+        return model
+    if provider in {"gemini", "gemini-kg"}:
+        decoded = unquote(path)
+        match = re.search(r"(?:^|/)models/([^/:]+)(?::|/|$)", decoded)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _provider_key(cfg: dict) -> str:
+    for name in cfg["secrets"]:
+        key = _credential(name)
+        if key:
+            return key
+    return ""
+
+
 def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     """Client headers minus hop-by-hop/auth, plus the provider's real auth."""
     headers = {
@@ -129,9 +170,13 @@ def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
 @app.get("/health")
 async def health():
     missing = [
-        name for name, cfg in PROVIDERS.items() if not _credential(cfg["secret"])
+        name for name, cfg in PROVIDERS.items() if not _provider_key(cfg)
     ]
-    return {"status": "ok", "providers_without_key": missing}
+    payload = {
+        "status": "ok" if not missing else "not_ready",
+        "providers_without_key": missing,
+    }
+    return JSONResponse(payload, status_code=200 if not missing else 503)
 
 
 @app.api_route("/{provider}/{path:path}", methods=["GET", "POST"])
@@ -139,7 +184,7 @@ async def proxy(provider: str, path: str, request: Request):
     cfg = PROVIDERS.get(provider)
     if cfg is None:
         return JSONResponse({"error": f"unknown provider {provider!r}"}, status_code=404)
-    key = _credential(cfg["secret"])
+    key = _provider_key(cfg)
     if not key:
         return JSONResponse(
             {"error": f"no credential for provider {provider!r}"}, status_code=503,
@@ -153,7 +198,7 @@ async def proxy(provider: str, path: str, request: Request):
     # in-process seam (llm/gateway.evaluate_policy — single source); THIS
     # evaluation is the one a caller cannot skip, because the provider key
     # only exists on the far side of it.
-    model = model_from_body(body)
+    model = model_from_request(provider, path, body)
     policy_provider = POLICY_PROVIDER.get(provider, provider)
     reason, enforce = evaluate_policy(provider=policy_provider, model=model)
     if reason is not None:
@@ -179,6 +224,13 @@ async def proxy(provider: str, path: str, request: Request):
     try:
         upstream = await _http_client().send(upstream_req, stream=True)
     except httpx.HTTPError as e:
+        record_llm_call(
+            surface="proxy", caller=request.headers.get("x-llm-caller"),
+            provider=policy_provider, model=model, label=path[:200],
+            status="error", error_excerpt=str(e),
+            latency_ms=int((time.monotonic() - started) * 1000),
+            estimate_cost=False,
+        )
         logger.warning("proxy %s/%s upstream error: %s", provider, path, e)
         return JSONResponse(
             {"error": f"upstream unreachable: {e.__class__.__name__}"}, status_code=502,
@@ -188,6 +240,15 @@ async def proxy(provider: str, path: str, request: Request):
         "proxy %s /%s → %d (headers in %.0fms, req %dB)",
         provider, path, upstream.status_code,
         (time.monotonic() - started) * 1000, len(body),
+    )
+    record_llm_call(
+        surface="proxy", caller=request.headers.get("x-llm-caller"),
+        provider=policy_provider, model=model, label=path[:200],
+        status="ok" if 200 <= upstream.status_code < 400 else "error",
+        error_excerpt=(None if upstream.status_code < 400
+                       else f"upstream HTTP {upstream.status_code}"),
+        latency_ms=int((time.monotonic() - started) * 1000),
+        estimate_cost=False,
     )
     # aiter_raw: bytes exactly as the provider sent them (no decompression),
     # so the preserved content-encoding header stays truthful.

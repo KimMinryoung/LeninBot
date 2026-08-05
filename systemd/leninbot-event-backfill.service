@@ -1,7 +1,7 @@
 [Unit]
 Description=LeninBot CommuLingo event-link backfill (one-off batch)
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target leninbot-llm-proxy.service
+After=network-online.target leninbot-llm-proxy.service
 
 [Service]
 Type=oneshot
@@ -11,7 +11,7 @@ EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 # Override at install time by editing this line (systemd word-splits $BACKFILL_ARGS).
 Environment="BACKFILL_ARGS=--min-confidence=0.8"
-LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
+# DeepSeek key is held only by leninbot-llm-proxy.
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_backfill_event_links.py $BACKFILL_ARGS
 # ~24 events x ~4 min of model time each — no start timeout.

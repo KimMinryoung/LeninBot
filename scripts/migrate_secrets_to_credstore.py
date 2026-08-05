@@ -38,6 +38,7 @@ TIER_A = [
     "EMAIL_IMAP_PASSWORD",
     "EMAIL_SMTP_PASSWORD",
     "GEMINI_API_KEY",
+    "KG_GEMINI_API_KEY",
     "GITHUB_TOKEN",
     "GRAFFITI_API_KEY",
     "HF_TOKEN",
@@ -55,26 +56,31 @@ TIER_A = [
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Per-service credential scopes (least privilege).
-# api/telegram host the agent and its wide tool surface — they get the full set.
-# Narrower services list only what they actually use.
+# Per-service credential scopes (least privilege).  LLM provider keys are
+# deliberately excluded: leninbot-llm-proxy is their sole runtime custodian.
+# Narrower services list only the application/tool secrets they actually use.
 # ═══════════════════════════════════════════════════════════════════════════
-_FULL = set(TIER_A)
+_LLM_PROVIDER_KEYS = {
+    "ANTHROPIC_API_KEY", "WRITER_ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "GEMINI_API_KEY",
+    "KG_GEMINI_API_KEY",
+}
+_SCOPED_PROXY_KEYS = {"WRITER_ANTHROPIC_API_KEY", "KG_GEMINI_API_KEY"}
+_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
-    # Agent hosts — broad tool access, full Tier A.
+    # Base keys are declared in the static proxy unit. Scoped keys are optional
+    # and therefore emitted through this generated drop-in only when present.
+    "leninbot-llm-proxy": _SCOPED_PROXY_KEYS,
+
+    # Agent hosts — broad tool access, all non-provider Tier A secrets.
     "leninbot-api": _FULL,
     "leninbot-telegram": _FULL,
 
-    # Personal fiction workspace: selectable Claude, DeepSeek, and Kimi main
-    # models plus Tavily-backed delegated research.
+    # Personal fiction workspace; provider keys are injected by the proxy.
     "novel-writer-api": {
         "ADMIN_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "WRITER_ANTHROPIC_API_KEY",
         "WRITER_ACCESS_KEY",
-        "DEEPSEEK_API_KEY",
-        "MOONSHOT_API_KEY",
         "DB_PASSWORD",
         "BRAVE_SEARCH_API_KEY",
         "TAVILY_API_KEY",
@@ -97,10 +103,6 @@ SERVICE_CREDS: dict[str, set[str]] = {
 
     # Public A2A endpoint runs an LLM/tool surface separate from the main API.
     "leninbot-a2a-api": {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MOONSHOT_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
         "BRAVE_SEARCH_API_KEY",
@@ -109,22 +111,13 @@ SERVICE_CREDS: dict[str, set[str]] = {
     },
 
     # Browser worker runs the task loop and writes task/log rows, so it needs DB.
-    # browser-use itself can use Gemini/OpenAI/Anthropic depending on runtime env.
+    # browser-use can select providers, all through the key-injection proxy.
     "leninbot-browser": {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "GEMINI_API_KEY",
         "DB_PASSWORD",
     },
 
     # T0 autonomous pilot — planning LLMs, KG/DB, telegram notify, razvedchik.
     "leninbot-autonomous": {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MOONSHOT_API_KEY",
-        "GEMINI_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
         "TELEGRAM_BOT_TOKEN",
@@ -142,34 +135,25 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "TELEGRAM_BOT_TOKEN",
     },
 
-    # Diary writer (daily 00:30) — Gemini for writing, DB/KG for reading activity.
-    # Imports bot_config so ANTHROPIC/OPENAI present too.
+    # Diary writer (daily 00:30); model traffic goes through the proxy.
     "leninbot-experience": {
-        "GEMINI_API_KEY",
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MOONSHOT_API_KEY",
     },
 
     # KG backup (daily 03:00) — R2 upload + Neo4j dump.
     "leninbot-kg-backup": {"R2_CF_API_TOKEN", "NEO4J_PASSWORD"},
 
-    # Read-only roleplay search surface. The model itself is DeepSeek and the
-    # search provider chain can use either Tavily or Brave.
+    # Read-only roleplay search surface. DeepSeek is supplied by the proxy.
     "leninbot-roleplay": {
-        "DEEPSEEK_API_KEY",
         "DB_PASSWORD",
         "NEO4J_PASSWORD",
         "TAVILY_API_KEY",
         "BRAVE_SEARCH_API_KEY",
     },
 
-    # These services already load their required DeepSeek/DB/Tavily
-    # credentials in the static unit. The optional Brave credential is emitted
-    # as a drop-in only after it exists in the encrypted credential store.
+    # These services load DB/Tavily in the static unit; model traffic goes via
+    # the proxy. Optional Brave is emitted only after it exists in credstore.
     "leninbot-commulingo-maintainer": {"BRAVE_SEARCH_API_KEY"},
     "leninbot-commulingo-new": {"BRAVE_SEARCH_API_KEY"},
     "leninbot-commulingo-enrich": {"BRAVE_SEARCH_API_KEY"},

@@ -554,6 +554,7 @@ class _ClaudeProtocolAdapter:
 
         assistant_content = []
         tool_calls: list[tuple[str, str, dict]] = []
+        malformed: list[tuple[str, str, str]] = []
         text_parts: list[str] = []
         for block in response.content:
             b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
@@ -578,17 +579,25 @@ class _ClaudeProtocolAdapter:
             elif btype == "tool_use":
                 tid = str(b.get("id", "")).strip()
                 tname = str(b.get("name", "")).strip()
-                tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
                 if not tid or not tname:
                     logger.warning("Skipping malformed tool_use block: %s", b)
                     continue
+                raw_input = b.get("input", {})
+                input_valid = isinstance(raw_input, dict)
+                tinput = raw_input if input_valid else {}
                 assistant_content.append({
                     "type": "tool_use",
                     "id": tid,
                     "name": tname,
                     "input": tinput,
                 })
-                tool_calls.append((tid, tname, tinput))
+                if input_valid:
+                    tool_calls.append((tid, tname, tinput))
+                else:
+                    malformed.append((
+                        tid, tname,
+                        "Tool execution blocked: tool input must be an object",
+                    ))
             else:
                 # Preserve unknown future block types as text context.
                 assistant_content.append({"type": "text", "text": _coerce_text(b)})
@@ -597,6 +606,7 @@ class _ClaudeProtocolAdapter:
             is_tool_round=True,
             text_parts=text_parts,
             tool_calls=tool_calls,
+            malformed=malformed,
             finish_reason=str(stop_reason or "tool_use"),
             raw=response,
             extra={"assistant_content": assistant_content},
@@ -627,6 +637,11 @@ class _ClaudeProtocolAdapter:
 
     def append_tool_results(self, msgs, turn, exec_results, missing, warning_texts):
         tool_results = []
+        for tid, _tname, error_text in turn.malformed:
+            tool_results.append({
+                "type": "tool_result", "tool_use_id": tid,
+                "content": error_text, "is_error": True,
+            })
         for tid, _tname, _tinput, result, is_error in exec_results:
             tool_result_block = {
                 "type": "tool_result",
@@ -738,6 +753,7 @@ class _ClaudeProtocolAdapter:
         allowed = set(final_tool_names or [])
         final_assistant_content: list[dict] = []
         batch: list[tuple[str, str, dict]] = []
+        malformed: list[tuple[str, str, str]] = []
         text_parts: list[str] = []
         for block in final.content:
             b = _to_block_dict(block) or {"type": getattr(block, "type", "unknown")}
@@ -754,28 +770,45 @@ class _ClaudeProtocolAdapter:
             elif btype == "tool_use":
                 tid = str(b.get("id", "")).strip()
                 tname = str(b.get("name", "")).strip()
-                tinput = b.get("input", {}) if isinstance(b.get("input", {}), dict) else {}
+                raw_input = b.get("input", {})
+                input_valid = isinstance(raw_input, dict)
+                tinput = raw_input if input_valid else {}
                 if tid and tname and tname in allowed:
                     final_assistant_content.append({
                         "type": "tool_use", "id": tid, "name": tname, "input": tinput,
                     })
-                    batch.append((tid, tname, tinput))
+                    if input_valid:
+                        batch.append((tid, tname, tinput))
+                    else:
+                        malformed.append((
+                            tid, tname,
+                            "Tool execution blocked: tool input must be an object",
+                        ))
                 else:
                     logger.warning("Forced-final: ignoring non-finalization tool_use name=%s", tname)
 
         return FinalTurn(
             text_parts=text_parts,
             batch=batch,
-            has_protocol=bool(batch),
+            has_protocol=bool(batch or malformed),
             raw=final,
-            extra={"assistant_content": final_assistant_content},
+            extra={
+                "assistant_content": final_assistant_content,
+                "malformed": malformed,
+            },
         )
 
     def append_final_assistant(self, msgs, final_turn):
         msgs.append({"role": "assistant", "content": final_turn.extra["assistant_content"]})
 
     def append_final_results(self, msgs, final_turn, exec_results):
-        final_tool_results = []
+        final_tool_results = [
+            {
+                "type": "tool_result", "tool_use_id": tid,
+                "content": error_text, "is_error": True,
+            }
+            for tid, _tname, error_text in final_turn.extra.get("malformed", [])
+        ]
         for tid, _tname, _tinput, result, is_error in exec_results:
             tr = {"type": "tool_result", "tool_use_id": tid, "content": result}
             if is_error:

@@ -69,6 +69,26 @@ class TestEstimateCost(unittest.TestCase):
         )
         self.assertAlmostEqual(cost, 0.20 + 0.02, places=6)
 
+    def test_overlapping_model_uses_explicit_protocol_semantics(self):
+        openai_cost = estimate_cost_usd(
+            "deepseek-v4-flash", tokens_in=2_000_000,
+            cache_read=1_000_000, token_semantics="openai",
+        )
+        anthropic_cost = estimate_cost_usd(
+            "deepseek-v4-flash", tokens_in=2_000_000,
+            cache_read=1_000_000, token_semantics="anthropic",
+        )
+        self.assertAlmostEqual(openai_cost, 0.1428, places=6)
+        self.assertAlmostEqual(anthropic_cost, 0.2828, places=6)
+
+    def test_gemini_pricing_and_cache_semantics(self):
+        cost = estimate_cost_usd(
+            "gemini-2.5-flash-lite", tokens_in=2_000_000,
+            tokens_out=1_000_000, cache_read=1_000_000,
+            token_semantics="gemini",
+        )
+        self.assertAlmostEqual(cost, 0.10 + 0.01 + 0.40, places=6)
+
     def test_unknown_model_returns_none_not_fabricated(self):
         self.assertIsNone(estimate_cost_usd("mystery-9000", tokens_in=1000))
         self.assertIsNone(estimate_cost_usd(None, tokens_in=1000))
@@ -266,6 +286,22 @@ class TestProxyPolicyGate(unittest.TestCase):
         self.assertIsNone(model_from_body(b""))
         self.assertIsNone(model_from_body(b"not json"))
         self.assertIsNone(model_from_body(b'{"messages": []}'))
+
+    def test_gemini_model_from_url_path(self):
+        from llm_proxy.app import model_from_request
+
+        self.assertEqual(
+            model_from_request(
+                "gemini", "v1beta/models/gemini-2.5-flash-lite%3AgenerateContent", b"{}",
+            ),
+            "gemini-2.5-flash-lite",
+        )
+        self.assertEqual(
+            model_from_request(
+                "gemini-kg", "v1beta/models/gemini-embedding-001:embedContent", b"",
+            ),
+            "gemini-embedding-001",
+        )
 
     def test_route_to_policy_provider_mapping(self):
         from llm_proxy.app import POLICY_PROVIDER, PROVIDERS

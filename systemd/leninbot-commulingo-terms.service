@@ -1,9 +1,9 @@
 [Unit]
 Description=LeninBot CommuLingo glossary-term curator
-Wants=network-online.target
+Wants=network-online.target leninbot-llm-proxy.service
 # Ordering only: when the daily batch queues all four lanes, they run one at a
 # time in new -> enrich -> terms -> maintainer order. No effect when started alone.
-After=network-online.target leninbot-commulingo-enrich.service
+After=network-online.target leninbot-commulingo-enrich.service leninbot-llm-proxy.service
 
 [Service]
 Type=oneshot

@@ -1,7 +1,7 @@
 [Unit]
 Description=LeninBot CommuLingo new-person curator
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target leninbot-llm-proxy.service
+After=network-online.target leninbot-llm-proxy.service
 
 [Service]
 Type=oneshot

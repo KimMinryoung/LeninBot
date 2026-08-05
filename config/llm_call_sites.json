@@ -87,14 +87,50 @@
     "managed": "model-only",
     "note": "writer 퇴고 진단 critic 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
   },
-  "razvedchik_chat": {
-    "provider": "deepseek",
+  "razvedchik_comment": {
+    "provider": "deepseek_anthropic",
     "model": "deepseek-v4-flash",
-    "managed": "model-only",
-    "env": [
-      "RAZVEDCHIK_LLM_MODEL"
-    ],
-    "note": "정찰(razvedchik) 에이전트 대화 모델. 실행·클라우드 가드는 agents/razvedchik/cloud_llm.py"
+    "temperature": 0.85,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "note": "Razvedchik Moltbook 댓글. 공통 executor·gateway 경유"
+  },
+  "razvedchik_observation": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.9,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "note": "Razvedchik 관찰 포스트. 공통 executor·gateway 경유"
+  },
+  "razvedchik_reply": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.8,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "note": "Razvedchik Moltbook 답글. 공통 executor·gateway 경유"
+  },
+  "razvedchik_debrief_scout": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "note": "Razvedchik 순찰 보고. 공통 executor·gateway 경유"
+  },
+  "razvedchik_debrief_commander": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "note": "Razvedchik 디브리핑 지시. 공통 executor·gateway 경유"
   },
   "writer_research_digest": {
     "provider": "deepseek",

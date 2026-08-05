@@ -5,12 +5,13 @@ Every managed LLM call in the project flows through this module's two calls:
   check_llm_call(...)   before the provider request — policy gate
   record_llm_call(...)  after it — spend/usage audit
 
-Integration points (the seam is these three, not N call sites):
+Primary integration points:
 
   1. agent_loop.LoopState.add_cost — every tool-loop round on every provider
      (both protocol adapters already funnel their cost events here)
   2. run_tool_loop entry — one policy check per agent turn
   3. llm.call_registry.generate_sync — every registered one-shot call
+  4. audited third-party wrappers — Graphiti Gemini, browser-use, vision
 
 Design borrows from LiteLLM's proxy data model (spend logs with model/tokens/
 cost/tags, hierarchical budgets, hard vs soft limits) but stays in-process:
@@ -37,7 +38,7 @@ A DB failure fails OPEN: availability of the bot outranks enforcement.
 
 This module is the observation/policy half; the enforcement half is the
 key-injection passthrough proxy (llm_proxy/, switched on via "proxy_base").
-Known gaps and the remaining enforcement runbook: dev_docs/llm_gateway.md.
+Coverage and the enforcement runbook: dev_docs/llm_gateway.md.
 """
 
 from __future__ import annotations
@@ -160,6 +161,7 @@ def infer_provider(model: str | None) -> str | None:
 def estimate_cost_usd(
     model: str | None, *, tokens_in: int = 0, tokens_out: int = 0,
     cache_read: int = 0, cache_create: int = 0,
+    token_semantics: str | None = None,
 ) -> float | None:
     """Best-effort cost from the canonical pricing tables.
 
@@ -172,7 +174,11 @@ def estimate_cost_usd(
     """
     if not model:
         return None
-    from llm.provider_registry import OPENAI_COMPATIBLE_PRICING, anthropic_pricing_table
+    from llm.provider_registry import (
+        GEMINI_PRICING,
+        OPENAI_COMPATIBLE_PRICING,
+        anthropic_pricing_table,
+    )
 
     def _lookup(table: dict) -> dict | None:
         if model in table:
@@ -183,22 +189,44 @@ def estimate_cost_usd(
                 return price
         return None
 
-    p = _lookup(anthropic_pricing_table())
-    if p is not None:
+    def _anthropic_cost(p: dict) -> float:
         return (
             tokens_in * p["input"]
             + tokens_out * p["output"]
             + cache_create * p.get("cache_creation", p["input"])
             + cache_read * p.get("cache_read", 0.0)
         )
-    p = _lookup(OPENAI_COMPATIBLE_PRICING)
-    if p is not None:
+
+    def _prompt_total_cost(p: dict) -> float:
         non_cached = max(0, tokens_in - cache_read)
         return (
             non_cached * p["input"]
             + cache_read * p.get("cached_input", p["input"])
             + tokens_out * p["output"]
         )
+
+    # Protocol is authoritative for overlapping models such as DeepSeek and
+    # Kimi.  Auto mode remains for legacy callers and prefers native Claude,
+    # then Gemini, then OpenAI-compatible pricing.
+    if token_semantics == "anthropic":
+        p = _lookup(anthropic_pricing_table())
+        return _anthropic_cost(p) if p is not None else None
+    if token_semantics == "gemini":
+        p = _lookup(GEMINI_PRICING)
+        return _prompt_total_cost(p) if p is not None else None
+    if token_semantics == "openai":
+        p = _lookup(OPENAI_COMPATIBLE_PRICING)
+        return _prompt_total_cost(p) if p is not None else None
+
+    p = _lookup(anthropic_pricing_table())
+    if p is not None:
+        return _anthropic_cost(p)
+    p = _lookup(GEMINI_PRICING)
+    if p is not None:
+        return _prompt_total_cost(p)
+    p = _lookup(OPENAI_COMPATIBLE_PRICING)
+    if p is not None:
+        return _prompt_total_cost(p)
     return None
 
 
@@ -438,15 +466,17 @@ def record_llm_call(
     cache_read: int = 0, cache_create: int = 0,
     cost_usd: float | None = None, latency_ms: int | None = None,
     status: str = "ok", error_excerpt: str | None = None,
+    token_semantics: str | None = None, estimate_cost: bool = True,
 ) -> None:
     """Record one completed (or failed) LLM call. Never raises."""
     try:
         if error_excerpt and len(error_excerpt) > _ERROR_EXCERPT_CAP:
             error_excerpt = error_excerpt[:_ERROR_EXCERPT_CAP] + "…"
-        if cost_usd is None:
+        if cost_usd is None and estimate_cost:
             cost_usd = estimate_cost_usd(
                 model, tokens_in=tokens_in, tokens_out=tokens_out,
                 cache_read=cache_read, cache_create=cache_create,
+                token_semantics=token_semantics,
             )
         _emit(
             {

@@ -1,6 +1,7 @@
 [Unit]
 Description=LeninBot Browser Worker (Chromium AI automation)
-After=network.target leninbot-telegram.service
+After=network.target leninbot-telegram.service leninbot-llm-proxy.service
+Wants=leninbot-llm-proxy.service
 
 [Service]
 User=grass

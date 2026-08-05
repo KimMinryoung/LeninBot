@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 
 from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
@@ -40,8 +41,58 @@ _DEEPSEEK_MODEL_ALIASES = {
 _OPENAI_MODEL_ALIASES = OPENAI_MODEL_MAP
 
 
-class _DeepSeekAnthropicBrowserChat(ChatAnthropic):
+class _AuditedBrowserChatMixin:
+    """Apply gateway policy and usage audit to every browser-use LLM step."""
+
+    _gateway_provider = ""
+    _gateway_token_semantics = ""
+
+    async def ainvoke(self, *args, **kwargs):
+        from llm.gateway import check_llm_call, record_llm_call
+
+        model = str(getattr(self, "model", "") or "")
+        check_llm_call(
+            surface="browser_use", caller="browser_agent",
+            provider=self._gateway_provider, model=model,
+        )
+        started = time.monotonic()
+        try:
+            result = await super().ainvoke(*args, **kwargs)
+        except Exception as exc:
+            record_llm_call(
+                surface="browser_use", caller="browser_agent",
+                provider=self._gateway_provider, model=model,
+                label="agent_step", status="error", error_excerpt=str(exc),
+                latency_ms=int((time.monotonic() - started) * 1000),
+                token_semantics=self._gateway_token_semantics,
+                estimate_cost=False,
+            )
+            raise
+
+        usage = getattr(result, "usage", None)
+        cached = getattr(usage, "prompt_cached_tokens", 0) or 0
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        tokens_in = prompt_tokens
+        if self._gateway_token_semantics == "anthropic":
+            tokens_in = max(0, prompt_tokens - cached)
+        record_llm_call(
+            surface="browser_use", caller="browser_agent",
+            provider=self._gateway_provider, model=model, label="agent_step",
+            tokens_in=tokens_in,
+            tokens_out=getattr(usage, "completion_tokens", 0) or 0,
+            cache_read=cached,
+            cache_create=getattr(usage, "prompt_cache_creation_tokens", 0) or 0,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            token_semantics=self._gateway_token_semantics,
+        )
+        return result
+
+
+class _DeepSeekAnthropicBrowserChat(_AuditedBrowserChatMixin, ChatAnthropic):
     """ChatAnthropic wrapper that disables thinking for browser tool calls."""
+
+    _gateway_provider = "deepseek"
+    _gateway_token_semantics = "anthropic"
 
     def _get_client_params_for_invoke(self):
         from bot_config import _get_deepseek_browser_params
@@ -160,8 +211,12 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         from browser_use.llm.google.chat import ChatGoogle
         from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base
 
+        class _AuditedGoogleBrowserChat(_AuditedBrowserChatMixin, ChatGoogle):
+            _gateway_provider = "gemini"
+            _gateway_token_semantics = "gemini"
+
         base = proxy_base()
-        llm = ChatGoogle(
+        llm = _AuditedGoogleBrowserChat(
             model=model,
             api_key=(get_secret("GEMINI_API_KEY", "") or "")
             or (PROXY_PLACEHOLDER_KEY if base else ""),
@@ -176,7 +231,11 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         from browser_use.llm.openai.chat import ChatOpenAI
         from bot_config import OPENAI_BASE_URL_EFFECTIVE, OPENAI_CLIENT_KEY
 
-        llm = ChatOpenAI(
+        class _AuditedOpenAIBrowserChat(_AuditedBrowserChatMixin, ChatOpenAI):
+            _gateway_provider = "openai"
+            _gateway_token_semantics = "openai"
+
+        llm = _AuditedOpenAIBrowserChat(
             model=model,
             api_key=OPENAI_CLIENT_KEY,
             base_url=OPENAI_BASE_URL_EFFECTIVE,

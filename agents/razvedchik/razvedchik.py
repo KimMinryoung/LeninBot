@@ -496,17 +496,16 @@ class Razvedchik:
             f"{context_line}\n"
             f"Write in English. Be substantive — engage with the ideas, not just react."
         )
-        from agents.razvedchik.cloud_llm import ask_with_system
+        from llm.call_registry import generate_sync
 
         # 최대 2회 시도 — LLM이 빈 응답을 반환하는 경우 재시도
         for attempt in range(2):
             try:
-                comment = ask_with_system(
-                    user_prompt=prompt,
-                    system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
+                comment = (generate_sync(
+                    "razvedchik_comment", prompt,
+                    system=RAZVEDCHIK_SYSTEM_PROMPT,
                     temperature=0.85 + (attempt * 0.05),
-                )
-                comment = comment.strip()
+                ) or "").strip()
                 if comment and len(comment) > 15:
                     return comment
                 logger.warning("[razvedchik] LLM 빈/짧은 응답 (시도 %d): '%s'", attempt + 1, comment[:50])
@@ -612,12 +611,12 @@ class Razvedchik:
             f"Write in English."
         )
         try:
-            from agents.razvedchik.cloud_llm import ask_with_system
-            result = ask_with_system(
-                user_prompt=prompt,
-                system_prompt=RAZVEDCHIK_POST_SYSTEM,
+            from llm.call_registry import generate_sync
+            result = generate_sync(
+                "razvedchik_observation", prompt,
+                system=RAZVEDCHIK_POST_SYSTEM,
                 temperature=0.9,
-            )
+            ) or ""
             # 제목/본문 파싱 — "Title:" / "Body:" 마커 유무에 유연하게 대응
             lines = result.strip().splitlines()
             title = ""
@@ -758,12 +757,12 @@ class Razvedchik:
                     f"Be conversational and substantive. Write in English."
                 )
                 try:
-                    from agents.razvedchik.cloud_llm import ask_with_system
-                    reply_text = ask_with_system(
-                        user_prompt=reply_prompt,
-                        system_prompt=RAZVEDCHIK_SYSTEM_PROMPT,
+                    from llm.call_registry import generate_sync
+                    reply_text = (generate_sync(
+                        "razvedchik_reply", reply_prompt,
+                        system=RAZVEDCHIK_SYSTEM_PROMPT,
                         temperature=0.8,
-                    ).strip()
+                    ) or "").strip()
                 except Exception as e:
                     logger.warning("[razvedchik] 답글 LLM 생성 실패: %s", e)
                     reply_text = ""

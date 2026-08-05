@@ -136,10 +136,8 @@ _EMBED_LIMITER = _EmbedRateLimiter()
 def _resolve_kg_gemini_key() -> str:
     """Gemini key for the KG service (LLM extraction + embeddings).
 
-    KG_GEMINI_API_KEY isolates KG traffic onto its own quota; it falls back
-    to the shared GEMINI_API_KEY so the separation can be provisioned later
-    (a key from the SAME Google project shares quota and gains nothing —
-    it must come from a separate project/account)."""
+    In proxy mode this is only a constructor placeholder; the dedicated
+    ``gemini-kg`` route chooses the scoped credential inside the proxy."""
     from secrets_loader import get_secret
 
     return (get_secret("KG_GEMINI_API_KEY", "") or "").strip() or (get_secret("GEMINI_API_KEY", "") or "")
@@ -219,26 +217,23 @@ class GraphMemoryService:
             neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
             gemini_api_key = _resolve_kg_gemini_key()
 
-            # LLM 게이트웨이 프록시 라우팅: proxy_base가 설정되면 graphiti의
-            # 추출·임베딩 Gemini 클라이언트를 키 주입 프록시 경유로 만든다
-            # (실키는 leninbot-llm-proxy에만). 두 클래스 모두 미리 만든
-            # genai.Client를 client= 로 받는다.
-            from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base as _llm_proxy_base
+            # Always inject our GenAI client so Graphiti extraction and
+            # embedding requests pass through the common policy/audit seam.
+            from google import genai as _genai
+            from llm.gateway import provider_endpoint
+            from llm.instrumented_clients import AuditedGenAIClient
 
-            _proxy = _llm_proxy_base()
-            if _proxy:
-                from google import genai as _genai
+            gemini_base, gemini_client_key = provider_endpoint(
+                "gemini-kg", None, gemini_api_key,
+            )
 
-                gemini_api_key = gemini_api_key or PROXY_PLACEHOLDER_KEY
-
-                def _proxied_genai_client():
-                    return _genai.Client(
-                        api_key=gemini_api_key,
-                        http_options={"base_url": f"{_proxy}/gemini"},
-                    )
-            else:
-                def _proxied_genai_client():
-                    return None
+            def _proxied_genai_client():
+                raw = _genai.Client(
+                    api_key=gemini_client_key,
+                    **({"http_options": {"base_url": gemini_base}}
+                       if gemini_base else {}),
+                )
+                return AuditedGenAIClient(raw, caller="kg_graphiti")
 
             # 모델명은 config/llm_call_sites.json이 관리 (kg_extraction_main/small, kg_embedding)
             from llm.call_registry import resolve as _resolve_call_site
