@@ -35,7 +35,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import query as db_query, execute as db_execute
-from secrets_loader import get_secret
 from runtime_tools.wiki import _exec_wiki_get
 from scripts.commulingo_backfill_event_links import (
     VALID_KINDS, FALLBACK_KIND, normalize_label, resolve_person_id,
@@ -178,20 +177,27 @@ async def evidence_for(person: dict, cfg: dict, sem: asyncio.Semaphore) -> dict:
     return {**person, "hits": hits[:3], "error": error}
 
 
-def label_batch(client, cfg: dict, people: list[dict]) -> list[dict]:
+def label_batch(cfg: dict, people: list[dict]) -> list[dict]:
+    from llm.call_registry import generate_sync
+
     block = "\n\n".join(
         f"{p['id']} | {p['name_ko']} | {p['years_label']} | {p['epithet_ko']}\n"
         + "\n".join(f"  근거: {h}" for h in p["hits"])
         for p in people
     )
-    resp = client.chat.completions.create(
+    text = generate_sync(
+        "commulingo_event_evidence_labels",
+        PROMPT.format(label_hint=cfg["label_hint"], people=block),
+        provider="deepseek",
         model=MODEL,
-        messages=[{"role": "user", "content": PROMPT.format(
-            label_hint=cfg["label_hint"], people=block)}],
-        response_format={"type": "json_object"},
         temperature=0.1,
+        max_tokens=8000,
+        timeout=180,
+        json_mode=True,
     )
-    got = json.loads(resp.choices[0].message.content or "{}").get("links")
+    if not text:
+        raise RuntimeError("LLM Gateway returned no CommUlingo evidence labels")
+    got = json.loads(text).get("links")
     return got if isinstance(got, list) else []
 
 
@@ -238,15 +244,13 @@ def main() -> int:
     print(f"[evidence] wikipedia evidence for {len(with_ev)}, "
           f"none for {len(probed) - len(with_ev)}, fetch errors {len(failed)}", file=sys.stderr)
 
-    from openai import OpenAI
-    client = OpenAI(api_key=get_secret("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
     by_id = {p["id"]: p for p in with_ev}
     report = {"event": args.event, "dry_run": args.dry_run, "cohort": len(people),
               "with_evidence": len(with_ev), "applied": [], "rejected": []}
 
     for i in range(0, len(with_ev), LABEL_BATCH):
         batch = with_ev[i:i + LABEL_BATCH]
-        for prop in label_batch(client, cfg, batch):
+        for prop in label_batch(cfg, batch):
             pid = str(prop.get("person_id") or "").strip()
             resolved = resolve_person_id(pid, str(prop.get("name_ko") or ""), with_ev)
             entry = {"person": pid,

@@ -150,9 +150,11 @@ moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninb
 ## Seam 밖에 남은 호출
 
 - **수동 maintenance/일회성 스크립트** — `research-document-translation`,
-  `scripts/classify_untyped_entities.py`, `scripts/commulingo_event_evidence_links.py`,
-  `skills/kg-maintenance/scripts/*`는 운영 상주 서비스가 아니며 operator가 명시적으로
-  provider credential을 전달해 실행하는 경로다. 서비스 keyless 경계에는 포함되지 않는다.
+  `scripts/classify_untyped_entities.py`, `skills/kg-maintenance/scripts/*`는 운영 상주
+  서비스가 아니며 operator가 명시적으로 provider credential을 전달해 실행하는 경로다.
+  서비스 keyless 경계에는 포함되지 않는다. CommUlingo Wikipedia-evidence 사건 링크
+  스크립트는 `commulingo_event_evidence_labels` registry executor로 이전되어 이 예외에서
+  제외됐다.
 - **Codex CLI 위임** (GPT Pro 구독 — 과금 자체가 API 밖)
 - 로컬 임베딩 서버 (BGE-M3, :8100 — LLM 아님, 비용 없음. 프록시는 :8110)
 
