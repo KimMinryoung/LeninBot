@@ -1,4 +1,4 @@
-"""finance_data.py — Financial market data via yfinance.
+"""runtime_tools/finance.py — Financial market data via yfinance.
 
 Provides get_finance_data tool with:
 - Preset assets (gold, silver, DXY, oil, S&P500, US10Y, KOSPI)
@@ -6,8 +6,8 @@ Provides get_finance_data tool with:
 - Historical data with period selection
 - News headlines for queried assets
 
-Integration in telegram_tools.py:
-    from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
+Integration in runtime_tools/registry.py:
+    from runtime_tools.finance import FINANCE_TOOL, FINANCE_TOOL_HANDLER
     TOOLS.append(FINANCE_TOOL)
     TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER
 """

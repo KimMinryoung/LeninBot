@@ -14,7 +14,7 @@ The CLAUDE.md goal (CLAW / Reflexion / LATS / Plan-and-Execute) is mostly unreal
 
 | CLAW component | Existing seed | Roadmap move |
 |---|---|---|
-| Executor (ReAct) | `chat_with_tools` in `claude_loop.py` / `openai_tool_loop.py` — live everywhere; since 2026-08-04 both are protocol adapters over the shared engine `agent_loop.run_tool_loop` | Keep as-is (loop upgrades now land once, in the engine) |
+| Executor (ReAct) | `chat_with_tools` in `llm/llm.claude_loop.py` / `llm/llm.openai_tool_loop.py` — live everywhere; since 2026-08-04 both are protocol adapters over the shared engine `llm.agent_loop.run_tool_loop` | Keep as-is (loop upgrades now land once, in the engine) |
 | Critic | **Dead** task verifier (below); writer `run_diagnose_revise_pass` (`writer/stream.py`, blind-eval 12/12); Stasova (advisory, publication-only) | Phase 1 wires the verifier; Phase 2 generalizes diagnose→revise |
 | Planner | `multi_delegate` `plan_id`/`plan_role` machinery; `autonomous_projects.plan` + `revise_plan` — static data, no planner component | Phase 3 adds dependency DAGs; Phase 4 adds per-tick objective selection |
 | Reflexion | Writer diagnose_revise; chat `_reflect_on_recent`; tick self-critique paragraph (dies with chat text) | Phases 2/4/5 make critique durable and general |
@@ -23,7 +23,7 @@ The CLAUDE.md goal (CLAW / Reflexion / LATS / Plan-and-Execute) is mostly unreal
 Code-verified facts that shape the ordering (recorded here so future sessions don't re-derive them):
 
 1. **The task verifier is dead code.** `_run_verification` (`telegram/tasks.py:510`) and `_maybe_redelegate_after_verification_failure` (`telegram/tasks.py:768`) — independent LLM verification of task reports with tools, PASS/FAIL verdict, restart orchestration, bounded auto-retry with "take a DIFFERENT approach" re-delegation, chain-depth guards — are defined but never called. Nothing writes `metadata.verification`; `_persist_task_success` sets `verification_status='pending'` and it stays pending forever. Wiring it is the highest value/effort item in the repo.
-2. **Experiential auto-recall already exists in the Telegram chat loop.** `telegram/commands.py:1495` calls `_fetch_relevant_experiences` (top-3, similarity > 0.5, local BGE-M3) on every message and injects a `<past-experiences>` block; `_reflect_on_recent` writes back every 5 exchanges; `experience_writer.py` runs a daily batch. The gap is the **task worker** and **autonomous tick**, plus structured write-back from failures.
+2. **Experiential auto-recall already exists in the Telegram chat loop.** `telegram/commands.py:1495` calls `_fetch_relevant_experiences` (top-3, similarity > 0.5, local BGE-M3) on every message and injects a `<past-experiences>` block; `_reflect_on_recent` writes back every 5 exchanges; `jobs/experience_writer.py` runs a daily batch. The gap is the **task worker** and **autonomous tick**, plus structured write-back from failures.
 3. **KG embedding 429 resilience is partially done.** `graph_memory/service.py:94` already wraps Gemini embeddings in bounded retry (`KG_EMBED_RETRY_DELAYS`, 5/15/45s, 429/503 only). Not done (per `knowledge_graph_design.md` Maintenance): separate key/project for `gemini-embedding-001`, client-side rate limiting, read-path degradation.
 4. **The corpus reingestion backlog is mostly complete.** Per `vector_corpus_reingestion_handoff.md`: core_theory and modern_analysis reingested with full metadata; Stalin was in-flight. Remaining: Stalin completion confirmation, curated Mao manifest + reingestion, audit of legacy rows missing `chunk_size` metadata.
 5. `run_agent` supports analyst only, budget capped $0.50 (`self_runtime/tools.py`). `multi_delegate` is parallel-only — no inter-subtask dependencies; the worker unblock query (`telegram/tasks.py:1906`) only unblocks `plan_role='synthesis'` rows.
@@ -56,7 +56,7 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 2 (P0) — Generalized Reflexion service (diagnose → author-revise)
 
-**Status: SHIPPED (2026-07-08).** `llm/reflexion.py` created; task-report hook live in `telegram/tasks.py` (`_maybe_reflexion_revise_report`, analyst/scout ≥1500 chars, cheap-tier diagnoser = the Phase-1 verifier fns, text-only author revision with a ≥50%-length guard); autonomous editorial diagnosis live in `autonomous_project.py` (`_diagnose_staged_drafts_for_tick`, per-draft-version caching via `editorial_diagnosis` events, DeepSeek-flash diagnoser with provider fallback, `<editorial-diagnosis>` prompt injection). Config flags `reflexion_task_reports` / `reflexion_autonomous_publish` (default on, /config panel). Smoke: `scripts/smoke_reflexion.py` (28/28). Deviation from the original sketch: task-report revision is deliberately **text-only** (no tool surface) so a revision turn can never re-run side-effectful publishing tools.
+**Status: SHIPPED (2026-07-08).** `llm/reflexion.py` created; task-report hook live in `telegram/tasks.py` (`_maybe_reflexion_revise_report`, analyst/scout ≥1500 chars, cheap-tier diagnoser = the Phase-1 verifier fns, text-only author revision with a ≥50%-length guard); autonomous editorial diagnosis live in `jobs/autonomous_project.py` (`_diagnose_staged_drafts_for_tick`, per-draft-version caching via `editorial_diagnosis` events, DeepSeek-flash diagnoser with provider fallback, `<editorial-diagnosis>` prompt injection). Config flags `reflexion_task_reports` / `reflexion_autonomous_publish` (default on, /config panel). Smoke: `scripts/smoke_reflexion.py` (28/28). Deviation from the original sketch: task-report revision is deliberately **text-only** (no tool surface) so a revision turn can never re-run side-effectful publishing tools.
 
 **Goal**: extract the writer's proven pattern into a reusable helper and apply it to (a) autonomous staged-draft publication, (b) long task reports.
 
@@ -64,11 +64,11 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 **Design**:
 - New module `llm/reflexion.py`: `async diagnose(content, context, *, chat_fn, model_tier="low", read_only_tools=None) -> notes | PASS` plus a thin `diagnose_then_revise(...)` composition, provider-agnostic via the `chat_with_tools` interface. Port the PASS-marker/note conventions from `writer/prompts.py`; leave `writer/` untouched as the reference implementation.
-- **Autonomous publish gate**: the cross-tick stage→publish design already forces a fresh-context verification wake. On the publish tick, before publishing, run a diagnosis pass (deepseek_flash) over the staged draft + fact-check notes and inject the notes as an `<editorial-diagnosis>` block into the tick prompt; the tick agent (author, main autonomous model) revises and re-stages or proceeds on PASS. Context injection, not a new control loop — complements the structural gates in `autonomous_publication_controls.py` (which deliberately refuse semantic judgment).
+- **Autonomous publish gate**: the cross-tick stage→publish design already forces a fresh-context verification wake. On the publish tick, before publishing, run a diagnosis pass (deepseek_flash) over the staged draft + fact-check notes and inject the notes as an `<editorial-diagnosis>` block into the tick prompt; the tick agent (author, main autonomous model) revises and re-stages or proceeds on PASS. Context injection, not a new control loop — complements the structural gates in `jobs/autonomous_publication_controls.py` (which deliberately refuse semantic judgment).
 - **Task reports**: in the task success path, for analyst/scout reports over a size threshold, run one diagnosis; if not PASS, one author-revision turn with the same agent model within remaining budget.
 - Flags: `REFLEXION_AUTONOMOUS_PUBLISH`, `REFLEXION_TASK_REPORTS`; per-agent opt-out via `config/agent_runtime.json`.
 
-**Files**: new `llm/reflexion.py`; `autonomous_project.py` (publish-tick hook); `telegram/tasks.py`; `dev_docs/autonomous_project.md`.
+**Files**: new `llm/reflexion.py`; `jobs/autonomous_project.py` (publish-tick hook); `telegram/tasks.py`; `dev_docs/autonomous_project.md`.
 
 **Success criteria**: replay K recent staged drafts through diagnosis and human-review note precision (writer-style blind check); post-publication correction frequency declines; per-report cost delta ≤ ~$0.05 when PASS.
 
@@ -103,7 +103,7 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 - Critic verdicts are diagnostic only; they must not automatically change project state.
 - Flags: `AUTONOMOUS_TICK_PLANNER`, `AUTONOMOUS_TICK_CRITIC` env vars (the timer process re-reads env each run — cheap rollout/rollback).
 
-**Files**: `autonomous_project.py` (`_run_one_tick`, `_build_task_prompt`, `_collect_tick_actions`, event types), `agents/autonomous.py` (one prompt note), `dev_docs/autonomous_project.md`.
+**Files**: `jobs/autonomous_project.py` (`_run_one_tick`, `_build_task_prompt`, `_collect_tick_actions`, event types), `agents/autonomous.py` (one prompt note), `dev_docs/autonomous_project.md`.
 
 **Success criteria**: from `autonomous_project_events` — `tick_no_durable_action` rate over 2 weeks drops vs the prior 2 weeks; added cost per tick ≤ ~10% (two flash calls); no increase in `tick_error`.
 
@@ -111,7 +111,7 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 
 ## Phase 5 (P1) — Memory into task & autonomous contexts + failure write-back
 
-**Status: SHIPPED (2026-07-08).** `recall_experiences_block` + `is_duplicate_experience` + `save_experiential_memory(dedupe=)` now live in `memory_store/experiential.py`; chat's `_fetch_relevant_experiences` and `experience_writer._is_duplicate` are thin delegates. Task worker injects `<past-experiences>` keyed on task content (`_build_task_context_content`); autonomous tick injects it keyed on title+topic+goal (`_build_task_prompt`, before the warnings block). Write-back hooks: verification FAIL (`_record_failure_experience`, `source_type=task_verification`), tick_error and no-op `tick_review` (`_record_tick_experience`, `source_type=autonomous_tick`) — all `category=mistake`, deduped over 30 days, never raise. KG auto-recall deliberately excluded as designed. Smoke: `scripts/smoke_experience_recall.py` (20/20).
+**Status: SHIPPED (2026-07-08).** `recall_experiences_block` + `is_duplicate_experience` + `save_experiential_memory(dedupe=)` now live in `memory_store/experiential.py`; chat's `_fetch_relevant_experiences` and `jobs.experience_writer._is_duplicate` are thin delegates. Task worker injects `<past-experiences>` keyed on task content (`_build_task_context_content`); autonomous tick injects it keyed on title+topic+goal (`_build_task_prompt`, before the warnings block). Write-back hooks: verification FAIL (`_record_failure_experience`, `source_type=task_verification`), tick_error and no-op `tick_review` (`_record_tick_experience`, `source_type=autonomous_tick`) — all `category=mistake`, deduped over 30 days, never raise. KG auto-recall deliberately excluded as designed. Smoke: `scripts/smoke_experience_recall.py` (20/20).
 
 **Goal**: extend the already-live chat auto-recall to the surfaces doing real work, and close the loop by writing structured lessons from failures.
 
@@ -120,9 +120,9 @@ Where each upgrade pays off: the **Critic** on task reports and publications (Ph
 - **Task worker**: `_build_task_context_content` adds a bounded `<past-experiences>` block keyed on task content (k=3, local BGE-M3 → milliseconds, zero API cost).
 - **Autonomous tick**: same block in `_build_task_prompt`, keyed on project topic + (Phase 4) tick objective.
 - **KG auto-recall: deliberately NOT per-message/per-task.** Each KG search costs a Gemini embedding call (quota-pressured; Phase 6's subject) plus latency; KG stays tool-driven. Optional later flag: entity-gated recall (only when the input names known entities).
-- **Write-back**: on verification FAIL (Phase 1), tick_error / no-op `tick_review` (Phase 4), and auto-retry exhaustion, save a structured `experiential_memory` row (`category=mistake`, `source_type=task_verification|autonomous_tick`), reusing the dedupe check in `experience_writer._is_duplicate` (move it into `memory_store/experiential.py`). Complements the daily writer with event-driven, high-signal entries.
+- **Write-back**: on verification FAIL (Phase 1), tick_error / no-op `tick_review` (Phase 4), and auto-retry exhaustion, save a structured `experiential_memory` row (`category=mistake`, `source_type=task_verification|autonomous_tick`), reusing the dedupe check in `jobs.experience_writer._is_duplicate` (move it into `memory_store/experiential.py`). Complements the daily writer with event-driven, high-signal entries.
 
-**Files**: `memory_store/experiential.py`, `telegram/tasks.py`, `autonomous_project.py`, `telegram/commands.py` (refactor to shared helper), `experience_writer.py` (dedupe extraction only).
+**Files**: `memory_store/experiential.py`, `telegram/tasks.py`, `jobs/autonomous_project.py`, `telegram/commands.py` (refactor to shared helper), `jobs/experience_writer.py` (dedupe extraction only).
 
 **Success criteria**: sampled task/tick prompts contain the block when relevant memories exist; verification-failure lessons visibly recalled on similar subsequent tasks; no latency regression (local embeddings only).
 

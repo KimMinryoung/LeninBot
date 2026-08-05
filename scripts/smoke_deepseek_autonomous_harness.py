@@ -9,7 +9,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from claude_loop import _calculate_cost, _content_block_for_replay, _pricing_for
+from llm.claude_loop import _calculate_cost, _content_block_for_replay, _pricing_for
 from bot_config import (
     _get_deepseek_browser_params,
     _get_deepseek_thinking_params,
@@ -42,7 +42,7 @@ def test_telegram_deepseek_routes_to_anthropic_harness() -> None:
 
 
 def test_a2a_deepseek_routes_to_anthropic_harness() -> None:
-    source = _read("a2a_handler.py")
+    source = _read("services/a2a_handler.py")
     assert 'provider == "deepseek" and _deepseek_anthropic_client' in source
     assert "client=_deepseek_anthropic_client" in source
     assert "_get_deepseek_tool_thinking_params" in source
@@ -57,12 +57,12 @@ def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     assert 'if provider == "deepseek":' in source
     assert 'resolve_inference_extra(call_policy, "deepseek")' in source
     assert "output_config=deepseek_params.get" in source
-    assert "from openai_tool_loop import chat_with_tools as openai_chat" in source
+    assert "from llm.openai_tool_loop import chat_with_tools as openai_chat" in source
 
 
 def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("browser/use_agent.py")
-    assert "class _DeepSeekAnthropicBrowserChat(ChatAnthropic)" in source
+    assert "class _DeepSeekAnthropicBrowserChat(_AuditedBrowserChatMixin, ChatAnthropic)" in source
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
     assert "params.update(_get_deepseek_browser_params())" in source
     assert "_browser_use_vision_enabled" in source
@@ -71,7 +71,7 @@ def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
 
 
 def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> None:
-    source = _read("web_chat.py")
+    source = _read("services/web_chat.py")
     assert "_deepseek_anthropic_client" in source
     assert 'provider == "deepseek"' in source
     assert "client=_deepseek_anthropic_client" in source

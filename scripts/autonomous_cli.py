@@ -29,7 +29,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one  # noqa: E402
-from autonomous_project import (  # noqa: E402
+from jobs.autonomous_project import (  # noqa: E402
     _ensure_tables,
     _log_event,
     run_tick,

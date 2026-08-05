@@ -6,7 +6,7 @@
 
 | 층 | 대상 | 설정 파일 | 반영 시점 |
 |---|---|---|---|
-| 에이전트 루프 | analyst/scout/diary/browser/... (claude_loop·openai_tool_loop 경유) | `config/agent_runtime.json` + `runtime_profile.py` | 서비스 재시작 |
+| 에이전트 루프 | analyst/scout/diary/browser/... (claude_loop·openai_tool_loop 경유) | `config/agent_runtime.json` + `llm/runtime_profile.py` | 서비스 재시작 |
 | **원샷 호출** | 요약·분류·번역·critic 등 단발 호출 | `config/llm_call_sites.json` + `llm/call_registry.py` | **핫리로드 (mtime)** |
 
 ## 원샷 레지스트리

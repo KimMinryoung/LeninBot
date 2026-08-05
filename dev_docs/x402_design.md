@@ -42,7 +42,7 @@ crypto_wallet/
 ### 메시지 흐름 (self-loop 데모)
 
 ```
-[telegram/bot.py orchestrator]              [api.py /x402-demo/quote]
+[telegram/bot.py orchestrator]              [services/api.py /x402-demo/quote]
   pay_and_fetch tool 호출
   └─→ httpx.GET URL ────────────────────────→ 402
                                               {
@@ -206,7 +206,7 @@ LoadCredentialEncrypted=eth.privkey:/etc/credstore.encrypted/eth.privkey.cred
 
 ## 4. 데모 라우트 — `/x402-demo/quote`
 
-`api.py`에 박힌 self-loop 라우트.
+`services/api.py`에 박힌 self-loop 라우트.
 
 | 항목 | 값 |
 |---|---|

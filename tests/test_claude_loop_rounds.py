@@ -16,8 +16,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import claude_loop
-from claude_loop import chat_with_tools
+import llm.claude_loop as claude_loop
+from llm.claude_loop import chat_with_tools
 
 
 def _usage(inp=100, out=50):

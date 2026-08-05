@@ -26,7 +26,7 @@ The default profile is `inspect`. Set `MCP_GATEWAY_PROFILE=operator` or pass `--
 
 ## Discovery
 
-Codex sessions in this repository should discover the gateway through `AGENTS.md`, which points to this document and the `scripts/mcp-gateway` wrapper. The LeninBot `programmer` agent also embeds the same guidance in `agents/programmer.py` and `codex_exec_loop.py`, so Codex CLI tasks delegated by the multi-agent runtime are told that the gateway exists.
+Codex sessions in this repository should discover the gateway through `AGENTS.md`, which points to this document and the `scripts/mcp-gateway` wrapper. The LeninBot `programmer` agent also embeds the same guidance in `agents/programmer.py` and `llm/codex_exec_loop.py`, so Codex CLI tasks delegated by the multi-agent runtime are told that the gateway exists.
 
 This discovery text does not by itself register an MCP server inside every external client. Codex CLI, Claude Code, or another MCP client still needs a client-side MCP server config if it should connect to the gateway as a live MCP server. Use the snippets below for that configuration.
 

@@ -20,7 +20,7 @@
 
 | 문서 | 용도 |
 |---|---|
-| `api_reference.md` | `api.py` FastAPI 라우트와 인증 |
+| `api_reference.md` | `services/api.py` FastAPI 라우트와 인증 |
 | `secret_management.md` | systemd credential 기반 시크릿 로딩 |
 | `db_migration_plan.md` | DB 인프라 현황 (로컬 leninbot-pg 구성·백업 체계·스탠바이 구축 기록) + Supabase 이탈 기록과 남은 단계 |
 | `standby_operations.md` | 스트리밍 스탠바이 활용법, 승격 런북, 재시드 절차 |
@@ -35,7 +35,19 @@
 
 ## 문서 유지 원칙
 
-- 코드의 현재 ownership을 먼저 확인한다. 주요 진입점은 `api.py`, `telegram/bot.py`, `telegram/tasks.py`, `agents/`, `runtime_tools/`, `bot_config.py`, `autonomous_project.py`, `kg_runtime/`, `graph_memory/`이다.
+- 코드의 현재 ownership을 먼저 확인한다. 주요 진입점은 `services/api.py`, `telegram/bot.py`, `telegram/tasks.py`, `agents/`, `runtime_tools/`, `bot_config.py`, `jobs/autonomous_project.py`, `kg_runtime/`, `graph_memory/`이다.
 - 계획 문서는 구현이 끝나면 완료 기록으로 남기지 말고, 해당 주제의 현재 설계 문서에 흡수한다.
 - 날짜가 붙은 handoff 문서는 장기 보존하지 않는다. 필요한 운영 지식만 주제별 문서로 옮긴다.
 - 실제 라우트, config key, systemd unit, tool name을 쓸 때는 코드에서 다시 확인한다.
+
+## Top-level Code Layout
+
+| 경로 | 역할 |
+|---|---|
+| `services/` | FastAPI·embedding 서비스 진입점과 web/A2A/email/image 서비스 구현 |
+| `jobs/` | systemd timer나 수동 명령이 실행하는 autonomous/experience 작업 |
+| `llm/` | provider adapter, 공용 tool-loop engine, gateway, model/runtime profile |
+| `telegram/`, `agents/`, `runtime_tools/` | Telegram orchestration, agent specs, runtime tool implementations |
+| `scripts/`, `deploy/`, `systemd/` | 운영·검증 스크립트, 배포 자산, unit 원본 |
+
+프로젝트 루트에는 저장소 메타데이터, 환경·dependency 예제, 배포 진입 스크립트와 아직 별도 도메인 패키지가 없는 공용 compatibility module만 둔다.

@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 import site_publishing
 from self_runtime.tools import _exec_read_self
-from tool_loop_common import execute_tool
+from llm.tool_loop_common import execute_tool
 
 
 LONG_BODY = "<p>" + ("가" * 60_000) + "</p>"

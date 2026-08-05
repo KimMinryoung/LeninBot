@@ -23,7 +23,7 @@ from aiogram.filters import Command
 from shared import KST
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
-from replicate_image_service import (
+from services.replicate_image import (
     generate_image,
     is_replicate_configured,
     build_soviet_prompt,
@@ -967,7 +967,7 @@ async def cmd_email(message: Message):
 
     poll_line = ""
     try:
-        from email_bridge import run_polling_cycle
+        from services.email_bridge import run_polling_cycle
         result = await asyncio.to_thread(run_polling_cycle, 10)
         new_count = result.get("new_count", 0)
         if new_count:
@@ -1182,7 +1182,7 @@ async def cmd_cancel(message: Message):
         await message.answer("사용법: `/cancel <task_id>`", parse_mode="Markdown")
         return
     task_id = int(args[1])
-    from tool_loop_common import request_cancel
+    from llm.tool_loop_common import request_cancel
     request_cancel(task_id)
     # Also mark in DB as failed immediately
     try:
@@ -2493,7 +2493,7 @@ async def cmd_project(message: Message):
             (rest, project_id),
         )
         try:
-            from autonomous_project import _log_event
+            from jobs.autonomous_project import _log_event
             await asyncio.to_thread(
                 _log_event,
                 project_id,
@@ -2528,7 +2528,7 @@ async def cmd_project(message: Message):
             (max_per_day, cooldown, project_id),
         )
         try:
-            from autonomous_project import _log_event
+            from jobs.autonomous_project import _log_event
             await asyncio.to_thread(
                 _log_event,
                 project_id,
@@ -2557,7 +2557,7 @@ async def cmd_project(message: Message):
             (target, project_id),
         )
         try:
-            from autonomous_project import _log_event
+            from jobs.autonomous_project import _log_event
             await asyncio.to_thread(
                 _log_event,
                 project_id,
@@ -2617,7 +2617,7 @@ async def cmd_advise(message: Message):
     )
     # Mirror the CLI path — log an event so the audit trail is uniform.
     try:
-        from autonomous_project import _log_event
+        from jobs.autonomous_project import _log_event
         await asyncio.to_thread(
             _log_event, project_id, "advisory_created",
             f"advisory #{row['id']} created via Telegram ({len(content)} chars)",

@@ -51,8 +51,8 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Global tool definitions and handlers | `runtime_tools/registry.py` | Inputs to selection helpers |
 | Telegram orchestrator allow-list | `tool_gateway.profiles.TELEGRAM_ORCHESTRATOR_TOOLS` | `runtime_tools/allowlists.build_orchestrator_toolset()` filters definitions and handlers together through `tool_gateway.selection.build_toolset` |
 | Specialist agent allow-lists | `agents/*.py` `AgentSpec.tools` | `AgentSpec.filter_tools()` delegates to `tool_gateway.selection.filter_agent_tools` |
-| Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `web_personas.py` aliases profile values; `web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
-| A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
+| Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `services/web_personas.py` aliases profile values; `services/web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
+| A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `services/a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
 | Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
 | MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface; `list_runtime_tool_profiles` exposes runtime allow-list inspection through MCP |
 | Execution authorization, atomic rate limits, durable idempotency, and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` before and after every executed tool |
@@ -88,5 +88,5 @@ venv/bin/python scripts/smoke_tool_allowlists.py
 venv/bin/python scripts/smoke_security_gateway.py
 venv/bin/python scripts/smoke_url_security.py
 venv/bin/python scripts/smoke_mcp_gateway.py
-venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py claude_loop.py openai_tool_loop.py web_chat.py a2a_handler.py mcp_gateway/tools.py
+venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py llm/llm.claude_loop.py llm/llm.openai_tool_loop.py services/web_chat.py services/a2a_handler.py mcp_gateway/tools.py
 ```

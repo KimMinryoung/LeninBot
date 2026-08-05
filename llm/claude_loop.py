@@ -1,4 +1,4 @@
-"""claude_loop.py — Claude tool-use loop (Anthropic protocol adapter).
+"""llm/claude_loop.py — Claude tool-use loop (Anthropic protocol adapter).
 
 Extracted from telegram_bot.py. Dependencies injected via function parameters
 to avoid circular imports. The round/forced-final control flow is the shared
@@ -16,8 +16,8 @@ import asyncio
 import json
 import logging
 
-from agent_loop import FinalTurn, Turn, run_tool_loop
-from tool_loop_common import (
+from llm.agent_loop import FinalTurn, Turn, run_tool_loop
+from llm.tool_loop_common import (
     build_budget_tracker, emit_progress,
     EMPTY_RESPONSE_FALLBACK,
     call_with_transient_retry,

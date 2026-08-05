@@ -1,3 +1,5 @@
+"""Main public API service entrypoint."""
+
 import asyncio
 import json
 import logging
@@ -17,14 +19,14 @@ from api_routes.chat_history import router as chat_history_router
 from api_routes.private_reports import router as private_reports_router
 from api_routes.task_reports import router as task_reports_router
 from api_routes.x402_demo import router as x402_demo_router
-from api_security import (
+from services.api_security import (
     require_admin,
     is_admin_request as _is_admin_request,
     trusted_proxy_request as _trusted_proxy_request,
 )
 from db import query as db_query, query_one as db_query_one
 
-from api_common import parse_cors_origins, setup_service_logging
+from services.api_common import parse_cors_origins, setup_service_logging
 
 setup_service_logging(quiet_neo4j=True)
 logger = logging.getLogger(__name__)
@@ -218,12 +220,12 @@ async def chat(request: ChatRequest, http_req: Request):
     클라이언트에게 실시간 로그와 답변을 스트리밍합니다.
     Uses claude_loop via web_chat module.
     """
-    from web_chat import (
+    from services.web_chat import (
         detached_web_chat_run_count,
         handle_web_chat,
         has_active_web_chat_run,
     )
-    from web_personas import get_persona
+    from services.web_personas import get_persona
 
     user_agent = http_req.headers.get("user-agent", "")
     ip_address = _client_ip(http_req)
@@ -310,7 +312,7 @@ async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
     persona/session once, then marked consumed. Regeneration feedback is applied
     only to that regeneration request.
     """
-    from web_chat import (
+    from services.web_chat import (
         _FEEDBACK_TONE_LABELS,
         get_web_chat_log_for_feedback,
         normalize_web_chat_tone_feedback,
@@ -363,7 +365,7 @@ async def list_chat_personas(http_req: Request):
     Admin-only personas are included only when the request carries a valid
     X-Admin-Key header.
     """
-    from web_personas import list_personas, DEFAULT_PERSONA_ID
+    from services.web_personas import list_personas, DEFAULT_PERSONA_ID
 
     is_admin = _is_admin_request(http_req)
     return {"personas": list_personas(include_admin=is_admin), "default": DEFAULT_PERSONA_ID}

@@ -6,7 +6,7 @@ import json
 import time
 
 from llm.gateway import check_llm_call, record_llm_call
-from tool_loop_common import estimate_text_tokens
+from llm.tool_loop_common import estimate_text_tokens
 
 
 def _gemini_usage(response) -> dict[str, int]:

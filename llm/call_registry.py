@@ -1,7 +1,7 @@
 """llm/call_registry.py — central registry for one-shot LLM call sites.
 
 Agent loops (analyst/scout/diary/...) are governed by config/agent_runtime.json
-+ runtime_profile.py. Everything else — small single-request calls scattered
++ llm/runtime_profile.py. Everything else — small single-request calls scattered
 across features (chunk summaries, classifiers, critics, query translation) —
 is governed here, by config/llm_call_sites.json.
 

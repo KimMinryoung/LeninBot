@@ -20,8 +20,8 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 
 | 지점 | 커버 범위 |
 |---|---|
-| `agent_loop.LoopState.add_cost` | 모든 툴-루프 라운드 (두 프로토콜 어댑터의 비용 이벤트가 이미 여기로 모임 — Claude·DeepSeek·Kimi Writer·GPT·Kimi·로컬) |
-| `agent_loop.run_tool_loop` 진입부 | 에이전트 턴당 1회 정책 체크 (`check_llm_call`) |
+| `llm.agent_loop.LoopState.add_cost` | 모든 툴-루프 라운드 (두 프로토콜 어댑터의 비용 이벤트가 이미 여기로 모임 — Claude·DeepSeek·Kimi Writer·GPT·Kimi·로컬) |
+| `llm.agent_loop.run_tool_loop` 진입부 | 에이전트 턴당 1회 정책 체크 (`check_llm_call`) |
 | `llm.call_registry.generate_sync` | 등록된 원샷 호출 전부 (gemini/deepseek/openai/claude/kimi executor) |
 | `llm.instrumented_clients.AuditedGenAIClient` | graphiti-core가 소유하는 Gemini 추출·임베딩 SDK 호출 (임베딩 토큰은 SDK 미제공이라 `embed_content:estimated` 라벨의 보수적 추정치) |
 | `browser.use_agent._AuditedBrowserChatMixin`, `telegram.commands.handle_photo` | browser-use 매 step과 Telegram vision 직접 호출 |

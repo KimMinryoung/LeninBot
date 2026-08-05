@@ -1,3 +1,4 @@
+"""Admin email API service entrypoint."""
 
 import uvicorn
 from fastapi import FastAPI
@@ -5,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_routes.email import router as email_router
 
-from api_common import parse_cors_origins, setup_service_logging
+from services.api_common import parse_cors_origins, setup_service_logging
 
 setup_service_logging()
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api_security import require_admin
+from services.api_security import require_admin
 from db import query as db_query, query_one as db_query_one
 
 router = APIRouter()

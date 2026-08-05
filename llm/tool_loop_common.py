@@ -1,4 +1,4 @@
-"""tool_loop_common.py — Shared utilities for claude_loop.py and openai_tool_loop.py.
+"""llm/tool_loop_common.py — Shared utilities for the provider loops.
 
 Centralizes duplicated budget, progress, Redis state, and limit-message helpers.
 Runtime tool execution now lives in tool_gateway.dispatcher and is re-exported

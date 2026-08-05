@@ -28,7 +28,7 @@ from prompt_context import (
     wrap_task_content,
     xml_attrs,
 )
-from runtime_profile import resolve_runtime_profile
+from llm.runtime_profile import resolve_runtime_profile
 
 
 def _assert_prompt_context() -> None:
@@ -236,7 +236,7 @@ def _assert_provider_registry_and_recovery_policy() -> None:
         anthropic_pricing_table,
         kimi_openai_tool_options,
     )
-    from openai_tool_loop import _is_tool_protocol_error, _is_transient_transport_error
+    from llm.openai_tool_loop import _is_tool_protocol_error, _is_transient_transport_error
 
     assert bot_config._MODEL_ALIAS_MAP["opus"] == ("claude-opus-5", "claude-opus-5")
     assert bot_config._OPENAI_MODEL_MAP == {
@@ -283,7 +283,7 @@ def _assert_provider_registry_and_recovery_policy() -> None:
 
 def _assert_writer_kimi_catalog_and_resolution() -> None:
     import bot_config
-    import claude_loop
+    import llm.claude_loop as claude_loop
     from writer.models import list_writer_models, resolve_writer_model
 
     original = bot_config._kimi_anthropic_client
@@ -318,7 +318,7 @@ def _assert_writer_kimi_catalog_and_resolution() -> None:
 
 def _assert_openai_input_replay_checkpoint() -> None:
     import json as _json
-    from openai_tool_loop import _checkpoint_tool_results_for_replay
+    from llm.openai_tool_loop import _checkpoint_tool_results_for_replay
 
     tool_calls = [{
         "id": "call-1",
@@ -381,7 +381,7 @@ def _assert_inference_reasoning_policy() -> None:
 
 async def _assert_openai_continuation_extends_round_limit() -> None:
     from types import SimpleNamespace
-    from openai_tool_loop import chat_with_tools
+    from llm.openai_tool_loop import chat_with_tools
 
     class _Completions:
         def __init__(self):
@@ -414,7 +414,7 @@ async def _assert_openai_continuation_extends_round_limit() -> None:
 
 async def _assert_kimi_preserves_reasoning_for_tool_replay() -> None:
     from types import SimpleNamespace
-    from openai_tool_loop import chat_with_tools
+    from llm.openai_tool_loop import chat_with_tools
 
     seen: list[dict] = []
 
@@ -632,7 +632,7 @@ def _assert_agent_runtime_dynamic_reload() -> None:
 
 
 def _assert_autonomous_prompt_surfaces_staged_drafts() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_notes = ap._recent_notes
     original_last_log = ap._fetch_last_tick_tool_log
@@ -708,7 +708,7 @@ def _assert_autonomous_prompt_surfaces_staged_drafts() -> None:
 
 
 def _assert_staged_drafts_prioritize_project_events() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_query = ap.db_query
     calls: list[str] = []
@@ -834,7 +834,7 @@ async def _assert_read_self_autonomous_project_uses_note_table() -> None:
 
 
 def _assert_autonomous_project_selection_prioritizes_advice() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_query_one = ap.db_query_one
     captured: dict[str, object] = {}
@@ -860,7 +860,7 @@ def _assert_autonomous_project_selection_prioritizes_advice() -> None:
 
 
 async def _assert_autonomous_tick_failure_updates_cooldown() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
     original_chat = __import__("telegram.bot").bot._chat_with_tools
@@ -955,7 +955,7 @@ async def _assert_autonomous_tick_failure_updates_cooldown() -> None:
 
 
 def _assert_collect_tick_actions_includes_publications() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_query = ap.db_query
 
@@ -983,7 +983,7 @@ def _assert_collect_tick_actions_includes_publications() -> None:
 
 
 async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
     original_chat = __import__("telegram.bot").bot._chat_with_tools
@@ -1087,7 +1087,7 @@ async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
 
 
 async def _assert_successful_durable_tick_consumes_advisories() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
     original_chat = __import__("telegram.bot").bot._chat_with_tools
@@ -1192,7 +1192,7 @@ async def _assert_successful_durable_tick_consumes_advisories() -> None:
 
 
 async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
     original_chat = __import__("telegram.bot").bot._chat_with_tools
@@ -1760,7 +1760,7 @@ async def _assert_telegram_project_show_includes_tick_signals() -> None:
 
 
 def _assert_web_feedback_is_one_shot() -> None:
-    import web_chat
+    import services.web_chat as web_chat
 
     original_query = web_chat.db_query
     original_query_one = web_chat.db_query_one
@@ -1825,7 +1825,7 @@ def _assert_web_feedback_is_one_shot() -> None:
 
 def _assert_web_political_line_dynamic_reload() -> None:
     import agents.base as agent_base
-    from web_chat import _build_web_system_prompt
+    from services.web_chat import _build_web_system_prompt
 
     original_path = agent_base._POLITICAL_LINE_PATH
 
@@ -1853,7 +1853,7 @@ def _assert_web_political_line_dynamic_reload() -> None:
 
 async def _assert_web_autonomous_summary_includes_publication_events() -> None:
     import bot_config
-    import web_chat
+    import services.web_chat as web_chat
 
     original_query = web_chat.db_query
     original_is_active = bot_config.is_autonomous_active
@@ -1897,7 +1897,7 @@ async def _assert_web_autonomous_summary_includes_publication_events() -> None:
 
 async def _assert_web_public_summary_includes_autonomous_loop_state() -> None:
     import bot_config
-    import web_chat
+    import services.web_chat as web_chat
 
     original_query = web_chat.db_query
     original_is_active = bot_config.is_autonomous_active
@@ -2050,7 +2050,7 @@ async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
     import telegram.bot as bot
     import telegram.diary_publication as publication
     from telegram.diary_mode import DEFAULT_DIARY_WRITING_PROMPT
-    from tool_loop_common import execute_tool
+    from llm.tool_loop_common import execute_tool
 
     original_review = bot._run_stasova_diary_review
     original_apply = bot._apply_stasova_diary_review

@@ -30,7 +30,7 @@ os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
-from claude_loop import chat_with_tools  # noqa: E402
+from llm.claude_loop import chat_with_tools  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
 from runtime_tools.commulingo_people import DENSE_SENTENCE_CHARS, FIELD_LIMITS  # noqa: E402
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402

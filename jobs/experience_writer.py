@@ -1,4 +1,4 @@
-"""experience_writer.py — Experiential Memory Consolidation
+"""jobs/experience_writer.py — Experiential Memory Consolidation
 
 Runs daily at 00:30 KST. Compresses the past 24 hours of activity
 (web chats, Telegram chats, completed tasks) into actionable experience

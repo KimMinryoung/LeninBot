@@ -1,4 +1,4 @@
-"""Autonomous publication controls.
+"""Autonomous job publication controls.
 
 This module holds the policy that sits around public-bound autonomous output:
 structural publication gates, optional pacing, and Stasova publication-security

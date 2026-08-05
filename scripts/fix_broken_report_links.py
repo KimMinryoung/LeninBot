@@ -9,7 +9,7 @@ published slug stem, so twelve references pointed at nothing.
 
 The frontend renders an unresolvable report link as plain text rather than a
 404 (utils/markdown.js), so nothing was broken for readers; this restores the
-links themselves. The publish gate in autonomous_publication_controls.py now
+links themselves. The publish gate in jobs/autonomous_publication_controls.py now
 rejects new references to slugs that do not exist.
 
 Usage:

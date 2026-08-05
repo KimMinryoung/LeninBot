@@ -27,7 +27,7 @@ from aiogram.types import BotCommand, Message
 from secrets_loader import get_secret
 from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
-from claude_loop import chat_with_tools
+from llm.claude_loop import chat_with_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import CallerContext, caller_scope

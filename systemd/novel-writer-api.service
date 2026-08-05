@@ -7,7 +7,7 @@ Wants=leninbot-llm-proxy.service
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn novel_writer_api:app --host 172.17.0.1 --port 8001
+ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn services.novel_writer_api:app --host 172.17.0.1 --port 8001
 Restart=always
 RestartSec=5
 

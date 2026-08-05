@@ -19,12 +19,11 @@ from tool_gateway.results import ToolFailure
 logger = logging.getLogger(__name__)
 
 # restart_service import-preflight targets. Dotted module names — the systemd
-# units run `python -m telegram.bot` / `python -m browser.worker`; the flat
-# telegram_bot.py/browser_worker.py names this map once held stopped existing
-# and the preflight silently skipped those services via its isfile guard.
+# units run dotted package entrypoints; stale flat module names make the
+# preflight silently skip services via its isfile guard.
 RESTART_PREFLIGHT_ENTRY_POINTS = {
     "telegram": "telegram.bot",
-    "api": "api",
+    "api": "services.api",
     "browser": "browser.worker",
 }
 
@@ -942,7 +941,7 @@ SEND_EMAIL_TOOL = {
 async def _exec_send_email(
     to: list[str], subject: str, body: str, html_body: str = "", reply_to_message_id: int | None = None,
 ) -> str:
-    from email_bridge import (
+    from services.email_bridge import (
         CONFIG, email_sending_is_configured, get_email_message,
     )
     from db import execute as db_execute, query as db_query
@@ -1062,7 +1061,7 @@ TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
 TOOLS = dedupe_tool_registry(TOOLS)
 
 # ── Finance data tool (real-time market prices) ──────────────────────
-from finance_data import FINANCE_TOOL, FINANCE_TOOL_HANDLER
+from runtime_tools.finance import FINANCE_TOOL, FINANCE_TOOL_HANDLER
 
 TOOLS.append(FINANCE_TOOL)
 TOOL_HANDLERS["get_finance_data"] = FINANCE_TOOL_HANDLER

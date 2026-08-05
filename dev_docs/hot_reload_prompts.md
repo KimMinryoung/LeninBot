@@ -43,7 +43,7 @@ Restart the owning service when changing:
 In practice:
 
 - Telegram agent behavior: restart `leninbot-telegram.service` for Python/tool changes.
-- Public web chat behavior: restart `leninbot-api.service` for `api.py`, `web_chat.py`, or webchat provider setting changes.
+- Public web chat behavior: restart `leninbot-api.service` for `services/api.py`, `services/web_chat.py`, or webchat provider setting changes.
 - Browser automation worker changes: restart `leninbot-browser.service`.
 
 ## What Belongs in Hot-Reload Files

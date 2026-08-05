@@ -1,4 +1,4 @@
-"""codex_exec_loop.py — Delegate the entire task to OpenAI Codex CLI.
+"""llm/codex_exec_loop.py — Delegate the entire task to OpenAI Codex CLI.
 
 Wraps `codex exec --full-auto` as a chat_with_tools()-compatible function.
 Used by agents whose AgentSpec has provider="codex". The agent's tool list
@@ -23,11 +23,11 @@ import os
 import tempfile
 from typing import Optional
 
-from tool_loop_common import emit_progress, build_budget_tracker
+from llm.tool_loop_common import emit_progress, build_budget_tracker
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_DEFAULT_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.6-sol")
 _PROGRESS_EMIT_TIMEOUT = 10.0

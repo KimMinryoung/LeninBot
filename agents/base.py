@@ -167,7 +167,7 @@ def _load_rate_limit_section(tool_names: list[str]) -> tuple[str, str] | None:
 
 # ── Legacy XML block strings (kept for callers not yet on IR) ────────
 #
-# Any module still assembling a raw template string (e.g. a2a_handler.py)
+# Any module still assembling a raw template string (e.g. services/a2a_handler.py)
 # can keep importing these — they reproduce the pre-IR format exactly.
 
 CONTEXT_AWARENESS_BLOCK = (

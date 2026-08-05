@@ -1,3 +1,4 @@
+"""Personal novel-writer API service entrypoint."""
 
 import uvicorn
 from fastapi import FastAPI
@@ -5,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_routes.writer import router as writer_router
 
-from api_common import parse_cors_origins, setup_service_logging
+from services.api_common import parse_cors_origins, setup_service_logging
 
 setup_service_logging()
 

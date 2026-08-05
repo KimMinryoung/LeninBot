@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 
 async def _check_detached_run_persists() -> None:
-    import web_chat
+    import services.web_chat as web_chat
 
     originals = {
         name: getattr(web_chat, name)
@@ -126,7 +126,7 @@ async def _check_detached_run_persists() -> None:
 
 
 async def _check_vector_timeout() -> None:
-    import web_chat
+    import services.web_chat as web_chat
 
     original_handler = web_chat.TOOL_HANDLERS["vector_search"]
     original_timeout = web_chat._WEBCHAT_VECTOR_SEARCH_TIMEOUT_SEC

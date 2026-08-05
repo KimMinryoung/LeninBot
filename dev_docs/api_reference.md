@@ -1,8 +1,8 @@
 # API Reference
 
-최종 확인 기준: 2026-07-25 코드 트리.
+최종 확인 기준: 2026-08-05 코드 트리.
 
-`api.py` exposes the main internal FastAPI service for public web chat and shared admin JSON routes. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Writer, email, and A2A now have dedicated FastAPI entrypoints and systemd services: `novel_writer_api.py` on `:8001`, `email_api.py` on `:8002`, and `a2a_api.py` on `:8003`. Extracted route modules are service boundaries only when included by one of those dedicated entrypoints; otherwise they are code-ownership modules inside `leninbot-api.service`.
+`services/api.py` exposes the main internal FastAPI service for public web chat and shared admin JSON routes. Production listens on `172.17.0.1:8000` behind the frontend/Nginx boundary. Writer, email, and A2A now have dedicated FastAPI entrypoints and systemd services: `services/novel_writer_api.py` on `:8001`, `services/email_api.py` on `:8002`, and `services/a2a_api.py` on `:8003`. Extracted route modules are service boundaries only when included by one of those dedicated entrypoints; otherwise they are code-ownership modules inside `leninbot-api.service`.
 
 ## Authentication
 
@@ -14,7 +14,7 @@ X-Admin-Key: <ADMIN_API_KEY>
 
 Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admin endpoints return `503`.
 
-Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `api.py`.
+Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `services/api.py`.
 
 Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call. The enabled endpoint remains unauthenticated and therefore read-only: its profiles expose only read/fetch capabilities, and `security_gateway` independently rejects write/publish/send/pay/execute/admin classes for the A2A interface.
 
@@ -22,11 +22,11 @@ Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret
 
 | Scope | Service/process | Port | Code owner | Boundary type |
 |---|---|---|---|---|
-| Main API | `leninbot-api.service` (`uvicorn api:app`) | `8000` | `api.py`, `api_routes/admin_users.py`, `api_routes/chat_history.py`, `api_routes/private_reports.py`, `api_routes/task_reports.py`, `api_routes/x402_demo.py` | main web chat and shared JSON API |
-| Writer API | `novel-writer-api.service` (`uvicorn novel_writer_api:app`) | `8001` | `novel_writer_api.py`, `api_routes/writer.py`, `writer/` | separate service/process |
-| Email API | `leninbot-email-api.service` (`uvicorn email_api:app`) | `8002` | `email_api.py`, `api_routes/email.py`, `email_bridge.py` | separate admin email bridge API |
-| Email poller | `leninbot-email-poller.timer` -> `leninbot-email-poller.service` | n/a | `scripts/email_poll_once.py`, `email_bridge.py` | periodic IMAP polling worker |
-| A2A API | `leninbot-a2a-api.service` (`uvicorn a2a_api:app`) | `8003` | `a2a_api.py`, `a2a_handler.py` | separate public A2A service/process |
+| Main API | `leninbot-api.service` (`uvicorn services.api:app`) | `8000` | `services/api.py`, `api_routes/admin_users.py`, `api_routes/chat_history.py`, `api_routes/private_reports.py`, `api_routes/task_reports.py`, `api_routes/x402_demo.py` | main web chat and shared JSON API |
+| Writer API | `novel-writer-api.service` (`uvicorn services.novel_writer_api:app`) | `8001` | `services/novel_writer_api.py`, `api_routes/writer.py`, `writer/` | separate service/process |
+| Email API | `leninbot-email-api.service` (`uvicorn services.email_api:app`) | `8002` | `services/email_api.py`, `api_routes/email.py`, `services/email_bridge.py` | separate admin email bridge API |
+| Email poller | `leninbot-email-poller.timer` -> `leninbot-email-poller.service` | n/a | `scripts/email_poll_once.py`, `services/email_bridge.py` | periodic IMAP polling worker |
+| A2A API | `leninbot-a2a-api.service` (`uvicorn services.a2a_api:app`) | `8003` | `services/a2a_api.py`, `services/a2a_handler.py` | separate public A2A service/process |
 | Frontend admin shell | frontend Express container | `3000` internally | `/home/grass/frontend/routes/admin.js`, `views/admin/private-reports.ejs` | UI shell; uses `/api/proxy/private-reports` for JSON |
 
 
@@ -45,7 +45,7 @@ Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret
 | `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
-Route ownership inside `leninbot-api.service` is split by module, but still runs in one process on port `8000`: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. `api.py` itself owns `/chat`, `/chat/feedback`, and `/personas`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints. `/email/*` is served by `leninbot-email-api.service`; `/.well-known/agent-card.json` and `/a2a` are served by `leninbot-a2a-api.service`.
+Route ownership inside `leninbot-api.service` is split by module, but still runs in one process on port `8000`: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. `services/api.py` itself owns `/chat`, `/chat/feedback`, and `/personas`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints. `/email/*` is served by `leninbot-email-api.service`; `/.well-known/agent-card.json` and `/a2a` are served by `leninbot-a2a-api.service`.
 
 ## Dedicated A2A Endpoints
 
@@ -79,7 +79,7 @@ Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 cha
 
 `POST /chat/messages/{message_id}/deactivate` accepts `part` (`user` or `assistant`), `fingerprint`, `session_id`, and `persona` through the trusted frontend proxy. It sets the corresponding `chat_logs.user_query_active` or `chat_logs.bot_answer_active` flag to false without deleting stored text. Inactive sides are omitted from browser history responses and represented as `[지워진 턴]` in LLM and agent chat-history context.
 
-Selectable personas are defined in `web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; for Gramsci theory/concept triggers the server also performs a preflight vector lookup and injects a bounded grounding block into the current turn. His persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
+Selectable personas are defined in `services/web_personas.py`. Current public personas include `cyber-lenin`, `gramsci`, and `yezhov`; admin-only personas are omitted from `/personas` unless the request has a valid `X-Admin-Key`. Persona-specific chat history and feedback are scoped by the `persona` value. Gramsci's primary writings are expected to be retrieved through `vector_search(layer="core_theory", author="Gramsci")`; for Gramsci theory/concept triggers the server also performs a preflight vector lookup and injects a bounded grounding block into the current turn. His persona-only dossier under `identity/web_personas/gramsci/knowledge` is supplemental reading protocol and answer-structure material. Web chat exposes that dossier only through the active persona-bound `read_persona_context` tool, so other personas cannot read that namespace.
 
 Response is `text/event-stream`. Event payloads are JSON:
 
@@ -176,7 +176,7 @@ Returns session IDs, first/last timestamps, message count, and a first-message p
 
 ## Personal Writer Endpoints
 
-`/writer` is owned by `api_routes/writer.py` and served by the dedicated writer process (`novel-writer-api.service`, port 8001). `api.py` does not include writer routes. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` to the dedicated writer service with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
+`/writer` is owned by `api_routes/writer.py` and served by the dedicated writer process (`novel-writer-api.service`, port 8001). `services/api.py` does not include writer routes. Through the public frontend, use `/writer`; the frontend requires the existing admin login and proxies `/api/proxy/writer` to the dedicated writer service with backend credentials injected server-side. Direct backend calls to the data and generation routes require `X-Writer-Key` or `X-Admin-Key`. This workspace is separate from `/chat`, `services/web_chat.py`, selectable personas, and `webchat_model`. It uses the `writer/` package (`creative_writer.py` is a compatibility shim), stores writer state in writer-specific PostgreSQL tables, and defaults to Anthropic Messages API with `model="claude-fable-5"` while also exposing configured DeepSeek writer model choices.
 
 Apply the explicit migration before first use or after schema changes:
 

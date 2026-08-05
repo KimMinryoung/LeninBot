@@ -8,8 +8,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from api_security import require_admin, trusted_proxy_request
-from chat_history_sanitize import clean_chat_history_text
+from services.api_security import require_admin, trusted_proxy_request
+from services.chat_history_sanitize import clean_chat_history_text
 from db import execute_returning_rowcount as db_execute_rowcount, query as db_query
 
 router = APIRouter()

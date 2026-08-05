@@ -1,4 +1,4 @@
-"""web_personas.py — Web chat persona registry.
+"""services/web_personas.py — Web chat persona registry.
 
 The public web chat used to serve a single hardcoded Cyber-Lenin persona. This
 module makes the persona a first-class, per-request selectable thing:
@@ -15,7 +15,7 @@ module makes the persona a first-class, per-request selectable thing:
   inherit Cyber-Lenin's core identity or political line, and get a reduced
   "roleplay + search" tool set (vector_search / web_search / fetch_url).
 
-web_chat.py owns the request lifecycle and the special web-only `read_self`
+services/web_chat.py owns the request lifecycle and the special web-only `read_self`
 tool; it consumes the spec returned here. This module has no dependency on
 web_chat (no import cycle).
 """
@@ -106,7 +106,7 @@ def render_system_prompt(spec: PersonaSpec, provider: str = "claude") -> str:
 # ── Persona definitions ──────────────────────────────────────────────
 
 # Cyber-Lenin: the default web persona. Section bodies are byte-for-byte the
-# strings that lived in web_chat.py before this refactor, so the rendered prompt
+# strings that lived in services/web_chat.py before this refactor, so the rendered prompt
 # (and thus model behavior) is unchanged.
 _CL_AUDIENCE = (
     "You are talking to a public web visitor — treat them as an interlocutor to debate, educate, and engage with.\n"
@@ -308,7 +308,7 @@ GRAMSCI = roleplay_persona(
 # web chat uses a public-facing variant derived from it.
 def _load_yezhov_web_persona() -> str:
     try:
-        path = Path(__file__).resolve().parent / "identity" / "roleplay_persona.md"
+        path = Path(__file__).resolve().parent.parent / "identity" / "roleplay_persona.md"
         body = path.read_text(encoding="utf-8").strip()
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Yezhov persona file unreadable: %s", exc)

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from runtime_tools.fetch import _exec_fetch_url
-from tool_loop_common import execute_tool
+from llm.tool_loop_common import execute_tool
 import content_fetch.urls as url_fetch
 import self_runtime.tools as self_tools
 import mcp_gateway.tools as mcp_tools

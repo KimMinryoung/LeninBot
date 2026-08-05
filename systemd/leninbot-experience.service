@@ -8,5 +8,5 @@ Type=oneshot
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-ExecStart=/home/grass/leninbot/venv/bin/python -c "from experience_writer import write_experiences; write_experiences()"
+ExecStart=/home/grass/leninbot/venv/bin/python -c "from jobs.experience_writer import write_experiences; write_experiences()"
 TimeoutStartSec=300

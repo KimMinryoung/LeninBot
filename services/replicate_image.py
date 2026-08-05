@@ -1,4 +1,4 @@
-"""replicate_image_service.py — Minimal Replicate image generation service for Leninbot.
+"""services/replicate_image.py — Minimal Replicate image generation service for Leninbot.
 
 MVP goals:
 - Safe env-based configuration
@@ -24,7 +24,7 @@ import requests
 
 from secrets_loader import get_secret
 
-PROJECT_ROOT = str(Path(__file__).resolve().parent)
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 
 logger = logging.getLogger(__name__)
 

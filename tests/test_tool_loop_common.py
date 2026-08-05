@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import tool_loop_common
-from tool_loop_common import (
+import llm.tool_loop_common as tool_loop_common
+from llm.tool_loop_common import (
     TRANSIENT_PROVIDER_STATUSES,
     call_with_transient_retry,
     validate_budget,

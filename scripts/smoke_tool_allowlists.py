@@ -240,8 +240,8 @@ def _assert_agents(tool_names: set[str]) -> None:
 
 
 def _assert_web_chat(tool_names: set[str]) -> None:
-    from web_chat import _WEB_ALLOWED_TOOLS, _web_handlers, _web_tools
-    from web_personas import CYBER_LENIN_TOOLS, ROLEPLAY_TOOLS
+    from services.web_chat import _WEB_ALLOWED_TOOLS, _web_handlers, _web_tools
+    from services.web_personas import CYBER_LENIN_TOOLS, ROLEPLAY_TOOLS
 
     assert set(CYBER_LENIN_TOOLS) == set(WEB_CYBER_LENIN_TOOLS)
     assert set(ROLEPLAY_TOOLS) == set(WEB_ROLEPLAY_TOOLS)
@@ -276,8 +276,8 @@ def _assert_web_personas() -> None:
     unregistered risk class shipped as a tool the model could see and the
     gateway always denied — observed 2026-07-26 in production web chat.
     """
-    from web_chat import _build_persona_tools
-    from web_personas import _REGISTRY
+    from services.web_chat import _build_persona_tools
+    from services.web_personas import _REGISTRY
 
     for persona_id, spec in _REGISTRY.items():
         tools, _handlers = _build_persona_tools(spec)

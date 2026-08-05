@@ -7,7 +7,7 @@ Before=leninbot-telegram.service leninbot-api.service
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-ExecStart=/home/grass/leninbot/venv/bin/python embedding_server.py
+ExecStart=/home/grass/leninbot/venv/bin/python -m services.embedding_server
 Restart=always
 RestartSec=5
 

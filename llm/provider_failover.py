@@ -21,7 +21,7 @@ import logging
 
 # 같은 판정을 두 벌 유지하면 어긋난다 — 두 루프가 공유하는 술어를 그대로
 # 재사용한다 (429/5xx/타임아웃/커넥션 계열).
-from tool_loop_common import emit_progress, is_transient_provider_error
+from llm.tool_loop_common import emit_progress, is_transient_provider_error
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def resolve_deepseek_failover_model(runtime_kind: str, openai_client) -> s
     """
     if not openai_client:
         return None
-    from runtime_profile import resolve_runtime_profile
+    from llm.runtime_profile import resolve_runtime_profile
     try:
         profile = await resolve_runtime_profile(
             runtime_kind, provider_override="openai", tier_override="medium",

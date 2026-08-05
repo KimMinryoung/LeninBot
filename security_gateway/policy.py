@@ -3,7 +3,7 @@
 Consolidates the rules that were previously scattered across
 ``scripts/smoke_tool_allowlists.py`` (risk classes, web-forbidden classes),
 ``runtime_tools/allowlists.py`` (orchestrator allow-list), and the implicit
-owner/admin gating in ``web_chat.py`` / ``telegram/bot.py``.
+owner/admin gating in ``services/web_chat.py`` / ``telegram/bot.py``.
 
 The values below are safe baked-in defaults. An optional
 ``config/security_policy.json`` overlay can tune rate limits and the

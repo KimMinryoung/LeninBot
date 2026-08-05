@@ -120,7 +120,7 @@ async def _exec_generate_image(
     import time as _time
 
     global _last_image_gen_time
-    from replicate_image_service import (
+    from services.replicate_image import (
         generate_image,
         is_replicate_configured,
         is_retro_diffusion_model,

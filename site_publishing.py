@@ -29,7 +29,7 @@ from pathlib import Path
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 from shared import KST
-from autonomous_publication_controls import (
+from jobs.autonomous_publication_controls import (
     check_autonomous_publication_allowed,
     is_autonomous_publication_context,
     record_autonomous_publication,

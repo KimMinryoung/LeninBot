@@ -34,7 +34,7 @@ PROJECT = {"id": 42, "title": "T", "topic": "semis", "goal": "Track HBM politica
 
 async def main():
     import bot_config
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     logged_events = []
     ap._log_event = lambda pid, et, content="", meta=None, **kw: logged_events.append((et, content, meta))

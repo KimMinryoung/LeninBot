@@ -8,14 +8,14 @@ The autonomous project loop advances long-running projects without a live user t
 
 | File | Role |
 |---|---|
-| `autonomous_project.py` | project selection, tick prompt assembly, event logging |
+| `jobs/autonomous_project.py` | project selection, tick prompt assembly, event logging |
 | `scripts/autonomous_work.py` | compatibility wrapper for older manual invocations |
 | `agents/autonomous.py` | `autonomous_project` AgentSpec and capability boundary |
 | `bot_config.py` | `autonomous_active`, `autonomous_provider`, `autonomous_model` |
 | `systemd/leninbot-autonomous.service` / `.timer` | scheduled execution |
 
 `is_autonomous_active()` reloads config from disk each call, so timer-spawned processes see Telegram `/config` toggles without a long-running process reload.
-The production systemd service runs `venv/bin/python -m autonomous_project`; `scripts/autonomous_work.py` delegates to the same entrypoint for compatibility and must not grow a separate workflow.
+The production systemd service runs `venv/bin/python -m jobs.autonomous_project`; `scripts/autonomous_work.py` delegates to the same entrypoint for compatibility and must not grow a separate workflow.
 
 ## Project State
 
@@ -100,9 +100,9 @@ The agent prompt also carries a `report-quality` section (lead with the finding,
 
 Two revision/publication paths avoid re-emitting long drafts (a ~23k-char draft does not fit the tick's 16,384-token completion cap): `edit_staged` applies exact find/replace `edits` to the stored staged body (each `find` must match exactly once; all-or-nothing; re-runs citation validation; records a `research_draft_staged` event and re-arms the cross-tick gate), and **slug-only `publish_public`** (content omitted, `fact_check_notes` still required) publishes the stored staged text as-is. In autonomous context, `stage_public` also records a `research_draft_staged` project event, and autonomous ticks surface that project's staged drafts before other recent staged drafts so later wakes can resume fact-checking or publication without relying only on the previous raw tool log.
 
-The stage→publish gate is cross-tick for autonomous runs: a draft staged during the current tick cannot be published by that same tick. `autonomous_project._run_one_tick` initializes the `current_tick_staged_slugs` contextvar per tick; `record_autonomous_staged_draft` records each staged filename into it, and `publish_public` refuses any filename found there with guidance to verify and publish on the next wake. The contextvar is `None` outside the tick runtime, so operator/task publication paths are unaffected. Rationale: the context that wrote a draft should not be the context that fact-checks and publishes it — fresh-context verification on the next wake catches errors that same-context self-review rationalizes away. Cost: public publication trails staging by at least one timer interval. `stage_public` refuses to overwrite an already-public row, so revisions to public documents must use `edit_public` instead of staging over the live slug. Public web chat remains restricted to `status='public'` research documents. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing. Autonomous public-bound research calls require an explicit stable slug. `publish_public`, `republish_public`, `publish_private`, and `edit_public` also require fact-check notes when they affect a public research document; private-to-public and republish calls are routed through the same public publication path as new reports.
+The stage→publish gate is cross-tick for autonomous runs: a draft staged during the current tick cannot be published by that same tick. `jobs.autonomous_project._run_one_tick` initializes the `current_tick_staged_slugs` contextvar per tick; `record_autonomous_staged_draft` records each staged filename into it, and `publish_public` refuses any filename found there with guidance to verify and publish on the next wake. The contextvar is `None` outside the tick runtime, so operator/task publication paths are unaffected. Rationale: the context that wrote a draft should not be the context that fact-checks and publishes it — fresh-context verification on the next wake catches errors that same-context self-review rationalizes away. Cost: public publication trails staging by at least one timer interval. `stage_public` refuses to overwrite an already-public row, so revisions to public documents must use `edit_public` instead of staging over the live slug. Public web chat remains restricted to `status='public'` research documents. The autonomous prompt requires independent verification of proper nouns, dates, figures, offices, source attributions, and other factual claims before public publishing. Autonomous public-bound research calls require an explicit stable slug. `publish_public`, `republish_public`, `publish_private`, and `edit_public` also require fact-check notes when they affect a public research document; private-to-public and republish calls are routed through the same public publication path as new reports.
 
-For autonomous projects, `autonomous_publication_controls.py` enforces a narrow structural gate before public publication:
+For autonomous projects, `jobs/autonomous_publication_controls.py` enforces a narrow structural gate before public publication:
 
 - autonomous public-bound research calls must include a stable slug; research publication and autonomous public research edits must include fact-check notes with at least two source markers/URLs.
 - hub curations must include source title, source publication, a valid source URL, rationale/context fields, and a stable slug.

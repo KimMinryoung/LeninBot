@@ -1,4 +1,4 @@
-"""Sanitize persisted chat text before display or reuse as model context."""
+"""Sanitize persisted web-chat text before display or model reuse."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""web_chat.py — Web chat handler using claude_loop (replaces LangGraph chatbot.py).
+"""services/web_chat.py — Web chat handler using the shared LLM loop.
 
 Bridges api.py to the unified agent system. Handles:
 - Web-specific system prompt (allows markdown, no delegation/mission)
@@ -21,15 +21,15 @@ from shared import KST
 from bot_config import (
     _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client, _kimi_client,
 )
-from chat_history_sanitize import clean_chat_history_text
+from services.chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
-from runtime_profile import resolve_runtime_profile
+from llm.runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.selection import build_toolset
-from claude_loop import chat_with_tools
+from llm.claude_loop import chat_with_tools
 from llm.provider_failover import run_with_provider_failover
 from db import query as db_query, query_one as db_query_one, execute as db_execute
-from web_personas import (
+from services.web_personas import (
     DEFAULT_PERSONA_ID,
     CYBER_LENIN_TOOLS,
     get_persona,
@@ -39,7 +39,7 @@ from web_personas import (
 logger = logging.getLogger(__name__)
 
 # ── Web-specific system prompt ───────────────────────────────────────
-# Persona definitions live in web_personas.py. The web-chat system prompt is
+# Persona definitions live in services/web_personas.py. The web-chat system prompt is
 # now rendered per-persona; this thin wrapper preserves the default (Cyber-Lenin)
 # rendering for callers/tests that reference it by name.
 
@@ -65,7 +65,8 @@ def _build_web_model_context(profile, provider: str = "claude") -> str:
 
 # ── Tool filtering: web chat gets only information-retrieval tools ────
 
-PERSONA_CONTEXT_ROOT = Path(__file__).resolve().parent / "identity" / "web_personas"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PERSONA_CONTEXT_ROOT = PROJECT_ROOT / "identity" / "web_personas"
 
 
 WEB_READ_SELF_TOOL = {
@@ -648,7 +649,7 @@ Redaction boundary: public web chat can discuss structure and public outputs, bu
 
 async def _format_public_model_config() -> str:
     """Return public-safe dynamic model configuration."""
-    from runtime_profile import resolve_runtime_profile
+    from llm.runtime_profile import resolve_runtime_profile
 
     async def _profile_line(label: str, profile, *, configured_provider: str | None = None, configured_model: str | None = None) -> str:
         configured_bits = []
@@ -667,7 +668,7 @@ async def _format_public_model_config() -> str:
     telegram_chat = await resolve_runtime_profile("chat")
     telegram_task = await resolve_runtime_profile("task")
 
-    runtime_path = Path(__file__).resolve().parent / "config" / "agent_runtime.json"
+    runtime_path = PROJECT_ROOT / "config" / "agent_runtime.json"
     try:
         agent_runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
     except Exception:
@@ -1635,7 +1636,7 @@ async def handle_web_chat(
                 budget_tracker=budget_tracker,
             )
             if provider == "openai":
-                from openai_tool_loop import chat_with_tools as openai_chat
+                from llm.openai_tool_loop import chat_with_tools as openai_chat
                 result = await openai_chat(
                     history,
                     client=_openai_client,
@@ -1647,7 +1648,7 @@ async def handle_web_chat(
             elif provider == "kimi":
                 if not _kimi_client:
                     raise RuntimeError("MOONSHOT_API_KEY is not configured for webchat_provider=kimi")
-                from openai_tool_loop import chat_with_tools as openai_chat
+                from llm.openai_tool_loop import chat_with_tools as openai_chat
                 from llm.provider_registry import kimi_openai_tool_options
                 result = await openai_chat(
                     history,
@@ -1675,7 +1676,7 @@ async def handle_web_chat(
                 failover_model = await resolve_deepseek_failover_model("webchat", _openai_client)
 
                 def _terra_failover():
-                    from openai_tool_loop import chat_with_tools as openai_chat
+                    from llm.openai_tool_loop import chat_with_tools as openai_chat
                     return openai_chat(
                         history,
                         client=_openai_client,

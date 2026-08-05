@@ -6,7 +6,7 @@ Run from repo root:  venv/bin/python -m unittest discover tests -v
 import unittest
 from types import SimpleNamespace
 
-from claude_loop import (
+from llm.claude_loop import (
     dedupe_tools_by_name,
     estimate_tokens,
     _append_user_text_message,
@@ -269,7 +269,7 @@ class TestEstimateTokens(unittest.TestCase):
         self.assertEqual(estimate_tokens(""), 0)
 
     def test_shared_with_openai_loop(self):
-        from tool_loop_common import estimate_text_tokens
+        from llm.tool_loop_common import estimate_text_tokens
         self.assertIs(estimate_tokens, estimate_text_tokens)
 
 

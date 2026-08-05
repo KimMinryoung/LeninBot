@@ -1,4 +1,4 @@
-"""email_bridge.py — IMAP/SMTP email bridge MVP for Cyber-Lenin.
+"""services/email_bridge.py — IMAP/SMTP email bridge MVP for Cyber-Lenin.
 
 Flow:
 1) poll IMAP inbox for unseen messages
@@ -89,7 +89,7 @@ def _apply_runtime_secrets_from_file(path_str: str | None) -> None:
 
 
 def load_email_bridge_config() -> EmailBridgeConfig:
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parent.parent
     runtime_secrets_path = os.getenv("EMAIL_RUNTIME_SECRETS_FILE", "").strip()
     _apply_runtime_secrets_from_file(runtime_secrets_path)
     return EmailBridgeConfig(

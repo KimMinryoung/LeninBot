@@ -1,4 +1,4 @@
-"""autonomous_project.py — Runtime for Cyber-Lenin's autonomous project loop.
+"""jobs/autonomous_project.py — Runtime for Cyber-Lenin's autonomous project loop.
 
 Entry point: `run_tick()` — invoked hourly by `leninbot-autonomous.service`.
 Picks a due active project, prioritizing pending operator advisories, and runs one bounded agent wake on it.
@@ -1299,7 +1299,7 @@ async def _reviewer_profile(provider: str, tier: str = "low") -> tuple[str, "obj
     judging real progress are judgment calls, and at measured tick costs
     (~$0.04, 2026-07-09) the stronger model adds ~$0.01–0.02 per call."""
     from bot_config import _deepseek_client
-    from runtime_profile import resolve_runtime_profile
+    from llm.runtime_profile import resolve_runtime_profile
 
     reviewer_provider = "deepseek" if _deepseek_client else provider
     profile = await resolve_runtime_profile(
@@ -1761,9 +1761,9 @@ def _build_task_prompt(
 async def _run_one_tick(project: dict) -> dict:
     """Run a single agent wake on the given project. Returns a result dict."""
     from agents import get_agent
-    from claude_loop import dedupe_tools_by_name
+    from llm.claude_loop import dedupe_tools_by_name
     from bot_config import _get_autonomous_provider
-    from runtime_profile import resolve_runtime_profile
+    from llm.runtime_profile import resolve_runtime_profile
     import runtime_tools.registry as tt_module
     from telegram.channel_broadcast import current_autonomous_project_id
 
@@ -1851,7 +1851,7 @@ async def _run_one_tick(project: dict) -> dict:
 
     tick_messages = [{"role": "user", "content": user_content}]
 
-    from autonomous_publication_controls import current_tick_staged_slugs
+    from jobs.autonomous_publication_controls import current_tick_staged_slugs
 
     ctx_token = current_autonomous_project_id.set(int(project["id"]))
     # Fresh per-tick set backing the cross-tick stage→publish gate: a draft
@@ -2021,8 +2021,7 @@ def run_tick() -> dict | None:
 
 
 if __name__ == "__main__":
-    # Direct invocation for manual/systemd use: `python -m autonomous_project`
-    # or `python autonomous_project.py`.
+    # Direct invocation for manual/systemd use: `python -m jobs.autonomous_project`.
     try:
         run_tick()
     except Exception:

@@ -7,8 +7,8 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api_security import require_admin
-from email_bridge import (
+from services.api_security import require_admin
+from services.email_bridge import (
     build_reply_prompt_input,
     deliver_inbound_email_to_internal_input,
     get_email_message,

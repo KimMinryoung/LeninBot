@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import httpx
 
-from openai_tool_loop import (
+from llm.openai_tool_loop import (
     _build_tc_list,
     _calculate_cost,
     _checkpoint_tool_results_for_replay,

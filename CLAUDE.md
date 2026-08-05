@@ -51,7 +51,7 @@ agent_loop.run_tool_loop          ← 제어 흐름 (라운드 루프, 예산/�
   └─ openai_tool_loop._OpenAIProtocolAdapter ← OpenAI 프로토콜 (GPT·Kimi·로컬 llama-server)
 ```
 
-- **제어 흐름 수정은 `agent_loop.py` 한 곳에만.** 두 어댑터 파일에 루프 로직을 미러링하지 말 것 — 그 미러링을 없애려고 통합한 것이다.
+- **제어 흐름 수정은 `llm/agent_loop.py` 한 곳에만.** 두 어댑터 파일에 루프 로직을 미러링하지 말 것 — 그 미러링을 없애려고 통합한 것이다.
 - 프로바이더 메시지 형식·스트리밍·과금·프로토콜 복구는 해당 어댑터 파일에.
 - 공개 진입점은 여전히 `claude_loop.chat_with_tools` / `openai_tool_loop.chat_with_tools` (시그니처 불변, 호출부는 이 둘만 안다).
 - 루프를 건드리면 `tests/test_agent_loop_engine.py` + `test_*_loop_rounds.py`가 계약 회귀를 잡는다. 상세: `dev_docs/llm_provider_architecture.md`.

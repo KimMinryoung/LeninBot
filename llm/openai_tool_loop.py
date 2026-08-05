@@ -1,15 +1,15 @@
-"""openai_tool_loop.py — Robust OpenAI-compatible tool-use loop.
+"""llm/openai_tool_loop.py — Robust OpenAI-compatible tool-use loop.
 
 Two modes:
   1. **SDK mode** (client=AsyncOpenAI): OpenAI 공식 API. 비용 추적 + 예산 제한.
   2. **httpx mode** (base_url=...): llama-server, vLLM 등 로컬 LLM. 비용 무시.
 
-claude_loop.py와 동일한 인터페이스를 제공하되, OpenAI 호환 API
+llm/claude_loop.py와 동일한 인터페이스를 제공하되, OpenAI 호환 API
 (/v1/chat/completions with function calling)를 사용한다. 라운드/forced-final
 제어 흐름은 agent_loop.run_tool_loop 공유 엔진이 소유하고, 이 모듈은 OpenAI
 프로토콜 메커니즘(_OpenAIProtocolAdapter)을 제공한다.
 
-Error recovery strategy (ported from claude_loop.py):
+Error recovery strategy (ported from llm/claude_loop.py):
   - Pre-API validation: check message integrity each round
   - Auto-recovery: on API error, strip tool blocks and retry once
   - Nuclear recovery: _strip_tool_blocks() converts all tool protocol to text
@@ -25,8 +25,8 @@ import uuid
 import httpx
 from types import SimpleNamespace
 
-from agent_loop import FinalTurn, LoopEarlyReturn, Turn, run_tool_loop
-from tool_loop_common import (
+from llm.agent_loop import FinalTurn, LoopEarlyReturn, Turn, run_tool_loop
+from llm.tool_loop_common import (
     build_budget_tracker, emit_progress,
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     call_with_transient_retry,

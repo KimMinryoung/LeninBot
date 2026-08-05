@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tool_loop_common import compact_tool_definitions
+from llm.tool_loop_common import compact_tool_definitions
 
 
 def main() -> int:

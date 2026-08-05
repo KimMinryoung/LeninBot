@@ -209,7 +209,7 @@ from content_fetch.urls import (
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Architecture
-Modules: web_chat.py (claude_loop web pipeline), telegram_bot.py (multi-agent orchestrator), \
+Modules: services/web_chat.py (claude_loop web pipeline), telegram_bot.py (multi-agent orchestrator), \
 agents/ (diary, analyst, scout, programmer, browser, visualizer), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
 Data: PostgreSQL (local Docker, leninbot-pg), Neo4j (local Docker), Redis (live state).
 ## Infrastructure

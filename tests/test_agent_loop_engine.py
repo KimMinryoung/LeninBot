@@ -12,8 +12,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import claude_loop
-import openai_tool_loop
+import llm.claude_loop as claude_loop
+import llm.openai_tool_loop as openai_tool_loop
 
 
 # ── Anthropic-shaped fakes (mirrors test_claude_loop_rounds) ─────────

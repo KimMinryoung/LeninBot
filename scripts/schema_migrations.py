@@ -57,13 +57,13 @@ def _site_publishing() -> None:
 
 
 def _experiential_memory() -> None:
-    from experience_writer import _ensure_table
+    from jobs.experience_writer import _ensure_table
 
     _ensure_table()
 
 
 def _autonomous_projects() -> None:
-    from autonomous_project import _ensure_tables
+    from jobs.autonomous_project import _ensure_tables
 
     _ensure_tables()
 
@@ -87,13 +87,13 @@ def _tool_idempotency() -> None:
 
 
 def _chat_logs_persona() -> None:
-    from web_chat import ensure_chat_logs_persona_column
+    from services.web_chat import ensure_chat_logs_persona_column
 
     ensure_chat_logs_persona_column()
 
 
 def _web_chat_feedback() -> None:
-    from web_chat import ensure_web_chat_feedback_table
+    from services.web_chat import ensure_web_chat_feedback_table
 
     ensure_web_chat_feedback_table()
 

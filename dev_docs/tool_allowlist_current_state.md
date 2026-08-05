@@ -12,7 +12,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Telegram orchestrator | `tool_gateway/profiles.py` (`TELEGRAM_ORCHESTRATOR_TOOLS`; compatibility alias in `runtime_tools/allowlists.py`) | schemas and executable handlers available to the top-level Telegram orchestrator |
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
-| Public web chat | `web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
+| Public web chat | `services/web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
 | Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 | Runtime tool gateway | `tool_gateway/` | named surface profiles, shared visibility filtering, batch dispatch, and security/audit integration |
@@ -83,15 +83,15 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 
 ## Public Web Chat
 
-Public web chat is not the Telegram orchestrator. `web_chat.py` builds tools from the active `PersonaSpec.allowed_tools`, excluding shared registry `read_self` and injecting web-only handlers where allowed. `WEB_READ_SELF_TOOL` is the public-safe Cyber-Lenin self-inspection surface. `WEB_PERSONA_CONTEXT_TOOL` is a persona-bound dossier reader: the handler closes over the active persona and resolves reads only under `identity/web_personas/<context_dir>/knowledge`, so one persona cannot request another persona's notes. This keeps anonymous public users away from Telegram-only, email, code, filesystem, and broad operational tools.
+Public web chat is not the Telegram orchestrator. `services/web_chat.py` builds tools from the active `PersonaSpec.allowed_tools`, excluding shared registry `read_self` and injecting web-only handlers where allowed. `WEB_READ_SELF_TOOL` is the public-safe Cyber-Lenin self-inspection surface. `WEB_PERSONA_CONTEXT_TOOL` is a persona-bound dossier reader: the handler closes over the active persona and resolves reads only under `identity/web_personas/<context_dir>/knowledge`, so one persona cannot request another persona's notes. This keeps anonymous public users away from Telegram-only, email, code, filesystem, and broad operational tools.
 
 `check_wallet` is intentionally exposed to public web chat as a read-only wallet visibility tool. It can show public wallet address/balance information, but it must not expose private keys, credential paths, signing, transfer, swap, or payment capabilities. Payment tools such as `pay_and_fetch`, code execution tools, filesystem write tools, email/A2A send tools, and publishing tools must remain absent from the web-chat allow-list.
 
-When changing public web tools, review `scripts/smoke_webchat_security.py`, persona-specific tool labels in `web_chat.py`, and the frontend caller behavior.
+When changing public web tools, review `scripts/smoke_webchat_security.py`, persona-specific tool labels in `services/web_chat.py`, and the frontend caller behavior.
 
 Current public persona-specific additions:
 
-- `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; `web_chat.py` also performs a bounded server-side preflight vector lookup for Gramsci theory/concept triggers. The persona dossier is supplemental reading protocol and strategy scaffolding.
+- `gramsci`: `vector_search`, `web_search`, `fetch_url`, and `read_persona_context`. Gramsci primary writings should come from `vector_search(layer="core_theory", author="Gramsci")`; `services/web_chat.py` also performs a bounded server-side preflight vector lookup for Gramsci theory/concept triggers. The persona dossier is supplemental reading protocol and strategy scaffolding.
 
 ## Public A2A
 
@@ -120,7 +120,7 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 
 ## Runtime Tool Gateway
 
-`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `web_personas.py`, `a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `services/web_personas.py`, `services/a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
 
 This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 

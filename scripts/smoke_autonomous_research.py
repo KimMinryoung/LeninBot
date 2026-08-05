@@ -45,7 +45,7 @@ LOG_TRICKY = (
 
 
 async def main():
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     print("=" * 72)
     print("1. Research trail — _extract_research_queries")

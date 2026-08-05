@@ -1,4 +1,4 @@
-"""embedding_server.py — Standalone BGE-M3 embedding + reranker service.
+"""services/embedding_server.py — Standalone BGE-M3 embedding + reranker service.
 
 Runs as an independent systemd service so that telegram_bot, api, and
 other processes share a single model instance via HTTP.  Model stays

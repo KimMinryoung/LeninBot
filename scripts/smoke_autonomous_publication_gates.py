@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from autonomous_publication_controls import (
+from jobs.autonomous_publication_controls import (
     validate_autonomous_hub_curation,
     validate_autonomous_research_publication,
     validate_autonomous_static_page,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-patch_file.py — 토큰 효율적인 파일 패치 유틸리티
+scripts/patch_file.py — 토큰 효율적인 파일 패치 유틸리티
 =====================================================
 전체 파일을 LLM에 넣지 않고, 최소한의 diff만 적용.
 
@@ -250,5 +250,5 @@ def show_diff(filepath: str, old_str: str, new_str: str) -> str:
 
 if __name__ == "__main__":
     import json, sys
-    print("patch_file.py 유틸리티 로드됨.")
+    print("scripts/patch_file.py 유틸리티 로드됨.")
     print("함수 목록: replace_block, replace_lines, insert_after, apply_unified_diff, show_diff")

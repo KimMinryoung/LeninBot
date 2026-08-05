@@ -1,4 +1,4 @@
-"""Shared boilerplate for the four FastAPI service entry points.
+"""Shared boilerplate for the four FastAPI service entrypoints.
 
 Each service module (api, a2a_api, email_api, novel_writer_api) keeps its
 own FastAPI() construction, routers, health endpoints and uvicorn tail —

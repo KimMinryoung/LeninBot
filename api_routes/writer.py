@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from api_security import require_writer_access
+from services.api_security import require_writer_access
 
 router = APIRouter()
 

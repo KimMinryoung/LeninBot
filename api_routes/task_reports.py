@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from api_security import require_admin
+from services.api_security import require_admin
 from db import query as db_query
 
 router = APIRouter(dependencies=[Depends(require_admin)])

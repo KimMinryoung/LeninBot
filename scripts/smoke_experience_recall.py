@@ -76,7 +76,7 @@ async def main():
     import db
     # Import BEFORE patching is_duplicate_experience: experience_writer binds
     # the function at import time (from-import alias).
-    import experience_writer
+    import jobs.experience_writer as experience_writer
     check("experience_writer shares the canonical dedupe", experience_writer._is_duplicate is exp.is_duplicate_experience)
 
     class FakeEmb:
@@ -137,7 +137,7 @@ async def main():
     print("5. Autonomous tick injection (_build_task_prompt)")
     print("=" * 72)
 
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
 
     ap._recent_notes = lambda p: []
     ap._synthesis_context = lambda pid: (None, None)

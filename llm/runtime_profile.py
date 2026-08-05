@@ -1,4 +1,4 @@
-"""runtime_profile.py - Central runtime/provider/model resolution.
+"""llm/runtime_profile.py - Central runtime/provider/model resolution.
 
 Small compatibility layer over bot_config. It gives each call path a single
 object describing the provider, model, token/round limits, budget, and prompt

@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api_security import require_admin
+from services.api_security import require_admin
 from runtime_tools import archival_translation as at
 
 logger = logging.getLogger(__name__)

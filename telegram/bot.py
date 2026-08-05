@@ -40,14 +40,14 @@ from bot_config import (
     get_current_model_selection, get_task_verification_mode,
     _extract_text,
 )
-from runtime_profile import resolve_runtime_profile
+from llm.runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
 from telegram._send_utils import make_progress_callback, split_message
 from ops.logs import log_event
 from llm.json_utils import extract_json_object
 from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
-from claude_loop import chat_with_tools, dedupe_tools_by_name
+from llm.claude_loop import chat_with_tools, dedupe_tools_by_name
 from llm.provider_failover import run_with_provider_failover
 from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
 from telegram.tasks import (
@@ -1481,7 +1481,7 @@ async def _chat_with_tools(
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
     # effective_provider already resolved above before prompt rendering.
     if effective_provider == "local":
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         from llm.client import (
             _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT,
             LOCAL_MAX_TOKENS, LOCAL_ENABLE_THINKING,
@@ -1506,7 +1506,7 @@ async def _chat_with_tools(
             return await _chat_coro
 
     if effective_provider == "openai" and _openai_client:
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         openai_inference = resolve_inference_extra(call_inference_policy, "openai")
         _chat_coro = openai_chat(
             messages,
@@ -1520,7 +1520,7 @@ async def _chat_with_tools(
             return await _chat_coro
 
     if effective_provider == "kimi" and _kimi_client:
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         from llm.provider_registry import kimi_openai_tool_options
         _chat_coro = openai_chat(
             messages,
@@ -1552,7 +1552,7 @@ async def _chat_with_tools(
         failover_model = await resolve_deepseek_failover_model(_runtime_kind, _openai_client)
 
         def _terra_failover():
-            from openai_tool_loop import chat_with_tools as openai_chat
+            from llm.openai_tool_loop import chat_with_tools as openai_chat
             return openai_chat(
                 messages,
                 client=_openai_client,
@@ -1656,7 +1656,7 @@ async def _get_model_for_agent(spec):
     if spec.provider == "moon":
         return await _get_model_moon()
     if spec.provider == "codex":
-        from codex_exec_loop import CODEX_DEFAULT_MODEL
+        from llm.codex_exec_loop import CODEX_DEFAULT_MODEL
         return CODEX_DEFAULT_MODEL
     provider = spec.provider or _get_task_provider()
     if provider == "local":
@@ -1680,7 +1680,7 @@ def _make_moon_chat_fn(spec):
     Falls back to the standard Claude/OpenAI chat fn if MOON is unhealthy
     so the agent run still succeeds.
     """
-    from openai_tool_loop import chat_with_tools as _moon_loop
+    from llm.openai_tool_loop import chat_with_tools as _moon_loop
     from llm.client import MOON_BASE, MOON_MODEL, _health_ok
     if not _health_ok(MOON_BASE):
         fallback_provider = _get_task_provider()
@@ -1725,7 +1725,7 @@ def _make_moon_chat_fn(spec):
 
 def _make_codex_chat_fn(spec):
     """Build a chat_fn that delegates the entire task to OpenAI Codex CLI."""
-    from codex_exec_loop import chat_with_tools as _codex_loop
+    from llm.codex_exec_loop import chat_with_tools as _codex_loop
 
     async def _codex_chat_fn(
         messages, max_rounds=None, system_prompt=None, model=None,

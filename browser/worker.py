@@ -146,7 +146,7 @@ async def execute_browser_task(task: dict) -> dict:
     # because it is a separate process with its own import cache and lifecycle.
     from agents import get_agent
     from agents.base import AgentSpec
-    from claude_loop import dedupe_tools_by_name
+    from llm.claude_loop import dedupe_tools_by_name
     from self_runtime.tools import build_task_context_tools
     from runtime_tools.registry import MISSION_TOOL, build_mission_handler
     from telegram.tasks import process_task, build_current_state
@@ -270,7 +270,7 @@ async def execute_browser_task(task: dict) -> dict:
             terminal_tools=terminal_tools,
         )
         if provider == "deepseek":
-            from claude_loop import chat_with_tools as deepseek_chat
+            from llm.claude_loop import chat_with_tools as deepseek_chat
             from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
             call_policy = AgentInferencePolicy(
                 max_input_tokens=int(max_input_tokens or inference_policy.max_input_tokens),
@@ -291,7 +291,7 @@ async def execute_browser_task(task: dict) -> dict:
                 output_config=deepseek_params.get("output_config"),
             )
 
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             messages,
             client=client,

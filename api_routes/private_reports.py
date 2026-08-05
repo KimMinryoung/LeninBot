@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from api_security import require_admin
+from services.api_security import require_admin
 from runtime_tools.private_reports import (
     get_private_report_sync,
     list_private_reports_sync,

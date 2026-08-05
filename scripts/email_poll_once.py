@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # force it here before email_bridge builds CONFIG at import time.
 os.environ["EMAIL_POLLING_ENABLED"] = "true"
 
-from email_bridge import run_polling_cycle
+from services.email_bridge import run_polling_cycle
 
 
 def main() -> int:

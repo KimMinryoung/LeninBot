@@ -93,8 +93,8 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 | Interface | Where set | is_owner |
 |---|---|---|
 | `telegram` / `agent` | `telegram/bot._chat_with_tools` via `tool_gateway.security`; standalone roleplay bot also uses `tool_gateway.security` with `agent_name=roleplay` | `True` (owner's gated channel) |
-| `webchat` | `web_chat._run_llm` via `tool_gateway.security` | `False` |
-| `a2a` | `a2a_handler._run_llm` via `tool_gateway.security` | `False` |
+| `webchat` | `services.web_chat._run_llm` via `tool_gateway.security` | `False` |
+| `a2a` | `services.a2a_handler._run_llm` via `tool_gateway.security` | `False` |
 | `system:writer` | `writer.stream.stream_writer_reply` around the `/writer` model loop | `True` |
 | `unknown` | unannotated direct callers | `False` |
 

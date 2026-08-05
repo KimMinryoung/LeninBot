@@ -4,7 +4,7 @@ _exp_embeddings = None
 
 
 def set_shared_embeddings(emb):
-    """Allow modules that already have BGE-M3 loaded (e.g. embedding_server.py) to share it."""
+    """Allow modules that already have BGE-M3 loaded (e.g. services/embedding_server.py) to share it."""
     global _exp_embeddings
     _exp_embeddings = emb
 

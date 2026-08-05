@@ -1,3 +1,5 @@
+"""Security helpers shared by the FastAPI services."""
+
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 

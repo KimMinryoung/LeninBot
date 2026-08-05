@@ -1,7 +1,7 @@
-"""a2a_handler.py — A2A protocol v1.0 handler.
+"""services/a2a_handler.py — A2A protocol v1.0 handler.
 
 Implements A2A JSON-RPC 2.0 `SendMessage` method for synchronous
-conversation with optional skill routing. Reuses web_chat.py's LLM pipeline.
+conversation with optional skill routing. Reuses services/web_chat.py's LLM pipeline.
 
 Supported skills:
   - (none / general chat) — default conversational agent
@@ -23,7 +23,7 @@ from bot_config import (
     _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client,
     _kimi_client, _config,
 )
-from runtime_profile import resolve_runtime_profile
+from llm.runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import (
     A2A_GENERAL_TOOLS,
@@ -100,7 +100,8 @@ def _general_prompt_ir() -> SystemPrompt:
     )
 
 
-_SKILL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SKILL_DIR = os.path.join(_PROJECT_ROOT, "skills")
 
 
 def _load_skill_prompt(skill_name: str) -> str | None:
@@ -373,7 +374,7 @@ async def _run_llm(
         budget_usd=profile.budget_usd,
     )
     if provider == "openai" and _openai_client:
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         return await openai_chat(
             history,
             client=_openai_client,
@@ -382,7 +383,7 @@ async def _run_llm(
             provider_label="openai:a2a",
         )
     elif provider == "kimi" and _kimi_client:
-        from openai_tool_loop import chat_with_tools as openai_chat
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
         from llm.provider_registry import kimi_openai_tool_options
         return await openai_chat(
             history,
@@ -393,7 +394,7 @@ async def _run_llm(
             **kimi_openai_tool_options(),
         )
     elif provider == "deepseek" and _deepseek_anthropic_client:
-        from claude_loop import chat_with_tools
+        from llm.claude_loop import chat_with_tools
         from bot_config import _get_deepseek_tool_thinking_params
         # A2A conversations run a multi-tool loop — thinking off by default
         # (see _get_deepseek_tool_thinking_params).
@@ -407,7 +408,7 @@ async def _run_llm(
             output_config=deepseek_thinking.get("output_config"),
         )
     else:
-        from claude_loop import chat_with_tools
+        from llm.claude_loop import chat_with_tools
         return await chat_with_tools(
             history,
             client=_claude,

@@ -18,9 +18,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import openai_tool_loop
-import tool_loop_common
-from openai_tool_loop import chat_with_tools
+import llm.openai_tool_loop as openai_tool_loop
+import llm.tool_loop_common as tool_loop_common
+from llm.openai_tool_loop import chat_with_tools
 
 
 def _usage(prompt=1000, completion=100):

@@ -196,7 +196,7 @@ class TestLoopStateSeam(unittest.TestCase):
     """LoopState.add_cost is the loop-side seam: it must forward usage."""
 
     def test_add_cost_forwards_to_gateway(self):
-        import agent_loop
+        import llm.agent_loop as agent_loop
 
         with patch.object(agent_loop, "record_llm_call") as rec:
             state = agent_loop.LoopState(0.5, agent_name="analyst")
@@ -214,7 +214,7 @@ class TestLoopStateSeam(unittest.TestCase):
 
     def test_add_cost_bare_still_works(self):
         # Compatibility: cost-only calls (older call shape) must still count.
-        import agent_loop
+        import llm.agent_loop as agent_loop
 
         with patch.object(agent_loop, "record_llm_call"):
             state = agent_loop.LoopState(0.5)

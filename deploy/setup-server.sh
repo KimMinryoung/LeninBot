@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hetzner 서버 초기 세팅 (root로 1회 실행)
-# 사용법: ssh root@YOUR_IP 'bash -s' < setup-server.sh
+# 사용법: ssh root@YOUR_IP 'bash -s' < deploy/setup-server.sh
 
 set -e
 

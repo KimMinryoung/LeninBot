@@ -1,7 +1,7 @@
-"""agent_loop.py — Unified agent tool-use loop engine.
+"""llm/agent_loop.py — Unified agent tool-use loop engine.
 
-The round-loop and forced-final control flow shared by claude_loop.py
-(Anthropic protocol: Claude, DeepSeek) and openai_tool_loop.py (OpenAI
+The round-loop and forced-final control flow shared by llm/claude_loop.py
+(Anthropic protocol: Claude, DeepSeek) and llm/openai_tool_loop.py (OpenAI
 protocol: OpenAI, Kimi, local llama-server) lives here, once. Provider
 mechanics — message shapes, API calls/streaming/retry, cost math, response
 parsing, protocol recovery — stay in the two protocol modules and are
@@ -56,7 +56,7 @@ import json
 import logging
 
 from llm.gateway import check_llm_call, record_llm_call
-from tool_loop_common import (
+from llm.tool_loop_common import (
     build_budget_warning,
     build_limit_message,
     build_round_warning,

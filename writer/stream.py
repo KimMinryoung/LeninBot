@@ -14,9 +14,9 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Awaitable, Callable
 
-from claude_loop import chat_with_tools
+from llm.claude_loop import chat_with_tools
 from tool_gateway.security import CallerContext, caller_scope
-from tool_loop_common import EMPTY_RESPONSE_FALLBACK
+from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 
 from writer.config import (
     WRITER_IDLE_TIMEOUT_SEC,

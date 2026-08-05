@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import runtime_profile
+import llm.runtime_profile as runtime_profile
 from llm.provider_failover import resolve_deepseek_failover_model
 from llm.provider_registry import kimi_openai_tool_options
 

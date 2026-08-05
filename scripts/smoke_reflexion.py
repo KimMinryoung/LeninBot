@@ -171,7 +171,7 @@ async def main():
     print("3. Autonomous editorial diagnosis")
     print("=" * 72)
 
-    import autonomous_project as ap
+    import jobs.autonomous_project as ap
     import research_store
 
     # Monkeypatch DB surfaces

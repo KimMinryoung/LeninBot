@@ -284,7 +284,7 @@ operator-needed dependency and continue with the work your current tools allow.
         # write tool stays off this surface; curation belongs to the curator.
         "commulingo_people",
         # Primary-source document pipeline (download → convert → paginated read).
-        # read_document is registered per-tick by autonomous_project.py and is
+        # read_document is registered per-tick by jobs/autonomous_project.py and is
         # sandboxed to data/downloads/ + data/converted/ — NOT general read_file.
         "download_file", "convert_document", "read_document",
         # Knowledge graph writes
@@ -293,7 +293,7 @@ operator-needed dependency and continue with the work your current tools allow.
         "research_document",
         "publish_hub_curation", "edit_content",
         "publish_static_page",
-        # Project state tools (registered dynamically per-tick by autonomous_project.py)
+        # Project state tools (registered dynamically per-tick by jobs/autonomous_project.py)
         "add_research_note", "read_research_notes", "revise_plan", "set_project_state",
         # Bounded read-only analyst sub-call (registered per-tick; the handler
         # filters the analyst spec down to read-only research tools)

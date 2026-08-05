@@ -1,3 +1,5 @@
+"""Public A2A API service entrypoint."""
+
 import json
 import os
 from pathlib import Path
@@ -7,11 +9,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from api_common import parse_cors_origins, setup_service_logging
+from services.api_common import parse_cors_origins, setup_service_logging
 
 setup_service_logging(quiet_neo4j=True)
 
-AGENT_CARD_DIR = Path(__file__).parent / "research"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+AGENT_CARD_DIR = PROJECT_ROOT / "research"
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -77,7 +80,7 @@ async def a2a_endpoint(request: Request):
             media_type="application/json",
             status_code=503,
         )
-    from a2a_handler import handle_a2a_message
+    from services.a2a_handler import handle_a2a_message
 
     result = await handle_a2a_message(body)
     status_code = 200 if "result" in result else 400

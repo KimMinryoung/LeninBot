@@ -28,7 +28,7 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-maintainer")
 
 from agents import get_agent
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
-from claude_loop import chat_with_tools
+from llm.claude_loop import chat_with_tools
 from db import query as db_query, query_one as db_query_one
 from runtime_tools.commulingo_people import (
     DENSE_SENTENCE_CHARS, FIELD_LIMITS, SECTION_BODY_TARGET, _dedup_key,
