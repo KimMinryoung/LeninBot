@@ -124,15 +124,20 @@ moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninb
   프록시 자신은 credential 파일 직독이라 이 env에 오염되지 않는다.
 - **롤백**: 각 파일 옆의 `.bak-llmkeys` 백업 복원 + `systemctl daemon-reload` + 재시작.
 - 키를 유지하는 예외: `leninbot-llm-proxy`(보관소), `leninbot-event-backfill`·
-  `research-document-translation`(직접 클라이언트 일회성 스크립트), 그리고
-  **gemini_api_key는 KG 서비스들에 유지** — graphiti 추출·임베딩이 명시 키로 직접
-  호출한다. graphiti의 Gemini 클라이언트를 프록시로 편입하는 것이 다음 단계다.
+  `research-document-translation`(직접 클라이언트 일회성 스크립트)뿐이다.
+- **gemini도 편입 완료 (2026-08-05 2차)**: graphiti 추출·임베딩은 `client=`로
+  프록시 경유 `genai.Client`를 주입받고, browser-use vision 폴백(ChatGoogle
+  `http_options` / ChatOpenAI `base_url`)도 프록시 경유. gemini 키 제거 후
+  keyless 상태에서 KG 스모크 ok=true + 프록시 로그의
+  `POST /gemini/.../batchEmbedContents → 200`으로 검증. ad-hoc KG 스크립트는
+  `GEMINI_API_KEY="$(cat /run/credentials/leninbot-llm-proxy.service/gemini_api_key)"`.
 
 ## Seam 밖에 남은 호출 (알려진 사각지대)
 
-- **graphiti-core의 Gemini 클라이언트** (KG 추출/임베딩) — 명시 gemini 키로 직접 호출 (프록시 편입이 남은 과제). 내부 OpenAI reranker는 env로 프록시 편입 완료
-- **browser-use의 vision 폴백** (ChatGoogle/ChatOpenAI 직접 구성) — 주 경로(DeepSeek 챗)는
-  프록시 경유, 폴백만 직접
+- ~~graphiti-core의 Gemini 클라이언트~~ — 2026-08-05 프록시 편입 완료 (`client=` 주입;
+  내부 OpenAI reranker는 env로 편입)
+- ~~browser-use의 vision 폴백~~ — 2026-08-05 편입 완료 (ChatGoogle `http_options`,
+  ChatOpenAI `base_url`)
 - **razvedchik** (`agents/razvedchik/cloud_llm.py`) — **의도적 제외**: 로컬 URL을 거부하는
   자체 보안 가드(로컬 모델 바꿔치기 방지)가 프록시(127.0.0.1)와 충돌한다. 편입하려면
   가드에 프록시 허용 예외를 넣는 결정이 먼저다. 그때까지 razvedchik 서비스는 deepseek 키 유지.
