@@ -245,14 +245,15 @@ def _invalidate_spend_cache() -> None:
 
 # ── Policy gate ──────────────────────────────────────────────────────
 
-def check_llm_call(
-    *, surface: str, caller: str | None, model: str | None,
-    provider: str | None = None,
-) -> None:
-    """Gate one LLM call. Raises LLMGatewayDenied only in enforce mode.
+def evaluate_policy(
+    *, provider: str | None, model: str | None,
+) -> tuple[str | None, bool]:
+    """Pure policy decision: (deny_reason_or_None, enforce). Never raises.
 
-    In shadow mode (enforce=false) a would-deny is logged and recorded but
-    the call proceeds. This function itself must never raise anything else.
+    The single source of policy truth. Called from BOTH evaluation points —
+    the in-process seam (check_llm_call: early fail, caller-tagged shadow
+    rows) and the authoritative one, llm_proxy (which a client cannot
+    bypass once the provider keys live only there).
     """
     try:
         policy = load_policy()
@@ -281,27 +282,38 @@ def check_llm_call(
                             f"daily {provider} budget ${float(provider_caps[provider]):.2f} "
                             f"exhausted (${spend.get(provider, 0.0):.2f})"
                         )
-
-        if reason is None:
-            return
-        enforce = bool(policy["enforce"])
-        _emit(
-            {
-                "surface": surface, "caller": caller, "provider": provider,
-                "model": model, "label": None, "tokens_in": None,
-                "tokens_out": None, "cache_read": None, "cache_create": None,
-                "cost_usd": None, "latency_ms": None,
-                "status": "denied" if enforce else "would_deny",
-                "error_excerpt": reason,
-            },
-            warn=True,
-        )
-        if enforce:
-            raise LLMGatewayDenied(f"LLM call denied: {reason}")
-    except LLMGatewayDenied:
-        raise
+        return reason, bool(policy["enforce"])
     except Exception as e:  # pragma: no cover - defensive
-        logger.warning("[llm-gateway] check failed (allowing call): %s", e)
+        logger.warning("[llm-gateway] policy evaluation failed (allowing): %s", e)
+        return None, False
+
+
+def check_llm_call(
+    *, surface: str, caller: str | None, model: str | None,
+    provider: str | None = None,
+) -> None:
+    """Gate one LLM call. Raises LLMGatewayDenied only in enforce mode.
+
+    In shadow mode (enforce=false) a would-deny is logged and recorded but
+    the call proceeds. This function itself must never raise anything else.
+    """
+    provider = provider or infer_provider(model)
+    reason, enforce = evaluate_policy(provider=provider, model=model)
+    if reason is None:
+        return
+    _emit(
+        {
+            "surface": surface, "caller": caller, "provider": provider,
+            "model": model, "label": None, "tokens_in": None,
+            "tokens_out": None, "cache_read": None, "cache_create": None,
+            "cost_usd": None, "latency_ms": None,
+            "status": "denied" if enforce else "would_deny",
+            "error_excerpt": reason,
+        },
+        warn=True,
+    )
+    if enforce:
+        raise LLMGatewayDenied(f"LLM call denied: {reason}")
 
 
 # ── Audit recording ──────────────────────────────────────────────────

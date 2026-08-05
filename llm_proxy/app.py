@@ -25,6 +25,7 @@ transient retry absorbs restart blips.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -33,9 +34,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from llm.gateway import evaluate_policy, record_llm_call
 from secrets_loader import get_secret
 
 logger = logging.getLogger("llm_proxy")
+
+# Route names → the provider names policy config uses (blocked_providers,
+# daily_budget_per_provider). Routes not listed map to themselves.
+POLICY_PROVIDER = {"anthropic": "claude", "moonshot": "kimi"}
 
 # auth styles: "x-api-key" (Anthropic protocol), "bearer" (OpenAI protocol),
 # "x-goog-api-key" (Gemini). DeepSeek serves both protocol families from one
@@ -78,6 +84,16 @@ def _http_client() -> httpx.AsyncClient:
     return _client
 
 
+def model_from_body(body: bytes) -> str | None:
+    """Best-effort model ID from a request body. The original bytes are
+    forwarded untouched regardless — this is read-only inspection."""
+    try:
+        model = json.loads(body).get("model")
+        return str(model) if model else None
+    except Exception:
+        return None
+
+
 def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     """Client headers minus hop-by-hop/auth, plus the provider's real auth."""
     headers = {
@@ -114,6 +130,27 @@ async def proxy(provider: str, path: str, request: Request):
     # Gemini SDKs may carry the key as a query parameter; drop it.
     params = [(k, v) for k, v in request.query_params.multi_items() if k != "key"]
     body = await request.body()
+
+    # Authoritative policy gate. The decision logic is shared with the
+    # in-process seam (llm/gateway.evaluate_policy — single source); THIS
+    # evaluation is the one a caller cannot skip, because the provider key
+    # only exists on the far side of it.
+    model = model_from_body(body)
+    policy_provider = POLICY_PROVIDER.get(provider, provider)
+    reason, enforce = evaluate_policy(provider=policy_provider, model=model)
+    if reason is not None:
+        record_llm_call(
+            surface="proxy", caller=request.headers.get("x-llm-caller"),
+            provider=policy_provider, model=model,
+            status="denied" if enforce else "would_deny", error_excerpt=reason,
+        )
+        if enforce:
+            logger.warning("proxy DENIED %s /%s: %s", provider, path, reason)
+            return JSONResponse(
+                {"error": f"llm gateway policy: {reason}"}, status_code=403,
+            )
+        logger.warning("proxy would-deny (shadow) %s /%s: %s", provider, path, reason)
+
     headers = build_forward_headers(dict(request.headers), cfg, key)
 
     started = time.monotonic()
