@@ -45,31 +45,42 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "llm_call_sites.json"
 
-# (direct_default, proxy_path) per provider — see llm/gateway.provider_endpoint.
-_PROVIDER_ROUTES = {
-    "deepseek": ("https://api.deepseek.com", "deepseek"),
-    "kimi": ("https://api.moonshot.ai/v1", "moonshot/v1"),
-    "openai": (None, "openai/v1"),
-    "claude": (None, "anthropic"),
-    "gemini": (None, "gemini"),
+# One connection record owns route, credential, and any explicit direct-base
+# override. Keeping these together prevents proxy routing and placeholder-key
+# resolution from drifting apart.
+_PROVIDER_CONNECTIONS = {
+    "deepseek": {
+        "credential": "DEEPSEEK_API_KEY",
+        "direct_base": "https://api.deepseek.com",
+        "proxy_path": "deepseek",
+    },
+    "deepseek_anthropic": {
+        "credential": "DEEPSEEK_API_KEY",
+        "direct_base": "https://api.deepseek.com/anthropic",
+        "direct_base_env": "DEEPSEEK_ANTHROPIC_BASE_URL",
+        "proxy_path": "deepseek/anthropic",
+    },
+    "kimi": {
+        "credential": "MOONSHOT_API_KEY",
+        "direct_base": "https://api.moonshot.ai/v1",
+        "proxy_path": "moonshot/v1",
+    },
+    "openai": {
+        "credential": "OPENAI_API_KEY",
+        "direct_base": None,
+        "proxy_path": "openai/v1",
+    },
+    "claude": {
+        "credential": "ANTHROPIC_API_KEY",
+        "direct_base": None,
+        "proxy_path": "anthropic",
+    },
+    "gemini": {
+        "credential": "GEMINI_API_KEY",
+        "direct_base": None,
+        "proxy_path": "gemini",
+    },
 }
-_PROVIDER_KEYS = {
-    "gemini": "GEMINI_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "deepseek_anthropic": "DEEPSEEK_API_KEY",
-    "kimi": "MOONSHOT_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "claude": "ANTHROPIC_API_KEY",
-}
-
-
-def _base_url(provider: str) -> str | None:
-    """Executor base URL for a provider: llm_proxy when configured, else direct."""
-    from llm.gateway import provider_endpoint
-
-    direct_default, proxy_path = _PROVIDER_ROUTES[provider]
-    base, _ = provider_endpoint(proxy_path, direct_default, None)
-    return base
 
 
 @dataclass(frozen=True)
@@ -85,6 +96,59 @@ class CallSiteProfile:
     managed: str = "executor"  # executor | model-only | external
     model_env_override: str | None = None  # which env var won, if any
     extra: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ProviderConnection:
+    """Resolved SDK connection for a registry provider."""
+
+    provider: str
+    credential_name: str
+    base_url: str | None
+    api_key: str
+
+
+class ProviderConnectionError(RuntimeError):
+    """A registry provider cannot be called with the current credentials."""
+
+    def __init__(self, provider: str, credential_name: str):
+        self.provider = provider
+        self.credential_name = credential_name
+        super().__init__(f"{credential_name} not configured for provider {provider}")
+
+
+def resolve_provider_connection(provider: str) -> ProviderConnection:
+    """Resolve base URL and key together, including gateway placeholder mode.
+
+    An explicit direct-base environment override bypasses the proxy and
+    therefore still requires the real provider key. Otherwise proxy mode may
+    safely use the public placeholder because llm_proxy injects the key.
+    """
+    try:
+        cfg = _PROVIDER_CONNECTIONS[provider]
+    except KeyError:
+        raise ValueError(f"unknown registry provider: {provider!r}") from None
+
+    credential_name = cfg["credential"]
+    real_key = (get_secret(credential_name, "") or "").strip()
+    env_name = cfg.get("direct_base_env")
+    explicit_base = (os.getenv(env_name) or "").strip() if env_name else ""
+    if explicit_base:
+        base_url, api_key = explicit_base.rstrip("/"), real_key
+    else:
+        from llm.gateway import provider_endpoint
+
+        base_url, api_key = provider_endpoint(
+            cfg["proxy_path"], cfg["direct_base"], real_key,
+        )
+    if not api_key:
+        raise ProviderConnectionError(provider, credential_name)
+    return ProviderConnection(
+        provider=provider,
+        credential_name=credential_name,
+        base_url=base_url,
+        api_key=api_key,
+    )
 
 
 # ── Config loading (hot reload) ──────────────────────────────────────
@@ -166,19 +230,6 @@ def resolve(feature: str, **defaults) -> CallSiteProfile:
 
 # ── Shared executor ──────────────────────────────────────────────────
 
-def _api_key(provider: str) -> str:
-    name = _PROVIDER_KEYS.get(provider)
-    key = (get_secret(name, "") or "").strip() if name else ""
-    if key:
-        return key
-    # Proxy mode: the real key lives only in llm_proxy; the placeholder
-    # satisfies the SDK and is stripped/replaced at the proxy.
-    from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base
-
-    if proxy_base():
-        return PROXY_PLACEHOLDER_KEY
-    raise RuntimeError(f"{name or provider} not configured")
-
 
 def _gemini_usage(response) -> dict:
     meta = getattr(response, "usage_metadata", None)
@@ -219,10 +270,11 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     from google import genai
     from google.genai.types import GenerateContentConfig
 
-    base = _base_url("gemini")
+    connection = resolve_provider_connection("gemini")
     client = genai.Client(
-        api_key=_api_key("gemini"),
-        **({"http_options": {"base_url": base}} if base else {}),
+        api_key=connection.api_key,
+        **({"http_options": {"base_url": connection.base_url}}
+           if connection.base_url else {}),
     )
     config = GenerateContentConfig(
         temperature=p.temperature,
@@ -239,9 +291,10 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
 def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     from openai import OpenAI
 
+    connection = resolve_provider_connection(p.provider)
     client = OpenAI(
-        api_key=_api_key(p.provider),
-        base_url=_base_url(p.provider),
+        api_key=connection.api_key,
+        base_url=connection.base_url,
         timeout=p.timeout,
     )
     messages = ([{"role": "system", "content": system}] if system else []) + [
@@ -282,10 +335,10 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
 def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     import anthropic
 
-    base = _base_url("claude")
+    connection = resolve_provider_connection("claude")
     client = anthropic.Anthropic(
-        api_key=_api_key("claude"), timeout=p.timeout,
-        **({"base_url": base} if base else {}),
+        api_key=connection.api_key, timeout=p.timeout,
+        **({"base_url": connection.base_url} if connection.base_url else {}),
     )
     kwargs: dict = {"system": system} if system else {}
     response = client.messages.create(
@@ -314,11 +367,10 @@ def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | 
     """
     import anthropic
 
-    from bot_config import DEEPSEEK_ANTHROPIC_BASE_URL
-
+    connection = resolve_provider_connection("deepseek_anthropic")
     client = anthropic.Anthropic(
-        api_key=_api_key("deepseek"),
-        base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
+        api_key=connection.api_key,
+        base_url=connection.base_url,
         timeout=p.timeout,
     )
     kwargs: dict = {"system": system} if system else {}

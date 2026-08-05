@@ -1,8 +1,8 @@
-"""Smoke test — Phase 6 KG embedding resilience (client limiter + shared key).
+"""Smoke test — Phase 6 KG embedding resilience (client limiter + retry).
 
 Hermetic: no network, no Neo4j, no real Gemini key. Exercises
-graph_memory.service._EmbedRateLimiter pacing, the retry wrapper's
-limiter integration, and shared Gemini key resolution.
+graph_memory.service._EmbedRateLimiter pacing and the retry wrapper's
+limiter integration.
 
 Run: venv/bin/python scripts/smoke_kg_embed_limiter.py
 """
@@ -91,29 +91,6 @@ def main():
     except RuntimeError:
         check("retry wrapper: non-retryable error raises immediately", calls["n"] == 1,
               f"attempts={calls['n']}")
-
-    # ── 3) Shared Gemini key resolution ──────────────────────────────
-    import secrets_loader
-
-    saved = {k: os.environ.get(k) for k in ("GEMINI_API_KEY", "CREDENTIALS_DIRECTORY")}
-    try:
-        os.environ.pop("CREDENTIALS_DIRECTORY", None)  # force env-var path in secrets_loader
-
-        def resolve_fresh():
-            # get_secret is lru_cached for the process lifetime (rotation
-            # implies restart in production); clear it so each scenario
-            # below sees its own env state.
-            secrets_loader.get_secret.cache_clear()
-            return svc._resolve_kg_gemini_key()
-
-        os.environ["GEMINI_API_KEY"] = "main-key"
-        check("key: uses GEMINI_API_KEY", resolve_fresh() == "main-key")
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
     print()
     print("=" * 60)

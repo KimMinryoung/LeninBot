@@ -133,16 +133,6 @@ class _EmbedRateLimiter:
 _EMBED_LIMITER = _EmbedRateLimiter()
 
 
-def _resolve_kg_gemini_key() -> str:
-    """Gemini key for the KG service (LLM extraction + embeddings).
-
-    In proxy mode this is only a constructor placeholder; the shared Gemini
-    credential is owned and injected by the proxy."""
-    from secrets_loader import get_secret
-
-    return (get_secret("GEMINI_API_KEY", "") or "").strip()
-
-
 class RetryingGeminiEmbedder(GeminiEmbedder):
     """Gemini embedder with client-side pacing plus bounded retry for
     transient Vertex/Gemini limits."""
@@ -215,7 +205,7 @@ class GraphMemoryService:
             neo4j_user = os.getenv("NEO4J_USER", "neo4j")
             neo4j_password = get_secret("NEO4J_PASSWORD", "") or ""
             neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
-            gemini_api_key = _resolve_kg_gemini_key()
+            gemini_api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
 
             # Always inject our GenAI client so Graphiti extraction and
             # embedding requests pass through the common policy/audit seam.

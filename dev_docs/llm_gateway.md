@@ -114,6 +114,12 @@ Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언�
 워커/browser-use의 provider 챗, Telegram vision. `null`로 되돌리고 재시작하면 직접 호출로 복귀한다
 (롤백 경로). 클라이언트 구성이 임포트 시점이라 반영은 서비스 재시작.
 
+Registry executor는 `resolve_provider_connection()`으로 base URL과 credential을 동시에
+해석한다. 따라서 keyless gateway mode의 placeholder가 정상 credential로 취급되고,
+archival translation preflight도 로컬 provider key를 잘못 요구하지 않는다. 반대로 명시적
+direct endpoint override에는 실제 provider key가 필요해 placeholder가 외부 endpoint로
+전송되지 않는다.
+
 라우트: `/{provider}/{path}` → upstream `/{path}`. provider는 anthropic / deepseek /
 moonshot / openai / gemini다. KG와 Writer도 각각 공용 gemini/anthropic route와 key를
 사용한다. `/health`는 모든 route에 쓸 키가 있을 때만 200, 아니면 503이다.

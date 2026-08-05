@@ -252,6 +252,67 @@ class TestProxyRouting(unittest.TestCase):
         self.assertEqual(key, "realkey")
 
 
+class TestRegistryProviderConnections(unittest.TestCase):
+    def test_proxy_mode_resolves_route_and_placeholder_together(self):
+        from llm import call_registry
+
+        pol = _policy(proxy_base="http://127.0.0.1:8110")
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(call_registry, "get_secret", return_value=""):
+                with patch.dict(os.environ, {"DEEPSEEK_ANTHROPIC_BASE_URL": ""}):
+                    connection = call_registry.resolve_provider_connection(
+                        "deepseek_anthropic"
+                    )
+        self.assertEqual(
+            connection.base_url, "http://127.0.0.1:8110/deepseek/anthropic"
+        )
+        self.assertEqual(connection.api_key, gw.PROXY_PLACEHOLDER_KEY)
+        self.assertEqual(connection.credential_name, "DEEPSEEK_API_KEY")
+
+    def test_direct_mode_requires_real_key(self):
+        from llm import call_registry
+
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            with patch.object(call_registry, "get_secret", return_value=""):
+                with self.assertRaises(call_registry.ProviderConnectionError) as raised:
+                    call_registry.resolve_provider_connection("gemini")
+        self.assertEqual(raised.exception.credential_name, "GEMINI_API_KEY")
+
+    def test_explicit_direct_base_does_not_receive_proxy_placeholder(self):
+        from llm import call_registry
+
+        pol = _policy(proxy_base="http://127.0.0.1:8110")
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(call_registry, "get_secret", return_value=""):
+                with patch.dict(
+                    os.environ,
+                    {"DEEPSEEK_ANTHROPIC_BASE_URL": "https://override.invalid/api/"},
+                ):
+                    with self.assertRaises(call_registry.ProviderConnectionError):
+                        call_registry.resolve_provider_connection("deepseek_anthropic")
+
+    def test_archival_preflight_accepts_keyless_gateway_mode(self):
+        from llm import call_registry
+        from runtime_tools.archival_translation import core
+
+        pol = _policy(proxy_base="http://127.0.0.1:8110")
+        with patch.object(gw, "load_policy", return_value=pol):
+            with patch.object(call_registry, "get_secret", return_value=""):
+                with patch.dict(os.environ, {"DEEPSEEK_ANTHROPIC_BASE_URL": ""}):
+                    core.preflight()
+
+    def test_archival_preflight_rejects_missing_direct_key(self):
+        from llm import call_registry
+        from runtime_tools.archival_translation import core
+
+        with patch.object(gw, "load_policy", return_value=_policy()):
+            with patch.object(call_registry, "get_secret", return_value=""):
+                with patch.dict(os.environ, {"DEEPSEEK_ANTHROPIC_BASE_URL": ""}):
+                    with self.assertRaises(core.SpecError) as raised:
+                        core.preflight()
+        self.assertIn("DEEPSEEK_API_KEY", str(raised.exception))
+
+
 class TestEvaluatePolicy(unittest.TestCase):
     """The shared decision function both evaluation points call."""
 
@@ -312,6 +373,14 @@ class TestProxyPolicyGate(unittest.TestCase):
         for route in PROVIDERS:
             name = POLICY_PROVIDER.get(route, route)
             self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini"})
+
+    def test_each_proxy_provider_has_exactly_one_credential(self):
+        from llm_proxy.app import PROVIDERS
+
+        for cfg in PROVIDERS.values():
+            self.assertIn("secret", cfg)
+            self.assertNotIn("secrets", cfg)
+            self.assertIsInstance(cfg["secret"], str)
 
 
 class TestProxyHeaderInjection(unittest.TestCase):

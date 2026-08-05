@@ -71,15 +71,15 @@ POLICY_PROVIDER = {
 # "x-goog-api-key" (Gemini). DeepSeek serves both protocol families from one
 # host, so both headers are injected; the endpoint reads whichever it wants.
 PROVIDERS: dict[str, dict] = {
-    "anthropic": {"upstream": "https://api.anthropic.com", "secrets": ("ANTHROPIC_API_KEY",),
+    "anthropic": {"upstream": "https://api.anthropic.com", "secret": "ANTHROPIC_API_KEY",
                   "auth": ("x-api-key",)},
-    "deepseek": {"upstream": "https://api.deepseek.com", "secrets": ("DEEPSEEK_API_KEY",),
+    "deepseek": {"upstream": "https://api.deepseek.com", "secret": "DEEPSEEK_API_KEY",
                  "auth": ("x-api-key", "bearer")},
-    "moonshot": {"upstream": "https://api.moonshot.ai", "secrets": ("MOONSHOT_API_KEY",),
+    "moonshot": {"upstream": "https://api.moonshot.ai", "secret": "MOONSHOT_API_KEY",
                  "auth": ("bearer",)},
-    "openai": {"upstream": "https://api.openai.com", "secrets": ("OPENAI_API_KEY",),
+    "openai": {"upstream": "https://api.openai.com", "secret": "OPENAI_API_KEY",
                "auth": ("bearer",)},
-    "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secrets": ("GEMINI_API_KEY",),
+    "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secret": "GEMINI_API_KEY",
                "auth": ("x-goog-api-key",)},
 }
 
@@ -136,14 +136,6 @@ def model_from_request(provider: str, path: str, body: bytes) -> str | None:
     return None
 
 
-def _provider_key(cfg: dict) -> str:
-    for name in cfg["secrets"]:
-        key = _credential(name)
-        if key:
-            return key
-    return ""
-
-
 def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     """Client headers minus hop-by-hop/auth, plus the provider's real auth."""
     headers = {
@@ -160,7 +152,7 @@ def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
 @app.get("/health")
 async def health():
     missing = [
-        name for name, cfg in PROVIDERS.items() if not _provider_key(cfg)
+        name for name, cfg in PROVIDERS.items() if not _credential(cfg["secret"])
     ]
     payload = {
         "status": "ok" if not missing else "not_ready",
@@ -174,7 +166,7 @@ async def proxy(provider: str, path: str, request: Request):
     cfg = PROVIDERS.get(provider)
     if cfg is None:
         return JSONResponse({"error": f"unknown provider {provider!r}"}, status_code=404)
-    key = _provider_key(cfg)
+    key = _credential(cfg["secret"])
     if not key:
         return JSONResponse(
             {"error": f"no credential for provider {provider!r}"}, status_code=503,

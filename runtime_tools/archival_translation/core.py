@@ -706,22 +706,23 @@ def preflight(opts: Options | None = None) -> None:
     """
     opts = opts or Options()
     from llm import call_registry
-    from secrets_loader import get_secret
 
     profile = call_registry.resolve(FEATURE, model=opts.model)
-    key_name = getattr(call_registry, "_PROVIDER_KEYS", {}).get(profile.provider)
-    if not key_name:
-        return  # unfamiliar provider shape — let the call itself report
-    key = (get_secret(key_name, "") or "").strip()
-    if not key:
-        raise SpecError(
-            f"{key_name}가 설정되어 있지 않다 (provider={profile.provider}). "
-            "credstore를 마운트해 실행하거나 환경변수로 넘길 것.")
     try:
-        key.encode("ascii")
+        connection = call_registry.resolve_provider_connection(profile.provider)
+    except ValueError:
+        return  # unfamiliar provider shape — let the call itself report
+    except call_registry.ProviderConnectionError as exc:
+        raise SpecError(
+            f"{exc.credential_name}가 설정되어 있지 않다 "
+            f"(provider={profile.provider}). credstore를 마운트해 실행하거나 "
+            "LLM Gateway를 설정할 것.") from None
+    try:
+        connection.api_key.encode("ascii")
     except UnicodeEncodeError:
         raise SpecError(
-            f"{key_name} 값에 ASCII가 아닌 문자가 들어 있다. 예시 명령의 자리표시자를 "
+            f"{connection.credential_name} 값에 ASCII가 아닌 문자가 들어 있다. "
+            "예시 명령의 자리표시자를 "
             "그대로 붙여넣지 않았는지 확인할 것.") from None
 
 

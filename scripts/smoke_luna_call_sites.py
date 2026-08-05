@@ -89,9 +89,14 @@ def reasoning_token_probe() -> str | None:
     """effort=none이 실제로 추론 토큰을 0으로 만드는지 raw 호출로 확인한다."""
     from openai import OpenAI
 
-    from llm.call_registry import _api_key
+    from llm.call_registry import resolve_provider_connection
 
-    client = OpenAI(api_key=_api_key("openai"), timeout=60)
+    connection = resolve_provider_connection("openai")
+    client = OpenAI(
+        api_key=connection.api_key,
+        base_url=connection.base_url,
+        timeout=60,
+    )
     msgs = [{"role": "user", "content": "다음 리포트의 group_id를 한 단어로만 답하라 "
                                         "(agent_knowledge / world_events / user_context): "
                                         "OpenAI가 API 단가를 인하했다."}]

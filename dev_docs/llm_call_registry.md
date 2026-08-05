@@ -1,6 +1,6 @@
 # LLM 호출 레지스트리 (llm/call_registry.py)
 
-최종 확인: 2026-07-17.
+최종 확인: 2026-08-05.
 
 프로젝트의 LLM API 호출은 두 층으로 관리한다.
 
@@ -16,11 +16,19 @@
 모델 해석 우선순위: **레거시 env(`env` 배열) > 제네릭 env `LLM_SITE_<KEY>_MODEL` > JSON > 콜사이트 기본값**.
 
 `managed` 값:
-- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude 지원, system·json_mode·timeout 옵션)
+- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션)
 - `model-only` — 모델명만 여기서 조회, 실행은 자체 클라이언트 (KG graphiti, razvedchik, writer 경량 별칭)
 - `external` — 정보 등재만 (vision 폴백처럼 실행 구조가 특수한 곳)
 
 실패 시 항상 `None` 반환 — 콜사이트가 자체 폴백(추출식 요약, 기본 라벨, 스킵)을 유지한다.
+
+원샷 executor의 endpoint와 credential은 공개 함수
+`resolve_provider_connection(provider)`가 한 번에 해석한다. 이 함수는 direct mode에서는
+실제 provider key를 요구하고, `proxy_base`가 설정된 keyless 서비스에서는 proxy route와
+`via-llm-proxy` placeholder를 함께 반환한다. `deepseek_anthropic`처럼 명시적 direct-base
+환경변수를 지원하는 경로는 그 override가 있을 때 proxy를 우회하므로 실제 키가 없으면
+즉시 실패한다. 호출부가 private key/route 표를 직접 읽거나 base와 key를 따로 해석하지
+않는다.
 
 ## 운영 CLI
 
