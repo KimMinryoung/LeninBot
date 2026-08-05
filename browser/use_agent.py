@@ -158,22 +158,28 @@ def _build_llm(model: str | None = None, provider: str | None = None):
 
     if provider == "google":
         from browser_use.llm.google.chat import ChatGoogle
+        from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base
 
+        base = proxy_base()
         llm = ChatGoogle(
             model=model,
-            api_key=get_secret("GEMINI_API_KEY", "") or "",
+            api_key=(get_secret("GEMINI_API_KEY", "") or "")
+            or (PROXY_PLACEHOLDER_KEY if base else ""),
             thinking_budget=0,
             max_output_tokens=4096,
+            **({"http_options": {"base_url": f"{base}/gemini"}} if base else {}),
         )
         logger.info("browser-use LLM: Google %s", model)
         return llm
 
     if provider == "openai":
         from browser_use.llm.openai.chat import ChatOpenAI
+        from bot_config import OPENAI_BASE_URL_EFFECTIVE, OPENAI_CLIENT_KEY
 
         llm = ChatOpenAI(
             model=model,
-            api_key=get_secret("OPENAI_API_KEY", "") or "",
+            api_key=OPENAI_CLIENT_KEY,
+            base_url=OPENAI_BASE_URL_EFFECTIVE,
             timeout=120,
             max_completion_tokens=4096,
         )

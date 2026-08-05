@@ -219,6 +219,27 @@ class GraphMemoryService:
             neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
             gemini_api_key = _resolve_kg_gemini_key()
 
+            # LLM 게이트웨이 프록시 라우팅: proxy_base가 설정되면 graphiti의
+            # 추출·임베딩 Gemini 클라이언트를 키 주입 프록시 경유로 만든다
+            # (실키는 leninbot-llm-proxy에만). 두 클래스 모두 미리 만든
+            # genai.Client를 client= 로 받는다.
+            from llm.gateway import PROXY_PLACEHOLDER_KEY, proxy_base as _llm_proxy_base
+
+            _proxy = _llm_proxy_base()
+            if _proxy:
+                from google import genai as _genai
+
+                gemini_api_key = gemini_api_key or PROXY_PLACEHOLDER_KEY
+
+                def _proxied_genai_client():
+                    return _genai.Client(
+                        api_key=gemini_api_key,
+                        http_options={"base_url": f"{_proxy}/gemini"},
+                    )
+            else:
+                def _proxied_genai_client():
+                    return None
+
             # 모델명은 config/llm_call_sites.json이 관리 (kg_extraction_main/small, kg_embedding)
             from llm.call_registry import resolve as _resolve_call_site
 
@@ -227,14 +248,16 @@ class GraphMemoryService:
                     api_key=gemini_api_key,
                     model=_resolve_call_site("kg_extraction_main", model="gemini-3.1-flash-lite").model,
                     small_model=_resolve_call_site("kg_extraction_small", model="gemini-2.5-flash-lite").model,
-                )
+                ),
+                client=_proxied_genai_client(),
             )
 
             embedder = RetryingGeminiEmbedder(
                 config=GeminiEmbedderConfig(
                     api_key=gemini_api_key,
                     embedding_model=_resolve_call_site("kg_embedding", model="gemini-embedding-001").model,
-                )
+                ),
+                client=_proxied_genai_client(),
             )
 
             graph_driver = Neo4jDriver(

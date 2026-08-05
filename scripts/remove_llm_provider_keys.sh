@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 # remove_llm_provider_keys.sh — LLM 게이트웨이 enforcement 최종 단계 (root 필요).
 #
-# anthropic/deepseek/moonshot/openai API 키 credential을 각 서비스에서 주석
-# 처리한다. 이후 실키는 leninbot-llm-proxy.service에만 남고, 클라이언트는
+# anthropic/deepseek/moonshot/openai/gemini API 키 credential을 각 서비스에서
+# 주석 처리한다. 이후 실키는 leninbot-llm-proxy.service에만 남고, 클라이언트는
 # placeholder + 프록시 경유로만 프로바이더에 닿을 수 있다 (물리적 우회 차단).
 #
 # - 주석 처리 방식 + 원본 .bak-llmkeys 백업 → 롤백은 백업 복원 + daemon-reload.
-# - gemini_api_key는 어디서도 건드리지 않는다: KG(graphiti) 추출·임베딩이
-#   명시 키로 직접 호출한다 (프록시 편입은 별도 작업).
+# - gemini 포함 (2026-08-05 2차): graphiti 추출·임베딩과 browser-use vision
+#   폴백이 프록시 경유 클라이언트로 전환된 뒤부터. 이미 주석된 라인은 매치되지
+#   않으므로 재실행(idempotent) 안전.
 # - 제외: leninbot-llm-proxy(키 보관소), leninbot-event-backfill,
 #   research-document-translation (직접 클라이언트 일회성 스크립트 — 문서화된 예외).
 # - 사전 조건 (이미 적용됨): .env의 OPENAI_API_KEY=via-llm-proxy +
 #   OPENAI_BASE_URL → graphiti 내부 reranker가 프록시 경유.
+# - skills/kg-maintenance 등 ad-hoc 스크립트는 이후 GEMINI_API_KEY를
+#   /run/credentials/leninbot-llm-proxy.service/gemini_api_key 에서 읽어 export.
 #
 # 실행: sudo bash scripts/remove_llm_provider_keys.sh
 # 이후 서비스 재시작은 별도로 수행한다.
 
 set -euo pipefail
 
-PATTERN='^(LoadCredentialEncrypted=(anthropic|deepseek|moonshot|openai)_api_key.*)$'
+PATTERN='^(LoadCredentialEncrypted=(anthropic|deepseek|moonshot|openai|gemini)_api_key.*)$'
 MARK='# key moved to leninbot-llm-proxy (2026-08-05)'
 
 DROPIN_SERVICES=(
