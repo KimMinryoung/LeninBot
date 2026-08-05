@@ -155,6 +155,32 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     "korea": ("hangul", "han"),
 }
 
+# Nations whose people write the family name first, and the joiner between
+# family and given per language. Korean text fuses Korean/Chinese/Vietnamese
+# names (김무정, 펑더화이, 호찌민) and keeps the space for Japanese
+# (도쿠다 규이치); English follows each nation's own romanization — family
+# first for Korean/Chinese/Vietnamese (Kim Mu-chong, Peng Dehuai, Le Duan),
+# given first for Japanese (Sen Katayama). Port of frontend
+# data/commulingo/native-script.js (FAMILY_FIRST) — keep the two in sync.
+_FAMILY_FIRST: dict[str, dict[str, str | None]] = {
+    "korea": {"ko": "", "en": " "},
+    "north-korea": {"ko": "", "en": " "},
+    "south-korea": {"ko": "", "en": " "},
+    "china": {"ko": "", "en": " "},
+    "vietnam": {"ko": "", "en": " "},
+    "japan": {"ko": " ", "en": None},
+}
+
+
+def _family_first_joiner(lang: str, codes) -> str | None:
+    """The joiner between family and given when one of these citizenship codes
+    puts the family name first in `lang`; None means Western given-first."""
+    for code in codes or ():
+        rule = _FAMILY_FIRST.get((code or "").strip())
+        if rule is not None:
+            return rule.get(lang)
+    return None
+
 # person patch fields that must be {ko, en} objects. Plain strings are
 # rejected outright: _localized() would store them as Korean-only and
 # silently blank the English side (this happened in production).
@@ -1184,24 +1210,50 @@ def _collapse_spaces(value) -> str:
     return " ".join(str(value or "").split())
 
 
-def _split_full_name(full: str) -> tuple[str, str]:
-    """(given, family) from a full name: family = last token, given = the rest.
+def _split_full_name(full: str, lang: str = "en", codes=()) -> tuple[str, str]:
+    """(given, family) from a full name: family = last token, given = the rest,
+    except family-first nationalities (korea/china/vietnam/japan), which lead
+    with the family name (Kim Mu-chong, 도쿠다 규이치).
     Single-token names (김일성, 카모) go wholly to family."""
     name = _collapse_spaces(full)
     if not name:
         return "", ""
     if " " not in name:
         return "", name
+    if _family_first_joiner(lang, codes) is not None:
+        family, given = name.split(" ", 1)
+        return given, family
     given, family = name.rsplit(" ", 1)
     return given, family
 
 
-def _patch_name_parts(patch: dict, lang: str, stored: dict | None = None) -> tuple[str, str, str]:
+def _compose_full_name(given: str, family: str, lang: str, codes=()) -> str:
+    """The derived full name in the nationality's own order: 김+무정 → 김무정,
+    Peng+Dehuai → Peng Dehuai, everyone else given-first with a space."""
+    joiner = _family_first_joiner(lang, codes)
+    if joiner is not None and given and family:
+        return f"{family}{joiner}{given}"
+    return " ".join(p for p in (given, family) if p)
+
+
+def _name_order_codes(patch: dict, stored: dict | None = None) -> tuple[str, ...]:
+    """The citizenship code that decides name order: the patch's when it sets
+    one, else the stored row's (`citizenship_code` key)."""
+    vals = _nationality_values(patch, "citizenship")
+    if vals is not None:
+        return (vals[0],) if vals[0] else ()
+    code = (stored or {}).get("citizenship_code") or ""
+    return (code,) if code else ()
+
+
+def _patch_name_parts(patch: dict, lang: str, stored: dict | None = None,
+                      codes=()) -> tuple[str, str, str]:
     """Effective (given, family, full) for one language after applying `patch`.
 
     Structured givenName/familyName win; a legacy full `name` is split; a
     partial parts patch falls back to `stored` (given_name_*/family_name_*
-    row) for the missing side. Mirrors frontend people-admin-store.js.
+    row) for the missing side. `codes` are the citizenship codes that decide
+    name order (see _compose_full_name). Mirrors frontend people-admin-store.js.
     """
     stored = stored or {}
     if "givenName" in patch or "familyName" in patch:
@@ -1210,11 +1262,11 @@ def _patch_name_parts(patch: dict, lang: str, stored: dict | None = None) -> tup
         family = (_collapse_spaces(_localized(patch.get("familyName"), lang))
                   if "familyName" in patch else _collapse_spaces(stored.get(f"family_name_{lang}")))
     elif "name" in patch:
-        given, family = _split_full_name(_localized(patch.get("name"), lang))
+        given, family = _split_full_name(_localized(patch.get("name"), lang), lang, codes)
     else:
         given = _collapse_spaces(stored.get(f"given_name_{lang}"))
         family = _collapse_spaces(stored.get(f"family_name_{lang}"))
-    full = " ".join(p for p in (given, family) if p)
+    full = _compose_full_name(given, family, lang, codes)
     return given, family, full
 
 
@@ -1232,8 +1284,9 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     a segment-wise subset of an existing one.
     Returns the matched row plus a `why` phrase, or None.
     """
-    _, _, name_ko = _patch_name_parts(patch, "ko")
-    _, _, name_en = _patch_name_parts(patch, "en")
+    codes = _name_order_codes(patch)
+    _, _, name_ko = _patch_name_parts(patch, "ko", codes=codes)
+    _, _, name_en = _patch_name_parts(patch, "en", codes=codes)
     birth, death = _parse_life_years(patch.get("years") or "")
     key_en, key_ko = _dedup_key(name_en), _dedup_key(name_ko)
     segments = set(target_id.split("-"))
@@ -1449,8 +1502,9 @@ def _apply_person_create(cur, person_id: str, patch: dict) -> None:
     birth, death = _parse_life_years(patch.get("years") or "")
     # Structured name parts (givenName/familyName win, legacy `name` is split);
     # name_ko/en are stored as the DERIVED full name — never written separately.
-    given_ko, family_ko, name_ko = _patch_name_parts(patch, "ko")
-    given_en, family_en, name_en = _patch_name_parts(patch, "en")
+    codes = _name_order_codes(patch)
+    given_ko, family_ko, name_ko = _patch_name_parts(patch, "ko", codes=codes)
+    given_en, family_en, name_en = _patch_name_parts(patch, "en", codes=codes)
     fate = patch.get("fate") or {}
     citizenship = _nationality_values(patch, "citizenship") or ("", "", "")
     origin = _nationality_values(patch, "origin") or ("", "", "")
@@ -1515,13 +1569,15 @@ def _apply_person_update(cur, person_id: str, patch: dict) -> None:
         # Any name field recomputes all six name columns so the structured
         # parts and the derived full name never diverge.
         cur.execute(
-            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en
+            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en,
+                      citizenship_code
                FROM commulingo_people WHERE id = %s""",
             (person_id,),
         )
         stored_name = dict(cur.fetchone() or {})
+        codes = _name_order_codes(patch, stored_name)
         for lang in ("ko", "en"):
-            given, family, full = _patch_name_parts(patch, lang, stored_name)
+            given, family, full = _patch_name_parts(patch, lang, stored_name, codes=codes)
             set_col(f"name_{lang}", full)
             set_col(f"given_name_{lang}", given)
             set_col(f"family_name_{lang}", family)
@@ -2702,7 +2758,10 @@ def sentence_prescription(field: str) -> str:
 _CEILING = (
     "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed {target},"
     " not to this number, but COUNT YOUR DRAFT AGAINST IT BEFORE CALLING: a rejected"
-    " write costs a full round."
+    " write costs a full round. Count the ENGLISH side first — it is the side that"
+    " actually overruns (every length rejection on 2026-08-03/04 was an English field"
+    " landing 3-9% over). An English draft within ~50 characters of its ceiling loses"
+    " its weakest clause before the call, not after the reject."
 )
 
 
@@ -2814,7 +2873,14 @@ _COMMULINGO_FIELD_SCHEMA = {
             "type": ["integer", "null"],
             "description": "Explicit position. Omit or null to append after the current last row.",
         },
-        "cyrillic": {"type": "string"},
+        "cyrillic": {"type": "string", "description": (
+            "Native-script name line (the column name is legacy): the person's name in "
+            "THEIR OWN script per citizenship — 김무정, 彭德怀, 'Võ Nguyên Giáp', "
+            "'Kádár János', 'Владимир Ленин'. Never a Russian transliteration of a "
+            "non-Russian name, and never omitted because the right script is not "
+            "Cyrillic: for Latin-script nations this line carries the native Latin "
+            "spelling with its diacritics."
+        )},
         "cyrillicPatronymic": {"type": "string"},
         "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
         "name": _BILINGUAL_TEXT_SCHEMA,
