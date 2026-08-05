@@ -11,7 +11,7 @@ User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
-LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
+# LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred  # key moved to leninbot-llm-proxy (2026-08-05)
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
 Environment=COMMULINGO_DAILY_CAP_USD=2.5

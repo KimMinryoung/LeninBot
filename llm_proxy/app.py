@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
@@ -35,9 +37,26 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from llm.gateway import evaluate_policy, record_llm_call
-from secrets_loader import get_secret
 
 logger = logging.getLogger("llm_proxy")
+
+
+def _credential(name: str) -> str:
+    """Read a provider key ONLY from this unit's systemd credentials.
+
+    Deliberately not secrets_loader.get_secret: that helper lets real env
+    vars win over credstore, and the services' .env (which this unit also
+    loads for DB access) carries placeholder values like
+    OPENAI_API_KEY=via-llm-proxy for graphiti's env-built internal client.
+    The key custodian must never let an env value shadow its own credstore.
+    """
+    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not cred_dir:
+        return ""
+    try:
+        return (Path(cred_dir) / name.lower()).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 # Route names → the provider names policy config uses (blocked_providers,
 # daily_budget_per_provider). Routes not listed map to themselves.
@@ -110,8 +129,7 @@ def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
 @app.get("/health")
 async def health():
     missing = [
-        name for name, cfg in PROVIDERS.items()
-        if not (get_secret(cfg["secret"], "") or "").strip()
+        name for name, cfg in PROVIDERS.items() if not _credential(cfg["secret"])
     ]
     return {"status": "ok", "providers_without_key": missing}
 
@@ -121,7 +139,7 @@ async def proxy(provider: str, path: str, request: Request):
     cfg = PROVIDERS.get(provider)
     if cfg is None:
         return JSONResponse({"error": f"unknown provider {provider!r}"}, status_code=404)
-    key = (get_secret(cfg["secret"], "") or "").strip()
+    key = _credential(cfg["secret"])
     if not key:
         return JSONResponse(
             {"error": f"no credential for provider {provider!r}"}, status_code=503,
