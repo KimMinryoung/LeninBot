@@ -84,8 +84,12 @@ def wikisource(raw: str) -> list[dict]:
     for m in WIKISOURCE_BLOCK_RE.finditer(body.group(1)):
         tag, inner = m.group(1).lower(), m.group(2)
         if tag == "table":
+            # 칸 하나가 곧 번역 한 줄이다. 서명란처럼 <br>로 여러 줄을 담은 칸이
+            # 줄바꿈을 그대로 지니면 모델이 그것을 각각 다른 줄로 보고, 조립기가
+            # 칸과 번역을 짝지을 때 한 칸씩 밀린다 — 독소조약 서명란에서 독일
+            # 측 서명이 통째로 사라졌다. 칸 안의 줄바꿈은 공백으로 접는다.
             rows = [
-                [_text(c) for c in TABLE_CELL_RE.findall(row)]
+                [" ".join(_text(c).split("\n")) for c in TABLE_CELL_RE.findall(row)]
                 for row in TABLE_ROW_RE.findall(inner)
             ]
             rows = [r for r in rows if any(c for c in r)]

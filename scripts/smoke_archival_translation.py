@@ -62,7 +62,9 @@ def main() -> int:
         check("모르는 포맷을 막는다", True)
 
     print("source slicing")
-    blocks = at.extract_blocks(spec)
+    # 스펙 수준 source는 선택이다. 문서마다 제 출처를 가진 스펙(조약과 의정서가
+    # 서로 다른 페이지에 있는 경우)에서는 그것이 없으므로, 검사도 그때는
+    # 문서별 출처를 본다.
     docs = at.slice_documents(spec)
     check("문서가 스펙 수만큼 잘린다", len(docs) == len(spec["documents"]))
     check("블록이 비지 않는다", all(d["blocks"] for d in docs))
@@ -74,8 +76,11 @@ def main() -> int:
     drifted["documents"][0]["startsWith"] = "이 문자열은 원문에 없다"
     expect_spec_error("경계가 어긋나면 실패한다", lambda: at.slice_documents(drifted))
     tampered = json.loads(json.dumps(spec))
-    tampered["source"]["sha256"] = "0" * 64
-    expect_spec_error("원본이 바뀌면 실패한다", lambda: at.extract_blocks(tampered))
+    if "source" in tampered:
+        tampered["source"]["sha256"] = "0" * 64
+    else:
+        tampered["documents"][0]["source"]["sha256"] = "0" * 64
+    expect_spec_error("원본이 바뀌면 실패한다", lambda: at.slice_documents(tampered))
 
     print("chunking")
     chunks = [c for d in docs for c in at.chunk_document(d, 3500)]
