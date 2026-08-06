@@ -226,7 +226,12 @@ def main() -> int:
           re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<ul><li>", html)
           is not None)
     check("서두에 hr을 두지 않는다", "<hr" not in html)
-    check("h5는 h2로 내려간다", "<h5" not in html and html.count("<h2>") > 0)
+    # 소제목이 있는 문서만 h2를 요구한다. 조항이 소제목 없이 이어지는 결의문
+    # (21개 조건 같은)은 h2가 하나도 없는 것이 맞다.
+    has_headings = any(b["tag"] in ("h2", "h3", "h4", "h5")
+                       for d in docs for b in d["blocks"])
+    check("h5는 h2로 내려간다",
+          "<h5" not in html and (html.count("<h2>") > 0 or not has_headings))
     check("인라인 스타일이 없다", "style=" not in html)
     check("금지 태그가 없다",
           not re.search(r"<(html|head|body|main|style|script)\b", html, re.I))
