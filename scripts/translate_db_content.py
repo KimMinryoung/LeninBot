@@ -31,6 +31,8 @@ FRONTEND_ENV = FRONTEND_DIR / ".env"
 DEFAULT_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEFAULT_MODEL = os.getenv("DB_CONTENT_TRANSLATION_MODEL", "deepseek-v4-flash")
 DEFAULT_MAX_TOKENS = int(os.getenv("DB_CONTENT_TRANSLATION_MAX_TOKENS", "12000"))
+# 빈 응답을 만났을 때 예산을 늘려 한 번 더 부를 때의 상한.
+MAX_TOKEN_CEILING = int(os.getenv("DB_CONTENT_TRANSLATION_MAX_TOKENS_CEILING", "32000"))
 TIMEOUT_SECONDS = 180
 
 TARGETS = {
@@ -178,6 +180,67 @@ def _parse_curation_json_response(text: str) -> dict[str, str]:
     return out
 
 
+class TranslationCallError(RuntimeError):
+    """제공자가 실제로 무엇을 돌려줬는지 함께 들고 다니는 오류.
+
+    예전에는 빈 응답이 json.loads에서 "Expecting value: line 1 column 1"으로
+    터졌다. 그 문장만 보고는 모델이 거부한 것인지, 응답이 잘린 것인지, 아예
+    비어서 온 것인지 구분할 수 없어서 로그를 봐도 손을 못 댔다.
+    """
+
+
+def _post_completion(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    system_prompt: str,
+    payload: dict[str, Any],
+    max_tokens: int,
+) -> tuple[str, str, dict[str, Any]]:
+    """한 번 호출하고 (본문, finish_reason, usage)를 그대로 돌려준다."""
+    response = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            "temperature": 0.1,
+            "max_tokens": max_tokens,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+        },
+        timeout=TIMEOUT_SECONDS,
+    )
+    if not response.ok:
+        raise TranslationCallError(
+            f"DeepSeek request failed: HTTP {response.status_code}: {response.text[:1000]}"
+        )
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise TranslationCallError(
+            f"DeepSeek returned a non-JSON body ({exc}): {response.text[:500]!r}"
+        ) from exc
+    choices = data.get("choices") or []
+    if not choices:
+        raise TranslationCallError(
+            f"DeepSeek response carried no choices: {json.dumps(data, ensure_ascii=False)[:500]}"
+        )
+    message = choices[0].get("message") or {}
+    return (
+        (message.get("content") or "").strip(),
+        choices[0].get("finish_reason") or "",
+        data.get("usage") or {},
+    )
+
+
 def _call_deepseek(row: dict[str, Any], *, label: str, model: str, base_url: str, max_tokens: int) -> dict[str, str]:
     api_key = get_secret("DEEPSEEK_API_KEY", "") or ""
     if not api_key:
@@ -200,32 +263,44 @@ def _call_deepseek(row: dict[str, Any], *, label: str, model: str, base_url: str
             "title": row.get("title") or "",
             "content": row.get("content") or "",
         }
-    response = requests.post(
-        f"{base_url}/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=TIMEOUT_SECONDS,
-    )
-    if not response.ok:
-        raise RuntimeError(f"DeepSeek request failed: HTTP {response.status_code}: {response.text[:1000]}")
-    data = response.json()
-    content = data["choices"][0]["message"].get("content") or ""
-    if "selection_rationale" in row:
-        return _parse_curation_json_response(content)
-    return _parse_json_response(content)
+    budget = max_tokens
+    content = ""
+    finish_reason = ""
+    usage: dict[str, Any] = {}
+    # 빈 응답이 오면 예산을 한 번 늘려 다시 부른다. 추론 토큰이 max_tokens를
+    # 다 써 버리면 본문이 한 글자도 없이 finish_reason=length로 돌아오는데,
+    # 그것은 요청이 거부된 것이 아니라 예산이 모자란 것이므로 재시도가 맞다.
+    for attempt in (1, 2):
+        content, finish_reason, usage = _post_completion(
+            api_key=api_key, base_url=base_url, model=model,
+            system_prompt=system_prompt, payload=payload, max_tokens=budget,
+        )
+        if content or attempt == 2 or finish_reason not in ("length", "", None):
+            break
+        budget = min(budget * 2, MAX_TOKEN_CEILING)
+        if budget == max_tokens:
+            break
+        print(
+            f"  empty completion (finish_reason={finish_reason!r}, usage={usage}); "
+            f"retrying with max_tokens={budget}"
+        )
+    if not content:
+        raise TranslationCallError(
+            f"empty completion from {model} "
+            f"(finish_reason={finish_reason!r}, usage={usage}, max_tokens={budget})"
+        )
+    try:
+        if "selection_rationale" in row:
+            return _parse_curation_json_response(content)
+        return _parse_json_response(content)
+    except (json.JSONDecodeError, ValueError) as exc:
+        # 잘린 JSON과 안내문으로 시작하는 JSON은 증상이 같다. 앞뒤를 같이
+        # 남겨야 다음 사람이 로그만 보고 어느 쪽인지 안다.
+        raise TranslationCallError(
+            f"could not parse the translation JSON ({exc}); "
+            f"finish_reason={finish_reason!r}, usage={usage}, {len(content)} chars, "
+            f"head={content[:200]!r}, tail={content[-200:]!r}"
+        ) from exc
 
 
 def _update_row(conn, target_name: str, table: str, row_id: int, translated: dict[str, str], row: dict[str, Any]) -> None:
@@ -278,11 +353,12 @@ def translate_target(
     model: str,
     base_url: str,
     max_tokens: int,
-) -> tuple[int, str]:
+) -> tuple[int, str, list[str]]:
     target = TARGETS[target_name]
     env = _load_frontend_env()
     conn = _connect_db(env)
     changed = 0
+    failures: list[str] = []
     try:
         if target_name == "curation":
             _ensure_curation_columns(conn)
@@ -292,13 +368,24 @@ def translate_target(
             print(f"translating {target_name}#{row['id']}: {row.get('title') or ''}")
             if select_only:
                 continue
-            translated = _call_deepseek(
-                row,
-                label=target["label"],
-                model=model,
-                base_url=base_url,
-                max_tokens=max_tokens,
-            )
+            # 한 줄이 실패해도 나머지는 계속한다. 예전에는 여기서 예외가 그대로
+            # 올라가 그 종류의 남은 줄을 전부 건너뛰었다. 2026-08-06에 일기
+            # #418 하나가 빈 응답으로 실패하자 뒤에 있던 #417이 시도조차 되지
+            # 않았고, 매일 밤 같은 #418을 먼저 집어 같은 자리에서 죽는 바람에
+            # 사흘치 일기가 통째로 번역되지 않았다. 한 편이 안 되는 것과 전부
+            # 멈추는 것은 다른 사고다.
+            try:
+                translated = _call_deepseek(
+                    row,
+                    label=target["label"],
+                    model=model,
+                    base_url=base_url,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:
+                failures.append(f"{target_name}#{row['id']}: {exc}")
+                print(f"failed {target_name}#{row['id']}: {exc}", file=sys.stderr)
+                continue
             if dry_run:
                 print(f"dry-run ok {target_name}#{row['id']}: {translated['title_en']}")
                 continue
@@ -307,7 +394,7 @@ def translate_target(
             print(f"updated {target_name}#{row['id']}: {translated['title_en']}")
     finally:
         conn.close()
-    return changed, target["cache_pattern"]
+    return changed, target["cache_pattern"], failures
 
 
 def main() -> int:
@@ -326,10 +413,10 @@ def main() -> int:
     names = ["posts", "diary", "curation"] if args.kind == "all" else [args.kind]
     changed_total = 0
     cache_patterns: set[str] = set()
-    failures = 0
+    failures: list[str] = []
     for name in names:
         try:
-            changed, pattern = translate_target(
+            changed, pattern, row_failures = translate_target(
                 name,
                 ids=args.ids,
                 limit=args.limit,
@@ -341,15 +428,23 @@ def main() -> int:
                 max_tokens=args.max_tokens,
             )
             changed_total += changed
+            failures.extend(row_failures)
             if changed:
                 cache_patterns.add(pattern)
         except Exception as exc:
+            # 여기까지 올라오는 것은 이제 그 종류 전체가 못 도는 사고다
+            # (DB 연결 실패 등). 개별 줄의 실패는 translate_target 안에서
+            # 잡혀 row_failures로 돌아온다.
             print(f"failed {name}: {exc}", file=sys.stderr)
-            failures += 1
+            failures.append(f"{name}: {exc}")
 
+    # 한 줄이라도 번역됐으면 캐시를 비운다. 실패가 섞여 있어도 성공한 것은
+    # 바로 보여야 한다.
     if cache_patterns and not args.dry_run:
         _clear_cache(cache_patterns, _load_frontend_env())
-    print(f"done: updated {changed_total} row(s), failures {failures}")
+    print(f"done: updated {changed_total} row(s), failures {len(failures)}")
+    for detail in failures:
+        print(f"  - {detail}", file=sys.stderr)
     return 1 if failures else 0
 
 
