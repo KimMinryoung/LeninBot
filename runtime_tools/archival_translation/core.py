@@ -631,7 +631,18 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     edits = spec.get("postEdits") or {}
     dedupe = gloss_deduper()
 
+    # 한국어 문헌은 인용부호로 홑낫표를 쓴다. 문체 지시에 적어 두어도 모델은
+    # 청크마다 "…"와 “…”를 섞어 내놓고, 그 흔들림은 한 문서 안에서 눈에 띈다.
+    # 짝이 맞는 것만 바꾸므로 인치 기호나 한쪽만 남은 따옴표는 건드리지 않는다.
+    # 서고의 관행은 인용문에 따옴표, 문헌·사건 이름에 홑낫표다. 모델은 청크마다
+    # 곧은 따옴표와 굽은 따옴표를 섞어 내놓으므로 짝이 맞는 것만 굽은 쪽으로
+    # 모은다. 인치 기호나 한쪽만 남은 따옴표는 건드리지 않는다.
+    curly_quotes = (spec.get("quotes") == "curly")
+    _STRAIGHT_PAIR = re.compile(r'"([^"\n]{1,400})"')
+
     def fix(line: str) -> str:
+        if curly_quotes:
+            line = _STRAIGHT_PAIR.sub("\u201c\\1\u201d", line)
         for ru, ko in edits.items():
             line = line.replace(ru, ko)
         return dedupe(line)
