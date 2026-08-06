@@ -142,10 +142,59 @@ def stalinism(raw: str) -> list[dict]:
     return blocks
 
 
+LIBRU_BODY_RE = re.compile(r"(?is)<pre>(.*?)</pre>")
+
+
+def libru(raw: str) -> list[dict]:
+    """Parse a saved lib.ru text page.
+
+    lib.ru serves a plain-text file inside one <pre>, hard-wrapped at about
+    seventy columns, with paragraphs separated by blank lines. The wrapping is
+    an artefact of the format, not of the document, so the lines of a paragraph
+    are joined back into one; a blank line is the only paragraph boundary there
+    is. The site's own furniture (the download menu, the OCR credit, the rule
+    of equals signs) is left in place — the spec's block range decides what
+    belongs to the document, as with every other adapter.
+
+    Save the page as UTF-8: lib.ru serves CP1251 and load_blocks reads UTF-8.
+    """
+    body = LIBRU_BODY_RE.search(raw)
+    scope = body.group(1) if body else raw
+    blocks: list[dict] = []
+
+    def add_paragraphs(text: str) -> None:
+        # 70칸 줄바꿈은 포맷의 산물이라 이어 붙이지만, <br>은 문서 자신의
+        # 줄바꿈이라 살려야 한다. 둘을 섞어 지우면 편지 수신인란처럼 짧은 행이
+        # 잇달아 오는 곳에서 낱말이 서로 붙는다("스탈린 동지에게.사본:").
+        text = re.sub(r"(?is)<br\s*/?>", "\x00", text)
+        text = re.sub(r"(?is)<[^>]+>", "", text)
+        for chunk in re.split(r"\n[ \t]*\n", htmllib.unescape(text)):
+            joined = " ".join(part.strip() for part in chunk.split("\n"))
+            lines = [re.sub(r"[ \t]+", " ", part).strip()
+                     for part in joined.split("\x00")]
+            lines = [line for line in lines if line]
+            if lines:
+                blocks.append({"tag": "p", "lines": lines})
+
+    # 절 제목은 <pre> 안에서도 <h2>로 표시된다. 태그를 먼저 전부 지우면 제목이
+    # 앞 문단 끝에 붙어 버려, 범위를 자를 자리도 사라지고 마지막 문단에 엉뚱한
+    # 낱말이 남는다("… 모두 일어섬.) 주석").
+    pos = 0
+    for m in re.finditer(r"(?is)<h([1-6])>(.*?)</h\1>", scope):
+        add_paragraphs(scope[pos:m.start()])
+        title = re.sub(r"[ \t]+", " ", re.sub(r"(?is)<[^>]+>", "", m.group(2))).strip()
+        if title:
+            blocks.append({"tag": "h" + m.group(1), "lines": [title]})
+        pos = m.end()
+    add_paragraphs(scope[pos:])
+    return blocks
+
+
 ADAPTERS: dict[str, Callable[[str], list[dict]]] = {
     "militera": militera,
     "wikisource": wikisource,
     "stalinism": stalinism,
+    "libru": libru,
 }
 DEFAULT_ADAPTER = "militera"
 
