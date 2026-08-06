@@ -43,6 +43,7 @@ Coverage and the enforcement runbook: dev_docs/llm_gateway.md.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -436,6 +437,49 @@ def _ensure_worker() -> None:
         t = threading.Thread(target=_worker_loop, name="llm-audit-writer", daemon=True)
         t.start()
         _worker_started = True
+        # 짧게 살다 죽는 프로세스를 위한 보험. 아래 flush_audit 설명 참조.
+        atexit.register(_flush_at_exit)
+
+
+# 종료 시 감사 큐를 비우는 데 기다릴 최대 시간(초).
+FLUSH_TIMEOUT_SECONDS = float(os.getenv("LENINBOT_LLM_AUDIT_FLUSH_SECONDS", "5"))
+
+
+def flush_audit(timeout: float = FLUSH_TIMEOUT_SECONDS) -> bool:
+    """큐에 남은 감사 행이 DB에 들어갈 때까지 기다린다.
+
+    기록 워커는 daemon 스레드다. 오래 사는 서비스에서는 문제가 없지만, 배치
+    스크립트처럼 한 번 돌고 끝나는 프로세스는 워커가 큐를 비우기 전에 죽어서
+    행이 통째로 사라진다. 프록시 쪽 행(surface=proxy)은 남으니 지출 자체는
+    보존되지만, '누가 썼는지'(caller)를 들고 있는 것은 이쪽 행이라 CLI 실행만
+    비용 귀속이 빠진 채로 남았다.
+
+    큐 자신의 조건변수를 쓰므로 Queue.join()의 타임아웃 있는 판본과 같다.
+    큐가 시간 안에 비면 True.
+    """
+    if not _worker_started:
+        return True
+    deadline = time.monotonic() + max(0.0, timeout)
+    with _DB_QUEUE.all_tasks_done:
+        while _DB_QUEUE.unfinished_tasks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "llm audit flush timed out; %d row(s) dropped",
+                    _DB_QUEUE.unfinished_tasks,
+                )
+                return False
+            _DB_QUEUE.all_tasks_done.wait(remaining)
+    return True
+
+
+def _flush_at_exit() -> None:
+    # atexit에서는 절대 예외를 올리지 않는다 — 종료 경로를 깨는 것보다 감사
+    # 행 몇 개를 잃는 편이 낫다.
+    try:
+        flush_audit()
+    except Exception:
+        pass
 
 
 def _emit(row: dict, *, warn: bool = False) -> None:

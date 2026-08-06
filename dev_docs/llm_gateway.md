@@ -168,3 +168,15 @@ Razvedchik의 독자 `cloud_llm.py`는 2026-08-05 삭제했다. 댓글·관찰·
 `tests/test_llm_gateway.py` (허메틱 22케이스): provider 추론, 비용 추정(양쪽 토큰
 의미론·dated 모델 프리픽스·미지 모델 None), 정책(shadow/enforce/예산/fail-open),
 LoopState seam 전달. 루프 계약 회귀는 기존 `test_*_loop_rounds.py`가 잡는다.
+
+## 짧게 사는 프로세스의 감사 유실 (2026-08-06)
+
+DB 싱크 워커는 daemon 스레드다. 오래 사는 서비스에서는 문제가 없지만, 배치
+스크립트처럼 한 번 돌고 끝나는 프로세스는 워커가 큐를 비우기 전에 죽어서 행이
+통째로 사라졌다. 프록시 쪽 행(`surface=proxy`)은 남으니 지출 자체는 보존되지만,
+`caller`를 들고 있는 것은 in-process 행이라 CLI 실행만 비용 귀속이 빠졌다.
+
+`gateway.flush_audit(timeout)`이 큐가 빌 때까지 기다린다. 워커가 처음 뜰 때
+`atexit`에 자동으로 걸리므로 호출부가 따로 부를 필요는 없다. 대기 상한은
+`LENINBOT_LLM_AUDIT_FLUSH_SECONDS`(기본 5초)이고, 시간을 넘기면 남은 행 수를
+경고로 남기고 포기한다 — 종료 경로를 붙잡고 있는 것보다 낫다.
