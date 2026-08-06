@@ -209,6 +209,14 @@ def main() -> int:
     check("article로 감싼다", html.startswith("<article>") and html.rstrip().endswith("</article>"))
     check("첫 h1이 문서 제목이다", re.search(r"<article>\s*<h1>", html) is not None)
     check("문서마다 h1이 있다", html.count("<h1>") == 1 + len(docs))
+    # 참고 문헌 16건이 쓰는 서두 틀 — 제목, byline 한 줄, 해제와 서지 목록을
+    # 담은 엮은이 주 상자. 손으로 쓴 문서와 이 파이프라인의 출력이 같아야 한다.
+    check("byline이 제목 바로 아래 온다",
+          re.search(r"</h1>\s*<p class=\"doc-byline\"><strong>", html) is not None)
+    check("엮은이 주 상자가 해제 뒤에 서지 목록을 담는다",
+          re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<ul><li>", html)
+          is not None)
+    check("서두에 hr을 두지 않는다", "<hr" not in html)
     check("h5는 h2로 내려간다", "<h5" not in html and html.count("<h2>") > 0)
     check("인라인 스타일이 없다", "style=" not in html)
     check("금지 태그가 없다",

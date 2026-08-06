@@ -141,6 +141,12 @@ def load_spec(spec_id: str) -> dict:
     for key in ("id", "title", "documents", "glossary", "output"):
         if key not in spec:
             raise SpecError(f"{spec_id}: spec is missing {key!r}")
+    # 서두 세 필드. 형태가 어긋나면 조립 때 조용히 빠지거나 글자 단위로
+    # 풀려 나가므로 여기서 잡는다.
+    for key, kind in (("byline", str), ("bylineNote", str),
+                      ("headnote", list), ("bibliography", list)):
+        if key in spec and not isinstance(spec[key], kind):
+            raise SpecError(f"{spec_id}: {key!r}는 {kind.__name__}이어야 한다")
     # A spec-level source is the default for its documents; a spec whose
     # documents each name their own does not need one.
     missing = [d.get("id") for d in spec["documents"]
@@ -635,14 +641,27 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     # 서식 문제가 아니라 정확성 문제다.
     label = "엮은이 주" if (spec.get("docLang") or "ko") == "ko" else "Editorial note"
 
-    def _aside(paras: list[str]) -> str:
+    def _aside(paras: list[str], items: list[str] | None = None) -> str:
         body = "".join(f"<p>{_esc(p)}</p>" for p in paras if p)
+        if items:
+            body += ("<ul>"
+                     + "".join(f"<li>{_esc(i)}</li>" for i in items if i)
+                     + "</ul>")
         return (f'<aside class="doc-editorial">'
                 f'<p class="doc-editorial-label">{label}</p>{body}</aside>')
 
+    # 참고 문헌의 서두는 문서 16건이 모두 같은 틀을 쓴다: 제목, 저자·부제 한 줄,
+    # 그리고 해제 문단과 서지 목록을 함께 담은 엮은이 주 상자. 손으로 쓴 문서와
+    # 이 파이프라인이 뽑은 문서가 화면에서 갈라지면 안 되므로 여기서도 같은
+    # 마크업을 낸다. 규칙은 data/commulingo/docs/README.md에 있다.
     out = ["<article>", f"<h1>{_esc(spec['title'])}</h1>"]
-    if spec.get("headnote"):
-        out.append(_aside(spec["headnote"]))
+    if spec.get("byline"):
+        line = f'<strong>{_esc(spec["byline"])}</strong>'
+        if spec.get("bylineNote"):
+            line += f', {_esc(spec["bylineNote"])}'
+        out.append(f'<p class="doc-byline">{line}</p>')
+    if spec.get("headnote") or spec.get("bibliography"):
+        out.append(_aside(spec.get("headnote") or [], spec.get("bibliography")))
 
     for doc in docs:
         out.append(f"<h1>{_esc(doc['titleKo'])}</h1>")
