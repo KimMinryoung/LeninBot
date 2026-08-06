@@ -218,7 +218,8 @@ def main() -> int:
     # 페이지 제목 h1 뒤쪽만 본다. 문서가 하나인 스펙은 제목이 스펙 제목과
     # 같아서, 전체 문자열로 재면 페이지 제목이 문서 제목으로 잘못 잡힌다.
     after_title = html.split("</h1>", 1)[1]
-    titled = [d for d in docs if d.get("heading", True)]
+    # 주석 문서는 h1이 아니라 주석 절의 h2를 제목으로 쓴다.
+    titled = [d for d in docs if d.get("heading", True) and not d.get("notes")]
     check("문서 제목 h1이 heading 설정을 따른다",
           all(f"<h1>{d['titleKo']}</h1>" in after_title for d in titled)
           and not any(f"<h1>{d['titleKo']}</h1>" in after_title
@@ -231,6 +232,20 @@ def main() -> int:
           re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<ul><li>", html)
           is not None)
     check("서두에 hr을 두지 않는다", "<hr" not in html)
+    # 주석은 서고 전체가 한 양식을 쓴다: 본문의 [n]은 앵커이고 항목에는 돌아오는
+    # 화살표가 달리며, 목록에는 크기·색이 걸린 notes-list 클래스가 붙는다.
+    if any(d.get("notes") for d in docs):
+        refs = set(re.findall(r'class="note-ref" id="ref-([^"]+)"', html))
+        items = set(re.findall(r'<li id="note-([^"]+)"', html))
+        backs = set(re.findall(r'back-link" href="#ref-([^"]+)"', html))
+        check("주석 목록에 notes-list 클래스가 붙는다",
+              '<ol class="notes-list">' in html
+              and '<section class="notes"' in html)
+        # 스텁 본문에는 [n]이 없으므로 개수가 아니라 정합성만 본다.
+        check("본문 [n]이 주석 항목으로 연결된다",
+              refs <= items, f"{sorted(refs - items)[:3]}")
+        check("돌아오는 화살표가 끊기지 않는다",
+              backs <= refs, f"{sorted(backs - refs)[:3]}")
     # 소제목이 있는 문서만 h2를 요구한다. 조항이 소제목 없이 이어지는 결의문
     # (21개 조건 같은)은 h2가 하나도 없는 것이 맞다.
     has_headings = any(b["tag"] in ("h2", "h3", "h4", "h5")

@@ -663,7 +663,59 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     if spec.get("headnote") or spec.get("bibliography"):
         out.append(_aside(spec.get("headnote") or [], spec.get("bibliography")))
 
+    # 주석은 서고 전체가 한 양식을 쓴다: 본문의 [3]은 뒤쪽 주석 항목으로 가는
+    # 앵커이고, 항목에는 본문으로 돌아오는 화살표가 달린다. 스펙이 주석 문서를
+    # 따로 두면("notes": true) 그 문서를 주석 절로 조립하고, 나머지 문서의
+    # 대괄호 숫자를 그 항목에 걸어 준다. 양식은
+    # data/commulingo/docs/README.md의 「주석」 절에 있다.
+    has_notes = any(d.get("notes") for d in docs)
+    seen_refs: set[str] = set()
+
+    def link_refs(text: str) -> str:
+        if not has_notes:
+            return text
+        seen_refs.update(re.findall(r"\[(\d{1,3})\]", text))
+        return re.sub(
+            r"\[(\d{1,3})\]",
+            lambda m: (f'<a class="note-ref" id="ref-{m.group(1)}" '
+                       f'href="#note-{m.group(1)}">[{m.group(1)}]</a>'),
+            text)
+
+    def render_notes(doc: dict) -> list[str]:
+        rows = []
+        auto = 0
+        for i, block in enumerate(doc["blocks"]):
+            idx = doc["offset"] + i
+            got = translated.get(idx)
+            if not got:
+                raise SpecError(f"조립 중 누락된 블록: {idx}")
+            text = " ".join(fix(ln) for ln in got).strip()
+            # 항목 번호는 원문이 매긴 것을 쓴다. 본문의 [n]과 맞아야 하므로
+            # 순서로 다시 매기지 않는다 — 저본이 한 항목을 빠뜨렸을 때 그
+            # 뒤가 통째로 어긋난다.
+            m = re.match(r"(\d{1,3})[\.\)]\s*(.+)", text, re.S)
+            if m:
+                num, body = m.group(1), m.group(2)
+            else:
+                auto += 1
+                num, body = str(auto), text
+            # 본문에서 부르지 않는 항목(저본이 표제나 발표 경위에 단 주)에는
+            # 돌아갈 자리가 없다. 그런 항목에 화살표를 달면 아무 데도 가지
+            # 않는 링크가 된다.
+            back = (f' <a class="back-link" href="#ref-{num}" '
+                    f'aria-label="본문으로 돌아가기">↩</a>'
+                    if num in seen_refs else "")
+            rows.append(
+                f'<li id="note-{num}"><span class="note-text">{_esc(body)}'
+                f'</span>{back}</li>')
+        return ['<section class="notes" aria-labelledby="notes-heading">',
+                f'<h2 id="notes-heading">{_esc(doc["titleKo"])}</h2>',
+                '<ol class="notes-list">', *rows, "</ol>", "</section>"]
+
     for doc in docs:
+        if doc.get("notes"):
+            out.extend(render_notes(doc))
+            continue
         # 문서가 하나뿐인 스펙에서는 문서 제목이 곧 페이지 제목이라 h1을 두 번
         # 찍게 된다. 그런 스펙은 문서에 "heading": false를 두어 끈다.
         if doc.get("heading", True):
@@ -689,13 +741,13 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
             if tag in ("h1", "h2", "h3", "h4"):
                 out.append(f"<{tag}>{_esc(' '.join(lines))}</{tag}>")
             elif tag == "blockquote":
-                inner = "".join(f"<p>{_esc(ln)}</p>" for ln in lines)
+                inner = "".join(f"<p>{link_refs(_esc(ln))}</p>" for ln in lines)
                 out.append(f"<blockquote>{inner}</blockquote>")
             elif tag == "li":
                 if not in_list:
                     out.append("<ul>")
                     in_list = True
-                out.append(f"<li>{_esc(' '.join(lines))}</li>")
+                out.append(f"<li>{link_refs(_esc(' '.join(lines)))}</li>")
             elif tag == "table":
                 # `lines` holds the translated cell vocabulary, in the same
                 # order the adapter collected it; the grid itself never went
@@ -709,7 +761,7 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
                     for row in block.get("rows", []))
                 out.append(f"<table>{body}</table>")
             else:
-                out.append("".join(f"<p>{_esc(ln)}</p>" for ln in lines))
+                out.append("".join(f"<p>{link_refs(_esc(ln))}</p>" for ln in lines))
         if in_list:
             out.append("</ul>")
             in_list = False
