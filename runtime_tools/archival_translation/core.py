@@ -664,7 +664,10 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
         out.append(_aside(spec.get("headnote") or [], spec.get("bibliography")))
 
     for doc in docs:
-        out.append(f"<h1>{_esc(doc['titleKo'])}</h1>")
+        # 문서가 하나뿐인 스펙에서는 문서 제목이 곧 페이지 제목이라 h1을 두 번
+        # 찍게 된다. 그런 스펙은 문서에 "heading": false를 두어 끈다.
+        if doc.get("heading", True):
+            out.append(f"<h1>{_esc(doc['titleKo'])}</h1>")
         if doc.get("note"):
             out.append(_aside([doc["note"]]))
         # What a source tag becomes in the fragment. The default suits

@@ -208,7 +208,16 @@ def main() -> int:
     html = at.assemble(spec, docs, stub_all)
     check("article로 감싼다", html.startswith("<article>") and html.rstrip().endswith("</article>"))
     check("첫 h1이 문서 제목이다", re.search(r"<article>\s*<h1>", html) is not None)
-    check("문서마다 h1이 있다", html.count("<h1>") == 1 + len(docs))
+    # 문서 제목 h1은 heading 설정을 따른다. 문서가 하나뿐인 스펙은 그 제목이
+    # 곧 페이지 제목이라 heading:false로 끄고, 그때는 h1이 하나만 나와야 한다.
+    # 페이지 제목 h1 뒤쪽만 본다. 문서가 하나인 스펙은 제목이 스펙 제목과
+    # 같아서, 전체 문자열로 재면 페이지 제목이 문서 제목으로 잘못 잡힌다.
+    after_title = html.split("</h1>", 1)[1]
+    titled = [d for d in docs if d.get("heading", True)]
+    check("문서 제목 h1이 heading 설정을 따른다",
+          all(f"<h1>{d['titleKo']}</h1>" in after_title for d in titled)
+          and not any(f"<h1>{d['titleKo']}</h1>" in after_title
+                      for d in docs if not d.get("heading", True)))
     # 참고 문헌 16건이 쓰는 서두 틀 — 제목, byline 한 줄, 해제와 서지 목록을
     # 담은 엮은이 주 상자. 손으로 쓴 문서와 이 파이프라인의 출력이 같아야 한다.
     check("byline이 제목 바로 아래 온다",
