@@ -224,6 +224,9 @@ def main() -> int:
     check("blockquote 안은 p로 감싼다",
           all("<p>" in seg[:40] for seg in html.split("<blockquote>")[1:]))
     expect_spec_error(
+        "frozen 스펙은 재실행을 거부한다",
+        lambda: at.run({**spec, "frozen": "테스트"}))
+    expect_spec_error(
         "블록이 비면 조립이 실패한다",
         lambda: at.assemble(spec, docs,
                             {k: v for k, v in stub_all.items() if k != next(iter(stub_all))}))

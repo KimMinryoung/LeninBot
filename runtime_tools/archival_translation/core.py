@@ -913,6 +913,18 @@ def run(spec: dict, opts: Options | None = None,
     opts = opts or Options()
     emit = progress or (lambda _e: None)
 
+    # 끝난 스펙은 다시 돌리지 않는다. 조립기는 output을 통째로 다시 쓰므로,
+    # 공개된 문서에 스펙이 재현할 수 없는 손질(스펙 밖에서 더한 문서, 손으로
+    # 고친 문구)이 들어간 뒤의 재실행은 고침이 아니라 되돌림이다. 새 문헌은
+    # 새 스펙으로 옮기면 되고, 이 잠금은 그 길을 막지 않는다.
+    if spec.get("frozen"):
+        raise SpecError(
+            f"{spec.get('id')}: 완료된 스펙이라 재실행이 막혀 있다\n"
+            f"  사유: {spec['frozen']}\n"
+            f"  출력: {spec.get('output')}\n"
+            f"  새 문헌은 새 스펙을 만들어 옮긴다. 이 문서를 정말 다시 만들어야 한다면\n"
+            f"  출력 파일과 스펙이 어긋난 곳을 먼저 맞춘 뒤 frozen을 지울 것.")
+
     prepared = plan(spec, opts)
     docs, glossary, chunks = prepared["_docs"], prepared["_glossary"], prepared["_chunks"]
 
