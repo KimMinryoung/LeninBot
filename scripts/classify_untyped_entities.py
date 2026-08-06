@@ -87,11 +87,6 @@ Entities to classify:
 
 def classify_batch(entities: list[dict]) -> list[dict]:
     """Send a batch to Gemini and return classifications."""
-    from google import genai
-    from google.genai.types import GenerateContentConfig
-
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
     # Prepare input — strip long summaries for token efficiency
     batch_input = []
     for e in entities:
@@ -104,13 +99,14 @@ def classify_batch(entities: list[dict]) -> list[dict]:
 
     prompt = CLASSIFICATION_PROMPT + json.dumps(batch_input, ensure_ascii=False)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=GenerateContentConfig(temperature=0.0, max_output_tokens=4096),
-    )
+    from llm.call_registry import generate_sync
 
-    text = response.text.strip()
+    text = (generate_sync("kg_entity_classification", prompt) or "").strip()
+    if not text:
+        raise RuntimeError(
+            "kg_entity_classification: 게이트웨이가 본문을 돌려주지 않았다 "
+            "(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
+        )
     # Strip markdown fences if present
     if text.startswith("```"):
         text = text.split("\n", 1)[1]

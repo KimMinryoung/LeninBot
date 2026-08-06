@@ -17,7 +17,6 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 import redis
-import requests
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,12 +27,10 @@ from secrets_loader import get_secret
 
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", ROOT.parent / "frontend")).resolve()
 FRONTEND_ENV = FRONTEND_DIR / ".env"
-DEFAULT_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEFAULT_MODEL = os.getenv("DB_CONTENT_TRANSLATION_MODEL", "deepseek-v4-flash")
-DEFAULT_MAX_TOKENS = int(os.getenv("DB_CONTENT_TRANSLATION_MAX_TOKENS", "12000"))
-# 빈 응답을 만났을 때 예산을 늘려 한 번 더 부를 때의 상한.
-MAX_TOKEN_CEILING = int(os.getenv("DB_CONTENT_TRANSLATION_MAX_TOKENS_CEILING", "32000"))
-TIMEOUT_SECONDS = 180
+# 프로바이더·모델·예산·타임아웃·thinking은 전부 레지스트리 항목이 정한다
+# (config/llm_call_sites.json). 여기에 base_url이나 키가 없는 것이 정상이다 —
+# 실키는 llm_proxy에만 있고 호출은 게이트웨이를 지난다.
+FEATURE = "db_content_translation"
 
 TARGETS = {
     "posts": {
@@ -189,62 +186,18 @@ class TranslationCallError(RuntimeError):
     """
 
 
-def _post_completion(
-    *,
-    api_key: str,
-    base_url: str,
-    model: str,
-    system_prompt: str,
-    payload: dict[str, Any],
-    max_tokens: int,
-) -> tuple[str, str, dict[str, Any]]:
-    """한 번 호출하고 (본문, finish_reason, usage)를 그대로 돌려준다."""
-    response = requests.post(
-        f"{base_url}/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=TIMEOUT_SECONDS,
-    )
-    if not response.ok:
-        raise TranslationCallError(
-            f"DeepSeek request failed: HTTP {response.status_code}: {response.text[:1000]}"
-        )
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise TranslationCallError(
-            f"DeepSeek returned a non-JSON body ({exc}): {response.text[:500]!r}"
-        ) from exc
-    choices = data.get("choices") or []
-    if not choices:
-        raise TranslationCallError(
-            f"DeepSeek response carried no choices: {json.dumps(data, ensure_ascii=False)[:500]}"
-        )
-    message = choices[0].get("message") or {}
-    return (
-        (message.get("content") or "").strip(),
-        choices[0].get("finish_reason") or "",
-        data.get("usage") or {},
-    )
+def _generate(system_prompt: str, payload: dict[str, Any]) -> str:
+    """게이트웨이를 지나는 원샷 호출. 모델·예산·thinking은 레지스트리가 정한다."""
+    from llm.call_registry import generate_sync
+
+    return generate_sync(
+        FEATURE,
+        json.dumps(payload, ensure_ascii=False),
+        system=system_prompt,
+    ) or ""
 
 
-def _call_deepseek(row: dict[str, Any], *, label: str, model: str, base_url: str, max_tokens: int) -> dict[str, str]:
-    api_key = get_secret("DEEPSEEK_API_KEY", "") or ""
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is required")
+def _call_translator(row: dict[str, Any], *, label: str) -> dict[str, str]:
     if "selection_rationale" in row:
         system_prompt = SYSTEM_PROMPT + '\nFor curation entries, return strict JSON only, with exactly these keys: "title_en", "source_title_en", "selection_rationale_en", "context_en".'
         payload = {
@@ -263,31 +216,14 @@ def _call_deepseek(row: dict[str, Any], *, label: str, model: str, base_url: str
             "title": row.get("title") or "",
             "content": row.get("content") or "",
         }
-    budget = max_tokens
-    content = ""
-    finish_reason = ""
-    usage: dict[str, Any] = {}
-    # 빈 응답이 오면 예산을 한 번 늘려 다시 부른다. 추론 토큰이 max_tokens를
-    # 다 써 버리면 본문이 한 글자도 없이 finish_reason=length로 돌아오는데,
-    # 그것은 요청이 거부된 것이 아니라 예산이 모자란 것이므로 재시도가 맞다.
-    for attempt in (1, 2):
-        content, finish_reason, usage = _post_completion(
-            api_key=api_key, base_url=base_url, model=model,
-            system_prompt=system_prompt, payload=payload, max_tokens=budget,
-        )
-        if content or attempt == 2 or finish_reason not in ("length", "", None):
-            break
-        budget = min(budget * 2, MAX_TOKEN_CEILING)
-        if budget == max_tokens:
-            break
-        print(
-            f"  empty completion (finish_reason={finish_reason!r}, usage={usage}); "
-            f"retrying with max_tokens={budget}"
-        )
+    content = _generate(system_prompt, payload)
     if not content:
+        # generate_sync는 어떤 실패든 None으로 삼킨다. 원인(HTTP 오류, 정책
+        # 거부, 빈 완성)은 llm_gateway.audit 로그와 journald의 registry 경고에
+        # 남으므로, 여기서는 그쪽을 보라고 가리킨다.
         raise TranslationCallError(
-            f"empty completion from {model} "
-            f"(finish_reason={finish_reason!r}, usage={usage}, max_tokens={budget})"
+            f"{FEATURE}: 게이트웨이가 본문을 돌려주지 않았다 "
+            f"(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
         )
     try:
         if "selection_rationale" in row:
@@ -298,8 +234,7 @@ def _call_deepseek(row: dict[str, Any], *, label: str, model: str, base_url: str
         # 남겨야 다음 사람이 로그만 보고 어느 쪽인지 안다.
         raise TranslationCallError(
             f"could not parse the translation JSON ({exc}); "
-            f"finish_reason={finish_reason!r}, usage={usage}, {len(content)} chars, "
-            f"head={content[:200]!r}, tail={content[-200:]!r}"
+            f"{len(content)} chars, head={content[:200]!r}, tail={content[-200:]!r}"
         ) from exc
 
 
@@ -350,9 +285,6 @@ def translate_target(
     force: bool,
     dry_run: bool,
     select_only: bool,
-    model: str,
-    base_url: str,
-    max_tokens: int,
 ) -> tuple[int, str, list[str]]:
     target = TARGETS[target_name]
     env = _load_frontend_env()
@@ -375,13 +307,7 @@ def translate_target(
             # 사흘치 일기가 통째로 번역되지 않았다. 한 편이 안 되는 것과 전부
             # 멈추는 것은 다른 사고다.
             try:
-                translated = _call_deepseek(
-                    row,
-                    label=target["label"],
-                    model=model,
-                    base_url=base_url,
-                    max_tokens=max_tokens,
-                )
+                translated = _call_translator(row, label=target["label"])
             except Exception as exc:
                 failures.append(f"{target_name}#{row['id']}: {exc}")
                 print(f"failed {target_name}#{row['id']}: {exc}", file=sys.stderr)
@@ -405,9 +331,10 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="Retranslate even when *_en columns already exist.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--select-only", action="store_true", help="Only list selected rows; do not call the translation API.")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    # 모델을 바꿔 보려면 레지스트리 항목을 고치거나 환경변수
+    # LLM_SITE_DB_CONTENT_TRANSLATION_MODEL을 쓴다. 예전의
+    # --model/--base-url/--max-tokens는 레지스트리가 값을 쥔 뒤로 아무 효과가
+    # 없어서 없앴다 — 먹지 않는 플래그를 남겨 두는 편이 더 나쁘다.
     args = parser.parse_args()
 
     names = ["posts", "diary", "curation"] if args.kind == "all" else [args.kind]
@@ -423,9 +350,6 @@ def main() -> int:
                 force=args.force,
                 dry_run=args.dry_run,
                 select_only=args.select_only,
-                model=args.model,
-                base_url=args.base_url.rstrip("/"),
-                max_tokens=args.max_tokens,
             )
             changed_total += changed
             failures.extend(row_failures)

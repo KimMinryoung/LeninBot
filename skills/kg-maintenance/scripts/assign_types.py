@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 타입 없는 KG 엔티티에 Person/Organization/Location/Event/Concept 부여.
-배치 50개씩 처리. anthropic SDK 사용.
+배치 50개씩 처리. LLM 호출은 게이트웨이 경유(llm.call_registry).
 """
 import os
 import json
-import anthropic
 from neo4j import GraphDatabase
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -20,18 +19,20 @@ def get_untyped(session):
     )
     return [r["name"] for r in result if r["name"]]
 
-def classify_batch(client, names):
+def classify_batch(names):
     prompt = (
         "다음 엔티티 목록을 Person/Organization/Location/Event/Concept 중 하나로 분류하라.\n"
         "JSON 배열로만 응답. 예: [{\"name\": \"김정은\", \"type\": \"Person\"}, ...]\n\n"
         f"엔티티 목록:\n{json.dumps(names, ensure_ascii=False)}"
     )
-    response = client.messages.create(
-        model="claude-3-5-haiku-20241022",
-        max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    text = response.content[0].text.strip()
+    from llm.call_registry import generate_sync
+
+    text = (generate_sync("kg_type_assignment", prompt) or "").strip()
+    if not text:
+        raise RuntimeError(
+            "kg_type_assignment: 게이트웨이가 본문을 돌려주지 않았다 "
+            "(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
+        )
     # JSON 추출
     start = text.find("[")
     end = text.rfind("]") + 1
@@ -39,7 +40,6 @@ def classify_batch(client, names):
 
 def assign_types():
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     updated = 0
 
     with driver.session() as session:
@@ -50,7 +50,7 @@ def assign_types():
             batch = untyped[i:i+BATCH_SIZE]
             print(f"배치 {i//BATCH_SIZE + 1} 처리 중... ({len(batch)}개)")
             try:
-                classified = classify_batch(client, batch)
+                classified = classify_batch(batch)
                 for item in classified:
                     name = item.get("name")
                     etype = item.get("type")

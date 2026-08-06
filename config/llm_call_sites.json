@@ -102,7 +102,9 @@
     "temperature": 0.85,
     "max_tokens": 2048,
     "timeout": 120,
-    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
     "note": "Razvedchik Moltbook 댓글. 공통 executor·gateway 경유"
   },
   "razvedchik_observation": {
@@ -111,7 +113,9 @@
     "temperature": 0.9,
     "max_tokens": 2048,
     "timeout": 120,
-    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
     "note": "Razvedchik 관찰 포스트. 공통 executor·gateway 경유"
   },
   "razvedchik_reply": {
@@ -120,7 +124,9 @@
     "temperature": 0.8,
     "max_tokens": 2048,
     "timeout": 120,
-    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
     "note": "Razvedchik Moltbook 답글. 공통 executor·gateway 경유"
   },
   "razvedchik_debrief_scout": {
@@ -129,7 +135,9 @@
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
-    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
     "note": "Razvedchik 순찰 보고. 공통 executor·gateway 경유"
   },
   "razvedchik_debrief_commander": {
@@ -138,7 +146,9 @@
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
-    "env": ["RAZVEDCHIK_LLM_MODEL"],
+    "env": [
+      "RAZVEDCHIK_LLM_MODEL"
+    ],
     "note": "Razvedchik 디브리핑 지시. 공통 executor·gateway 경유"
   },
   "writer_research_digest": {
@@ -193,5 +203,61 @@
       "LIGHT_LLM_MODEL"
     ],
     "note": "보고서 표기 자동 교정의 스타소바 문맥 검수 — 잘못된 교정 번호 반환 (실패 시 기계 교정 유지). 2026-07-31 gemini-3.5-flash-lite→luna. 다섯 호출부 중 유일한 판단형이라 추론을 끄지 않고 low로 둔다"
+  },
+  "db_content_translation": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.1,
+    "max_tokens": 12000,
+    "timeout": 180,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "블로그 글·AI 일기·허브 큐레이션의 한→영 번역. scripts/translate_db_content.py 전용, 매일 research-document-translation.timer가 돌린다. thinking을 끈 이유는 vector_query_translation과 같다 — DeepSeek V4는 기본 ON이라 추론이 예산을 다 쓰고 본문 없이 200이 돌아온다. 2026-08-06 일기 #418(3145자)에서 실제로 났다: completion_tokens 12000이 전부 reasoning_tokens였고 본문 0자, finish_reason=length. json_mode가 필요해 Anthropic 호환으로는 못 옮기고 OpenAI 호환 경로에 extra_body로 넘긴다."
+  },
+  "research_markdown_translation": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.1,
+    "max_tokens": 20000,
+    "timeout": 240,
+    "note": "리서치 보고서 마크다운 한→영 번역. scripts/translate_research_markdown.py 및 이를 부르는 translate_research_documents.py 전용, research-document-translation.timer가 매일 돌린다. thinking은 일부러 건드리지 않는다(기본 ON) — 이 호출부는 그 상태로 20000 예산에서 잘 돌고 있었고, 사료 번역(archival_document_translation)에서 추론을 켠 쪽이 다의어 오역이 적었다. db_content_translation과 달리 json_mode가 아니라 마크다운을 그대로 받는다."
+  },
+  "kg_entity_classification": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "timeout": 120,
+    "json_mode": true,
+    "note": "지식그래프의 타입 없는 엔티티를 Person/Organization/... 으로 분류. scripts/classify_untyped_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+  },
+  "kg_entity_merge_grouping": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "temperature": 0.0,
+    "max_tokens": 8192,
+    "timeout": 120,
+    "json_mode": true,
+    "note": "지식그래프 중복 엔티티 이름 묶기. skills/kg-maintenance/scripts/merge_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+  },
+  "kg_edge_name_normalization": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "temperature": 0.0,
+    "max_tokens": 16384,
+    "timeout": 120,
+    "json_mode": true,
+    "note": "지식그래프 엣지 이름 정규화. skills/kg-maintenance/scripts/normalize_edge_names.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+  },
+  "kg_type_assignment": {
+    "provider": "claude",
+    "model": "claude-3-5-haiku-20241022",
+    "temperature": 0.0,
+    "max_tokens": 2048,
+    "timeout": 120,
+    "json_mode": false,
+    "note": "지식그래프 엔티티 타입 배정(Neo4j 직접 갱신). skills/kg-maintenance/scripts/assign_types.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
   }
 }

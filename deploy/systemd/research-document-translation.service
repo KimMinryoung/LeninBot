@@ -9,7 +9,9 @@ User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
-LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
+# deepseek_api_key는 일부러 없다. 두 스크립트 모두 llm.call_registry를 지나고,
+# 실키는 leninbot-llm-proxy.service에만 있다("실키는 프록시에만"). 여기에 키를
+# 다시 얹으면 프록시를 우회할 수 있게 되고, 그 경로는 감사에도 정책에도 안 잡힌다.
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=-/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_research_documents.py --limit 0 --max-chars 0
 ExecStart=-/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/translate_db_content.py --kind all --limit 0

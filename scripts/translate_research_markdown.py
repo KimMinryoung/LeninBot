@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -26,10 +25,9 @@ from secrets_loader import get_secret
 
 RESEARCH_DIR = ROOT / "research"
 OUTPUT_DIR = RESEARCH_DIR / "en"
-DEFAULT_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEFAULT_MODEL = os.getenv("RESEARCH_TRANSLATION_MODEL", "deepseek-v4-flash")
-DEFAULT_MAX_TOKENS = int(os.getenv("RESEARCH_TRANSLATION_MAX_TOKENS", "20000"))
-TIMEOUT_SECONDS = 240
+# 모델·예산·타임아웃은 레지스트리 항목이 정한다 (config/llm_call_sites.json).
+# 실키는 llm_proxy에만 있고, 호출은 게이트웨이를 지나 감사에 남는다.
+FEATURE = "research_markdown_translation"
 
 SYSTEM_PROMPT = """You are a meticulous Korean-to-English translation editor for political economy research.
 
@@ -125,42 +123,25 @@ def _validate_translation(source: str, translated: str, *, max_hangul_ratio: flo
         )
 
 
-def _call_deepseek(markdown: str, *, model: str, base_url: str, max_tokens: int) -> str:
-    api_key = get_secret("DEEPSEEK_API_KEY", "") or ""
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is required")
+def _call_translator(markdown: str) -> str:
+    """게이트웨이를 지나는 원샷 호출."""
+    from llm.call_registry import generate_sync
 
-    response = requests.post(
-        f"{base_url}/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": markdown},
-            ],
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-            "stream": False,
-        },
-        timeout=TIMEOUT_SECONDS,
-    )
-    if not response.ok:
-        raise RuntimeError(f"DeepSeek request failed: HTTP {response.status_code}: {response.text[:1000]}")
-    data: dict[str, Any] = response.json()
-    return _strip_outer_fence(data["choices"][0]["message"].get("content") or "")
+    text = generate_sync(FEATURE, markdown, system=SYSTEM_PROMPT)
+    if not text:
+        # generate_sync는 실패 원인을 삼키고 None을 준다. HTTP 오류·정책 거부·
+        # 빈 완성 어느 쪽인지는 llm_gateway.audit과 [llm-registry] 경고에 남는다.
+        raise RuntimeError(
+            f"{FEATURE}: 게이트웨이가 본문을 돌려주지 않았다 "
+            f"(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
+        )
+    return _strip_outer_fence(text)
 
 
 def translate_one(
     source_path: Path,
     *,
     output_dir: Path,
-    model: str,
-    base_url: str,
-    max_tokens: int,
     max_hangul_ratio: float,
     force: bool,
     dry_run: bool,
@@ -171,9 +152,9 @@ def translate_one(
         return output_path
 
     source = source_path.read_text(encoding="utf-8")
-    print(f"translating: {source_path.name} ({len(source):,} chars) with {model}")
+    print(f"translating: {source_path.name} ({len(source):,} chars) via {FEATURE}")
     translated = normalize_translated_markdown(
-        _call_deepseek(source, model=model, base_url=base_url, max_tokens=max_tokens)
+        _call_translator(source)
     )
     _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
     if dry_run:
@@ -189,9 +170,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Translate research/*.md documents with DeepSeek V4 Flash.")
     parser.add_argument("targets", nargs="+", help="Research slugs or paths, e.g. alt-economy-04")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--max-hangul-ratio", type=float, default=0.03)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -203,9 +181,6 @@ def main() -> int:
             translate_one(
                 _slug_to_path(target),
                 output_dir=Path(args.output_dir),
-                model=args.model,
-                base_url=args.base_url.rstrip("/"),
-                max_tokens=args.max_tokens,
                 max_hangul_ratio=args.max_hangul_ratio,
                 force=args.force,
                 dry_run=args.dry_run,

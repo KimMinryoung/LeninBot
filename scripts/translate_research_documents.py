@@ -23,10 +23,8 @@ if str(ROOT) not in sys.path:
 import research_store
 from db import execute as db_execute, query as db_query
 from scripts.translate_research_markdown import (
-    DEFAULT_BASE_URL,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL,
-    _call_deepseek,
+    FEATURE,
+    _call_translator,
     _validate_translation,
     normalize_translated_markdown,
 )
@@ -92,9 +90,6 @@ def main() -> int:
     parser.add_argument("--max-chars", type=int, default=60_000, help="Skip rows longer than this many source chars. Use 0 for no cap.")
     parser.add_argument("--force", action="store_true", help="Retranslate even when markdown_en already exists.")
     parser.add_argument("--dry-run", action="store_true", help="Only list selected rows; do not call the translation API.")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--max-hangul-ratio", type=float, default=0.03)
     args = parser.parse_args()
 
@@ -111,12 +106,9 @@ def main() -> int:
         slug = row["slug"]
         markdown = row["markdown"]
         try:
-            print(f"translating {slug} ({len(markdown):,} chars) with {args.model}")
-            translated = _call_deepseek(
+            print(f"translating {slug} ({len(markdown):,} chars) via {FEATURE}")
+            translated = _call_translator(
                 markdown,
-                model=args.model,
-                base_url=args.base_url.rstrip("/"),
-                max_tokens=args.max_tokens,
             )
             translated = normalize_translated_markdown(translated)
             _validate_translation(markdown, translated, max_hangul_ratio=args.max_hangul_ratio)
