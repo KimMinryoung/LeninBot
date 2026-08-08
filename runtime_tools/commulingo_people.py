@@ -1059,6 +1059,28 @@ def _localized(value, lang: str) -> str:
     return ""
 
 
+_SECTION_YEAR_RE = re.compile(r"(1[6-9]\d\d|20[0-2]\d)")
+
+
+def _section_sort_order(patch: dict, heading, fallback: int) -> int:
+    """Chronological key for a person section, as YYYYMM (MM=00 for year-only).
+
+    Sections render in sort_order, so this is what makes a life story read front
+    to back. An explicit sortOrder wins; otherwise the earliest year in the
+    heading stands in, which is right for the "... (1898-1918)" and "1991년 8월,
+    ..." heading shapes the sections actually use. Appending after the current
+    last row is the last resort, and it is the one that used to put a newly
+    written childhood section below a death scene.
+    """
+    if isinstance(patch.get("sortOrder"), int):
+        return patch["sortOrder"]
+    for lang in ("ko", "en"):
+        match = _SECTION_YEAR_RE.search(_localized(heading, lang))
+        if match:
+            return int(match.group(1)) * 100
+    return fallback
+
+
 def _nationality_values(patch: dict, key: str):
     """Extract (code, label_ko, label_en) for a citizenship/origin patch node.
 
@@ -2484,15 +2506,14 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
                 "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_person_sections WHERE person_id = %s",
                 (target_id,),
             )
-            next_sort = cur.fetchone()["next_sort"]
+            next_sort = _section_sort_order(patch, heading, cur.fetchone()["next_sort"])
             cur.execute(
                 """INSERT INTO commulingo_person_sections
                       (person_id, slug, sort_order, heading_ko, heading_en,
                        body_ko, body_en, sources, updated_at)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
                 (
-                    target_id, slug,
-                    patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
+                    target_id, slug, next_sort,
                     _localized(heading, "ko"), _localized(heading, "en"),
                     _localized(body, "ko"), _localized(body, "en"),
                     json.dumps(patch.get("sources") or [], ensure_ascii=False),
@@ -3313,7 +3334,14 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "slug": {"type": "string"},
             "heading": _BILINGUAL_TEXT_SCHEMA,
             "body": _SECTION_BODY_SCHEMA,
-            "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
+            "sort_order": {"type": ["integer", "null"], "description": (
+                "Chronological key: YYYYMM of the period the section opens on, with MM=00 "
+                "when only the year is known (1898 -> 189800, 1991-08 -> 199108). Sections "
+                "render in this order, so a life story reads front to back no matter which "
+                "one was written first. Omit or null only when the section has no period at "
+                "all; the year in the heading is then used, and a bare append is the last "
+                "resort."
+            )},
             "citations": _CITATIONS_SCHEMA,
         },
         "required": ["action", "person_id", "slug", "heading", "body", "citations"],
