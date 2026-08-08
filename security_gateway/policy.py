@@ -68,6 +68,11 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "commulingo_people": "read",
     # Runner-local typed discovery terminal; validates through read-only duplicate lookup.
     "commulingo_candidate_select": "read",
+    # Runner-local typed terminal for "this step honestly needs no write". Writes
+    # nothing; it only sets a box the runner reads to close the run as complete.
+    # Unregistered until 2026-08-08, so every call was denied as uncategorized and
+    # the curator paid retry rounds for a conclusion it had already reached.
+    "commulingo_no_edit": "read",
     "check_inbox": "read",
     "check_wallet": "wallet_read",
     # Writes / publication

@@ -2673,7 +2673,17 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
     "bio": (380, 900),
     "moment": (140, 300),
     "fate_label": (22, 50),
-    "event_note": (90, 200),
+    # A ceiling is a refusal boundary above the target, but at (90, 200) this one
+    # sat exactly ON its target: sentence_budget prescribes one sentence and
+    # DENSE_SENTENCE_CHARS prices one at 90/200, so a slightly-denser-than-average
+    # sentence bounced on arrival. note.en was the largest length-rejection bucket
+    # on the site over 2026-08-01..08-08 (15 of 40), every draft between 201 and
+    # 253 characters, plus 4 note.ko between 92 and 101. Raised to one dense
+    # sentence plus ~25% headroom; sentence_budget still returns 1, so the
+    # prescription is unchanged and notes are not meant to get longer. (Stored
+    # corpus on 2026-08-08, 1,072 notes: ko p50 58 / en p50 140 — the typical note
+    # is nowhere near either number.)
+    "event_note": (110, 250),
     "definition": (400, 900),
     # A section body is the one long-form field, and it was the one field left
     # out of this table: no maxLength on the tool schema, no save-time check,
