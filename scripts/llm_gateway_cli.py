@@ -5,6 +5,7 @@
   venv/bin/python scripts/llm_gateway_cli.py spend --days 7
   venv/bin/python scripts/llm_gateway_cli.py tail -n 30
   venv/bin/python scripts/llm_gateway_cli.py set enforce true
+  venv/bin/python scripts/llm_gateway_cli.py unset enforce
   venv/bin/python scripts/llm_gateway_cli.py set daily_budget_usd 25
 
 DB-backed commands read llm_audit_log and need DB credentials (read-only is
@@ -15,20 +16,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from llm.gateway import CONFIG_PATH, _DEFAULTS, load_policy  # noqa: E402
+from llm.gateway import (  # noqa: E402
+    DEFAULT_CONFIG_PATH,
+    LOCAL_CONFIG_PATH,
+    _DEFAULTS,
+    load_policy,
+)
 
 _SETTABLE = set(_DEFAULTS)
 
 
 def cmd_status(_args) -> int:
     policy = load_policy()
+    print(f"defaults: {DEFAULT_CONFIG_PATH}")
+    print(f"local overrides: {LOCAL_CONFIG_PATH}")
     print("policy:", json.dumps(policy, ensure_ascii=False, indent=2))
     try:
         from db import query
@@ -101,6 +111,36 @@ def cmd_tail(args) -> int:
     return 0
 
 
+def _read_local_overrides() -> dict:
+    if not LOCAL_CONFIG_PATH.exists():
+        return {}
+    data = json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("local config top-level JSON must be an object")
+    return data
+
+
+def _write_local_overrides(data: dict) -> None:
+    LOCAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{LOCAL_CONFIG_PATH.name}.",
+        suffix=".tmp",
+        dir=str(LOCAL_CONFIG_PATH.parent),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, 0o664)
+        os.replace(tmp_path, LOCAL_CONFIG_PATH)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
 def cmd_set(args) -> int:
     if args.key not in _SETTABLE:
         print(f"unknown key {args.key!r}; settable: {', '.join(sorted(_SETTABLE))}")
@@ -109,13 +149,23 @@ def cmd_set(args) -> int:
         value = json.loads(args.value)
     except json.JSONDecodeError:
         value = args.value  # bare strings allowed
-    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
+    raw = _read_local_overrides()
     raw[args.key] = value
-    merged = {**_DEFAULTS, **raw}
-    CONFIG_PATH.write_text(
-        json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_local_overrides(raw)
     print(f"{args.key} = {json.dumps(value, ensure_ascii=False)} (hot-reloaded on next call)")
+    return 0
+
+
+def cmd_unset(args) -> int:
+    if args.key not in _SETTABLE:
+        print(f"unknown key {args.key!r}; settable: {', '.join(sorted(_SETTABLE))}")
+        return 1
+    raw = _read_local_overrides()
+    existed = args.key in raw
+    raw.pop(args.key, None)
+    _write_local_overrides(raw)
+    state = "removed" if existed else "already inherited"
+    print(f"{args.key}: local override {state}; tracked default applies on next call")
     return 0
 
 
@@ -130,10 +180,16 @@ def main() -> int:
     p_set = sub.add_parser("set")
     p_set.add_argument("key")
     p_set.add_argument("value")
+    p_unset = sub.add_parser("unset")
+    p_unset.add_argument("key")
     args = parser.parse_args()
-    return {"status": cmd_status, "spend": cmd_spend, "tail": cmd_tail, "set": cmd_set}[
-        args.cmd
-    ](args)
+    return {
+        "status": cmd_status,
+        "spend": cmd_spend,
+        "tail": cmd_tail,
+        "set": cmd_set,
+        "unset": cmd_unset,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-05 (키 격리, 외부 SDK 계측, readiness 보강).
+최종 확인: 2026-08-08 (Git 기본값과 host-local 운영 오버라이드 분리).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -62,16 +62,36 @@ OpenAI 호환과 Gemini는 prompt_tokens가 캐시 히트를 **포함**한다. D
 가격은 [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)의
 2026-08-05 standard tier를 기준으로 `provider_registry.GEMINI_PRICING`에 둔다.
 
-## 정책 (config/llm_gateway.json, mtime 핫리로드)
+## 정책 설정 계층 (mtime 핫리로드)
+
+정책은 세 계층을 순서대로 병합한다.
+
+1. `llm/gateway.py`의 코드 fallback
+2. Git이 추적하는 `config/llm_gateway.defaults.json` — 권장 기본값과 배포 토폴로지
+3. Git에서 제외한 `config/llm_gateway.local.json` — 해당 호스트의 가변 운영값
+
+운영 CLI는 local 파일만 원자적으로 수정한다. 따라서 예산·차단 목록·kill switch를
+바꿔도 작업트리가 더러워지지 않고, `git pull`이 호스트 정책을 덮어쓰지 않는다.
+local 파일이 없거나 특정 key가 없으면 tracked default를 그대로 상속한다.
 
 ```json
 {
-  "enforce": false,               // false = shadow (would_deny 기록만)
+  "enforce": true,                // false로 local override하면 shadow
   "block_all": false,             // kill switch
   "blocked_providers": [],
   "blocked_models": [],
   "daily_budget_usd": null,       // UTC 일일 총액 캡
   "daily_budget_per_provider": {} // {"claude": 20.0} 형태
+}
+```
+
+예를 들어 한 호스트에서 일시적으로 shadow 모드와 일일 총액 cap만 적용하려면 local
+파일은 아래 두 key만 가지면 된다.
+
+```json
+{
+  "enforce": false,
+  "daily_budget_usd": 25
 }
 ```
 
@@ -98,7 +118,8 @@ Gemini는 `models/{model}:method` URL 경로(퍼센트 인코딩 포함)에서 �
 venv/bin/python scripts/llm_gateway_cli.py status        # 정책 + 오늘 스펜드
 venv/bin/python scripts/llm_gateway_cli.py spend --days 7
 venv/bin/python scripts/llm_gateway_cli.py tail -n 30
-venv/bin/python scripts/llm_gateway_cli.py set daily_budget_usd 25   # 핫리로드
+venv/bin/python scripts/llm_gateway_cli.py set daily_budget_usd 25   # local override, 핫리로드
+venv/bin/python scripts/llm_gateway_cli.py unset daily_budget_usd    # tracked default 상속
 ```
 
 DB 명령은 자격증명 필요: `DB_PASSWORD="$(cat /run/credentials/leninbot-api.service/db_password)"`.
@@ -109,7 +130,9 @@ DB 명령은 자격증명 필요: `DB_PASSWORD="$(cat /run/credentials/leninbot-
 
 ## 프록시 라우팅 (2026-08-04 가동)
 
-`config/llm_gateway.json`의 `"proxy_base": "http://127.0.0.1:8110"`이 스위치다.
+effective policy의 `"proxy_base": "http://127.0.0.1:8110"`이 스위치다. 저장소의
+권장값은 `config/llm_gateway.defaults.json`에 있고, 다른 배포 토폴로지가 필요한
+호스트만 `config/llm_gateway.local.json`에서 override한다.
 설정되면 (env의 명시적 base URL 오버라이드가 없는 한) 관리형 클라이언트 전부가
 프록시 경유로 구성된다: bot_config의 6개 클라이언트(Claude·OpenAI·DeepSeek 양栈·
 Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언트, browser

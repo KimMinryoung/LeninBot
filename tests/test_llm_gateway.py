@@ -5,10 +5,13 @@ No DB, no API keys: the DB sink is disabled via LENINBOT_LLM_AUDIT_DB=0
 lookups are patched.
 """
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
@@ -102,7 +105,9 @@ class TestCheckLLMCall(unittest.TestCase):
         emit.assert_not_called()
 
     def test_block_all_shadow_records_but_allows(self):
-        with patch.object(gw, "load_policy", return_value=_policy(block_all=True)):
+        with patch.object(
+            gw, "load_policy", return_value=_policy(block_all=True, enforce=False)
+        ):
             with patch.object(gw, "_emit") as emit:
                 check_llm_call(surface="loop", caller="analyst", model="claude-fable-5")
         row = emit.call_args[0][0]
@@ -316,11 +321,11 @@ class TestRegistryProviderConnections(unittest.TestCase):
 class TestEvaluatePolicy(unittest.TestCase):
     """The shared decision function both evaluation points call."""
 
-    def test_allow_returns_none(self):
+    def test_allow_returns_none_with_enforce_posture(self):
         with patch.object(gw, "load_policy", return_value=_policy()):
             reason, enforce = gw.evaluate_policy(provider="claude", model="claude-fable-5")
         self.assertIsNone(reason)
-        self.assertFalse(enforce)
+        self.assertTrue(enforce)
 
     def test_deny_reason_with_enforce_flag(self):
         pol = _policy(blocked_providers=["kimi"], enforce=True)
@@ -420,16 +425,98 @@ class TestProxyHeaderInjection(unittest.TestCase):
 
 
 class TestPolicyLoading(unittest.TestCase):
+    def setUp(self):
+        gw._config_cache = None
+        gw._config_signature = None
+
+    def tearDown(self):
+        gw._config_cache = None
+        gw._config_signature = None
+
     def test_missing_config_uses_defaults(self):
-        with patch.object(gw, "CONFIG_PATH", Path("/nonexistent/llm_gateway.json")):
+        with patch.object(
+            gw, "DEFAULT_CONFIG_PATH", Path("/nonexistent/llm_gateway.defaults.json")
+        ), patch.object(
+            gw, "LOCAL_CONFIG_PATH", Path("/nonexistent/llm_gateway.local.json")
+        ):
             pol = gw.load_policy()
-        self.assertFalse(pol["enforce"])
+        self.assertTrue(pol["enforce"])
         self.assertFalse(pol["block_all"])
 
-    def test_repo_config_is_valid_shadow_default(self):
+    def test_repo_defaults_are_safe_and_enforced(self):
         pol = gw.load_policy()
-        self.assertIn("enforce", pol)
+        self.assertTrue(pol["enforce"])
         self.assertFalse(pol["block_all"], "repo default must not block calls")
+        self.assertEqual(pol["proxy_base"], "http://127.0.0.1:8110")
+
+    def test_local_overrides_take_precedence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            defaults = root / "llm_gateway.defaults.json"
+            local = root / "llm_gateway.local.json"
+            defaults.write_text(
+                json.dumps({"enforce": True, "daily_budget_usd": None}),
+                encoding="utf-8",
+            )
+            local.write_text(
+                json.dumps({"enforce": False, "daily_budget_usd": 12.5}),
+                encoding="utf-8",
+            )
+            with patch.object(gw, "DEFAULT_CONFIG_PATH", defaults), patch.object(
+                gw, "LOCAL_CONFIG_PATH", local
+            ):
+                pol = gw.load_policy()
+        self.assertFalse(pol["enforce"])
+        self.assertEqual(pol["daily_budget_usd"], 12.5)
+
+    def test_invalid_local_config_keeps_last_good_policy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            defaults = root / "llm_gateway.defaults.json"
+            local = root / "llm_gateway.local.json"
+            defaults.write_text(json.dumps({"enforce": True}), encoding="utf-8")
+            local.write_text(json.dumps({"block_all": False}), encoding="utf-8")
+            with patch.object(gw, "DEFAULT_CONFIG_PATH", defaults), patch.object(
+                gw, "LOCAL_CONFIG_PATH", local
+            ):
+                first = gw.load_policy()
+                local.write_text("{broken", encoding="utf-8")
+                second = gw.load_policy()
+        self.assertIs(first, second)
+        self.assertFalse(second["block_all"])
+
+
+class TestGatewayCLIOverrides(unittest.TestCase):
+    def test_set_writes_only_local_override(self):
+        from scripts import llm_gateway_cli as cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local = Path(tmpdir) / "llm_gateway.local.json"
+            args = SimpleNamespace(key="daily_budget_usd", value="25")
+            with patch.object(cli, "LOCAL_CONFIG_PATH", local), patch("builtins.print"):
+                self.assertEqual(cli.cmd_set(args), 0)
+            self.assertEqual(
+                json.loads(local.read_text(encoding="utf-8")),
+                {"daily_budget_usd": 25},
+            )
+            self.assertFalse(list(local.parent.glob(f".{local.name}.*.tmp")))
+
+    def test_unset_restores_inheritance(self):
+        from scripts import llm_gateway_cli as cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local = Path(tmpdir) / "llm_gateway.local.json"
+            local.write_text(
+                json.dumps({"enforce": False, "block_all": True}),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(key="enforce")
+            with patch.object(cli, "LOCAL_CONFIG_PATH", local), patch("builtins.print"):
+                self.assertEqual(cli.cmd_unset(args), 0)
+            self.assertEqual(
+                json.loads(local.read_text(encoding="utf-8")),
+                {"block_all": True},
+            )
 
 
 if __name__ == "__main__":

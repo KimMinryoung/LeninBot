@@ -1,5 +1,5 @@
 {
-  "enforce": false,
+  "enforce": true,
   "block_all": false,
   "blocked_providers": [],
   "blocked_models": [],

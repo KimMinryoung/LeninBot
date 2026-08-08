@@ -22,10 +22,10 @@ line on the ``llm_gateway.audit`` logger (journald), plus a best-effort row in
 the ``llm_audit_log`` Postgres table from one background worker thread. Neither
 sink may ever raise into, or block, an LLM call.
 
-Policy (config/llm_gateway.json, hot-reloaded on mtime):
+Policy (tracked defaults + ignored local overrides, hot-reloaded on mtime):
 
   {
-    "enforce": false,                  // false = shadow: log would-deny, allow
+    "enforce": true,                   // local false = shadow: log would-deny, allow
     "block_all": false,                // kill switch
     "blocked_providers": [],           // e.g. ["openai"]
     "blocked_models": [],              // exact model IDs
@@ -54,12 +54,14 @@ from pathlib import Path
 
 logger = logging.getLogger("llm_gateway.audit")
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "llm_gateway.json"
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+DEFAULT_CONFIG_PATH = CONFIG_DIR / "llm_gateway.defaults.json"
+LOCAL_CONFIG_PATH = CONFIG_DIR / "llm_gateway.local.json"
 
 _ERROR_EXCERPT_CAP = 500
 
 _DEFAULTS = {
-    "enforce": False,
+    "enforce": True,
     "block_all": False,
     "blocked_providers": [],
     "blocked_models": [],
@@ -81,28 +83,61 @@ class LLMGatewayDenied(RuntimeError):
 
 _config_lock = threading.Lock()
 _config_cache: dict | None = None
-_config_mtime: float | None = None
+_config_signature: tuple | None = None
+
+
+def _path_signature(path: Path) -> tuple[bool, int | None, int | None]:
+    try:
+        stat = path.stat()
+        return True, stat.st_mtime_ns, stat.st_size
+    except OSError:
+        return False, None, None
+
+
+def _read_policy_file(path: Path) -> dict:
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("top-level JSON must be an object")
+    return data
 
 
 def load_policy() -> dict:
-    global _config_cache, _config_mtime
-    try:
-        mtime = CONFIG_PATH.stat().st_mtime
-    except OSError:
-        return dict(_DEFAULTS)
+    """Load code defaults, tracked defaults, then host-local overrides."""
+    global _config_cache, _config_signature
+    signature = (
+        _path_signature(DEFAULT_CONFIG_PATH),
+        _path_signature(LOCAL_CONFIG_PATH),
+    )
     with _config_lock:
-        if _config_cache is not None and _config_mtime == mtime:
+        if _config_cache is not None and _config_signature == signature:
             return _config_cache
+
+        merged = dict(_DEFAULTS)
         try:
-            with open(CONFIG_PATH, encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                raise ValueError("top-level JSON must be an object")
+            if DEFAULT_CONFIG_PATH.exists():
+                merged.update(_read_policy_file(DEFAULT_CONFIG_PATH))
         except Exception as e:
-            logger.error("[llm-gateway] config unreadable (%s); keeping previous", e)
+            logger.error(
+                "[llm-gateway] defaults config unreadable at %s (%s); keeping previous",
+                DEFAULT_CONFIG_PATH,
+                e,
+            )
             return _config_cache or dict(_DEFAULTS)
-        _config_cache = {**_DEFAULTS, **data}
-        _config_mtime = mtime
+
+        try:
+            if LOCAL_CONFIG_PATH.exists():
+                merged.update(_read_policy_file(LOCAL_CONFIG_PATH))
+        except Exception as e:
+            logger.error(
+                "[llm-gateway] local config unreadable at %s (%s); keeping previous",
+                LOCAL_CONFIG_PATH,
+                e,
+            )
+            return _config_cache or merged
+
+        _config_cache = merged
+        _config_signature = signature
         return _config_cache
 
 

@@ -29,7 +29,7 @@ MOONSHOT_API_KEY = get_secret("MOONSHOT_API_KEY", "") or ""
 def _provider_base(env_name: str, proxy_path: str, direct_default: str) -> str:
     """Provider base URL: explicit env override > llm_proxy (when configured) > direct.
 
-    With config/llm_gateway.json "proxy_base" set, clients talk to the local
+    With the effective LLM gateway policy's "proxy_base" set, clients talk to the local
     key-injection proxy (llm_proxy/) and the real API keys can be absent from
     this service's credentials — the placeholder key below satisfies the SDKs.
     """
