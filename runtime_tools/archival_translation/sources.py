@@ -190,11 +190,73 @@ def libru(raw: str) -> list[dict]:
     return blocks
 
 
+MARXISTS_HEAD_RE = re.compile(r"(?is)<h([1-6])\b[^>]*>(.*?)</h\1>")
+# The page is HTML 3.2: <P> opens a paragraph and nothing closes it, so a
+# paragraph runs to the next block-level tag. Splitting on the openers is the
+# only way to find its end.
+MARXISTS_SPLIT_RE = re.compile(r"(?is)<(?:p|h[1-6]|hr|table|blockquote)\b[^>]*>")
+MARXISTS_BOLD_ONLY_RE = re.compile(r"(?is)\A\s*<b>(.*?)</b>\s*\Z")
+
+
+def marxists(raw: str) -> list[dict]:
+    """Parse a saved marxists.org page (Russian section).
+
+    The archive keeps these files as they were typed in the 1990s: HTML 3.2
+    with unclosed ``<P>``, one ``<H3>`` carrying author and title, and section
+    headings written as a centred paragraph whose whole content is bold. So
+    paragraphs are cut at the next block-level opener rather than at a closing
+    tag, and a paragraph that is nothing but ``<b>…</b>`` is emitted as ``h4``
+    — the spec's tagMap decides what that becomes in the fragment.
+
+    The site's own furniture (the "Оглавление" links top and bottom, the
+    provenance line, the issue of Бюллетень оппозиции at the end) is left in
+    place: as with every other adapter, the block range is the spec's call.
+
+    Save the page as UTF-8. marxists.org serves the Russian section in
+    CP1251 and load_blocks reads UTF-8.
+    """
+    body = re.search(r"(?is)<body\b[^>]*>(.*?)(?:</body>|\Z)", raw)
+    scope = body.group(1) if body else raw
+
+    blocks: list[dict] = []
+
+    def emit(tag: str, fragment: str) -> None:
+        # The file is hard-wrapped at about seventy columns, so a raw newline
+        # is an artefact of how it was typed, not a line of the document —
+        # left in, _text turns every wrapped line into its own line and the
+        # reader gets one word per row. Only <br> is the document's own break.
+        marked = re.sub(r"(?is)<br\s*/?>", "\x00", fragment).replace("\n", " ")
+        lines = [ln for ln in (_text(part) for part in marked.split("\x00")) if ln]
+        if not lines or not CYRILLIC_RE.search(" ".join(lines)):
+            return
+        blocks.append({"tag": tag, "lines": lines})
+
+    # Headings first: they are properly closed, so their spans are known, and
+    # cutting them out keeps the paragraph splitter from swallowing them.
+    pos = 0
+    for m in MARXISTS_HEAD_RE.finditer(scope):
+        _split_paragraphs(scope[pos:m.start()], emit)
+        emit("h" + m.group(1), m.group(2))
+        pos = m.end()
+    _split_paragraphs(scope[pos:], emit)
+    return blocks
+
+
+def _split_paragraphs(scope: str, emit: Callable[[str, str], None]) -> None:
+    starts = [m.end() for m in MARXISTS_SPLIT_RE.finditer(scope)]
+    bounds = [m.start() for m in MARXISTS_SPLIT_RE.finditer(scope)] + [len(scope)]
+    for i, start in enumerate(starts):
+        fragment = scope[start:bounds[i + 1]]
+        bold = MARXISTS_BOLD_ONLY_RE.match(fragment.strip())
+        emit("h4" if bold else "p", bold.group(1) if bold else fragment)
+
+
 ADAPTERS: dict[str, Callable[[str], list[dict]]] = {
     "militera": militera,
     "wikisource": wikisource,
     "stalinism": stalinism,
     "libru": libru,
+    "marxists": marxists,
 }
 DEFAULT_ADAPTER = "militera"
 
