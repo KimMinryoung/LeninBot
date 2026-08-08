@@ -1145,9 +1145,9 @@ TOOL_HANDLERS.update(MEDIA_TOOL_HANDLERS)
 CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
-        "Read lenin@cyber-lenin.com INBOX + Junk. Returns subject, sender, "
-        "date, folder, read status, body text, and any links. Unread → "
-        "[UNREAD], junk → [JUNK]."
+        "Read lenin@cyber-lenin.com mail — INBOX + Junk together by default, or "
+        "one of them via folder. Returns subject, sender, date, folder, read "
+        "status, body text, and any links. Unread → [UNREAD], junk → [JUNK]."
     ),
     "input_schema": {
         "type": "object",
@@ -1185,10 +1185,18 @@ CHECK_INBOX_TOOL = {
                 "description": "Character offset into a single email body when uid is provided. Default 0.",
                 "default": 0,
             },
+            # The default must stay "" and not "INBOX": _apply_top_level_defaults
+            # injects a declared default into the arguments, so a declared "INBOX"
+            # arrives even when the caller omitted the field and there is then no
+            # way to mean "both folders".
             "folder": {
                 "type": "string",
-                "description": "Mailbox folder for a single-email uid read. Use INBOX or Junk. Default INBOX.",
-                "default": "INBOX",
+                "description": (
+                    "Which mailbox to read: 'INBOX', 'Junk', or omit for both. "
+                    "Also picks the folder for a uid single-email read, where "
+                    "omitting it means INBOX."
+                ),
+                "default": "",
             },
             "uid": {
                 "type": "string",
@@ -1348,7 +1356,10 @@ async def _exec_check_inbox(
     include_body: bool = True,
     body_max_chars: int = 4000,
     body_offset: int = 0,
-    folder: str = "INBOX",
+    # "" (both folders), not "INBOX": this default has to agree with the schema's,
+    # or a caller that omits the field gets INBOX-only listings from the handler
+    # while the tool advertises INBOX + Junk.
+    folder: str = "",
     uid: str = "",
 ) -> str:
     """Check IMAP INBOX + Junk folders and extract readable body text plus links from recent emails."""
@@ -1359,7 +1370,16 @@ async def _exec_check_inbox(
     except (TypeError, ValueError):
         body_offset = 0
     uid = str(uid or "").strip()
-    selected_folder = "Junk" if str(folder or "").lower() == "junk" else "INBOX"
+
+    # `folder` used to be read only by the uid branch below: a listing call asking
+    # for Junk was answered with INBOX, silently, because the argument passed
+    # schema validation and was then never looked at. An unknown value is now an
+    # error rather than a quiet fallback to INBOX, for the same reason.
+    requested = str(folder or "").strip().lower()
+    if requested not in ("", "inbox", "junk"):
+        return f"Error: unknown folder {folder!r} — use 'INBOX', 'Junk', or omit for both"
+    selected_folder = "Junk" if requested == "junk" else "INBOX"
+    search_folders = {"inbox": ["INBOX"], "junk": ["Junk"]}.get(requested, ["INBOX", "Junk"])
 
     def _fetch():
         conn = _imap_connect()
@@ -1390,7 +1410,7 @@ async def _exec_check_inbox(
                 parsed["is_read"] = b"\\Seen" in flags_raw
                 return [parsed]
 
-            for mailbox_folder in ["INBOX", "Junk"]:
+            for mailbox_folder in search_folders:
                 try:
                     status, _ = conn.select(mailbox_folder, readonly=True)
                     if status != "OK":
@@ -1413,8 +1433,17 @@ async def _exec_check_inbox(
                 candidate_uids = all_uids[-(limit * 5):]
                 candidate_uids.reverse()
 
+                # Budgeted per folder, not against the shared accumulator. INBOX
+                # is walked first and holds hundreds of messages, so a shared
+                # `len(results) >= limit` let it consume the whole budget and
+                # broke out of Junk on its first candidate — Junk contributed
+                # nothing whenever INBOX had `limit` matches, which is why the
+                # advertised [JUNK] tag was effectively unreachable. Each folder
+                # now fills up to `limit`; the date sort below decides which of
+                # them survive the final cut.
+                folder_results = []
                 for candidate_uid in candidate_uids:
-                    if len(results) >= limit:
+                    if len(folder_results) >= limit:
                         break
                     fetch_status, msg_data = conn.uid("fetch", candidate_uid, "(FLAGS BODY.PEEK[])")
                     if fetch_status != "OK":
@@ -1446,7 +1475,9 @@ async def _exec_check_inbox(
                         else candidate_uid.decode("ascii", errors="replace")
                     )
                     parsed["is_read"] = is_read
-                    results.append(parsed)
+                    folder_results.append(parsed)
+
+                results.extend(folder_results)
         finally:
             conn.logout()
 

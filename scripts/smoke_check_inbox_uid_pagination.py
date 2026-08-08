@@ -36,25 +36,51 @@ NEWER_EMAIL = (
     "Content-Type: text/plain; charset=utf-8\n\nnewer"
 ).encode("utf-8")
 
+# Newer than anything in the fake INBOX, so a listing that drops it is a listing
+# that never reached Junk.
+JUNK_EMAIL = (
+    "From: spam@example.test\n"
+    "Subject: Junk folder message\n"
+    "Date: Mon, 20 Jul 2026 11:00:00 +0000\n"
+    "Content-Type: text/plain; charset=utf-8\n\njunk"
+).encode("utf-8")
+
 
 class FakeImap:
+    """One-message INBOX. Junk exists and is empty, as a real mailbox may be.
+
+    The fakes here are folder-aware on purpose: the earlier versions served the
+    same messages whatever was selected, which is not how IMAP works and which
+    hid the folder bugs this test now covers.
+    """
+
+    MESSAGES = {"INBOX": {b"216": RAW_EMAIL}, "Junk": {}}
+
     def __init__(self):
         self.selected = None
 
     def select(self, folder, readonly=True):
+        assert folder in self.MESSAGES, f"selected an unknown folder: {folder}"
         self.selected = folder
         return "OK", [b""]
 
+    def _box(self):
+        return self.MESSAGES[self.selected]
+
     def uid(self, command, *args):
+        box = self._box()
         if command == "search":
-            assert args == (None, "ALL"), args
-            return "OK", [b"216"]
+            assert args in ((None, "ALL"), (None, "UNSEEN")), args
+            return "OK", [b" ".join(box) if box else b""]
         if command == "fetch":
             uid, query = args
-            assert uid in (b"216", "216"), uid
             assert query == "(FLAGS BODY.PEEK[])", query
-            header = b"216 (UID 216 FLAGS (\\Seen) BODY[] {3000}"
-            return "OK", [(header, RAW_EMAIL)]
+            key = uid if isinstance(uid, bytes) else str(uid).encode()
+            if key not in box:
+                return "NO", [None]
+            n = key.decode()
+            header = f"{n} (UID {n} FLAGS (\\Seen) BODY[] {{3000}}".encode()
+            return "OK", [(header, box[key])]
         raise AssertionError(f"unexpected uid command: {command}")
 
     def logout(self):
@@ -62,17 +88,16 @@ class FakeImap:
 
 
 class FakeChronologicalImap(FakeImap):
-    def uid(self, command, *args):
-        if command == "search":
-            return "OK", [b"244 259"]
-        if command == "fetch":
-            uid, query = args
-            assert query == "(FLAGS BODY.PEEK[])", query
-            if uid == b"244":
-                return "OK", [(b"244 (UID 244 FLAGS () BODY[] {6}", OLDER_EMAIL)]
-            if uid == b"259":
-                return "OK", [(b"259 (UID 259 FLAGS () BODY[] {6}", NEWER_EMAIL)]
-        raise AssertionError(f"unexpected uid command: {command} {args}")
+    MESSAGES = {"INBOX": {b"244": OLDER_EMAIL, b"259": NEWER_EMAIL}, "Junk": {}}
+
+
+class FakeFolderedImap(FakeImap):
+    """INBOX and Junk holding different mail, the newest of it in Junk."""
+
+    MESSAGES = {
+        "INBOX": {b"244": OLDER_EMAIL, b"259": NEWER_EMAIL},
+        "Junk": {b"17": JUNK_EMAIL},
+    }
 
 
 class FakeBrokenImap(FakeImap):
@@ -102,6 +127,34 @@ async def _main() -> None:
         newer_position = chronological.index("Newer chronological message")
         older_position = chronological.index("Older lexical trap")
         assert newer_position < older_position, chronological
+
+        # `folder` used to be read only by the uid branch, so a listing call
+        # asking for Junk was answered with INBOX and the caller could not tell.
+        registry._imap_connect = lambda: FakeFolderedImap()
+        junk_only = await registry._exec_check_inbox(folder="Junk", limit=5, include_body=False)
+        assert "Folder: Junk | UID: 17" in junk_only, junk_only
+        assert "Folder: INBOX" not in junk_only, junk_only
+        assert "[JUNK]" in junk_only, junk_only
+
+        inbox_only = await registry._exec_check_inbox(folder="INBOX", limit=5, include_body=False)
+        assert "Folder: INBOX | UID: 259" in inbox_only, inbox_only
+        assert "Folder: Junk" not in inbox_only, inbox_only
+
+        both = await registry._exec_check_inbox(limit=5, include_body=False)
+        assert "Folder: INBOX | UID: 259" in both, both
+        assert "Folder: Junk | UID: 17" in both, both
+
+        # The limit is a per-folder budget. When it was shared, INBOX was walked
+        # first, filled it, and Junk broke out on its first candidate — so the
+        # newest message on the account was unreachable whenever INBOX held
+        # `limit` of its own.
+        budgeted = await registry._exec_check_inbox(limit=1, include_body=False)
+        assert "Folder: Junk | UID: 17" in budgeted, budgeted
+        assert "Folder: INBOX" not in budgeted, budgeted
+
+        # An unrecognized folder is an error, not a silent INBOX listing.
+        unknown = await registry._exec_check_inbox(folder="Spam", limit=1)
+        assert unknown.startswith("Error: unknown folder 'Spam'"), unknown
 
         registry._imap_connect = lambda: FakeBrokenImap()
         broken = await registry._exec_check_inbox(limit=2, include_body=False)
