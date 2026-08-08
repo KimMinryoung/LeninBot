@@ -47,6 +47,7 @@ _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # model had returned them correctly and the parser refused to see them.
 MARKER_RE = re.compile(r"\[\[(\d+)\|([a-z][a-z0-9]*)\]\][ \t]*\n?")
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
+HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
 HANGUL_RE = re.compile(r"[가-힣]")
 
 # deepseek-v4-flash, USD per 1M tokens
@@ -91,8 +92,118 @@ SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기�
 - 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다."""
 
 
+SYSTEM_PROMPT_ZH = """당신은 1960년대 중국공산당의 공식 문건을 한국어로 옮기는 사료
+번역자다. 원문은 《인민일보》·《홍기》 편집부 명의로 발표된 논쟁문이며, 역사 연구용
+참고 문헌으로 공개된다.
+
+번역 원칙
+- 1차 사료다. 내용을 요약·생략·완곡화·현대화하지 않는다. 원문에 있는 정보는 하나도
+  빠뜨리지 않는다. 논지가 거칠거나 상대를 매도하는 대목도 그대로 옮긴다.
+- 그러나 중국어 어순을 한국어에 옮기지 않는다. 병렬 구조를 길게 잇는 정론문의 문장을
+  그대로 한 문장에 담으려 하면 한국어로 읽을 수 없는 문장이 된다. 필요하면 문장을
+  나누고 어순을 한국어에 맞게 재배열한다. 정보 보존이 기준이고, 문장 경계 보존은
+  기준이 아니다.
+- 한자어를 한국 한자음으로 그대로 읽어 옮기지 않는다. 한국어에서 쓰지 않는 낱말이면
+  뜻을 옮긴다. 예: 修正主义는 "수정주의"(한국어에서 쓰는 말이므로 그대로), 그러나
+  掩盖는 "엄개"가 아니라 "가리다", 大肆는 "대사"가 아니라 "마구"다.
+- 성어와 비유는 뜻을 옮긴다. 直译하면 한국어 독자에게 아무 뜻도 전달되지 않는다.
+  예: 掩耳盗铃은 "귀를 막고 방울을 훔친다"로 옮기되 뜻이 통하게 문맥을 살린다.
+- 정치 용어는 아래 용어표를 따른다. 표에 있는 항목은 반드시 그 표기를 쓴다.
+- 인용문, 조항 번호, 날짜, 수량, 직위, 문헌 제목은 정확히 보존한다. 마르크스·레닌·
+  스탈린 인용은 인용문임이 드러나게 옮긴다.
+- 원문에 없는 설명·주석·머리말·꼬리말을 절대 덧붙이지 않는다. 번역문만 출력한다.
+
+표기
+- 중국 인명은 중국어 발음으로 음차한다. 마오쩌둥, 저우언라이, 덩샤오핑. 한국 한자음
+  (모택동, 주은래)을 쓰지 않는다.
+- 러시아어·유럽 인명은 중국어 음역을 되돌려 원어 발음의 한국어 표기를 쓴다.
+  赫鲁晓夫는 "허루샤오푸"가 아니라 "흐루쇼프", 斯大林은 "스다린"이 아니라 "스탈린",
+  铁托는 "톄퉈"가 아니라 "티토"다. 지명도 같다. 布加勒斯特는 "부쿠레슈티"다.
+- 용어표에 없는 중국 인명·지명은 처음 나올 때만 괄호에 한자를 병기한다.
+  예: 캉성(康生). 이후에는 한국어 표기만 쓴다. 러시아어·유럽 인명에는 한자를
+  병기하지 않는다 — 한자는 중국어 음역일 뿐 그 사람의 이름이 아니다.
+- 신문·잡지·단행본 이름은 겹화살괄호를 그대로 쓴다: 《인민일보》, 《홍기》.
+  사설·논문·문건·성명의 이름은 홑낫표로 옮긴다: 「소련공산당 중앙위원회 공개서한」.
+- 인용한 말과 글에는 굽은 따옴표(“…”)를 쓴다. 홑낫표는 문헌·문건의 이름에만 쓴다.
+- 원문이 강조로 쓴 착점(着重号)은 옮기지 않는다. 본문 글자만 옮긴다.
+
+출력 형식 (엄격)
+- 입력의 각 단락은 [[번호|태그]] 마커로 시작한다. 같은 마커를 같은 순서로 그대로
+  반환하고, 마커 바로 다음 줄부터 그 단락의 번역문을 쓴다.
+- 마커를 빠뜨리거나, 없는 마커를 만들거나, 두 단락을 한 마커로 합치지 않는다.
+- 한 마커 안의 줄바꿈 개수는 원문과 같게 유지한다.
+- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다."""
+
+
 class SpecError(ValueError):
     """Spec is missing, malformed, or no longer matches its source."""
+
+
+@dataclass(frozen=True)
+class SourceLanguage:
+    """What differs when the source is not Russian.
+
+    The pipeline was built against one corpus and hardcoded its assumptions:
+    Cyrillic is what an untranslated word looks like, a Korean rendering is
+    about half the length of its source, a glossary surface needs a
+    letter-boundary guard. None of that holds for Chinese, where Korean runs
+    *longer* than the source and there are no word boundaries to anchor on.
+    Rather than branch on the language at each site, the differences are
+    gathered here and the spec names one with ``sourceLang``.
+    """
+
+    code: str
+    label: str
+    system_prompt: str
+    # What untranslated source text looks like in the output.
+    script: re.Pattern
+    # A stray run of source script, for the whole-document sweep.
+    stray_word: re.Pattern
+    # Runs shorter than this are noise rather than a hole (Russian initials
+    # such as С.О.). Chinese has no such case: one stray 한자 is one hole.
+    stray_min: int
+    # Floor on translated/source length before a reply counts as a stub.
+    # Russian compresses into Korean, Chinese expands into it.
+    short_ratio: float
+    # Glossary surfaces get a letter-boundary guard only where the script has
+    # word boundaries. Anchoring 毛泽东 on "not a Han character" would refuse
+    # to match it in 毛泽东同志, which is most of its occurrences.
+    bounded: bool
+    # Source chars per input token, and translated chars per source char, for
+    # the cost estimate.
+    chars_per_token: float
+    output_ratio: float
+
+
+RUSSIAN = SourceLanguage(
+    code="ru", label="러시아어", system_prompt=SYSTEM_PROMPT,
+    script=CYRILLIC_RE,
+    stray_word=re.compile(r"[А-Яа-яЁёІіЇїЄє][А-Яа-яЁёІіЇїЄє\-]*"),
+    stray_min=3, short_ratio=0.25, bounded=True,
+    chars_per_token=2.2, output_ratio=0.9,
+)
+
+CHINESE = SourceLanguage(
+    code="zh", label="중국어", system_prompt=SYSTEM_PROMPT_ZH,
+    script=HAN_RE,
+    stray_word=re.compile(r"[㐀-䶿一-鿿]+"),
+    stray_min=1, short_ratio=0.7, bounded=False,
+    chars_per_token=1.4, output_ratio=1.8,
+)
+
+LANGUAGES = {lang.code: lang for lang in (RUSSIAN, CHINESE)}
+
+
+def language_for(spec: dict | None) -> SourceLanguage:
+    """The spec's source language. Specs written before this existed have no
+    field and are Russian, which is what they were parsed and priced as."""
+    code = ((spec or {}).get("sourceLang") or "ru").strip()
+    lang = LANGUAGES.get(code)
+    if lang is None:
+        raise SpecError(
+            f"알 수 없는 sourceLang: {code!r} (쓸 수 있는 값: "
+            f"{', '.join(sorted(LANGUAGES))})")
+    return lang
 
 
 @dataclass
@@ -293,13 +404,16 @@ def _variants(surname: str) -> list[str]:
     return [surname + e for e in _NOUN_ENDINGS]
 
 
-def _pattern(surfaces: list[str]) -> re.Pattern:
+def _pattern(surfaces: list[str], bounded: bool = True) -> re.Pattern:
     alts = "|".join(sorted((re.escape(s) for s in surfaces), key=len, reverse=True))
+    if not bounded:
+        return re.compile(alts)
     return re.compile(rf"(?<![А-Яа-яЁё]){alts}(?![А-Яа-яЁё])")
 
 
 def build_glossary(people_path: Path, terms_path: Path,
-                   extra: dict[str, str] | None = None) -> list[dict]:
+                   extra: dict[str, str] | None = None,
+                   lang: SourceLanguage | None = None) -> list[dict]:
     """[{ru, ko, pattern}] — pattern is what a chunk is searched for.
 
     ``extra`` is added first so it wins: the people/terms dictionaries are
@@ -308,6 +422,7 @@ def build_glossary(people_path: Path, terms_path: Path,
     unpinned the model invents a rendering per chunk — it produced
     "인민내무위원부" for НКВД, a word order this site never uses.
     """
+    lang = lang or RUSSIAN
     seen: set[str] = set()
     entries: list[dict] = []
 
@@ -315,7 +430,8 @@ def build_glossary(people_path: Path, terms_path: Path,
         if display_ru in seen or not ko:
             return
         seen.add(display_ru)
-        entries.append({"ru": display_ru, "ko": ko, "pattern": _pattern(surfaces)})
+        entries.append({"ru": display_ru, "ko": ko,
+                        "pattern": _pattern(surfaces, lang.bounded)})
 
     for ru, ko in (extra or {}).items():
         add(ru, ko, [ru])
@@ -323,21 +439,32 @@ def build_glossary(people_path: Path, terms_path: Path,
     people = json.loads(people_path.read_text(encoding="utf-8")).get("people", [])
     for p in people:
         cyr = (p.get("cyrillic") or "").strip()
-        family_ko = (p.get("familyName") or {}).get("ko")
-        if not cyr or not family_ko:
+        if not cyr or not lang.script.search(cyr):
             continue
-        # Family name only. A given name on its own is too common to pin to
-        # one person by surface match. The length floor is 4, not 5: Ежов is
-        # four letters, and boundary+case-ending matching (not substring)
-        # already carries the disambiguation a length filter used to.
-        family_ru = cyr.split()[-1]
-        if len(family_ru) >= 4:
-            add(family_ru, family_ko, _variants(family_ru))
+        if lang.bounded:
+            family_ko = (p.get("familyName") or {}).get("ko")
+            if not family_ko:
+                continue
+            # Family name only. A given name on its own is too common to pin
+            # to one person by surface match. The length floor is 4, not 5:
+            # Ежов is four letters, and boundary+case-ending matching (not
+            # substring) already carries the disambiguation a length filter
+            # used to.
+            family_ru = cyr.split()[-1]
+            if len(family_ru) >= 4:
+                add(family_ru, family_ko, _variants(family_ru))
+            continue
+        # Chinese: pin the whole name. A Chinese surname is one character and
+        # matching it alone would fire on every 李 in the text; the full name
+        # is what the source actually writes, and it is unambiguous.
+        full_ko = ((p.get("name") or {}).get("ko") or "").strip()
+        if len(cyr) >= 2 and full_ko:
+            add(cyr, full_ko, [cyr])
 
     for t in json.loads(terms_path.read_text(encoding="utf-8")):
         original = (t.get("original") or "").strip()
         term = ((t.get("term") or {}).get("ko") or "").strip()
-        if original and term and CYRILLIC_RE.search(original):
+        if original and term and lang.script.search(original):
             add(original, term, [original])
 
     return entries
@@ -392,7 +519,9 @@ def parse_response(text: str) -> dict[int, list[str]]:
     return out
 
 
-def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]]) -> list[str]:
+def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
+             lang: SourceLanguage | None = None) -> list[str]:
+    lang = lang or RUSSIAN
     problems = []
     expected = {idx for idx, _ in chunk}
     missing = sorted(expected - set(got))
@@ -407,7 +536,7 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]]) -> list[s
             continue
         joined = " ".join(lines)
         source = " ".join(block["lines"])
-        src_cyr = len(CYRILLIC_RE.findall(source))
+        src_cyr = len(lang.script.findall(source))
 
         # Verbatim echo of the input is the real passthrough failure, and it
         # is unambiguous — check it before the ratio heuristics.
@@ -426,9 +555,10 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]]) -> list[s
         # instructed output, not untranslated input. Measure what is left
         # outside the parentheses.
         outside = re.sub(r"[(（][^)）]*[)）]", " ", joined)
-        cyr = len(CYRILLIC_RE.findall(outside))
+        cyr = len(lang.script.findall(outside))
         if cyr / max(len(outside.strip()), 1) > 0.15:
-            problems.append(f"[[{idx}]] 러시아어가 그대로 남음 ({cyr}자): {outside.strip()[:40]}…")
+            problems.append(
+                f"[[{idx}]] {lang.label}가 그대로 남음 ({cyr}자): {outside.strip()[:40]}…")
 
         # Korean renders Russian in roughly half the characters, but a sentence
         # dense in long compound nouns (мобилизационная подготовка → 동원 준비)
@@ -436,8 +566,10 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]]) -> list[s
         # median 0.50, minimum 0.34. A 0.35 floor sat inside the real
         # distribution and failed a correct translation; 0.25 clears every
         # observed block while still catching a stub reply to a long paragraph.
+        # (Chinese runs the other way — one 한자 becomes two or three 한글 — so
+        # its floor sits above 1.0 rather than below it.)
         src_len = sum(len(ln) for ln in block["lines"])
-        if src_len > 200 and len(joined) < src_len * 0.25:
+        if src_len > 200 and len(joined) < src_len * lang.short_ratio:
             problems.append(f"[[{idx}]] 번역문이 지나치게 짧음 ({len(joined)}자 < 원문 {src_len}자)")
     return problems
 
@@ -483,7 +615,8 @@ def _chunk_prompt(chunk, glossary, opts: Options) -> str:
             f"아래 단락들을 번역하라.\n\n{body}")
 
 
-def _chunk_key(prompt: str, opts: Options) -> str:
+def _chunk_key(prompt: str, opts: Options,
+               lang: SourceLanguage | None = None) -> str:
     """Cache key. Resolving the profile needs no credential, so this is safe
     to compute before preflight.
 
@@ -500,7 +633,8 @@ def _chunk_key(prompt: str, opts: Options) -> str:
     # translation rules silently reuses output produced under the old ones
     # unless someone remembers to bump PROMPT_VERSION by hand — and a
     # constant that has to be remembered is a constant that gets forgotten.
-    system_hash = hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
+    system_hash = hashlib.sha256(
+        (lang or RUSSIAN).system_prompt.encode("utf-8")).hexdigest()[:16]
     fingerprint = (f"{profile.provider}\0{profile.model}\0"
                    f"{profile.extra.get('thinking')}\0{system_hash}")
     return hashlib.sha256(
@@ -508,11 +642,13 @@ def _chunk_key(prompt: str, opts: Options) -> str:
 
 
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
-                     progress: Callable[[dict], None]) -> dict[int, list[str]]:
+                     progress: Callable[[dict], None],
+                     lang: SourceLanguage | None = None) -> dict[int, list[str]]:
     from llm import call_registry
 
+    lang = lang or RUSSIAN
     prompt = _chunk_prompt(chunk, glossary, opts)
-    key = _chunk_key(prompt, opts)
+    key = _chunk_key(prompt, opts, lang)
 
     cached = cache.get(key)
     if cached:
@@ -523,7 +659,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     last_reason = "원인 미상"
     for attempt in range(1, opts.retries + 1):
         raw = call_registry.generate_sync(
-            FEATURE, prompt + correction, system=SYSTEM_PROMPT,
+            FEATURE, prompt + correction, system=lang.system_prompt,
             model=opts.model, max_tokens=opts.max_tokens,
         )
         if not raw:
@@ -539,7 +675,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             time.sleep(2 * attempt)
             continue
         got = parse_response(raw)
-        problems = validate(chunk, got)
+        problems = validate(chunk, got, lang)
         if not problems:
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
             stats.translated += 1
@@ -589,7 +725,7 @@ def gloss_deduper() -> Callable[[str], str]:
 
     def repl(m: re.Match) -> str:
         korean, inner = m.group(1), m.group(2)
-        if not re.search(r"[А-Яа-яЁёІіЇїЄєA-Za-z]", inner):
+        if not re.search(r"[А-Яа-яЁёІіЇїЄєA-Za-z㐀-䶿一-鿿]", inner):
             return m.group(0)  # Korean parenthetical: part of the name
         if korean in seen:
             return korean
@@ -604,21 +740,23 @@ def dedupe_glosses(lines: list[str]) -> list[str]:
     return [apply(line) for line in lines]
 
 
-def stray_cyrillic(text: str, allowed: list[str] | None = None) -> list[str]:
-    """Cyrillic words left outside parentheses that are not allowed to remain.
+def stray_cyrillic(text: str, allowed: list[str] | None = None,
+                   lang: SourceLanguage | None = None) -> list[str]:
+    """Source-script words left outside parentheses that may not remain.
 
     A single untranslated word inside a long paragraph is invisible to the
     per-block ratio check, so it needs a whole-document pass. Document code
     names the translation deliberately keeps (ПОВ, КН-1) go in the spec's
     allowedCyrillic list; anything else is a hole in the translation.
     """
+    lang = lang or RUSSIAN
     outside = re.sub(r"[(（][^)）]*[)）]", " ", re.sub(r"<[^>]+>", " ", text))
     keep = set(allowed or [])
     found = []
-    for word in re.findall(r"[А-Яа-яЁёІіЇїЄє][А-Яа-яЁёІіЇїЄє\-]*", outside):
+    for word in lang.stray_word.findall(outside):
         if word in keep or any(word.startswith(k) for k in keep):
             continue
-        if len(word) <= 2:  # initials such as С.О. carry no translatable text
+        if len(word) < lang.stray_min:  # Russian initials such as С.О.
             continue
         found.append(word)
     return sorted(set(found))
@@ -838,7 +976,7 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
         terms = glossary_for(body, prepared["_glossary"], opts.glossary_limit)
         gloss = "\n".join(f"- {ru} → {ko}" for ru, ko in terms) or "(해당 없음)"
         cases.append((
-            f"first-chunk ({len(body):,}자)", SYSTEM_PROMPT,
+            f"first-chunk ({len(body):,}자)", prepared["_lang"].system_prompt,
             f"용어표 (반드시 이 표기를 쓸 것)\n{gloss}\n\n아래 단락들을 번역하라.\n\n{body}",
         ))
 
@@ -882,7 +1020,7 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
 
     opts = opts or Options()
     prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
-    chunks, glossary = prepared["_chunks"], prepared["_glossary"]
+    chunks, glossary, lang = prepared["_chunks"], prepared["_glossary"], prepared["_lang"]
     base = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
 
     results = []
@@ -912,13 +1050,13 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
             prompt = _chunk_prompt(chunk, glossary, opts)
             started = time.time()
             try:
-                raw = executor(profile, prompt, SYSTEM_PROMPT) or ""
+                raw = executor(profile, prompt, lang.system_prompt) or ""
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
                 break
             seconds += time.time() - started
             got = parse_response(raw)
-            problems.extend(validate(chunk, got))
+            problems.extend(validate(chunk, got, lang))
             blocks.update(got)
         results.append({
             "variant": variant, "provider": provider, "model": profile.model,
@@ -935,10 +1073,11 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
 def plan(spec: dict, opts: Options | None = None) -> dict:
     """Slice, chunk and price a run without calling the model."""
     opts = opts or Options()
+    lang = language_for(spec)
     docs = slice_documents(spec)
     glossary = build_glossary(Path(spec["glossary"]["people"]),
                               Path(spec["glossary"]["terms"]),
-                              spec["glossary"].get("extra"))
+                              spec["glossary"].get("extra"), lang)
     chunks = [c for d in docs for c in chunk_document(d, opts.max_chars)]
     if opts.limit_chunks:
         chunks = chunks[: opts.limit_chunks]
@@ -952,12 +1091,13 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
     price = openai_compatible_pricing(profile.model)
     thinking_on = (profile.extra.get("thinking") or {}).get("type") == "enabled"
-    tokens_in = total / 2.2
+    tokens_in = total / lang.chars_per_token
     # Reasoning tokens bill as output; high effort roughly doubles it.
-    tokens_out = total * 0.9 / 1.6 * (2.0 if thinking_on else 1.0)
+    tokens_out = total * lang.output_ratio / 1.6 * (2.0 if thinking_on else 1.0)
     est = tokens_in * price["input"] + tokens_out * price["output"]
     return {
         "id": spec.get("id"),
+        "sourceLang": lang.code,
         "model": profile.model,
         "thinking": thinking_on,
         "documents": [
@@ -969,7 +1109,7 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
         "chunks": len(chunks),
         "chars": total,
         "estimatedUsd": round(est, 4),
-        "_docs": docs, "_glossary": glossary, "_chunks": chunks,
+        "_docs": docs, "_glossary": glossary, "_chunks": chunks, "_lang": lang,
     }
 
 
@@ -993,10 +1133,12 @@ def run(spec: dict, opts: Options | None = None,
 
     prepared = plan(spec, opts)
     docs, glossary, chunks = prepared["_docs"], prepared["_glossary"], prepared["_chunks"]
+    lang = prepared["_lang"]
 
     cache = Cache(_cache_path(spec, opts.cache_path))
-    pending = sum(1 for c in chunks
-                  if cache.get(_chunk_key(_chunk_prompt(c, glossary, opts), opts)) is None)
+    pending = sum(
+        1 for c in chunks
+        if cache.get(_chunk_key(_chunk_prompt(c, glossary, opts), opts, lang)) is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
@@ -1008,7 +1150,8 @@ def run(spec: dict, opts: Options | None = None,
     started = time.time()
 
     with ThreadPoolExecutor(max_workers=opts.concurrency) as pool:
-        futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats, emit)
+        futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats,
+                               emit, lang)
                    for c in chunks]
         results, failures = [], []
         for i, (fut, chunk) in enumerate(zip(futures, chunks), 1):
@@ -1046,6 +1189,6 @@ def run(spec: dict, opts: Options | None = None,
     out_path.write_text(html, encoding="utf-8")
     result["output"] = str(out_path)
     result["bytes"] = out_path.stat().st_size
-    result["strayCyrillic"] = stray_cyrillic(html, spec.get("allowedCyrillic"))
+    result["strayCyrillic"] = stray_cyrillic(html, spec.get("allowedCyrillic"), lang)
     emit({"event": "done", **result})
     return result

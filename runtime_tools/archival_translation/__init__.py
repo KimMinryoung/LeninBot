@@ -1,4 +1,4 @@
-"""runtime_tools.archival_translation — Russian archival documents → Korean.
+"""runtime_tools.archival_translation — archival documents → Korean.
 
 Public surface used by scripts/translate_archival_documents.py and
 api_routes/archival_translation.py. See core.py for the scope rules.
@@ -8,12 +8,18 @@ from __future__ import annotations
 
 from .core import (
     CACHE_DIR,
+    CHINESE,
     CYRILLIC_RE,
+    HAN_RE,
     HANGUL_RE,
+    LANGUAGES,
     MARKER_RE,
+    RUSSIAN,
     SPEC_DIR,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_ZH,
     Options,
+    SourceLanguage,
     SpecError,
     assemble,
     build_glossary,
@@ -21,6 +27,7 @@ from .core import (
     compare,
     extract_blocks,
     glossary_for,
+    language_for,
     list_specs,
     load_spec,
     parse_response,
@@ -38,12 +45,18 @@ from .sources import ADAPTERS, get_adapter
 __all__ = [
     "ADAPTERS",
     "CACHE_DIR",
+    "CHINESE",
     "CYRILLIC_RE",
+    "HAN_RE",
     "HANGUL_RE",
+    "LANGUAGES",
     "MARKER_RE",
+    "RUSSIAN",
     "SPEC_DIR",
     "SYSTEM_PROMPT",
+    "SYSTEM_PROMPT_ZH",
     "Options",
+    "SourceLanguage",
     "SpecError",
     "assemble",
     "build_glossary",
@@ -52,6 +65,7 @@ __all__ = [
     "extract_blocks",
     "get_adapter",
     "glossary_for",
+    "language_for",
     "list_specs",
     "load_spec",
     "parse_response",
