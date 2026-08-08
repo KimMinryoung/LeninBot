@@ -190,6 +190,7 @@ def libru(raw: str) -> list[dict]:
     return blocks
 
 
+LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 MARXISTS_HEAD_RE = re.compile(r"(?is)<h([1-6])\b[^>]*>(.*?)</h\1>")
 # The page is HTML 3.2: <P> opens a paragraph and nothing closes it, so a
 # paragraph runs to the next block-level tag. Splitting on the openers is the
@@ -227,7 +228,11 @@ def marxists(raw: str) -> list[dict]:
         # reader gets one word per row. Only <br> is the document's own break.
         marked = re.sub(r"(?is)<br\s*/?>", "\x00", fragment).replace("\n", " ")
         lines = [ln for ln in (_text(part) for part in marked.split("\x00")) if ln]
-        if not lines or not CYRILLIC_RE.search(" ".join(lines)):
+        # Not a Cyrillic test: the same archive holds the Spanish section, and
+        # José Díaz's speeches would be dropped whole by one. A block only has
+        # to carry a letter — the spacer paragraphs this markup is full of
+        # (&nbsp; alone) are what needs dropping.
+        if not lines or not LETTER_RE.search(" ".join(lines)):
             return
         blocks.append({"tag": tag, "lines": lines})
 
