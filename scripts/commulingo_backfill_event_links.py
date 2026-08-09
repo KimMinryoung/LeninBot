@@ -65,7 +65,7 @@ For each item return four short strings and one kind:
       망명 정부의 외무장관. Not a job title in the abstract: what they were to this event.
   note_ko / note_en — ONE sentence on what they did or what happened to them in this
       event. Draw it from the curator's note; do not invent facts that are not there.
-      Hard limit: Korean at most 100 characters, English at most 230. This is a caption
+      Hard limit: Korean at most 70 characters, English at most 160. This is a caption
       under a name on the event page, not a paragraph: everything that does not fit is
       already on the person's own card. Count before you answer; a note over the limit
       is thrown away and the person stays unlinked.

@@ -94,9 +94,17 @@ if OPENAI_API_KEY or _via_proxy:
 if DEEPSEEK_API_KEY or _via_proxy:
     _deepseek_client = AsyncOpenAI(
         api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=DEEPSEEK_BASE_URL)
-    _deepseek_anthropic_client = anthropic.AsyncAnthropic(
-        api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY,
-        base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
+    # Wrapped, not raw: this name is imported by maintenance scripts that do not
+    # go through llm/call_registry, and an unwrapped SDK object is an unmetered
+    # path out of the process. See AuditedAsyncAnthropic for what that cost.
+    from llm.instrumented_clients import AuditedAsyncAnthropic
+    _deepseek_anthropic_client = AuditedAsyncAnthropic(
+        anthropic.AsyncAnthropic(
+            api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY,
+            base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
+        ),
+        caller="deepseek_anthropic_direct",
+        provider="deepseek",
     )
 if MOONSHOT_API_KEY or _via_proxy:
     _kimi_client = AsyncOpenAI(
