@@ -104,7 +104,7 @@ def latest_lane_edit() -> dict | None:
     )
 
 
-def select_event(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict | None:
+def select_event(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton: bool = False) -> dict | None:
     """The event that most needs its next section.
 
     Ordered by how much body it already has, then by period, so an event with no
@@ -122,6 +122,14 @@ def select_event(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict | N
     if forced_id:
         row = db_query_one(
             "SELECT * FROM commulingo_history_events WHERE id = %(id)s", {"id": forced_id}
+        )
+        return dict(row) if row else None
+    if skeleton:
+        # A row with no summary has never been written at all, and its section
+        # count is beside the point.
+        row = db_query_one(
+            """SELECT * FROM commulingo_history_events
+                WHERE COALESCE(summary_ko, '') = '' ORDER BY sort_order LIMIT 1"""
         )
         return dict(row) if row else None
     rows = db_query(
@@ -251,7 +259,61 @@ def section_assignment(event: dict) -> dict:
     }
 
 
-def build_task(event: dict) -> str:
+SKELETON_TOOL = "commulingo_event_update"
+
+
+def build_skeleton_task(event: dict) -> str:
+    """The task for an event row that has a title and a period and nothing else.
+
+    A new event is registered with only the three things a person had to decide:
+    its id, when it ran, and what to call it. Everything a reader meets first —
+    the question the page asks, the summary, what it left behind, the timeline —
+    is written here, once, before any body section exists. The nightly lane then
+    deepens it section by section.
+    """
+    return f"""MODE: NEW EVENT SKELETON. The event `{event['id']}` exists as a row with a title and a
+period and nothing else. Write the parts a reader meets before the body.
+
+  title:  {event['title_ko']} / {event['title_en']}
+  period: {event['period_label']}
+
+Research first. Use web_search and the dictionaries; two solid non-Wikipedia sources before
+you write. Then call `{SKELETON_TOOL}` EXACTLY ONCE with all of:
+
+  question — the one question this page answers, as a question, in both languages. Not a
+      label: 「압도적으로 우세한 붉은 군대는 왜 작은 이웃 앞에서 105일을 흘렸는가?」 is the
+      shape. It is what a reader who knows nothing would want settled.
+  summary — what happened, in one paragraph. Open with what the event is and when, then the
+      cause, then the course. A reader who stops here should be able to say what happened.
+  outcome — what it left behind: the settlement, the cost, what it made possible or
+      foreclosed, and where the consequence shows up later on this site.
+  timeline — eight to twelve dated entries, each with a short title and a sentence of body,
+      in both languages. Dates as the existing events write them: 1939.08.23, or 1921.03 when
+      the day is not the point. First entry is the precondition, last is the consequence.
+  sources — the works you actually used. Author and title; no bare URLs.
+
+WRITING RULES
+
+  Both languages carry the same content. English is not a gloss of Korean word order.
+  No em dash anywhere. Korean is 한다체 written prose.
+  Write 그루지야, never 조지아. Write 조선민주주의인민공화국 or 조선, never 북한.
+  Name people as their dictionary card names them.
+  Do not invent numbers. A figure you cannot source does not go in.
+
+Nothing is saved except through the tool call. A reply containing the draft is a failed run.
+"""
+
+
+def build_task(event: dict, brief: str = "") -> str:
+    """`brief` commissions one specific section instead of the next one in the walk.
+
+    The topic walker is right for a lane grinding through the catalogue, and
+    wrong when a person has read the page and knows what is missing. The
+    Kronstadt card asserted that the 1921 sailors were the men of 1917, which is
+    the claim Trotsky made and Getzler's muster rolls contradict; the section
+    that has to exist is the dispute itself, and no walk over the timeline would
+    have produced it.
+    """
     headings = event_section_headings(event["body_ko"] or "")
     timeline = event.get("timeline") or []
     timeline_text = "\n".join(
@@ -262,6 +324,8 @@ def build_task(event: dict) -> str:
     queued = open_gaps(event["id"])
 
     assignment = section_assignment(event)
+    if brief:
+        assignment = {"kind": "commissioned", "brief": brief, "entries": []}
     if headings:
         body_state = (
             "This event's body already has these sections, in order:\n"
@@ -321,7 +385,7 @@ WHAT TO DO
 One run, one event, one write."""
 
 
-async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
+async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton: bool = False, brief: str = "") -> dict:
     config = maintainer.load_config()
     if not config.get("enabled"):
         return {"status": "skipped", "reason": "maintainer disabled"}
@@ -332,7 +396,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
 
-    event = select_event(forced_id, lane, lanes)
+    event = select_event(forced_id, lane, lanes, skeleton=skeleton)
     if not event:
         return {
             "status": "skipped",
@@ -355,7 +419,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
     model = _resolve_deepseek_model(spec.model or "deepseek_pro")
     reasoning = resolve_inference_extra(policy, "deepseek")
 
-    task = build_task(event)
+    task = build_skeleton_task(event) if skeleton else build_task(event, brief)
     ctx = new_run_context(
         interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id=f"commulingo_events:{SUGGESTED_BY}",
@@ -455,12 +519,16 @@ def main() -> int:
     parser.add_argument("--event", default="", help="Force one event id instead of selecting.")
     parser.add_argument("--lane", type=int, default=0, help="This copy's partition index.")
     parser.add_argument("--lanes", type=int, default=1, help="How many copies share the dictionary.")
+    parser.add_argument("--brief", default="",
+                        help="Commission one specific section instead of the next in the walk.")
+    parser.add_argument("--skeleton", action="store_true",
+                        help="Write question/summary/outcome/timeline for an event that has none.")
     parser.add_argument("--print-candidate", action="store_true",
                         help="Print the event that would be selected, without calling the model.")
     args = parser.parse_args()
 
     if args.print_candidate:
-        event = select_event(args.event, args.lane, args.lanes)
+        event = select_event(args.event, args.lane, args.lanes, skeleton=args.skeleton)
         print(json.dumps(
             {
                 "event": (event or {}).get("id"),
@@ -478,7 +546,7 @@ def main() -> int:
     except BlockingIOError:
         logger.info("another events run is active; exiting")
         return 0
-    result = asyncio.run(run_once(args.event, args.lane, args.lanes))
+    result = asyncio.run(run_once(args.event, args.lane, args.lanes, skeleton=args.skeleton, brief=args.brief))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
     return 0
 
