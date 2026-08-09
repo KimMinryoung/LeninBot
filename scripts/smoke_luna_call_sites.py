@@ -92,7 +92,7 @@ def reasoning_token_probe() -> str | None:
     from llm.call_registry import resolve_provider_connection
 
     connection = resolve_provider_connection("openai")
-    client = OpenAI(
+    client = OpenAI(  # llm-client-ok: smoke test of the provider contract itself
         api_key=connection.api_key,
         base_url=connection.base_url,
         timeout=60,

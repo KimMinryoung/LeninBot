@@ -91,7 +91,7 @@ WRITER_RESEARCH_CHOICE = _resolve_call_site("writer_research_digest", model="dee
 _writer_client: anthropic.AsyncAnthropic | None = None
 
 
-def _client() -> anthropic.AsyncAnthropic:
+def _client():   # AuditedAsyncAnthropic, transparent over anthropic.AsyncAnthropic
     global _writer_client
     if _writer_client is None:
         from llm.gateway import provider_endpoint
@@ -100,9 +100,16 @@ def _client() -> anthropic.AsyncAnthropic:
         base, api_key = provider_endpoint("anthropic", None, api_key)
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is required")
-        _writer_client = anthropic.AsyncAnthropic(
-            api_key=api_key,
-            **({"base_url": base} if base else {}),
+        # Wrapped like every other client: the proxy names callers by the
+        # x-llm-caller header and only the wrapper sends it.
+        from llm.instrumented_clients import AuditedAsyncAnthropic
+
+        _writer_client = AuditedAsyncAnthropic(
+            anthropic.AsyncAnthropic(
+                api_key=api_key,
+                **({"base_url": base} if base else {}),
+            ),
+            caller="writer", provider="anthropic",
         )
     return _writer_client
 

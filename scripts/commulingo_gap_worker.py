@@ -71,7 +71,7 @@ SUGGESTED_BY = f"commulingo-gap-worker-{_worker_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
-from scripts import commulingo_backfill_event_links as event_links  # noqa: E402
+from scripts import commulingo_gap_event_links as event_links  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, query_one as db_query_one, get_conn  # noqa: E402

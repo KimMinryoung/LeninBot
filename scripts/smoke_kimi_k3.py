@@ -33,7 +33,7 @@ def main() -> None:
     key = _load_key()
     print(f"key loaded: {key[:6]}...{key[-4:]} ({len(key)} chars)")
 
-    client = OpenAI(api_key=key, base_url="https://api.moonshot.ai/v1", timeout=60)
+    client = OpenAI(api_key=key, base_url="https://api.moonshot.ai/v1", timeout=60)  # llm-client-ok: reproduces the provider config under test
     response = client.chat.completions.create(
         model="kimi-k3",
         messages=[{"role": "user", "content": "Reply with exactly: KIMI_K3_SMOKE_OK"}],
@@ -66,7 +66,7 @@ def _smoke_anthropic_endpoint(key: str) -> None:
     import anthropic
 
     print("\n-- Anthropic 호환 엔드포인트 (claude_loop/writer 경로) --")
-    client = anthropic.Anthropic(
+    client = anthropic.Anthropic(  # llm-client-ok: reproduces the provider config under test
         auth_token=key,
         base_url="https://api.moonshot.ai/anthropic",
         timeout=60,
