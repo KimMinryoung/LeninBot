@@ -58,6 +58,9 @@ Content rules:
   alternative transliteration. Original spellings inside direct quotations are preserved.
 - Korean copy never uses `북한`. Write `조선민주주의인민공화국` on first reference and `조선`
   afterwards. The save rejects the whole patch over this one word, so fix it while writing.
+- Never use the em dash (—) in either language. Use a comma, a colon, parentheses, or two
+  sentences instead. The save rejects the whole patch over one of these too. The only
+  exception is a quoted title that contains one, like 「스페인의 교훈 — 마지막 경고」.
 - Verified nicknames, habits, physical details, and concrete scenes are welcome when they
   make a card memorable. Use them to illuminate the subject, but never let them replace the
   person’s political role, institutional work, or historical responsibility.
