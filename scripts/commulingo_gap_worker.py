@@ -40,7 +40,34 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-SUGGESTED_BY = "commulingo-gap-worker"
+def _worker_tag() -> str:
+    """This copy's provenance suffix, read from argv before the imports below.
+
+    Every worker used to write under one `commulingo-gap-worker`, and the stage
+    decides whether its commissioned write landed by counting rows with that
+    value. With one worker that is exact. With four it is not: A's count moves
+    when B writes, so A's own successful write is reported as an unexpected edit
+    and the run raises after the card is already saved. On 2026-08-09 all seven
+    counter-revolution cards were written that way and every one of them closed
+    with an error note.
+
+    argparse runs in main(), which is far too late — COMMULINGO_SUGGESTED_BY has
+    to be set before runtime_tools.commulingo_people is imported a few lines
+    down. Hence reading argv by hand here. Same fix as commulingo_people_parallel,
+    which gives each of its lanes its own suggested_by for the same reason.
+    """
+    argv = sys.argv[1:]
+    values = {"--kind": "any", "--worker": "0"}
+    for index, arg in enumerate(argv):
+        for flag in values:
+            if arg == flag and index + 1 < len(argv):
+                values[flag] = argv[index + 1]
+            elif arg.startswith(f"{flag}="):
+                values[flag] = arg.split("=", 1)[1]
+    return f"{values['--kind'] or 'any'}-{values['--worker'] or '0'}"
+
+
+SUGGESTED_BY = f"commulingo-gap-worker-{_worker_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
@@ -206,9 +233,24 @@ async def run_once(kind: str = "") -> dict:
     if gap["kind"] == "person" and gap["target_id"]:
         # An existing but thin card: the people lane's enrich path already knows
         # how to deepen one, so hand it the id rather than duplicating that logic.
-        result = await maintainer.run_once(
-            mode="enrich", candidate_id=gap["target_id"], config=config
-        )
+        # Wrapped, because an unwrapped raise here left the row 'claimed' and
+        # invisible to every other worker until the 40-minute reclaim — seven of
+        # them were sitting like that on 2026-08-09 with their sections already
+        # written.
+        before_enrich = completed_run_count()
+        try:
+            result = await maintainer.run_once(
+                mode="enrich", candidate_id=gap["target_id"], config=config
+            )
+        except Exception as exc:
+            landed = completed_run_count() != before_enrich
+            close_gap(
+                gap["id"], "done" if landed else "pending", gap["target_id"],
+                f"enrich raised after {'a' if landed else 'no'} write: {exc}",
+            )
+            return {"status": "applied" if landed else "error", "gap": gap["id"],
+                    "kind": "person-enrich", "target": gap["target_id"],
+                    "error": str(exc)[:300]}
         close_gap(
             gap["id"],
             "done" if result.get("status") == "applied" else "pending",
@@ -295,6 +337,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", default="", choices=["", "person", "term"],
                         help="Restrict to one gap kind; default takes the highest priority of either.")
+    parser.add_argument("--worker", type=int, default=0,
+                        help="This copy's index. Several workers of the same kind drain the queue "
+                             "together; claim_gap's FOR UPDATE SKIP LOCKED is what makes that safe, "
+                             "and this only keeps one index from overlapping itself.")
     parser.add_argument("--queue", action="store_true", help="Print the pending queue and exit.")
     args = parser.parse_args()
 
@@ -308,10 +354,10 @@ def main() -> int:
         print(json.dumps(rows, ensure_ascii=False, default=str, indent=2))
         return 0
 
-    # One lock per kind, so a person worker and a term worker drain the queue at
-    # the same time. claim_gap already makes that safe on the row level
-    # (FOR UPDATE SKIP LOCKED); this only stops a kind overlapping itself.
-    lock_path = Path(f"{LOCK_PATH}.{args.kind or 'any'}")
+    # One lock per (kind, worker index), so as many workers as the queue warrants
+    # run side by side. claim_gap already makes that safe on the row level
+    # (FOR UPDATE SKIP LOCKED); this only stops one index overlapping itself.
+    lock_path = Path(f"{LOCK_PATH}.{args.kind or 'any'}.{args.worker}")
     lock_file = lock_path.open("w")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
