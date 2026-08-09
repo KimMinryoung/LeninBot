@@ -502,12 +502,19 @@ def _dumps(obj) -> str:
 # ── Read queries ──────────────────────────────────────────────────────
 
 def _list_groups() -> list[dict]:
+    # The blurb is what actually defines a group; the title is a label for it.
+    # Without it the curator classified on the title alone, and 「비소련 반혁명
+    # 진영」 collected every non-Soviet politician who ever opposed Moscow —
+    # Roosevelt, Marshall, Paasikivi, and a Finnish foreign minister — when the
+    # blurb says the group is for those who took up arms against a revolution.
     return db_query(
         """SELECT g.id, g.range_label, g.title_ko, g.title_en,
+                  g.blurb_ko, g.blurb_en,
                   COUNT(p.id) AS people_count
            FROM commulingo_people_groups g
            LEFT JOIN commulingo_people p ON p.group_id = g.id
-           GROUP BY g.id, g.sort_order, g.range_label, g.title_ko, g.title_en
+           GROUP BY g.id, g.sort_order, g.range_label, g.title_ko, g.title_en,
+                    g.blurb_ko, g.blurb_en
            ORDER BY g.sort_order, g.id"""
     )
 
