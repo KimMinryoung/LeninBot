@@ -3498,6 +3498,35 @@ def _normalize_soviet_korean_content(value, *, korean: bool = False, excluded: b
     return value
 
 
+_LITERAL_NEWLINE_RE = re.compile(r"\\r\\n|\\n")
+
+
+def _unescape_literal_newlines(value, applied: list):
+    """Turn a typed-out \\n back into the line break the writer meant.
+
+    A curator composing markdown in a JSON tool argument can escape the
+    backslash as well as the n, and then what reaches the column is two
+    characters rather than a line break. Markdown has no idea what to do with
+    them, so the reader sees \\n\\n printed in the middle of a paragraph — which
+    is what happened to one section of `revolution-1905` on 2026-08-09, eighteen
+    times in each language.
+
+    Nothing on this site legitimately writes a backslash before an n, so the
+    substitution is safe and is made here rather than refused: a refusal costs a
+    paid round and risks losing the manuscript over a typing artefact.
+    """
+    if isinstance(value, str):
+        fixed = _LITERAL_NEWLINE_RE.sub("\n", value)
+        if fixed != value:
+            applied.append(len(value) - len(fixed))
+        return fixed
+    if isinstance(value, list):
+        return [_unescape_literal_newlines(item, applied) for item in value]
+    if isinstance(value, dict):
+        return {key: _unescape_literal_newlines(item, applied) for key, item in value.items()}
+    return value
+
+
 def _normalize_localized_spellings(value, applied: dict, lang: str = ""):
     """Apply the name-spelling registry to every {ko, en} string in a patch.
 
@@ -3611,6 +3640,11 @@ def normalize_commulingo_write(
             if confidence is None:
                 confidence = misplaced_confidence
             repairs.append("fields.confidence->confidence")
+
+    escaped_breaks: list = []
+    normalized = _unescape_literal_newlines(normalized, escaped_breaks)
+    if escaped_breaks:
+        repairs.append(f"literal \\n -> line break ({len(escaped_breaks)} field(s))")
 
     terminology_normalized = _normalize_soviet_korean_content(normalized)
     if terminology_normalized != normalized:
