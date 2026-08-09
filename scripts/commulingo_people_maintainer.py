@@ -36,7 +36,7 @@ from runtime_tools.commulingo_people import (
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.results import ToolRejection
-from tool_gateway.security import CallerContext, caller_scope
+from tool_gateway.security import caller_scope, new_run_context
 
 logger = logging.getLogger("commulingo_people_maintainer")
 
@@ -1285,7 +1285,10 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
         return selected_tools, selected_handlers
 
     model = _resolve_deepseek_model(spec.model or "deepseek_pro")
-    ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
+    ctx = new_run_context(
+        interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id="commulingo_people_maintainer",
+    )
 
     candidate = None
     discovery = None

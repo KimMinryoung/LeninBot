@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import uuid
 from dataclasses import dataclass, replace
 
 # Known interfaces. "unknown" is the fail-open default for call sites that have
@@ -47,6 +48,11 @@ class CallerContext:
     is_owner: bool = False
     task_id: str | None = None
     session_id: str | None = None
+    request_id: str | None = None
+    parent_request_id: str | None = None
+    scope_type: str | None = None
+    scope_id: str | None = None
+    chat_log_id: int | None = None
 
     def with_agent(self, agent_name: str | None) -> "CallerContext":
         """Return a copy scoped to a delegated agent (interface stays the same)."""
@@ -74,6 +80,61 @@ def get_caller() -> CallerContext:
         return current_caller.get()
     except LookupError:  # pragma: no cover - default makes this unreachable
         return _DEFAULT
+
+
+def new_request_id() -> str:
+    """Return a process-independent identifier for one LLM/tool-loop run."""
+    return uuid.uuid4().hex
+
+
+_UNSET = object()
+
+
+def new_run_context(
+    *,
+    interface=_UNSET,
+    agent_name=_UNSET,
+    user_id=_UNSET,
+    is_owner=_UNSET,
+    task_id=_UNSET,
+    session_id=_UNSET,
+    request_id: str | None = None,
+    parent_request_id=_UNSET,
+    scope_type=_UNSET,
+    scope_id=_UNSET,
+    chat_log_id=_UNSET,
+) -> CallerContext:
+    """Build a correlated context for one concrete LLM/tool-loop run.
+
+    Unspecified business identifiers inherit from the active caller. A fresh
+    ``request_id`` is always allocated unless the caller supplies one, and a
+    nested run automatically points ``parent_request_id`` at the active run.
+    Passing an explicit ``None`` clears an inherited optional field.
+    """
+    parent = get_caller()
+
+    def _value(value, field: str):
+        return getattr(parent, field, None) if value is _UNSET else value
+
+    resolved_request_id = str(request_id) if request_id else new_request_id()
+    resolved_parent_request_id = (
+        getattr(parent, "request_id", None)
+        if parent_request_id is _UNSET
+        else parent_request_id
+    )
+    return CallerContext(
+        interface=_value(interface, "interface"),
+        agent_name=_value(agent_name, "agent_name"),
+        user_id=_value(user_id, "user_id"),
+        is_owner=bool(_value(is_owner, "is_owner")),
+        task_id=_value(task_id, "task_id"),
+        session_id=_value(session_id, "session_id"),
+        request_id=resolved_request_id,
+        parent_request_id=resolved_parent_request_id,
+        scope_type=_value(scope_type, "scope_type"),
+        scope_id=_value(scope_id, "scope_id"),
+        chat_log_id=_value(chat_log_id, "chat_log_id"),
+    )
 
 
 def set_caller(ctx: CallerContext) -> contextvars.Token:

@@ -87,6 +87,14 @@ Tool visibility is filtered at dispatch:
 
 Empty `AgentSpec.tools` is fail-closed. A tool must be present in the global registry and the relevant allow-list to be callable.
 
+Every concrete Telegram or agent tool loop creates a gateway `request_id`.
+Direct owner turns are grouped by `scope_type=telegram_message` and the Telegram
+message ID; durable executors and their independent verifier use
+`scope_type=telegram_task` and `telegram_tasks.id`. Synchronous `run_agent`
+calls inherit the outer user/session/scope and store the outer request as
+`parent_request_id`, so one audit query can reconstruct the orchestrator and
+sub-agent tree without treating a Telegram chat session as the universal key.
+
 ## Task Lifecycle
 
 Durable task states live in `telegram_tasks`:

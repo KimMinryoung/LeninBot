@@ -9,6 +9,8 @@ from security_gateway import (
     authorize,
     caller_scope,
     get_caller,
+    new_request_id,
+    new_run_context,
     reset_caller,
     set_caller,
 )
@@ -20,6 +22,8 @@ __all__ = [
     "authorize",
     "caller_scope",
     "get_caller",
+    "new_request_id",
+    "new_run_context",
     "reset_caller",
     "set_caller",
 ]

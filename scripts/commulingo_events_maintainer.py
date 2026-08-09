@@ -70,7 +70,7 @@ from runtime_tools.commulingo_people import (  # noqa: E402
     EVENT_SECTION_TARGET, event_section_headings,
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402
-from tool_gateway.security import CallerContext, caller_scope  # noqa: E402
+from tool_gateway.security import caller_scope, new_run_context  # noqa: E402
 
 logger = logging.getLogger("commulingo_events_maintainer")
 
@@ -356,7 +356,10 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
     reasoning = resolve_inference_extra(policy, "deepseek")
 
     task = build_task(event)
-    ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
+    ctx = new_run_context(
+        interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id=f"commulingo_events:{SUGGESTED_BY}",
+    )
     total_cost = 0.0
     total_rounds = 0
     result = ""

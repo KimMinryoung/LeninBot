@@ -30,7 +30,7 @@ from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
-from tool_gateway.security import CallerContext, caller_scope
+from tool_gateway.security import caller_scope, new_run_context
 from tool_gateway.selection import build_toolset
 from identity.prompts import EXTERNAL_SOURCE_RULE
 from telegram._send_utils import make_progress_callback, split_message
@@ -208,11 +208,14 @@ async def handle_message(message: Message) -> None:
     # Stream reasoning/tool steps as separate messages; keep the final reply clean.
     progress_cb = _make_progress_callback(message.bot, message.chat.id)
     try:
-        ctx = CallerContext(
+        ctx = new_run_context(
             interface="telegram",
             agent_name="roleplay",
             user_id=str(user_id),
             is_owner=True,
+            session_id=f"telegram-roleplay:{message.chat.id}",
+            scope_type="telegram_message",
+            scope_id=str(message.message_id),
         )
         with caller_scope(ctx):
             reply = await chat_with_tools(

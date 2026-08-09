@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from shared import KST
 from bot_config import (
@@ -1229,6 +1230,26 @@ def ensure_chat_logs_persona_column() -> None:
            ON chat_logs (user_id, persona, created_at DESC)
            WHERE user_id IS NOT NULL"""
     )
+    db_execute(
+        """ALTER TABLE chat_logs
+           ADD COLUMN IF NOT EXISTS request_id text"""
+    )
+    db_execute(
+        """CREATE INDEX IF NOT EXISTS idx_chat_logs_request_id
+           ON chat_logs (request_id) WHERE request_id IS NOT NULL"""
+    )
+
+
+def _reserve_chat_log_id() -> int | None:
+    """Reserve the eventual chat row id before tools run for exact audit joins."""
+    try:
+        row = db_query_one(
+            "SELECT nextval(pg_get_serial_sequence('chat_logs', 'id')) AS id"
+        )
+        return int(row["id"]) if row and row.get("id") is not None else None
+    except Exception as exc:
+        logger.warning("Failed to reserve web chat log id: %s", exc)
+        return None
 
 
 _SOURCE_TOOL_NAMES = {
@@ -1263,6 +1284,205 @@ def _build_tool_trace(tool_work_details: list[str]) -> str:
         total += len(line)
     return "\n".join(lines)
 
+_WEB_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_FOOTNOTE_DEF_RE = re.compile(r"(?m)^[ \t]*\[\^(\d+)\]:[ \t]*(.*?)[ \t]*$")
+_FOOTNOTE_MARKER_RE = re.compile(r"\[\^(\d+)\]")
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", re.IGNORECASE)
+_STORED_TARGET_RE = re.compile(
+    r"(일기|게시물|공개\s*글|저장(?:된)?\s*(?:글|기록|문서|데이터)|"
+    r"계정|메시지|페이지|파일|이메일|메일|diary|post|account|"
+    r"stored\s+(?:content|record|document|data)|message|page|file|email)",
+    re.IGNORECASE,
+)
+_MUTATION_ACTION_RE = re.compile(
+    r"(삭제|지우|비공개|수정|변경|업로드|게시|발행|전송|보내|연락|"
+    r"신고|결제|송금|delete|remove|redact|unpublish|edit|change|"
+    r"upload|publish|send|forward|contact|report|pay|transfer)",
+    re.IGNORECASE,
+)
+_REQUEST_CUE_RE = re.compile(
+    r"(줘|주세요|해\s*주|해라|하라|해야|맞지|않을까|"
+    r"원한다|바란다|can\s+you|please|would\s+you|should\s+(?:you|we)|\?)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_source_url(value: str) -> str | None:
+    candidate = str(value or "").strip().strip("<>")
+    candidate = candidate.rstrip(".,;!?")
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return None
+    return candidate
+
+
+def _extract_web_source_urls(tool_work_details: list[str]) -> list[str]:
+    """Return successful fetch/search result URLs, with fetched pages first."""
+    fetched: list[str] = []
+    searched: list[str] = []
+    for raw_detail in tool_work_details or []:
+        detail = str(raw_detail)
+        match = _TOOL_DETAIL_RE.search(detail)
+        if not match:
+            continue
+        tool_name = match.group(1)
+        _sep, _arrow, result = detail.partition("→")
+        if tool_name == "fetch_url":
+            if "[fetch_url] url=" not in result:
+                continue
+            url_match = re.search(
+                r'"url"\s*:\s*("(?:\\.|[^"\\])*")',
+                detail[: match.end() + 2000],
+            )
+            if url_match:
+                try:
+                    url = _normalize_source_url(json.loads(url_match.group(1)))
+                except Exception:
+                    url = None
+                if url:
+                    fetched.append(url)
+        elif tool_name == "web_search":
+            if '<external source="web_search:' not in result:
+                continue
+            for line in result.splitlines():
+                line = line.strip()
+                if line.lower().startswith(("http://", "https://")):
+                    url = _normalize_source_url(line)
+                    if url:
+                        searched.append(url)
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for url in fetched + searched:
+        if url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
+
+
+def _format_verified_url_footnotes(answer: str, source_urls: list[str]) -> str:
+    """Normalize web citations to body [^n] markers plus URL-only definitions."""
+    candidates = [url for url in source_urls if _normalize_source_url(url)]
+    candidates = list(dict.fromkeys(candidates))
+    definitions = _FOOTNOTE_DEF_RE.findall(answer)
+    if not candidates:
+        if not definitions:
+            return answer
+        invalid_numbers = {number for number, _definition in definitions}
+        body = _FOOTNOTE_DEF_RE.sub("", answer).rstrip()
+        body = _FOOTNOTE_MARKER_RE.sub(
+            lambda match: "" if match.group(1) in invalid_numbers else match.group(0),
+            body,
+        )
+        body = re.sub(
+            r"(?im)\n{0,2}[ \t]*#{1,3}[ \t]*(?:출처|sources?)[ \t]*$",
+            "",
+            body,
+        )
+        return body.rstrip()
+
+    candidate_set = set(candidates)
+    body = _FOOTNOTE_DEF_RE.sub("", answer).rstrip()
+    body = re.sub(
+        r"(?im)\n{0,2}[ \t]*#{1,3}[ \t]*(?:출처|sources?)[ \t]*$",
+        "",
+        body,
+    ).rstrip()
+
+    old_to_url: dict[str, str] = {}
+    for old_number, definition in definitions:
+        match = _WEB_URL_RE.search(definition)
+        url = _normalize_source_url(match.group(0)) if match else None
+        if url in candidate_set:
+            old_to_url[old_number] = url
+
+    chosen: list[str] = []
+    for marker in _FOOTNOTE_MARKER_RE.finditer(body):
+        url = old_to_url.get(marker.group(1))
+        if url and url not in chosen:
+            chosen.append(url)
+    for match in _WEB_URL_RE.finditer(body):
+        url = _normalize_source_url(match.group(0))
+        if url in candidate_set and url not in chosen:
+            chosen.append(url)
+    if not chosen:
+        chosen = candidates[:3]
+
+    number_for_url = {url: index for index, url in enumerate(chosen, 1)}
+    old_to_new = {
+        old: number_for_url[url]
+        for old, url in old_to_url.items()
+        if url in number_for_url
+    }
+    body = _FOOTNOTE_MARKER_RE.sub(
+        lambda match: f"[^{old_to_new[match.group(1)]}]"
+        if match.group(1) in old_to_new else "",
+        body,
+    )
+
+    def _replace_link(match: re.Match) -> str:
+        url = _normalize_source_url(match.group(2))
+        number = number_for_url.get(url or "")
+        return f"{match.group(1)}[^{number}]" if number else match.group(1)
+
+    body = _MARKDOWN_LINK_RE.sub(_replace_link, body)
+
+    def _replace_raw_url(match: re.Match) -> str:
+        url = _normalize_source_url(match.group(0))
+        number = number_for_url.get(url or "")
+        return f"[^{number}]" if number else ""
+
+    body = _WEB_URL_RE.sub(_replace_raw_url, body).rstrip()
+    used = {int(number) for number in _FOOTNOTE_MARKER_RE.findall(body)}
+    missing = [number for number in range(1, len(chosen) + 1) if number not in used]
+    if missing:
+        body += "".join(f"[^{number}]" for number in missing)
+
+    definitions_text = "\n".join(
+        f"[^{number}]: {url}" for number, url in enumerate(chosen, 1)
+    )
+    return f"{body}\n\n{definitions_text}".strip()
+
+
+def _is_external_mutation_request(message: str) -> bool:
+    compact = " ".join(str(message or "").split())
+    if not _REQUEST_CUE_RE.search(compact):
+        return False
+    if re.search(
+        r"(업로드|게시|발행|연락|신고|결제|송금|"
+        r"upload|publish|contact|report|pay|transfer)",
+        compact,
+        re.IGNORECASE,
+    ):
+        return True
+    return bool(_STORED_TARGET_RE.search(compact) and _MUTATION_ACTION_RE.search(compact))
+
+
+def _finalize_web_answer(
+    original_message: str,
+    answer: str,
+    tool_work_details: list[str],
+) -> str:
+    """Fail closed on impossible mutations, then enforce verified URL footnotes."""
+    if _is_external_mutation_request(original_message):
+        if re.search(r"[가-힣]", original_message):
+            return (
+                "이 웹 채팅은 읽기 전용이라 저장되거나 공개된 내용을 삭제·수정하거나 "
+                "운영자에게 요청을 전달할 수 없다. 개인정보가 관련된 내용은 여기서 "
+                "재인용하지 않으며, 권한이 있는 운영 경로에서 직접 처리해야 한다."
+            )
+        return (
+            "This web chat is read-only. It cannot delete or edit stored/public "
+            "content or forward a request to an operator. I will not repeat any "
+            "personal details here; the change must be made through an authorized "
+            "operator path."
+        )
+    source_urls = _extract_web_source_urls(tool_work_details)
+    return _format_verified_url_footnotes(answer, source_urls)
+
 _TOOL_DETAIL_RE = re.compile(r"\]\s*([A-Za-z_][A-Za-z0-9_]*)\(")
 
 
@@ -1293,18 +1513,23 @@ def _log_chat(
     user_query: str, bot_answer: str, route: str = "web_chat",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
     persona: str = DEFAULT_PERSONA_ID, authenticated_user_id: int | None = None,
-    tool_trace: str = "",
+    tool_trace: str = "", request_id: str = "",
+    reserved_chat_log_id: int | None = None,
 ) -> int | None:
     """Save web chat exchange to chat_logs table and return its id."""
     try:
         row = db_query_one(
             """INSERT INTO chat_logs
-               (session_id, fingerprint, user_agent, ip_address,
+               (id, request_id, session_id, fingerprint, user_agent, ip_address,
                 user_query, bot_answer, route, documents_count,
                 web_search_used, strategy, persona, user_id, tool_trace)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (
+                   COALESCE(%s, nextval(pg_get_serial_sequence('chat_logs', 'id'))),
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+               )
                RETURNING id""",
-            (session_id, fingerprint, user_agent, ip_address,
+            (reserved_chat_log_id, request_id or None,
+             session_id, fingerprint, user_agent, ip_address,
              user_query, bot_answer, route, documents_count, web_search_used, strategy,
              persona, authenticated_user_id, tool_trace or None),
         )
@@ -1317,7 +1542,7 @@ def _log_chat(
 def _update_chat_answer(
     chat_log_id: int, fingerprint: str, bot_answer: str, route: str = "web_chat_regenerated",
     documents_count: int = 0, web_search_used: bool = False, strategy: str = "",
-    tool_trace: str = "",
+    tool_trace: str = "", request_id: str = "",
 ) -> int | None:
     """Replace an existing web-chat answer during regeneration and return its id."""
     try:
@@ -1329,11 +1554,12 @@ def _update_chat_answer(
                       documents_count = %s,
                       web_search_used = %s,
                       strategy = %s,
-                      tool_trace = %s
+                      tool_trace = %s,
+                      request_id = %s
                 WHERE id = %s AND fingerprint = %s
                 RETURNING id""",
             (bot_answer, route, documents_count, web_search_used, strategy,
-             tool_trace or None, chat_log_id, fingerprint),
+             tool_trace or None, request_id or None, chat_log_id, fingerprint),
         )
         return int(row["id"]) if row and row.get("id") is not None else None
     except Exception as e:
@@ -1575,6 +1801,11 @@ async def handle_web_chat(
     # observer. If that observer disappears, the run continues and persists
     # the answer so the frontend can recover it from /history.
     web_request_id = uuid.uuid4().hex
+    audit_chat_log_id = (
+        int(regeneration_source["id"])
+        if regeneration_source
+        else await asyncio.to_thread(_reserve_chat_log_id)
+    )
     run = _WebChatRun(request_id=web_request_id, session_id=session_id)
 
     async def on_progress(event: str, detail: str):
@@ -1614,11 +1845,18 @@ async def handle_web_chat(
         try:
             # Security gateway: public, untrusted, non-owner caller. Runs in its
             # own task (create_task below), so the contextvar is isolated.
-            from tool_gateway.security import set_caller, CallerContext
-            set_caller(CallerContext(
+            from tool_gateway.security import set_caller, new_run_context
+            set_caller(new_run_context(
                 interface="webchat",
                 user_id=fingerprint or None,
                 session_id=session_id,
+                request_id=web_request_id,
+                scope_type="web_chat_turn",
+                scope_id=(
+                    str(audit_chat_log_id)
+                    if audit_chat_log_id is not None else web_request_id
+                ),
+                chat_log_id=audit_chat_log_id,
                 is_owner=False,
             ))
             # Kwargs shared verbatim by every loop call below; per-provider
@@ -1703,6 +1941,12 @@ async def handle_web_chat(
                 )
             metadata = result if isinstance(result, dict) else {}
             answer = str((metadata.get("text") or "") if metadata else result)
+            tool_work_details = budget_tracker.get("tool_work_details", [])
+            answer = _finalize_web_answer(
+                original_message,
+                answer,
+                tool_work_details,
+            )
             if metadata.get("truncated"):
                 await run.publish(_format_sse({
                     "type": "warning",
@@ -1711,9 +1955,9 @@ async def handle_web_chat(
             rounds_used = metadata.get("rounds", budget_tracker.get("rounds_used"))
             cost_usd = metadata.get("cost_usd", budget_tracker.get("total_cost"))
             documents_count, web_search_used, strategy = _summarize_tool_usage(
-                budget_tracker.get("tool_work_details", [])
+                tool_work_details
             )
-            tool_trace = _build_tool_trace(budget_tracker.get("tool_work_details", []))
+            tool_trace = _build_tool_trace(tool_work_details)
             # Persistence belongs to the server-side run, not to the SSE
             # observer. This must happen even when the browser has detached.
             if regeneration_source:
@@ -1725,6 +1969,7 @@ async def handle_web_chat(
                     f"{provider}_loop_regenerated",
                     documents_count, web_search_used, strategy,
                     tool_trace,
+                    web_request_id,
                 )
             else:
                 chat_log_id = await asyncio.to_thread(
@@ -1732,6 +1977,8 @@ async def handle_web_chat(
                     original_message, answer, f"{provider}_loop",
                     documents_count, web_search_used, strategy, persona, authenticated_user_id,
                     tool_trace,
+                    web_request_id,
+                    audit_chat_log_id,
                 )
                 if feedback_ids:
                     try:

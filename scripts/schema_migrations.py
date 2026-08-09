@@ -92,6 +92,20 @@ def _chat_logs_persona() -> None:
     ensure_chat_logs_persona_column()
 
 
+def _web_chat_audit_correlation() -> None:
+    from security_gateway.audit import ensure_tool_audit_log_table
+    from services.web_chat import ensure_chat_logs_persona_column
+
+    ensure_tool_audit_log_table()
+    ensure_chat_logs_persona_column()
+
+
+def _tool_audit_run_correlation() -> None:
+    from security_gateway.audit import ensure_tool_audit_log_table
+
+    ensure_tool_audit_log_table()
+
+
 def _web_chat_feedback() -> None:
     from services.web_chat import ensure_web_chat_feedback_table
 
@@ -123,6 +137,8 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("tool-audit-log", _tool_audit_log),
     ("tool-idempotency", _tool_idempotency),
     ("chat-logs-persona", _chat_logs_persona),
+    ("web-chat-audit-correlation", _web_chat_audit_correlation),
+    ("tool-audit-run-correlation", _tool_audit_run_correlation),
     ("web-chat-feedback", _web_chat_feedback),
     ("writer-tables", _writer_tables),
     ("llm-audit-log", _llm_audit_log),

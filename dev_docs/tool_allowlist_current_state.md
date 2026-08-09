@@ -87,6 +87,29 @@ Public web chat is not the Telegram orchestrator. `services/web_chat.py` builds 
 
 `check_wallet` is intentionally exposed to public web chat as a read-only wallet visibility tool. It can show public wallet address/balance information, but it must not expose private keys, credential paths, signing, transfer, swap, or payment capabilities. Payment tools such as `pay_and_fetch`, code execution tools, filesystem write tools, email/A2A send tools, and publishing tools must remain absent from the web-chat allow-list.
 
+Every public persona also receives the common web runtime rules from
+`services/web_personas.py`. They require exact named-entity/date anchors in the
+first verification query, forbid treating an irrelevant or empty search result
+as evidence, and forbid claiming an external mutation unless a successful
+action-capable tool actually performed it. Because this surface is read-only,
+stored/public-content mutation requests are finalized fail-closed without
+repeating identifying details or claiming that an operator was contacted.
+
+After successful `web_search` or `fetch_url` use, the final response may cite
+only URLs extracted from those successful tool results. The response format is
+body markers `[^1]`, `[^2]`, and so on, followed by URL-only definitions:
+
+```markdown
+주장 본문.[^1]
+
+[^1]: https://example.com/source
+```
+
+Titles, publishers, dates, descriptions, numbered source lists, raw body URLs,
+Markdown source links, and model-invented URLs are not valid citation
+definitions. `services/web_chat.py` normalizes the final persisted/SSE answer
+to this contract after the provider loop returns.
+
 When changing public web tools, review `scripts/smoke_webchat_security.py`, persona-specific tool labels in `services/web_chat.py`, and the frontend caller behavior.
 
 Current public persona-specific additions:
@@ -121,6 +144,13 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 ## Runtime Tool Gateway
 
 `tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `services/web_personas.py`, `services/a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
+
+Audit attribution is cross-surface rather than web-session-specific. Every
+annotated LLM/tool loop has a unique `request_id`; nested loops use
+`parent_request_id`; durable work is grouped by `scope_type/scope_id` such as
+`telegram_message`, `telegram_task`, `autonomous_project`, `maintenance_job`,
+`writer_project`, `web_chat_turn`, or `a2a_task`. Channel-specific IDs remain
+available as secondary fields where they exist.
 
 This does not make all surfaces share one allow-list. It centralizes the mechanics while preserving separate orchestrator, agent, webchat, A2A, and MCP boundaries. See `dev_docs/tool_gateway.md`.
 

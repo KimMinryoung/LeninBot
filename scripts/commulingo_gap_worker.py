@@ -76,7 +76,7 @@ from bot_config import _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, query_one as db_query_one, get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402
-from tool_gateway.security import CallerContext, caller_scope  # noqa: E402
+from tool_gateway.security import caller_scope, new_run_context  # noqa: E402
 
 logger = logging.getLogger("commulingo_gap_worker")
 
@@ -326,7 +326,10 @@ async def run_once(kind: str = "") -> dict:
     task = build_person_task(gap) if gap["kind"] == "person" else build_term_task(gap)
 
     before = completed_run_count()
-    ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
+    ctx = new_run_context(
+        interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id=f"commulingo_gap:{gap['id']}",
+    )
     try:
         with caller_scope(ctx):
             result, tracker, _ = await maintainer._call_curator_stage(

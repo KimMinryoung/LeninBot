@@ -687,6 +687,11 @@ async def _run_verification(
                 budget_usd=0.15,
                 extra_tools=extra_tools,
                 extra_handlers=extra_handlers,
+                task_id=task_id,
+                agent_name="task_verifier",
+                runtime_kind="task",
+                scope_type="telegram_task",
+                scope_id=str(task_id),
             )
             llm_upper = (llm_response or "").strip().upper()
             # Extract the reasoning anchored to the VERDICT line. The verifier
@@ -1255,6 +1260,8 @@ def _build_task_context_content(
 async def _run_task_llm(
     *,
     task_id: int,
+    task_user_id: int | str | None,
+    agent_name: str | None,
     content: str,
     chat_with_tools_fn,
     get_model_fn,
@@ -1288,6 +1295,11 @@ async def _run_task_llm(
         on_progress=on_progress,
         budget_tracker=budget_tracker,
         task_id=task_id,
+        user_id=str(task_user_id) if task_user_id is not None else None,
+        agent_name=agent_name,
+        runtime_kind="task",
+        scope_type="telegram_task",
+        scope_id=str(task_id),
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
     )
@@ -1552,6 +1564,8 @@ async def process_task(
         try:
             report, bt = await _run_task_llm(
                 task_id=task_id,
+                task_user_id=user_id,
+                agent_name=task.get("agent_type"),
                 content=content,
                 chat_with_tools_fn=chat_with_tools_fn,
                 get_model_fn=get_model_fn,

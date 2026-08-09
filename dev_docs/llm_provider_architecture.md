@@ -155,6 +155,17 @@ Use `scripts/model_runtime_audit.py` to print the current surface-level and per-
 
 Do not hardcode model names in prompts or docs beyond describing current maps. Use `bot_config.py` as source of truth.
 
+## Public Web Answer Finalization
+
+Public web chat applies one provider-independent finalization step after the
+Anthropic/OpenAI-compatible loop returns and before it persists or emits the
+terminal `answer` event. It normalizes successful web-search/page-fetch citations
+to body footnotes with URL-only definitions and drops citations to URLs that did
+not appear in this run's successful tool output. It also fails closed on requests
+to mutate stored/public content because the public persona tool profiles are
+read-only. The common prompt contract lives in `services/web_personas.py`; the
+enforcement and URL extraction live in `services/web_chat.py`.
+
 ## Error Recovery and Tool Conversion
 
 For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gateway input ceiling. When tool output growth crosses it, large prior results from explicitly replay-safe read-only tools are replaced in the request by explicit replay checkpoints while their preceding tool calls retain the exact tool name and arguments. This allows complete source material to be retrieved again instead of silently truncating it. Write, publish, send, execute, and other side-effecting results are never checkpointed with a replay instruction. Output-length stops continue from the exact cutoff up to the configured bounded continuation count.

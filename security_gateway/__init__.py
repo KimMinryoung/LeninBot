@@ -17,6 +17,8 @@ from security_gateway.context import (
     CallerContext,
     caller_scope,
     get_caller,
+    new_request_id,
+    new_run_context,
     set_caller,
     reset_caller,
 )
@@ -28,6 +30,8 @@ __all__ = [
     "CallerContext",
     "caller_scope",
     "get_caller",
+    "new_request_id",
+    "new_run_context",
     "set_caller",
     "reset_caller",
     "Decision",

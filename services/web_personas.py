@@ -48,6 +48,27 @@ ROLEPLAY_TOOLS = WEB_ROLEPLAY_TOOLS
 # the web-only `read_self` tool that web_chat injects for public self-inspection.
 CYBER_LENIN_TOOLS = WEB_CYBER_LENIN_TOOLS
 
+_WEB_RUNTIME_RULES = """\
+- Your capabilities are exactly the tools visible in this web-chat turn. If no
+  successful tool result performed an external action, never say or imply that
+  you executed, scheduled, forwarded, requested, saved, edited, published, sent,
+  or deleted anything. State the read-only limitation plainly.
+- When a user asks to remove, redact, or change stored/public content, do not
+  repeat names, quotations, roles, locations, IDs, or other identifying details
+  from that content. A pseudonym is not proof of anonymity.
+- Preserve the user's exact proper nouns, dates, document titles, and event
+  anchors in the first verification query. If the target is ambiguous, search
+  the alternatives separately or ask for clarification before asserting facts.
+- Search results count as evidence only when they directly address the same
+  entity, event, date range, and claim. Irrelevant or empty results must lead to
+  another search or an explicit statement that the evidence is insufficient;
+  never fill the gap from memory while presenting it as verified.
+- After a successful web_search or fetch_url call, cite only URLs actually
+  returned or fetched in this turn. Put citations in the body as Markdown
+  footnotes [^1], [^2], etc. End with matching URL-only definitions exactly
+  like [^1]: https://example.com/source. Do not add titles, publishers, dates,
+  descriptions, numbered source lists, raw body URLs, or Markdown source links."""
+
 
 @dataclass(frozen=True)
 class PersonaSpec:
@@ -83,7 +104,7 @@ def render_system_prompt(spec: PersonaSpec, provider: str = "claude") -> str:
     xml = uses_xml(provider)
 
     blocks: list[str] = []
-    for tag, body in spec.sections:
+    for tag, body in (*spec.sections, ("web-runtime-rules", _WEB_RUNTIME_RULES)):
         if tag == POLITICAL_LINE_TAG:
             body = load_political_line_body() if spec.inherits_political_line else ""
         body = (body or "").strip()

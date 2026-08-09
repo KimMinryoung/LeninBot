@@ -2535,6 +2535,8 @@ def build_run_agent_handler(chat_with_tools_fn):
                 max_rounds=10,
                 extra_tools=agent_tools,
                 extra_handlers=agent_handlers,
+                agent_name=agent,
+                runtime_kind="task",
             )
             # Truncate to avoid blowing up orchestrator context
             if len(result) > 4000:

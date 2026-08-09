@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Awaitable, Callable
 
 from llm.claude_loop import chat_with_tools
-from tool_gateway.security import CallerContext, caller_scope
+from tool_gateway.security import caller_scope, new_run_context
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 
 from writer.config import (
@@ -58,8 +58,24 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _writer_scope():
-    return caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True))
+def _writer_scope(
+    project_id: int,
+    *,
+    agent_name: str = "writer",
+    request_id: str | None = None,
+    parent_request_id: str | None = None,
+):
+    kwargs = {
+        "interface": "system",
+        "agent_name": agent_name,
+        "is_owner": True,
+        "request_id": request_id,
+        "scope_type": "writer_project",
+        "scope_id": str(project_id),
+    }
+    if parent_request_id is not None:
+        kwargs["parent_request_id"] = parent_request_id
+    return caller_scope(new_run_context(**kwargs))
 
 
 def _refusal_commentary(stop_details: dict | None) -> str:
@@ -99,6 +115,7 @@ async def run_line_edit_pass(
     light_model: tuple,
     on_progress,
     tracker: dict,
+    parent_request_id: str | None = None,
 ) -> str | None:
     """Legacy 퇴고 mode: one light-model line edit over this turn's changed
     spans. Returns the pass's reply text, or None when the turn is too small."""
@@ -110,7 +127,9 @@ async def run_line_edit_pass(
     call_extra = resolve_writer_call_extra(policy, model, extra)
     tools, handlers = build_critic_tools(project_id)
     system = await asyncio.to_thread(build_critic_system_blocks, project)
-    with _writer_scope():
+    with _writer_scope(
+        project_id, agent_name="writer_critic", parent_request_id=parent_request_id,
+    ):
         return await chat_with_tools(
             [{"role": "user", "content": critic_msg}],
             client=client,
@@ -145,6 +164,7 @@ async def run_diagnose_revise_pass(
     announce,
     diagnosis_tracker: dict,
     revision_tracker: dict,
+    parent_request_id: str | None = None,
 ) -> str | None:
     """Upgraded 퇴고: a light editor model DIAGNOSES this turn's passages
     (stage 1, read-only tools), then the MAIN model revises them as the
@@ -162,7 +182,10 @@ async def run_diagnose_revise_pass(
     try:
         diag_tools, diag_handlers = build_diagnosis_tools(project_id)
         diag_system = await asyncio.to_thread(build_diagnosis_system_blocks, project)
-        with _writer_scope():
+        with _writer_scope(
+            project_id, agent_name="writer_diagnosis",
+            parent_request_id=parent_request_id,
+        ):
             notes = await chat_with_tools(
                 [{"role": "user", "content": diag_msg}],
                 client=d_client,
@@ -219,7 +242,10 @@ async def run_diagnose_revise_pass(
     # the main pass just wrote. The revision request forbids appending.
     rev_tools, rev_handlers = build_writer_tools(project_id)
     rev_system = await asyncio.to_thread(build_system_blocks, project, project_id)
-    with _writer_scope():
+    with _writer_scope(
+        project_id, agent_name="writer_revision",
+        parent_request_id=parent_request_id,
+    ):
         return await chat_with_tools(
             [{"role": "user", "content": rev_msg}],
             client=m_client,
@@ -538,6 +564,7 @@ async def stream_writer_reply(
                     announce=announce,
                     diagnosis_tracker=critic_budget_tracker,
                     revision_tracker=revision_budget_tracker,
+                    parent_request_id=run.run_id,
                 )
             else:
                 if not critic_user_message(body, edits_snapshot):
@@ -553,6 +580,7 @@ async def stream_writer_reply(
                     light_model=(critic_client, critic_model, critic_display, critic_extra),
                     on_progress=on_progress,
                     tracker=critic_budget_tracker,
+                    parent_request_id=run.run_id,
                 )
             if critic_text is not None:
                 critic_holder.append(critic_text)
@@ -568,7 +596,7 @@ async def stream_writer_reply(
     async def run_llm() -> None:
         try:
             system_blocks = await asyncio.to_thread(build_system_blocks, project, project_id)
-            with caller_scope(CallerContext(interface="system", agent_name="writer", is_owner=True)):
+            with _writer_scope(project_id, request_id=run.run_id):
                 result = await chat_with_tools(
                     model_messages,
                     client=writer_client,

@@ -86,7 +86,9 @@ def cmd_audit(args) -> int:
         where.append("decision = %s")
         params.append(args.decision)
     sql = (
-        "SELECT ts, interface, agent_name, user_id, is_owner, task_id, tool_name, "
+        "SELECT ts, interface, agent_name, user_id, is_owner, task_id, "
+        "session_id, request_id, parent_request_id, scope_type, scope_id, "
+        "chat_log_id, tool_name, "
         "risk_class, decision, enforced, deny_reason, result_status, latency_ms, "
         "args_summary, error_excerpt "
         f"FROM tool_audit_log WHERE {' AND '.join(where)} "

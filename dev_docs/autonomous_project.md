@@ -50,6 +50,14 @@ Inactive states are:
 8. **Post-tick Critic** (`_review_tick_outcome`, flag `autonomous_tick_critic`, default on): one bounded call (high tier, ≤$0.03, max_tokens 800, thinking disabled, toolless single round — same rationale as the planner) judges the tick's durable actions against the objective (or the one-concrete-step standard when no objective was set) — `VERDICT: advanced|partial|no-op` + one-line reason, logged as a `tick_review` event (meta: verdict, model, objective). This makes the tick's self-critique durable: partial/no-op verdicts surface in the next tick's warnings, unlike the closing self-critique paragraph that dies with the chat text. The critic does not run on `tick_error` ticks. A no-op verdict (and any `tick_error`) additionally writes a deduped `mistake` lesson to `experiential_memory` (`source_type=autonomous_tick`) so later ticks recall it via the past-experiences block. The verdict + REASON line also rides on the owner Telegram tick notification (`[크리틱]`), next to the agent's own self-critique.
 9. Mark pending advisories consumed only if the tick produced durable project work, including a staged research draft; otherwise retain them for the next tick.
 
+One tick allocates a gateway `request_id` for the main autonomous run and uses
+`scope_type=autonomous_project`, `scope_id=<project id>`. Planner, critic, and
+`research_deep_dive` sub-runs receive the main run ID as
+`parent_request_id`; all tool audits therefore remain queryable by project even
+though the scheduled worker has no chat session. Scheduled CommuLingo
+maintainers use the same `interface=autonomous` boundary with
+`scope_type=maintenance_job` and a lane/job identifier.
+
 `tick_error` and `tick_review` verdicts remain diagnostic signals only. Repeated
 `no-op`/error ticks do not automatically pause a project; project state changes
 to `paused` only through an explicit operator or agent state-change action.

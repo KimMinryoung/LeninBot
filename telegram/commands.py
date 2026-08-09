@@ -1582,6 +1582,10 @@ async def handle_message(message: Message):
             history, on_progress=progress_cb, budget_tracker=bt,
             extra_handlers={"mission": mission_handler},
             extra_system_context=extra_context,
+            user_id=str(user_id),
+            session_id=f"telegram:{message.chat.id}",
+            scope_type="telegram_message",
+            scope_id=str(message.message_id),
         )
         if hasattr(progress_cb, "flush"):
             await progress_cb.flush()
@@ -1613,6 +1617,10 @@ async def handle_message(message: Message):
                 history, on_progress=progress_cb, budget_tracker=retry_bt,
                 extra_handlers={"mission": mission_handler},
                 extra_system_context=echo_guard_context,
+                user_id=str(user_id),
+                session_id=f"telegram:{message.chat.id}",
+                scope_type="telegram_message",
+                scope_id=str(message.message_id),
             )
             if hasattr(progress_cb, "flush"):
                 await progress_cb.flush()
@@ -1641,6 +1649,10 @@ async def handle_message(message: Message):
                     budget_tracker=retry_bt,
                     extra_handlers={"mission": mission_handler},
                     extra_system_context=extra_context,
+                    user_id=str(user_id),
+                    session_id=f"telegram:{message.chat.id}",
+                    scope_type="telegram_message",
+                    scope_id=str(message.message_id),
                 )
                 bt = retry_bt
                 if hasattr(progress_cb, "flush"):

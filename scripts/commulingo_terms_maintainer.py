@@ -34,7 +34,7 @@ from llm.claude_loop import chat_with_tools  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
 from runtime_tools.commulingo_people import DENSE_SENTENCE_CHARS, FIELD_LIMITS  # noqa: E402
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402
-from tool_gateway.security import CallerContext, caller_scope  # noqa: E402
+from tool_gateway.security import caller_scope, new_run_context  # noqa: E402
 
 logger = logging.getLogger("commulingo_terms_maintainer")
 
@@ -265,7 +265,10 @@ async def run_once() -> dict:
     total_cost = 0.0
     total_rounds = 0
     result = ""
-    ctx = CallerContext(interface="agent", agent_name=spec.name, is_owner=True)
+    ctx = new_run_context(
+        interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id="commulingo_terms_maintainer",
+    )
     for attempt in range(1, attempts + 1):
         tracker: dict = {}
         retry_note = "" if attempt == 1 else (

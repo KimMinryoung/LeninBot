@@ -245,6 +245,8 @@ async def handle_a2a_message(request_body: dict) -> dict:
 
     task_id = str(uuid.uuid4())
     context_id = message.get("contextId") or str(uuid.uuid4())
+    user_msg_id = message.get("messageId") or str(uuid.uuid4())
+    a2a_request_id = uuid.uuid4().hex
 
     # v1.0: configuration (also accept legacy "config" for interop)
     configuration = params.get("configuration") or params.get("config") or {}
@@ -298,7 +300,13 @@ async def handle_a2a_message(request_body: dict) -> dict:
     # Run LLM
     try:
         answer = await asyncio.wait_for(
-            _run_llm(history, system_prompt, tools, handlers, profile),
+            _run_llm(
+                history, system_prompt, tools, handlers, profile,
+                request_id=a2a_request_id,
+                session_id=str(context_id),
+                scope_id=task_id,
+                agent_name=skill_id or "a2a_general",
+            ),
             timeout=timeout_sec,
         )
     except asyncio.TimeoutError:
@@ -308,7 +316,6 @@ async def handle_a2a_message(request_body: dict) -> dict:
         return _make_error(rpc_id, -32000, f"Internal error: {type(e).__name__}")
 
     # Build A2A v1.0 Task response
-    user_msg_id = message.get("messageId") or str(uuid.uuid4())
     agent_msg_id = str(uuid.uuid4())
 
     task = {
@@ -355,15 +362,27 @@ async def _run_llm(
     tools: list[dict],
     handlers: dict,
     profile,
+    *,
+    request_id: str,
+    session_id: str,
+    scope_id: str,
+    user_id: str | None = None,
+    agent_name: str = "a2a_general",
 ) -> str:
     """Run the LLM pipeline with the given tool set."""
     # Security gateway: inbound A2A is an external, non-owner peer. Runs in the
     # per-request handler task, so the contextvar is isolated to this request.
-    try:
-        from tool_gateway.security import set_caller, CallerContext
-        set_caller(CallerContext(interface="a2a", is_owner=False))
-    except Exception:
-        pass
+    from tool_gateway.security import caller_scope, new_run_context
+    ctx = new_run_context(
+        interface="a2a",
+        agent_name=agent_name,
+        user_id=user_id,
+        is_owner=False,
+        session_id=session_id,
+        request_id=request_id,
+        scope_type="a2a_task",
+        scope_id=scope_id,
+    )
     provider = profile.provider
     loop_kwargs = dict(
         tools=tools,
@@ -373,45 +392,46 @@ async def _run_llm(
         max_tokens=profile.max_tokens,
         budget_usd=profile.budget_usd,
     )
-    if provider == "openai" and _openai_client:
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        return await openai_chat(
-            history,
-            client=_openai_client,
-            model=profile.model_id,
-            **loop_kwargs,
-            provider_label="openai:a2a",
-        )
-    elif provider == "kimi" and _kimi_client:
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        from llm.provider_registry import kimi_openai_tool_options
-        return await openai_chat(
-            history,
-            client=_kimi_client,
-            model=profile.model_id,
-            **loop_kwargs,
-            provider_label="kimi:a2a",
-            **kimi_openai_tool_options(),
-        )
-    elif provider == "deepseek" and _deepseek_anthropic_client:
-        from llm.claude_loop import chat_with_tools
-        from bot_config import _get_deepseek_tool_thinking_params
-        # A2A conversations run a multi-tool loop — thinking off by default
-        # (see _get_deepseek_tool_thinking_params).
-        deepseek_thinking = _get_deepseek_tool_thinking_params()
-        return await chat_with_tools(
-            history,
-            client=_deepseek_anthropic_client,
-            model=profile.model_id,
-            **loop_kwargs,
-            thinking=deepseek_thinking.get("thinking"),
-            output_config=deepseek_thinking.get("output_config"),
-        )
-    else:
-        from llm.claude_loop import chat_with_tools
-        return await chat_with_tools(
-            history,
-            client=_claude,
-            model=profile.model_id,
-            **loop_kwargs,
-        )
+    with caller_scope(ctx):
+        if provider == "openai" and _openai_client:
+            from llm.openai_tool_loop import chat_with_tools as openai_chat
+            return await openai_chat(
+                history,
+                client=_openai_client,
+                model=profile.model_id,
+                **loop_kwargs,
+                provider_label="openai:a2a",
+            )
+        elif provider == "kimi" and _kimi_client:
+            from llm.openai_tool_loop import chat_with_tools as openai_chat
+            from llm.provider_registry import kimi_openai_tool_options
+            return await openai_chat(
+                history,
+                client=_kimi_client,
+                model=profile.model_id,
+                **loop_kwargs,
+                provider_label="kimi:a2a",
+                **kimi_openai_tool_options(),
+            )
+        elif provider == "deepseek" and _deepseek_anthropic_client:
+            from llm.claude_loop import chat_with_tools
+            from bot_config import _get_deepseek_tool_thinking_params
+            # A2A conversations run a multi-tool loop — thinking off by default
+            # (see _get_deepseek_tool_thinking_params).
+            deepseek_thinking = _get_deepseek_tool_thinking_params()
+            return await chat_with_tools(
+                history,
+                client=_deepseek_anthropic_client,
+                model=profile.model_id,
+                **loop_kwargs,
+                thinking=deepseek_thinking.get("thinking"),
+                output_config=deepseek_thinking.get("output_config"),
+            )
+        else:
+            from llm.claude_loop import chat_with_tools
+            return await chat_with_tools(
+                history,
+                client=_claude,
+                model=profile.model_id,
+                **loop_kwargs,
+            )

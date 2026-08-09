@@ -41,8 +41,16 @@ def _force_mode(mode: str):
 
 
 def main() -> int:
-    from security_gateway import CallerContext, authorize, policy
-    from security_gateway.audit import _IMMUTABILITY_DDL, redact_args
+    from security_gateway import (
+        CallerContext, authorize, caller_scope, new_run_context, policy,
+    )
+    from security_gateway.audit import (
+        _ALTERS,
+        _IMMUTABILITY_DDL,
+        _INDEXES,
+        _INSERT,
+        redact_args,
+    )
 
     print("== registry: every tool has a risk class ==")
     from runtime_tools.registry import TOOLS
@@ -239,6 +247,71 @@ def main() -> int:
     check("blocks update/delete", "BEFORE UPDATE OR DELETE ON tool_audit_log" in _IMMUTABILITY_DDL)
     check("blocks truncate", "BEFORE TRUNCATE ON tool_audit_log" in _IMMUTABILITY_DDL)
     check("requires explicit admin approval setting", "leninbot.audit_log_mutation_approved" in _IMMUTABILITY_DDL)
+
+    print("== audit correlation fields ==")
+    correlated = CallerContext(
+        interface="webchat",
+        session_id="session-1",
+        request_id="request-1",
+        parent_request_id="request-root",
+        scope_type="web_chat_turn",
+        scope_id="123",
+        chat_log_id=123,
+    )
+    check("caller keeps session id", correlated.session_id == "session-1")
+    check("caller keeps request id", correlated.request_id == "request-1")
+    check("caller keeps parent request id", correlated.parent_request_id == "request-root")
+    check("caller keeps scope", (correlated.scope_type, correlated.scope_id) == ("web_chat_turn", "123"))
+    check("caller keeps chat log id", correlated.chat_log_id == 123)
+    for field in (
+        "session_id", "request_id", "parent_request_id", "scope_type",
+        "scope_id", "chat_log_id",
+    ):
+        check(
+            f"audit insert includes {field}",
+            f"%({field})s" in _INSERT,
+            _INSERT,
+        )
+        check(
+            f"existing audit table adds {field}",
+            any(field in statement for statement in _ALTERS),
+            str(_ALTERS),
+        )
+    check(
+        "audit request id is indexed",
+        any("request_id" in statement for statement in _INDEXES),
+        str(_INDEXES),
+    )
+    check(
+        "audit chat log id is indexed",
+        any("chat_log_id" in statement for statement in _INDEXES),
+        str(_INDEXES),
+    )
+    check(
+        "audit parent request id is indexed",
+        any("parent_request_id" in statement for statement in _INDEXES),
+        str(_INDEXES),
+    )
+    check(
+        "audit scope pair is indexed",
+        any("scope_type, scope_id" in statement for statement in _INDEXES),
+        str(_INDEXES),
+    )
+
+    print("== nested run correlation inheritance ==")
+    root = new_run_context(
+        interface="telegram", request_id="root-request", user_id="owner-1",
+        is_owner=True, session_id="telegram:1",
+        scope_type="telegram_message", scope_id="99",
+    )
+    with caller_scope(root):
+        child = new_run_context(interface="agent", agent_name="analyst")
+    check("nested run gets a fresh request id", child.request_id not in (None, root.request_id))
+    check("nested run points to parent request", child.parent_request_id == root.request_id)
+    check("nested run inherits user", child.user_id == root.user_id)
+    check("nested run inherits session", child.session_id == root.session_id)
+    check("nested run inherits scope", (child.scope_type, child.scope_id) == (root.scope_type, root.scope_id))
+    check("nested run inherits owner trust", child.is_owner is True)
 
     print("== gateway fails closed on internal error ==")
     # Passing a context missing attributes shouldn't raise; authorize denies.

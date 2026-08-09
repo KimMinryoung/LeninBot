@@ -1331,6 +1331,12 @@ async def _chat_with_tools(
     agent_name: str | None = None,
     runtime_kind: str | None = None,
     deepseek_thinking_override: dict | None = None,
+    user_id: str | int | None = None,
+    session_id: str | None = None,
+    request_id: str | None = None,
+    parent_request_id: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | int | None = None,
 ) -> str:
     """Call LLM with tools — dispatches to Claude or OpenAI based on provider config.
 
@@ -1429,16 +1435,20 @@ async def _chat_with_tools(
     # Resolve agent name + mission for provenance tracking
     _agent_name = agent_name or ("orchestrator" if is_orchestrator else "agent")
     _mission_id: int | None = None
-    if agent_name is None and not is_orchestrator and task_id is not None:
+    _task_user_id = None
+    if task_id is not None:
         try:
             from db import query as _db_q
             row = _db_q(
-                "SELECT agent_type, mission_id FROM telegram_tasks WHERE id = %s",
+                "SELECT agent_type, mission_id, user_id, parent_task_id "
+                "FROM telegram_tasks WHERE id = %s",
                 (task_id,),
             )
             if row:
-                _agent_name = str(row[0].get("agent_type") or "agent")
+                if agent_name is None and not is_orchestrator:
+                    _agent_name = str(row[0].get("agent_type") or "agent")
                 _mission_id = row[0].get("mission_id")
+                _task_user_id = row[0].get("user_id")
         except Exception:
             pass
 
@@ -1447,13 +1457,34 @@ async def _chat_with_tools(
     # so calls here are trusted. Orchestrator vs delegated-agent is distinguished
     # for audit attribution; caller_scope restores the parent on exit so a nested
     # run_agent sub-call doesn't leak its agent identity back to the orchestrator.
-    from tool_gateway.security import CallerContext, caller_scope
-    _gw_ctx = CallerContext(
-        interface="telegram" if is_orchestrator else "agent",
-        agent_name=None if is_orchestrator else _agent_name,
-        is_owner=True,
-        task_id=str(task_id) if task_id is not None else None,
+    from tool_gateway.security import caller_scope, new_run_context
+    _interface = (
+        "autonomous" if _runtime_kind == "autonomous"
+        else ("telegram" if is_orchestrator else "agent")
     )
+    _ctx_kwargs = {
+        "interface": _interface,
+        "agent_name": None if is_orchestrator and _interface == "telegram" else _agent_name,
+        "is_owner": True,
+        "request_id": request_id,
+    }
+    if user_id is not None or _task_user_id is not None:
+        _ctx_kwargs["user_id"] = str(user_id if user_id is not None else _task_user_id)
+    if task_id is not None:
+        _ctx_kwargs["task_id"] = str(task_id)
+    if session_id is not None:
+        _ctx_kwargs["session_id"] = session_id
+    if parent_request_id is not None:
+        _ctx_kwargs["parent_request_id"] = parent_request_id
+    if scope_type is not None:
+        _ctx_kwargs["scope_type"] = scope_type
+    elif task_id is not None:
+        _ctx_kwargs["scope_type"] = "telegram_task"
+    if scope_id is not None:
+        _ctx_kwargs["scope_id"] = str(scope_id)
+    elif task_id is not None:
+        _ctx_kwargs["scope_id"] = str(task_id)
+    _gw_ctx = new_run_context(**_ctx_kwargs)
 
     # Kwargs shared verbatim by every loop call below — the per-provider
     # branches add only client/model and provider-specific extras.
@@ -1698,28 +1729,51 @@ def _make_moon_chat_fn(spec):
         thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
+        agent_name=None, runtime_kind=None, user_id=None, session_id=None,
+        request_id=None, parent_request_id=None, scope_type=None, scope_id=None,
     ):
-        return await _moon_loop(
-            messages,
-            base_url=MOON_BASE,
-            model=model or MOON_MODEL,
-            tools=list(extra_tools or []),
-            tool_handlers=dict(extra_handlers or {}),
-            system_prompt=system_prompt,
-            max_rounds=max_rounds or spec.max_rounds,
-            max_tokens=max_tokens or spec.max_output_tokens,
-            max_input_tokens=max_input_tokens or spec.max_input_tokens,
-            recover_input_via_tools=True,
-            continue_on_length=max_output_continuations > 0,
-            max_length_continuations=max_output_continuations,
-            log_event=_log_event,
-            budget_usd=budget_usd or 0.0,
-            budget_tracker=budget_tracker,
-            on_progress=on_progress,
-            task_id=task_id,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
-        )
+        from tool_gateway.security import caller_scope, new_run_context
+        ctx_kwargs = {
+            "interface": "agent", "agent_name": agent_name or spec.name,
+            "is_owner": True, "request_id": request_id,
+        }
+        if user_id is not None:
+            ctx_kwargs["user_id"] = str(user_id)
+        if task_id is not None:
+            ctx_kwargs["task_id"] = str(task_id)
+        if session_id is not None:
+            ctx_kwargs["session_id"] = session_id
+        if parent_request_id is not None:
+            ctx_kwargs["parent_request_id"] = parent_request_id
+        if scope_type is not None:
+            ctx_kwargs["scope_type"] = scope_type
+        elif task_id is not None:
+            ctx_kwargs["scope_type"] = "telegram_task"
+        if scope_id is not None or task_id is not None:
+            ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
+        ctx = new_run_context(**ctx_kwargs)
+        with caller_scope(ctx):
+            return await _moon_loop(
+                messages,
+                base_url=MOON_BASE,
+                model=model or MOON_MODEL,
+                tools=list(extra_tools or []),
+                tool_handlers=dict(extra_handlers or {}),
+                system_prompt=system_prompt,
+                max_rounds=max_rounds or spec.max_rounds,
+                max_tokens=max_tokens or spec.max_output_tokens,
+                max_input_tokens=max_input_tokens or spec.max_input_tokens,
+                recover_input_via_tools=True,
+                continue_on_length=max_output_continuations > 0,
+                max_length_continuations=max_output_continuations,
+                log_event=_log_event,
+                budget_usd=budget_usd or 0.0,
+                budget_tracker=budget_tracker,
+                on_progress=on_progress,
+                task_id=task_id,
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
+            )
     return _moon_chat_fn
 
 
@@ -1733,23 +1787,46 @@ def _make_codex_chat_fn(spec):
         thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
+        agent_name=None, runtime_kind=None, user_id=None, session_id=None,
+        request_id=None, parent_request_id=None, scope_type=None, scope_id=None,
     ):
-        return await _codex_loop(
-            messages,
-            model=model,
-            tools=extra_tools, tool_handlers=extra_handlers,
-            system_prompt=system_prompt,
-            max_rounds=max_rounds or spec.max_rounds,
-            max_tokens=max_tokens or 8192,
-            log_event=_log_event,
-            budget_usd=budget_usd or 0.0,
-            budget_tracker=budget_tracker,
-            on_progress=on_progress,
-            task_id=task_id,
-            agent_name=spec.name,
-            finalization_tools=finalization_tools,
-            terminal_tools=terminal_tools,
-        )
+        from tool_gateway.security import caller_scope, new_run_context
+        ctx_kwargs = {
+            "interface": "agent", "agent_name": agent_name or spec.name,
+            "is_owner": True, "request_id": request_id,
+        }
+        if user_id is not None:
+            ctx_kwargs["user_id"] = str(user_id)
+        if task_id is not None:
+            ctx_kwargs["task_id"] = str(task_id)
+        if session_id is not None:
+            ctx_kwargs["session_id"] = session_id
+        if parent_request_id is not None:
+            ctx_kwargs["parent_request_id"] = parent_request_id
+        if scope_type is not None:
+            ctx_kwargs["scope_type"] = scope_type
+        elif task_id is not None:
+            ctx_kwargs["scope_type"] = "telegram_task"
+        if scope_id is not None or task_id is not None:
+            ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
+        ctx = new_run_context(**ctx_kwargs)
+        with caller_scope(ctx):
+            return await _codex_loop(
+                messages,
+                model=model,
+                tools=extra_tools, tool_handlers=extra_handlers,
+                system_prompt=system_prompt,
+                max_rounds=max_rounds or spec.max_rounds,
+                max_tokens=max_tokens or 8192,
+                log_event=_log_event,
+                budget_usd=budget_usd or 0.0,
+                budget_tracker=budget_tracker,
+                on_progress=on_progress,
+                task_id=task_id,
+                agent_name=spec.name,
+                finalization_tools=finalization_tools,
+                terminal_tools=terminal_tools,
+            )
     return _codex_chat_fn
 
 
@@ -1767,6 +1844,8 @@ def _make_provider_chat_fn(provider: str):
         task_id=None, finalization_tools=None, terminal_tools=None,
         agent_name=None,
         runtime_kind=None,
+        user_id=None, session_id=None, request_id=None, parent_request_id=None,
+        scope_type=None, scope_id=None,
     ):
         return await _chat_with_tools(
             messages, max_rounds=max_rounds, system_prompt=system_prompt,
@@ -1781,6 +1860,9 @@ def _make_provider_chat_fn(provider: str):
             terminal_tools=terminal_tools,
             agent_name=agent_name,
             runtime_kind=runtime_kind,
+            user_id=user_id, session_id=session_id, request_id=request_id,
+            parent_request_id=parent_request_id,
+            scope_type=scope_type, scope_id=scope_id,
         )
     return _provider_chat_fn
 
@@ -2141,6 +2223,10 @@ async def bot_main():
                 budget_usd=0.15,
                 max_rounds=5,
                 extra_handlers={"mission": build_mission_handler(chat_id)},
+                user_id=str(chat_id),
+                session_id=f"telegram:{chat_id}",
+                scope_type="telegram_task_callback",
+                scope_id=str(task_id),
             )
 
             for chunk in _split_message(reply):

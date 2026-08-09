@@ -885,7 +885,9 @@ DEEP_DIVE_MAX_ROUNDS = 10
 DEEP_DIVE_BUDGET_CAP = 0.50
 
 
-def _build_deep_dive_tool(project_id: int, provider: str, chat_fn) -> tuple[list[dict], dict]:
+def _build_deep_dive_tool(
+    project_id: int, provider: str, chat_fn, parent_request_id: str | None = None,
+) -> tuple[list[dict], dict]:
     """Return ([schema], {handler}) for research_deep_dive, closed over this
     tick's project id and chat function. Registered per tick like the other
     project tools; the call counter resets naturally with the closure."""
@@ -940,6 +942,9 @@ def _build_deep_dive_tool(project_id: int, provider: str, chat_fn) -> tuple[list
                 provider_override=sub_provider,
                 agent_name="analyst",
                 runtime_kind="autonomous",
+                parent_request_id=parent_request_id,
+                scope_type="autonomous_project",
+                scope_id=str(project_id),
             )
         except Exception as e:
             logger.warning("research_deep_dive failed (project=%s): %s", project_id, e)
@@ -1414,7 +1419,10 @@ _TICK_CRITIC_SYSTEM = (
 )
 
 
-async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, chat_fn) -> str | None:
+async def _plan_tick_objective(
+    project: dict, task_prompt: str, provider: str, chat_fn,
+    parent_request_id: str | None = None,
+) -> str | None:
     """Pre-tick planner: one bounded call over the assembled tick context picks
     the tick's single objective. Returns the planner text for prompt injection,
     or None (disabled, malformed reply, or failure — never blocks the tick)."""
@@ -1447,6 +1455,9 @@ async def _plan_tick_objective(project: dict, task_prompt: str, provider: str, c
             provider_override=planner_provider,
             agent_name="tick_planner",
             runtime_kind="autonomous",
+            parent_request_id=parent_request_id,
+            scope_type="autonomous_project",
+            scope_id=str(project["id"]),
             # DeepSeek reasoning mode burned the entire max_tokens (400, then
             # 1200) before any visible reply on the first live ticks
             # (2026-07-09) — a 3-line formatted verdict doesn't need thinking.
@@ -1501,6 +1512,7 @@ def _summarize_tick_actions_for_review(actions: dict) -> str:
 
 async def _review_tick_outcome(
     project: dict, objective: str | None, actions: dict, provider: str, chat_fn,
+    parent_request_id: str | None = None,
 ) -> dict | None:
     """Post-tick critic: one bounded call judges the tick's durable actions
     against the pre-tick objective (or the one-concrete-step standard). The
@@ -1535,6 +1547,9 @@ async def _review_tick_outcome(
             provider_override=critic_provider,
             agent_name="tick_critic",
             runtime_kind="autonomous",
+            parent_request_id=parent_request_id,
+            scope_type="autonomous_project",
+            scope_id=str(project["id"]),
             # Same as the planner: two-line verdict, thinking off (see there).
             deepseek_thinking_override={"thinking": {"type": "disabled"}},
         )
@@ -1766,6 +1781,7 @@ async def _run_one_tick(project: dict) -> dict:
     from llm.runtime_profile import resolve_runtime_profile
     import runtime_tools.registry as tt_module
     from telegram.channel_broadcast import current_autonomous_project_id
+    from tool_gateway.security import new_request_id
 
     spec = get_agent("autonomous_project")
     configured_provider = _get_autonomous_provider()
@@ -1791,10 +1807,13 @@ async def _run_one_tick(project: dict) -> dict:
     pending_advisories = _fetch_pending_advisories(project["id"])
 
     from telegram.bot import _chat_with_tools
+    tick_request_id = new_request_id()
 
     # Deep-dive sub-agent needs the chat closure, so it is registered here
     # rather than in _build_project_tools.
-    dd_schemas, dd_handlers = _build_deep_dive_tool(project["id"], provider, _chat_with_tools)
+    dd_schemas, dd_handlers = _build_deep_dive_tool(
+        project["id"], provider, _chat_with_tools, tick_request_id,
+    )
     agent_tools.extend(dd_schemas)
     agent_handlers.update(dd_handlers)
     agent_tools = dedupe_tools_by_name(agent_tools)
@@ -1823,7 +1842,9 @@ async def _run_one_tick(project: dict) -> dict:
     # turns "advance by exactly one concrete step" into a concrete, externally
     # chosen step. Logged as tick_objective; the post-tick critic judges
     # against it.
-    tick_objective = await _plan_tick_objective(project, user_content, provider, _chat_with_tools)
+    tick_objective = await _plan_tick_objective(
+        project, user_content, provider, _chat_with_tools, tick_request_id,
+    )
     if tick_objective:
         user_content = f"{user_content}\n\n{_format_tick_objective_block(tick_objective, provider)}"
 
@@ -1873,6 +1894,9 @@ async def _run_one_tick(project: dict) -> dict:
             provider_override=provider,
             agent_name="autonomous_project",
             runtime_kind="autonomous",
+            request_id=tick_request_id,
+            scope_type="autonomous_project",
+            scope_id=str(project["id"]),
             finalization_tools=spec.finalization_tools,
             terminal_tools=spec.terminal_tools,
         )
@@ -1940,7 +1964,9 @@ async def _run_one_tick(project: dict) -> dict:
     # the objective. Durable across ticks — partial/no-op verdicts feed the
     # next tick's warnings, unlike the self-critique paragraph that dies with
     # the chat text.
-    tick_review = await _review_tick_outcome(project, tick_objective, actions, provider, _chat_with_tools)
+    tick_review = await _review_tick_outcome(
+        project, tick_objective, actions, provider, _chat_with_tools, tick_request_id,
+    )
     if tick_review and tick_review.get("verdict") == "no-op":
         # Lesson write-back: future ticks on similar objectives recall this
         # via the past-experiences block.

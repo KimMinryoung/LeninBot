@@ -34,7 +34,13 @@ interface boundary  →  installs CallerContext (contextvar) for its run
 ## Package layout (`security_gateway/`)
 
 - **`context.py`** — `CallerContext(interface, agent_name, user_id, is_owner, task_id,
-  session_id)` carried in a `contextvars.ContextVar`. `caller_scope(ctx)` is a
+  session_id, request_id, parent_request_id, scope_type, scope_id, chat_log_id)`
+  carried in a `contextvars.ContextVar`. `new_run_context()` allocates a fresh
+  `request_id`, inherits the active caller's user/session/business scope, and
+  points a nested run's `parent_request_id` at the active run. `scope_type` and
+  `scope_id` identify the durable business object independently of channel;
+  `chat_log_id` remains the web-chat-specific fast join.
+  `caller_scope(ctx)` is a
   context manager that installs it for a `with` block and restores the parent on
   exit (so a nested `run_agent` sub-call doesn't leak its identity back to the
   orchestrator). ContextVars are snapshotted into `asyncio.gather` children, so the
@@ -92,10 +98,11 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 
 | Interface | Where set | is_owner |
 |---|---|---|
-| `telegram` / `agent` | `telegram/bot._chat_with_tools` via `tool_gateway.security`; standalone roleplay bot also uses `tool_gateway.security` with `agent_name=roleplay` | `True` (owner's gated channel) |
+| `telegram` / `agent` | `telegram/bot._chat_with_tools`; direct messages use `telegram_message`, durable workers/verifiers use `telegram_task`, and nested `run_agent` calls inherit the parent request | `True` (owner's gated channel) |
 | `webchat` | `services.web_chat._run_llm` via `tool_gateway.security` | `False` |
-| `a2a` | `services.a2a_handler._run_llm` via `tool_gateway.security` | `False` |
-| `system:writer` | `writer.stream.stream_writer_reply` around the `/writer` model loop | `True` |
+| `a2a` | `services.a2a_handler._run_llm`; A2A context/task/message IDs map to session/scope/user fields | `False` |
+| `autonomous` | autonomous project ticks and scheduled CommuLingo maintainers; project ticks use `autonomous_project`, maintainers use `maintenance_job` | `True` |
+| `system:writer` | `/writer` main run plus diagnosis/revision children under `writer_project` | `True` |
 | `unknown` | unannotated direct callers | `False` |
 
 Unannotated callers fall to `unknown` and are still audited — they can be
@@ -119,10 +126,28 @@ a fallback, but no local socket is opened before this validation succeeds.
 ## Audit table
 
 `tool_audit_log` (applied via `scripts/schema_migrations.py --only tool-audit-log`,
-no startup DDL): `ts, interface, agent_name, user_id, is_owner, task_id, tool_name,
+no startup DDL): `ts, interface, agent_name, user_id, is_owner, task_id, session_id,
+request_id, parent_request_id, scope_type, scope_id, chat_log_id, tool_name,
 risk_class, decision, enforced, deny_reason, args_summary (redacted+truncated),
 result_status, latency_ms, `error_excerpt`. Indexed on `ts`,
-`(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`.
+`(tool_name, ts)`, `(decision, ts)`, `(interface, ts)`, and partial
+`(request_id, ts)`, `(parent_request_id, ts)`, `(scope_type, scope_id, ts)`, and
+`(chat_log_id, ts)` indexes. Apply the cross-runtime correlation columns with:
+
+```
+venv/bin/python scripts/schema_migrations.py --only tool-audit-run-correlation
+```
+
+For public web chat, `chat_logs.request_id` stores the same run ID. A normal
+turn reserves `chat_logs.id` before model execution and inserts the row with
+that ID after the answer completes; regeneration reuses the row being replaced.
+This makes `tool_audit_log.request_id = chat_logs.request_id` the run-level join
+and `tool_audit_log.chat_log_id = chat_logs.id` the message-level join, including
+detached browser observers. Apply both sides before deploying the code:
+
+```
+venv/bin/python scripts/schema_migrations.py --only web-chat-audit-correlation
+```
 
 Every exit from `execute_tool` writes exactly one row, including the ones that
 never reach the handler. `result_status` is one of `ok`, `error`, `rejected`,

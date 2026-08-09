@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS tool_audit_log (
     user_id       TEXT,
     is_owner      BOOLEAN,
     task_id       TEXT,
+    session_id    TEXT,
+    request_id    TEXT,
+    parent_request_id TEXT,
+    scope_type    TEXT,
+    scope_id      TEXT,
+    chat_log_id   BIGINT,
     tool_name     TEXT NOT NULL,
     risk_class    TEXT,
     decision      TEXT NOT NULL,
@@ -50,18 +56,33 @@ CREATE TABLE IF NOT EXISTS tool_audit_log (
     error_excerpt TEXT
 );
 """
+_ALTERS = [
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS session_id TEXT",
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS request_id TEXT",
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS parent_request_id TEXT",
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS scope_type TEXT",
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS scope_id TEXT",
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS chat_log_id BIGINT",
+]
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS tool_audit_log_ts_idx ON tool_audit_log (ts DESC)",
     "CREATE INDEX IF NOT EXISTS tool_audit_log_tool_ts_idx ON tool_audit_log (tool_name, ts DESC)",
     "CREATE INDEX IF NOT EXISTS tool_audit_log_decision_ts_idx ON tool_audit_log (decision, ts DESC)",
     "CREATE INDEX IF NOT EXISTS tool_audit_log_interface_ts_idx ON tool_audit_log (interface, ts DESC)",
+    "CREATE INDEX IF NOT EXISTS tool_audit_log_request_ts_idx ON tool_audit_log (request_id, ts DESC) WHERE request_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS tool_audit_log_parent_request_ts_idx ON tool_audit_log (parent_request_id, ts DESC) WHERE parent_request_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS tool_audit_log_scope_ts_idx ON tool_audit_log (scope_type, scope_id, ts DESC) WHERE scope_type IS NOT NULL AND scope_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS tool_audit_log_chat_ts_idx ON tool_audit_log (chat_log_id, ts DESC) WHERE chat_log_id IS NOT NULL",
 ]
 
 _INSERT = """
 INSERT INTO tool_audit_log
-    (interface, agent_name, user_id, is_owner, task_id, tool_name, risk_class,
+    (interface, agent_name, user_id, is_owner, task_id, session_id, request_id,
+     parent_request_id, scope_type, scope_id, chat_log_id, tool_name, risk_class,
      decision, enforced, deny_reason, args_summary, result_status, latency_ms, error_excerpt)
 VALUES (%(interface)s, %(agent_name)s, %(user_id)s, %(is_owner)s, %(task_id)s,
+        %(session_id)s, %(request_id)s, %(parent_request_id)s, %(scope_type)s,
+        %(scope_id)s, %(chat_log_id)s,
         %(tool_name)s, %(risk_class)s, %(decision)s, %(enforced)s, %(deny_reason)s,
         %(args_summary)s, %(result_status)s, %(latency_ms)s, %(error_excerpt)s)
 """
@@ -102,6 +123,8 @@ def ensure_tool_audit_log_table() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_DDL)
+            for stmt in _ALTERS:
+                cur.execute(stmt)
             for stmt in _INDEXES:
                 cur.execute(stmt)
             cur.execute(_IMMUTABILITY_DDL)
@@ -201,6 +224,30 @@ def audit(
             "user_id": str(ctx.user_id) if ctx.user_id is not None else None,
             "is_owner": bool(ctx.is_owner),
             "task_id": str(ctx.task_id) if ctx.task_id is not None else None,
+            "session_id": (
+                str(getattr(ctx, "session_id"))
+                if getattr(ctx, "session_id", None) is not None else None
+            ),
+            "request_id": (
+                str(getattr(ctx, "request_id"))
+                if getattr(ctx, "request_id", None) is not None else None
+            ),
+            "parent_request_id": (
+                str(getattr(ctx, "parent_request_id"))
+                if getattr(ctx, "parent_request_id", None) is not None else None
+            ),
+            "scope_type": (
+                str(getattr(ctx, "scope_type"))
+                if getattr(ctx, "scope_type", None) is not None else None
+            ),
+            "scope_id": (
+                str(getattr(ctx, "scope_id"))
+                if getattr(ctx, "scope_id", None) is not None else None
+            ),
+            "chat_log_id": (
+                int(getattr(ctx, "chat_log_id"))
+                if getattr(ctx, "chat_log_id", None) is not None else None
+            ),
             "tool_name": tool_name,
             "risk_class": decision.risk_class,
             "decision": decision.label,
