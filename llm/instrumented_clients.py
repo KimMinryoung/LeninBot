@@ -132,13 +132,24 @@ def _anthropic_usage(response) -> dict[str, int]:
 
 
 class _AuditedAsyncMessages:
-    def __init__(self, messages, caller: str, provider: str):
+    def __init__(self, messages, caller: str, provider: str, thinking_off: bool):
         self._messages = messages
         self._caller = caller
         self._provider = provider
+        self._thinking_off = thinking_off
 
     def __getattr__(self, name):
         return getattr(self._messages, name)
+
+    def _prepare(self, kwargs: dict) -> None:
+        if self._thinking_off:
+            kwargs.setdefault("thinking", {"type": "disabled"})
+        # The proxy records who called it from this header. Without it every
+        # request from a directly-held client lands in the ledger as one
+        # anonymous heap.
+        headers = dict(kwargs.get("extra_headers") or {})
+        headers.setdefault("x-llm-caller", self._caller)
+        kwargs["extra_headers"] = headers
 
     async def create(self, *args, **kwargs):
         model = _model_arg(args, kwargs)
@@ -149,13 +160,7 @@ class _AuditedAsyncMessages:
         # disabled, a2a_handler sends _get_deepseek_tool_thinking_params), so
         # silence here means "not asked for" rather than "leave it to the
         # provider".
-        kwargs.setdefault("thinking", {"type": "disabled"})
-        # The proxy records who called it from this header. Without it every
-        # request from a directly-held client lands in the ledger as one
-        # anonymous heap.
-        headers = dict(kwargs.get("extra_headers") or {})
-        headers.setdefault("x-llm-caller", self._caller)
-        kwargs["extra_headers"] = headers
+        self._prepare(kwargs)
         check_llm_call(
             surface="external_sdk", caller=self._caller,
             provider=self._provider, model=model,
@@ -180,6 +185,17 @@ class _AuditedAsyncMessages:
         )
         return response
 
+    def stream(self, *args, **kwargs):
+        model = _model_arg(args, kwargs)
+        self._prepare(kwargs)
+        check_llm_call(
+            surface="external_sdk", caller=self._caller,
+            provider=self._provider, model=model,
+        )
+        # Returns the SDK's own async context manager untouched: the caller
+        # consumes the stream and records its usage (llm/claude_loop does).
+        return self._messages.stream(*args, **kwargs)
+
 
 class AuditedAsyncAnthropic:
     """Transparent async Anthropic-compatible client that reports its spend.
@@ -194,9 +210,91 @@ class AuditedAsyncAnthropic:
     script gets metered without knowing the gateway exists.
     """
 
+    def __init__(self, client, *, caller: str, provider: str, thinking_off: bool = False):
+        self._client = client
+        self.messages = _AuditedAsyncMessages(client.messages, caller, provider, thinking_off)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def _openai_usage(response) -> dict[str, int]:
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "prompt_tokens_details", None)
+    return {
+        "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
+        "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
+        "cache_read": getattr(details, "cached_tokens", 0) or 0,
+    }
+
+
+class _AuditedOpenAIEndpoint:
+    """One `create`-shaped OpenAI endpoint (chat.completions, embeddings, …)."""
+
+    def __init__(self, endpoint, caller: str, provider: str, label: str):
+        self._endpoint = endpoint
+        self._caller = caller
+        self._provider = provider
+        self._label = label
+
+    def __getattr__(self, name):
+        return getattr(self._endpoint, name)
+
+    async def create(self, *args, **kwargs):
+        model = _model_arg(args, kwargs)
+        headers = dict(kwargs.get("extra_headers") or {})
+        headers.setdefault("x-llm-caller", self._caller)
+        kwargs["extra_headers"] = headers
+        check_llm_call(
+            surface="external_sdk", caller=self._caller,
+            provider=self._provider, model=model,
+        )
+        started = time.monotonic()
+        try:
+            response = await self._endpoint.create(*args, **kwargs)
+        except Exception as exc:
+            record_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model, label=self._label,
+                status="error", error_excerpt=str(exc),
+                latency_ms=int((time.monotonic() - started) * 1000),
+                estimate_cost=False,
+            )
+            raise
+        # A streamed response is an iterator with no usage until it is drained;
+        # the caller that drains it owns the accounting.
+        usage = ({} if kwargs.get("stream") else _openai_usage(response))
+        record_llm_call(
+            surface="external_sdk", caller=self._caller,
+            provider=self._provider, model=model, label=self._label,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            estimate_cost=not kwargs.get("stream"), **usage,
+        )
+        return response
+
+
+class _AuditedChat:
+    def __init__(self, chat, caller: str, provider: str):
+        self._chat = chat
+        self.completions = _AuditedOpenAIEndpoint(
+            chat.completions, caller, provider, "chat.completions.create")
+
+    def __getattr__(self, name):
+        return getattr(self._chat, name)
+
+
+class AuditedAsyncOpenAI:
+    """Transparent async OpenAI-compatible client that names itself.
+
+    Same reason as AuditedAsyncAnthropic: bot_config hands these out by name and
+    whatever imports one would otherwise reach the proxy anonymously.
+    """
+
     def __init__(self, client, *, caller: str, provider: str):
         self._client = client
-        self.messages = _AuditedAsyncMessages(client.messages, caller, provider)
+        self.chat = _AuditedChat(client.chat, caller, provider)
+        self.embeddings = _AuditedOpenAIEndpoint(
+            client.embeddings, caller, provider, "embeddings.create")
 
     def __getattr__(self, name):
         return getattr(self._client, name)

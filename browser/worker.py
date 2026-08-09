@@ -97,17 +97,14 @@ def _init_provider_client(provider: str):
         return _provider_clients[provider]
     from secrets_loader import get_secret
 
+    # bot_config's clients, not new ones: those are wrapped so the proxy learns
+    # who is calling, and a client built here would reach it anonymously.
     if provider == "openai":
-        from openai import AsyncOpenAI
-        from bot_config import OPENAI_BASE_URL_EFFECTIVE, OPENAI_CLIENT_KEY
-        client = AsyncOpenAI(api_key=OPENAI_CLIENT_KEY, base_url=OPENAI_BASE_URL_EFFECTIVE)
+        from bot_config import _openai_client as client
     else:
-        import anthropic
-        from bot_config import DEEPSEEK_ANTHROPIC_BASE_URL, DEEPSEEK_CLIENT_KEY
-        client = anthropic.AsyncAnthropic(
-            api_key=DEEPSEEK_CLIENT_KEY,
-            base_url=DEEPSEEK_ANTHROPIC_BASE_URL,
-        )
+        from bot_config import _deepseek_anthropic_client as client
+    if client is None:
+        raise RuntimeError(f"no configured client for provider {provider!r}")
     _provider_clients[provider] = client
     return client
 

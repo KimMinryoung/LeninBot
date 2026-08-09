@@ -73,9 +73,20 @@ OPENAI_CLIENT_KEY = OPENAI_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else 
 DEEPSEEK_CLIENT_KEY = DEEPSEEK_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
 MOONSHOT_CLIENT_KEY = MOONSHOT_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else "")
 
-_claude = anthropic.AsyncAnthropic(
-    api_key=ANTHROPIC_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else ""),
-    base_url=ANTHROPIC_BASE_URL,
+# Every provider client this module exports is wrapped. The proxy is the
+# enforcement point and it identifies callers by the x-llm-caller header, so a
+# raw SDK object handed out under a module-level name is an anonymous way past
+# it — 21,026 of 21,027 proxy records on 2026-08-09 had no caller. The wrapper
+# stamps the name and, for DeepSeek, supplies the thinking default that
+# llm/call_registry applies on its own path.
+from llm.instrumented_clients import AuditedAsyncAnthropic, AuditedAsyncOpenAI
+
+_claude = AuditedAsyncAnthropic(
+    anthropic.AsyncAnthropic(
+        api_key=ANTHROPIC_API_KEY or (PROXY_PLACEHOLDER_KEY if _via_proxy else ""),
+        base_url=ANTHROPIC_BASE_URL,
+    ),
+    caller="anthropic_client", provider="anthropic",
 )
 
 # OpenAI-compatible clients (lazy — only created if keys exist or proxied)
@@ -87,17 +98,19 @@ _kimi_anthropic_client = None
 if OPENAI_API_KEY or DEEPSEEK_API_KEY or MOONSHOT_API_KEY or _via_proxy:
     from openai import AsyncOpenAI
 if OPENAI_API_KEY or _via_proxy:
-    _openai_client = AsyncOpenAI(
-        api_key=OPENAI_API_KEY or PROXY_PLACEHOLDER_KEY,
-        base_url=OPENAI_BASE_URL_EFFECTIVE,
+    _openai_client = AuditedAsyncOpenAI(
+        AsyncOpenAI(
+            api_key=OPENAI_API_KEY or PROXY_PLACEHOLDER_KEY,
+            base_url=OPENAI_BASE_URL_EFFECTIVE,
+        ),
+        caller="openai_client", provider="openai",
     )
 if DEEPSEEK_API_KEY or _via_proxy:
-    _deepseek_client = AsyncOpenAI(
-        api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=DEEPSEEK_BASE_URL)
-    # Wrapped, not raw: this name is imported by maintenance scripts that do not
-    # go through llm/call_registry, and an unwrapped SDK object is an unmetered
-    # path out of the process. See AuditedAsyncAnthropic for what that cost.
-    from llm.instrumented_clients import AuditedAsyncAnthropic
+    _deepseek_client = AuditedAsyncOpenAI(
+        AsyncOpenAI(
+            api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=DEEPSEEK_BASE_URL),
+        caller="deepseek_client", provider="deepseek",
+    )
     _deepseek_anthropic_client = AuditedAsyncAnthropic(
         anthropic.AsyncAnthropic(
             api_key=DEEPSEEK_API_KEY or PROXY_PLACEHOLDER_KEY,
@@ -105,13 +118,20 @@ if DEEPSEEK_API_KEY or _via_proxy:
         ),
         caller="deepseek_anthropic_direct",
         provider="deepseek",
+        thinking_off=True,
     )
 if MOONSHOT_API_KEY or _via_proxy:
-    _kimi_client = AsyncOpenAI(
-        api_key=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=MOONSHOT_BASE_URL)
-    _kimi_anthropic_client = anthropic.AsyncAnthropic(
-        auth_token=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY,
-        base_url=MOONSHOT_ANTHROPIC_BASE_URL,
+    _kimi_client = AuditedAsyncOpenAI(
+        AsyncOpenAI(
+            api_key=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY, base_url=MOONSHOT_BASE_URL),
+        caller="kimi_client", provider="moonshot",
+    )
+    _kimi_anthropic_client = AuditedAsyncAnthropic(
+        anthropic.AsyncAnthropic(
+            auth_token=MOONSHOT_API_KEY or PROXY_PLACEHOLDER_KEY,
+            base_url=MOONSHOT_ANTHROPIC_BASE_URL,
+        ),
+        caller="kimi_anthropic_client", provider="moonshot",
     )
 _CLAUDE_MAX_TOKENS = 4096
 _CLAUDE_MAX_TOKENS_TASK = 16384  # Tasks need longer output for full reports
