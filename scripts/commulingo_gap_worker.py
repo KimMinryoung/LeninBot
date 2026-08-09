@@ -143,6 +143,30 @@ def claim_gap(kind: str = "") -> dict | None:
             return dict(row) if row else None
 
 
+def produced_entry(gap: dict) -> str:
+    """The id of the entry this gap asked for, if it now exists.
+
+    Closing a gap used to be decided by whether the suggestion count moved,
+    which is a proxy for "my write landed" and was a wrong one while every
+    worker shared a suggested_by: another worker's write moved the same counter,
+    so a run whose own write never happened still closed its row as done. 36
+    gaps were retired that way on 2026-08-09 with nothing written for them, and
+    nothing noticed because the queue said they were finished.
+
+    This asks the dictionaries instead. It is the same lookup the gap tool uses
+    to refuse a gap for an entry that already exists, so a gap closes as done
+    only when the thing it asked for is actually there.
+    """
+    if gap["target_id"]:
+        return gap["target_id"]  # a deepen request; the card existed all along
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            from runtime_tools.commulingo_people import _already_covered
+            return _already_covered(
+                cur, gap["kind"], {"ko": gap["label_ko"], "en": gap["label_en"]}, ""
+            )
+
+
 def close_gap(gap_id: int, status: str, resolved_id: str, resolution: str) -> None:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -299,10 +323,11 @@ async def run_once(kind: str = "") -> dict:
                 no_edit_box=no_edit_box,
             )
     except Exception as exc:
-        # The stage raises after exhausting its own retries. Put the row back so
-        # the next worker gets it, instead of leaving it claimed and invisible.
-        if completed_run_count() != before:
-            close_gap(gap["id"], "done", "", f"write landed then the stage raised: {exc}")
+        # The stage raises after exhausting its own retries. Whether the row is
+        # finished is decided by looking for the entry, not by the counter.
+        made = produced_entry(gap)
+        if made:
+            close_gap(gap["id"], "done", made, f"written, then the stage raised: {exc}")
             raise
         close_gap(gap["id"], "pending", "", f"requeued after stage error: {exc}")
         return {"status": "error", "gap": gap["id"], "kind": gap["kind"],
@@ -314,14 +339,10 @@ async def run_once(kind: str = "") -> dict:
         "event": gap["event_id"], "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
         "rounds": int(tracker.get("rounds_used") or 0),
     }
-    if completed_run_count() != before:
-        edit = db_query_one(
-            """SELECT target_id FROM commulingo_agent_suggestions
-                WHERE suggested_by = %(s)s ORDER BY id DESC LIMIT 1""",
-            {"s": SUGGESTED_BY},
-        ) or {}
-        close_gap(gap["id"], "done", str(edit.get("target_id") or ""), "created")
-        return {"status": "applied", "created": edit.get("target_id"), **summary}
+    made = produced_entry(gap)
+    if made:
+        close_gap(gap["id"], "done", made, "created")
+        return {"status": "applied", "created": made, **summary}
     reason = str(no_edit_box.get("reason") or "")
     if reason:
         close_gap(gap["id"], "skipped", "", reason)
