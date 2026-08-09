@@ -142,6 +142,20 @@ class _AuditedAsyncMessages:
 
     async def create(self, *args, **kwargs):
         model = _model_arg(args, kwargs)
+        # DeepSeek V4 turns thinking on when the request says nothing, and the
+        # reasoning shares max_tokens with the reply: a call that only wants
+        # text can spend the whole budget deliberating and return an empty text
+        # block. Every caller that wants reasoning passes it (web_chat sends
+        # disabled, a2a_handler sends _get_deepseek_tool_thinking_params), so
+        # silence here means "not asked for" rather than "leave it to the
+        # provider".
+        kwargs.setdefault("thinking", {"type": "disabled"})
+        # The proxy records who called it from this header. Without it every
+        # request from a directly-held client lands in the ledger as one
+        # anonymous heap.
+        headers = dict(kwargs.get("extra_headers") or {})
+        headers.setdefault("x-llm-caller", self._caller)
+        kwargs["extra_headers"] = headers
         check_llm_call(
             surface="external_sdk", caller=self._caller,
             provider=self._provider, model=model,
