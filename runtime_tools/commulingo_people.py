@@ -3491,6 +3491,36 @@ def _normalize_soviet_korean_content(value, *, korean: bool = False, excluded: b
     return value
 
 
+def _normalize_localized_spellings(value, applied: dict, lang: str = ""):
+    """Apply the name-spelling registry to every {ko, en} string in a patch.
+
+    normalize_spellings_in_text has done the careful part since the registry was
+    added (masking direct quotations and the blocked compounds like 시베리아 ⊃
+    베리아) but nothing ever called it: the only live path was the _validate
+    rejection, which costs a paid round to fix a substitution with exactly one
+    right answer. The 조지아 -> 그루지야 rule in the same file has always been
+    applied here rather than refused, and a variant spelling is the same kind of
+    rule. _validate keeps its check as a backstop for writers that reach it
+    without passing through here.
+    """
+    if isinstance(value, str):
+        if lang not in ("ko", "en"):
+            return value
+        fixed, hits = normalize_spellings_in_text(value, lang)
+        applied.update(hits)
+        return fixed
+    if isinstance(value, list):
+        return [_normalize_localized_spellings(item, applied, lang) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_localized_spellings(
+                item, applied, key if key in ("ko", "en") else lang
+            )
+            for key, item in value.items()
+        }
+    return value
+
+
 def normalize_commulingo_write(
     target_type: str,
     target_id: str,
@@ -3579,6 +3609,14 @@ def normalize_commulingo_write(
     if terminology_normalized != normalized:
         normalized = terminology_normalized
         repairs.append("조지아->그루지야 in Korean content")
+
+    spelling_hits: dict = {}
+    normalized = _normalize_localized_spellings(normalized, spelling_hits)
+    if spelling_hits:
+        repairs.append(
+            "name spellings: "
+            + ", ".join(f"{variant}->{canonical}" for variant, canonical in spelling_hits.items())
+        )
 
     allowed = _PATCH_KEYS_BY_TARGET[target_type]
     unknown = sorted(set(normalized) - allowed)
