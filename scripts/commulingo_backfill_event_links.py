@@ -1,359 +1,239 @@
 #!/usr/bin/env python3
-"""Batch-backfill commulingo_history_event_people links, event by event.
+"""Link the person cards an event commissioned back to that event.
 
-For each history event, hands the event card plus the full people roster
-(names, epithets, condensed careers) to DeepSeek and asks for the people who
-were clearly involved. Proposals are validated against the roster, filtered by
-confidence, deduplicated against existing links, and applied with a revision
-row per link (changed_by 'operator:claude-code') for post-hoc review.
+`commulingo_person_create` is a finalization tool: a successful call ends the
+run. The gap worker was built around that, so a curator that made a card had no
+round left to call `commulingo_event_link`, and 206 of the 253 cards ordered by
+an event page never linked back to the page that ordered them. Valery
+Khodemchuk, the first man killed at Chernobyl, sat outside the Chernobyl event's
+people list while eighteen others were in it.
 
-Runs under a systemd oneshot unit (leninbot-event-backfill.service); DB access
-is service-scoped and DeepSeek is routed through the local LLM proxy.
+The research is already done and stored: the gap row names the person, the
+event, and — in the curator's own words — why that section needed them. What is
+missing is only the two short bilingual strings the link carries, so this asks
+the model for those and nothing else. It never invents a link: every row comes
+from a gap whose event the curator chose.
+
+The worker itself is fixed separately (it links in code after the card lands),
+so this is a one-off for the backlog, not a recurring job.
 
 Usage:
-  ... commulingo_backfill_event_links.py --dry-run           # propose only
-  ... commulingo_backfill_event_links.py                     # apply
-  ... commulingo_backfill_event_links.py --events chernobyl  # subset
+  scripts/commulingo_backfill_event_links.py --dry-run --limit 8
+  scripts/commulingo_backfill_event_links.py --limit 50
+  scripts/commulingo_backfill_event_links.py            # the whole backlog
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import logging
+import os
 import sys
-import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import query as db_query, execute as db_execute
-from secrets_loader import get_secret
+os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-event-link-backfill")
 
-MODEL = "deepseek-v4-pro"
-CHANGED_BY = "operator:claude-code"
-REPORT_DIR = PROJECT_ROOT / "logs" / "commulingo"
+from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
+from db import get_conn  # noqa: E402
+from psycopg2.extras import RealDictCursor  # noqa: E402
+from runtime_tools.commulingo_people import (  # noqa: E402
+    _HISTORY_RELATION_KINDS,
+    normalize_commulingo_write,
+    _run_edit,
+)
 
-# The event page groups people by manner of involvement. The model must classify
-# each link into one of these; anything else (or a missing value) becomes the
-# neutral "unclassified" bucket for human review — never a silent "target",
-# which would libel a mere participant as a victim of the event.
-VALID_KINDS = {"leader", "participant", "executor", "target", "opponent", "witness"}
-FALLBACK_KIND = "unclassified"
+logger = logging.getLogger("commulingo_backfill_event_links")
+# Four, not a dozen: the model reasons before it answers and that reasoning
+# shares the token budget with the reply. A batch of eight came back with the
+# whole budget spent on thinking and an empty text block.
+BATCH = 4
 
-PROMPT = """You are auditing the people-links of one historical event card on a Soviet/revolutionary
-history site. Below are the event and the site's full roster of people. List every person from the
-roster whose card shows they took part in this event. Judge from the roster line itself; do not
-speculate beyond it. Never invent a connection the line does not support: missing a link is fine,
-inventing one is not. But do not omit a real one for being ordinary. Ordinary service in a mass
-event IS a link, because the reader learns as much from who was there as from who was not, and a
-missing link would otherwise be indistinguishable from an absence.
+PROMPT = """You are filling in the connective tissue of a Korean-language site on Soviet
+history. Each item below is a person the site already has a card for, an event the site
+already has a page for, and the note the event's own curator wrote when it asked for that
+card. The link between them is decided; you are writing only what the link says.
 
-The WEIGHT of an involvement is carried by the length of relation_ko/relation_en, not by whether
-the link exists:
-  - Decisive involvement (led it, commanded a named formation, made a documented turning act, or
-    the event is the centre of this person's card): a short role phrase, as specific as the roster
-    line supports. e.g. "백군 총사령관", "제7군 사령관 · 만네르헤임 선 돌파".
-  - Ordinary involvement (enlisted, served, was mobilized, held a routine post while it happened):
-    the BARE role noun and nothing else, at most a few characters. e.g. "정찰병", "기병학교 생도",
-    "군수보급". No verbs, no explanation, no clause. If the roster line says only that they served,
-    "붉은 군대 복무" is the whole label.
-A generation of Soviet officers served in the Civil War; the page must show that plainly without
-dressing each one up as a protagonist.
+For each item return four short strings and one kind:
 
-Never put an em dash (—) in a label: this site does not use them. Join two parts with a middle
-dot ( · ) as the rest of the dictionary does, e.g. "제7군 사령관 · 만네르헤임 선 돌파".
-A label needing more than one such join is too long for a label; cut it back to the role.
+  relation_ko / relation_en — the person's position in THIS event, two to six words.
+      Korean examples: 첫 희생자, 4호기 야간 근무조장, 진압을 지휘한 내무장관,
+      망명 정부의 외무장관. Not a job title in the abstract: what they were to this event.
+  note_ko / note_en — one sentence, at most two, on what they did or what happened to them
+      in this event. Draw it from the curator's note; do not invent facts that are not there.
+  kind — exactly one of: {kinds}
+      leader (directed it), participant (took part), executor (carried out orders),
+      target (it was done to them), opponent (worked against it), witness (recorded or
+      observed it, including scholars who later wrote about it).
 
-Holding a post while the event happened is not taking part in it, and neither is being promoted
-into posts the event emptied. The tell is that there is nothing to write in the label except the
-person's job title. On 2026-08-02 a pass over the Kosygin reform returned 24 people labelled
-운송건설장관, 중공업장관, 해운장관, 체신장관 and so on: ministers who were in office from 1965
-to 1970 and nothing more. Compare the ones that belonged: 코시긴 "개혁 주도", 리베르만 "이론적
-촉매", 브레즈네프 "개혁을 제한", 스타롭스키 "OGAS 반대 · 통계 기관의 기득권 방어". Each of
-those says what the person did to the event. If the only honest label is a post, OMIT the person.
-A post plus what they did with it is fine: "고스플란 의장으로 계획경제 개혁을 집행".
+Writing rules, both languages:
+  - No em dash (—) anywhere. Use a comma, a colon, or a new sentence.
+  - Korean is 한다체 written prose: '~했다', '~이다'. No 존댓말, no bullet fragments.
+  - Write 그루지야, never 조지아. Write 조선민주주의인민공화국 or 조선, never 북한.
+  - Use the person's name exactly as the item gives it.
+  - The two languages must say the same thing. English is not a gloss of the Korean word
+    order; write it as English prose.
 
-For each person also classify HOW they were involved in THIS event, as one "kind":
-  leader      — directed or led the event from the top
-  participant — took active part (commanders, officials, organizers, designers, soldiers)
-  executor    — security/repression apparatus that carried out the event's coercion
-  target      — a victim or target of the event (purged, deported, executed, deposed)
-  opponent    — opposed or resisted the event
-  witness     — a chronicler or observer (writer, journalist, artist), not a direct actor
-The kind is event-specific: the same person may be a target in one event and an
-executor in another. Do NOT default to "target" — pick the role they actually played.
+Reply with a JSON array and nothing else:
+[{{"i": 0, "relation_ko": "...", "relation_en": "...", "note_ko": "...", "note_en": "...", "kind": "participant"}}]
 
-EVENT
-{event_block}
-
-PEOPLE ALREADY LINKED (do not repeat): {already}
-
-ROSTER (id | names | epithet | group | career)
-{roster}
-
-person_id MUST be COPIED VERBATIM from the id column of the ROSTER above. Never build one
-from the person's name: the roster's ids do not follow a rule you can guess (some carry a given
-name, some do not; transliteration varies). Copy the string, and also echo the roster's Korean
-name in name_ko so a copy error can be repaired.
-
-Answer with ONLY a JSON object, no other text:
-{{"links": [{{"person_id": "<roster id, copied verbatim>", "name_ko": "<roster Korean name>",
-"relation_ko": "<간결한 역할, 예: 진압 지휘>",
-"relation_en": "<same in English>", "kind": "<leader|participant|executor|target|opponent|witness>",
-"confidence": <0.0-1.0>, "reason": "<one short sentence>"}}]}}
-Use an empty list when nobody qualifies."""
+Items:
+"""
 
 
-def normalize_label(value) -> str:
-    """Strip an em dash out of a relation label.
-
-    The site does not use em dashes in written content, and the model puts them
-    in anyway: 56 stored labels carried one by 2026-08-02, 7 of them from that
-    day's civil-war pass. The prompt now forbids it, but a prompt rule is a
-    request and this is the boundary, so normalize here too. ' — ' becomes the
-    middle dot the rest of the dictionary joins with; a bare '—' becomes a
-    space, since it was standing in for a break rather than a join.
-    """
-    text = str(value or "").strip()
-    text = text.replace(" — ", " · ").replace("—", " ")
-    return " ".join(text.split())
-
-
-def resolve_person_id(pid: str, name_ko: str, roster: list[dict]) -> tuple[str, str] | None:
-    """Repair an id the model constructed instead of copying, or give up.
-
-    Two real misses on 2026-08-02, both id-shaped rather than wrong people:
-    'sergei-kruglov' for roster 'sergey-kruglov' (transliteration), and
-    'boris-ponomarev' for roster 'ponomarev' (a given name the roster id does
-    not carry). Both were correct identifications thrown away over spelling.
-
-    Only unambiguous repairs are accepted. A name matching two roster people,
-    or a suffix matching two ids, stays rejected: a wrong link is far worse
-    than a missing one, which is the rule the prompt itself states.
-    """
-    ids = {p["id"] for p in roster}
-    if pid in ids:
-        return pid, "exact"
-
-    name = (name_ko or "").strip()
-    if name:
-        by_name = [p["id"] for p in roster if (p.get("name_ko") or "").strip() == name]
-        if len(by_name) == 1:
-            return by_name[0], "name_ko"
-
-    if pid:
-        # 'boris-ponomarev' -> 'ponomarev': the model prepended a given name.
-        tail = pid.split("-", 1)[-1]
-        if tail != pid and tail in ids:
-            return tail, "dropped-given-name"
-        # 'ponomarev' -> 'boris-ponomarev': or omitted one the roster carries.
-        by_suffix = [i for i in ids if i.endswith("-" + pid)]
-        if len(by_suffix) == 1:
-            return by_suffix[0], "added-given-name"
-        # 'sergei-kruglov' -> 'sergey-kruglov': i/y and similar transliteration.
-        squashed = pid.replace("-", "").replace("i", "y").replace("j", "y")
-        by_translit = [
-            i for i in ids
-            if i.replace("-", "").replace("i", "y").replace("j", "y") == squashed
-        ]
-        if len(by_translit) == 1:
-            return by_translit[0], "transliteration"
-    return None
+_PENDING_SQL = """SELECT g.resolved_id AS person_id, g.event_id, g.reason,
+                          p.name_ko, p.name_en, p.epithet_ko,
+                          e.title_ko AS event_ko, e.title_en AS event_en
+                     FROM commulingo_curation_gaps g
+                     JOIN commulingo_people p ON p.id = g.resolved_id
+                     JOIN commulingo_history_events e ON e.id = g.event_id
+                    WHERE g.kind = 'person'
+                      AND g.resolved_id <> '' AND g.event_id <> ''
+                      AND NOT EXISTS (
+                            SELECT 1 FROM commulingo_history_event_people l
+                             WHERE l.person_id = g.resolved_id
+                               AND l.event_id = g.event_id)
+"""
 
 
-def fetch_events(only: list[str]) -> list[dict]:
-    rows = db_query(
-        """SELECT id, period_label, title_ko, title_en, summary_ko, outcome_ko
-             FROM commulingo_history_events ORDER BY sort_order"""
+def _select(extra: str, params: tuple) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(_PENDING_SQL + extra, params)
+            return [dict(row) for row in cur.fetchall()]
+
+
+def pending_rows(limit: int) -> list[dict]:
+    """Gap-commissioned cards that never linked back to their event."""
+    return _select(" ORDER BY g.priority DESC, g.id LIMIT %s", (limit,))
+
+
+def pending_rows_for(person_id: str, event_id: str) -> list[dict]:
+    """The same row for one card, for the worker that just created it."""
+    return _select(" AND g.resolved_id = %s AND g.event_id = %s LIMIT 1", (person_id, event_id))
+
+
+def next_sort_order(event_id: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) AS m FROM commulingo_history_event_people WHERE event_id = %s",
+                (event_id,),
+            )
+            return int(cur.fetchone()["m"]) + 1
+
+
+async def describe(rows: list[dict], model: str) -> list[dict]:
+    items = "\n".join(
+        f"--- item {i} ---\n"
+        f"person: {row['name_ko']} / {row['name_en']}\n"
+        f"card says: {row.get('epithet_ko') or ''}\n"
+        f"event: {row['event_ko']} / {row['event_en']} (id {row['event_id']})\n"
+        f"why the event asked for this card: {row['reason']}"
+        for i, row in enumerate(rows)
     )
-    return [r for r in rows if not only or r["id"] in only]
-
-
-def fetch_roster() -> list[dict]:
-    return db_query(
-        """SELECT p.id, p.name_ko, p.name_en, p.epithet_ko, p.group_id,
-                  COALESCE(LEFT(STRING_AGG(c.period_label || ' ' || c.role_ko, '; '
-                    ORDER BY c.sort_order), 200), '') AS career
-             FROM commulingo_people p
-             LEFT JOIN commulingo_person_career_entries c ON c.person_id = p.id
-            GROUP BY p.id, p.name_ko, p.name_en, p.epithet_ko, p.group_id
-            ORDER BY p.id"""
+    response = await _deepseek_anthropic_client.messages.create(
+        model=model,
+        max_tokens=12000,
+        messages=[{"role": "user", "content": PROMPT.format(kinds=", ".join(_HISTORY_RELATION_KINDS)) + items}],
     )
+    raw = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
+    start, end = raw.find("["), raw.rfind("]")
+    if start == -1 or end == -1:
+        raise ValueError(f"no JSON array in reply (stop_reason={response.stop_reason}): {raw[:200]}")
+    out: list[dict] = [{} for _ in rows]
+    for entry in json.loads(raw[start:end + 1]):
+        index = int(entry.get("i", -1))
+        if 0 <= index < len(out):
+            out[index] = entry
+    return out
 
 
-def existing_links() -> set[tuple[str, str]]:
-    rows = db_query("SELECT event_id, person_id FROM commulingo_history_event_people")
-    return {(r["event_id"], r["person_id"]) for r in rows}
+def acceptable(entry: dict) -> str:
+    """'' if the entry can be written, else why not."""
+    for key in ("relation_ko", "relation_en", "note_ko", "note_en"):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return f"missing {key}"
+        if "—" in value:
+            return f"em dash in {key}"
+        if "북한" in value or "조지아" in value:
+            return f"banned spelling in {key}"
+    if entry.get("kind") not in _HISTORY_RELATION_KINDS:
+        return f"kind {entry.get('kind')!r} not in {_HISTORY_RELATION_KINDS}"
+    # Calibrated on what is already stored: the longest relation in the table is
+    # 64 Korean characters and 164 English, the 95th percentile 30 and 82. A cap
+    # tighter than the corpus refuses rows the site itself would accept.
+    if len(entry["relation_ko"]) > 64 or len(entry["relation_en"]) > 164:
+        return "relation longer than anything else in the table"
+    return ""
 
 
-def propose(client, event: dict, roster: list[dict], linked_ids: list[str]) -> list[dict]:
-    event_block = (
-        f"id: {event['id']}\nperiod: {event['period_label']}\n"
-        f"title: {event['title_ko']} / {event['title_en']}\n"
-        f"summary: {event['summary_ko']}\noutcome: {event['outcome_ko']}"
+def write_link(row: dict, entry: dict) -> None:
+    patch = {
+        "personId": row["person_id"],
+        "sortOrder": next_sort_order(row["event_id"]),
+        "relationKind": entry["kind"],
+        "relation": {"ko": entry["relation_ko"].strip(), "en": entry["relation_en"].strip()},
+        "note": {"ko": entry["note_ko"].strip(), "en": entry["note_en"].strip()},
+    }
+    citations = [f"결손 큐 {row['event_id']} → {row['person_id']}: {row['reason'][:200]}"]
+    patch, citations, _confidence, _repairs = normalize_commulingo_write(
+        "history_event_person", row["event_id"], patch, citations, None
     )
-    roster_lines = "\n".join(
-        f"{p['id']} | {p['name_ko']} / {p['name_en']} | {p['epithet_ko']} | {p['group_id']} | {p['career']}"
-        for p in roster
-    )
-    prompt = PROMPT.format(
-        event_block=event_block,
-        already=", ".join(linked_ids) or "(none)",
-        roster=roster_lines,
-    )
-    from llm.gateway import check_llm_call, record_llm_call
-
-    check_llm_call(
-        surface="oneshot", caller="commulingo_event_backfill",
-        provider="deepseek", model=MODEL,
-    )
-    started = time.monotonic()
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.1,
-        )
-    except Exception as exc:
-        record_llm_call(
-            surface="oneshot", caller="commulingo_event_backfill",
-            provider="deepseek", model=MODEL, status="error",
-            error_excerpt=str(exc),
-            latency_ms=int((time.monotonic() - started) * 1000),
-            token_semantics="openai", estimate_cost=False,
-        )
-        raise
-    usage = getattr(resp, "usage", None)
-    details = getattr(usage, "prompt_tokens_details", None)
-    record_llm_call(
-        surface="oneshot", caller="commulingo_event_backfill",
-        provider="deepseek", model=MODEL,
-        tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
-        tokens_out=getattr(usage, "completion_tokens", 0) or 0,
-        cache_read=getattr(details, "cached_tokens", 0) or 0,
-        latency_ms=int((time.monotonic() - started) * 1000),
-        token_semantics="openai",
-    )
-    payload = json.loads(resp.choices[0].message.content or "{}")
-    links = payload.get("links")
-    if not isinstance(links, list):
-        raise ValueError(f"model returned no links array for {event['id']}")
-    return links
+    result = _run_edit("history_event_person", "create", row["event_id"], patch, citations, None)
+    if result.startswith("Error:"):
+        raise RuntimeError(result)
 
 
-def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str, kind: str) -> None:
-    kind = kind if kind in VALID_KINDS else FALLBACK_KIND
-    row = db_query(
-        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM commulingo_history_event_people WHERE event_id = %s",
-        (event_id,),
-    )[0]
-    db_execute(
-        """INSERT INTO commulingo_history_event_people
-             (event_id, person_id, sort_order, relation_ko, relation_en, relation_kind)
-           VALUES (%s, %s, %s, %s, %s, %s)""",
-        (event_id, person_id, row["next"], relation_ko, relation_en, kind),
-    )
-    db_execute(
-        """INSERT INTO commulingo_people_revisions (entity_type, entity_id, revision_note, snapshot, changed_by)
-           VALUES ('history_event_person', %s, 'event-link backfill (batch, operator-approved)', %s::jsonb, %s)""",
-        (
-            f"{event_id}/{person_id}",
-            json.dumps({"after": {
-                "event_id": event_id, "person_id": person_id,
-                "relation_ko": relation_ko, "relation_en": relation_en,
-                "relation_kind": kind,
-            }}, ensure_ascii=False),
-            CHANGED_BY,
-        ),
-    )
+async def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=10_000)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    rows = pending_rows(args.limit)
+    logger.info("unlinked gap-commissioned cards: %d", len(rows))
+    model = _resolve_deepseek_model("deepseek_pro")
+    written = skipped = 0
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dry-run", action="store_true", help="propose and report only, write nothing")
-    ap.add_argument("--events", default="", help="comma-separated event ids (default: all)")
-    ap.add_argument("--min-confidence", type=float, default=0.8)
-    ap.add_argument("--sleep", type=float, default=1.0, help="seconds between event calls")
-    args = ap.parse_args()
-
-    from openai import OpenAI
-
-    from llm.gateway import provider_endpoint
-
-    base_url, api_key = provider_endpoint(
-        "deepseek", "https://api.deepseek.com",
-        get_secret("DEEPSEEK_API_KEY", "") or "",
-    )
-    if not api_key:
-        print("DEEPSEEK_API_KEY unavailable and LLM proxy disabled", file=sys.stderr)
-        return 1
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    only = [e.strip() for e in args.events.split(",") if e.strip()]
-    events = fetch_events(only)
-    roster = fetch_roster()
-    linked = existing_links()
-    print(f"[event-links] {len(events)} events, roster {len(roster)}, existing links {len(linked)}", file=sys.stderr)
-
-    report = {"dry_run": args.dry_run, "min_confidence": args.min_confidence,
-              "applied": [], "rejected": [], "errors": []}
-    REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    report_path = REPORT_DIR / f"event_link_backfill_{stamp}{'_dry' if args.dry_run else ''}.json"
-    for i, event in enumerate(events):
-        linked_ids = sorted(p for (e, p) in linked if e == event["id"])
+    for start in range(0, len(rows), BATCH):
+        batch = rows[start:start + BATCH]
         try:
-            proposals = propose(client, event, roster, linked_ids)
+            entries = await describe(batch, model)
         except Exception as exc:
-            report["errors"].append({"event": event["id"], "error": str(exc)})
-            print(f"[event-links] {event['id']}: ERROR {exc}", file=sys.stderr)
+            logger.warning("batch %d failed, left alone: %s", start // BATCH, exc)
+            skipped += len(batch)
             continue
-        for prop in proposals:
-            pid = str(prop.get("person_id") or "").strip()
-            kind = str(prop.get("kind") or "").strip().lower()
-            entry = {"event": event["id"], "person": pid,
-                     "relation_ko": normalize_label(prop.get("relation_ko")),
-                     "relation_en": normalize_label(prop.get("relation_en")),
-                     "kind": kind if kind in VALID_KINDS else FALLBACK_KIND,
-                     "confidence": prop.get("confidence"), "reason": prop.get("reason")}
-            try:
-                conf = float(prop.get("confidence") or 0.0)
-            except (TypeError, ValueError):
-                conf = 0.0
-            resolved = resolve_person_id(pid, str(prop.get("name_ko") or ""), roster)
-            if resolved and resolved[0] != pid:
-                entry["person_id_as_proposed"] = pid
-                entry["id_repair"] = resolved[1]
-                pid = entry["person"] = resolved[0]
-            if resolved is None:
-                entry["verdict"] = "rejected: unknown person_id"
-            elif (event["id"], pid) in linked:
-                entry["verdict"] = "rejected: already linked"
-            elif conf < args.min_confidence:
-                entry["verdict"] = f"rejected: confidence {conf} < {args.min_confidence}"
-            elif not entry["relation_ko"] or not entry["relation_en"]:
-                entry["verdict"] = "rejected: missing relation labels"
-            else:
-                entry["verdict"] = "proposed" if args.dry_run else "applied"
-                if not args.dry_run:
-                    apply_link(event["id"], pid, entry["relation_ko"], entry["relation_en"], entry["kind"])
-                linked.add((event["id"], pid))
-                report["applied"].append(entry)
+        for row, entry in zip(batch, entries):
+            problem = acceptable(entry)
+            if problem:
+                logger.warning("skip %s -> %s: %s", row["person_id"], row["event_id"], problem)
+                skipped += 1
                 continue
-            report["rejected"].append(entry)
-        print(f"[event-links] {event['id']}: +{sum(1 for a in report['applied'] if a['event'] == event['id'])} "
-              f"(rejected {sum(1 for r in report['rejected'] if r['event'] == event['id'])})", file=sys.stderr)
-        # Checkpoint after every event so a kill/timeout never loses the audit trail.
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        if i + 1 < len(events):
-            time.sleep(args.sleep)
-    print(json.dumps({"applied": len(report["applied"]), "rejected": len(report["rejected"]),
-                      "errors": len(report["errors"]), "report": str(report_path)}, ensure_ascii=False))
+            if args.dry_run:
+                print(f"{row['event_id']:<28} {row['name_ko']:<18} [{entry['kind']}] "
+                      f"{entry['relation_ko']}\n    {entry['note_ko']}")
+                written += 1
+                continue
+            try:
+                write_link(row, entry)
+                written += 1
+            except Exception as exc:
+                logger.warning("write failed %s -> %s: %s", row["person_id"], row["event_id"], exc)
+                skipped += 1
+        logger.info("progress: %d written, %d skipped, %d remaining",
+                    written, skipped, len(rows) - start - len(batch))
+
+    logger.info("done: %d written, %d skipped", written, skipped)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(asyncio.run(main()))

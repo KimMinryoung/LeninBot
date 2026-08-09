@@ -71,6 +71,7 @@ SUGGESTED_BY = f"commulingo-gap-worker-{_worker_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
+from scripts import commulingo_backfill_event_links as event_links  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, query_one as db_query_one, get_conn  # noqa: E402
@@ -165,6 +166,39 @@ def produced_entry(gap: dict) -> str:
             return _already_covered(
                 cur, gap["kind"], {"ko": gap["label_ko"], "en": gap["label_en"]}, ""
             )
+
+
+
+async def link_back(gap: dict, person_id: str) -> bool:
+    """Connect a new card to the event that commissioned it.
+
+    The write tool that creates a card is a finalization tool, so the run that
+    made it ends there and cannot go on to call commulingo_event_link. Left
+    alone, that meant 213 of the cards an event page had asked for never
+    appeared on it: the first man killed at Chernobyl was missing from the
+    Chernobyl event while eighteen of his colleagues were on it.
+
+    The link needs a relation line and a note in both languages, which the gap
+    row does not carry, so this is one small model call outside the run rather
+    than a plain INSERT. It is best-effort: a card with no link is worth more
+    than a failed run, and the backfill script sweeps up whatever this misses.
+    """
+    if not gap.get("event_id") or gap.get("kind") != "person":
+        return False
+    try:
+        rows = event_links.pending_rows_for(person_id, gap["event_id"])
+        if not rows:
+            return False   # the curator linked it itself, or the event is gone
+        entries = await event_links.describe(rows, _resolve_deepseek_model("deepseek_pro"))
+        problem = event_links.acceptable(entries[0])
+        if problem:
+            logger.warning("event link for %s not written: %s", person_id, problem)
+            return False
+        event_links.write_link(rows[0], entries[0])
+        return True
+    except Exception as exc:
+        logger.warning("event link for %s failed: %s", person_id, exc)
+        return False
 
 
 def close_gap(gap_id: int, status: str, resolved_id: str, resolution: str) -> None:
@@ -360,6 +394,7 @@ async def run_once(kind: str = "") -> dict:
     made = produced_entry(gap)
     if made:
         close_gap(gap["id"], "done", made, "created")
+        summary["linked"] = await link_back(gap, made)
         return {"status": "applied", "created": made, **summary}
     reason = str(no_edit_box.get("reason") or "")
     if reason:
