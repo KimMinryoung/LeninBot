@@ -218,7 +218,9 @@ async def main() -> int:
 
     rows = pending_rows(args.limit)
     logger.info("unlinked gap-commissioned cards: %d", len(rows))
-    model = _resolve_deepseek_model("deepseek_pro")
+    # Flash: the research is already in the gap row and this writes two short
+    # captions from it. Nothing here decides what is true.
+    model = _resolve_deepseek_model("deepseek_flash")
     written = skipped = 0
 
     for start in range(0, len(rows), BATCH):

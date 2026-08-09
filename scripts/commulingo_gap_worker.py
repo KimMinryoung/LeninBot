@@ -189,7 +189,7 @@ async def link_back(gap: dict, person_id: str) -> bool:
         rows = event_links.pending_rows_for(person_id, gap["event_id"])
         if not rows:
             return False   # the curator linked it itself, or the event is gone
-        entries = await event_links.describe(rows, _resolve_deepseek_model("deepseek_pro"))
+        entries = await event_links.describe(rows, _resolve_deepseek_model("deepseek_flash"))
         problem = event_links.acceptable(entries[0])
         if problem:
             logger.warning("event link for %s not written: %s", person_id, problem)

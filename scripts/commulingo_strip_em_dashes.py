@@ -226,7 +226,11 @@ def batches(units: list) -> list[list]:
 async def sweep(target: str, limit: int, dry_run: bool) -> dict:
     _table, keys, cols, _entity = TARGETS[target]
     rows = fetch_rows(target, limit)
-    model = _resolve_deepseek_model("deepseek_pro")
+    # Flash, not Pro. The unit of work is "say this paragraph again without the
+    # dash", which is a rewrite with one correct shape rather than a judgement,
+    # and acceptable() rejects anything that drifts. Pro's price is for prose
+    # nobody has written yet.
+    model = _resolve_deepseek_model("deepseek_flash")
     stats = {"target": target, "rows": len(rows), "updated": 0,
              "paragraphs": 0, "refused": 0}
 
