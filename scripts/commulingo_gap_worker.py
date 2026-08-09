@@ -254,6 +254,21 @@ async def run_once(kind: str = "") -> dict:
     if not gap:
         return {"status": "skipped", "reason": f"no pending {kind or 'person/term'} gap"}
 
+    # The queue runs hundreds deep, so hours pass between a gap being filed and
+    # a worker reaching it, and another worker may have written the entry in
+    # between. Five of the twenty-two glossary gaps dismissed on 2026-08-09 were
+    # that: the check at filing time found nothing, and the run that eventually
+    # picked the row spent a full research cycle rediscovering an entry that by
+    # then existed. One query here costs nothing and closes the row instead.
+    if not gap["target_id"]:
+        already = produced_entry(gap)
+        if already:
+            close_gap(gap["id"], "skipped", already,
+                      f"이미 등재됨({already}) — 큐에 넣은 뒤 다른 실행이 만든 것")
+            return {"status": "skipped", "gap": gap["id"], "kind": gap["kind"],
+                    "label": gap["label_ko"], "reason": f"already covered by {already}",
+                    "cost_usd": 0.0, "rounds": 0}
+
     if gap["kind"] == "person" and gap["target_id"]:
         # An existing but thin card: the people lane's enrich path already knows
         # how to deepen one, so hand it the id rather than duplicating that logic.

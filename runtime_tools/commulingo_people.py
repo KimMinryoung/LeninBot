@@ -4103,6 +4103,36 @@ COMMULINGO_GAP_REPORT_TOOL = {
 }
 
 
+_PAREN_RE = re.compile(r"[（(][^）)]*[)）]")
+
+
+def _label_variants(label: str) -> list[str]:
+    """The forms of a filed label worth looking up, most specific first.
+
+    Labels arrive as the event text writes them, and the dictionaries store
+    headwords. The two disagree in small ways that an exact match cannot see:
+    「소브나르호스(국민경제회의)」 is the entry `sovnarkhoz` plus its own alias in
+    brackets, 「식량 배급제 (프로드라즈베르스트카)」 is `prodrazvyorstka` behind a
+    gloss, 「국가비상사태위원회 (GKChP)」 is `gkchp` with the acronym spelled out.
+    Eleven of the twenty-two glossary gaps dismissed on 2026-08-09 were of this
+    shape, and each cost a full curator run to look up and reject.
+
+    So: the label itself, the label without its bracket, and the bracket's own
+    contents (often the registered alias), each also without spaces.
+    """
+    forms: list[str] = []
+    raw = (label or "").strip()
+    if not raw:
+        return forms
+    candidates = [raw, _PAREN_RE.sub(" ", raw).strip()]
+    candidates += [inner.strip() for inner in re.findall(r"[（(]([^）)]*)[)）]", raw)]
+    for candidate in candidates:
+        for form in (candidate, candidate.replace(" ", "")):
+            if form and form not in forms:
+                forms.append(form)
+    return forms
+
+
 def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     """The id of an existing entry this gap is asking for, or ''.
 
@@ -4119,29 +4149,54 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     if not (ko or en):
         return ""
     if kind == "person":
-        cur.execute(
-            """SELECT p.id FROM commulingo_people p
-                WHERE lower(p.name_ko) = lower(%(ko)s) OR lower(p.name_en) = lower(%(en)s)
-                UNION
-               SELECT a.person_id FROM commulingo_person_aliases a
-                WHERE lower(a.alias) IN (lower(%(ko)s), lower(%(en)s))
-                LIMIT 1""",
-            {"ko": ko, "en": en},
-        )
+        sql = """SELECT p.id FROM commulingo_people p
+                  WHERE replace(lower(p.name_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
+                     OR replace(lower(p.name_en), ' ', '') = replace(lower(%(v)s), ' ', '')
+                  UNION
+                 SELECT a.person_id FROM commulingo_person_aliases a
+                  WHERE replace(lower(a.alias), ' ', '') = replace(lower(%(v)s), ' ', '')
+                  LIMIT 1"""
     elif kind == "term":
-        cur.execute(
-            """SELECT t.id FROM commulingo_terms t
-                WHERE lower(t.term_ko) = lower(%(ko)s) OR lower(t.term_en) = lower(%(en)s)
-                UNION
-               SELECT a.term_id FROM commulingo_term_aliases a
-                WHERE lower(a.alias) IN (lower(%(ko)s), lower(%(en)s))
-                LIMIT 1""",
-            {"ko": ko, "en": en},
-        )
+        sql = """SELECT t.id FROM commulingo_terms t
+                  WHERE replace(lower(t.term_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
+                     OR replace(lower(t.term_en), ' ', '') = replace(lower(%(v)s), ' ', '')
+                  UNION
+                 SELECT a.term_id FROM commulingo_term_aliases a
+                  WHERE replace(lower(a.alias), ' ', '') = replace(lower(%(v)s), ' ', '')
+                  LIMIT 1"""
     else:
         return ""
-    row = cur.fetchone()
-    return str(row["id"]) if row else ""
+    # Try the whole label in either language first; only then the stripped forms,
+    # so an entry that matches outright always wins over one reached by peeling a
+    # bracket off. A hit from a stripped form has to agree across languages when
+    # both are given, because that is where a disambiguating bracket could
+    # otherwise collapse two entries into one (인민전선 (소련 말기) and the 1930s
+    # Popular Front are not the same entry).
+    for whole in (v for v in (ko, en) if v):
+        cur.execute(sql, {"v": whole})
+        row = cur.fetchone()
+        if row:
+            return str(row["id"])
+    hits = {}
+    for lang, raw in (("ko", ko), ("en", en)):
+        for form in _label_variants(raw)[1:]:  # [0] is the whole label, tried above
+            cur.execute(sql, {"v": form})
+            row = cur.fetchone()
+            if row:
+                hits[lang] = str(row["id"])
+                break
+    if len(hits) == 2:
+        return hits["ko"] if hits["ko"] == hits["en"] else ""
+    if len(hits) == 1 and not (ko and en):
+        return next(iter(hits.values()))
+    if len(hits) == 1:
+        # One language resolved and the other said nothing. Accept it only when
+        # the silent side has no headword of its own to contradict with.
+        lang, found = next(iter(hits.items()))
+        other = en if lang == "ko" else ko
+        cur.execute(sql, {"v": other})
+        return "" if cur.fetchone() else found
+    return ""
 
 
 def _file_gaps(gaps: list, event_id: str) -> dict:
