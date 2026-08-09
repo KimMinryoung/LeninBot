@@ -4133,6 +4133,68 @@ def _label_variants(label: str) -> list[str]:
     return forms
 
 
+_DOC_MANIFEST = os.path.join(
+    os.getenv("FRONTEND_DIR", "/home/grass/frontend"),
+    "data", "commulingo", "docs", "manifest.json",
+)
+# Document names are dressed in title marks that the same title wears
+# inconsistently: the manifest lists 「대전환의 해」 and 대전환의 해 as separate
+# aliases of one entry, and a curator writing a gap picks whichever its sentence
+# used. The marks carry no identity, so neither side keeps them.
+_DOC_TITLE_MARKS = dict.fromkeys(map(ord, "『』「」《》〈〉<>\"'“”‘’ "))
+_doc_index_cache: tuple[float, dict] = (0.0, {})
+
+
+def _doc_key(value: str) -> str:
+    return (value or "").strip().lower().translate(_DOC_TITLE_MARKS)
+
+
+def _doc_index() -> dict:
+    """Every name a published reference document answers to, mapped to its id.
+
+    Documents are the one dictionary that does not live in a table: they are
+    files listed in the frontend manifest. So the coverage check below had
+    nothing to ask and let every document gap through, and the queue collected
+    requests for documents already on the site — four of the thirty published by
+    2026-08-09 were sitting in it a second time.
+
+    Re-read when the file's mtime moves, which is exactly when a document is
+    published. A manifest that is missing or malformed yields no index, and the
+    gap is filed as before rather than lost.
+    """
+    global _doc_index_cache
+    try:
+        stamp = os.path.getmtime(_DOC_MANIFEST)
+    except OSError:
+        return {}
+    cached_stamp, cached = _doc_index_cache
+    if cached and stamp == cached_stamp:
+        return cached
+    try:
+        with open(_DOC_MANIFEST, encoding="utf-8") as handle:
+            docs = json.load(handle).get("docs") or []
+    except (OSError, ValueError):
+        logger.warning("commulingo doc manifest unreadable at %s", _DOC_MANIFEST)
+        return {}
+    index: dict = {}
+    for doc in docs:
+        doc_id = str(doc.get("id") or "").strip()
+        if not doc_id:
+            continue
+        names = [doc_id]
+        for field in ("title", "aliases"):
+            block = doc.get(field) or {}
+            for lang in ("ko", "en"):
+                value = block.get(lang)
+                names += value if isinstance(value, list) else [value or ""]
+        for name in names:
+            key = _doc_key(str(name))
+            if key:
+                index.setdefault(key, doc_id)
+    _doc_index_cache = (stamp, index)
+    return index
+
+
 def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     """The id of an existing entry this gap is asking for, or ''.
 
@@ -4164,8 +4226,22 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
                  SELECT a.term_id FROM commulingo_term_aliases a
                   WHERE replace(lower(a.alias), ' ', '') = replace(lower(%(v)s), ' ', '')
                   LIMIT 1"""
+    elif kind == "doc":
+        sql = ""
     else:
         return ""
+
+    if kind == "doc":
+        index = _doc_index()
+
+        def probe(value: str) -> str:
+            return index.get(_doc_key(value), "")
+    else:
+        def probe(value: str) -> str:
+            cur.execute(sql, {"v": value})
+            row = cur.fetchone()
+            return str(row["id"]) if row else ""
+
     # Try the whole label in either language first; only then the stripped forms,
     # so an entry that matches outright always wins over one reached by peeling a
     # bracket off. A hit from a stripped form has to agree across languages when
@@ -4173,17 +4249,15 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     # otherwise collapse two entries into one (인민전선 (소련 말기) and the 1930s
     # Popular Front are not the same entry).
     for whole in (v for v in (ko, en) if v):
-        cur.execute(sql, {"v": whole})
-        row = cur.fetchone()
-        if row:
-            return str(row["id"])
+        found = probe(whole)
+        if found:
+            return found
     hits = {}
     for lang, raw in (("ko", ko), ("en", en)):
         for form in _label_variants(raw)[1:]:  # [0] is the whole label, tried above
-            cur.execute(sql, {"v": form})
-            row = cur.fetchone()
-            if row:
-                hits[lang] = str(row["id"])
+            found = probe(form)
+            if found:
+                hits[lang] = found
                 break
     if len(hits) == 2:
         return hits["ko"] if hits["ko"] == hits["en"] else ""
@@ -4194,8 +4268,7 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
         # the silent side has no headword of its own to contradict with.
         lang, found = next(iter(hits.items()))
         other = en if lang == "ko" else ko
-        cur.execute(sql, {"v": other})
-        return "" if cur.fetchone() else found
+        return "" if probe(other) else found
     return ""
 
 
