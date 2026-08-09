@@ -1,0 +1,21 @@
+[Unit]
+Description=LeninBot CommuLingo history-event curator (one body section per run)
+Wants=network-online.target leninbot-llm-proxy.service
+# After the gap lane: the queue it fills is served at the head of the NEXT
+# batch, twenty minutes later, rather than by a worker racing it in this one.
+After=network-online.target leninbot-commulingo-gap.service leninbot-llm-proxy.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
+Environment=COMMULINGO_DAILY_CAP_USD=2.5
+ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_budget_guard.py
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_events_maintainer.py --lane 0 --lanes 1
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal

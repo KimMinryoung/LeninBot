@@ -1,0 +1,21 @@
+[Unit]
+Description=LeninBot CommuLingo event-link captions for cards the queue produced
+Wants=network-online.target leninbot-llm-proxy.service
+After=network-online.target leninbot-commulingo-events.service leninbot-llm-proxy.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=COMMULINGO_SUGGESTED_BY=commulingo-gap-event-links
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+Environment=COMMULINGO_DAILY_CAP_USD=2.5
+ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_budget_guard.py
+# Bounded per batch: this is a tail that clears whatever the earlier lanes made,
+# and an unbounded run would spend the window on a backlog nobody is waiting on.
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_gap_event_links.py --limit 12
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal

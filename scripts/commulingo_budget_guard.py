@@ -15,7 +15,16 @@ import re
 import subprocess
 import sys
 
+# Every unit whose spend counts against the shared daily cap. The sum is
+# compared to each lane's own COMMULINGO_DAILY_CAP_USD, so the lowest cap among
+# them is the real ceiling for the day, not a per-lane allowance. A lane missing
+# from this list spends nothing as far as the guard is concerned: when the batch
+# moved to the gap queue on 2026-08-09 the three new lanes were invisible here
+# and the cap would never have bound.
 LANE_UNITS = [
+    "leninbot-commulingo-gap",
+    "leninbot-commulingo-events",
+    "leninbot-commulingo-links",
     "leninbot-commulingo-new",
     "leninbot-commulingo-enrich",
     "leninbot-commulingo-terms",

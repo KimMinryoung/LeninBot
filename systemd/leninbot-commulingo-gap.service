@@ -1,0 +1,24 @@
+[Unit]
+Description=LeninBot CommuLingo gap-queue worker (people and terms an event page asked for)
+Wants=network-online.target leninbot-llm-proxy.service
+# First in the batch: the queue is what the event pages decided they needed, so
+# it is served before anything picks work of its own accord.
+After=network-online.target leninbot-llm-proxy.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
+Environment=COMMULINGO_DAILY_CAP_USD=2.5
+ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_budget_guard.py
+# One gap per batch. An empty queue exits 0 in seconds and costs nothing, which
+# is the shape that lets this stay first even on a day the events lane filed
+# nothing.
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_gap_worker.py --worker 0
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
