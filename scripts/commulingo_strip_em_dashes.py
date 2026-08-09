@@ -166,6 +166,12 @@ async def rewrite_batch(texts: list[str], model: str) -> list[str]:
     response = await _deepseek_anthropic_client.messages.create(
         model=model,
         max_tokens=8000,
+        # DeepSeek V4 thinks by default and the reasoning shares max_tokens with
+        # the reply, so a call that only needs text can spend the whole budget
+        # deliberating and return an empty text block. llm/call_registry.py
+        # disables it for exactly this reason on every one-shot generation; a
+        # script that reaches for the client directly has to say so itself.
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": PROMPT + items}],
     )
     raw = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")

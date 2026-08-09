@@ -49,10 +49,9 @@ from runtime_tools.commulingo_people import (  # noqa: E402
 )
 
 logger = logging.getLogger("commulingo_backfill_event_links")
-# Four, not a dozen: the model reasons before it answers and that reasoning
-# shares the token budget with the reply. A batch of eight came back with the
-# whole budget spent on thinking and an empty text block.
-BATCH = 4
+# A batch that dies takes every item in it with it, so this stays modest even
+# now that thinking is off and the whole budget goes to the reply.
+BATCH = 6
 
 PROMPT = """You are filling in the connective tissue of a Korean-language site on Soviet
 history. Each item below is a person the site already has a card for, an event the site
@@ -64,8 +63,12 @@ For each item return four short strings and one kind:
   relation_ko / relation_en — the person's position in THIS event, two to six words.
       Korean examples: 첫 희생자, 4호기 야간 근무조장, 진압을 지휘한 내무장관,
       망명 정부의 외무장관. Not a job title in the abstract: what they were to this event.
-  note_ko / note_en — one sentence, at most two, on what they did or what happened to them
-      in this event. Draw it from the curator's note; do not invent facts that are not there.
+  note_ko / note_en — ONE sentence on what they did or what happened to them in this
+      event. Draw it from the curator's note; do not invent facts that are not there.
+      Hard limit: Korean at most 100 characters, English at most 230. This is a caption
+      under a name on the event page, not a paragraph: everything that does not fit is
+      already on the person's own card. Count before you answer; a note over the limit
+      is thrown away and the person stays unlinked.
   kind — exactly one of: {kinds}
       leader (directed it), participant (took part), executor (carried out orders),
       target (it was done to them), opponent (worked against it), witness (recorded or
@@ -140,6 +143,12 @@ async def describe(rows: list[dict], model: str) -> list[dict]:
     response = await _deepseek_anthropic_client.messages.create(
         model=model,
         max_tokens=12000,
+        # DeepSeek V4 thinks by default and the reasoning shares max_tokens with
+        # the reply, so a call that only needs text can spend the whole budget
+        # deliberating and return an empty text block. llm/call_registry.py
+        # disables it for exactly this reason on every one-shot generation; a
+        # script that reaches for the client directly has to say so itself.
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": PROMPT.format(kinds=", ".join(_HISTORY_RELATION_KINDS)) + items}],
     )
     raw = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
@@ -164,6 +173,11 @@ def acceptable(entry: dict) -> str:
             return f"em dash in {key}"
         if "북한" in value or "조지아" in value:
             return f"banned spelling in {key}"
+    # The event page caps the caption at 110/250 characters. Thirty-nine of the
+    # first backfill's forty failures were the model writing a paragraph, and
+    # each one cost a write attempt to discover. Ask here instead.
+    if len(entry["note_ko"]) > 110 or len(entry["note_en"]) > 250:
+        return f"note too long ({len(entry['note_ko'])}/110 ko, {len(entry['note_en'])}/250 en)"
     if entry.get("kind") not in _HISTORY_RELATION_KINDS:
         return f"kind {entry.get('kind')!r} not in {_HISTORY_RELATION_KINDS}"
     # Calibrated on what is already stored: the longest relation in the table is
