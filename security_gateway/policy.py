@@ -94,6 +94,10 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "commulingo_office_row_save": "write",
     "commulingo_term_create": "write",
     "commulingo_term_update": "write",
+    "commulingo_event_update": "write",
+    "commulingo_event_section_save": "write",
+    # A gap report queues work for another lane; it touches no public text.
+    "commulingo_gap_report": "write",
     "research_document": "publish",
     "edit_content": "publish",
     "edit_public_post": "publish",
@@ -172,6 +176,9 @@ OWNER_REQUIRED_TOOLS = frozenset({
     "commulingo_office_row_save",
     "commulingo_term_create",
     "commulingo_term_update",
+    "commulingo_event_update",
+    "commulingo_event_section_save",
+    "commulingo_gap_report",
 })
 
 # ── Per-tool caller allow-lists ───────────────────────────────────────
@@ -185,7 +192,9 @@ OWNER_REQUIRED_TOOLS = frozenset({
 # The list is what has actually written, taken from tool_audit_log over the
 # whole history of the table: the curation lanes, the analyst on research
 # follow-ups, and the orchestrator itself. Nothing else has ever written.
-COMMULINGO_WRITE_CALLERS = frozenset({"commulingo_curator", "analyst", "telegram"})
+COMMULINGO_WRITE_CALLERS = frozenset({
+    "commulingo_curator", "commulingo_event_curator", "analyst", "telegram",
+})
 
 TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
     tool: COMMULINGO_WRITE_CALLERS for tool in OWNER_REQUIRED_TOOLS

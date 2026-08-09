@@ -47,7 +47,10 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
 _SUGGESTED_BY = os.getenv("COMMULINGO_SUGGESTED_BY", "cyber-lenin").strip() or "cyber-lenin"
 
-_TARGET_TYPES = ("person", "office_row", "person_section", "history_event_person", "term")
+_TARGET_TYPES = (
+    "person", "office_row", "person_section", "history_event_person", "term",
+    "history_event", "history_event_section",
+)
 
 _HISTORY_RELATION_KINDS = ("leader", "participant", "executor", "target", "opponent", "witness")
 _ACTIONS = ("create", "update", "delete")
@@ -199,6 +202,22 @@ _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
     "personId", "sortOrder", "relationKind", "relation", "note",
 })
 
+# The event card's short fields (frontend /commulingo/events/<id>). Title and
+# period are deliberately absent: they are the id's public identity and the
+# chronological sort key, and an unattended run has no business moving either.
+_HISTORY_EVENT_PATCH_KEYS = frozenset({
+    "question", "summary", "outcome", "timeline", "sources",
+})
+_LOCALIZED_EVENT_KEYS = ("question", "summary", "outcome")
+
+# One `## ` section of an event's long-form body. The body is a single markdown
+# column rather than a table of rows, so a section write is a splice into that
+# markdown — see _splice_event_section. Modelled on person sections for the same
+# reason they exist: a narrative this long is written one part per run, and a
+# run that had to restate the whole body would spend most of its output
+# reproducing text it is not changing (and would regress it whenever it drifted).
+_HISTORY_EVENT_SECTION_PATCH_KEYS = frozenset({"heading", "body", "after"})
+
 # Glossary terms (frontend /commulingo/terms, tables from frontend migration
 # 061). `aliases` are the exact strings prose uses and feed the auto-linking
 # pipeline; `people`/`events` are lists of related ids.
@@ -214,6 +233,19 @@ _TERM_PATCH_KEYS = frozenset({
     "parentId",
 })
 _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
+
+# The one allow-list every write path reads. It used to be spelled out twice —
+# once in normalize_commulingo_write and once in _validate — which is one copy
+# too many for a table that grows a row per target type.
+_PATCH_KEYS_BY_TARGET = {
+    "person": _PERSON_PATCH_KEYS,
+    "office_row": _OFFICE_ROW_PATCH_KEYS,
+    "person_section": _SECTION_PATCH_KEYS,
+    "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
+    "history_event": _HISTORY_EVENT_PATCH_KEYS,
+    "history_event_section": _HISTORY_EVENT_SECTION_PATCH_KEYS,
+    "term": _TERM_PATCH_KEYS,
+}
 
 # The glossary category registry lives in commulingo_term_categories, the same
 # table the site reads (frontend migration 115). It used to be this tuple here
@@ -757,23 +789,38 @@ def _get_sections(person_id: str) -> list[dict] | None:
 def _list_events() -> list[dict]:
     return db_query(
         """SELECT e.id, e.period_label, e.title_ko, e.title_en,
-                  COUNT(ep.person_id)::int AS people_count
+                  COUNT(ep.person_id)::int AS people_count,
+                  length(e.body_ko) AS body_ko_chars,
+                  jsonb_array_length(e.timeline) AS timeline_entries
              FROM commulingo_history_events e
              LEFT JOIN commulingo_history_event_people ep ON ep.event_id = e.id
-            GROUP BY e.id, e.sort_order, e.period_label, e.title_ko, e.title_en
+            GROUP BY e.id, e.sort_order, e.period_label, e.title_ko, e.title_en,
+                     e.body_ko, e.timeline
             ORDER BY e.sort_order, e.id"""
     )
 
 
 def _get_event(event_id: str) -> dict | None:
     event = db_query_one(
-        """SELECT id, period_label, title_ko, title_en, summary_ko, summary_en
+        """SELECT id, period_label, title_ko, title_en, question_ko, question_en,
+                  summary_ko, summary_en, outcome_ko, outcome_en,
+                  body_ko, body_en, timeline, sources
              FROM commulingo_history_events WHERE id = %s""",
         (event_id,),
     )
     if not event:
         return None
     event = dict(event)
+    # The bodies are the longest text on the site and the reader only needs to
+    # know which parts exist and how long each one runs — returning them whole
+    # would spend most of a curator's context re-reading what it already wrote.
+    for lang in ("ko", "en"):
+        body = event.pop(f"body_{lang}") or ""
+        event[f"body_{lang}_chars"] = len(body)
+        event[f"body_{lang}_sections"] = [
+            {"heading": heading, "chars": len(block)}
+            for heading, block in _split_event_body(body)
+        ]
     event["people"] = [
         {
             "personId": row["person_id"],
@@ -1174,6 +1221,35 @@ def _contains_north_korea(value) -> bool:
     if isinstance(value, (list, tuple)):
         return any(_contains_north_korea(item) for item in value)
     return False
+
+
+def _em_dash_problem(patch: dict) -> str | None:
+    """Reject the em dash in prose, allowing it inside a quoted title.
+
+    It is not house style and never was: on 2026-08-09 the only em dash in any
+    hand-written text on the site was inside 「스페인의 교훈 — 마지막 경고」, the
+    title of a Trotsky pamphlet. The 522 person sections and 11 event bodies that
+    carried one had all been written by these lanes, which reach for it in both
+    languages no matter what the prompt says. The prompt rule stayed and this is
+    what makes it stick, the way the 북한 and 조지아 rules do.
+
+    Quoted spans are exempt because that pamphlet title is the legitimate case:
+    a work's own name is reproduced, not restyled.
+    """
+    strings: list[tuple[str, str]] = []
+    _collect_localized_strings(patch, strings)
+    for _lang, text in strings:
+        if "—" not in text:
+            continue
+        if "—" in _QUOTED_SPAN_RE.sub("", text):
+            excerpt = text[max(0, text.find("—") - 40):text.find("—") + 40]
+            return (
+                "Error: Korean and English copy do not use the em dash (—). Rewrite the "
+                "clause with a comma, a colon, parentheses, or two sentences: "
+                f"…{excerpt}… It is allowed only inside a quoted title, where it is part "
+                "of the work's own name."
+            )
+    return None
 
 
 def _parse_life_years(label: str) -> tuple[int | None, int | None]:
@@ -1745,6 +1821,9 @@ _WRITE_TOOL_CALLS = {
     ("office_row", "create"): "commulingo_office_row_save(action='create')",
     ("office_row", "update"): "commulingo_office_row_save(action='update')",
     ("history_event_person", "create"): "commulingo_event_link",
+    ("history_event", "update"): "commulingo_event_update",
+    ("history_event_section", "create"): "commulingo_event_section_save(action='create')",
+    ("history_event_section", "update"): "commulingo_event_section_save(action='update')",
 }
 
 
@@ -1763,6 +1842,9 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             "Error: Korean text contains '북한'. On first reference use "
             "'조선민주주의인민공화국', then '조선'. Rewrite only the affected text."
         )
+    em_dash = _em_dash_problem(patch)
+    if em_dash:
+        return em_dash
     variants = _find_name_variants(patch)
     if variants:
         fixes = "; ".join(f"'{v}' → '{c}'" for v, c in variants)
@@ -1771,13 +1853,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             "exactly as their own dictionary card does. Keep an original spelling "
             "only inside direct quotation marks (quoted spans are already exempt)."
         )
-    allowed = {
-        "person": _PERSON_PATCH_KEYS,
-        "office_row": _OFFICE_ROW_PATCH_KEYS,
-        "person_section": _SECTION_PATCH_KEYS,
-        "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
-        "term": _TERM_PATCH_KEYS,
-    }[target_type]
+    allowed = _PATCH_KEYS_BY_TARGET[target_type]
     unknown = set(patch) - allowed
     if unknown:
         return (
@@ -2137,6 +2213,137 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         # failed for an event link.
         if patch.get("sortOrder") is not None and not isinstance(patch["sortOrder"], int):
             return "Error: sortOrder must be an integer, or null to append."
+    elif target_type == "history_event":
+        if action != "update":
+            return (
+                "Error: history events are created and retired by hand. The curator may "
+                "only update one that already exists."
+            )
+        cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return (
+                f"Error: history event '{target_id}' not found. Find the id with "
+                f"{_reader_call('list_events')}."
+            )
+        for key in _LOCALIZED_EVENT_KEYS:
+            value = patch.get(key)
+            if key not in patch or value is None:
+                continue
+            if not isinstance(value, dict):
+                return (
+                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                    "a plain string would silently blank the other language."
+                )
+            ko_max, en_max = FIELD_LIMITS[f"event_{key}"]
+            ko_len, en_len = len(value.get("ko") or ""), len(value.get("en") or "")
+            if ko_len > ko_max or en_len > en_max:
+                return (
+                    f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+                    f"characters). It is the card text that sits above the body — put the "
+                    f"depth in a body section with "
+                    f"{_write_tool_call('history_event_section', 'create')} instead."
+                )
+        timeline = patch.get("timeline")
+        if timeline is not None:
+            if not isinstance(timeline, list) or not timeline:
+                return "Error: timeline must be a non-empty list; omit it to leave it unchanged."
+            for index, item in enumerate(timeline):
+                if not isinstance(item, dict) or set(item) - {"date", "title", "body"}:
+                    return (
+                        f"Error: timeline[{index}] must be exactly "
+                        '{"date": "1936.02", "title": {"ko","en"}, "body": {"ko","en"}}.'
+                    )
+                if not str(item.get("date") or "").strip():
+                    return (
+                        f"Error: timeline[{index}].date is required — '1936', '1936.02' or "
+                        "'1936.07.18' as the source supports."
+                    )
+                for key in ("title", "body"):
+                    part = item.get(key)
+                    if not isinstance(part, dict) or not (part.get("ko") and part.get("en")):
+                        return f"Error: timeline[{index}].{key} needs both a ko and an en string."
+        sources = patch.get("sources")
+        if sources is not None and (
+            not isinstance(sources, list)
+            or not sources
+            or not all(isinstance(s, str) and s.strip() for s in sources)
+        ):
+            return (
+                "Error: sources must be a non-empty list of reference strings. Sending it "
+                "replaces the stored list whole, so include the entries already there."
+            )
+
+    elif target_type == "history_event_section":
+        if action == "delete":
+            return "Error: event body sections are not deleted by the unattended curator."
+        cur.execute(
+            "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
+            (target_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return (
+                f"Error: history event '{target_id}' not found. Find the id with "
+                f"{_reader_call('list_events')}."
+            )
+        for key in ("heading", "body"):
+            value = patch.get(key)
+            if not isinstance(value, dict) or not (value.get("ko") and value.get("en")):
+                return (
+                    f"Error: {key} must be an object with a non-empty ko and en — a section "
+                    "written in one language only leaves the other page with a gap."
+                )
+        after = patch.get("after")
+        if after is not None and not isinstance(after, dict):
+            return (
+                'Error: after must be {"ko": "<an existing ## heading>", "en": "..."}, '
+                "or omitted to append the section at the end."
+            )
+        ko_max, en_max = FIELD_LIMITS["event_section_body"]
+        ko_len = len(patch["body"].get("ko") or "")
+        en_len = len(patch["body"].get("en") or "")
+        if ko_len > ko_max or en_len > en_max:
+            return (
+                f"Error: section body is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+                f"characters). The target is {EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} "
+                f"Korean characters; a body this size is two sections — file the second one "
+                f"as its own section instead of trimming this one to fit."
+            )
+        ko_parts = _split_event_body(row["body_ko"])
+        en_parts = _split_event_body(row["body_en"])
+        ko_at = _find_event_section(ko_parts, patch["heading"]["ko"])
+        en_at = _find_event_section(en_parts, patch["heading"]["en"])
+        if action == "create":
+            if ko_at >= 0 or en_at >= 0:
+                existing = ko_parts[ko_at][0] if ko_at >= 0 else en_parts[en_at][0]
+                return (
+                    f"Error: '{target_id}' already has a section '{existing}' on this topic. "
+                    f"Rewrite it with {_write_tool_call('history_event_section', 'update')}, "
+                    f"or write a genuinely different part of the story."
+                )
+            for lang, parts in (("ko", ko_parts), ("en", en_parts)):
+                anchor = ((after or {}).get(lang) or "").strip()
+                if anchor and _find_event_section(parts, anchor) < 0:
+                    return (
+                        f"Error: after.{lang} '{anchor}' is not a heading of this event's "
+                        f"{lang} body. Omit 'after' to append at the end."
+                    )
+            ko_cap, en_cap = EVENT_BODY_CEILING
+            ko_total = len(row["body_ko"]) + ko_len
+            en_total = len(row["body_en"]) + en_len
+            if ko_total > ko_cap or en_total > en_cap:
+                return (
+                    f"Error: this section would take the body past the per-event ceiling "
+                    f"(ko {ko_total}/{ko_cap}, en {en_total}/{en_cap}). The event is already a "
+                    f"long article — deepen an existing section instead of adding another."
+                )
+        elif ko_at < 0 or en_at < 0:
+            missing = "ko" if ko_at < 0 else "en"
+            return (
+                f"Error: '{target_id}' has no '{patch['heading'][missing]}' section in its "
+                f"{missing} body. Use action 'create' to add it."
+            )
+
     elif target_type == "term":
         for key in ("id", "original"):
             if key in patch and patch[key] is not None and not isinstance(patch[key], str):
@@ -2437,6 +2644,129 @@ def _apply_term_update(cur, term_id: str, patch: dict) -> None:
         _replace_term_links(cur, term_id, "commulingo_term_events", "event_id", patch.get("events") or [])
 
 
+_EVENT_HEADING_RE = re.compile(r"^## +(.+?)[ \t]*$", re.M)
+
+
+def _split_event_body(body: str) -> list[tuple[str, str]]:
+    """Split an event body into [(heading, block)] parts.
+
+    Each block keeps its own `## ` line, so re-joining the blocks reproduces the
+    body. Any text before the first heading comes back under an empty heading
+    and is never reordered — there is none today, but a hand edit could leave a
+    lead paragraph there and a splice must not eat it.
+    """
+    text = (body or "").strip("\n")
+    if not text:
+        return []
+    matches = list(_EVENT_HEADING_RE.finditer(text))
+    if not matches:
+        return [("", text)]
+    parts: list[tuple[str, str]] = []
+    lead = text[: matches[0].start()].strip("\n")
+    if lead:
+        parts.append(("", lead))
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        parts.append((match.group(1).strip(), text[match.start():end].strip("\n")))
+    return parts
+
+
+def event_section_headings(body: str) -> list[str]:
+    """The `## ` headings of an event body, in order (used by the lane prompt)."""
+    return [heading for heading, _ in _split_event_body(body) if heading]
+
+
+def _find_event_section(parts: list[tuple[str, str]], heading: str) -> int:
+    """Index of the part whose heading is the same topic, or -1.
+
+    Matched on _dedup_key rather than the raw string for the reason person
+    sections are: the same topic came back under punctuation-only variants.
+    """
+    key = _dedup_key(heading)
+    if not key:
+        return -1
+    for index, (existing, _) in enumerate(parts):
+        if existing and _dedup_key(existing) == key:
+            return index
+    return -1
+
+
+def _splice_event_section(body: str, heading: str, section_body: str,
+                          after: str, action: str) -> str:
+    """Write one `## heading` part into an event body and return the new body."""
+    parts = _split_event_body(body)
+    heading = (heading or "").strip()
+    block = f"## {heading}\n\n{(section_body or '').strip()}"
+    at = _find_event_section(parts, heading)
+    if action == "update":
+        # _validate has already established the section exists in both languages.
+        parts[at] = (heading, block)
+    else:
+        anchor = _find_event_section(parts, after) if after else -1
+        parts.insert(anchor + 1 if anchor >= 0 else len(parts), (heading, block))
+    return "\n\n".join(block for _, block in parts if block.strip())
+
+
+def _event_snapshot(cur, event_id: str) -> dict | None:
+    """Full history event via an existing cursor, for the revision log."""
+    cur.execute(
+        """SELECT id, period_label, title_ko, title_en, question_ko, question_en,
+                  summary_ko, summary_en, outcome_ko, outcome_en,
+                  body_ko, body_en, timeline, sources
+             FROM commulingo_history_events WHERE id = %s""",
+        (event_id,),
+    )
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def _apply_event_update(cur, event_id: str, patch: dict) -> None:
+    sets: list[str] = []
+    params: list = []
+    for key, (ko_col, en_col) in (
+        ("question", ("question_ko", "question_en")),
+        ("summary", ("summary_ko", "summary_en")),
+        ("outcome", ("outcome_ko", "outcome_en")),
+    ):
+        value = patch.get(key)
+        if isinstance(value, dict):
+            sets += [f"{ko_col} = %s", f"{en_col} = %s"]
+            params += [value.get("ko") or "", value.get("en") or ""]
+    for key in ("timeline", "sources"):
+        if patch.get(key) is not None:
+            sets.append(f"{key} = %s::jsonb")
+            params.append(json.dumps(patch[key], ensure_ascii=False))
+    if not sets:
+        return
+    sets.append("updated_at = NOW()")
+    params.append(event_id)
+    cur.execute(
+        f"UPDATE commulingo_history_events SET {', '.join(sets)} WHERE id = %s", params
+    )
+
+
+def _apply_event_section(cur, event_id: str, patch: dict, action: str) -> None:
+    cur.execute(
+        "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
+        (event_id,),
+    )
+    row = cur.fetchone()
+    heading, body = patch["heading"], patch["body"]
+    after = patch.get("after") or {}
+    cur.execute(
+        """UPDATE commulingo_history_events
+              SET body_ko = %s, body_en = %s, updated_at = NOW()
+            WHERE id = %s""",
+        (
+            _splice_event_section(row["body_ko"], heading.get("ko", ""),
+                                  body.get("ko", ""), after.get("ko", ""), action),
+            _splice_event_section(row["body_en"], heading.get("en", ""),
+                                  body.get("en", ""), after.get("en", ""), action),
+            event_id,
+        ),
+    )
+
+
 def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, changed_by: str) -> str:
     """Apply a validated edit via an open RealDictCursor. Returns a summary.
 
@@ -2475,6 +2805,22 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
         cur.execute("DELETE FROM commulingo_terms WHERE id = %s", (target_id,))
         _write_revision(cur, "term", target_id, "delete term", before, changed_by)
         return f"deleted term '{target_id}'"
+
+    if target_type == "history_event":
+        before = _event_snapshot(cur, target_id)
+        _apply_event_update(cur, target_id, patch)
+        _write_revision(cur, "history_event", target_id, "update event",
+                        {"before": before, "after": _event_snapshot(cur, target_id)}, changed_by)
+        return f"updated event '{target_id}' ({', '.join(sorted(patch)) or 'no fields'})"
+
+    if target_type == "history_event_section":
+        heading = (patch["heading"].get("ko") or patch["heading"].get("en") or "").strip()
+        before = _event_snapshot(cur, target_id)
+        _apply_event_section(cur, target_id, patch, action)
+        _write_revision(cur, "history_event", target_id, f"{action} body section '{heading}'",
+                        {"before": before, "after": _event_snapshot(cur, target_id)}, changed_by)
+        verb = "added" if action == "create" else "rewrote"
+        return f"{verb} body section '{heading}' of event '{target_id}'"
 
     if target_type == "person_section":
         slug = patch["slug"]
@@ -2630,6 +2976,23 @@ def _record_suggestion(cur, target_type, action, target_id, patch, sources, conf
     return cur.fetchone()["id"]
 
 
+def _public_page(target_type: str, target_id: str) -> str:
+    """The page a successful edit shows up on, for the confirmation message.
+
+    It used to name /commulingo/people whatever had been written, so a glossary
+    or event write told the curator to go look at the wrong page.
+    """
+    section = {
+        "term": "terms",
+        "history_event": "events",
+        "history_event_section": "events",
+        "history_event_person": "events",
+        "office_row": "offices",
+    }.get(target_type, "people")
+    suffix = f"/{target_id}" if section in ("terms", "events", "people") else ""
+    return f"cyber-lenin.com/commulingo/{section}{suffix}"
+
+
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
     if target_type == "person_section" and not patch.get("sources"):
@@ -2651,7 +3014,8 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 )
                 return (
                     f"OK — applied: {summary}. Logged as edit #{sid}. The change is live "
-                    "on cyber-lenin.com/commulingo/people within ~1 minute (server cache TTL)."
+                    f"on {_public_page(target_type, target_id)} within ~1 minute "
+                    "(server cache TTL)."
                 )
             cur.execute(
                 """SELECT id FROM commulingo_agent_suggestions
@@ -2714,7 +3078,33 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
     # stored sections: ko p50 724 / p95 1203 / max 2071, en p50 1579 / p95 2574
     # / max 3938 — the whole corpus stays writable under this.)
     "section_body": (2600, 5800),
+    # The history event card's short fields. Ceilings sit ~20% above the longest
+    # stored value on 2026-08-08 (summary ko 430 / en 952, outcome ko 404 / en
+    # 921, question ko 56 / en 124) so every existing event stays rewritable and
+    # a card that wants one more clause has room, without the summary growing
+    # into the body's job.
+    "event_question": (70, 155),
+    "event_summary": (520, 1150),
+    "event_outcome": (520, 1150),
+    # One `## ` part of an event body. Same numbers as a person section, because
+    # it is the same kind of object: one topic, written in one run, read as one
+    # screen. The whole-body ceiling is EVENT_BODY_CEILING below.
+    "event_section_body": (2600, 5800),
 }
+
+# What one event body section should be written to, as (min, max) Korean
+# characters — the event twin of SECTION_BODY_TARGET. The two bodies that
+# existed before this lane (spanish-civil-war, sino-soviet-split) averaged ~690
+# Korean characters per section across 7 sections; that is the floor of what
+# reads as a section, not the target. A history event carries more than a person
+# section does, so the band is set higher on purpose.
+EVENT_SECTION_TARGET = (700, 1800)
+
+# Runaway guard on the assembled body, not a target. At the top of
+# EVENT_SECTION_TARGET this pays for roughly a dozen sections, which is a long
+# encyclopedia article and well past the point where a reader wants the page
+# split. Nothing should ever land on it.
+EVENT_BODY_CEILING = (24000, 52000)
 
 # What a section body should actually be written to, as (min, max) Korean
 # characters; the English twin follows at the DENSE_SENTENCE_CHARS ratio
@@ -3190,13 +3580,7 @@ def normalize_commulingo_write(
         normalized = terminology_normalized
         repairs.append("조지아->그루지야 in Korean content")
 
-    allowed = {
-        "person": _PERSON_PATCH_KEYS,
-        "office_row": _OFFICE_ROW_PATCH_KEYS,
-        "person_section": _SECTION_PATCH_KEYS,
-        "history_event_person": _HISTORY_EVENT_PERSON_PATCH_KEYS,
-        "term": _TERM_PATCH_KEYS,
-    }[target_type]
+    allowed = _PATCH_KEYS_BY_TARGET[target_type]
     unknown = sorted(set(normalized) - allowed)
     if unknown:
         raise CommulingoInputError(
@@ -3385,6 +3769,121 @@ COMMULINGO_OFFICE_ROW_SAVE_TOOL = {
     },
 }
 
+_EVENT_QUESTION_SCHEMA = _capped_bilingual_schema(
+    "event_question",
+    extra=(
+        " The question the page answers, written as a question. It is the line under"
+        " the title, not a summary."
+    ),
+)
+_EVENT_SUMMARY_SCHEMA = _capped_bilingual_schema(
+    "event_summary",
+    extra=" What happened, for a reader who knows nothing about the period yet.",
+    target="short paragraph",
+)
+_EVENT_OUTCOME_SCHEMA = _capped_bilingual_schema(
+    "event_outcome",
+    extra=" What it left behind — the consequences the rest of the site refers back to.",
+    target="short paragraph",
+)
+_EVENT_SECTION_BODY_SCHEMA = _capped_bilingual_schema(
+    "event_section_body",
+    extra=(
+        f" Markdown. Write to {EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} Korean"
+        " characters: one part of the story, told with the dates, names and figures a"
+        " reader would otherwise have to look up. No `#` or `##` headings inside the"
+        " body — the heading argument supplies the only one."
+    ),
+    target=f"{EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} Korean characters",
+)
+
+COMMULINGO_EVENT_UPDATE_TOOL = {
+    "name": "commulingo_event_update",
+    "description": (
+        "Update one history event's card fields: the question it answers, the summary, "
+        "the outcome, the timeline, the source list. The long-form body is NOT written "
+        "here — use commulingo_event_section_save for that. Read the event with "
+        "commulingo_people(action='get_event') first. Sending timeline or sources "
+        "replaces the stored list whole, so include the entries that are already there. "
+        "A successful call ends the run."
+    ),
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "event_id": {"type": "string", "description": "Existing event id from list_events."},
+            "fields": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "question": _EVENT_QUESTION_SCHEMA,
+                    "summary": _EVENT_SUMMARY_SCHEMA,
+                    "outcome": _EVENT_OUTCOME_SCHEMA,
+                    "timeline": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": (
+                            "The whole timeline, in chronological order. Every entry the "
+                            "event already has plus the ones being added — an omitted "
+                            "entry is a deleted entry."
+                        ),
+                        "items": {
+                            "type": "object", "additionalProperties": False,
+                            "properties": {
+                                "date": {"type": "string", "description": "'1936', '1936.02' or '1936.07.18'."},
+                                "title": _BILINGUAL_TEXT_SCHEMA,
+                                "body": _BILINGUAL_TEXT_SCHEMA,
+                            },
+                            "required": ["date", "title", "body"],
+                        },
+                    },
+                    "sources": {
+                        "type": "array", "minItems": 1, "items": {"type": "string"},
+                        "description": (
+                            "The whole source list: author, title, publisher, year for a "
+                            "book; a URL for a document. Replaces the stored list."
+                        ),
+                    },
+                },
+            },
+            "citations": _CITATIONS_SCHEMA,
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["event_id", "fields", "citations"],
+    },
+}
+
+COMMULINGO_EVENT_SECTION_SAVE_TOOL = {
+    "name": "commulingo_event_section_save",
+    "description": (
+        "Write one `## ` section of a history event's long-form body. The body is built "
+        "one section per run, the way a person's detail sections are, so this call sends "
+        "ONLY the new part — never the whole body. 'create' adds a section, 'update' "
+        "rewrites the one whose heading matches. The heading must be a real heading, not "
+        "a label: '무기보다 먼저 온 것들' tells a reader what the part is about, "
+        "'배경 3' does not. Read the event with commulingo_people(action='get_event') "
+        "first to see which sections exist. A successful call ends the run."
+    ),
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "action": {"type": "string", "enum": ["create", "update"]},
+            "event_id": {"type": "string"},
+            "heading": _BILINGUAL_TEXT_SCHEMA,
+            "body": _EVENT_SECTION_BODY_SCHEMA,
+            "after": {
+                **_BILINGUAL_TEXT_SCHEMA,
+                "description": (
+                    "On create: the existing heading this section goes after, per "
+                    "language. Omit to append at the end, which is right whenever the "
+                    "body is being written front to back."
+                ),
+            },
+            "citations": _CITATIONS_SCHEMA,
+        },
+        "required": ["action", "event_id", "heading", "body", "citations"],
+    },
+}
+
+
 def _term_write_tool(name: str, action: str) -> dict:
     creating = action == "create"
     return {
@@ -3481,6 +3980,192 @@ async def _exec_commulingo_term_update(term_id: str, fields: dict, citations: li
     return await _exec_commulingo_write("term", "update", term_id, citations, fields, confidence)
 
 
+async def _exec_commulingo_event_update(
+    event_id: str, fields: dict, citations: list, confidence=None,
+) -> str:
+    return await _exec_commulingo_write(
+        "history_event", "update", event_id, citations, fields, confidence,
+    )
+
+
+async def _exec_commulingo_event_section_save(
+    action: str, event_id: str, heading: dict, body: dict, citations: list,
+    after: dict | None = None,
+) -> str:
+    fields = {"heading": heading, "body": body}
+    if after:
+        fields["after"] = after
+    return await _exec_commulingo_write(
+        "history_event_section", action, event_id, citations, fields, None,
+    )
+
+
+COMMULINGO_GAP_REPORT_TOOL = {
+    "name": "commulingo_gap_report",
+    "description": (
+        "File what the event text you just wrote needed and the site does not have: a "
+        "person with no card, a term with no glossary entry, a document worth publishing "
+        "in full. The people and glossary lanes work from this queue, so a gap filed here "
+        "becomes a card, and the link in your section resolves. File only what the "
+        "narrative actually leans on — a name mentioned once in passing is not a gap. "
+        "Reading tools first: a card that already exists is not a gap unless it is too "
+        "thin to carry the weight the event puts on it, in which case send its target_id."
+    ),
+    "input_schema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "gaps": {
+                "type": "array", "minItems": 1, "maxItems": 8,
+                "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["person", "term", "doc"]},
+                        "label": {
+                            **_BILINGUAL_TEXT_SCHEMA,
+                            "description": "What the event text calls it, in both languages.",
+                        },
+                        "target_id": {
+                            "type": "string",
+                            "description": (
+                                "The existing entry id when the gap is 'this card is too "
+                                "thin'. Omit when nothing exists yet."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": (
+                                "What the event narrative needs from it. This is the brief "
+                                "the next lane writes from, so name the specific role, not "
+                                "'important figure'."
+                            ),
+                        },
+                        "priority": {
+                            "type": "integer", "minimum": 0, "maximum": 10,
+                            "description": (
+                                "How load-bearing it is in the section just written: 8-10 "
+                                "the reader cannot follow the section without it, 4-7 it "
+                                "deepens the section, 0-3 it is adjacent."
+                            ),
+                        },
+                    },
+                    "required": ["kind", "label", "reason", "priority"],
+                },
+            },
+            "event_id": {"type": "string", "description": "The event whose text needed them."},
+        },
+        "required": ["gaps", "event_id"],
+    },
+}
+
+
+def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
+    """The id of an existing entry this gap is asking for, or ''.
+
+    The event curator files gaps from what its own text leans on, and a good
+    section leans on plenty the dictionaries already have — the first day of the
+    lane queued 블라디미르 레닌 as a missing person. Each of those costs a full
+    curator run to look up and dismiss, so they are matched here, where the check
+    is one indexed query.
+    """
+    if target_id:
+        return ""  # an explicit target means "this exists but is too thin"
+    ko = (label.get("ko") or "").strip()
+    en = (label.get("en") or "").strip()
+    if not (ko or en):
+        return ""
+    if kind == "person":
+        cur.execute(
+            """SELECT p.id FROM commulingo_people p
+                WHERE lower(p.name_ko) = lower(%(ko)s) OR lower(p.name_en) = lower(%(en)s)
+                UNION
+               SELECT a.person_id FROM commulingo_person_aliases a
+                WHERE lower(a.alias) IN (lower(%(ko)s), lower(%(en)s))
+                LIMIT 1""",
+            {"ko": ko, "en": en},
+        )
+    elif kind == "term":
+        cur.execute(
+            """SELECT t.id FROM commulingo_terms t
+                WHERE lower(t.term_ko) = lower(%(ko)s) OR lower(t.term_en) = lower(%(en)s)
+                UNION
+               SELECT a.term_id FROM commulingo_term_aliases a
+                WHERE lower(a.alias) IN (lower(%(ko)s), lower(%(en)s))
+                LIMIT 1""",
+            {"ko": ko, "en": en},
+        )
+    else:
+        return ""
+    row = cur.fetchone()
+    return str(row["id"]) if row else ""
+
+
+def _file_gaps(gaps: list, event_id: str) -> dict:
+    filed, duplicates, covered = [], [], []
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            for gap in gaps:
+                label = gap.get("label") or {}
+                existing = _already_covered(
+                    cur, gap["kind"], label, (gap.get("target_id") or "").strip()
+                )
+                if existing:
+                    covered.append(f"{label.get('ko') or label.get('en')} -> {existing}")
+                    continue
+                cur.execute(
+                    """INSERT INTO commulingo_curation_gaps
+                          (kind, event_id, target_id, label_ko, label_en, reason,
+                           priority, created_by)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING
+                       RETURNING id""",
+                    (
+                        gap["kind"], event_id, (gap.get("target_id") or "").strip(),
+                        (label.get("ko") or "").strip(), (label.get("en") or "").strip(),
+                        (gap.get("reason") or "").strip(), int(gap.get("priority") or 0),
+                        _SUGGESTED_BY,
+                    ),
+                )
+                row = cur.fetchone()
+                # The partial unique index makes a re-file a no-op, which is the
+                # point: two sections of one event needing the same person must
+                # not queue that person twice.
+                (filed if row else duplicates).append(label.get("ko") or label.get("en") or "?")
+    return {"filed": filed, "already_queued": duplicates, "already_covered": covered}
+
+
+async def _exec_commulingo_gap_report(gaps: list, event_id: str) -> str:
+    if not isinstance(gaps, list) or not gaps:
+        return _commulingo_error("missing_gaps", "gaps must be a non-empty list", retryable=False)
+    for index, gap in enumerate(gaps):
+        if not isinstance(gap, dict):
+            return _commulingo_error("invalid_gap", f"gaps[{index}] must be an object")
+        label = gap.get("label")
+        if not isinstance(label, dict) or not (label.get("ko") or "").strip():
+            return _commulingo_error(
+                "invalid_gap", f"gaps[{index}].label needs at least a Korean name"
+            )
+        if not (gap.get("reason") or "").strip():
+            return _commulingo_error(
+                "invalid_gap",
+                f"gaps[{index}].reason is required — it is the brief the next lane writes from",
+            )
+    try:
+        result = await asyncio.to_thread(_file_gaps, gaps, (event_id or "").strip())
+    except Exception as e:
+        logger.warning("commulingo gap report error: %s", e)
+        return _commulingo_error("internal_error", f"{type(e).__name__}: {e}", retryable=True)
+    parts = [f"OK — queued {len(result['filed'])} gap(s): {', '.join(result['filed']) or 'none'}."]
+    if result["already_queued"]:
+        parts.append(f"Already queued, not duplicated: {', '.join(result['already_queued'])}.")
+    if result["already_covered"]:
+        parts.append(
+            "The site already covers these, so they were not queued: "
+            f"{', '.join(result['already_covered'])}. Link to them in your section text "
+            "instead of describing them from scratch."
+        )
+    return " ".join(parts)
+
+
 COMMULINGO_TOOLS = [
     COMMULINGO_PEOPLE_TOOL,
     COMMULINGO_PERSON_CREATE_TOOL,
@@ -3490,6 +4175,9 @@ COMMULINGO_TOOLS = [
     COMMULINGO_OFFICE_ROW_SAVE_TOOL,
     COMMULINGO_TERM_CREATE_TOOL,
     COMMULINGO_TERM_UPDATE_TOOL,
+    COMMULINGO_EVENT_UPDATE_TOOL,
+    COMMULINGO_EVENT_SECTION_SAVE_TOOL,
+    COMMULINGO_GAP_REPORT_TOOL,
 ]
 COMMULINGO_TOOL_HANDLERS = {
     "commulingo_people": _exec_commulingo_people,
@@ -3500,4 +4188,7 @@ COMMULINGO_TOOL_HANDLERS = {
     "commulingo_office_row_save": _exec_commulingo_office_row_save,
     "commulingo_term_create": _exec_commulingo_term_create,
     "commulingo_term_update": _exec_commulingo_term_update,
+    "commulingo_event_update": _exec_commulingo_event_update,
+    "commulingo_event_section_save": _exec_commulingo_event_section_save,
+    "commulingo_gap_report": _exec_commulingo_gap_report,
 }

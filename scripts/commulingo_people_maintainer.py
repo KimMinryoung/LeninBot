@@ -1117,6 +1117,7 @@ Make exactly one commulingo_person_create call and stop. Keep citations top-leve
 NARROW_WRITE_TOOLS = frozenset({
     "commulingo_person_create", "commulingo_person_update",
     "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
+    "commulingo_event_update", "commulingo_event_section_save",
 })
 PEOPLE_ENRICH_WRITE_TOOLS = frozenset({
     "commulingo_person_update", "commulingo_section_save", "commulingo_event_link",
@@ -1267,7 +1268,10 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     if expected != available:
         raise RuntimeError(f"curator toolset incomplete: missing={sorted(expected - available)}")
     handlers = dict(handlers)
-    for name in NARROW_WRITE_TOOLS:
+    # Only the write tools this spec actually carries. NARROW_WRITE_TOOLS is the
+    # registry of every narrow writer on the site, and it now lists the event
+    # writers, which the people curator has no handler for.
+    for name in NARROW_WRITE_TOOLS & handlers.keys():
         handlers[name] = build_retrying_write_handler(handlers[name])
     read_tools = [t for t in tools if t.get("name") not in NARROW_WRITE_TOOLS]
     read_handlers = {k: v for k, v in handlers.items() if k not in NARROW_WRITE_TOOLS}
