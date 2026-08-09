@@ -103,6 +103,24 @@ EDITORIAL POLICY (MANDATORY):
   when it is relevant and sourced, but
   polemical anti-Soviet framing is not the voice of this site.
 
+LINKING THE PEOPLE YOUR SECTION IS ABOUT
+
+An event page lists the people who were in it, and that list is built from
+`commulingo_event_link` calls. Nothing else builds it, so a person your section
+gives a real part to and who is not already on the event stays off the page.
+
+That is how the site ended up with a Korean War page whose twelve linked people
+were all on one side, a Cuban missile crisis with no American, and a Yalta with
+only Stalin among the three who met there. When your section turns on what
+someone did, and `commulingo_people(action='get_event')` shows they are not
+linked, link them: `relation` is a short role tag (남측 대통령, 총사령관),
+`note` is one sentence on what they did in THIS event, and `relation_kind` is
+their side of it (leader, participant, executor, target, opponent, witness).
+
+Link only people who are already in the dictionary and whose part your own
+research established. Someone the site does not have yet is a gap to file, not
+a link to invent. At most a handful per run; this is not the run's purpose.
+
 FILING WHAT THE SECTION NEEDED
 
 The dictionaries exist to hold up the event pages. While researching you will find people,
@@ -152,7 +170,8 @@ COMMULINGO_EVENT_CURATOR = AgentSpec(
     prompt_ir=SystemPrompt(identity=_PROMPT),
     tools=[
         "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people",
-        "commulingo_gap_report", "commulingo_event_section_save", "commulingo_event_update",
+        "commulingo_gap_report", "commulingo_event_link",
+        "commulingo_event_section_save", "commulingo_event_update",
     ],
     finalization_tools=["commulingo_event_section_save", "commulingo_event_update"],
     terminal_tools=["commulingo_event_section_save", "commulingo_event_update"],

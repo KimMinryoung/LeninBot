@@ -36,7 +36,29 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-SUGGESTED_BY = "commulingo-maintainer-events"
+def _lane_tag() -> str:
+    """This copy's partition index, read from argv before the imports below.
+
+    The three lanes shared one suggested_by, and the run's own success check
+    counts rows with that value, so lane 0's count moved whenever lane 1 wrote
+    and the run raised after its section was already saved. That happened 226
+    times on 2026-08-09. No section was lost — the write commits before the
+    check — but every one of those runs exited without reporting what it did.
+
+    COMMULINGO_SUGGESTED_BY has to be set before runtime_tools is imported a few
+    lines down, which is well before argparse runs.
+    """
+    argv = sys.argv[1:]
+    lane = "0"
+    for index, arg in enumerate(argv):
+        if arg == "--lane" and index + 1 < len(argv):
+            lane = argv[index + 1]
+        elif arg.startswith("--lane="):
+            lane = arg.split("=", 1)[1]
+    return lane
+
+
+SUGGESTED_BY = f"commulingo-maintainer-events-{_lane_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
@@ -139,6 +161,32 @@ def open_gaps(event_id: str) -> list[str]:
         {"id": event_id},
     )
     return [f"{row['label_ko']} ({row['kind']})" for row in rows]
+
+
+def writes_since(since_id: int) -> dict:
+    """{'body': n, 'links': n, 'other': n} for this lane's writes after `since_id`.
+
+    A body write is the section or card the run was commissioned for; links are
+    the person-to-event rows it may add alongside. Splitting them is what lets
+    the run demand exactly one of the former while allowing several of the
+    latter.
+    """
+    rows = db_query(
+        """SELECT target_type, count(*)::int AS n
+             FROM commulingo_agent_suggestions
+            WHERE suggested_by = %(s)s AND status = 'approved' AND id > %(since)s
+            GROUP BY target_type""",
+        {"s": SUGGESTED_BY, "since": since_id},
+    )
+    tally = {"body": 0, "links": 0, "other": 0}
+    for row in rows:
+        if row["target_type"] in ("history_event_section", "history_event"):
+            tally["body"] += row["n"]
+        elif row["target_type"] == "history_event_person":
+            tally["links"] += row["n"]
+        else:
+            tally["other"] += row["n"]
+    return tally
 
 
 def _ko(value) -> str:
@@ -292,6 +340,12 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
         }
 
     before = completed_run_count()
+    # Highest suggestion id this lane had written before the run, so the tally
+    # below counts only what this run added.
+    before_max_id = int(((db_query_one(
+        "SELECT COALESCE(MAX(id), 0) AS id FROM commulingo_agent_suggestions WHERE suggested_by = %(s)s",
+        {"s": SUGGESTED_BY},
+    ) or {}).get("id")) or 0)
     spec = get_agent("commulingo_event_curator")
     policy = resolve_agent_inference_policy(spec)
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
@@ -342,10 +396,15 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
             )
         total_cost += float(tracker.get("total_cost") or 0.0)
         total_rounds += int(tracker.get("rounds_used") or 0)
-        if completed_run_count() != before:
+        # The run is done when the BODY is written, not when anything is. Since
+        # the curator can also link people, a plain "did the count move" test
+        # would call it finished on a run that linked three names and never
+        # wrote the section it was commissioned for.
+        if writes_since(before_max_id).get("body", 0):
             break
         logger.warning(
-            "event attempt %d/%d ended without a write: %s", attempt, ATTEMPTS, str(result)[:300]
+            "event attempt %d/%d ended without a body write: %s",
+            attempt, ATTEMPTS, str(result)[:300],
         )
 
     after = completed_run_count()
@@ -368,8 +427,19 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1) -> dict:
         # Nothing written and nothing inconsistent: report the barren run and exit
         # clean, so the next tick is the retry.
         return {"status": "no_edit", "result": str(result)[:500], **summary}
-    if after != before + 1:
-        raise RuntimeError(f"expected exactly one applied edit, count changed {before} -> {after}")
+
+    # A run writes one piece of the event and may also link the people that
+    # piece is about, so "exactly one edit" is no longer the shape to check for.
+    # What has to stay true is that the run produced one body/card write; the
+    # person links are supporting work and are counted, not forbidden.
+    counts = writes_since(before_max_id)
+    summary["links_made"] = counts.get("links", 0)
+    if counts.get("body", 0) != 1:
+        raise RuntimeError(
+            f"expected one body or card write, got {counts.get('body', 0)} (all writes: {counts})"
+        )
+    if counts.get("other"):
+        raise RuntimeError(f"run wrote {counts['other']} edit(s) of a type it should not touch")
     edit = latest_lane_edit()
     if not edit or edit.get("status") != "approved":
         raise RuntimeError(f"applied edit was not approved: {edit}")
