@@ -246,6 +246,14 @@ bilingual card in a single commulingo_person_create call.
 
 
 def build_term_task(gap: dict) -> str:
+    # The glossary lane hard-injects this list and forbids re-registering any of
+    # it; the gap worker used to carry only a sentence of prose about events, and
+    # the model overrode it. Seven event titles were registered as glossary terms
+    # on 2026-08-09 that way, each one a second page saying what its event page
+    # already said. Same list, same instruction, so the two lanes refuse the same
+    # thing.
+    from runtime_tools.commulingo_people import registered_event_labels
+    events = registered_event_labels()
     return f"""MODE: GLOSSARY TERM REGISTRATION, commissioned by a history-event page.
 
 Register exactly this concept and no other:
@@ -256,6 +264,15 @@ Register exactly this concept and no other:
 WHY THE SITE NEEDS THIS ENTRY (written by the curator of `{gap['event_id']}`, whose
 section uses it):
 {gap['reason']}
+
+ALREADY IN THE EVENTS DICTIONARY (these are events, not glossary terms — never register
+one of these, a renaming of it, or the same title with a date bracket added):
+{', '.join(events)}
+
+If what was commissioned is one of those, finish with commulingo_no_edit naming the event.
+A concept the event narrates (관동군, 그단스크 협정) is a term and belongs here; the
+episode itself (「폴란드 연대노조와 계엄 (1980~1981)」) does not, and neither does a
+compound headword that welds two of them together.
 
 First confirm it is not already registered:
 commulingo_people(action='list_terms', q='<the term>'), matched against ids, both names,

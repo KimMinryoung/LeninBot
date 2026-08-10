@@ -32,7 +32,11 @@ from agents import get_agent  # noqa: E402
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
 from llm.claude_loop import chat_with_tools  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
-from runtime_tools.commulingo_people import DENSE_SENTENCE_CHARS, FIELD_LIMITS  # noqa: E402
+from runtime_tools.commulingo_people import (  # noqa: E402
+    DENSE_SENTENCE_CHARS,
+    FIELD_LIMITS,
+    registered_event_labels,
+)
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS  # noqa: E402
 from tool_gateway.security import caller_scope, new_run_context  # noqa: E402
 
@@ -78,14 +82,11 @@ def registered_aliases() -> list[str]:
 
 
 def registered_events() -> list[str]:
-    """Event-dictionary titles, so the curator cannot file an event as a term."""
-    rows = db_query("SELECT title_ko, title_en FROM commulingo_history_events")
-    labels = []
-    for row in rows:
-        ko = str(row.get("title_ko") or "").strip()
-        en = str(row.get("title_en") or "").strip()
-        labels.append(f"{ko} ({en})" if ko and en else ko or en)
-    return sorted(label for label in labels if label)
+    """Event-dictionary titles, so the curator cannot file an event as a term.
+
+    Shared with the gap worker, which needs the same list for the same reason.
+    """
+    return registered_event_labels()
 
 
 def pick_material(run_index: int) -> tuple[str, str]:

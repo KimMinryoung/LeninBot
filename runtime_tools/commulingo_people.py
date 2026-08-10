@@ -4229,6 +4229,26 @@ def _doc_index() -> dict:
     return index
 
 
+def registered_event_labels() -> list[str]:
+    """Event-dictionary titles as 'ko (en)', for prompts that must not re-register one.
+
+    Lives here rather than in the glossary lane because two lanes need it and
+    that module cannot be imported to borrow it: it sets COMMULINGO_SUGGESTED_BY
+    at import time, so importing it from another lane would relabel that lane's
+    writes.
+    """
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT title_ko, title_en FROM commulingo_history_events")
+            rows = cur.fetchall() or []
+    labels = []
+    for row in rows:
+        ko = str(row.get("title_ko") or "").strip()
+        en = str(row.get("title_en") or "").strip()
+        labels.append(f"{ko} ({en})" if ko and en else ko or en)
+    return sorted(label for label in labels if label)
+
+
 def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     """The id of an existing entry this gap is asking for, or ''.
 
@@ -4265,6 +4285,21 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
     else:
         return ""
 
+    # A history event is not a glossary term. The event curator files its gaps
+    # from what its own prose calls things, so an event it narrates comes back as
+    # a missing concept: on 2026-08-09 「홀로도모르와 집단화 기근 (1932~1933)」 and
+    # 「소련-일본 국경 전쟁과 중립조약 (1938~1941)」 were registered as terms beside
+    # the events of the same name, and the reader got the same account twice in
+    # two dictionaries. The events dictionary is part of what "the site already
+    # covers this" means, so it is probed here too. The answer is returned as
+    # 'event:<id>' because the id names a row in another table, and callers write
+    # it into a resolution note rather than dereferencing it as a term.
+    event_sql = "" if kind != "term" else """
+        SELECT e.id FROM commulingo_history_events e
+         WHERE replace(lower(e.title_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
+            OR replace(lower(e.title_en), ' ', '') = replace(lower(%(v)s), ' ', '')
+         LIMIT 1"""
+
     if kind == "doc":
         index = _doc_index()
 
@@ -4274,7 +4309,13 @@ def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
         def probe(value: str) -> str:
             cur.execute(sql, {"v": value})
             row = cur.fetchone()
-            return str(row["id"]) if row else ""
+            if row:
+                return str(row["id"])
+            if not event_sql:
+                return ""
+            cur.execute(event_sql, {"v": value})
+            row = cur.fetchone()
+            return f"event:{row['id']}" if row else ""
 
     # Try the whole label in either language first; only then the stripped forms,
     # so an entry that matches outright always wins over one reached by peeling a
