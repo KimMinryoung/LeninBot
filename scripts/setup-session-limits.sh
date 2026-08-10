@@ -29,8 +29,13 @@ DROPIN="${DROPIN_DIR}/limits.conf"
 SLICE="user-${UID_TARGET}.slice"
 
 MEM_HIGH="6G"    # 소프트 상한 — 죽이지 않고 이 cgroup 안에서만 회수 시작
-MEM_MAX="10G"    # 하드 상한 — 닿으면 폭주한 세션만 죽고 서버는 산다
+MEM_MAX="8G"     # 하드 상한 — 닿으면 폭주한 세션만 죽고 서버는 산다
 CPU_WEIGHT="30"  # 경합 시 시스템 서비스에 양보 (기본 100)
+# MEM_MAX 근거: 2026-08-10 사건에서 Claude Code(2.1.226)가 anon-rss 8.74 GiB까지
+#   부풀었다. 평소 이 슬라이스는 1.4 GiB를 쓴다. 8G면 정상 사용의 5배라 안 닿고,
+#   폭주는 관측된 정점(8.74 GiB) 아래에서 잘라 낸다.
+# 스왑이 없고 MemorySwapMax=0이라 MemoryHigh는 익명 메모리를 회수하지 못한다.
+#   즉 6~8 GiB 구간은 "느려지는 구간"이고 실제 차단은 MemoryMax가 한다.
 
 show() {
   echo "── 현재 설정 ──"
