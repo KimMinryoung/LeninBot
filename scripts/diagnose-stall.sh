@@ -28,6 +28,14 @@ if [ "$(id -u)" -ne 0 ]; then
   exec sudo -- bash "$0" "$SINCE" "$UNTIL"
 fi
 
+# 결과를 파일로도 남긴다. 모바일에서 긴 출력을 복사하지 않아도 되고,
+# root가 아닌 쪽(에이전트 포함)이 읽을 수 있도록 소유자를 호출자로 돌려준다.
+OUT_DIR="/home/grass/leninbot/logs"
+OUT="${OUT_DIR}/stall-diagnosis.txt"
+mkdir -p "$OUT_DIR"
+
+report() {
+
 echo "════ 조사 창: ${SINCE} ~ ${UNTIL} (UTC 기준 로그) ════"
 echo
 
@@ -81,3 +89,14 @@ fi
 
 echo
 echo "════ 끝 ════"
+
+}
+
+report 2>&1 | tee "$OUT"
+
+# sudo로 올라왔으면 호출한 사용자에게 소유권을 돌려준다
+chown "${SUDO_UID:-1000}:${SUDO_GID:-1000}" "$OUT" 2>/dev/null || true
+chmod 644 "$OUT" 2>/dev/null || true
+
+echo
+echo "결과를 파일로도 저장했습니다: $OUT"
