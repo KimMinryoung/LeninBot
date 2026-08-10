@@ -75,8 +75,10 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 |---|---|
 | 🔴 `cyber-lenin.com 응답 이상` (5분 내) | 사이트가 안 보인다. 원인은 아직 모름 |
 | 🔴 `... 콘텐츠 이상 — DB 유래 링크 0개` | 응답은 오는데 DB에서 글이 안 나온다 |
-| 🔴 `복제 상태 점검` 실패 (15분 주기) | DB 또는 스탠바이 문제 |
+| 🔴 `복제 상태 점검` 실패 (15분 주기) | DB 또는 스탠바이 문제 — **먼저 "복제가 끊겼을 때" 절로 갈 것.** 승격도 재시드도 아닌 경우가 대부분이다 |
 | 🔴 `복제 상태 점검 무소식 N분` (1시간 내) | **메인 VM이 죽었다** — 데드맨 스위치 |
+
+여러 알림이 **같은 시각에** 왔다면 개별 원인을 쫓지 말고 호스트 전체를 먼저 의심한다. 2026-08-10이 그랬다 — 사이트 응답 이상과 복제 실패가 같은 뿌리(메모리 고갈로 인한 호스트 정지)에서 나왔다. `scripts/diagnose-stall.sh` 참고.
 
 ### 1. 분류: VM이 살아 있나
 
@@ -191,6 +193,72 @@ scripts/promote_standby.sh --confirm=PROMOTE_STANDBY      # 실행
 ### 승격은 되돌리기 어렵다
 
 승격하면 타임라인이 갈라진다. 옛 primary는 재기동만으로는 복제에 합류하지 못하고 `pg_rewind`나 새 base backup이 필요하다. **훈련 삼아 승격하지 말 것.**
+
+## 복제가 끊겼을 때 — 먼저 `wal_status`를 본다
+
+`🔴 복제 상태 점검` 알림이 오면 재시드부터 떠올리기 쉬운데, **대개는 재시드가 필요 없다.** 갈림길은 하나뿐이다.
+
+```bash
+docker exec leninbot-pg psql -U postgres -c "
+  SELECT slot_name, active, wal_status,
+         pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained
+  FROM pg_replication_slots;"
+```
+
+| `wal_status` | 뜻 | 할 일 |
+|---|---|---|
+| `lost` | 스탠바이가 `max_slot_wal_keep_size`(8 GB)를 넘겨 뒤처졌다. WAL이 이미 지워졌다 | 아래 "재시드" |
+| `reserved` / `extended` | **WAL은 그대로 있다.** 스탠바이가 붙지 못하고 있을 뿐이다 | 아래 "붙지 못할 때" — 재시드하지 말 것 |
+
+`reserved`인데 `active=f`라면 데이터는 한 바이트도 안 잃었다. 원인만 치우면 walreceiver가 5초 안에 다시 붙어 즉시 따라잡는다.
+
+### 붙지 못할 때 — 스탠바이 로그가 이유를 말해 준다
+
+```bash
+ssh root@100.124.58.85 'docker logs --tail 5 leninbot-pg-standby'
+```
+
+`could not connect to the primary server`에 붙은 뒷말이 그대로 진단이다.
+
+**`no pg_hba.conf entry for replication connection from host "172.18.0.1"`** — 출발지 IP가 재작성됐다. 2026-08-10에 이걸로 3시간을 잃었다.
+
+pg_hba는 복제를 스탠바이의 tailnet 주소로만 좁혀 두었다:
+
+```
+host  replication  replicator  100.124.58.85/32  scram-sha-256
+```
+
+이 한 줄은 **"Docker 퍼블리싱을 지나도 출발지 IP가 보존된다"는 전제 위에 서 있다.** 그 전제가 깨지면 복제만 조용히 죽는다. 다른 연결은 `host all all 172.16.0.0/12` catch-all에 걸려 멀쩡하기 때문에 더 헷갈린다.
+
+원인은 tailscale의 SNAT 마스커레이드였다. `NoSNAT=false`면 tailscaled가 이 규칙을 넣는다:
+
+```
+-A ts-postrouting -m mark --mark 0x40000/0xff0000 -j MASQUERADE
+```
+
+tailnet에서 들어온 패킷이 Docker DNAT로 컨테이너에 **포워딩**되는 순간 이 마크가 붙고, 나가는 인터페이스인 브리지의 주소(`172.18.0.1`)로 출발지가 바뀐다. 확인과 조치:
+
+```bash
+tailscale debug prefs | grep -E "NoSNAT|AdvertiseRoutes"
+# AdvertiseRoutes: null 이면 이 노드는 서브넷 라우터가 아니므로 SNAT 규칙이 할 일이 없다
+sudo tailscale set --snat-subnet-routes=false
+```
+
+이 노드는 서브넷 라우트를 광고하지 않고 exit node도 아니라 부작용이 없다. prefs라 재부팅에도 유지된다.
+
+> **함정: psql로 흉내 낸 확인은 못 믿는다.** `psql "... replication=database"`로 찔러 보면 psql이 그 키워드를 실제로 보내지 않아 일반 연결이 되고, catch-all `172.16.0.0/12`에 걸려 "password authentication failed"가 돌아온다. 출발지 IP가 멀쩡한 것처럼 보이지만 착각이다. 진짜로 보려면 primary 로그를 직접 보거나 스탠바이에서 `tcpdump -nni tailscale0 'tcp port 5434'`로 나가는 SYN의 출발지를 본다.
+
+**다른 뒷말이라면**: `Connection refused`는 primary의 5434 퍼블리싱이나 컨테이너를, `timeout`은 tailnet 경로(`tailscale status`)를 본다.
+
+### 그 사건의 진짜 원인은 복제가 아니었다
+
+2026-08-10 04:17~04:23 UTC, 호스트가 5분간 멈췄다. Claude Code가 anon-rss 8.74 GiB까지 부풀어 시스템 파일 캐시를 6.5 GB에서 4 MB로 밀어냈고, 모든 프로세스가 실행 페이지를 디스크에서 다시 읽느라 초당 1 GB 읽기와 load 120이 났다. nginx·sshd가 스케줄을 못 받아 사이트는 522, SSH는 무응답이 됐다. 04:23:10 전역 OOM 킬러가 죽이며 자동 복구됐다.
+
+복제가 끊긴 것(`walsender timeout`, 04:18:00)은 그 정지의 **증상**이고, 3시간 동안 다시 못 붙은 것은 정지가 풀린 뒤 tailscaled가 netfilter 규칙을 다시 깔면서 위의 마스커레이드가 적용됐기 때문이다.
+
+교훈: **`🔴 복제 상태 점검` 실패는 DB 문제가 아닐 수 있다.** 같은 시각 사이트·SSH도 이상했다면 호스트 전체를 먼저 의심하고 `sar -q`(load), `sar -r`(메모리), `journalctl -k`(OOM)를 본다. `scripts/diagnose-stall.sh`가 그 셋을 한 번에 뽑는다.
+
+재발 방지로 `scripts/setup-session-limits.sh`가 대화형 세션에 cgroup 상한을 건다(`user-1000.slice`, high 6G / max 8G). leninbot 서비스는 `system.slice` 소속이라 영향받지 않는다. `scripts/watch-session-memory.sh --report`로 추이를 본다.
 
 ## 재시드 (슬롯이 무효화됐을 때)
 
