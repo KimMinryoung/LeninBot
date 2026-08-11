@@ -12,8 +12,11 @@
 #   스왑도 systemd-oomd도 earlyoom도 없고 user 슬라이스에 상한이 없어서
 #   프로세스 하나가 서버 전체를 멈춰 세울 수 있는 상태였다.
 #
-# 적용 범위: user-1000.slice(= grass의 로그인 세션)에만 걸린다.
+# 적용 범위: user-.slice.d 템플릿 — 모든 사용자 슬라이스(root 포함)에 걸린다.
+#   2026-08-11에 user-1000 전용에서 옮겼다. PC에서 root로 SSH 접속하면 세션이
+#   user-0.slice에 실려 uid 1000 전용 상한이 실세션을 못 덮었기 때문.
 #   leninbot-* 서비스는 User=grass여도 system.slice 소속이라 영향이 없다.
+#   예산은 uid별로 따로다(user-0과 user-1000이 각각 6G/8G).
 #
 # 사용법:  bash scripts/setup-session-limits.sh          # 적용 (필요하면 sudo로 자동 재실행)
 #          bash scripts/setup-session-limits.sh --show   # 현재 상태만 확인
@@ -23,10 +26,8 @@
 
 set -euo pipefail
 
-UID_TARGET=1000
-DROPIN_DIR="/etc/systemd/system/user-${UID_TARGET}.slice.d"
+DROPIN_DIR="/etc/systemd/system/user-.slice.d"
 DROPIN="${DROPIN_DIR}/limits.conf"
-SLICE="user-${UID_TARGET}.slice"
 
 MEM_HIGH="6G"    # 소프트 상한 — 죽이지 않고 이 cgroup 안에서만 회수 시작
 MEM_MAX="8G"     # 하드 상한 — 닿으면 폭주한 세션만 죽고 서버는 산다
@@ -38,16 +39,19 @@ CPU_WEIGHT="30"  # 경합 시 시스템 서비스에 양보 (기본 100)
 #   즉 6~8 GiB 구간은 "느려지는 구간"이고 실제 차단은 MemoryMax가 한다.
 
 show() {
-  echo "── 현재 설정 ──"
-  systemctl show "$SLICE" -p MemoryHigh -p MemoryMax -p MemorySwapMax -p CPUWeight 2>/dev/null || true
-  echo "── 커널이 실제로 물고 있는 값 ──"
-  for f in memory.high memory.max memory.swap.max cpu.weight; do
-    p="/sys/fs/cgroup/user.slice/${SLICE}/${f}"
-    [ -r "$p" ] && echo "  ${f} = $(cat "$p")" || echo "  ${f} = (없음)"
+  local found=0 s slice
+  for s in /sys/fs/cgroup/user.slice/user-*.slice; do
+    [ -d "$s" ] || continue
+    found=1
+    slice=$(basename "$s")
+    echo "── ${slice} — 커널이 실제로 물고 있는 값 ──"
+    for f in memory.high memory.max memory.swap.max cpu.weight; do
+      [ -r "$s/$f" ] && echo "  ${f} = $(cat "$s/$f")" || echo "  ${f} = (없음)"
+    done
+    [ -r "$s/memory.current" ] \
+      && awk '{printf "  memory.current = %.2f GiB\n", $1/1073741824}' "$s/memory.current"
   done
-  echo "── 이 슬라이스가 지금 쓰는 메모리 ──"
-  p="/sys/fs/cgroup/user.slice/${SLICE}/memory.current"
-  [ -r "$p" ] && awk '{printf "  memory.current = %.2f GiB\n", $1/1073741824}' "$p" || echo "  (없음)"
+  [ "$found" -eq 1 ] || echo "  (활성 user-*.slice 없음)"
   echo "── 드롭인 파일 ──"
   if [ -f "$DROPIN" ]; then echo "  $DROPIN (있음)"; else echo "  $DROPIN (없음)"; fi
 }
@@ -90,7 +94,9 @@ fi
 install -d -m 755 "$DROPIN_DIR"
 cat > "$DROPIN" <<EOF
 # 2026-08-10 04:17~04:23 UTC 호스트 정지 사건 대응.
-# 대화형 세션(SSH 셸, Claude Code)만 제한한다.
+# 모든 사용자 세션(root SSH 포함, SSH 셸·Claude Code)을 제한한다.
+# 2026-08-11: user-1000.slice.d에서 user-.slice.d(전 사용자 템플릿)로 이동.
+#   PC에서 root로 접속하므로 uid 1000 전용 제한은 실세션을 못 덮었다.
 # leninbot-* 서비스는 system.slice 소속이라 영향 없음.
 
 [Slice]
