@@ -133,7 +133,16 @@ def claim_gap(kind: str = "") -> dict | None:
                                 OR (status = 'claimed'
                                     AND claimed_at < NOW() - INTERVAL '40 minutes'))
                            AND (%(kind)s = '' OR kind = %(kind)s)
-                           AND kind <> 'doc'
+                           -- Only the kinds this worker can actually finish. The
+                           -- 2026-08-09 backfill left 18 kind='event' rows that the
+                           -- gap_report enum no longer admits; they were commissioned
+                           -- as glossary terms (which the term task itself forbids
+                           -- for episodes) and produced_entry() knows no 'event'
+                           -- lookup, so a created entry never closed its row — each
+                           -- burned a second full run before skipping (gaps 1101 and
+                           -- 1107, 2026-08-11). They stay pending for human triage,
+                           -- like 'doc'.
+                           AND kind IN ('person', 'term')
                          ORDER BY priority DESC, id
                          FOR UPDATE SKIP LOCKED
                          LIMIT 1)
