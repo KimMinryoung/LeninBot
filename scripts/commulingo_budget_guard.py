@@ -30,7 +30,13 @@ LANE_UNITS = [
     "leninbot-commulingo-terms",
     "leninbot-commulingo-maintainer",
 ]
-COST = re.compile(r'"cost_usd": ([0-9.]+)')
+# Anchored to the pretty-printed result JSON only ("^\s*"), not the llm_gateway
+# audit lines: each round is audited twice (surface external_sdk + loop) and the
+# result JSON restates the run total, so an unanchored match trebled real spend.
+# The value needs the exponent branch: json.dumps renders sub-$0.0001 costs as
+# e.g. 6.933e-05, and a mantissa-only match read that as $6.93 — one cheap flash
+# call then tripped the daily cap and skipped the rest of the window (2026-08-11).
+COST = re.compile(r'^\s*"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)', re.M)
 
 
 def main() -> int:

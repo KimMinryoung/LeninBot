@@ -24,10 +24,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# The lanes the batch actually wants since 2026-08-09 (gap queue first; the old
+# new/enrich/terms units are installed but not pulled in — putting them here
+# while parked would page "no runs recorded" every morning). Swap this dict back
+# in the same commit that re-adds them to leninbot-commulingo-batch.service.
 LANES = {
-    "enrich": "leninbot-commulingo-enrich.service",
-    "new": "leninbot-commulingo-new.service",
-    "terms": "leninbot-commulingo-terms.service",
+    "gap": "leninbot-commulingo-gap.service",
+    "events": "leninbot-commulingo-events.service",
+    "links": "leninbot-commulingo-links.service",
 }
 
 # A lane is unhealthy when it fails this often, or produces nothing at all.
@@ -71,7 +75,10 @@ SKIPPED = re.compile(r'^\s*"status": "skipped"', re.M)
 NO_EDIT = re.compile(r'^\s*"status": "no_edit"', re.M)
 FALLBACK = re.compile(r'^\s*"mode": "enrich_fallback"', re.M)
 FAILED = re.compile(r"^(?:\S+ )*(?:RuntimeError|ValueError|Exception):", re.M)
-COST = re.compile(r'"cost_usd": ([0-9.]+)')
+# Result-JSON line only, like APPLIED above — unanchored it also swept the two
+# llm_gateway audit copies of every round (≈3× real spend), and without the
+# exponent branch a sub-$0.0001 cost like 6.933e-05 read as $6.93.
+COST = re.compile(r'^\s*"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)', re.M)
 ROUNDS = re.compile(r'"rounds": ([0-9]+)')
 
 
