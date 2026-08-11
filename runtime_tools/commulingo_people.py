@@ -102,6 +102,7 @@ _NATIONALITY_CODES = frozenset({
     "guinea-bissau", "indonesia", "mozambique", "peru", "trinidad", "portugal",
     "brazil", "el-salvador", "grenada", "guyana", "nicaragua", "south-africa",
     "tanzania", "ireland", "slovakia", "czechoslovakia", "korea", "martinique",
+    "israel",
 })
 
 # Which writing system each nationality's own names use. Port of
@@ -156,6 +157,7 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     "south-korea": ("hangul", "han"),
     "india": ("devanagari", "bengali", "latin"),
     "korea": ("hangul", "han"),
+    "israel": ("hebrew",),
 }
 
 # Nations whose people write the family name first, and the joiner between
