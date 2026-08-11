@@ -396,6 +396,14 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
 
+    if not forced_id and not skeleton and select_event(skeleton=True) is not None:
+        # A hand-seeded skeleton (empty summary) outranks section work: the
+        # section walker's outline IS the timeline, which a skeleton does not
+        # have yet, and the frontend hides summaryless events, so until the
+        # card is written the page the seeder asked for does not exist. This
+        # also means seeding a row is all a human has to do — no manual
+        # --skeleton run needed anymore.
+        skeleton = True
     event = select_event(forced_id, lane, lanes, skeleton=skeleton)
     if not event:
         return {
