@@ -523,7 +523,9 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
              lang: SourceLanguage | None = None) -> list[str]:
     lang = lang or RUSSIAN
     problems = []
-    expected = {idx for idx, _ in chunk}
+    # A block with no lines (an all-numeric table) sends only its marker and
+    # owes no reply — do not fail the chunk when the model skips it.
+    expected = {idx for idx, b in chunk if b["lines"]}
     missing = sorted(expected - set(got))
     extra = sorted(set(got) - expected)
     if missing:
@@ -881,7 +883,13 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
             idx = doc["offset"] + i
             lines = translated.get(idx)
             if not lines:
-                raise SpecError(f"조립 중 누락된 블록: {idx}")
+                # A block with nothing to translate (an all-numeric table has
+                # an empty cell vocabulary) owes no reply; its content is
+                # emitted from the block itself. Only a block that actually
+                # carried source text is a hole.
+                if block["lines"]:
+                    raise SpecError(f"조립 중 누락된 블록: {idx}")
+                lines = []
             lines = [fix(ln) for ln in lines]
             tag = tag_map.get(block["tag"], "p")
             if tag != "li" and in_list:
@@ -903,9 +911,12 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
                 # to the model. Cells outside the vocabulary — the numbers —
                 # are emitted exactly as they came out of the source.
                 vocab = dict(zip(block.get("lines", []), lines))
+                # Cells carry note refs too — Bukharin cites his source on a
+                # table's total row — so they get the same [n] linking as
+                # prose.
                 body = "".join(
                     "<tr>" + "".join(
-                        f"<td>{_esc(vocab.get(c, c))}</td>" for c in row
+                        f"<td>{link_refs(_esc(vocab.get(c, c)))}</td>" for c in row
                     ) + "</tr>"
                     for row in block.get("rows", []))
                 out.append(f"<table>{body}</table>")
