@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# 대화형 세션(user-1000.slice) 메모리 관찰기.
+# 대화형 세션(user.slice 아래 모든 user-*.slice) 메모리 관찰기.
 #
 # 2026-08-10 04:23 UTC 사건 이후 만들었다. Claude Code가 anon-rss 8.74 GiB까지
 # 부풀어 전역 OOM 킬러에게 죽었고, 그 사이 시스템 파일 캐시가 전멸해 서버가
 # 5분간 멈췄다. cgroup 상한(scripts/setup-session-limits.sh)으로 막아 두었지만,
 # 상한이 적절한지·문맥 상한 환경변수가 실제로 듣는지는 관찰해야 안다.
+#
+# 2026-08-11: 상한이 user-1000 전용에서 user-.slice.d 템플릿(전 사용자)으로
+# 옮겨졌다. PC에서 root로 SSH 접속하면 세션이 user-0.slice에 실리므로,
+# 관찰도 특정 uid 고정이 아니라 존재하는 user-*.slice 전체를 합산한다.
 #
 # 사용법:
 #   bash scripts/watch-session-memory.sh              # 한 번 재고 로그에 append (cron용)
@@ -19,11 +23,14 @@
 
 set -uo pipefail
 
-CG="/sys/fs/cgroup/user.slice/user-1000.slice"
 LOG="/home/grass/leninbot/logs/session-memory.tsv"
 
-if [ ! -d "$CG" ]; then
-  echo "오류: $CG 가 없습니다. cgroup v2가 아니거나 세션이 없습니다." >&2
+slices() {
+  find /sys/fs/cgroup/user.slice -maxdepth 1 -type d -name 'user-*.slice' 2>/dev/null | sort
+}
+
+if [ -z "$(slices)" ]; then
+  echo "오류: /sys/fs/cgroup/user.slice 아래에 user-*.slice 가 없습니다. cgroup v2가 아니거나 세션이 없습니다." >&2
   exit 1
 fi
 
@@ -42,19 +49,24 @@ top_procs() {
         comm=$(tr -d '\0' < "/proc/$pid/comm" 2>/dev/null)
         [ -n "${rss:-}" ] && echo "$rss $comm"
       done < "$pidfile"
-    done < <(find "$CG" -name cgroup.procs 2>/dev/null)
+    done < <(slices | while IFS= read -r cg; do find "$cg" -name cgroup.procs 2>/dev/null; done)
   } | sort -rn | head -"$n" | awk '{printf "%s:%.2fGiB ", $2, $1/1048576}'
 }
 
+# 슬라이스별 값을 합산한다. cur·oom_kill·high 이벤트는 합, peak는 최대,
+# high/max 상한은 템플릿이라 모든 슬라이스가 같으므로 첫 값을 쓴다.
 sample() {
-  local ts cur peak high max oomk highev
+  local ts cur peak high max oomk highev cg v
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  cur=$(rd "$CG/memory.current")
-  peak=$(rd "$CG/memory.peak")
-  high=$(rd "$CG/memory.high")
-  max=$(rd "$CG/memory.max")
-  oomk=$(awk '/^oom_kill /{print $2}' "$CG/memory.events" 2>/dev/null)
-  highev=$(awk '/^high /{print $2}' "$CG/memory.events" 2>/dev/null)
+  cur=0; peak=0; oomk=0; highev=0; high=""; max=""
+  while IFS= read -r cg; do
+    v=$(rd "$cg/memory.current"); [ -n "$v" ] && cur=$((cur + v))
+    v=$(rd "$cg/memory.peak");    [ -n "$v" ] && [ "$v" -gt "$peak" ] 2>/dev/null && peak=$v
+    [ -z "$high" ] && high=$(rd "$cg/memory.high")
+    [ -z "$max" ]  && max=$(rd "$cg/memory.max")
+    v=$(awk '/^oom_kill /{print $2}' "$cg/memory.events" 2>/dev/null); [ -n "$v" ] && oomk=$((oomk + v))
+    v=$(awk '/^high /{print $2}' "$cg/memory.events" 2>/dev/null);     [ -n "$v" ] && highev=$((highev + v))
+  done < <(slices)
 
   CUR_G=$(gib "$cur"); PEAK_G=$(gib "$peak")
   HIGH_G=$(gib "$high"); MAX_G=$(gib "$max")
@@ -86,13 +98,15 @@ case "${1:-}" in
     ;;
 
   --reset-peak)
-    if [ ! -w "$CG/memory.peak" ] && [ "$(id -u)" -ne 0 ]; then
+    if [ "$(id -u)" -ne 0 ]; then
       echo "root 권한이 필요합니다. sudo로 재실행합니다."
       exec sudo -- bash "$0" --reset-peak
     fi
-    echo 0 > "$CG/memory.peak" 2>/dev/null \
-      && echo "최고점 기록을 초기화했습니다." \
-      || echo "초기화 실패 (커널이 쓰기를 지원하지 않을 수 있습니다)."
+    while IFS= read -r cg; do
+      echo 0 > "$cg/memory.peak" 2>/dev/null \
+        && echo "최고점 초기화: $cg" \
+        || echo "초기화 실패: $cg (커널이 쓰기를 지원하지 않을 수 있습니다)."
+    done < <(slices)
     sample; print_status
     ;;
 
