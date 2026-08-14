@@ -267,6 +267,19 @@ def _assert_provider_registry_and_recovery_policy() -> None:
     }
     assert anthropic_pricing_table(date(2026, 8, 31))["claude-sonnet-5"]["input"] == 2 / 1_000_000
     assert anthropic_pricing_table(date(2026, 9, 1))["claude-sonnet-5"]["input"] == 3 / 1_000_000
+    # DeepSeek V4 flat -> peak/off-peak cutover at 2026-08-16 16:00 UTC.
+    from datetime import datetime, timezone
+
+    from llm.provider_registry import deepseek_price_triple
+
+    before = datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc)
+    peak = datetime(2026, 8, 20, 2, 0, tzinfo=timezone.utc)   # 01:00–04:00 UTC
+    offpeak = datetime(2026, 8, 20, 20, 0, tzinfo=timezone.utc)
+    assert deepseek_price_triple("deepseek-v4-flash", before) == (0.14, 0.28, 0.0028)
+    assert deepseek_price_triple("deepseek-v4-flash", peak) == (0.44, 1.32, 0.014667)
+    assert deepseek_price_triple("deepseek-v4-pro", peak) == (1.32, 3.96, 0.044)
+    assert deepseek_price_triple("deepseek-v4-pro", offpeak) == (0.66, 1.98, 0.022)
+    assert anthropic_pricing_table(peak)["deepseek-v4-flash"]["output"] == 1.32 / 1_000_000
     options = kimi_openai_tool_options()
     assert "content_filter_fallback_client" not in options  # 스위칭 계약 제거됨 (2026-08-04)
     assert options["extra_body"] == {"reasoning_effort": "max"}

@@ -61,13 +61,63 @@ def _per_token(input_price: float, output_price: float, cached: float) -> dict[s
     }
 
 
+# ── DeepSeek V4 tiered pricing (effective 2026-08-16 16:00 UTC) ──────
+# DeepSeek replaced its flat V4 rate with peak/off-peak tiers at 00:00 Beijing
+# on 2026-08-17, i.e. 16:00 UTC on 2026-08-16. Peak windows are 01:00–04:00 and
+# 06:00–10:00 UTC (09:00–12:00 and 14:00–18:00 Beijing, UTC+8); every other hour
+# is off-peak at exactly half the peak rate (computed here, never stored twice).
+# Source: DeepSeek pricing announcement 2026-08-13. The published USD list is
+# the RMB table over 6.8182 RMB/USD (27.00元 output = $3.96, 9.00元 = $1.32); the
+# cache-hit USD below is that same conversion of 0.10元 / 0.30元. Pre-cutover the
+# flat rates in _DEEPSEEK_FLAT apply. Triple order: (cache-miss input, output,
+# cache-hit input), USD per 1M tokens.
+DEEPSEEK_TIERED_START = datetime(2026, 8, 16, 16, 0, tzinfo=timezone.utc)
+_DEEPSEEK_FLAT = {
+    "deepseek-v4-flash": (0.14, 0.28, 0.0028),
+    "deepseek-v4-pro": (0.435, 0.87, 0.003625),
+}
+_DEEPSEEK_PEAK = {
+    "deepseek-v4-flash": (0.44, 1.32, 0.014667),
+    "deepseek-v4-pro": (1.32, 3.96, 0.044),
+}
+
+
+def _deepseek_key(model: str) -> str | None:
+    if model in _DEEPSEEK_FLAT:
+        return model
+    for base in _DEEPSEEK_FLAT:
+        if model.startswith(base + "-") or model.startswith(base + "."):
+            return base
+    return None
+
+
+def deepseek_price_triple(
+    model: str, now: datetime | None = None
+) -> tuple[float, float, float] | None:
+    """(cache-miss input, output, cache-hit input) USD **per 1M tokens** for a
+    DeepSeek model at ``now`` (UTC, defaults to current time), or None if the
+    model is not DeepSeek. Flat until the 2026-08-16 16:00 UTC cutover, then
+    peak/off-peak; the caller divides by 1_000_000 for a per-token rate."""
+    key = _deepseek_key(model)
+    if key is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if now < DEEPSEEK_TIERED_START:
+        return _DEEPSEEK_FLAT[key]
+    miss, out, hit = _DEEPSEEK_PEAK[key]
+    hour = now.astimezone(timezone.utc).hour
+    if (1 <= hour < 4) or (6 <= hour < 10):
+        return miss, out, hit
+    return miss / 2, out / 2, hit / 2
+
+
 OPENAI_COMPATIBLE_PRICING = {
     "gpt-5.6-sol": _per_token(5.00, 30.00, 0.50),
     # 2026-07-30 인하: Terra -20%, Luna -80%. 롱컨텍스트 티어(2x)는 미반영.
     "gpt-5.6-terra": _per_token(2.00, 12.00, 0.20),
     "gpt-5.6-luna": _per_token(0.20, 1.20, 0.02),
-    "deepseek-v4-flash": _per_token(0.14, 0.28, 0.0028),
-    "deepseek-v4-pro": _per_token(0.435, 0.87, 0.003625),
+    # DeepSeek is intentionally NOT a static row: its price is time-of-day
+    # dependent since 2026-08-16 and is resolved via deepseek_price_triple().
     "kimi-k3": _per_token(3.00, 15.00, 0.30),
 }
 
@@ -85,8 +135,21 @@ GEMINI_PRICING = {
 }
 
 
-def openai_compatible_pricing(model: str) -> dict[str, float]:
-    """Return pricing for an exact or provider-pinned model ID."""
+def openai_compatible_pricing(
+    model: str, now: datetime | None = None
+) -> dict[str, float]:
+    """Return pricing for an exact or provider-pinned model ID.
+
+    DeepSeek rows are time-of-day dependent (peak/off-peak) and resolved live;
+    everything else is a static row with a Terra fallback for unknowns."""
+    triple = deepseek_price_triple(model, now)
+    if triple is not None:
+        miss, out, hit = triple
+        return {
+            "input": miss / 1_000_000,
+            "output": out / 1_000_000,
+            "cached_input": hit / 1_000_000,
+        }
     if model in OPENAI_COMPATIBLE_PRICING:
         return OPENAI_COMPATIBLE_PRICING[model]
     for base, price in OPENAI_COMPATIBLE_PRICING.items():
@@ -108,31 +171,46 @@ def _anthropic_row(
     }
 
 
-def anthropic_pricing_table(today: date | None = None) -> dict[str, dict[str, float]]:
-    """Return current Messages pricing, including Sonnet 5 launch pricing."""
-    current = today or datetime.now(timezone.utc).date()
+def anthropic_pricing_table(
+    now: datetime | date | None = None,
+) -> dict[str, dict[str, float]]:
+    """Return current Messages pricing, including Sonnet 5 launch pricing and
+    the DeepSeek V4 peak/off-peak tiers (from 2026-08-16 16:00 UTC).
+
+    Accepts a datetime (its UTC hour picks the DeepSeek peak/off-peak tier) or a
+    bare date (treated as 00:00 UTC — fine for the Sonnet cutover, which is
+    date-only). No argument means now."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    current = now.date() if isinstance(now, datetime) else now
+    now_dt = (
+        now if isinstance(now, datetime)
+        else datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    )
     sonnet = (
         _anthropic_row(2.00, 10.00, 0.20)
         if current <= date(2026, 8, 31)
         else _anthropic_row(3.00, 15.00, 0.30)
     )
+
+    def _deepseek(model: str) -> dict[str, float]:
+        miss, out, hit = deepseek_price_triple(model, now_dt)
+        # Anthropic semantics: cache_creation is priced as ordinary (cache-miss)
+        # input, cache_read as the cache-hit rate.
+        return {
+            "input": miss / 1_000_000,
+            "output": out / 1_000_000,
+            "cache_creation": miss / 1_000_000,
+            "cache_read": hit / 1_000_000,
+        }
+
     return {
         "claude-fable-5": _anthropic_row(10.00, 50.00, 1.00),
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
         "claude-sonnet-5": sonnet,
         "claude-haiku-4-5": _anthropic_row(1.00, 5.00, 0.10),
-        "deepseek-v4-flash": {
-            "input": 0.14 / 1_000_000,
-            "output": 0.28 / 1_000_000,
-            "cache_creation": 0.14 / 1_000_000,
-            "cache_read": 0.0028 / 1_000_000,
-        },
-        "deepseek-v4-pro": {
-            "input": 0.435 / 1_000_000,
-            "output": 0.87 / 1_000_000,
-            "cache_creation": 0.435 / 1_000_000,
-            "cache_read": 0.003625 / 1_000_000,
-        },
+        "deepseek-v4-flash": _deepseek("deepseek-v4-flash"),
+        "deepseek-v4-pro": _deepseek("deepseek-v4-pro"),
         "kimi-k3": {
             "input": 3.00 / 1_000_000,
             "output": 15.00 / 1_000_000,

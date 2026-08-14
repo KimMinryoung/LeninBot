@@ -214,6 +214,7 @@ def estimate_cost_usd(
         GEMINI_PRICING,
         OPENAI_COMPATIBLE_PRICING,
         anthropic_pricing_table,
+        deepseek_price_triple,
     )
 
     def _lookup(table: dict) -> dict | None:
@@ -224,6 +225,20 @@ def estimate_cost_usd(
             if model.startswith(base + "-") or model.startswith(base + "."):
                 return price
         return None
+
+    def _lookup_openai() -> dict | None:
+        # DeepSeek left the static OpenAI-compatible table when its price became
+        # time-of-day dependent (2026-08-16); resolve it live, else fall back to
+        # the static rows. None for a genuinely unknown model, as before.
+        triple = deepseek_price_triple(model)
+        if triple is not None:
+            miss, out, hit = triple
+            return {
+                "input": miss / 1_000_000,
+                "output": out / 1_000_000,
+                "cached_input": hit / 1_000_000,
+            }
+        return _lookup(OPENAI_COMPATIBLE_PRICING)
 
     def _anthropic_cost(p: dict) -> float:
         return (
@@ -251,7 +266,7 @@ def estimate_cost_usd(
         p = _lookup(GEMINI_PRICING)
         return _prompt_total_cost(p) if p is not None else None
     if token_semantics == "openai":
-        p = _lookup(OPENAI_COMPATIBLE_PRICING)
+        p = _lookup_openai()
         return _prompt_total_cost(p) if p is not None else None
 
     p = _lookup(anthropic_pricing_table())
@@ -260,7 +275,7 @@ def estimate_cost_usd(
     p = _lookup(GEMINI_PRICING)
     if p is not None:
         return _prompt_total_cost(p)
-    p = _lookup(OPENAI_COMPATIBLE_PRICING)
+    p = _lookup_openai()
     if p is not None:
         return _prompt_total_cost(p)
     return None

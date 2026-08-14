@@ -62,6 +62,13 @@ OpenAI 호환과 Gemini는 prompt_tokens가 캐시 히트를 **포함**한다. D
 가격은 [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)의
 2026-08-05 standard tier를 기준으로 `provider_registry.GEMINI_PRICING`에 둔다.
 
+DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-17 00:00)부터
+평면 단가를 버리고 피크(UTC 01–04·06–10시)/오프피크(그 외, 피크의 절반) 티어로
+바뀐다. 정적 표에 두지 않고 `provider_registry.deepseek_price_triple(model, now)`가
+호출 시각으로 해석하며, `anthropic_pricing_table()`·`openai_compatible_pricing()`·
+`gateway.estimate_cost_usd()`가 이를 경유한다. 컷오버 전은 옛 평면 단가. 큐레이터
+레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]).
+
 ## 정책 설정 계층 (mtime 핫리로드)
 
 정책은 세 계층을 순서대로 병합한다.
