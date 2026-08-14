@@ -4,6 +4,7 @@ import os
 import json
 import asyncio
 import logging
+from typing import NamedTuple
 
 import anthropic
 
@@ -411,6 +412,48 @@ def _resolve_deepseek_model(alias: str) -> str:
 def _resolve_kimi_model(alias: str) -> str:
     """Resolve a Kimi model alias to the official Moonshot API model ID."""
     return _KIMI_MODEL_MAP.get(alias, alias)
+
+
+class AgentLoopBinding(NamedTuple):
+    """Everything a tool-loop call site needs that depends on the provider."""
+
+    chat: object          # the provider-family chat_with_tools coroutine fn
+    client: object        # audited SDK client for that family
+    model: str            # canonical API model ID
+    render_provider: str  # spec.render_prompt(provider=...) value
+    reasoning: dict       # kwargs to splat into chat (thinking=/output_config=/extra_body=)
+
+
+def resolve_agent_tool_loop(spec, policy) -> AgentLoopBinding:
+    """Resolve a tool-loop AgentSpec's provider binding in one place.
+
+    The CommuLingo curator lanes each hardcoded the DeepSeek path (client,
+    loop module, model resolver, prompt renderer, reasoning kwargs) in four
+    scripts; switching the curators to GPT-5.6 Luna (2026-08-16 DeepSeek
+    price hike) would have meant re-mirroring that choice four times. Call
+    sites resolve the whole binding here from the spec instead.
+    """
+    from tool_gateway.inference import resolve_inference_extra
+
+    provider = spec.effective_provider()
+    reasoning = resolve_inference_extra(policy, provider)
+    if provider == "openai":
+        from llm.openai_tool_loop import chat_with_tools
+        if _openai_client is None:
+            raise RuntimeError("OPENAI_API_KEY is not configured")
+        return AgentLoopBinding(
+            chat_with_tools, _openai_client,
+            _resolve_openai_model(spec.model or "gpt56luna"), "openai", reasoning,
+        )
+    if provider == "deepseek":
+        from llm.claude_loop import chat_with_tools
+        if _deepseek_anthropic_client is None:
+            raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        return AgentLoopBinding(
+            chat_with_tools, _deepseek_anthropic_client,
+            _resolve_deepseek_model(spec.model or "deepseek_pro"), "deepseek", reasoning,
+        )
+    raise ValueError(f"unsupported tool-loop provider for {spec.name}: {provider!r}")
 
 
 def _get_deepseek_thinking_params() -> dict:

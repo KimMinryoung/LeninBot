@@ -70,8 +70,8 @@ class SectionCursor:
 SECTION_CURSOR = SectionCursor()
 
 
-assert COMMULINGO_CURATOR.provider == "deepseek"
-assert COMMULINGO_CURATOR.model == "deepseek_pro"
+assert COMMULINGO_CURATOR.provider == "openai"
+assert COMMULINGO_CURATOR.model == "gpt56luna"
 NARROW_TOOLS = {
     "commulingo_person_create", "commulingo_person_update",
     "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
@@ -547,7 +547,7 @@ finally:
     maintainer.db_query = original_query
 
 async def assert_dsml_retry():
-    original_chat = maintainer.chat_with_tools
+    original_resolve = maintainer.resolve_agent_tool_loop
     original_count = maintainer.completed_run_count
     original_query = maintainer.db_query_one
     original_roster = maintainer.db_query
@@ -563,7 +563,10 @@ async def assert_dsml_retry():
         })
         return "selected"
     try:
-        maintainer.chat_with_tools = fake_chat
+        from bot_config import AgentLoopBinding
+        maintainer.resolve_agent_tool_loop = lambda _spec, _policy: AgentLoopBinding(
+            fake_chat, None, "gpt-5.6-luna", "openai", {},
+        )
         maintainer.completed_run_count = lambda: 10
         maintainer.db_query_one = lambda *_a, **_kw: None
         maintainer.db_query = lambda sql, params=None: []
@@ -579,7 +582,7 @@ async def assert_dsml_retry():
         box = {}
         candidate_handler = maintainer.build_candidate_select_handler(box)
         _result, _tracker, found = await maintainer._call_curator_stage(
-            task="discover", spec=spec, model="deepseek-v4-pro",
+            task="discover", spec=spec,
             tools=[maintainer.COMMULINGO_CANDIDATE_SELECT_TOOL],
             handlers={"commulingo_candidate_select": candidate_handler},
             policy=policy, stage="test discovery",
@@ -590,7 +593,7 @@ async def assert_dsml_retry():
         assert len(calls) == 2
         assert found["id"] == "retry-person"
     finally:
-        maintainer.chat_with_tools = original_chat
+        maintainer.resolve_agent_tool_loop = original_resolve
         maintainer.completed_run_count = original_count
         maintainer.db_query_one = original_query
         maintainer.db_query = original_roster

@@ -29,8 +29,7 @@ os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
 from agents import get_agent  # noqa: E402
-from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
-from llm.claude_loop import chat_with_tools  # noqa: E402
+from bot_config import resolve_agent_tool_loop  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
 from runtime_tools.commulingo_people import (  # noqa: E402
     DENSE_SENTENCE_CHARS,
@@ -228,7 +227,7 @@ async def run_once() -> dict:
         return {"status": "skipped", "reason": "term_lane_enabled=false"}
 
     from runtime_tools.commulingo_people import direct_apply_enabled
-    from tool_gateway.inference import resolve_agent_inference_policy, resolve_inference_extra
+    from tool_gateway.inference import resolve_agent_inference_policy
 
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
@@ -248,8 +247,7 @@ async def run_once() -> dict:
         if name not in maintainer.NARROW_WRITE_TOOLS or name == write_name
     }
     handlers[write_name] = maintainer.build_retrying_write_handler(handlers[write_name])
-    model = _resolve_deepseek_model(spec.model or "deepseek_pro")
-    reasoning = resolve_inference_extra(policy, "deepseek")
+    binding = resolve_agent_tool_loop(spec, policy)
 
     label, material = pick_material(before)
     if not material.strip():
@@ -280,13 +278,13 @@ async def run_once() -> dict:
             "genuinely holds no unregistered concept, answer NO_CANDIDATE now."
         )
         with caller_scope(ctx):
-            result = await chat_with_tools(
+            result = await binding.chat(
                 [{"role": "user", "content": task + retry_note}],
-                client=_deepseek_anthropic_client,
-                model=model,
+                client=binding.client,
+                model=binding.model,
                 tools=tools,
                 tool_handlers=handlers,
-                system_prompt=spec.render_prompt(provider="deepseek"),
+                system_prompt=spec.render_prompt(provider=binding.render_provider),
                 max_rounds=policy.max_rounds,
                 max_tokens=policy.max_output_tokens,
                 max_input_tokens=policy.max_input_tokens,
@@ -298,8 +296,7 @@ async def run_once() -> dict:
                 agent_name=spec.name,
                 finalization_tools=[write_name],
                 terminal_tools=[write_name],
-                thinking=reasoning.get("thinking"),
-                output_config=reasoning.get("output_config"),
+                **binding.reasoning,
             )
         total_cost += float(tracker.get("total_cost") or 0.0)
         total_rounds += int(tracker.get("rounds_used") or 0)
@@ -313,7 +310,7 @@ async def run_once() -> dict:
     after = completed_run_count()
     summary = {
         "material": label,
-        "model": model,
+        "model": binding.model,
         "cost_usd": round(total_cost, 4),
         "rounds": total_rounds,
         "attempts": attempt,

@@ -179,8 +179,12 @@ COMMULINGO_CURATOR = AgentSpec(
         "commulingo_person_create", "commulingo_person_update",
         "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
     ],
-    provider="deepseek",
-    model="deepseek_pro",
+    # 2026-08-14: deepseek_pro → GPT-5.6 Luna. The 2026-08-16 DeepSeek V4
+    # peak/off-peak repricing (~2x blended for this lane even off-peak) made
+    # Luna cheaper at equal blind-judged card quality (Luna won on grounding
+    # discipline, DeepSeek on epithet craft; bench 2026-08-14).
+    provider="openai",
+    model="gpt56luna",
     budget_usd=0.35,
     max_rounds=16,
     max_input_tokens=160_000,

@@ -27,8 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-maintainer")
 
 from agents import get_agent
-from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
-from llm.claude_loop import chat_with_tools
+from bot_config import resolve_agent_tool_loop
 from db import query as db_query, query_one as db_query_one
 from runtime_tools.commulingo_people import (
     DENSE_SENTENCE_CHARS, FIELD_LIMITS, SECTION_BODY_TARGET, _dedup_key,
@@ -1157,14 +1156,12 @@ def latest_maintainer_edit() -> dict | None:
 
 
 async def _call_curator_stage(
-    *, task: str, spec, model: str, tools: list, handlers: dict,
+    *, task: str, spec, tools: list, handlers: dict,
     policy, stage: str, expect_edit: bool, before_count: int,
     finalization_tools: list[str], terminal_tools: list[str],
     candidate_box: dict | None = None, no_edit_box: dict | None = None,
 ) -> tuple[str, dict, dict | None]:
-    from tool_gateway.inference import resolve_inference_extra
-
-    reasoning = resolve_inference_extra(policy, "deepseek")
+    binding = resolve_agent_tool_loop(spec, policy)
     attempts = 1 + max(0, int(policy.max_output_continuations))
     total_cost = 0.0
     total_rounds = 0
@@ -1188,14 +1185,14 @@ async def _call_curator_stage(
             + rejected_candidate_note((candidate_box or {}).get("rejected"))
         )
         try:
-            last_result = await chat_with_tools(
+            last_result = await binding.chat(
                 [{"role": "user", "content": task + retry_note}],
-                client=_deepseek_anthropic_client,
-                model=model,
+                client=binding.client,
+                model=binding.model,
                 tools=tools,
                 tool_handlers=handlers,
                 system_prompt=(
-                    spec.render_prompt(provider="deepseek")
+                    spec.render_prompt(provider=binding.render_provider)
                     + ("\n\nDISCOVERY-STAGE EXCEPTION: do not edit; finish only with commulingo_candidate_select." if not expect_edit else "")
                 ),
                 max_rounds=policy.max_rounds,
@@ -1209,8 +1206,7 @@ async def _call_curator_stage(
                 agent_name=spec.name,
                 finalization_tools=finalization_tools,
                 terminal_tools=terminal_tools,
-                thinking=reasoning.get("thinking"),
-                output_config=reasoning.get("output_config"),
+                **binding.reasoning,
             )
             total_cost += float(tracker.get("total_cost") or 0.0)
             total_rounds += int(tracker.get("rounds_used") or 0)
@@ -1286,7 +1282,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
         }
         return selected_tools, selected_handlers
 
-    model = _resolve_deepseek_model(spec.model or "deepseek_pro")
+    report_model = resolve_agent_tool_loop(spec, policy).model
     ctx = new_run_context(
         interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id="commulingo_people_maintainer",
@@ -1312,7 +1308,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     task=build_discovery_task(
                         config["new_person_focus"], candidate_box["rejected"],
                         roster_groups_for_focus(config),
-                    ), spec=spec, model=model,
+                    ), spec=spec,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
                     stage="new-person discovery", expect_edit=False, before_count=before,
                     finalization_tools=["commulingo_candidate_select"],
@@ -1323,7 +1319,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 tracker["rounds_used"] += discovery_tracker["rounds_used"]
                 create_tools, create_handlers = stage_tools(frozenset({"commulingo_person_create"}))
                 result, create_tracker, _ = await _call_curator_stage(
-                    task=build_new_person_task(candidate), spec=spec, model=model,
+                    task=build_new_person_task(candidate), spec=spec,
                     tools=create_tools, handlers=create_handlers, policy=policy,
                     stage="new-person creation", expect_edit=True, before_count=before,
                     finalization_tools=["commulingo_person_create"],
@@ -1383,7 +1379,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
             enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS) + ["commulingo_no_edit"]
             try:
                 result, enrich_tracker, _ = await _call_curator_stage(
-                    task=task, spec=spec, model=model,
+                    task=task, spec=spec,
                     tools=enrich_tools, handlers=enrich_handlers,
                     policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
                     finalization_tools=enrich_terminals,
@@ -1427,7 +1423,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "status": "no_edit",
                     "mode": chosen_mode,
                     "candidate": candidate.get("id"),
-                    "model": model,
+                    "model": report_model,
                     "reason": no_edit_reason,
                     "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
                     "rounds": int(tracker.get("rounds_used") or 0),
@@ -1452,7 +1448,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
         "status": "applied",
         "mode": chosen_mode,
         "candidate": candidate and candidate.get("id"),
-        "model": model,
+        "model": report_model,
         "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
         "rounds": int(tracker.get("rounds_used") or 0),
         "edit": edit,

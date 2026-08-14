@@ -67,7 +67,11 @@ DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-
 바뀐다. 정적 표에 두지 않고 `provider_registry.deepseek_price_triple(model, now)`가
 호출 시각으로 해석하며, `anthropic_pricing_table()`·`openai_compatible_pricing()`·
 `gateway.estimate_cost_usd()`가 이를 경유한다. 컷오버 전은 옛 평면 단가. 큐레이터
-레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]).
+레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]) — 다만
+이 재가격이 계기가 되어 2026-08-14에 큐레이터 두 스펙(people/event)은 GPT-5.6
+Luna(`openai`/`gpt56luna`)로 옮겼다(블라인드 벤치 품질 동급, 비용 ~절반; 바인딩은
+`bot_config.resolve_agent_tool_loop`가 스펙에서 해석). DeepSeek 시간대 단가는
+webchat 등 남은 DeepSeek 호출부의 과금에 계속 쓰인다.
 
 ## 정책 설정 계층 (mtime 핫리로드)
 

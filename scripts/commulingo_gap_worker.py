@@ -393,7 +393,7 @@ async def run_once(kind: str = "") -> dict:
     try:
         with caller_scope(ctx):
             result, tracker, _ = await maintainer._call_curator_stage(
-                task=task, spec=spec, model=_resolve_deepseek_model(spec.model or "deepseek_pro"),
+                task=task, spec=spec,
                 tools=stage_tools, handlers=stage_handlers, policy=policy,
                 stage=f"gap-{gap['kind']}", expect_edit=True, before_count=before,
                 finalization_tools=[write_name, "commulingo_no_edit"],

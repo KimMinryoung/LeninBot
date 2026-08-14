@@ -63,8 +63,7 @@ os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
 from agents import get_agent  # noqa: E402
-from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
-from llm.claude_loop import chat_with_tools  # noqa: E402
+from bot_config import resolve_agent_tool_loop  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
 from runtime_tools.commulingo_people import (  # noqa: E402
     EVENT_SECTION_TARGET, event_section_headings,
@@ -393,7 +392,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
         return {"status": "skipped", "reason": "maintainer disabled"}
 
     from runtime_tools.commulingo_people import direct_apply_enabled
-    from tool_gateway.inference import resolve_agent_inference_policy, resolve_inference_extra
+    from tool_gateway.inference import resolve_agent_inference_policy
 
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
@@ -426,8 +425,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     for name in maintainer.NARROW_WRITE_TOOLS:
         if name in handlers:
             handlers[name] = maintainer.build_retrying_write_handler(handlers[name])
-    model = _resolve_deepseek_model(spec.model or "deepseek_pro")
-    reasoning = resolve_inference_extra(policy, "deepseek")
+    binding = resolve_agent_tool_loop(spec, policy)
 
     task = build_skeleton_task(event) if skeleton else build_task(event, brief)
     ctx = new_run_context(
@@ -450,13 +448,13 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
             f"`{WRITE_TOOL}` and nowhere else."
         )
         with caller_scope(ctx):
-            result = await chat_with_tools(
+            result = await binding.chat(
                 [{"role": "user", "content": task + retry_note}],
-                client=_deepseek_anthropic_client,
-                model=model,
+                client=binding.client,
+                model=binding.model,
                 tools=tools,
                 tool_handlers=handlers,
-                system_prompt=spec.render_prompt(provider="deepseek"),
+                system_prompt=spec.render_prompt(provider=binding.render_provider),
                 max_rounds=policy.max_rounds,
                 max_tokens=policy.max_output_tokens,
                 max_input_tokens=policy.max_input_tokens,
@@ -468,8 +466,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
                 agent_name=spec.name,
                 finalization_tools=spec.finalization_tools,
                 terminal_tools=spec.terminal_tools,
-                thinking=reasoning.get("thinking"),
-                output_config=reasoning.get("output_config"),
+                **binding.reasoning,
             )
         total_cost += float(tracker.get("total_cost") or 0.0)
         total_rounds += int(tracker.get("rounds_used") or 0)
@@ -491,7 +488,7 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     ) or {}
     summary = {
         "event": event["id"],
-        "model": model,
+        "model": binding.model,
         "cost_usd": round(total_cost, 4),
         "rounds": total_rounds,
         "attempts": attempt,
