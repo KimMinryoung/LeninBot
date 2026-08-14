@@ -91,6 +91,11 @@ ROUNDS = re.compile(r'"rounds": ([0-9]+)')
 # One per drain-lane run, items not runs. Matches the final summary only, not
 # the per-batch "progress: N written" lines, which restate the same items.
 DONE = re.compile(r"\bdone: (\d+) written, (\d+) skipped\b")
+# Drain lanes print no result JSON; their spend exists only as the audited SDK
+# client's llm_call line (one per call, still via the llm_proxy). Never applied
+# to the loop lanes, where the same line duplicates the result JSON.
+LLM_CALL_COST = re.compile(
+    r'INFO llm_call \{.*?"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)')
 
 
 def journal(unit: str, since: str) -> str:
@@ -116,11 +121,7 @@ def tally_drain(unit: str, since: str) -> dict:
         "fallback": 0,
         # A crashed run never prints its done line, so it is counted on top.
         "total": len(runs) + failed,
-        # The links script calls DeepSeek directly and prints no cost_usd, so
-        # this stays 0 even when it writes; its flash batches are the cheapest
-        # thing in the batch. Counted here anyway so a future lane that does
-        # print the line is not silently dropped.
-        "cost": sum(float(v) for v in COST.findall(text)),
+        "cost": sum(float(v) for v in LLM_CALL_COST.findall(text)),
         "rounds": [],
     }
 

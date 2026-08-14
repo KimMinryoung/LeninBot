@@ -38,6 +38,15 @@ LANE_UNITS = [
 # call then tripped the daily cap and skipped the rest of the window (2026-08-11).
 COST = re.compile(r'^\s*"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)', re.M)
 
+# Units that never print a result JSON: they call the audited SDK client
+# directly (through the llm_proxy like everything else), so their one llm_call
+# audit line per call IS the spend record. For the loop lanes above that same
+# line is a duplicate of the result JSON and must stay excluded. Until
+# 2026-08-14 links was in neither sum and its spend escaped the cap entirely.
+DIRECT_UNITS = {"leninbot-commulingo-links"}
+LLM_CALL_COST = re.compile(
+    r'INFO llm_call \{.*?"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)')
+
 
 def main() -> int:
     cap = float(os.environ.get("COMMULINGO_DAILY_CAP_USD", "1.0"))
@@ -47,7 +56,8 @@ def main() -> int:
             ["journalctl", "-u", unit, "--since", "today", "-o", "cat", "--no-pager"],
             capture_output=True, text=True, timeout=60,
         ).stdout
-        spent += sum(float(v) for v in COST.findall(out))
+        pattern = LLM_CALL_COST if unit in DIRECT_UNITS else COST
+        spent += sum(float(v) for v in pattern.findall(out))
     if spent >= cap:
         print(f"[budget-guard] today's curator spend ${spent:.2f} >= cap ${cap:.2f} — skipping run")
         return 1
