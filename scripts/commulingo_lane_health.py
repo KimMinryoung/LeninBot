@@ -34,6 +34,14 @@ LANES = {
     "links": "leninbot-commulingo-links.service",
 }
 
+# Drain lanes clear a queue the other lanes feed instead of picking their own
+# subject, so their healthy steady state is the one the curator lanes must
+# never show: run after run with nothing to do. They also report in items per
+# run ("done: 2 written, 1 skipped"), not one status JSON per run — tallied by
+# the curator rules, an idle night reads as "no runs recorded" (paged
+# 2026-08-14, links had run 19 times) and a working one as "nothing applied".
+DRAIN_LANES = {"links"}
+
 # A lane is unhealthy when it fails this often, or produces nothing at all.
 MAX_FAILURE_RATE = 0.10
 # The new lane falls back to enrichment when discovery cannot find a real gap.
@@ -80,6 +88,9 @@ FAILED = re.compile(r"^(?:\S+ )*(?:RuntimeError|ValueError|Exception):", re.M)
 # exponent branch a sub-$0.0001 cost like 6.933e-05 read as $6.93.
 COST = re.compile(r'^\s*"cost_usd": ([0-9.]+(?:[eE][+-]?[0-9]+)?)', re.M)
 ROUNDS = re.compile(r'"rounds": ([0-9]+)')
+# One per drain-lane run, items not runs. Matches the final summary only, not
+# the per-batch "progress: N written" lines, which restate the same items.
+DONE = re.compile(r"\bdone: (\d+) written, (\d+) skipped\b")
 
 
 def journal(unit: str, since: str) -> str:
@@ -91,6 +102,46 @@ def journal(unit: str, since: str) -> str:
         print(f"WARNING: journalctl failed for {unit}: {result.stderr.strip()}",
               file=sys.stderr)
     return result.stdout
+
+
+def tally_drain(unit: str, since: str) -> dict:
+    text = journal(unit, since)
+    runs = DONE.findall(text)
+    failed = len(FAILED.findall(text))
+    return {
+        "applied": sum(int(written) for written, _ in runs),
+        "skipped": sum(int(skipped) for _, skipped in runs),
+        "failed": failed,
+        "no_edit": 0,
+        "fallback": 0,
+        # A crashed run never prints its done line, so it is counted on top.
+        "total": len(runs) + failed,
+        # The links script calls DeepSeek directly and prints no cost_usd, so
+        # this stays 0 even when it writes; its flash batches are the cheapest
+        # thing in the batch. Counted here anyway so a future lane that does
+        # print the line is not silently dropped.
+        "cost": sum(float(v) for v in COST.findall(text)),
+        "rounds": [],
+    }
+
+
+def drain_problems(lane: str, stats: dict) -> list[str]:
+    found = []
+    if stats["total"] == 0:
+        return [f"{lane}: no runs recorded"]
+    if stats["failed"] / stats["total"] > MAX_FAILURE_RATE:
+        found.append(
+            f"{lane}: {stats['failed']}/{stats['total']} runs failed"
+        )
+    # Skipped rows stay in the queue and are re-selected next run, so a few
+    # skips with writes alongside are a transient; skips with NO writes are
+    # the same rows failing every twenty minutes.
+    if stats["skipped"] and not stats["applied"]:
+        found.append(
+            f"{lane}: {stats['skipped']} skips and nothing written — "
+            f"the same rows may be failing every run"
+        )
+    return found
 
 
 def tally(unit: str, since: str) -> dict:
@@ -155,16 +206,16 @@ def tool_rejections(since: str) -> tuple[list[str], list[str]]:
     """
     match = re.fullmatch(r"-(\d+)h", since.strip())
     hours = int(match.group(1)) if match else 24
+    # Grouped by status as well as tool: a bare count cannot tell a validation
+    # rejection the model fixes next round from an unknown_tool deny (a typo'd
+    # name — "fetfetch_url rejected 1/1" read as a broken tool on 2026-08-14
+    # until someone opened the audit log).
     sql = (
-        "SELECT tool_name,"
-        "       count(*) FILTER (WHERE result_status <> 'ok') AS rejected,"
-        "       count(*) AS total"
+        "SELECT tool_name, result_status, count(*)"
         "  FROM tool_audit_log"
         " WHERE agent_name = 'commulingo_curator'"
         f"  AND ts > now() - interval '{hours} hours'"
-        " GROUP BY tool_name"
-        " HAVING count(*) FILTER (WHERE result_status <> 'ok') > 0"
-        " ORDER BY 2 DESC"
+        " GROUP BY 1, 2"
     )
     result = subprocess.run(
         ["docker", "exec", "leninbot-pg", "psql", "-U", "postgres", "-d", "leninbot",
@@ -173,17 +224,31 @@ def tool_rejections(since: str) -> tuple[list[str], list[str]]:
     )
     if result.returncode != 0:
         return [f"(tool rejection stats unavailable: {result.stderr.strip()[:200]})"], []
-    lines, alerts = [], []
+    by_tool: dict[str, dict[str, int]] = {}
     for raw in result.stdout.strip().splitlines():
         parts = raw.split("|")
         if len(parts) != 3:
             continue
-        tool, rejected, total = parts[0], int(parts[1]), int(parts[2])
+        by_tool.setdefault(parts[0], {})[parts[1]] = int(parts[2])
+    lines, alerts = [], []
+    for tool, statuses in sorted(
+        by_tool.items(),
+        key=lambda item: -sum(v for k, v in item[1].items() if k != "ok"),
+    ):
+        total = sum(statuses.values())
+        rejected = total - statuses.get("ok", 0)
+        if not rejected:
+            continue
         rate = rejected / total
-        lines.append(f"{tool:28} rejected {rejected:4}/{total:<5} ({rate:.0%})")
+        why = ", ".join(
+            f"{status} {count}"
+            for status, count in sorted(statuses.items(), key=lambda kv: -kv[1])
+            if status != "ok"
+        )
+        lines.append(f"{tool:28} rejected {rejected:4}/{total:<5} ({rate:.0%})  [{why}]")
         if total >= MIN_CALLS_FOR_REJECTION_ALERT and rate > MAX_REJECTION_RATE:
             alerts.append(
-                f"tool {tool}: {rejected}/{total} calls rejected ({rate:.0%}) — "
+                f"tool {tool}: {rejected}/{total} calls rejected ({rate:.0%}, {why}) — "
                 f"paid rounds are being burned on retries"
             )
     return lines, alerts
@@ -257,16 +322,18 @@ def main() -> int:
     lines, alerts, total_cost = [], [], 0.0
     waste_lines = []
     for lane, unit in LANES.items():
-        stats = tally(unit, args.since)
+        drain = lane in DRAIN_LANES
+        stats = tally_drain(unit, args.since) if drain else tally(unit, args.since)
         total_cost += stats["cost"]
         lines.append(
             f"{lane:7} applied {stats['applied']:4}  skipped {stats['skipped']:3}  "
             f"failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
             f"fallback {stats['fallback']:3}  "
             f"${stats['cost']:.2f}"
+            + (f"  ({stats['total']} runs)" if drain else "")
         )
-        alerts.extend(problems(lane, stats))
-        if stats["applied"]:
+        alerts.extend(drain_problems(lane, stats) if drain else problems(lane, stats))
+        if stats["applied"] and stats["rounds"]:
             rounds = sorted(stats["rounds"])
             median = rounds[len(rounds) // 2] if rounds else 0
             waste_lines.append(

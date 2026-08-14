@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import difflib
 import inspect
 import json
 import logging
@@ -250,6 +251,13 @@ async def execute_tool(
     handler = handlers.get(name)
     if not handler:
         msg = f"Unknown tool: {name}"
+        # The caller is a model that occasionally garbles a name it knows
+        # (fetfetch_url for fetch_url, 2026-08-12). Naming the nearest real
+        # tool turns the recovery from a guess into a correction; without it
+        # the denied round is pure spend.
+        close = difflib.get_close_matches(name, handlers, n=1, cutoff=0.6)
+        if close:
+            msg += f" (did you mean {close[0]}?)"
         _audit_blocked(None, name, args, result_status="unknown_tool", reason=msg)
         return msg, True
 
