@@ -77,8 +77,16 @@ Content rules:
 - `career`, `aliases`, and `scenes` replace the whole stored list. If changing one of them,
   preserve every existing entry and send the complete new list.
 - `fate.label` is a compact card badge, not a second biography: at most __FATE_LABEL_KO__
-  Korean characters and __FATE_LABEL_EN__ English characters. Keep only cause or disposition plus year; move burial,
-  rehabilitation, dismissal details, and explanation to bio, career, or sections.
+  Korean characters and __FATE_LABEL_EN__ English characters, and most cards need far less.
+  It states the VERDICT only: what history did to the person. Never put age, city, home,
+  illness, or burial site in the badge — the card already shows the years, and those details
+  belong in bio or sections. Good badges: 자연사 · 총살 (1938) · 옥사, 1978년 복권 ·
+  망명 중 사망 · 실각 1957 · 자연사 · 자살. Bad → good: "85세로 모스크바에서 사망" → "자연사";
+  "간암, 모스크바에서 사망" → "자연사"; "자연사 · 노보데비치 묘지" → "자연사". What DOES
+  earn badge space: legal outcomes (sentence, amnesty, rehabilitation year, dismissal) and
+  fate-category places (망명, 옥사, 수용소) — a place is banned only as geography. A cause of
+  death belongs in the badge only when the death itself is the historical event (자살,
+  의문사, 독살 의혹, 방사선 피폭).
 - `moment` must be a real, traceable quotation or documented scene. Leave it empty when no
   solid source exists. Never invent dialogue or inner motives. It is a pull-quote on the
   list card, not a paragraph. Capture a single scene or turn: __MOMENT_SENTENCES__.
