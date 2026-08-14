@@ -1,13 +1,16 @@
 # Project State
 
-최종 확인 기준: 2026-08-05 코드·운영 상태.
+최종 확인 기준: 2026-08-08 코드·운영 상태.
 
 Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 로컬 PostgreSQL(`leninbot-pg` Docker 컨테이너 — 활성 `leninbot`·`writer` DB와 읽기 전용 보관 `legacy_game` DB, `dev_docs/db_migration_plan.md`)과 Neo4j에 저장하고, Redis는 실행 중인 task 상태와 mission board 같은 단기 공유 상태를 맡는다.
 
 ## Runtime Map
 
 ```
-cyber-lenin.com frontend
+cyber-lenin.com (Cloudflare -> Nginx, Cloudflare Origin Certificate)
+        |
+        v
+frontend
         |
         v
 leninbot-api (:8000, FastAPI)
@@ -93,6 +96,8 @@ developer MCP clients
 | `leninbot-commulingo-terms.service` | `scripts/commulingo_terms_maintainer.py` | independent glossary-term creation lane |
 
 Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-online and a credential-complete `/health`, then every LLM-consuming unit starts after it; Neo4j/Redis and embedding also start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
+
+Public HTTPS terminates at Nginx for `cyber-lenin.com` with a Cloudflare Origin Certificate under `/etc/ssl/cloudflare/`.
 
 ## API Boundary Status
 
