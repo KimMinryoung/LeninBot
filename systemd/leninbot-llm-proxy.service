@@ -4,7 +4,17 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-User=grass
+# A transient, per-boot UID that is NOT grass. systemd grants the decrypted
+# credentials below to the service user alone, so running as grass made every
+# grass process (the lanes, an operator shell, an ad hoc script) a co-holder of
+# the provider keys and the proxy a convention rather than a boundary. Under a
+# dynamic UID the keys in /run/credentials are readable only by this unit; the
+# sole way for anything else to reach a provider is an HTTP call to 127.0.0.1:8110,
+# which is audited and budget-gated here. SupplementaryGroups=grass is read-only
+# reach the other way (into the group-readable, world-readable source tree under
+# /home/grass, 0750), and grants nothing back toward these credentials.
+DynamicUser=yes
+SupplementaryGroups=grass
 WorkingDirectory=/home/grass/leninbot
 # .env + db_password: the authoritative policy gate reads today's spend
 # from llm_audit_log for the daily budget caps (fail-open on DB errors).
@@ -25,9 +35,10 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
 LockPersonality=true
 UMask=0077
-# Provider keys live HERE and (after the enforcement step) nowhere else.
-# The blobs are host-key encrypted with name binding, shared with the
-# credstore layout in dev_docs/secret_management.md.
+# Provider keys live HERE and, now that the unit runs under a dynamic UID,
+# are readable by no other local account. The blobs are host-key encrypted
+# with name binding, shared with the credstore layout in
+# dev_docs/secret_management.md.
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key.cred
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
