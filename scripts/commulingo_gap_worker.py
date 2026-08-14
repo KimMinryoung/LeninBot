@@ -223,7 +223,11 @@ def close_gap(gap_id: int, status: str, resolved_id: str, resolution: str) -> No
 
 
 def slugify(label_en: str, label_ko: str) -> str:
-    base = _SLUG_STRIP.sub("-", (label_en or "").strip().lower()).strip("-")
+    # Fold diacritics first (Joaquín → joaquin); otherwise every accented letter
+    # becomes a hyphen and the public URL reads joaqu-n-maur-n.
+    import unicodedata
+    folded = unicodedata.normalize("NFKD", label_en or "").encode("ascii", "ignore").decode()
+    base = _SLUG_STRIP.sub("-", folded.strip().lower()).strip("-")
     if not base:
         # No Latin form to work from. The id is internal, so a stable transliteration
         # is not worth a model round; the curator renames it if it matters.
