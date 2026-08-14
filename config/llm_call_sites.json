@@ -222,7 +222,10 @@
     "temperature": 0.1,
     "max_tokens": 20000,
     "timeout": 240,
-    "note": "리서치 보고서 마크다운 한→영 번역. scripts/translate_research_markdown.py 및 이를 부르는 translate_research_documents.py 전용, research-document-translation.timer가 매일 돌린다. thinking은 일부러 건드리지 않는다(기본 ON) — 이 호출부는 그 상태로 20000 예산에서 잘 돌고 있었고, 사료 번역(archival_document_translation)에서 추론을 켠 쪽이 다의어 오역이 적었다. db_content_translation과 달리 json_mode가 아니라 마크다운을 그대로 받는다."
+    "thinking": {
+      "type": "enabled"
+    },
+    "note": "리서치 보고서 마크다운 한→영 번역. scripts/translate_research_markdown.py 및 이를 부르는 translate_research_documents.py 전용, research-document-translation.timer가 매일 돌린다. thinking ON은 의도적 — 이 호출부는 그 상태로 20000 예산에서 잘 돌고 있었고, 사료 번역(archival_document_translation)에서 추론을 켠 쪽이 다의어 오역이 적었다. 2026-08-14부터 명시적으로 enabled를 보낸다: 프록시가 thinking 키 없는 DeepSeek 요청에 disabled를 주입하게 되어(애드혹 스크립트 방어), '키 생략=기본 ON' 의존이 더는 성립하지 않는다. db_content_translation과 달리 json_mode가 아니라 마크다운을 그대로 받는다."
   },
   "kg_entity_classification": {
     "provider": "gemini",

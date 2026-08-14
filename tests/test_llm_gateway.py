@@ -424,6 +424,53 @@ class TestProxyHeaderInjection(unittest.TestCase):
         self.assertEqual(headers["authorization"], "Bearer K")
 
 
+class TestDeepseekThinkingDefault(unittest.TestCase):
+    """DeepSeek completion requests that say nothing default to thinking OFF."""
+
+    def _apply(self, provider, path, body):
+        from llm_proxy.app import apply_deepseek_thinking_default
+
+        return apply_deepseek_thinking_default(provider, path, body)
+
+    def test_injected_on_openai_protocol_path(self):
+        body = json.dumps({"model": "deepseek-v4-flash", "messages": []}).encode()
+        out, injected = self._apply("deepseek", "chat/completions", body)
+        self.assertTrue(injected)
+        payload = json.loads(out)
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertEqual(payload["model"], "deepseek-v4-flash")
+
+    def test_injected_on_anthropic_protocol_path(self):
+        body = json.dumps({"model": "deepseek-v4-flash", "messages": []}).encode()
+        out, injected = self._apply("deepseek", "anthropic/v1/messages", body)
+        self.assertTrue(injected)
+        self.assertEqual(json.loads(out)["thinking"], {"type": "disabled"})
+
+    def test_explicit_thinking_passes_byte_identical(self):
+        body = json.dumps(
+            {"model": "deepseek-v4-flash", "thinking": {"type": "enabled"}}
+        ).encode()
+        out, injected = self._apply("deepseek", "anthropic/v1/messages", body)
+        self.assertFalse(injected)
+        self.assertIs(out, body)
+
+    def test_other_providers_untouched(self):
+        body = json.dumps({"model": "claude-x", "messages": []}).encode()
+        out, injected = self._apply("anthropic", "v1/messages", body)
+        self.assertFalse(injected)
+        self.assertIs(out, body)
+
+    def test_non_completion_path_untouched(self):
+        out, injected = self._apply("deepseek", "v1/models", b"")
+        self.assertFalse(injected)
+
+    def test_unparseable_body_untouched(self):
+        raw = b"\x1f\x8b not json"
+        out, injected = self._apply("deepseek", "chat/completions", raw)
+        self.assertFalse(injected)
+        self.assertIs(out, raw)
+
+
 class _FakeUpstream:
     """Stand-in for httpx.Response: a chunk script, optional mid-stream error."""
 

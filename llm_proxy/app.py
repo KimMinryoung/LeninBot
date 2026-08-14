@@ -11,7 +11,11 @@ Deliberately a BYTE passthrough, not a translating router (the reason
 LiteLLM proxy was rejected): the request body and the response stream are
 forwarded untouched, so provider protocol details the adapters depend on —
 SSE streaming, prompt-cache markers, thinking blocks, tool_use shapes —
-cannot be altered by this hop. The only mutation is the auth header swap.
+cannot be altered by this hop. The only mutations are the auth header swap
+and ONE guarded request-body default: a DeepSeek completion request that
+says nothing about thinking gets {"type": "disabled"} injected (see
+apply_deepseek_thinking_default) — requests that state a thinking value
+pass through byte-identical.
 
 Routes:  /{provider}/{path}  →  {upstream}/{path}   (GET/POST)
 Auth:    incoming x-api-key / authorization / x-goog-api-key are stripped
@@ -135,6 +139,38 @@ def model_from_request(provider: str, path: str, body: bytes) -> str | None:
     return None
 
 
+# DeepSeek completion endpoints, both protocol families: the OpenAI-compatible
+# path ends in chat/completions, the Anthropic-compatible one in v1/messages.
+_DEEPSEEK_COMPLETION_PATH = re.compile(r"(?:^|/)(?:chat/completions|v1/messages)$")
+
+
+def apply_deepseek_thinking_default(
+    provider: str, path: str, body: bytes,
+) -> tuple[bytes, bool]:
+    """Default DeepSeek completion requests to thinking OFF. → (body, injected)
+
+    DeepSeek V4 turns thinking ON when the request says nothing, and the
+    reasoning shares max_tokens with the reply — a call that only wants text
+    can burn the whole budget deliberating and return 200 with empty content.
+    Every managed path states thinking explicitly (wrappers, loops, registry
+    specs), but ad-hoc scripts keep forgetting it, and since the provider key
+    lives only here, THIS is the one place such a script cannot bypass. Only a
+    JSON object body on a deepseek completion route with no "thinking" key is
+    touched; anything else — key present (any value), other providers, other
+    endpoints, unparseable/compressed bodies — passes through byte-identical.
+    """
+    if provider != "deepseek" or not _DEEPSEEK_COMPLETION_PATH.search(path):
+        return body, False
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return body, False
+    if not isinstance(payload, dict) or "thinking" in payload:
+        return body, False
+    payload["thinking"] = {"type": "disabled"}
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8"), True
+
+
 def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     """Client headers minus hop-by-hop/auth, plus the provider's real auth."""
     headers = {
@@ -219,6 +255,13 @@ async def proxy(provider: str, path: str, request: Request):
     # Gemini SDKs may carry the key as a query parameter; drop it.
     params = [(k, v) for k, v in request.query_params.multi_items() if k != "key"]
     body = await request.body()
+    body, thinking_injected = apply_deepseek_thinking_default(provider, path, body)
+    if thinking_injected:
+        logger.info(
+            "proxy deepseek /%s: request had no thinking field; "
+            "injected {'type': 'disabled'}", path,
+        )
+    audit_label = (path + (" +think-off-default" if thinking_injected else ""))[:200]
 
     # Authoritative policy gate. The decision logic is shared with the
     # in-process seam (llm/gateway.evaluate_policy — single source); THIS
@@ -252,7 +295,7 @@ async def proxy(provider: str, path: str, request: Request):
     except httpx.HTTPError as e:
         record_llm_call(
             surface="proxy", caller=request.headers.get("x-llm-caller"),
-            provider=policy_provider, model=model, label=path[:200],
+            provider=policy_provider, model=model, label=audit_label,
             status="error", error_excerpt=str(e),
             latency_ms=int((time.monotonic() - started) * 1000),
             estimate_cost=False,
@@ -272,7 +315,7 @@ async def proxy(provider: str, path: str, request: Request):
     return StreamingResponse(
         relay_and_record(
             upstream, caller=request.headers.get("x-llm-caller"),
-            provider=policy_provider, model=model, label=path[:200],
+            provider=policy_provider, model=model, label=audit_label,
             started=started,
         ),
         status_code=upstream.status_code,

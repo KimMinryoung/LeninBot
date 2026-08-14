@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-14 (프록시 transport 감사를 스트림 종료 시점으로 이동, CLI 합계·거부 표시).
+최종 확인: 2026-08-14 (프록시 transport 감사를 스트림 종료 시점으로 이동, CLI 합계·거부 표시, DeepSeek thinking 기본 off 주입).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -155,6 +155,21 @@ effective policy의 `"proxy_base": "http://127.0.0.1:8110"`이 스위치다. 저
 Kimi 양栈), registry 원샷 executor 5종(gemini 포함), writer 클라이언트, browser
 워커/browser-use의 provider 챗, Telegram vision. `null`로 되돌리고 재시작하면 직접 호출로 복귀한다
 (롤백 경로). 클라이언트 구성이 임포트 시점이라 반영은 서비스 재시작.
+
+### DeepSeek thinking 기본값 주입 (2026-08-14)
+
+DeepSeek V4는 요청이 아무 말도 안 하면 thinking ON이고, 추론이 max_tokens를 reply와
+나눠 쓰므로 텍스트만 원한 호출이 예산 전부를 추론에 태우고 본문 없는 200을 받는다.
+관리 경로는 전부 명시한다(래퍼 `thinking_off`, 루프 파라미터, registry 스펙 —
+`research_markdown_translation`도 2026-08-14부터 명시적 enabled). 문제는 **애드혹
+스크립트가 반복적으로 누락**하는 것 — AST 컨포먼스 테스트는 temp_dev/저장소 밖을
+안 보고 런타임엔 아무것도 못 막는다. 그래서 키가 있는 유일한 지점인 프록시가
+백스톱이다: deepseek 라우트의 completion 경로(`chat/completions`·`v1/messages`)로
+온 JSON object 본문에 `thinking` 키가 없으면 `{"type": "disabled"}`를 주입한다
+(`apply_deepseek_thinking_default`). 키가 있으면(값 불문) 바이트 그대로 통과 —
+바이트 패스스루 원칙의 유일한 본문 예외이며, 주입 시 transport 감사 행 label에
+` +think-off-default`가 붙고 journald 로그가 남는다. thinking ON이 필요한 애드혹
+호출은 명시적으로 `thinking: {"type": "enabled"}`를 보내면 된다.
 
 Registry executor는 `resolve_provider_connection()`으로 base URL과 credential을 동시에
 해석한다. 따라서 keyless gateway mode의 placeholder가 정상 credential로 취급되고,
