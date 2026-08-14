@@ -297,6 +297,8 @@ WRITING RULES
   Both languages carry the same content. English is not a gloss of Korean word order.
   No em dash anywhere. Korean is 한다체 written prose.
   Write 그루지야, never 조지아. Write 조선민주주의인민공화국 or 조선, never 북한.
+  Korea before 1948 is 조선 (대한제국 for 1897–1910), 조선인, 조선어. 한국 is the
+  southern republic of 1948 and nothing earlier; 한국전쟁 is the one fixed exception.
   Name people as their dictionary card names them.
   Do not invent numbers. A figure you cannot source does not go in.
 

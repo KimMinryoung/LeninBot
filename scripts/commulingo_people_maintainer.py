@@ -658,7 +658,9 @@ by sources, duplicated elsewhere on the card, or clearly violating the style rul
 an accidental side effect of a rewrite. If the existing content already satisfies a step, that
 step does not apply; move to the next one.
 Korean Soviet-history prose uses `그루지야`, not `조지아`; modern citizenship labels may still
-use `조지아`.
+use `조지아`. Korea before the two states of 1948 is `조선` (`대한제국` for 1897–1910), its
+people `조선인`, its language `조선어`; `한국` names the southern republic founded in 1948 and
+nothing earlier, with `한국전쟁` the one fixed exception.
 {bio_gate}COMMISSIONED STEP — {step_text}
 Preserve every wholesale field exactly when updating. Research with the free wiki_search/wiki_get
 tools first (Russian Wikipedia when available), then open at least one source outside Wikipedia —

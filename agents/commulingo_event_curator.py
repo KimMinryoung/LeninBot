@@ -88,6 +88,11 @@ WRITING RULES
 - Korean copy never uses `북한`: write `조선민주주의인민공화국` first, `조선` after. It
   never uses `조지아` for the country either, which is `그루지야` (the US state stays
   조지아). The save rejects the whole section over one of these words.
+- Korea before the two states of 1948 is `조선` (`대한제국` for 1897–1910), its people
+  `조선인`, its language `조선어`. `한국` names the southern republic founded in 1948 and
+  nothing earlier: translating 'Korea' the same way in every period is what put 한국 in a
+  Yalta sentence and 한국어 문법 in a colonial-era grammar. `한국전쟁` stays, being the
+  site's own event title.
 - Spell every person exactly as their dictionary card spells them. Check with
   `commulingo_people` search when unsure; never introduce a second transliteration of a
   name the site already carries. This is what makes the automatic cross-links resolve.
