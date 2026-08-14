@@ -36,7 +36,6 @@ from urllib.parse import unquote
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.background import BackgroundTask
 
 from llm.gateway import evaluate_policy, record_llm_call
 
@@ -149,6 +148,51 @@ def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     return headers
 
 
+async def relay_and_record(
+    upstream: httpx.Response, *, caller: str | None, provider: str | None,
+    model: str | None, label: str, started: float,
+):
+    """Forward the upstream bytes; write the transport audit row at stream END.
+
+    The row used to be written when the response HEADERS arrived, so a stream
+    that died mid-flight stayed in the ledger as ok and latency_ms measured
+    time-to-headers only. Recording after the last byte makes the authoritative
+    row truthful: status reflects the actual stream outcome (upstream abort and
+    client disconnect are distinguished in error_excerpt) and latency_ms covers
+    the whole stream. The in-process seam still writes the billed row; this one
+    stays the unbilled transport cross-check (estimate_cost=False).
+    """
+    bytes_out = 0
+    outcome = None
+    try:
+        async for chunk in upstream.aiter_raw():
+            bytes_out += len(chunk)
+            yield chunk
+    except GeneratorExit:
+        outcome = "client disconnected mid-stream"
+        raise
+    except BaseException as e:  # CancelledError included — the row must be truthful
+        detail = str(e)
+        outcome = f"stream aborted: {e.__class__.__name__}" + (
+            f": {detail}" if detail else ""
+        )
+        raise
+    finally:
+        await upstream.aclose()
+        if outcome is None and not (200 <= upstream.status_code < 400):
+            outcome = f"upstream HTTP {upstream.status_code}"
+        latency_ms = int((time.monotonic() - started) * 1000)
+        record_llm_call(
+            surface="proxy", caller=caller, provider=provider, model=model,
+            label=label, status="ok" if outcome is None else "error",
+            error_excerpt=outcome, latency_ms=latency_ms, estimate_cost=False,
+        )
+        logger.info(
+            "proxy stream end %s %s → %s (%dB in %dms)",
+            provider or "?", label, outcome or "ok", bytes_out, latency_ms,
+        )
+
+
 @app.get("/health")
 async def health():
     missing = [
@@ -223,25 +267,19 @@ async def proxy(provider: str, path: str, request: Request):
         provider, path, upstream.status_code,
         (time.monotonic() - started) * 1000, len(body),
     )
-    record_llm_call(
-        surface="proxy", caller=request.headers.get("x-llm-caller"),
-        provider=policy_provider, model=model, label=path[:200],
-        status="ok" if 200 <= upstream.status_code < 400 else "error",
-        error_excerpt=(None if upstream.status_code < 400
-                       else f"upstream HTTP {upstream.status_code}"),
-        latency_ms=int((time.monotonic() - started) * 1000),
-        estimate_cost=False,
-    )
     # aiter_raw: bytes exactly as the provider sent them (no decompression),
     # so the preserved content-encoding header stays truthful.
     return StreamingResponse(
-        upstream.aiter_raw(),
+        relay_and_record(
+            upstream, caller=request.headers.get("x-llm-caller"),
+            provider=policy_provider, model=model, label=path[:200],
+            started=started,
+        ),
         status_code=upstream.status_code,
         headers={
             k: v for k, v in upstream.headers.items()
             if k.lower() not in _STRIP_RESPONSE
         },
-        background=BackgroundTask(upstream.aclose),
     )
 
 

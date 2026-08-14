@@ -58,6 +58,15 @@ def cmd_status(_args) -> int:
     print(f"\ntoday (UTC): ${total:.4f} total")
     for r in rows or []:
         print(f"  {r['provider']:<10} {r['calls']:>5} calls  ${r['spend']:.4f}")
+    denials = query(
+        """SELECT status, COUNT(*) AS n
+             FROM llm_audit_log
+            WHERE ts >= date_trunc('day', now() AT TIME ZONE 'utc')
+              AND status IN ('denied', 'would_deny')
+            GROUP BY 1""",
+    )
+    for r in denials or []:
+        print(f"  !! {r['status']}: {r['n']} call(s) today")
     return 0
 
 
@@ -76,13 +85,27 @@ def cmd_spend(args) -> int:
         {"days": int(args.days)},
     )
     day = None
+    day_total = 0.0
+    total = 0.0
+
+    def _close_day():
+        if day is not None:
+            print(f"  {'':<10} {'= day total':<28} {'':>11}  ${day_total:.4f}")
+
     for r in rows or []:
         if r["day"] != day:
+            _close_day()
             day = r["day"]
+            day_total = 0.0
             print(f"\n{day}")
+        day_total += r["spend"]
+        total += r["spend"]
         print(f"  {r['provider']:<10} {r['caller']:<28} {r['calls']:>5} calls  ${r['spend']:.4f}")
+    _close_day()
     if not rows:
         print("(no rows)")
+    else:
+        print(f"\n{args.days}-day total: ${total:.4f}")
     return 0
 
 

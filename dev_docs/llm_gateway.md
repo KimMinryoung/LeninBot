@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-08 (Git 기본값과 host-local 운영 오버라이드 분리).
+최종 확인: 2026-08-14 (프록시 transport 감사를 스트림 종료 시점으로 이동, CLI 합계·거부 표시).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -13,8 +13,8 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
   credential에만 있고, 다른 서비스의 클라이언트는 placeholder 키(`via-llm-proxy`) +
   프록시 base_url로 구성된다. 요청/응답 본문은 건드리지 않고(스트리밍은 `aiter_raw`
   원시 바이트 그대로) auth 헤더만 교체하므로, LiteLLM 같은 *번역형* 프록시와 달리
-  SSE·prompt cache·thinking 블록 계약에 회귀 여지가 없다. 최종 단계(아래 "남은
-  enforcement 단계")까지 가면 키 없는 코드는 프로바이더를 직접 호출할 수 없게 된다.
+  SSE·prompt cache·thinking 블록 계약에 회귀 여지가 없다. 키 제거는 완료됐다(아래
+  "Enforcement — 키 제거 완료") — 키 없는 코드는 프로바이더를 직접 호출할 수 없다.
 
 ## Seam이 되는 지점
 
@@ -122,12 +122,18 @@ Gemini는 `models/{model}:method` URL 경로(퍼센트 인코딩 포함)에서 �
 (anthropic→claude, moonshot→kimi). enforce 시
 403 + `surface=proxy` 거부 행을 기록한다. 허용된 upstream 요청도 `surface=proxy`의
 비과금 transport 행(`estimate_cost=False`)을 남겨 in-process 감사와 대조할 수 있다.
+이 transport 행은 **스트림이 실제로 끝난 시점**에 쓴다(2026-08-14,
+`relay_and_record`): 헤더 도착 시점에 쓰면 중간에 끊긴 스트림이 영원히 ok로
+남고 latency_ms가 헤더까지의 시간만 재기 때문이다. 이제 status가 스트림의 실제
+결말을 반영하고(업스트림 중단 `stream aborted: …`와 클라이언트 이탈
+`client disconnected mid-stream`을 error_excerpt로 구분), latency_ms는 스트림
+전체 시간이다. 헤더 도착·스트림 종료는 각각 journald 로그 라인도 남긴다.
 
 ## 운영 CLI
 
 ```bash
-venv/bin/python scripts/llm_gateway_cli.py status        # 정책 + 오늘 스펜드
-venv/bin/python scripts/llm_gateway_cli.py spend --days 7
+venv/bin/python scripts/llm_gateway_cli.py status        # 정책 + 오늘 스펜드 + 오늘 거부(denied/would_deny) 건수
+venv/bin/python scripts/llm_gateway_cli.py spend --days 7  # 일별 합계 + 기간 총계 포함
 venv/bin/python scripts/llm_gateway_cli.py tail -n 30
 venv/bin/python scripts/llm_gateway_cli.py set daily_budget_usd 25   # local override, 핫리로드
 venv/bin/python scripts/llm_gateway_cli.py unset daily_budget_usd    # tracked default 상속

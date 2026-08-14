@@ -424,6 +424,97 @@ class TestProxyHeaderInjection(unittest.TestCase):
         self.assertEqual(headers["authorization"], "Bearer K")
 
 
+class _FakeUpstream:
+    """Stand-in for httpx.Response: a chunk script, optional mid-stream error."""
+
+    def __init__(self, chunks, status_code=200, raise_after=None):
+        self.status_code = status_code
+        self.closed = False
+        self._chunks = chunks
+        self._raise_after = raise_after
+
+    async def aiter_raw(self):
+        for chunk in self._chunks:
+            yield chunk
+        if self._raise_after is not None:
+            raise self._raise_after
+
+    async def aclose(self):
+        self.closed = True
+
+
+class TestProxyStreamAudit(unittest.TestCase):
+    """The proxy transport row must reflect the actual STREAM outcome."""
+
+    def _run(self, coro):
+        import asyncio
+
+        return asyncio.run(coro)
+
+    def _relay(self, upstream):
+        from llm_proxy.app import relay_and_record
+
+        return relay_and_record(
+            upstream, caller="tester", provider="claude", model="claude-x",
+            label="v1/messages", started=0.0,
+        )
+
+    def test_completed_stream_records_ok_once(self):
+        upstream = _FakeUpstream([b"a", b"bc"])
+        with patch("llm_proxy.app.record_llm_call") as rec:
+            async def consume():
+                return [c async for c in self._relay(upstream)]
+
+            chunks = self._run(consume())
+        self.assertEqual(chunks, [b"a", b"bc"])
+        self.assertTrue(upstream.closed)
+        self.assertEqual(rec.call_count, 1)
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs["status"], "ok")
+        self.assertIsNone(kwargs["error_excerpt"])
+        self.assertFalse(kwargs["estimate_cost"])
+
+    def test_upstream_http_error_status_recorded_after_body(self):
+        upstream = _FakeUpstream([b'{"error":1}'], status_code=429)
+        with patch("llm_proxy.app.record_llm_call") as rec:
+            async def consume():
+                return [c async for c in self._relay(upstream)]
+
+            self._run(consume())
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs["status"], "error")
+        self.assertIn("HTTP 429", kwargs["error_excerpt"])
+
+    def test_mid_stream_abort_records_error(self):
+        upstream = _FakeUpstream([b"a"], raise_after=RuntimeError("conn reset"))
+        with patch("llm_proxy.app.record_llm_call") as rec:
+            async def consume():
+                async for _ in self._relay(upstream):
+                    pass
+
+            with self.assertRaises(RuntimeError):
+                self._run(consume())
+        self.assertTrue(upstream.closed)
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs["status"], "error")
+        self.assertIn("stream aborted: RuntimeError: conn reset", kwargs["error_excerpt"])
+
+    def test_client_disconnect_records_error(self):
+        upstream = _FakeUpstream([b"a", b"b", b"c"])
+        with patch("llm_proxy.app.record_llm_call") as rec:
+            async def disconnect_after_first():
+                gen = self._relay(upstream)
+                await gen.__anext__()
+                await gen.aclose()  # what starlette does when the client goes away
+
+            self._run(disconnect_after_first())
+        self.assertTrue(upstream.closed)
+        self.assertEqual(rec.call_count, 1)
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs["status"], "error")
+        self.assertIn("client disconnected", kwargs["error_excerpt"])
+
+
 class TestPolicyLoading(unittest.TestCase):
     def setUp(self):
         gw._config_cache = None

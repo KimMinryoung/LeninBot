@@ -316,12 +316,6 @@ def _today_spend() -> dict[str, float] | None:
     return spend
 
 
-def _invalidate_spend_cache() -> None:
-    global _spend_cache
-    with _spend_lock:
-        _spend_cache = None
-
-
 # ── Policy gate ──────────────────────────────────────────────────────
 
 def evaluate_policy(
