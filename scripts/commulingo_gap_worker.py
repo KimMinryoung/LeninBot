@@ -367,11 +367,21 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
             return {"status": "applied" if landed else "error", "gap": gap["id"],
                     "kind": "person-enrich", "target": gap["target_id"],
                     "error": str(exc)[:300]}
+        enrich_status = result.get("status")
+        if enrich_status == "applied":
+            row_status = "done"
+        elif enrich_status == "skipped":
+            # A skipped enrich is a completed judgement ("card already deep
+            # enough"), not a transient failure. Returning the row to 'pending'
+            # parked gap 368 at the head of the queue on 2026-08-17: every
+            # worker claimed it, skipped, and re-offered it 40 minutes later —
+            # over a thousand idle loops while 14 rows behind it starved.
+            row_status = "skipped"
+        else:
+            row_status = "pending"
         close_gap(
-            gap["id"],
-            "done" if result.get("status") == "applied" else "pending",
-            gap["target_id"],
-            f"enrich run: {result.get('status')}",
+            gap["id"], row_status, gap["target_id"],
+            f"enrich run: {enrich_status}: {str(result.get('reason') or '')[:200]}".rstrip(': '),
         )
         return {"status": result.get("status"), "gap": gap["id"], "kind": "person-enrich",
                 "target": gap["target_id"], "cost_usd": result.get("cost_usd"),
