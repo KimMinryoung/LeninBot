@@ -96,7 +96,7 @@ _NATIONALITY_CODES = frozenset({
     "turkmenistan", "tajikistan", "kyrgyzstan", "poland", "finland", "germany",
     "east-germany", "austria", "hungary", "czechia", "romania", "bulgaria",
     "yugoslavia",
-    "france", "italy", "spain", "uk", "netherlands", "usa", "cuba", "argentina",
+    "france", "italy", "spain", "uk", "netherlands", "belgium", "usa", "cuba", "argentina",
     "chile", "china", "japan", "india", "turkey", "vietnam", "north-korea",
     "south-korea", "albania", "angola", "burkina-faso", "congo", "ghana",
     "guinea-bissau", "indonesia", "mozambique", "peru", "trinidad", "portugal",
@@ -134,7 +134,7 @@ _CYRILLIC_NATIONS = (
 _LATIN_NATIONS = (
     "latvia", "lithuania", "estonia", "poland", "finland", "germany",
     "east-germany", "austria", "hungary", "czechia", "romania", "albania",
-    "france", "italy", "spain", "portugal", "netherlands", "uk", "usa",
+    "france", "italy", "spain", "portugal", "netherlands", "belgium", "uk", "usa",
     "turkey", "cuba", "argentina", "chile", "peru", "angola", "burkina-faso",
     "congo", "ghana", "guinea-bissau", "mozambique", "trinidad", "indonesia",
     "vietnam", "brazil", "el-salvador", "grenada", "guyana", "nicaragua",
