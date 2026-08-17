@@ -45,6 +45,25 @@ logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,120}$")
 
+# Letters NFKD cannot decompose to ASCII. Without these, folding drops the
+# letter whole (Piłsudski -> pisudski) instead of romanizing it.
+_FOLD_MAP = str.maketrans({
+    "ł": "l", "Ł": "l", "ø": "o", "Ø": "o", "đ": "d", "Đ": "d",
+    "ß": "ss", "æ": "ae", "Æ": "ae", "œ": "oe", "Œ": "oe",
+    "þ": "th", "Þ": "th", "ð": "d", "Ð": "d", "ı": "i",
+})
+
+
+def _fold_slug(value: str) -> str:
+    """ASCII kebab-case form of a model-written id: fold diacritics, drop
+    apostrophes, collapse everything else to single dashes."""
+    import unicodedata
+    value = (value or "").translate(_FOLD_MAP)
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    value = re.sub(r"['’]", "", value)
+    value = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return value
+
 _SUGGESTED_BY = os.getenv("COMMULINGO_SUGGESTED_BY", "cyber-lenin").strip() or "cyber-lenin"
 
 _TARGET_TYPES = (
@@ -3736,6 +3755,17 @@ async def _exec_commulingo_write(
     target_id = (target_id or "").strip()
     if not target_id:
         return _commulingo_error("missing_target_id", "target_id is required")
+    if action == "create":
+        # Models write ids straight from the person's name, diacritics included
+        # (václav-havel), and the old "must be kebab-case" rejection taught them
+        # to swap the offending letters for dashes: twenty /people/v-clav-havel
+        # style URLs shipped on 2026-08-09. Fold the id server-side instead.
+        folded = _fold_slug(target_id)
+        if folded != target_id:
+            patch = dict(patch or {})
+            if isinstance(patch.get("id"), str):
+                patch["id"] = _fold_slug(patch["id"])
+            target_id = folded
     patch = patch or {}
     if action != "delete" and not patch:
         return _commulingo_error("missing_fields", "fields are required for create/update")
