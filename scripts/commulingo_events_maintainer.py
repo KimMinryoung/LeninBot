@@ -394,7 +394,11 @@ WHAT TO DO
    article alone is not worth the run. Four to six research calls is the budget; stop
    when you have the two outside sources, not when you run out of leads.
 2. Call `commulingo_gap_report` ONCE with the people, terms and documents your section
-   leans on that this site does not have or covers too thinly.
+   leans on that this site does not have or covers too thinly. A 'doc' gap means a
+   PRIMARY source short enough to republish in full (decree, treaty, speech, resolution,
+   letter) — never the books, articles or press pieces you researched from, and never a
+   book-length record. Your research bibliography goes in the section's sources, not the
+   gap queue.
    {"Already queued for this event, do not re-file: " + ", ".join(queued) if queued else
     "Nothing is queued for this event yet."}
 3. Call `{WRITE_TOOL}` with action='create', a heading that tells the reader what the part

@@ -4128,7 +4128,16 @@ COMMULINGO_GAP_REPORT_TOOL = {
         "becomes a card, and the link in your section resolves. File only what the "
         "narrative actually leans on — a name mentioned once in passing is not a gap. "
         "Reading tools first: a card that already exists is not a gap unless it is too "
-        "thin to carry the weight the event puts on it, in which case send its target_id."
+        "thin to carry the weight the event puts on it, in which case send its target_id. "
+        "A 'doc' gap has a HIGHER bar than the others: the reference library republishes "
+        "PRIMARY sources in full — a decree, treaty, speech, resolution, letter, or short "
+        "set of minutes a reader should be able to read whole. Never file the scholarship "
+        "you researched from (monographs, journal articles, memoirs, press pieces — those "
+        "belong in your sources and nowhere else), never a book-length record (trial "
+        "transcripts, plenum stenograms, commission reports), and never a document the "
+        "library already carries. On 2026-08-17 the queue held 175 doc rows and a third "
+        "were copyrighted secondary literature, one was a novel; every one of those rows "
+        "wasted a human triage pass."
     ),
     "input_schema": {
         "type": "object", "additionalProperties": False,
