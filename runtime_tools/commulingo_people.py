@@ -2228,12 +2228,33 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 "Error: history events are created and retired by hand. The curator may "
                 "only update one that already exists."
             )
-        cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
-        if not cur.fetchone():
+        cur.execute(
+            "SELECT COALESCE(summary_ko, '') = '' AS skeleton "
+            "FROM commulingo_history_events WHERE id = %s",
+            (target_id,),
+        )
+        event_row = cur.fetchone()
+        if not event_row:
             return (
                 f"Error: history event '{target_id}' not found. Find the id with "
                 f"{_reader_call('list_events')}."
             )
+        if event_row["skeleton"]:
+            # A row with no summary is a hand-seeded skeleton: its first write is
+            # the whole card, in one call. A partial fill would publish the page
+            # (the store keys visibility on summary) with the rest still blank —
+            # the empty sources box ships to readers.
+            missing = [
+                key for key in ("question", "summary", "outcome", "timeline", "sources")
+                if not patch.get(key)
+            ]
+            if missing:
+                return (
+                    "Error: this event is a skeleton, so its first write must carry the "
+                    f"whole card. Missing: {', '.join(missing)}. Resend ONE call with "
+                    "question, summary, outcome, timeline and sources together — sources "
+                    "is the works you actually used, the same ones as your citations."
+                )
         for key in _LOCALIZED_EVENT_KEYS:
             value = patch.get(key)
             if key not in patch or value is None:

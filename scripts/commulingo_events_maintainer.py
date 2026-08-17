@@ -285,11 +285,16 @@ you write. Then call `{SKELETON_TOOL}` EXACTLY ONCE with all of:
   summary — what happened, in one paragraph. Open with what the event is and when, then the
       cause, then the course. A reader who stops here should be able to say what happened.
   outcome — what it left behind: the settlement, the cost, what it made possible or
-      foreclosed, and where the consequence shows up later on this site.
+      foreclosed, and where the consequence shows up later on this site. When you point at
+      another entry, name only one that exists: check `commulingo_people(action='list_events')`
+      first, and never invent a title the site does not have.
   timeline — eight to twelve dated entries, each with a short title and a sentence of body,
       in both languages. Dates as the existing events write them: 1939.08.23, or 1921.03 when
-      the day is not the point. First entry is the precondition, last is the consequence.
-  sources — the works you actually used. Author and title; no bare URLs.
+      the day is not the point. First entry is the precondition, last is the consequence, and
+      the entries between them cover the WHOLE span of the period label: an event labelled
+      1940–1944 whose timeline spends nine entries on the opening weeks has not been written.
+  sources — the works you actually used. Author and title; no bare URLs. This list ships on
+      the page, so it goes in the tool call's `sources` field, not only in `citations`.
 
 WRITING RULES
 
