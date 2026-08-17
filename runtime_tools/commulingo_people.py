@@ -4106,10 +4106,10 @@ COMMULINGO_GAP_REPORT_TOOL = {
                             "description": "What the event text calls it, in both languages.",
                         },
                         "target_id": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "description": (
                                 "The existing entry id when the gap is 'this card is too "
-                                "thin'. Omit when nothing exists yet."
+                                "thin'. Null when nothing exists yet."
                             ),
                         },
                         "reason": {
@@ -4129,7 +4129,7 @@ COMMULINGO_GAP_REPORT_TOOL = {
                             ),
                         },
                     },
-                    "required": ["kind", "label", "reason", "priority"],
+                    "required": ["kind", "label", "target_id", "reason", "priority"],
                 },
             },
             "event_id": {"type": "string", "description": "The event whose text needed them."},

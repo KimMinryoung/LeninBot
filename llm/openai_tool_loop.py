@@ -132,27 +132,37 @@ def _calculate_cost(usage, model: str) -> float:
 def _is_strict_safe_schema(params: dict) -> bool:
     """Whether a JSON schema is safe to use with OpenAI's strict mode.
 
-    Strict mode additionally requires:
+    Strict mode additionally requires, at EVERY object level — the API
+    validates the whole tree, so a shallow check here does not make the tool
+    strict-eligible, it makes the first call a 400 (which is how the events
+    lane silently lost a week of runs to one nested optional property):
       * ``required`` must list every property name in ``properties``.
+      * ``additionalProperties`` must be ``false``.
       * No property may carry a ``default`` (strict mode drops the default
         silently, which masks bugs).
-      * ``anyOf`` / ``oneOf`` at the top level of a property is partially
-        supported and pragmatically best avoided to keep the API happy.
+      * ``anyOf`` / ``oneOf`` is partially supported and pragmatically best
+        avoided to keep the API happy.
     """
     if params.get("type") != "object":
         return False
-    props = params.get("properties") or {}
-    required = set(params.get("required") or [])
-    if any(pname not in required for pname in props):
+    return _strict_safe_node(params)
+
+
+def _strict_safe_node(schema) -> bool:
+    if not isinstance(schema, dict):
+        return True
+    if "default" in schema or "anyOf" in schema or "oneOf" in schema:
         return False
-    for p in props.values():
-        if not isinstance(p, dict):
-            continue
-        if "default" in p:
+    if schema.get("type") == "object" or "properties" in schema:
+        if schema.get("additionalProperties") is not False:
             return False
-        if "anyOf" in p or "oneOf" in p:
+        props = schema.get("properties") or {}
+        required = set(schema.get("required") or [])
+        if any(pname not in required for pname in props):
             return False
-    return True
+        if any(not _strict_safe_node(p) for p in props.values()):
+            return False
+    return _strict_safe_node(schema.get("items"))
 
 
 def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
