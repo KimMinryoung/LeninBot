@@ -236,9 +236,11 @@ def slugify(label_en: str, label_ko: str) -> str:
     folded = unicodedata.normalize("NFKD", label_en or "").encode("ascii", "ignore").decode()
     base = _SLUG_STRIP.sub("-", folded.strip().lower()).strip("-")
     if not base:
-        # No Latin form to work from. The id is internal, so a stable transliteration
-        # is not worth a model round; the curator renames it if it matters.
-        base = "gap-" + _SLUG_STRIP.sub("-", str(abs(hash(label_ko)))[:8])
+        # No Latin form to work from (the lane sometimes files the Korean name in
+        # label_en too). The id is a public URL, so a gap-<hash> here shipped five
+        # /people/gap-82245666 pages on 2026-08-17. The model writing the card
+        # romanizes names reliably — hand it the choice instead.
+        return ""
     return base[:60]
 
 
@@ -246,7 +248,9 @@ def build_person_task(gap: dict) -> str:
     return f"""MODE: NEW PERSON CREATION, commissioned by a history-event page.
 
 Create exactly this person and no one else:
-- suggested id: {slugify(gap['label_en'], gap['label_ko'])}
+- suggested id: {slugify(gap['label_en'], gap['label_ko'])
+    or "(no Latin label was filed — pick a lowercase kebab-case romanization of the "
+       "person's name yourself, the way existing ids do: kanji-ishiwara, sen-katayama)"}
 - Korean name: {gap['label_ko']}
 - English name: {gap['label_en']}
 
@@ -277,7 +281,9 @@ def build_term_task(gap: dict) -> str:
     return f"""MODE: GLOSSARY TERM REGISTRATION, commissioned by a history-event page.
 
 Register exactly this concept and no other:
-- suggested id: {slugify(gap['label_en'], gap['label_ko'])}
+- suggested id: {slugify(gap['label_en'], gap['label_ko'])
+    or "(no Latin label was filed — pick a lowercase kebab-case romanization or "
+       "English rendering of the concept yourself)"}
 - Korean term: {gap['label_ko']}
 - English term: {gap['label_en']}
 
