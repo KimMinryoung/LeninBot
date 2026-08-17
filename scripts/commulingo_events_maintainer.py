@@ -138,7 +138,7 @@ def select_event(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton: b
         {"lane": lane, "lanes": lanes},
     )
     for row in rows:
-        if len(event_section_headings(row["body_ko"] or "")) < TARGET_SECTIONS:
+        if len(event_section_headings(row["body_ko"] or "")) < sections_needed(dict(row)):
             return dict(row)
     return None
 
@@ -200,6 +200,23 @@ def _ko(value) -> str:
     if isinstance(value, dict):
         return str(value.get("ko") or value.get("en") or "")
     return str(value or "")
+
+
+def sections_needed(event: dict) -> int:
+    """How many sections this event's walk actually produces: an opening, one
+    section per timeline chunk, and one closing.
+
+    With a 12-entry timeline the chunks number six, so the walk is done at
+    eight sections — but completeness used to be `< TARGET_SECTIONS`, so the
+    lane sent the finished event back to the empty-chunk branch and every such
+    event grew a second closing section saying the same thing under a new
+    heading. Completeness has to be the walk's own length, capped by
+    TARGET_SECTIONS, not TARGET_SECTIONS itself."""
+    timeline = [item for item in (event.get("timeline") or []) if isinstance(item, dict)]
+    narrative_slots = max(1, TARGET_SECTIONS - 2)
+    per_slot = max(1, -(-len(timeline) // narrative_slots))  # ceil
+    chunks = -(-len(timeline) // per_slot) if timeline else 1
+    return min(TARGET_SECTIONS, 2 + chunks)
 
 
 def section_assignment(event: dict) -> dict:

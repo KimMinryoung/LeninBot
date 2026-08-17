@@ -2323,6 +2323,23 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                     f"Error: {key} must be an object with a non-empty ko and en — a section "
                     "written in one language only leaves the other page with a gap."
                 )
+        for lang in ("ko", "en"):
+            text = patch["body"].get(lang) or ""
+            # The save path renders '## {heading}\n\n{body}', so a heading line
+            # inside the body ships as a duplicated or smuggled extra section.
+            if re.search(r"(^|\n)\s*#{1,6} ", text):
+                return (
+                    f"Error: body.{lang} contains a markdown heading line. The heading goes "
+                    "in the heading field and one call is one section — remove the '## ' "
+                    "line (do not repeat the heading inside the body, and do not pack a "
+                    "second section into this call)."
+                )
+            if re.search(r"중략|이하 생략|원문이 길어|\|\|\|", text):
+                return (
+                    f"Error: body.{lang} contains a truncation placeholder. The page ships "
+                    "exactly what you send — write the section in full, ending it cleanly "
+                    "within the length target instead of cutting it with a marker."
+                )
         after = patch.get("after")
         if after is not None and not isinstance(after, dict):
             return (
