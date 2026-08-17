@@ -111,11 +111,16 @@ maintainer.latest_maintainer_edit = lambda: db_query_one(
 maintainer.LOCK_PATH = LOCK_PATH
 
 
-def claim_gap(kind: str = "") -> dict | None:
+def claim_gap(kind: str = "", events: list[str] | None = None) -> dict | None:
     """Take the highest-priority pending gap and mark it claimed, atomically.
 
     SKIP LOCKED rather than a plain UPDATE ... LIMIT 1 so several workers can
     drain the queue at once without two of them writing the same card.
+
+    `events` narrows the claim to gaps filed by those event pages. That is what
+    a targeted drain needs — "finish what THIS page asked for, now" — without
+    touching the recorded priorities, which claim order still respects inside
+    the filter.
     """
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -143,11 +148,13 @@ def claim_gap(kind: str = "") -> dict | None:
                            -- 1107, 2026-08-11). They stay pending for human triage,
                            -- like 'doc'.
                            AND kind IN ('person', 'term')
+                           AND (%(events)s::text[] IS NULL
+                                OR event_id = ANY(%(events)s::text[]))
                          ORDER BY priority DESC, id
                          FOR UPDATE SKIP LOCKED
                          LIMIT 1)
                 RETURNING *""",
-                {"by": SUGGESTED_BY, "kind": kind},
+                {"by": SUGGESTED_BY, "kind": kind, "events": events},
             )
             row = cur.fetchone()
             return dict(row) if row else None
@@ -303,7 +310,7 @@ contemporary. Keep citations top-level.
 """
 
 
-async def run_once(kind: str = "") -> dict:
+async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
     config = maintainer.load_config()
     if not config.get("enabled"):
         return {"status": "skipped", "reason": "maintainer disabled"}
@@ -314,7 +321,7 @@ async def run_once(kind: str = "") -> dict:
     if not direct_apply_enabled():
         raise RuntimeError("config/commulingo_people.json direct_apply must be true")
 
-    gap = claim_gap(kind)
+    gap = claim_gap(kind, events)
     if not gap:
         return {"status": "skipped", "reason": f"no pending {kind or 'person/term'} gap"}
 
@@ -445,6 +452,10 @@ def main() -> int:
                         help="This copy's index. Several workers of the same kind drain the queue "
                              "together; claim_gap's FOR UPDATE SKIP LOCKED is what makes that safe, "
                              "and this only keeps one index from overlapping itself.")
+    parser.add_argument("--events", default="",
+                        help="Comma-separated event ids. Claim only gaps those event pages "
+                             "filed — a targeted drain that leaves the rest of the queue and "
+                             "its priorities untouched.")
     parser.add_argument("--queue", action="store_true", help="Print the pending queue and exit.")
     args = parser.parse_args()
 
@@ -468,7 +479,8 @@ def main() -> int:
     except BlockingIOError:
         logger.info("another gap worker is active; exiting")
         return 0
-    result = asyncio.run(run_once(args.kind))
+    events = [e.strip() for e in args.events.split(",") if e.strip()] or None
+    result = asyncio.run(run_once(args.kind, events))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
     return 0
 
