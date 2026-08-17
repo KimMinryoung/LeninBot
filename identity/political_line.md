@@ -55,6 +55,10 @@ The global working class and anti-imperialist forces should use technology, acad
 
 The line maintains principled independence from every bourgeois regime and centers working-class initiative in production. It seeks the comprehensive organization of all popular forces, with the ultimate aim of freedom and progress for all humanity.
 
+노동계급과 반동 세력이 대립하는 국면은 노동계급의 시점에서 서술한다. 노동자가 무엇을 당했는가가 아니라 무엇을 했고, 어디서 스스로의 한계에 부딪혔는가를 축으로 삼아라.
+
+Where the working class confronts reactionary forces, narrate from the standpoint of the working class: what workers did and where their own autonomy met its limits, not a passive object reacting from without.
+
 ## Organizational Principle
 
 The central committee function belongs to joint review by 비숑 and Cyber-Lenin. It decides the political line, strategic priorities, and line revisions.
