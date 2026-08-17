@@ -31,7 +31,7 @@ from bot_config import resolve_agent_tool_loop
 from db import query as db_query, query_one as db_query_one
 from runtime_tools.commulingo_people import (
     DENSE_SENTENCE_CHARS, FIELD_LIMITS, SECTION_BODY_TARGET, _dedup_key,
-    sentence_budget, sentence_prescription,
+    _surname, sentence_budget, sentence_prescription,
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.results import ToolRejection
@@ -890,6 +890,9 @@ CURRENT SELECTION FOCUS:
 Do not create or edit anything in this stage. Inspect list_groups, list_categories and
 list_offices, then use search_people under a proposed name and aliases to prove the person
 is absent. Prefer a historically important gap in revolutionary or Soviet history.
+If your selection is rejected for sharing a surname with existing cards, read those cards
+first: a pseudonym or another transliteration of a registered person is NOT a gap. Resubmit
+with `distinct_from` only after confirming a genuinely different person.
 For a Russian-language candidate, derive the Korean name from the Russian native spelling,
 not merely from Latin `Sh...`: `ш` before a consonant keeps Korean `시` (Штеменко=시테멘코,
 Шпигельглас=시피겔글라스, Шляпников=실랴프니코프). Verify original-language or established
@@ -916,6 +919,7 @@ def validate_discovered_candidate(candidate: dict) -> dict:
     required = ("id", "name_ko", "name_en", "reason", "source_url")
     if not isinstance(candidate, dict) or any(not str(candidate.get(k) or "").strip() for k in required):
         raise ToolRejection("discovery candidate is missing required fields")
+    distinct_from = str(candidate.get("distinct_from") or "")
     candidate = {k: str(candidate[k]).strip() for k in required}
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", candidate["id"]):
         raise ToolRejection("candidate id is not lowercase kebab-case")
@@ -942,14 +946,68 @@ def validate_discovered_candidate(candidate: dict) -> dict:
     # The SQL above compares raw strings, so a different transliteration reads
     # as a different person (C.L.R. James over C. L. R. James). Re-check on the
     # spelling-insensitive key the create tool uses, here where rejecting still
-    # leaves the run a chance to pick someone else.
+    # leaves the run a chance to pick someone else. Aliases are re-checked the
+    # same way: '알렉세이 로좁스키' filed over the stored alias '알렉세이 로조프스키'
+    # is one pseudonym written two ways, not a new person.
     key_ko, key_en = _dedup_key(candidate["name_ko"]), _dedup_key(candidate["name_en"])
-    for row in db_query("SELECT id, name_ko, name_en FROM commulingo_people"):
+    people = db_query("SELECT id, name_ko, name_en, years_label FROM commulingo_people")
+    alias_rows = db_query("SELECT person_id, lang, alias FROM commulingo_person_aliases")
+    aliases_by_person: dict[str, list[dict]] = {}
+    for a in alias_rows:
+        aliases_by_person.setdefault(a["person_id"], []).append(a)
+    for row in people:
         if _dedup_key(row["name_ko"]) == key_ko or _dedup_key(row["name_en"]) == key_en:
             raise ToolRejection(
                 f"candidate duplicates existing person {row['id']} "
                 f"({row['name_ko']}) under a different spelling"
             )
+        for a in aliases_by_person.get(row["id"], ()):
+            if _dedup_key(a["alias"]) == (key_ko if a["lang"] == "ko" else key_en):
+                raise ToolRejection(
+                    f"candidate duplicates existing person {row['id']} "
+                    f"({row['name_ko']}): '{a['alias']}' is already that card's alias"
+                )
+
+    # A shared surname is not proof of identity, but it is exactly how the
+    # pseudonym duplicates slipped through (알렉산드르 로조프스키 proposed over
+    # 솔로몬 로조프스키, whose card lists the alias 알렉세이 로조프스키). Force one
+    # explicit verification round: the first submission is bounced with the
+    # colliding cards spelled out, and only a resubmission that names them in
+    # `distinct_from` — an assertion the curator has read those cards and
+    # confirmed a different person — passes.
+    # Exact surname-key equality on purpose: _same_surname's edit-distance
+    # slack is only safe next to a matching life-year pair, and here it pulled
+    # in Kotovsky and Kozlovsky for a Lozovsky candidate. The Korean side is
+    # canonicalized by the name-normalization table, so an exact key still
+    # catches variant English spellings through the ko comparison.
+    surname_key_ko = _dedup_key(_surname(candidate["name_ko"]))
+    surname_key_en = _dedup_key(_surname(candidate["name_en"]))
+    acknowledged = set(re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", distinct_from))
+    collisions = []
+    for row in people:
+        if row["id"] in acknowledged:
+            continue
+        names = [(row["name_ko"], surname_key_ko), (row["name_en"], surname_key_en)]
+        names += [
+            (a["alias"], surname_key_ko if a["lang"] == "ko" else surname_key_en)
+            for a in aliases_by_person.get(row["id"], ())
+        ]
+        if any(key and _dedup_key(_surname(stored)) == key for stored, key in names):
+            alias_note = ", ".join(a["alias"] for a in aliases_by_person.get(row["id"], ()))
+            collisions.append(
+                f"{row['id']} ({row['name_ko']} / {row['name_en']}"
+                + (f", {row['years_label']}" if row.get("years_label") else "")
+                + (f"; aliases: {alias_note}" if alias_note else "") + ")"
+            )
+    if collisions:
+        raise ToolRejection(
+            "candidate shares a surname with: " + "; ".join(collisions) + ". "
+            "Read those cards (life years, career, aliases — pseudonyms and other "
+            "transliterations count as the same person). If your candidate IS one of "
+            "them, do not select them — pick someone else. Only if you have confirmed "
+            "a genuinely different person, resubmit the same candidate with "
+            "distinct_from listing the ids you checked."
+        )
     return candidate
 
 
@@ -975,8 +1033,17 @@ COMMULINGO_CANDIDATE_SELECT_TOOL = {
             "name_en": {"type": "string"},
             "reason": {"type": "string"},
             "source_url": {"type": "string"},
+            "distinct_from": {
+                "type": ["string", "null"],
+                "description": (
+                    "Null on first submission. If the tool rejects the candidate for "
+                    "sharing a surname with existing cards, read those cards; only "
+                    "when you have confirmed your candidate is a genuinely different "
+                    "person, resubmit with their ids here (space-separated)."
+                ),
+            },
         },
-        "required": ["id", "name_ko", "name_en", "reason", "source_url"],
+        "required": ["id", "name_ko", "name_en", "reason", "source_url", "distinct_from"],
     },
 }
 

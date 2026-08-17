@@ -525,8 +525,18 @@ original_query = maintainer.db_query
 try:
     duplicate_queries = []
     maintainer.db_query_one = lambda sql, *_a, **_kw: duplicate_queries.append(sql) or None
-    roster = [{"id": "c-l-r-james", "name_ko": "C. L. R. 제임스", "name_en": "C. L. R. James"}]
-    maintainer.db_query = lambda sql, params=None: roster
+    roster = [
+        {"id": "c-l-r-james", "name_ko": "C. L. R. 제임스", "name_en": "C. L. R. James"},
+        {"id": "lozovsky", "name_ko": "솔로몬 로조프스키", "name_en": "Solomon Lozovsky",
+         "years_label": "1878–1952"},
+    ]
+    alias_rows = [
+        {"person_id": "lozovsky", "lang": "ko", "alias": "알렉세이 로조프스키"},
+        {"person_id": "lozovsky", "lang": "en", "alias": "Alexey Lozovsky"},
+    ]
+    maintainer.db_query = lambda sql, params=None: (
+        alias_rows if "commulingo_person_aliases" in sql else roster
+    )
     candidate_payload = {
         "id": "example-person", "name_ko": "예시",
         "name_en": "Example Person", "reason": "gap",
@@ -546,6 +556,36 @@ try:
         raise AssertionError("respelled duplicate should be rejected")
     except ValueError as exc:
         assert "under a different spelling" in str(exc)
+
+    # a respelling of a stored ALIAS is the same person too
+    try:
+        maintainer.validate_discovered_candidate({
+            "id": "aleksei-lozovsky", "name_ko": "알렉세이 로조프스키",
+            "name_en": "Aleksei Lozovskii", "reason": "gap",
+            "source_url": "https://example.com/bio",
+        })
+        raise AssertionError("alias respelling should be rejected")
+    except ValueError as exc:
+        assert "already that card's alias" in str(exc)
+
+    # a shared surname (pseudonym risk: 알렉산드르 로조프스키 over 솔로몬 로조프스키)
+    # bounces once with the colliding card, and passes only with distinct_from
+    pseudonym_risk = {
+        "id": "alexander-lozovsky", "name_ko": "알렉산드르 로조프스키",
+        "name_en": "Alexander Lozovsky", "reason": "gap",
+        "source_url": "https://example.com/bio",
+    }
+    try:
+        maintainer.validate_discovered_candidate(pseudonym_risk)
+        raise AssertionError("surname collision should bounce without distinct_from")
+    except ValueError as exc:
+        assert "shares a surname" in str(exc) and "lozovsky" in str(exc)
+        assert "duplicates existing person" not in str(exc)  # not recorded as settled
+    verified = maintainer.validate_discovered_candidate(
+        {**pseudonym_risk, "distinct_from": "lozovsky"}
+    )
+    assert verified["id"] == "alexander-lozovsky"
+    assert "distinct_from" not in verified
 finally:
     maintainer.db_query_one = original_query_one
     maintainer.db_query = original_query
