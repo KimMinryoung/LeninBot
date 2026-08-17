@@ -56,6 +56,15 @@ Content rules:
 - When mentioning another person who has a dictionary card, spell their name exactly as
   their card does (check with `commulingo_people` search when unsure) — never introduce an
   alternative transliteration. Original spellings inside direct quotations are preserved.
+- For a new Russian-language name, follow the National Institute of Korean Language's
+  Russian table instead of guessing from Latin `Sh...`: `ш` is Korean `시`; before a vowel
+  that `시` combines with the vowel (`ша`→`샤`, `ше`→`셰`, `ши`→`시`, `шо`→`쇼`,
+  `шу`→`슈`), while before another consonant the initial `시` remains
+  (`Штеменко`→`시테멘코`, `Шпигельглас`→`시피겔글라스`,
+  `Шляпников`→`실랴프니코프`). Compare the native-script name with every Korean name
+  and alias before saving. A name borrowed from another language or an established Korean
+  conventional form may be an exception, so verify its original language and existing
+  usage rather than mechanically rewriting every `슈`.
 - Korean copy never uses `북한`. Write `조선민주주의인민공화국` on first reference and `조선`
   afterwards. The save rejects the whole patch over this one word, so fix it while writing.
 - Never use the em dash (—) in either language. Use a comma, a colon, parentheses, or two

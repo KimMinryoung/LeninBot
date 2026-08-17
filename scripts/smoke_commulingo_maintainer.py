@@ -232,12 +232,16 @@ assert "non-standard person-name spelling" in _validate(
      "body": {"ko": "투하체프스키 재판에 관여했다.", "en": "Involved."}, "sources": []},
 )
 from runtime_tools.commulingo_people import _find_name_variants
+from runtime_tools.commulingo_people import normalize_spellings_in_text
 assert _find_name_variants(
     {"body": {"ko": "그는 “베리아 동지에게 보고하라”라고 적었다. 베리야는 침묵했다.", "en": ""}}
 ) == []
 assert _find_name_variants(
     {"career": [{"y": "1938", "r": {"ko": "베리아의 부관", "en": "Beria's deputy"}}]}
 ) == [("베리아", "베리야")]
+assert normalize_spellings_in_text("슈테멘코와 슈피겔글랴스", "ko")[0] == "시테멘코와 시피겔글라스"
+# A conventional/original-language exception must not be caught by a generic 슈→시 rewrite.
+assert normalize_spellings_in_text("오토 슈미트", "ko")[0] == "오토 슈미트"
 
 with TemporaryDirectory() as tmp:
     path = Path(tmp) / "config.json"

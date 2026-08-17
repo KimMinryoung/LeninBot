@@ -890,6 +890,10 @@ CURRENT SELECTION FOCUS:
 Do not create or edit anything in this stage. Inspect list_groups, list_categories and
 list_offices, then use search_people under a proposed name and aliases to prove the person
 is absent. Prefer a historically important gap in revolutionary or Soviet history.
+For a Russian-language candidate, derive the Korean name from the Russian native spelling,
+not merely from Latin `Sh...`: `ш` before a consonant keeps Korean `시` (Штеменко=시테멘코,
+Шпигельглас=시피겔글라스, Шляпников=실랴프니코프). Verify original-language or established
+Korean usage before treating a non-Russian borrowed surname as Russian.
 
 ALREADY IN THE DICTIONARY — anyone below is NOT a gap, and neither is the same person
 under another transliteration. The roster is split by era: read the section your candidate
@@ -960,7 +964,14 @@ COMMULINGO_CANDIDATE_SELECT_TOOL = {
         "additionalProperties": False,
         "properties": {
             "id": {"type": "string", "description": "Lowercase kebab-case slug."},
-            "name_ko": {"type": "string"},
+            "name_ko": {
+                "type": "string",
+                "description": (
+                    "Canonical Korean name. For Russian ш before a consonant retain 시, "
+                    "e.g. Штеменко=시테멘코 and Шпигельглас=시피겔글라스; verify "
+                    "original-language or established-form exceptions."
+                ),
+            },
             "name_en": {"type": "string"},
             "reason": {"type": "string"},
             "source_url": {"type": "string"},
