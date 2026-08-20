@@ -392,17 +392,20 @@ def _detect_scripts(text: str) -> list[str]:
     return [name for name, pattern in _SCRIPT_RANGES if pattern.search(value)]
 
 
-def _check_native_script(text: str, codes: list[str], field: str) -> str | None:
+def _check_native_script(text: str, codes: list[tuple[str, str]], field: str) -> str | None:
     """Error string when a native-name line is written in the wrong script.
 
     Both citizenship and origin count: Soviet republic officials are filed as
     citizenship 'soviet' + origin 'latvia'/'georgia'/…, and a Latvian in the USSR
     legitimately writes 'Mārtiņš Lācis' in Latin. The allowed set is the union.
+    `codes` pairs each code with the public field it came from, so the error can
+    say WHICH field carries the wrong code — a bare 'soviet + russia' left the
+    model retrying the name instead of fixing nationalOrigin (gap 1617, Sillari).
     """
     value = str(text or "").strip()
-    codes = [c.strip() for c in codes if c and c.strip()]
+    codes = [(label, code.strip()) for label, code in codes if code and code.strip()]
     allowed: list[str] = []
-    for code in codes:
+    for _label, code in codes:
         for script in _NATION_SCRIPTS.get(code, ()):
             if script not in allowed:
                 allowed.append(script)
@@ -411,13 +414,18 @@ def _check_native_script(text: str, codes: list[str], field: str) -> str | None:
     wrong = [s for s in _detect_scripts(value) if s not in allowed]
     if not wrong:
         return None
+    named = " + ".join(f"{label} '{code}'" for label, code in codes)
     return (
-        f"Error: {field} '{value}' is written in {'/'.join(wrong)}, but nationality "
-        f"'{' + '.join(codes)}' writes its own names in {' or '.join(allowed)}. {field} is the "
+        f"Error: {field} '{value}' is written in {'/'.join(wrong)}, but {named} "
+        f"writes its own names in {' or '.join(allowed)}. {field} is the "
         "person's name in THEIR OWN script, never a Russian transliteration of it "
         "(박헌영, not 'Пак Хон Ён'; 'Kádár János', not 'Янош Кадар'; 毛泽东, not "
-        "'Мао Цзэдун'). Either write the name in the right script, or fix "
-        "citizenship if that is the field that is wrong."
+        "'Мао Цзэдун'). Either write the name in the right script, or fix the "
+        "nationality field that is wrong — usually nationalOrigin: a Soviet "
+        "official of a non-Russian nationality keeps their OWN nation there, "
+        "which admits its script (soviet + estonia admits Latin, soviet + "
+        "georgia admits Georgian). Never file a Soviet citizen as "
+        "nationalOrigin 'russia' just because they served in the USSR."
     )
 
 
@@ -1916,12 +1924,15 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         # The native-name line must use the person's own script. Check it against
         # the citizenship the record will HAVE after this patch, so correcting a
         # wrong citizenship and the name together is accepted.
-        nationality_codes: list[str] = []
-        for key, column in (("citizenship", "citizenship_code"), ("origin", "origin_code")):
+        nationality_codes: list[tuple[str, str]] = []
+        for key, public, column in (
+            ("citizenship", "citizenship", "citizenship_code"),
+            ("origin", "nationalOrigin", "origin_code"),
+        ):
             if isinstance(patch.get(key), dict):
-                nationality_codes.append(str(patch[key].get("code") or "").strip())
+                nationality_codes.append((public, str(patch[key].get("code") or "").strip()))
             elif key not in patch:
-                nationality_codes.append(str(stored.get(column) or ""))
+                nationality_codes.append((public, str(stored.get(column) or "")))
         for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
             problem = _check_native_script(value, nationality_codes, field)
             if problem:
@@ -3334,7 +3345,10 @@ _NATIONAL_ORIGIN_SCHEMA = {
     "description": (
         "National or ethnic background, not birthplace and not place of death. "
         "For example Radek=Poland although born in present-day Ukraine; "
-        "Yezhov=Russia although born in Lithuania."
+        "Yezhov=Russia although born in Lithuania (an ethnic Russian). The "
+        "other direction matters just as much: a Soviet official OF a "
+        "non-Russian nationality keeps that nation (Sillari=estonia, "
+        "Gumbaridze=georgia), never a blanket 'russia'."
     ),
 }
 
