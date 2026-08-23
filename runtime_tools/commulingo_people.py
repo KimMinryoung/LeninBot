@@ -146,6 +146,44 @@ _SCRIPT_RANGES = (
 
 _ROMAN_NUMERAL_RE = re.compile(r"(?:^|\s)[IVXLCDM]+(?=$|\s)")
 
+# Scripts that never belong in this site's prose, in ANY field. The writing
+# model sometimes drops a token of its own multilingual vocabulary into the
+# middle of a sentence — threefold-war's definition_ko carried 'संघर्ष' for
+# 전쟁, operation-shingle 'उपलब्ध' for 쓸 수 있었다, and a Metaxas alias was
+# spelled '메타كساس 체제' (2026-08-23). Unlike _SCRIPT_RANGES above, which
+# decides WHICH script a native name should use, membership here is grounds
+# for outright rejection: the site quotes Cyrillic, Greek, Han, Kana and the
+# Caucasus scripts legitimately, but has no Hindi, Arabic or Thai content, so
+# any such character is leakage. A native-name/original field that one day
+# genuinely needs one of these scripts is exempted by key in
+# _collect_checked_prose, not by loosening this list.
+_FOREIGN_SCRIPT_RANGES = (
+    ("Devanagari", re.compile(r"[ऀ-ॿ]")),
+    ("Bengali", re.compile(r"[ঀ-৿]")),
+    ("Gurmukhi/Gujarati/Oriya", re.compile(r"[਀-୿]")),
+    ("Tamil/Telugu/Kannada/Malayalam/Sinhala", re.compile(r"[஀-෿]")),
+    ("Thai/Lao", re.compile(r"[฀-໿]")),
+    ("Tibetan/Myanmar", re.compile(r"[ༀ-႟]")),
+    ("Khmer", re.compile(r"[ក-៿]")),
+    ("Arabic", re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿ]")),
+)
+
+# A Hangul syllable running straight into three or more lowercase Latin letters
+# is the half-transliterated cousin of the same leak: term_ko '산acja 체제',
+# '아프간tsy', '아isne 방어선', '이반ovo-보즈네센스크'. Three letters, not one,
+# because Korean prose legitimately glues short Latin units and acronym tails
+# onto Hangul (2만km); the legitimate acronym pattern (친PDPA, 좌파SR, 중앙TV)
+# is uppercase and never matches.
+_HANGUL_LATIN_MIX_RE = re.compile(r"[가-힯][a-z]{3}")
+
+# Patch keys whose values legitimately carry a foreign script: the native-name
+# line and its patronymic twin, a term's original native-script form, and
+# source references, where a work's own title stays in the work's own script.
+_SCRIPT_CHECK_EXEMPT_KEYS = frozenset({
+    "original", "cyrillic", "cyrillicPatronymic", "native",
+    "sources", "citations", "url",
+})
+
 _CYRILLIC_NATIONS = (
     "soviet", "russia", "ukraine", "belarus", "bulgaria",
     "kazakhstan", "kyrgyzstan", "tajikistan",
@@ -1289,6 +1327,62 @@ def _em_dash_problem(patch: dict) -> str | None:
     return None
 
 
+def _collect_checked_prose(node, out: list, key: str = "") -> None:
+    """Every string in a patch except native-script and source fields.
+
+    Wider than _collect_localized_strings on purpose: the Metaxas leak sat in
+    an alias list ({"ko": ["메타كساس 체제"]}), whose members are plain strings
+    under a list, not {ko, en} dicts — a collector keyed on localized pairs
+    walks straight past them.
+    """
+    if key in _SCRIPT_CHECK_EXEMPT_KEYS:
+        return
+    if isinstance(node, str):
+        out.append((key, node))
+    elif isinstance(node, dict):
+        for child_key, value in node.items():
+            _collect_checked_prose(value, out, str(child_key))
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_checked_prose(item, out, key)
+
+
+def _script_leak_problem(patch: dict) -> str | None:
+    """Reject model-token leakage: foreign-script words and half-transliterations.
+
+    See _FOREIGN_SCRIPT_RANGES for the incident this guards against. The check
+    runs on every write, so a leak now costs the model a retry with the exact
+    bad word quoted back, instead of costing a reader a 'संघर्ष' in a Korean
+    definition until someone happens to open the page.
+    """
+    strings: list[tuple[str, str]] = []
+    _collect_checked_prose(patch, strings)
+    for field, text in strings:
+        for script, pattern in _FOREIGN_SCRIPT_RANGES:
+            hit = pattern.search(text)
+            if hit:
+                start = max(0, hit.start() - 40)
+                return (
+                    f"Error: '{field}' contains {script} characters: "
+                    f"…{text[start:hit.end() + 40]}… This site has no {script} "
+                    "content — the word is a token leak from the writing model, "
+                    "not a quotation. Rewrite the affected word in the language "
+                    "of the field (한국어 필드는 한국어로, English fields in "
+                    "English) and resend the same edit."
+                )
+        mix = _HANGUL_LATIN_MIX_RE.search(text)
+        if mix:
+            start = max(0, mix.start() - 40)
+            return (
+                f"Error: '{field}' glues Hangul straight into lowercase Latin: "
+                f"…{text[start:mix.end() + 40]}… That is a half-transliterated "
+                "word ('산acja 체제', '아프간tsy'), not valid Korean. Write the "
+                "whole word in Hangul per 외래어 표기법 ('사나차 체제'), keeping "
+                "any Latin original in parentheses after it if needed."
+            )
+    return None
+
+
 def _parse_life_years(label: str) -> tuple[int | None, int | None]:
     m = re.match(r"^(\d{3,4})[–-](\d{3,4})$", label or "")
     if not m:
@@ -1882,6 +1976,9 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
     em_dash = _em_dash_problem(patch)
     if em_dash:
         return em_dash
+    script_leak = _script_leak_problem(patch)
+    if script_leak:
+        return script_leak
     variants = _find_name_variants(patch)
     if variants:
         fixes = "; ".join(f"'{v}' → '{c}'" for v, c in variants)
