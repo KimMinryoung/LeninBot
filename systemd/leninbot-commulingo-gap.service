@@ -1,5 +1,5 @@
 [Unit]
-Description=LeninBot CommuLingo gap-queue worker (people and terms an event page asked for)
+Description=LeninBot CommuLingo gap-queue worker (people an event page asked for; terms parked 2026-08-29)
 Wants=network-online.target leninbot-llm-proxy.service
 # First in the batch: the queue is what the event pages decided they needed, so
 # it is served before anything picks work of its own accord.
@@ -18,7 +18,7 @@ ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/
 # One gap per batch. An empty queue exits 0 in seconds and costs nothing, which
 # is the shape that lets this stay first even on a day the events lane filed
 # nothing.
-ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_gap_worker.py --worker 0
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_gap_worker.py --kind person --worker 0
 TimeoutStartSec=1800
 StandardOutput=journal
 StandardError=journal

@@ -435,7 +435,13 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     if not event:
         return {
             "status": "skipped",
-            "reason": f"every event in this lane already has {TARGET_SECTIONS}+ body sections",
+            # Completeness is sections_needed(), the walk's own length (opening +
+            # one per timeline chunk + closing, capped at TARGET_SECTIONS), so a
+            # 7-section event with a short timeline is finished, not short.
+            "reason": (
+                f"no event in this lane needs another section (each has reached "
+                f"its walk length, cap {TARGET_SECTIONS}); seed a skeleton row to give it work"
+            ),
         }
 
     before = completed_run_count()

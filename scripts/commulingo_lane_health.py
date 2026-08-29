@@ -24,12 +24,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The lanes the batch actually wants since 2026-08-09 (gap queue first; the old
-# new/enrich/terms units are installed but not pulled in — putting them here
-# while parked would page "no runs recorded" every morning). Swap this dict back
-# in the same commit that re-adds them to leninbot-commulingo-batch.service.
+# The lanes the batch actually wants (gap queue first). enrich came back on
+# 2026-08-29 (existing-person standard fields); new/terms stay installed but not
+# pulled in — putting a parked unit here would page "no runs recorded" every
+# morning. Change this dict in the same commit that changes the Wants= list in
+# leninbot-commulingo-batch.service.
 LANES = {
     "gap": "leninbot-commulingo-gap.service",
+    "enrich": "leninbot-commulingo-enrich.service",
     "events": "leninbot-commulingo-events.service",
     "links": "leninbot-commulingo-links.service",
 }
@@ -77,6 +79,16 @@ MAX_BIO_TOP_BAND_RATE = 0.40
 
 APPLIED = re.compile(r'^\s*"status": "applied"', re.M)
 SKIPPED = re.compile(r'^\s*"status": "skipped"', re.M)
+# A skip because the lane looked and found nothing to do — gap queue empty,
+# every event built out to its walk length, every card outside the cooldown
+# complete, a lane switched off in config. Twenty of these a night is a lane
+# waiting for work, not a broken one; from 2026-08-26 the digest paged
+# "nothing applied" on exactly that for three mornings running. Any other skip
+# reason (rejected create, tool refusal) still counts as a run that found work
+# and produced nothing.
+IDLE = re.compile(
+    r'^\s*"reason": "(?:no pending \S+ gap|no event in this lane needs another section'
+    r'|no claimable candidate outside the cooldown|\w+_lane_enabled=false)', re.M)
 # A barren run — rounds spent without a write and without NO_CANDIDATE. It exits
 # clean rather than crashing the unit, so it has to be tallied explicitly or it
 # would leave no trace here at all and a dead lane would read as a quiet one.
@@ -149,12 +161,14 @@ def tally(unit: str, since: str) -> dict:
     text = journal(unit, since)
     applied = len(APPLIED.findall(text))
     skipped = len(SKIPPED.findall(text))
+    idle = len(IDLE.findall(text))
     failed = len(FAILED.findall(text))
     no_edit = len(NO_EDIT.findall(text))
     total = applied + skipped + failed + no_edit
     return {
         "applied": applied,
         "skipped": skipped,
+        "idle": idle,
         "failed": failed,
         "no_edit": no_edit,
         "fallback": len(FALLBACK.findall(text)),
@@ -175,8 +189,14 @@ def problems(lane: str, stats: dict) -> list[str]:
     found = []
     if stats["total"] == 0:
         return [f"{lane}: no runs recorded"]
-    if stats["applied"] == 0:
-        found.append(f"{lane}: {stats['total']} runs, nothing applied")
+    # Runs that had a subject in hand. Idle runs exited on an empty queue and
+    # spent nothing, so they are a wait, not a failure to apply.
+    busy = stats["total"] - stats["idle"]
+    if stats["applied"] == 0 and busy:
+        found.append(
+            f"{lane}: {busy} runs found work, nothing applied"
+            + (f" ({stats['idle']} idle, queue empty)" if stats["idle"] else "")
+        )
     if stats["no_edit"] / stats["total"] > MAX_FAILURE_RATE:
         found.append(
             f"{lane}: {stats['no_edit']}/{stats['total']} runs ended with no edit "
@@ -327,8 +347,9 @@ def main() -> int:
         stats = tally_drain(unit, args.since) if drain else tally(unit, args.since)
         total_cost += stats["cost"]
         lines.append(
-            f"{lane:7} applied {stats['applied']:4}  skipped {stats['skipped']:3}  "
-            f"failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
+            f"{lane:7} applied {stats['applied']:4}  skipped {stats['skipped']:3}"
+            + (f" (idle {stats['idle']})" if stats.get("idle") else "")
+            + f"  failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
             f"fallback {stats['fallback']:3}  "
             f"${stats['cost']:.2f}"
             + (f"  ({stats['total']} runs)" if drain else "")

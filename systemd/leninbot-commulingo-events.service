@@ -3,7 +3,7 @@ Description=LeninBot CommuLingo history-event curator (one body section per run)
 Wants=network-online.target leninbot-llm-proxy.service
 # After the gap lane: the queue it fills is served at the head of the NEXT
 # batch, twenty minutes later, rather than by a worker racing it in this one.
-After=network-online.target leninbot-commulingo-gap.service leninbot-llm-proxy.service
+After=network-online.target leninbot-commulingo-gap.service leninbot-commulingo-enrich.service leninbot-llm-proxy.service
 
 [Service]
 Type=oneshot

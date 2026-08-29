@@ -1,7 +1,7 @@
 [Unit]
 Description=LeninBot CommuLingo curator batch (runs the lanes sequentially)
 # Pulls in the lanes; their mutual After= ordering runs them one at a time
-# (gap -> events -> links). Wants, not Requires: one lane failing must not
+# (gap -> enrich -> events -> links). Wants, not Requires: one lane failing must not
 # cancel the rest. Each lane keeps its own budget-guard ExecCondition, so a
 # mid-batch cap hit skips the remaining lanes' work.
 #
@@ -11,9 +11,11 @@ Description=LeninBot CommuLingo curator batch (runs the lanes sequentially)
 # has a backlog that is the wrong thing to spend the window on. Their units are
 # still installed and can be wanted here again when the queue runs dry.
 Wants=leninbot-commulingo-gap.service
+Wants=leninbot-commulingo-enrich.service
 Wants=leninbot-commulingo-events.service
 Wants=leninbot-commulingo-links.service
 After=leninbot-commulingo-gap.service
+After=leninbot-commulingo-enrich.service
 After=leninbot-commulingo-events.service
 After=leninbot-commulingo-links.service
 

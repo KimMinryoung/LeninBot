@@ -5,8 +5,8 @@
   "recent_days": 30,
   "incomplete_recent_days": 2,
   "new_person_cooldown_runs": 6,
-  "new_lane_enabled": true,
-  "term_lane_enabled": true,
+  "new_lane_enabled": false,
+  "term_lane_enabled": false,
   "enrich_non_soviet_revolutionaries": true,
   "new_person_focus": "all"
 }
