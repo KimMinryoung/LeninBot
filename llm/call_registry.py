@@ -288,6 +288,59 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     return (response.text or "").strip(), _gemini_usage(response)
 
 
+# ── Output budget guarantee ──────────────────────────────────────────
+#
+# 추론 모델은 max_tokens 안에서 생각하고 답한다. 추론이 예산을 다 먹으면
+# 본문이 비었거나 잘린 채 200이 돌아오고, 그것을 그대로 돌려주면 추론은
+# 비용만 쓰고 결과를 못 낸 셈이다 (1925 대회 번역에서 20k 예산이 통째로
+# 추론에 들어가 본문 0자가 다섯 청크). 예산 소진이 확인되면 executor가
+# max_tokens를 늘려 다시 부르고, 상한까지 늘려도 완결되지 않으면 조용한
+# 빈 문자열 대신 예외로 드러낸다. 호출부가 재시도로 때울 일이 아니다.
+#
+# 예산 소진의 정의: 길이 때문에 멈췄고(stop_reason=max_tokens /
+# finish_reason=length), 본문이 비었거나 추론이 켜진 호출이다. 추론이
+# 꺼진 호출이 본문을 낸 채 길이에 걸린 것은 호출부가 정한 길이 상한일 수
+# 있으므로 경고만 남기고 그대로 돌려준다.
+OUTPUT_BUDGET_CAP = 65536
+_OUTPUT_BUDGET_STEPS = 2
+
+
+class OutputBudgetExhausted(RuntimeError):
+    """max_tokens를 상한까지 늘려도 완결된 응답을 받지 못했다."""
+
+
+def _reasoning_on(p: CallSiteProfile) -> bool:
+    thinking = p.extra.get("thinking")
+    if isinstance(thinking, dict):
+        return thinking.get("type") == "enabled"
+    return bool(p.extra.get("reasoning_effort")) or p.provider == "openai"
+
+
+def _with_output_budget(p: CallSiteProfile, call) -> tuple[str, dict]:
+    """``call(max_tokens) -> (text, usage, hit_length_limit)`` 를 예산 보장 아래 실행한다."""
+    max_tokens = p.max_tokens
+    text, usage = "", {}
+    for step in range(_OUTPUT_BUDGET_STEPS + 1):
+        text, usage, hit_limit = call(max_tokens)
+        if not hit_limit:
+            return text, usage
+        if text and not _reasoning_on(p):
+            logger.warning("[llm-registry] %s/%s: output hit max_tokens=%d (%d chars kept)",
+                           p.provider, p.model, max_tokens, len(text))
+            return text, usage
+        if max_tokens >= OUTPUT_BUDGET_CAP or step == _OUTPUT_BUDGET_STEPS:
+            break
+        nxt = min(max_tokens * 2, OUTPUT_BUDGET_CAP)
+        logger.warning(
+            "[llm-registry] %s/%s: output budget exhausted at max_tokens=%d "
+            "(text %d chars, tokens_out %s) — retrying with %d",
+            p.provider, p.model, max_tokens, len(text), usage.get("tokens_out"), nxt)
+        max_tokens = nxt
+    raise OutputBudgetExhausted(
+        f"{p.provider}/{p.model}: 출력 예산 소진 — max_tokens {max_tokens}까지 늘려도 "
+        f"완결된 응답을 받지 못했다 (본문 {len(text)}자, tokens_out {usage.get('tokens_out')})")
+
+
 def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     from openai import OpenAI
 
@@ -324,12 +377,19 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
         # 호출부에만 적용되므로 기존 동작은 그대로다.
         if p.provider == "deepseek" and isinstance(p.extra.get("thinking"), dict):
             kwargs["extra_body"] = {"thinking": p.extra["thinking"]}
-    response = client.chat.completions.create(
-        model=p.model,
-        messages=messages,
-        **kwargs,
-    )
-    return (response.choices[0].message.content or "").strip(), _openai_usage(response)
+    budget_key = "max_completion_tokens" if p.provider == "openai" else "max_tokens"
+
+    def call(max_tokens: int):
+        response = client.chat.completions.create(
+            model=p.model,
+            messages=messages,
+            **{**kwargs, budget_key: max_tokens},
+        )
+        choice = response.choices[0]
+        text = (choice.message.content or "").strip()
+        return text, _openai_usage(response), choice.finish_reason == "length"
+
+    return _with_output_budget(p, call)
 
 
 def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
@@ -383,16 +443,19 @@ def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | 
     else:
         kwargs["thinking"] = {"type": "disabled"}
 
-    response = client.messages.create(
-        model=p.model,
-        max_tokens=p.max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-        **kwargs,
-    )
-    text = " ".join(
-        b.text for b in response.content if getattr(b, "type", "") == "text"
-    ).strip()
-    return text, _anthropic_usage(response)
+    def call(max_tokens: int):
+        response = client.messages.create(
+            model=p.model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+            **kwargs,
+        )
+        text = " ".join(
+            b.text for b in response.content if getattr(b, "type", "") == "text"
+        ).strip()
+        return text, _anthropic_usage(response), response.stop_reason == "max_tokens"
+
+    return _with_output_budget(p, call)
 
 
 _EXECUTORS = {

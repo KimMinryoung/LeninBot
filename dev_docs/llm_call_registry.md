@@ -49,6 +49,17 @@ python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
 2. 코드에서: `from llm.call_registry import generate` → `await generate("my_feature", prompt, system=...)` (sync는 `generate_sync`)
 3. 실패(None) 폴백을 콜사이트에 마련할 것.
 
+## 출력 예산 보장 (2026-08-30)
+
+추론이 켜진 호출(DeepSeek `thinking: enabled`, GPT-5.6 reasoning)은 추론이 max_tokens를 다 먹으면 본문이 비었거나 잘린 채 200이 돌아온다. 이걸 그대로 돌려주면 추론은 비용만 쓰고 결과를 못 낸 것이다 — 1925 대회 번역에서 20k 예산이 통째로 추론에 들어가 본문 0자가 다섯 청크였다. 그래서 executor가 보장한다 (`_with_output_budget`):
+
+- 길이 때문에 멈췄고(`stop_reason=max_tokens` / `finish_reason=length`) **본문이 비었거나 추론이 켜진 호출**이면 max_tokens를 2배로 늘려 다시 부른다. 최대 2단계, 상한 `OUTPUT_BUDGET_CAP=65536`.
+- 상한까지 늘려도 완결되지 않으면 `OutputBudgetExhausted`를 던진다. `generate_sync`는 이를 실패로 기록하고(`status=error`) 경고 로그에 원인을 남긴 뒤 None을 돌려준다 — 조용한 빈 문자열이 아니다.
+- 추론이 꺼진 호출이 본문을 낸 채 길이에 걸린 것은 호출부가 정한 길이 상한일 수 있으므로 경고만 남기고 그대로 돌려준다.
+- 적용 executor: `deepseek_anthropic`, `deepseek`/`kimi`/`openai`(OpenAI 호환). 테스트: `tests/test_call_registry_output_budget.py`.
+
+registry 항목의 max_tokens는 여전히 첫 시도 예산이다. 추론 호출부는 넉넉히 잡는 것이 맞고(archival은 48000), 보장 로직은 그 추정이 빗나간 청크를 구제하는 안전망이다.
+
 ## 주의
 
 - **Kimi K3 제약**: temperature=1만 허용(그 외 400) — executor가 kimi provider에서는 temperature를 자동 생략한다. 추론 모델이라 max_tokens에 추론분 여유 필요. Kimi 경로 등재: `kimi_chat_model`(텔레그램/웹챗 티어, bot_config), `writer_main_kimi`(writer 메인 선택지) — 둘 다 model-only, 임포트 시점 해석.
