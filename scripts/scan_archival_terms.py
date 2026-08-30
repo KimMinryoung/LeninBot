@@ -13,9 +13,18 @@ glossary.extra에 손으로 채웠다. 첫 등장 표기가 문서 전체의 일
 대문자가 정보가 아니므로 제외). 중국어는 대소문자 신호가 없어 이 방법이
 통하지 않는다 — NER 없이 돌리면 목록 전체가 소음이 되므로 거부한다.
 
+--llm은 정규식 대신 LLM 추출(runtime_tools/archival_translation/terms.py)을
+쓴다: 청크마다 인명·기관·지명·간행물·정치용어를 문맥(lemma+sense)으로 뽑고,
+표면 매칭으로 걸렸지만 이 문맥에서는 뜻이 다른 용어표 항목(misfire →
+glossary.exclude 후보)도 함께 보고한다. 대소문자 신호에 기대지 않으므로
+중국어 스펙에도 통한다. 유료 호출이므로 --plan으로 견적을 먼저 본다. 결과는
+청크 단위로 캐시되어 같은 스펙을 다시 봐도 호출이 없다.
+
 Usage:
     python scripts/scan_archival_terms.py --spec new-spec-id
     python scripts/scan_archival_terms.py --spec a --spec b --min-count 2
+    python scripts/scan_archival_terms.py --spec new-spec-id --llm --plan
+    python scripts/scan_archival_terms.py --spec new-spec-id --llm [--out report.md]
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from runtime_tools.archival_translation import Options, load_spec, plan
+from runtime_tools.archival_translation import terms as at_terms
 
 # 전부 대문자인 약어. ЦК ВКП(б) 같은 괄호 꼬리는 뒤에서 별도로 붙지 않고
 # 낱개 토큰(ЦК, ВКП)으로 잡혀도 검토 목록으로는 충분하다.
@@ -83,12 +93,63 @@ def scan_candidates(docs: list[dict], glossary: list[dict],
     return out
 
 
+def _llm_main(args) -> int:
+    failures = 0
+    for spec_id in args.spec:
+        try:
+            spec = load_spec(spec_id)
+            if args.plan:
+                est = at_terms.estimate(spec, Options(), "pre")
+                print(f"{spec_id}: 청크 {est['chunks']}개, {est['chars']:,}자, "
+                      f"캐시 레코드 {est['cachedRecords']}개, 예상 비용 약 ${est['estimatedUsd']:.3f} "
+                      f"({est['provider']}/{est['model']})")
+                continue
+
+            def progress(event: dict) -> None:
+                kind = event.get("event")
+                if kind == "chunk" and (event["done"] % 10 == 0 or event["done"] == event["total"]):
+                    print(f"  {event['done']}/{event['total']} 청크", flush=True)
+                elif kind in ("extractRetry", "extractFailed"):
+                    print(f"  {kind} {event['blocks'][0]}–{event['blocks'][1]}: {event['error']}",
+                          flush=True)
+
+            result = at_terms.pre_scan(spec, Options(), min_count=args.min_count,
+                                       emit=progress, concurrency=args.concurrency)
+            out = args.out or (at_terms.CACHE_DIR / f"{spec['id']}.terms-scan.md")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(result["markdown"], encoding="utf-8")
+            print(f"\n# {spec_id} — LLM 사전 스캔: 미등재 후보 {len(result['candidates'])}건, "
+                  f"오탐 의심 {len(result['misfires'])}건, 등재 확인 {len(result['registered'])}건 "
+                  f"(청크 {result['chunks']}, 캐시 {result['cachedChunks']}, "
+                  f"실패 {len(result['failedChunks'])})")
+            for c in result["candidates"][:40]:
+                print(f"  {c['count']:>3}× {c['kind']:<11} {c['lemma']:<24} → {c['proposed'] or '?':<14} … {c['context'][:70]}")
+            for m in result["misfires"]:
+                print(f"  오탐 {m['ru']}: {m['misfired']}/{m['offered']} 청크"
+                      + (" → exclude 후보" if m["always"] else ""))
+            print(f"  보고서: {out}")
+        except Exception as exc:
+            failures += 1
+            print(f"failed {spec_id}: {exc}", file=sys.stderr)
+    return 1 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scan spec sources for glossary candidates before translating.")
     parser.add_argument("--spec", action="append", required=True, help="Spec id. Repeatable.")
     parser.add_argument("--min-count", type=int, default=2,
                         help="이 횟수 미만 등장한 후보는 버린다 (기본 2 — 한 번뿐인 표면은 대개 소음)")
+    parser.add_argument("--llm", action="store_true",
+                        help="정규식 대신 LLM 추출 (registry feature archival_term_extraction). 중국어 가능")
+    parser.add_argument("--plan", action="store_true",
+                        help="--llm의 청크 수·예상 비용만 출력하고 호출하지 않는다")
+    parser.add_argument("--out", type=Path,
+                        help="--llm 보고서 마크다운 경로 (기본 output/archival_translations/<id>.terms-scan.md)")
+    parser.add_argument("--concurrency", type=int, default=4)
     args = parser.parse_args()
+
+    if args.llm:
+        return _llm_main(args)
 
     failures = 0
     for spec_id in args.spec:

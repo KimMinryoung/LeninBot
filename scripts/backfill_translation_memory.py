@@ -38,35 +38,8 @@ from runtime_tools.archival_translation import (
     load_spec,
     list_specs,
 )
-from runtime_tools.archival_translation.core import (
-    _cache_path,
-    apply_post_edits,
-)
-
-
-def align_cached_blocks(
-    source_by_idx: dict[int, str], cache_lines: list[str], spec: dict
-) -> tuple[list[tuple[str, str]], list[int]]:
-    """캐시 JSONL 줄들을 블록 번호로 원문과 정렬해 (원문, 번역) 쌍을 만든다."""
-    target_by_idx: dict[int, list[str]] = {}
-    for line in cache_lines:
-        if not line.strip():
-            continue
-        rec = json.loads(line)
-        for key, lines in (rec.get("blocks") or {}).items():
-            if lines:
-                target_by_idx[int(key)] = lines
-    pairs: list[tuple[str, str]] = []
-    block_ids: list[int] = []
-    for idx, target_lines in sorted(target_by_idx.items()):
-        source = source_by_idx.get(idx)
-        if not source:
-            continue
-        # 캐시에는 모델 원출력이 있고, 사람이 postEdits로 고친 결과는 조립
-        # 단계에만 있었다. 같은 치환을 적용해야 발행본과 같은 텍스트가 남는다.
-        pairs.append((source, "\n".join(apply_post_edits(target_lines, spec))))
-        block_ids.append(idx)
-    return pairs, block_ids
+from runtime_tools.archival_translation.core import _cache_path
+from runtime_tools.archival_translation.terms import align_cached_blocks
 
 
 def backfill_spec(spec_id: str) -> dict:

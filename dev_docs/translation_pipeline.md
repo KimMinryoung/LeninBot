@@ -8,7 +8,7 @@
 | 엔진 | `runtime_tools/archival_translation/` | `scripts/translate_*.py` 4종 |
 | 단위 | HTML 블록, `[[번호\|태그]]` 마커, 청크(기본 3,500자) | 문서/행 통짜 1회 호출 |
 | 용어집 | CommuLingo 스냅샷 + 스펙 `glossary.extra`, 청크 등장 항목만 주입(상한 60) | 프롬프트 내장 소사전 |
-| 검증 | 결정론 4종(마커·원문반환·한국어부재/문자잔존·길이) + 사유 첨부 교정 재시도. 용어표는 검사 안 함 | 결정론 검사 + 교정 재시도 1회 |
+| 검증 | 결정론 4종(마커·원문반환·한국어부재/문자잔존·길이) + 사유 첨부 교정 재시도. 용어표는 루프에서 검사 안 함 — 별도 LLM 용어 감사(보고 전용) | 결정론 검사 + 교정 재시도 1회 |
 | 캐시/이어하기 | 내용 해시 JSONL, 청크 단위 | 없음(스킵 조건이 재개 역할) |
 | 진입점 | `scripts/translate_archival_documents.py`, `api_routes/archival_translation.py` | systemd `research-document-translation.timer` + 수동 |
 
@@ -19,7 +19,7 @@
 - **실행**: `venv/bin/python scripts/translate_archival_documents.py --spec <id>`. 프로바이더 호출은 LLM 게이트웨이 프록시(`:8110`)를 지나고 키는 프록시가 주입하므로 **credstore·sudo·systemd-run이 필요 없다** (예전 `run-archival-translation.sh` 래퍼와 `LoadCredentialEncrypted` 안내는 삭제됨). `--plan`은 모델을 부르지 않고 슬라이싱·청킹·견적만 낸다. 같은 실행은 `POST /admin/archival-translation/run`으로도 된다.
 - **모델·max_tokens·thinking은 registry가 결정한다**: `config/llm_call_sites.json`의 `archival_document_translation_ru`/`_zh` 항목(또는 `LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL`). `call_registry.resolve()`는 항목 값을 호출부 기본값보다 우선하므로 CLI·API·`Options`에는 model 옵션이 **없다** — 예전 `--model`/`--max-tokens`는 조용히 무시되던 죽은 옵션이라 제거했다. 후보 모델은 `--compare provider/model[,+think,+effort=high]`로 같은 청크를 나란히 뽑아 본 뒤 registry 항목을 고친다. `--compare`의 preflight는 변형에 적힌 provider마다 검사한다.
 - **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
-- **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서·검증기(`parse_response`/`validate`)가 바뀌어 옛 캐시의 판정을 믿을 수 없을 때만 올린다.
+- **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서(`parse_response`)가 바뀌어 옛 레코드의 블록 분할을 믿을 수 없을 때만 올린다 — 검증기 강화는 캐시 재심사가 흡수한다.
 
 ## 번역 메모리 (TM)
 
@@ -40,7 +40,14 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 검증 레이어
 
-- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. **용어표 준수는 검사하지 않는다** (2026-08-30 제거): 표면 일치 검사는 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌(Каменева)을 가릴 수 없고, 그 검사가 교정 재시도로 모델의 옳은 첫 번역을 뒤집어 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"을 발행시켰다. 용어표는 프롬프트에 참고로 주입될 뿐이며, 표기 통일은 발행 전 통독 + 스펙 postEdits 몫이다.
+- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한/**응답 끊김**) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. 끊김 검사(2026-08-31): 청크의 마지막 비어 있지 않은 블록에서 원문은 문장부호로 끝나는데 번역의 마지막 줄이 그렇지 않으면 실패 — 1925 대회 문서 블록 43·1000017이 "…만들어졌", "…지원"에서 끊긴 채 길이 하한(0.36·0.30 > 0.25)을 통과해 발행된 사고의 후속. 끊김은 마지막 블록에서만 조용히 지나가고(앞에서 끊기면 마커 누락으로 잡힘) 전 스펙 캐시 2,923블록 실측에서 이 제한 아래 오탐 0건. **캐시 재심사**: 캐시에서 꺼낸 청크도 현재 `validate()`를 다시 통과해야 쓰인다(`_cached_blocks`) — 검증기가 엄격해질 때 `PROMPT_VERSION`을 올려 전체를 재번역하는 대신 새 검사에 걸리는 청크만 다시 번역한다(`cacheInvalid` 이벤트, `Stats.revalidated`). **용어표 준수는 검사하지 않는다** (2026-08-30 제거): 표면 일치 검사는 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌(Каменева)을 가릴 수 없고, 그 검사가 교정 재시도로 모델의 옳은 첫 번역을 뒤집어 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"을 발행시켰다. 용어표는 프롬프트에 참고로 주입될 뿐이며, 표기 통일은 발행 전 통독 + 스펙 postEdits 몫이다.
+- **LLM 용어 일관성 (보고 전용, 2026-08-31)** — `runtime_tools/archival_translation/terms.py`. 표면 매칭이 못 가리는 다의어·격변화 판정을 LLM(registry `archival_term_extraction`, deepseek-v4-flash·json_mode·추론 off)에 맡기되, 결과는 **보고서와 붙여넣을 스펙 조각**으로만 나온다. 번역 루프·재시도에는 넣지 않는다(어제 제거한 검사가 뒤집은 것이 바로 그 자리다). 채택은 사람이 스펙(`glossary.extra`/`glossary.exclude`/`postEdits`)을 고쳐서 하고, postEdits 변경은 전 청크 캐시 적중이라 재조립만 일어난다.
+  - 사전 스캔 `scripts/scan_archival_terms.py --spec <id> --llm [--plan]`: 번역 청크와 같은 단위로 인명·기관·지명·간행물·정치용어를 lemma+sense로 뽑아 (a) 용어표 미등재 후보 + 제안 표기(`glossary.extra` 조각), (b) 표면 매칭으로 청크에 걸렸지만 그 문맥에서는 뜻이 다른 용어표 항목(misfire — 전 청크 오탐이면 `glossary.exclude` 조각, 일부만이면 두 뜻 공존 표시)을 낸다. 대소문자 신호를 쓰지 않아 **중국어 스펙도 된다**. 정규식 스캔(플래그 없음)은 그대로 남아 있다.
+  - 사후 감사 `scripts/audit_archival_terms.py --spec <id> [--plan]`: 청크 캐시(모델 원출력)를 블록 번호로 원문과 정렬해 (원문, 번역) 쌍을 보이고 항목마다 **번역문이 실제 쓴 표기**를 뽑는다. 결정론 집계로 (a) 한 항목에 표기가 둘 이상(불일치 — 다수/소수, 소수의 sense가 다수와 전혀 안 겹치면 "다의어일 수 있음" 표시), (b) 용어표 항목의 뜻(misfire 아님)인데 표기가 다름(이탈)을 보고하고, 스펙 postEdits가 이미 덮는 블록은 "postEdits 적용됨"으로 구분한다. 미처리분만 `postEdits` 제안 조각으로 낸다. 재번역 없음.
+  - 추출 결과는 `output/archival_translations/<id>.terms.jsonl`에 (프롬프트 버전·모드·provider·model·프롬프트) 키로 캐시 — 같은 문서 재감사는 호출 0회. 보고서는 `<id>.terms-scan.md` / `<id>.terms-audit.md`.
+  - **용어표 연결도 LLM이 한다**: 항목마다 «이 청크에 제시된 용어표 항목 중 같은 것을 가리키는 것»을 `glossary` 필드로 답하게 하고, 이탈 판정·기준 표기는 그 연결이 있을 때만 쓴다. 첫 실행(2026-08-31)에서 정규식으로 lemma를 용어표에 대자 Союз(나라)가 Союз(의원 그룹)에 걸려 "연방 → 소유즈 (의원 그룹)"이 제안됐다 — 표면 매칭을 판정에 쓰면 안 된다는 같은 교훈이다. 기준 표기 = 용어표 표기 > postEdits가 덮고 남은 블록이 가장 많은 표기(동률이면 첫 등장). 다수 표기가 이미 postEdits로 고쳐진 오역("소비에트 소유즈")이면 기준이 되지 않고, 불일치 제안과 이탈 제안이 반대 방향("라린→루리예"/"루리예→라린")으로 나오지 않는다.
+  - 집계 키는 lemma 소문자뿐이다. kind(place/org)와 sense는 같은 지시체에도 청크마다 흔들리므로 집계로만 남기고, sense는 사람이 다의어를 가리는 근거로 쓴다. 모델이 지시를 어기고 붙여 온 원어 병기 괄호(사르키스(Саркис))와 복수 '들'은 파서가 결정론으로 뗀다.
+  - 첫 실검증(1925 대회, deepseek-v4-flash, 67청크 ≈ $0.1): 발행본에 남아 있던 실제 불일치를 잡았다 — 라린이 3블록에서 "루리예"로 남음(postEdits 키 "루리예)"가 병기 형태만 덮음), Косиор→"코시오р"(키릴 р 혼입), кулак 미번역 1건, смычка "결합" ×3, 협상국/앙탕트, 국가계획위원회/고스플란 등.
 - 사이트 공통(`scripts/_translation_common.py`): `field_translation_problems()` — 한글 잔존율(원문이 한국어인 긴 필드), 원문 그대로 반환(짧은 필드), HTML 태그 열 보존, URL 보존. `translate_db_content.py`와 스모크가 사용.
 - research markdown: 제목 깊이 열·한글 잔존율·내부 보고서 링크 보존(`_validate_translation`). `translate_markdown_with_retry()`가 검증 실패 사유를 시스템 프롬프트에 붙여 1회 재번역한다(reflection 1회, 반복 자기수정 없음).
 - 오프라인 스모크: `scripts/smoke_translation_memory.py`(TM + 공용 검증기, 맨 클론에서 실행 가능), `scripts/smoke_archival_translation.py`(frontend 체크아웃 필요).
@@ -62,7 +69,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.1 청크 ID·재조립·부분 재시도 | ✅ | 마커 + 내용 해시 캐시, 실패분만 재호출 |
 | §2.1 한국어 출력 팽창 | ✅ | `SourceLanguage.output_ratio` (RU 0.9 / ZH 1.8) |
 | §2.2 코퍼스 단위 용어집 | ⚠️ | CommuLingo DB(상태·출처·리비전 있음)가 코퍼스 용어집, 파이프라인은 스냅샷을 읽기 전용 소비. 스냅샷 갱신은 수동 단계 |
-| §2.2 사전 스캔(PREPARE) | ⚠️ | RU: `scripts/scan_archival_terms.py` — 약어·문장 중간 대문자 낱말을 용어집과 대조해 미등재 후보만 보고, 채택·표기는 사람이 결정. ZH: 대소문자 신호가 없어 NER 도입 전까지 수동 |
+| §2.2 사전 스캔(PREPARE) | ✅ | `scripts/scan_archival_terms.py` — 정규식(RU 전용: 약어·문장 중간 대문자) 또는 `--llm`(RU·ZH: 문맥 포함 추출 + 용어표 오탐 보고). 채택·표기는 사람이 결정 |
 | §2.2 청크 등장 항목만 주입 | ✅ | `glossary_for()` + 상한 60 |
 | §2.2 표기 변형 매칭 | ✅ | 러시아어 곡용 변형 + 경계 가드, 중국어 무경계 |
 | §2.2 다의어 항목 차단 | ✅ | `glossary.exclude` — 이 문서 문맥에서 거의 항상 다른 뜻인 항목은 주입에서 뺀다 (주입 목록이 바뀌므로 캐시 키가 바뀐다) |
@@ -72,7 +79,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.4 번역투 금지 목록 이식 | ✅ | 이번 변경 (RU·ZH 프롬프트) |
 | §2.4 스타일 규칙 캐시 위치 | ✅ | 시스템 프롬프트 고정 + 캐시 키 포함 |
 | §2.5 문장 수/길이 급감 | ⚠️ | 문장 수 대신 실측 기반 길이 하한(RU 0.25 / ZH 0.7) |
-| §2.5 용어집 준수 사후 검사 | ❌ | 의도적으로 제거(2026-08-30). 표면 일치 검사는 다의어·격변화 충돌에서 오탐을 내고 재시도로 옳은 번역을 뒤집었다. 표기 통일은 통독 + postEdits |
+| §2.5 용어집 준수 사후 검사 | ✅ | 루프 안 표면 일치 검사는 제거(2026-08-30, 오탐이 재시도로 옳은 번역을 뒤집음). 대신 `audit_archival_terms.py`가 LLM으로 실제 쓰인 표기를 뽑아 불일치·이탈을 **보고**하고 postEdits 제안을 낸다. 자동 수정·재시도 없음 |
 | §2.5 숫자·마크업 보존 | ⚠️ | 표 숫자는 코드 보존, 사이트는 태그 열·URL 검사(이번 추가). 본문 숫자 대조는 없음 |
 | §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
 | §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |
@@ -84,7 +91,6 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 남은 로드맵 (우선순위 순)
 
-1. ZH 사전 스캔 — RU 스캐너는 있으나 중국어는 NER(GLiNER류) 없이는 소음이라 보류.
-2. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제.
-3. Batch API 경로(야간 타이머 작업 50% 할인).
-4. 사이트 파이프라인 청킹 — 60k자 캡을 넘는 문서가 생기면 사료 엔진의 마커 방식 재사용.
+1. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제.
+2. Batch API 경로(야간 타이머 작업 50% 할인).
+3. 사이트 파이프라인 청킹 — 60k자 캡을 넘는 문서가 생기면 사료 엔진의 마커 방식 재사용.

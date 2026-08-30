@@ -27,6 +27,18 @@
       "effort": "high"
     }
   },
+  "archival_term_extraction": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.0,
+    "max_tokens": 8000,
+    "timeout": 180,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "사료 번역 용어 추출(사전 스캔·사후 감사). scripts/scan_archival_terms.py --llm, scripts/audit_archival_terms.py 전용 (runtime_tools/archival_translation/terms.py). 표면 매칭 대신 문맥으로 인명·기관·정치용어와 번역문이 실제 쓴 표기를 뽑아 보고서를 만든다 — 번역 루프·재시도에는 관여하지 않는다. json_mode가 필요해 OpenAI 호환 경로, thinking OFF(vector_query_translation과 같은 이유: V4는 기본 ON이라 추론이 예산을 먹고 본문 없이 200이 온다). 결과는 output/archival_translations/<id>.terms.jsonl에 provider·model 포함 키로 캐시되므로 모델을 바꾸면 재추출된다. 2026-08-31 신설."
+  },
   "commulingo_event_evidence_labels": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",

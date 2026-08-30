@@ -34,6 +34,7 @@ from .core import (
     validate,
 )
 from .sources import ADAPTERS, get_adapter
+from .terms import post_audit, pre_scan, terms_cache_path
 
 __all__ = [
     "ADAPTERS",
@@ -56,11 +57,14 @@ __all__ = [
     "load_spec",
     "parse_response",
     "plan",
+    "post_audit",
+    "pre_scan",
     "preflight",
     "probe",
     "render_chunk",
     "run",
     "slice_documents",
     "spec_path",
+    "terms_cache_path",
     "validate",
 ]
