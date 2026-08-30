@@ -142,6 +142,29 @@ def exact_matches(
     return out
 
 
+def list_segments(
+    *,
+    lang_pair: str,
+    statuses: Sequence[str] | None = None,
+    db_path: Path | str | None = None,
+) -> list[tuple[str, str, str]]:
+    """(source, target, status) 전체 — 유사도 검색처럼 코퍼스를 훑는 소비자용.
+
+    수천 행 규모라 전체 적재가 스캔 인덱스보다 단순하고 충분히 빠르다.
+    규모가 자라 문제가 되면 그때 FTS를 얹는다.
+    """
+    status_sql = ""
+    params: list[str] = [lang_pair]
+    if statuses:
+        status_sql = f" AND status IN ({','.join('?' for _ in statuses)})"
+        params.extend(statuses)
+    with _connect(db_path) as conn:
+        return conn.execute(
+            f"SELECT source, target, status FROM segments WHERE lang_pair = ?{status_sql}",
+            params,
+        ).fetchall()
+
+
 def stats(db_path: Path | str | None = None) -> dict:
     with _connect(db_path) as conn:
         total = conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
