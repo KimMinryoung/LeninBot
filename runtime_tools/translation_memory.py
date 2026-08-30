@@ -108,27 +108,34 @@ def exact_matches(
     sources: Iterable[str],
     *,
     lang_pair: str,
+    statuses: Sequence[str] | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, str]:
     """source text → target for exact matches.
 
     reviewed > published > machine 순서로 이기고, 같은 상태에서는 새 행이
     이긴다 — 정렬을 그 순서로 두고 dict를 덮어쓰게 해서, 마지막에 남는 행이
-    승자다.
+    승자다. statuses를 주면 그 상태의 행만 본다(자동 재사용은 검수 등급만
+    쓰는 식으로).
     """
     out: dict[str, str] = {}
     cleaned = [s.strip() for s in sources if (s or "").strip()]
     if not cleaned:
         return out
+    status_sql = ""
+    status_params: list[str] = []
+    if statuses:
+        status_sql = f" AND status IN ({','.join('?' for _ in statuses)})"
+        status_params = list(statuses)
     with _connect(db_path) as conn:
         for start in range(0, len(cleaned), 500):
             batch = cleaned[start : start + 500]
             marks = ",".join("?" for _ in batch)
             rows = conn.execute(
                 f"SELECT source, target FROM segments"
-                f" WHERE lang_pair = ? AND source IN ({marks})"
+                f" WHERE lang_pair = ? AND source IN ({marks})" + status_sql +
                 " ORDER BY CASE status WHEN 'reviewed' THEN 2 WHEN 'published' THEN 1 ELSE 0 END, id",
-                [lang_pair, *batch],
+                [lang_pair, *batch, *status_params],
             ).fetchall()
             for source, target in rows:
                 out[source] = target

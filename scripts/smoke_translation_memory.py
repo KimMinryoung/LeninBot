@@ -173,12 +173,81 @@ def _backfill_align_checks() -> None:
     check("block ids sorted and aligned", block_ids == [5, 6])
 
 
+def _status_filter_checks() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "tm.sqlite3"
+        tm.record_segments([("приказ", "명령")], lang_pair="ru-ko", doc_id="m", db_path=db)
+        tm.record_segments(
+            [("подпись", "서명")], lang_pair="ru-ko", doc_id="p", status="published", db_path=db
+        )
+        got = tm.exact_matches(
+            ["приказ", "подпись"], lang_pair="ru-ko",
+            statuses=("published", "reviewed"), db_path=db,
+        )
+        check("status filter hides machine rows", "приказ" not in got)
+        check("status filter keeps published rows", got.get("подпись") == "서명")
+
+
+def _glossary_validate_checks() -> None:
+    import re as _re
+
+    from runtime_tools.archival_translation.core import RUSSIAN, validate
+
+    terms = [{"ru": "НКВД", "ko": "내무인민위원부", "pattern": _re.compile("НКВД")}]
+    chunk = [(1, {"tag": "p", "lines": ["Приказ НКВД о мобилизации."]})]
+    bad = {1: ["동원에 관한 인민내무위원부(НКВД) 명령."]}   # 뒤집힌 표기
+    good = {1: ["동원에 관한 내무인민위원부(НКВД) 명령."]}
+    problems = validate(chunk, bad, RUSSIAN, terms)
+    check("glossary violation flagged", any("용어표 미준수" in p and "내무인민위원부" in p for p in problems))
+    check("glossary compliance passes", validate(chunk, good, RUSSIAN, terms) == [])
+    check("validate without terms unchanged", validate(chunk, good, RUSSIAN) == [])
+
+
+def _tm_prefill_checks() -> None:
+    from runtime_tools.archival_translation import core
+
+    with tempfile.TemporaryDirectory() as td:
+        old_db = tm.DEFAULT_DB
+        tm.DEFAULT_DB = Path(td) / "tm.sqlite3"
+        try:
+            tm.record_segments(
+                [("Приказ № 1.", "명령 제1호.")], lang_pair="ru-ko",
+                doc_id="old-spec", status="published",
+            )
+            tm.record_segments(
+                [("Приказ № 2.", "명령 제2호.")], lang_pair="ru-ko",
+                doc_id="old-spec", status="machine",
+            )
+            docs = [{"offset": 10, "blocks": [
+                {"tag": "p", "lines": ["Приказ № 1."]},
+                {"tag": "p", "lines": ["Приказ № 2."]},
+                {"tag": "p", "lines": []},
+            ]}]
+            events: list[dict] = []
+            filled = core._tm_prefill(docs, core.RUSSIAN, events.append)
+            check("prefill reuses published segment", filled.get(10) == ["명령 제1호."])
+            check("prefill refuses machine segment", 11 not in filled)
+            check("prefill skips empty blocks", 12 not in filled)
+            check("prefill emits tmReuse event", events and events[0]["event"] == "tmReuse")
+            # 재사용된 블록이 덮는 청크는 실행 대상에서 빠진다
+            chunks = [[(10, docs[0]["blocks"][0]), (12, docs[0]["blocks"][2])],
+                      [(11, docs[0]["blocks"][1])]]
+            runnable = [c for c in chunks
+                        if not all((idx in filled) or not b["lines"] for idx, b in c)]
+            check("fully covered chunk skipped", runnable == [chunks[1]])
+        finally:
+            tm.DEFAULT_DB = old_db
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
     _field_checks()
     _post_edit_checks()
     _backfill_align_checks()
+    _status_filter_checks()
+    _glossary_validate_checks()
+    _tm_prefill_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
