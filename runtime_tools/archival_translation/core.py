@@ -462,15 +462,15 @@ def build_glossary(people_path: Path, terms_path: Path,
     seen: set[str] = set()
     entries: list[dict] = []
 
-    def add(display_ru: str, ko: str, surfaces: list[str]) -> None:
+    def add(display_ru: str, ko: str, surfaces: list[str], source: str) -> None:
         if display_ru in seen or not ko:
             return
         seen.add(display_ru)
-        entries.append({"ru": display_ru, "ko": ko,
+        entries.append({"ru": display_ru, "ko": ko, "source": source,
                         "pattern": _pattern(surfaces, lang.bounded)})
 
     for ru, ko in (extra or {}).items():
-        add(ru, ko, [ru])
+        add(ru, ko, [ru], "extra")
 
     people = json.loads(people_path.read_text(encoding="utf-8")).get("people", [])
     for p in people:
@@ -488,22 +488,32 @@ def build_glossary(people_path: Path, terms_path: Path,
             # used to.
             family_ru = cyr.split()[-1]
             if len(family_ru) >= 4:
-                add(family_ru, family_ko, _variants(family_ru))
+                add(family_ru, family_ko, _variants(family_ru), "people")
             continue
         # Chinese: pin the whole name. A Chinese surname is one character and
         # matching it alone would fire on every 李 in the text; the full name
         # is what the source actually writes, and it is unambiguous.
         full_ko = ((p.get("name") or {}).get("ko") or "").strip()
         if len(cyr) >= 2 and full_ko:
-            add(cyr, full_ko, [cyr])
+            add(cyr, full_ko, [cyr], "people")
 
     for t in json.loads(terms_path.read_text(encoding="utf-8")):
         original = (t.get("original") or "").strip()
         term = ((t.get("term") or {}).get("ko") or "").strip()
         if original and term and lang.script.search(original):
-            add(original, term, [original])
+            add(original, term, [original], "terms")
 
     return entries
+
+
+def mark_enforcement(glossary: list[dict], spec_glossary: dict) -> None:
+    """Which entries the validator may fail a chunk over: spec ``extra`` and
+    ``enforce`` names, minus ``noEnforce``. Snapshot entries are advisory."""
+    no_enforce = set(spec_glossary.get("noEnforce") or [])
+    force = set(spec_glossary.get("enforce") or [])
+    for g in glossary:
+        g["enforce"] = ((g.get("source") == "extra" or g["ru"] in force)
+                        and g["ru"] not in no_enforce)
 
 
 def glossary_entries_for(text: str, glossary: list[dict], limit: int) -> list[dict]:
@@ -1205,14 +1215,13 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     glossary = build_glossary(Path(spec["glossary"]["people"]),
                               Path(spec["glossary"]["terms"]),
                               spec["glossary"].get("extra"), lang)
-    # glossary.noEnforce: 프롬프트에 주입은 하되 준수를 강제하지 않는 항목의
-    # 원문 표기 목록. 용어집에는 고유명사만이 아니라 보편적 단어에 가까운
-    # 항목도 들어오는데, 다의어 문맥에서는 확정 표기가 아닌 번역이 옳을 수
-    # 있다. 그런 항목의 표면이 원문에 있다는 것만으로 위반을 선언하면 오탐이
-    # 재시도를 소진시킨다.
-    no_enforce = set(spec["glossary"].get("noEnforce") or [])
-    for g in glossary:
-        g["enforce"] = g["ru"] not in no_enforce
+    # 준수 강제(위반 → 교정 재시도)는 사람이 이 스펙에 직접 쓴 extra 항목에만
+    # 건다. 스냅샷에서 자동으로 딸려 온 인물·용어 항목은 참고로 주입만 한다.
+    # 1925 대회 번역에서 모델의 첫 시도는 전부 옳았는데, 검증기가 스냅샷의
+    # Союз(의원 그룹)·Октябрьский(인명)·Каменева(카메네프의 속격) 표기를
+    # 재시도로 강요해 틀리게 만들었다. 자동 항목은 문맥을 모르므로 강제할
+    # 자격이 없다.
+    mark_enforcement(glossary, spec["glossary"])
     # glossary.exclude: 이 스펙에서는 용어표에서 아예 빼는 항목의 원문 표기.
     # noEnforce는 사후 검사만 끄고 프롬프트에는 "반드시 이 표기를 쓸 것"으로
     # 여전히 주입된다 — 그래서 1925 대회 번역에서 스냅샷의 Союз(두마 의원

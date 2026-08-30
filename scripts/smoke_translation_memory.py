@@ -188,6 +188,30 @@ def _status_filter_checks() -> None:
         check("status filter keeps published rows", got.get("подпись") == "서명")
 
 
+def _glossary_build_checks() -> None:
+    """스냅샷 항목은 참고용(비강제), 강제는 스펙 extra(+enforce 지명)에만."""
+    import json as _json
+    import tempfile as _tmp
+    from pathlib import Path as _P
+
+    from runtime_tools.archival_translation.core import build_glossary, mark_enforcement
+
+    people = {"people": [{"cyrillic": "Николай Бухарин", "familyName": {"ko": "부하린"}}]}
+    terms = [{"original": "Союз", "term": {"ko": "소유즈 (의원 그룹)"}}]
+    with _tmp.TemporaryDirectory() as d:
+        pp, tp = _P(d) / "p.json", _P(d) / "t.json"
+        pp.write_text(_json.dumps(people, ensure_ascii=False), encoding="utf-8")
+        tp.write_text(_json.dumps(terms, ensure_ascii=False), encoding="utf-8")
+        g = build_glossary(pp, tp, {"ЦК": "중앙위원회"})
+    by = {x["ru"]: x for x in g}
+    check("source tagged", by["ЦК"]["source"] == "extra" and by["Союз"]["source"] == "terms"
+          and by["Бухарин"]["source"] == "people")
+    mark_enforcement(g, {})
+    check("only extra enforced", [x["ru"] for x in g if x["enforce"]] == ["ЦК"])
+    mark_enforcement(g, {"noEnforce": ["ЦК"], "enforce": ["Союз"]})
+    check("enforce/noEnforce override", [x["ru"] for x in g if x["enforce"]] == ["Союз"])
+
+
 def _glossary_validate_checks() -> None:
     import re as _re
 
@@ -369,6 +393,7 @@ def main() -> int:
     _post_edit_checks()
     _backfill_align_checks()
     _status_filter_checks()
+    _glossary_build_checks()
     _glossary_validate_checks()
     _tm_prefill_checks()
     _term_soft_accept_checks()
