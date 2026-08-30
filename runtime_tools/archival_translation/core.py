@@ -247,10 +247,12 @@ class Stats:
     translated: int = 0
     retried: int = 0
     failed: int = 0
+    term_warnings: int = 0
 
     def as_dict(self) -> dict:
         return {"cached": self.cached, "translated": self.translated,
-                "retried": self.retried, "failed": self.failed}
+                "retried": self.retried, "failed": self.failed,
+                "termWarnings": self.term_warnings}
 
 
 # ── spec loading ─────────────────────────────────────────────────────
@@ -611,6 +613,8 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         # 실제로 주입된 항목뿐이다 — 못 본 표기를 요구하는 것은 검사가 아니라
         # 복권이다.
         for term in glossary_terms or []:
+            if not term.get("enforce", True):
+                continue
             if term["pattern"].search(source) and term["ko"] not in joined:
                 problems.append(
                     f"[[{idx}]] 용어표 미준수: {term['ru']} → \"{term['ko']}\" 표기를 쓸 것")
@@ -725,6 +729,20 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         if not problems:
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
             stats.translated += 1
+            return got
+        if attempt == opts.retries and all("용어표 미준수" in p for p in problems):
+            # 용어표 문제"만" 남았고 재시도도 소진됐다면 실패 대신 경고로
+            # 낮춘다. 다의어 문맥에서는 확정 표기가 아닌 번역이 옳을 수 있고,
+            # 그 판단은 검사가 아니라 사람 몫이다(발행 전 통독 + postEdits).
+            # 형식·누락·미번역과 달리 오탐 가능성이 있는 검사이므로, 오탐
+            # 하나가 문서 전체를 막게 두지 않는다. 상습 오탐 항목은 스펙의
+            # glossary.noEnforce에 올려 강제 대상에서 뺀다.
+            cache.put(key, got, {"attempt": attempt, "chars": len(prompt),
+                                 "termWarnings": problems})
+            stats.translated += 1
+            stats.term_warnings += len(problems)
+            progress({"event": "termWarnings",
+                      "blocks": [chunk[0][0], chunk[-1][0]], "problems": problems})
             return got
         correction = (
             "\n\n(직전 응답에 다음 문제가 있었다. 같은 입력을 형식에 맞게 다시 번역하라.\n"
@@ -1158,6 +1176,14 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     glossary = build_glossary(Path(spec["glossary"]["people"]),
                               Path(spec["glossary"]["terms"]),
                               spec["glossary"].get("extra"), lang)
+    # glossary.noEnforce: 프롬프트에 주입은 하되 준수를 강제하지 않는 항목의
+    # 원문 표기 목록. 용어집에는 고유명사만이 아니라 보편적 단어에 가까운
+    # 항목도 들어오는데, 다의어 문맥에서는 확정 표기가 아닌 번역이 옳을 수
+    # 있다. 그런 항목의 표면이 원문에 있다는 것만으로 위반을 선언하면 오탐이
+    # 재시도를 소진시킨다.
+    no_enforce = set(spec["glossary"].get("noEnforce") or [])
+    for g in glossary:
+        g["enforce"] = g["ru"] not in no_enforce
     chunks = [c for d in docs for c in chunk_document(d, opts.max_chars)]
     if opts.limit_chunks:
         chunks = chunks[: opts.limit_chunks]

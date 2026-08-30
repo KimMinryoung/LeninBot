@@ -239,6 +239,72 @@ def _tm_prefill_checks() -> None:
             tm.DEFAULT_DB = old_db
 
 
+def _term_soft_accept_checks() -> None:
+    import re as _re
+
+    from llm import call_registry
+    from runtime_tools.archival_translation import core
+
+    chunk = [(1, {"tag": "p", "lines": ["Приказ НКВД о мобилизации."]})]
+    glossary = [{"ru": "НКВД", "ko": "내무인민위원부",
+                 "pattern": _re.compile("НКВД"), "enforce": True}]
+
+    class _StubCache:
+        def __init__(self):
+            self.written = {}
+
+        def get(self, key):
+            return None
+
+        def put(self, key, blocks, meta):
+            self.written[key] = (blocks, meta)
+
+    # 표기 위반(뒤집힌 인민내무위원부)이지만 그 외 검사는 전부 통과하는 응답
+    reply = "[[1|p]]\n동원에 관한 인민내무위원부(НКВД) 명령."
+    calls: list[int] = []
+    original = call_registry.generate_sync
+    call_registry.generate_sync = lambda *a, **k: (calls.append(1) or reply)
+    try:
+        events: list[dict] = []
+        cache = _StubCache()
+        stats = core.Stats()
+        got = core._translate_chunk(
+            chunk, glossary, cache, core.Options(retries=2), stats, events.append
+        )
+        check("term-only failure soft-accepts", got == {1: ["동원에 관한 인민내무위원부(НКВД) 명령."]})
+        check("soft-accept retried once first", len(calls) == 2)
+        check("soft-accept emits termWarnings", any(e.get("event") == "termWarnings" for e in events))
+        check(
+            "soft-accept counts stats",
+            stats.translated == 1 and stats.term_warnings == 1 and stats.failed == 0,
+        )
+        check(
+            "soft-accept caches with warnings",
+            any("termWarnings" in meta for _, meta in cache.written.values()),
+        )
+
+        # enforce=False(noEnforce) 항목은 아예 위반이 아니므로 1회에 통과
+        calls.clear()
+        glossary2 = [dict(glossary[0], enforce=False)]
+        stats2 = core.Stats()
+        core._translate_chunk(
+            chunk, glossary2, _StubCache(), core.Options(retries=2), stats2, lambda e: None
+        )
+        check("noEnforce entry not enforced", len(calls) == 1 and stats2.term_warnings == 0)
+
+        # 치명 문제(원문 그대로 반환)는 여전히 실패로 올라온다
+        call_registry.generate_sync = lambda *a, **k: "[[1|p]]\nПриказ НКВД о мобилизации."
+        try:
+            core._translate_chunk(
+                chunk, glossary, _StubCache(), core.Options(retries=1), core.Stats(), lambda e: None
+            )
+            check("fatal problems still fail", False)
+        except RuntimeError:
+            check("fatal problems still fail", True)
+    finally:
+        call_registry.generate_sync = original
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
@@ -248,6 +314,7 @@ def main() -> int:
     _status_filter_checks()
     _glossary_validate_checks()
     _tm_prefill_checks()
+    _term_soft_accept_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1

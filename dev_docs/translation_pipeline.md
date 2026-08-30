@@ -33,7 +33,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 검증 레이어
 
-- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한/용어표 준수) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. 용어표 검사는 그 청크에 실제로 주입된 항목만 대상으로 한다 — 모델은 못 본 표기를 지킬 수 없다.
+- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한/용어표 준수) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. 용어표 검사는 그 청크에 실제로 주입된 항목만 대상으로 하며(모델은 못 본 표기를 지킬 수 없다), **오탐 방어가 두 겹이다**: 재시도를 소진하고도 용어표 문제만 남으면 실패 대신 경고로 낮춰 통과시키고(`termWarnings` 이벤트·stats, 판단은 발행 전 통독과 postEdits 몫), 다의어라 상습 오탐인 항목은 스펙의 `glossary.noEnforce` 목록에 올려 주입은 하되 강제하지 않는다. 형식·누락·미번역 검사는 오탐이 없으므로 여전히 실패로 처리한다.
 - 사이트 공통(`scripts/_translation_common.py`): `field_translation_problems()` — 한글 잔존율(원문이 한국어인 긴 필드), 원문 그대로 반환(짧은 필드), HTML 태그 열 보존, URL 보존. `translate_db_content.py`와 스모크가 사용.
 - research markdown: 제목 깊이 열·한글 잔존율·내부 보고서 링크 보존(`_validate_translation`). `translate_markdown_with_retry()`가 검증 실패 사유를 시스템 프롬프트에 붙여 1회 재번역한다(reflection 1회, 반복 자기수정 없음).
 - 오프라인 스모크: `scripts/smoke_translation_memory.py`(TM + 공용 검증기, 맨 클론에서 실행 가능), `scripts/smoke_archival_translation.py`(frontend 체크아웃 필요).
