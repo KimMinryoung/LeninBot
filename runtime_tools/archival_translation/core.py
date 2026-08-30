@@ -50,9 +50,6 @@ CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
 HANGUL_RE = re.compile(r"[가-힣]")
 
-# deepseek-v4-flash, USD per 1M tokens
-_PRICE_IN, _PRICE_OUT = 0.14, 0.28
-
 SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기는 사료 번역자다.
 원문은 당·국가 기관의 공식 문서(작전명령, 비밀서한, 총회 속기록)이며, 역사 연구용
 참고 문헌으로 공개된다.
@@ -66,6 +63,11 @@ SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기�
   문장 경계 보존은 기준이 아니다.
 - 완성된 번역문은 한국어 문어로 자연스럽게 읽혀야 한다. 번역투로 뻣뻣하더라도
   원문 구조를 흉내 내는 쪽을 택하지 말 것.
+- 번역투 금지: "~것이다"를 버릇처럼 반복하지 말 것. "~의"를 사슬처럼 잇지 말 것
+  (예: "당의 노선의 관철의 과정"이 아니라 "당 노선을 관철하는 과정"). "되어지다"
+  같은 이중 피동을 쓰지 말 것. он/она를 기계적으로 "그/그녀"로 옮기지 말 것 —
+  한국어는 아는 주어를 생략한다. 문맥이 허락하면 한자어+하다보다 고유어 동사를
+  고른다.
 - 원문의 관료적 문체와 완곡어법 자체는 그대로 옮긴다. 예: «первая категория»는 실제
   의미를 풀어 쓰지 말고 "제1범주"로 옮긴다. 원문이 모호하면 모호한 채로 둔다.
 - 다의어를 사전 첫 번째 뜻으로 기계적으로 옮기지 말 것. 문맥에 맞는 뜻을 고른다.
@@ -110,6 +112,10 @@ SYSTEM_PROMPT_ZH = """당신은 1960년대 중국공산당의 공식 문건을 �
   掩盖는 "엄개"가 아니라 "가리다", 大肆는 "대사"가 아니라 "마구"다.
 - 성어와 비유는 뜻을 옮긴다. 直译하면 한국어 독자에게 아무 뜻도 전달되지 않는다.
   예: 掩耳盗铃은 "귀를 막고 방울을 훔친다"로 옮기되 뜻이 통하게 문맥을 살린다.
+- 번역투 금지: "~것이다"를 버릇처럼 반복하지 말 것. "~의"를 사슬처럼 잇지 말 것.
+  "되어지다" 같은 이중 피동을 쓰지 말 것. 他/她를 기계적으로 "그/그녀"로 옮기지
+  말 것 — 한국어는 아는 주어를 생략한다. 문맥이 허락하면 한자어+하다보다
+  고유어 동사를 고른다.
 - 정치 용어는 아래 용어표를 따른다. 표에 있는 항목은 반드시 그 표기를 쓴다.
 - 인용문, 조항 번호, 날짜, 수량, 직위, 문헌 제목은 정확히 보존한다. 마르크스·레닌·
   스탈린 인용은 인용문임이 드러나게 옮긴다.
@@ -1129,6 +1135,41 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     }
 
 
+def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts: Options,
+                               emit: Callable[[dict], None]) -> None:
+    """성공한 청크의 블록 쌍을 코퍼스 단위 번역 메모리에 적재한다 (인수인계 §5-1).
+
+    청크 캐시는 이 파이프라인 안에서만 재사용되는 해시 키 저장소라 문서 간
+    연속성에 쓸 수 없다. TM은 정렬된 (원문, 번역) 쌍을 남겨 다음 단계(완전
+    일치 재사용, 예시 주입)의 토대가 된다. 캐시에서 나온 청크도 다시 적재한다
+    — INSERT OR IGNORE라 중복 비용이 없고, 캐시보다 늦게 생긴 TM에 과거
+    실행분이 재실행만으로 채워진다. TM 실패가 번역 실행을 깨서는 안 되므로
+    어떤 예외도 여기서 멈춘다.
+    """
+    try:
+        from llm import call_registry
+        from runtime_tools import translation_memory
+
+        pairs: list[tuple[str, str]] = []
+        block_ids: list[int] = []
+        for chunk, got in succeeded:
+            for idx, block in chunk:
+                lines = got.get(idx)
+                if not lines:
+                    continue
+                pairs.append(("\n".join(block["lines"]), "\n".join(lines)))
+                block_ids.append(idx)
+        if not pairs:
+            return
+        profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+        inserted = translation_memory.record_segments(
+            pairs, lang_pair=f"{lang.code}-ko", doc_id=spec.get("id", "unnamed"),
+            block_ids=block_ids, provider=profile.provider, model=profile.model)
+        emit({"event": "tm", "segments": len(pairs), "inserted": inserted})
+    except Exception as e:
+        emit({"event": "tmFailed", "error": str(e)})
+
+
 def run(spec: dict, opts: Options | None = None,
         progress: Callable[[dict], None] | None = None) -> dict:
     """Translate every chunk and (unless limit_chunks) write the fragment."""
@@ -1169,11 +1210,12 @@ def run(spec: dict, opts: Options | None = None,
         futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats,
                                emit, lang)
                    for c in chunks]
-        results, failures = [], []
+        succeeded: list[tuple[list, dict[int, list[str]]]] = []
+        failures = []
         for i, (fut, chunk) in enumerate(zip(futures, chunks), 1):
             span = [chunk[0][0], chunk[-1][0]]
             try:
-                results.append(fut.result())
+                succeeded.append((chunk, fut.result()))
             except Exception as e:
                 # One bad chunk must not discard the 40 good ones: they are
                 # already cached, so a re-run costs only the failures.
@@ -1182,8 +1224,11 @@ def run(spec: dict, opts: Options | None = None,
             emit({"event": "chunk", "done": i, "total": len(futures)})
 
     translated: dict[int, list[str]] = {}
-    for r in results:
+    for _, r in succeeded:
         translated.update(r)
+
+    # 실패한 청크가 있어도 성공분은 유효한 정렬 쌍이므로 먼저 적재한다.
+    _record_translation_memory(spec, lang, succeeded, opts, emit)
 
     result = {"stats": stats.as_dict(), "seconds": round(time.time() - started, 1),
               "chunks": len(chunks), "failures": failures, "output": None}
