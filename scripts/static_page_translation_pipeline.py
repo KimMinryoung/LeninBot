@@ -66,36 +66,11 @@ def _page_paths(slugs: list[str]) -> list[Path]:
     return [_page_path(slug) for slug in slugs] if slugs else sorted(STATIC_PAGES_DIR.glob("*.json"))
 
 
-def _strip_fences(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
-    return text.strip()
-
-
-def _parse_json_object(text: str) -> dict[str, Any]:
-    raw = _strip_fences(text)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start < 0 or end <= start:
-            raise
-        data = json.loads(raw[start : end + 1])
-    if not isinstance(data, dict):
-        raise ValueError("translation output is not a JSON object")
-    return data
-
-
-def _tag_sequence(html: str) -> list[str]:
-    without_comments = re.sub(r"<!--.*?-->", "", html or "", flags=re.DOTALL)
-    tags = re.findall(r"<\s*/?\s*([a-zA-Z][a-zA-Z0-9:-]*)\b", without_comments)
-    return [tag.lower() for tag in tags]
-
-
-from _translation_common import hangul_ratio as _hangul_ratio
+from scripts._translation_common import (
+    hangul_ratio as _hangul_ratio,
+    parse_json_object as _parse_json_object,
+    tag_sequence as _tag_sequence,
+)
 
 
 def _split_edge_whitespace(text: str) -> tuple[str, str, str]:
