@@ -157,6 +157,14 @@ def main() -> int:
         check("지나치게 짧은 번역을 잡는다",
               any("짧" in p for p in at.validate(sample, {**got, big[0]: ["짧음"]})))
 
+    # 용어집 준수 검사: 가나다 스텁에는 확정 표기가 없으므로, 샘플에 등장하는
+    # 용어가 하나라도 있으면 위반으로 잡혀야 한다.
+    sample_terms = _core.glossary_entries_for(rendered, glossary, at.Options().glossary_limit)
+    if sample_terms:
+        check("용어표 미준수를 잡는다",
+              any("용어표 미준수" in p
+                  for p in at.validate(sample, got, None, sample_terms)))
+
     print("translate loop (stub provider)")
     # _translate_chunk is the one path the other checks never enter, because it
     # is the one that calls the API. Stubbing the executor covers it offline —
@@ -176,8 +184,18 @@ def main() -> int:
         def put(self, key, blocks, meta):
             self.written[key] = (blocks, meta)
 
+    # _translate_chunk은 이제 용어집 준수까지 검증하므로, 스텁도 샘플에 등장하는
+    # 확정 표기를 실어야 통과한다 — 실제 모델에게 요구하는 것과 같은 조건이다.
+    def _ko_with_terms(line: str) -> str:
+        needed = " ".join(t["ko"] for t in sample_terms if t["pattern"].search(line))
+        return (_ko(line) + (" " + needed if needed else "")).rstrip()
+
+    stub_ok = "\n\n".join(
+        f"[[{idx}|{b['tag']}]]\n" + "\n".join(_ko_with_terms(l) for l in b["lines"])
+        for idx, b in sample)
+
     original = call_registry.generate_sync
-    call_registry.generate_sync = lambda *a, **k: stub
+    call_registry.generate_sync = lambda *a, **k: stub_ok
     try:
         cache = _StubCache()
         stats = core.Stats()

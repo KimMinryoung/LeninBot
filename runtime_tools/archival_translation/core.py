@@ -492,9 +492,16 @@ def build_glossary(people_path: Path, terms_path: Path,
     return entries
 
 
-def glossary_for(text: str, glossary: list[dict], limit: int) -> list[tuple[str, str]]:
-    hits = [(g["ru"], g["ko"]) for g in glossary if g["pattern"].search(text)]
+def glossary_entries_for(text: str, glossary: list[dict], limit: int) -> list[dict]:
+    """이 텍스트에 등장하는 용어표 항목들 — 프롬프트 주입과 사후 검사가 같은
+    목록을 봐야 한다. 모델은 자기가 못 본 항목을 지킬 수 없으므로, 검사도
+    주입된(limit 안의) 항목만 대상으로 한다."""
+    hits = [g for g in glossary if g["pattern"].search(text)]
     return hits[:limit]
+
+
+def glossary_for(text: str, glossary: list[dict], limit: int) -> list[tuple[str, str]]:
+    return [(g["ru"], g["ko"]) for g in glossary_entries_for(text, glossary, limit)]
 
 
 # ── chunking ─────────────────────────────────────────────────────────
@@ -542,7 +549,8 @@ def parse_response(text: str) -> dict[int, list[str]]:
 
 
 def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
-             lang: SourceLanguage | None = None) -> list[str]:
+             lang: SourceLanguage | None = None,
+             glossary_terms: list[dict] | None = None) -> list[str]:
     lang = lang or RUSSIAN
     problems = []
     # A block with no lines (an all-numeric table) sends only its marker and
@@ -595,6 +603,17 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         src_len = sum(len(ln) for ln in block["lines"])
         if src_len > 200 and len(joined) < src_len * lang.short_ratio:
             problems.append(f"[[{idx}]] 번역문이 지나치게 짧음 ({len(joined)}자 < 원문 {src_len}자)")
+
+        # 용어표 준수: 프롬프트는 "표에 있는 항목은 반드시 그 표기를 쓴다"고
+        # 지시하지만, 지시만으로는 긴 청크에서 희석된다(인수인계 P1). 원문에
+        # 항목이 등장하는데 번역문에 확정 표기가 없으면 위반이고, 그 사유가
+        # 교정 재시도로 돌아가 모델이 스스로 고친다. 검사 대상은 이 청크에
+        # 실제로 주입된 항목뿐이다 — 못 본 표기를 요구하는 것은 검사가 아니라
+        # 복권이다.
+        for term in glossary_terms or []:
+            if term["pattern"].search(source) and term["ko"] not in joined:
+                problems.append(
+                    f"[[{idx}]] 용어표 미준수: {term['ru']} → \"{term['ko']}\" 표기를 쓸 것")
     return problems
 
 
@@ -673,6 +692,8 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
 
     lang = lang or RUSSIAN
     prompt = _chunk_prompt(chunk, glossary, opts)
+    # 프롬프트에 주입된 것과 같은 용어 목록으로 사후 검사한다.
+    chunk_terms = glossary_entries_for(render_chunk(chunk), glossary, opts.glossary_limit)
     key = _chunk_key(prompt, opts, lang)
 
     cached = cache.get(key)
@@ -700,7 +721,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             time.sleep(2 * attempt)
             continue
         got = parse_response(raw)
-        problems = validate(chunk, got, lang)
+        problems = validate(chunk, got, lang, chunk_terms)
         if not problems:
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
             stats.translated += 1
@@ -1172,6 +1193,45 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     }
 
 
+# 자동 재사용은 검수 등급만: machine 세그먼트를 되먹이면 미검수 출력이
+# 자기 강화 루프를 탄다. 세그먼트 승격은 backfill(frozen→published)이나
+# 수동 reviewed 지정으로 이뤄진다.
+_TM_REUSE_STATUSES = ("published", "reviewed")
+
+
+def _tm_prefill(docs: list[dict], lang: SourceLanguage,
+                emit: Callable[[dict], None]) -> dict[int, list[str]]:
+    """검수 등급 TM 세그먼트와 완전 일치하는 블록을 모델 없이 채운다.
+
+    반복 문구(조문 서두, 서명부, 재수록 단락)는 이미 사람 검수를 거친 번역이
+    코퍼스에 있다. 완전 일치는 LLM 호출 비용이 0이고 회귀 위험도 0이다
+    (인수인계 §2.3). TM 실패는 재사용을 포기할 이유일 뿐 번역을 멈출 이유가
+    아니므로 어떤 예외도 여기서 멈춘다.
+    """
+    try:
+        from runtime_tools import translation_memory
+
+        source_by_idx: dict[int, str] = {}
+        for doc in docs:
+            for i, block in enumerate(doc["blocks"]):
+                text = "\n".join(block["lines"]).strip()
+                if text:
+                    source_by_idx[doc["offset"] + i] = text
+        if not source_by_idx:
+            return {}
+        hits = translation_memory.exact_matches(
+            list(source_by_idx.values()), lang_pair=f"{lang.code}-ko",
+            statuses=_TM_REUSE_STATUSES)
+        filled = {idx: hits[text].split("\n")
+                  for idx, text in source_by_idx.items() if text in hits}
+        if filled:
+            emit({"event": "tmReuse", "blocks": len(filled)})
+        return filled
+    except Exception as e:
+        emit({"event": "tmReuseFailed", "error": str(e)})
+        return {}
+
+
 def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts: Options,
                                emit: Callable[[dict], None]) -> None:
     """성공한 청크의 블록 쌍을 코퍼스 단위 번역 메모리에 적재한다 (인수인계 §5-1).
@@ -1233,14 +1293,24 @@ def run(spec: dict, opts: Options | None = None,
     lang = prepared["_lang"]
 
     cache = Cache(_cache_path(spec, opts.cache_path))
+
+    tm_filled = _tm_prefill(docs, lang, emit)
+    # TM이 청크의 모든(비어 있지 않은) 블록을 덮으면 그 청크는 모델도 캐시도
+    # 필요 없다. 일부만 덮인 청크는 통째로 돌린다 — 덮인 블록만 빼고 청크를
+    # 다시 자르면 프롬프트가 달라져 기존 청크 캐시가 전부 무효가 되고,
+    # 재사용이 비용을 줄이는 게 아니라 늘리게 된다.
+    runnable = [c for c in chunks
+                if not all((idx in tm_filled) or not b["lines"] for idx, b in c)]
     pending = sum(
-        1 for c in chunks
+        1 for c in runnable
         if cache.get(_chunk_key(_chunk_prompt(c, glossary, opts), opts, lang)) is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
         preflight(opts, lang)
     emit({"event": "plan", "pending": pending,
+          "tmReusedBlocks": len(tm_filled),
+          "chunksSkipped": len(chunks) - len(runnable),
           **{k: v for k, v in prepared.items() if not k.startswith("_")}})
 
     stats = Stats()
@@ -1249,10 +1319,10 @@ def run(spec: dict, opts: Options | None = None,
     with ThreadPoolExecutor(max_workers=opts.concurrency) as pool:
         futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats,
                                emit, lang)
-                   for c in chunks]
+                   for c in runnable]
         succeeded: list[tuple[list, dict[int, list[str]]]] = []
         failures = []
-        for i, (fut, chunk) in enumerate(zip(futures, chunks), 1):
+        for i, (fut, chunk) in enumerate(zip(futures, runnable), 1):
             span = [chunk[0][0], chunk[-1][0]]
             try:
                 succeeded.append((chunk, fut.result()))
@@ -1266,8 +1336,11 @@ def run(spec: dict, opts: Options | None = None,
     translated: dict[int, list[str]] = {}
     for _, r in succeeded:
         translated.update(r)
+    # 부분 덮임 청크에서는 모델 출력과 TM이 겹친다. 검수 등급 TM이 이긴다.
+    translated.update(tm_filled)
 
     # 실패한 청크가 있어도 성공분은 유효한 정렬 쌍이므로 먼저 적재한다.
+    # (TM에서 온 블록은 모델 출력이 아니므로 다시 적재하지 않는다.)
     _record_translation_memory(spec, lang, succeeded, opts, emit)
 
     result = {"stats": stats.as_dict(), "seconds": round(time.time() - started, 1),
