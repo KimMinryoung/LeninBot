@@ -252,6 +252,13 @@ class Stats:
     retried: int = 0
     failed: int = 0
     term_warnings: int = 0
+    # 워커 스레드들이 같은 객체를 올린다. 속성 += 는 원자적이지 않으므로
+    # 갱신은 add()로 모은다.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def add(self, name: str, n: int = 1) -> None:
+        with self._lock:
+            setattr(self, name, getattr(self, name) + n)
 
     def as_dict(self) -> dict:
         return {"cached": self.cached, "translated": self.translated,
@@ -657,9 +664,24 @@ def _cache_path(spec: dict, override: Path | None) -> Path:
 
 # ── translation ──────────────────────────────────────────────────────
 
-def _chunk_prompt(chunk, glossary, opts: Options) -> str:
+def _prepare_chunk(chunk, glossary, opts: Options,
+                   lang: SourceLanguage | None = None) -> tuple[str, list[dict], str]:
+    """(prompt, injected glossary entries, cache key) for one chunk.
+
+    프롬프트 주입과 사후 검사는 같은 용어 목록을 봐야 하고, run()의 pending
+    집계와 워커는 같은 키를 봐야 한다. 한 자리에서 한 번만 만든다.
+    """
     body = render_chunk(chunk)
-    terms = glossary_for(body, glossary, opts.glossary_limit)
+    terms = glossary_entries_for(body, glossary, opts.glossary_limit)
+    prompt = _render_prompt(chunk, body, [(g["ru"], g["ko"]) for g in terms])
+    return prompt, terms, _chunk_key(prompt, opts, lang)
+
+
+def _chunk_prompt(chunk, glossary, opts: Options) -> str:
+    return _prepare_chunk(chunk, glossary, opts)[0]
+
+
+def _render_prompt(chunk, body: str, terms: list[tuple[str, str]]) -> str:
     gloss_text = "\n".join(f"- {ru} → {ko}" for ru, ko in terms) or "(해당 없음)"
     example_text = ""
     examples = chunk[0][1].get("tmExamples") or []
@@ -703,18 +725,17 @@ def _chunk_key(prompt: str, opts: Options,
 
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
                      progress: Callable[[dict], None],
-                     lang: SourceLanguage | None = None) -> dict[int, list[str]]:
+                     lang: SourceLanguage | None = None,
+                     prepared: tuple[str, list[dict], str] | None = None) -> dict[int, list[str]]:
     from llm import call_registry
 
     lang = lang or RUSSIAN
-    prompt = _chunk_prompt(chunk, glossary, opts)
-    # 프롬프트에 주입된 것과 같은 용어 목록으로 사후 검사한다.
-    chunk_terms = glossary_entries_for(render_chunk(chunk), glossary, opts.glossary_limit)
-    key = _chunk_key(prompt, opts, lang)
+    # run()은 pending 집계 때 이미 만든 것을 넘긴다; 직접 부르는 쪽은 여기서 만든다.
+    prompt, chunk_terms, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
 
     cached = cache.get(key)
     if cached:
-        stats.cached += 1
+        stats.add("cached")
         return {int(k): v for k, v in cached["blocks"].items()}
 
     correction = ""
@@ -728,7 +749,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             # a silent retry here is how a bad key burns every chunk before
             # anyone sees why.
             last_reason = "빈 응답 (provider 오류는 llm-registry 로그 참조)"
-            stats.retried += 1
+            stats.add("retried")
             progress({"event": "retry", "blocks": [chunk[0][0], chunk[-1][0]],
                       "attempt": attempt, "problems": [last_reason]})
             correction = "\n\n(직전 응답이 비어 있었다. 형식을 지켜 다시 출력하라.)"
@@ -738,7 +759,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         problems = validate(chunk, got, lang, chunk_terms)
         if not problems:
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
-            stats.translated += 1
+            stats.add("translated")
             return got
         if attempt == opts.retries and all("용어표 미준수" in p for p in problems):
             # 용어표 문제"만" 남았고 재시도도 소진됐다면 실패 대신 경고로
@@ -749,8 +770,8 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             # glossary.noEnforce에 올려 강제 대상에서 뺀다.
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt),
                                  "termWarnings": problems})
-            stats.translated += 1
-            stats.term_warnings += len(problems)
+            stats.add("translated")
+            stats.add("term_warnings", len(problems))
             progress({"event": "termWarnings",
                       "blocks": [chunk[0][0], chunk[-1][0]], "problems": problems})
             return got
@@ -759,11 +780,11 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             + "\n".join(f"- {p}" for p in problems) + ")"
         )
         last_reason = "; ".join(problems[:3])
-        stats.retried += 1
+        stats.add("retried")
         progress({"event": "retry", "blocks": [chunk[0][0], chunk[-1][0]],
                   "attempt": attempt, "problems": problems[:3]})
 
-    stats.failed += 1
+    stats.add("failed")
     raise RuntimeError(
         f"청크 {chunk[0][0]}–{chunk[-1][0]} 번역 실패 ({opts.retries}회 시도) — {last_reason}")
 
@@ -1020,27 +1041,28 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
 
 # ── public entry points ──────────────────────────────────────────────
 
-def preflight(opts: Options | None = None, lang: SourceLanguage | None = None) -> None:
+def preflight(opts: Options | None = None, lang: SourceLanguage | None = None,
+              provider: str | None = None) -> None:
     """Fail fast on a credential that cannot possibly work.
 
     call_registry.generate_sync swallows the provider exception and returns
     None, so without this check a bad key surfaces only as every chunk
     failing its full retry budget with no stated cause. 언어쌍마다 provider가
-    다를 수 있으므로 검사할 feature도 lang을 따른다.
+    다를 수 있으므로 검사할 feature도 lang을 따른다. ``provider``를 주면
+    registry 대신 그 provider를 검사한다 (--compare의 변형들).
     """
-    opts = opts or Options()
     lang = lang or RUSSIAN
     from llm import call_registry
 
-    profile = call_registry.resolve(lang.feature)
+    provider = provider or call_registry.resolve(lang.feature).provider
     try:
-        connection = call_registry.resolve_provider_connection(profile.provider)
+        connection = call_registry.resolve_provider_connection(provider)
     except ValueError:
         return  # unfamiliar provider shape — let the call itself report
     except call_registry.ProviderConnectionError as exc:
         raise SpecError(
             f"{exc.credential_name}가 설정되어 있지 않다 "
-            f"(provider={profile.provider}). credstore를 마운트해 실행하거나 "
+            f"(provider={provider}). credstore를 마운트해 실행하거나 "
             "LLM Gateway를 설정할 것.") from None
     try:
         connection.api_key.encode("ascii")
@@ -1334,9 +1356,8 @@ def run(spec: dict, opts: Options | None = None,
     # 재사용이 비용을 줄이는 게 아니라 늘리게 된다.
     runnable = [c for c in chunks
                 if not all((idx in tm_filled) or not b["lines"] for idx, b in c)]
-    pending = sum(
-        1 for c in runnable
-        if cache.get(_chunk_key(_chunk_prompt(c, glossary, opts), opts, lang)) is None)
+    prepared_chunks = [_prepare_chunk(c, glossary, opts, lang) for c in runnable]
+    pending = sum(1 for _, _, key in prepared_chunks if cache.get(key) is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
@@ -1351,8 +1372,8 @@ def run(spec: dict, opts: Options | None = None,
 
     with ThreadPoolExecutor(max_workers=opts.concurrency) as pool:
         futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats,
-                               emit, lang)
-                   for c in runnable]
+                               emit, lang, prep)
+                   for c, prep in zip(runnable, prepared_chunks)]
         succeeded: list[tuple[list, dict[int, list[str]]]] = []
         failures = []
         for i, (fut, chunk) in enumerate(zip(futures, runnable), 1):

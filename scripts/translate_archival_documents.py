@@ -88,8 +88,10 @@ def main() -> int:
             return 0
 
         if args.compare:
-            at.preflight(opts, at.language_for(spec))
             variants = [v.strip() for v in args.compare.split(",") if v.strip()]
+            # 비교 대상은 registry의 provider가 아니라 변형마다 다르다.
+            for provider in dict.fromkeys(v.partition("+")[0].partition("/")[0] for v in variants):
+                at.preflight(opts, at.language_for(spec), provider=provider)
             report = at.compare(spec, variants, opts, args.compare_chunks)
             out = args.compare_out or Path(f"/tmp/compare-{spec['id']}.md")
             lines = [f"# 번역 모델 비교 — {spec['id']}",
