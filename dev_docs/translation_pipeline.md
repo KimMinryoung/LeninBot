@@ -14,6 +14,13 @@
 
 설계 원칙은 `~/uploads`로 전달된 번역기 인수인계 문서(2026-08-30)를 따른다: LLM은 청크 번역기로만 쓰고, 용어 일관성·연속성·검증은 결정론적 레이어가 책임진다. 모델 호출은 전부 `call_registry`의 feature 단위 설정(`config/llm_call_sites.json`)을 지난다.
 
+## 사료 파이프라인 실행 (2026-08-30 정리)
+
+- **실행**: `venv/bin/python scripts/translate_archival_documents.py --spec <id>`. 프로바이더 호출은 LLM 게이트웨이 프록시(`:8110`)를 지나고 키는 프록시가 주입하므로 **credstore·sudo·systemd-run이 필요 없다** (예전 `run-archival-translation.sh` 래퍼와 `LoadCredentialEncrypted` 안내는 삭제됨). `--plan`은 모델을 부르지 않고 슬라이싱·청킹·견적만 낸다. 같은 실행은 `POST /admin/archival-translation/run`으로도 된다.
+- **모델·max_tokens·thinking은 registry가 결정한다**: `config/llm_call_sites.json`의 `archival_document_translation_ru`/`_zh` 항목(또는 `LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL`). `call_registry.resolve()`는 항목 값을 호출부 기본값보다 우선하므로 CLI·API·`Options`에는 model 옵션이 **없다** — 예전 `--model`/`--max-tokens`는 조용히 무시되던 죽은 옵션이라 제거했다. 후보 모델은 `--compare provider/model[,+think,+effort=high]`로 같은 청크를 나란히 뽑아 본 뒤 registry 항목을 고친다. `--compare`의 preflight는 변형에 적힌 provider마다 검사한다.
+- **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 주입 용어 목록, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. 사후 용어 검사가 프롬프트에 주입된 목록과 같은 목록을 보는 것도 여기서 보장된다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
+- **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서·검증기(`parse_response`/`validate`)가 바뀌어 옛 캐시의 판정을 믿을 수 없을 때만 올린다.
+
 ## 번역 메모리 (TM)
 
 `runtime_tools/translation_memory.py`. SQLite(`output/translation_memory.sqlite3`)의 단일 테이블:
@@ -40,7 +47,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 스타일 자산
 
-- 번역투 금지 목록(writer/prompts.py에서 이식): ~것이다 반복, ~의 사슬, 되어지다 이중 피동, 그/그녀 남용, 한자어+하다 편중 — 사료 시스템 프롬프트(RU·ZH) 양쪽에 있다. 시스템 프롬프트는 청크 캐시 키에 포함되므로 프롬프트 수정은 캐시를 자동 무효화한다(frozen 스펙은 애초에 재실행이 거부된다).
+- 번역투 금지 목록(writer/prompts.py에서 이식): ~것이다 반복, ~의 사슬, 되어지다 이중 피동, 그/그녀 남용, 한자어+하다 편중 — 사료 시스템 프롬프트(RU·ZH) 양쪽에 있다. 시스템 프롬프트 해시와 유저 프롬프트 전문이 청크 캐시 키에 포함되므로 프롬프트 수정은 캐시를 자동 무효화한다(frozen 스펙은 애초에 재실행이 거부된다). `PROMPT_VERSION`은 파서·검증기 변경 전용이다.
 - 문장부호 규칙은 한 곳에 있지 않다: ZH 프롬프트(《》·「」·굽은 따옴표·着重号), 조립기의 `quotes:"curly"` 정규화, 스펙별 `register` 문자열, em-dash 정책(`commulingo_strip_em_dashes.py`).
 
 ## 인수인계 체크리스트 대조 (2026-08-30 기준)
@@ -56,7 +63,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.1 한국어 출력 팽창 | ✅ | `SourceLanguage.output_ratio` (RU 0.9 / ZH 1.8) |
 | §2.2 코퍼스 단위 용어집 | ⚠️ | CommuLingo DB(상태·출처·리비전 있음)가 코퍼스 용어집, 파이프라인은 스냅샷을 읽기 전용 소비. 스냅샷 갱신은 수동 단계 |
 | §2.2 사전 스캔(PREPARE) | ⚠️ | RU: `scripts/scan_archival_terms.py` — 약어·문장 중간 대문자 낱말을 용어집과 대조해 미등재 후보만 보고, 채택·표기는 사람이 결정. ZH: 대소문자 신호가 없어 NER 도입 전까지 수동 |
-| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_for()` + 상한 60 |
+| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_entries_for()` + 상한 60, 주입 목록과 사후 검사 목록이 동일(`_prepare_chunk`) |
 | §2.2 표기 변형 매칭 | ✅ | 러시아어 곡용 변형 + 경계 가드, 중국어 무경계 |
 | §2.3 TM 정렬 쌍 저장 | ✅ | 이번 변경. v1은 적재 우선 |
 | §2.3 완전 일치 재사용 | ✅ | 검수 등급 한정, 청크 경계 보존(`_tm_prefill`) |
@@ -69,7 +76,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
 | §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |
 | §2.6 위치 지정 편집 정제 | — | 정제 단계 자체가 없다(P5의 회귀 위험이 없는 상태). 필요해지면 diff 반환으로 설계 |
-| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드. 사료는 `archival_document_translation_ru`/`_zh`로 분리되어 언어쌍별 provider·model 교체 가능(`SourceLanguage.feature`). 교체 전 `--compare`로 검증 |
+| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드. 사료는 `archival_document_translation_ru`/`_zh`로 분리되어 언어쌍별 provider·model 교체 가능(`SourceLanguage.feature`). 교체 전 `--compare`로 검증. CLI·API에는 model 옵션이 없다(registry가 이김) |
 | §2.7 Batch API | ❌ | 미지원 — 남은 로드맵(야간 타이머 작업이 후보) |
 | §2.7 토큰·비용 기록 | ✅ | `record_llm_call` 감사 + `plan()` 사전 견적 |
 | §2.8 고정 테스트셋·자동 지표 | ❌ | 없음 — 남은 로드맵 §5-5 (모델 교체 재평가의 전제) |
