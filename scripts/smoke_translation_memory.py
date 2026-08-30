@@ -305,6 +305,30 @@ def _term_soft_accept_checks() -> None:
         call_registry.generate_sync = original
 
 
+def _prepare_scan_checks() -> None:
+    import re as _re
+
+    from scripts.scan_archival_terms import scan_candidates
+
+    docs = [{"offset": 0, "blocks": [{"lines": [
+        "Приказ НКВД получен.",
+        "Доклад товарища Ульмера. Приказ прилагается.",
+        "Сообщение Ульмера в ЦК.",
+    ]}]}]
+    glossary = [{"ru": "НКВД", "ko": "내무인민위원부",
+                 "pattern": _re.compile(r"(?<![А-Яа-яЁё])НКВД(?![А-Яа-яЁё])")}]
+
+    found = scan_candidates(docs, glossary, min_count=1)
+    surfaces = {c["surface"]: c for c in found}
+    check("known glossary surface excluded", "НКВД" not in surfaces)
+    check("mid-sentence name is a candidate", surfaces.get("Ульмера", {}).get("count") == 2)
+    check("abbreviation is a candidate", "ЦК" in surfaces)
+    check("sentence-initial capitals ignored", "Приказ" not in surfaces and "Доклад" not in surfaces)
+    check("context captured", "товарища Ульмера" in surfaces["Ульмера"]["context"])
+    check("min_count filters singletons",
+          {c["surface"] for c in scan_candidates(docs, glossary, min_count=2)} == {"Ульмера"})
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
@@ -315,6 +339,7 @@ def main() -> int:
     _glossary_validate_checks()
     _tm_prefill_checks()
     _term_soft_accept_checks()
+    _prepare_scan_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
