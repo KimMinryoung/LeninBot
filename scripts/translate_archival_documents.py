@@ -147,6 +147,13 @@ def main() -> int:
             elif kind == "chunkFailed":
                 print(f"  실패 청크 {event['blocks'][0]}–{event['blocks'][1]}: {event['error']}",
                       flush=True)
+            elif kind == "termWarnings":
+                # 재시도로도 안 잡힌 용어표 문제 — 오탐일 수 있어 실패 대신
+                # 경고다. 발행 전 통독에서 판단하고, 상습 오탐은 스펙의
+                # glossary.noEnforce에 올린다.
+                print(f"  용어표 경고 (블록 {event['blocks'][0]}–{event['blocks'][1]}):", flush=True)
+                for p_ in event["problems"]:
+                    print(f"    {p_}", flush=True)
             elif kind == "done":
                 print(f"완료: {event['stats']} ({event['seconds']}초)")
                 for f in event.get("failures", []):
