@@ -136,6 +136,9 @@ def main() -> int:
             if kind == "plan":
                 _print_plan(event)
                 print(f"\n번역 시작 (동시 {opts.concurrency})")
+            elif kind == "cacheInvalid":
+                print(f"    캐시 재심사 탈락 {event['blocks'][0]}–{event['blocks'][1]}: "
+                      f"{'; '.join(event['problems'])} → 다시 번역", flush=True)
             elif kind == "retry":
                 print(f"    재시도 {event['attempt']}: {'; '.join(event['problems'])}", flush=True)
             elif kind == "chunk" and (event["done"] % 5 == 0 or event["done"] == event["total"]):

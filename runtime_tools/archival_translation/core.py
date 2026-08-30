@@ -44,8 +44,11 @@ CACHE_DIR = ROOT / "output" / "archival_translations"
 # LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL 환경변수를 쓴다.
 # 교체 전에 --compare로 같은 청크를 후보 모델들로 나란히 뽑아 확인할 것.
 # 캐시 키에는 시스템 프롬프트 해시와 유저 프롬프트 전문이 이미 들어간다
-# (_chunk_key). 이 상수는 프롬프트가 아니라 파서·검증기(parse_response,
-# validate)가 바뀌어 옛 캐시의 판정을 믿을 수 없게 됐을 때만 올린다.
+# (_chunk_key). 검증기(validate)가 엄격해진 경우는 이 상수를 올리지 않는다 —
+# 캐시에서 꺼낸 청크도 현재 검증기를 다시 통과해야 쓰이므로(_cached_blocks),
+# 새 검사에 걸리는 청크만 다시 번역되고 나머지 캐시는 그대로 산다. 이 상수는
+# 파서(parse_response)가 바뀌어 옛 레코드의 블록 분할 자체를 믿을 수 없게
+# 됐을 때만 올린다.
 PROMPT_VERSION = "2"
 
 _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -56,6 +59,9 @@ MARKER_RE = re.compile(r"\[\[(\d+)\|([a-z][a-z0-9]*)\]\][ \t]*\n?")
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
 HANGUL_RE = re.compile(r"[가-힣]")
+# 원문/번역문의 "문장이 끝났다"는 신호. validate()의 끊김 검사가 쓴다.
+_SENTENCE_END_SRC = re.compile(r'[.!?…»”"\)\]。！？」』]$')
+_SENTENCE_END_TGT = re.compile(r'[.!?…。」』”"\)\]:;]$')
 
 SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기는 사료 번역자다.
 원문은 당·국가 기관의 공식 문서(작전명령, 비밀서한, 총회 속기록)이며, 역사 연구용
@@ -251,6 +257,8 @@ class Stats:
     translated: int = 0
     retried: int = 0
     failed: int = 0
+    # 캐시에 있었지만 현재 검증기를 통과하지 못해 다시 번역한 청크 수.
+    revalidated: int = 0
     # 워커 스레드들이 같은 객체를 올린다. 속성 += 는 원자적이지 않으므로
     # 갱신은 add()로 모은다.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -261,7 +269,8 @@ class Stats:
 
     def as_dict(self) -> dict:
         return {"cached": self.cached, "translated": self.translated,
-                "retried": self.retried, "failed": self.failed}
+                "retried": self.retried, "failed": self.failed,
+                "revalidated": self.revalidated}
 
 
 # ── spec loading ─────────────────────────────────────────────────────
@@ -617,6 +626,22 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         src_len = sum(len(ln) for ln in block["lines"])
         if src_len > 200 and len(joined) < src_len * lang.short_ratio:
             problems.append(f"[[{idx}]] 번역문이 지나치게 짧음 ({len(joined)}자 < 원문 {src_len}자)")
+
+    # 응답이 도중에 끊긴 청크. 끊김은 청크의 마지막 블록에서만 조용히 지나간다 —
+    # 그 앞에서 끊기면 뒤 블록의 마커가 빠져 위에서 잡히고, 마지막 블록은
+    # 길이 하한만 넘으면 통과했다. 1925 대회 문서의 블록 43·1000017이 그렇게
+    # "…만들어졌", "…지원"에서 끊긴 채(원문 대비 0.36·0.30) 발행됐다. 원문이
+    # 문장부호로 끝나는데 번역의 마지막 줄이 그렇지 않으면 끊긴 것으로 본다.
+    # 전 스펙 캐시 2,923블록 실측: 마지막 블록 제한 아래 실제 끊김 2건만 잡고
+    # 오탐 0건 (제한 없이는 제목·목록 항목 3건이 걸린다). 청크 끝에 제목이 오는
+    # 일은 chunk_document가 막으므로 태그 예외는 필요 없다.
+    last = next((idx for idx, b in reversed(chunk) if b["lines"]), None)
+    if last is not None and got.get(last):
+        source = " ".join(dict(chunk)[last]["lines"]).strip()
+        tail = got[last][-1].strip()
+        if (len(source) >= 80 and _SENTENCE_END_SRC.search(source)
+                and not _SENTENCE_END_TGT.search(tail)):
+            problems.append(f"[[{last}]] 응답이 도중에 끊김: …{tail[-30:]}")
     return problems
 
 
@@ -707,6 +732,23 @@ def _chunk_key(prompt: str, opts: Options,
         f"{PROMPT_VERSION}\0{fingerprint}\0{prompt}".encode("utf-8")).hexdigest()
 
 
+def _cached_blocks(cache: "Cache", key: str, chunk,
+                   lang: SourceLanguage | None = None) -> tuple[dict[int, list[str]] | None, list[str]]:
+    """캐시 레코드를 현재 검증기로 다시 심사해 (블록들, 문제들)을 돌려준다.
+
+    캐시는 그 레코드를 저장할 당시의 validate()를 통과했다는 뜻이지 지금의
+    validate()를 통과했다는 뜻이 아니다. 검사가 하나 늘었을 때 PROMPT_VERSION을
+    올려 문서 전체를 다시 번역하는 대신, 새 검사에 걸리는 청크만 miss로 취급해
+    그것만 다시 번역한다. 문제가 없으면 (블록들, []), 레코드가 없으면 (None, []),
+    있지만 걸리면 (None, 문제들)."""
+    rec = cache.get(key)
+    if rec is None:
+        return None, []
+    blocks = {int(k): v for k, v in rec["blocks"].items()}
+    problems = validate(chunk, blocks, lang)
+    return (None, problems) if problems else (blocks, [])
+
+
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
                      progress: Callable[[dict], None],
                      lang: SourceLanguage | None = None,
@@ -717,10 +759,14 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     # run()은 pending 집계 때 이미 만든 것을 넘긴다; 직접 부르는 쪽은 여기서 만든다.
     prompt, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
 
-    cached = cache.get(key)
-    if cached:
+    cached, stale = _cached_blocks(cache, key, chunk, lang)
+    if cached is not None:
         stats.add("cached")
-        return {int(k): v for k, v in cached["blocks"].items()}
+        return cached
+    if stale:
+        stats.add("revalidated")
+        progress({"event": "cacheInvalid", "blocks": [chunk[0][0], chunk[-1][0]],
+                  "problems": stale[:3]})
 
     correction = ""
     last_reason = "원인 미상"
@@ -1325,7 +1371,8 @@ def run(spec: dict, opts: Options | None = None,
     runnable = [c for c in chunks
                 if not all((idx in tm_filled) or not b["lines"] for idx, b in c)]
     prepared_chunks = [_prepare_chunk(c, glossary, opts, lang) for c in runnable]
-    pending = sum(1 for _, key in prepared_chunks if cache.get(key) is None)
+    pending = sum(1 for c, (_, key) in zip(runnable, prepared_chunks)
+                  if _cached_blocks(cache, key, c, lang)[0] is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
