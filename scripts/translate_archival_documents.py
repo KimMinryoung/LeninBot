@@ -94,7 +94,7 @@ def main() -> int:
             return 0
 
         if args.compare:
-            at.preflight(opts)
+            at.preflight(opts, at.language_for(spec))
             variants = [v.strip() for v in args.compare.split(",") if v.strip()]
             report = at.compare(spec, variants, opts, args.compare_chunks)
             out = args.compare_out or Path(f"/tmp/compare-{spec['id']}.md")
@@ -122,7 +122,7 @@ def main() -> int:
             return 0
 
         if args.probe:
-            at.preflight(opts)
+            at.preflight(opts, at.language_for(spec))
             for rec in at.probe(spec, opts):
                 print(f"\n[{rec['case']}] {rec['provider']}/{rec['model']} "
                       f"max_tokens={rec['maxTokens']} thinking={rec['thinking']} "

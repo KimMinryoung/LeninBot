@@ -82,8 +82,9 @@ async def run_translation(req: RunRequest):
     try:
         spec = await asyncio.to_thread(at.load_spec, req.specId)
         # Check the credential before opening a stream, so a bad key is a 400
-        # here instead of a stream of identical chunk failures.
-        await asyncio.to_thread(at.preflight, opts_preview)
+        # here instead of a stream of identical chunk failures. 언어쌍마다
+        # provider가 다를 수 있으므로 스펙의 언어로 검사한다.
+        await asyncio.to_thread(at.preflight, opts_preview, at.language_for(spec))
     except at.SpecError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

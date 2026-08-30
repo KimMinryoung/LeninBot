@@ -67,7 +67,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
 | §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |
 | §2.6 위치 지정 편집 정제 | — | 정제 단계 자체가 없다(P5의 회귀 위험이 없는 상태). 필요해지면 diff 반환으로 설계 |
-| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드 |
+| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드. 사료는 `archival_document_translation_ru`/`_zh`로 분리되어 언어쌍별 provider·model 교체 가능(`SourceLanguage.feature`). 교체 전 `--compare`로 검증 |
 | §2.7 Batch API | ❌ | 미지원 — 남은 로드맵(야간 타이머 작업이 후보) |
 | §2.7 토큰·비용 기록 | ✅ | `record_llm_call` 감사 + `plan()` 사전 견적 |
 | §2.8 고정 테스트셋·자동 지표 | ❌ | 없음 — 남은 로드맵 §5-5 (모델 교체 재평가의 전제) |
