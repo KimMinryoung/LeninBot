@@ -406,7 +406,14 @@ def slice_documents(spec: dict) -> list[dict]:
         # pin it. Left to the model it varies chunk to chunk wherever more than
         # one register is defensible — a spoken stenogram came back half 합쇼체,
         # half 한다체, while the written orders were consistent on their own.
-        chosen = [{**b, "register": entry.get("register")} for b in chosen]
+        # tmExamples(스펙 또는 문서 항목에 고정한 확정 번역례)도 같은 길로
+        # 나른다 — 실행 시점에 TM에서 동적으로 뽑으면 TM이 자랄 때마다
+        # 프롬프트와 캐시 키가 바뀌어, postEdits 수정 하나에 문서 전체를
+        # 재번역하게 된다. 후보 추천은 scripts/suggest_tm_examples.py가 하고,
+        # 채택은 사람이 스펙을 고쳐서 한다(의도된 캐시 무효화).
+        examples = entry.get("tmExamples") or spec.get("tmExamples")
+        chosen = [{**b, "register": entry.get("register"), "tmExamples": examples}
+                  for b in chosen]
         docs.append({**entry, "blocks": chosen,
                      "offset": band + anchor_idx + start})
     return docs
@@ -656,9 +663,16 @@ def _chunk_prompt(chunk, glossary, opts: Options) -> str:
     body = render_chunk(chunk)
     terms = glossary_for(body, glossary, opts.glossary_limit)
     gloss_text = "\n".join(f"- {ru} → {ko}" for ru, ko in terms) or "(해당 없음)"
+    example_text = ""
+    examples = chunk[0][1].get("tmExamples") or []
+    if examples:
+        rendered = "\n".join(
+            f"- 원문: {e['source']}\n  번역: {e['target']}" for e in examples)
+        example_text = ("참고 번역례 (이 서고의 확정 번역 — 표기와 문체를 따르되 "
+                        f"문장을 그대로 옮겨 쓰지 말 것)\n{rendered}\n\n")
     register = (chunk[0][1].get("register") or "").strip()
     register_line = f"문체: {register}\n\n" if register else ""
-    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n{register_line}"
+    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n{example_text}{register_line}"
             f"아래 단락들을 번역하라.\n\n{body}")
 
 

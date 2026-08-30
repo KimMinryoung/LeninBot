@@ -329,6 +329,39 @@ def _prepare_scan_checks() -> None:
           {c["surface"] for c in scan_candidates(docs, glossary, min_count=2)} == {"Ульмера"})
 
 
+def _tm_example_checks() -> None:
+    from runtime_tools.archival_translation import core
+    from scripts.suggest_tm_examples import rank_examples
+
+    # 스펙에 고정된 예시가 청크 프롬프트에 실린다
+    block = {"tag": "p", "lines": ["Приказ о мобилизации."],
+             "tmExamples": [{"source": "Приказ № 00447.", "target": "명령 제00447호."}]}
+    prompt = core._chunk_prompt([(1, block)], [], core.Options())
+    check("tm examples rendered in prompt",
+          "참고 번역례" in prompt and "명령 제00447호." in prompt)
+    bare = {"tag": "p", "lines": ["Приказ о мобилизации."]}
+    check("no examples, no section",
+          "참고 번역례" not in core._chunk_prompt([(1, bare)], [], core.Options()))
+
+    # 후보 순위: 겹침 높은 세그먼트가 앞서고, 완전 일치·범위 밖 길이는 빠진다
+    blocks = ["Приказ народного комиссара внутренних дел о мобилизации резервов."]
+    segments = [
+        ("Приказ народного комиссара внутренних дел об учете резервов.", "내무인민위원 명령.", "published"),
+        ("Совершенно другая тема без общих слов тут вообще нигде.", "다른 주제.", "published"),
+        ("Приказ народного комиссара внутренних дел о мобилизации резервов.", "완전 일치라 제외.", "reviewed"),
+        ("Приказ.", "너무 짧음.", "published"),
+    ]
+    ranked = rank_examples(blocks, segments, "ru", limit=3, min_score=0.25)
+    check("high-overlap segment ranked", ranked and "учете" in ranked[0]["source"])
+    check("exact match excluded from examples", all("완전 일치라 제외." != c["target"] for c in ranked))
+    check("low-overlap and short filtered", len(ranked) == 1)
+
+    zh = rank_examples(["中央委员会关于修正主义的决定与通知全文如下所述内容。"],
+                       [("中央委员会关于修正主义的决定与通知的全文内容如下所示等等。", "중앙위원회 결정.", "published")],
+                       "zh", limit=3, min_score=0.2)
+    check("zh bigram path works", len(zh) == 1)
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
@@ -340,6 +373,7 @@ def main() -> int:
     _tm_prefill_checks()
     _term_soft_accept_checks()
     _prepare_scan_checks()
+    _tm_example_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
