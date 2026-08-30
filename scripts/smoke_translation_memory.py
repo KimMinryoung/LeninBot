@@ -188,140 +188,41 @@ def _status_filter_checks() -> None:
         check("status filter keeps published rows", got.get("подпись") == "서명")
 
 
-def _glossary_build_checks() -> None:
-    """스냅샷 항목은 참고용(비강제), 강제는 스펙 extra(+enforce 지명)에만."""
-    import json as _json
-    import tempfile as _tmp
-    from pathlib import Path as _P
-
-    from runtime_tools.archival_translation.core import build_glossary, mark_enforcement
-
-    people = {"people": [{"cyrillic": "Николай Бухарин", "familyName": {"ko": "부하린"}}]}
-    terms = [{"original": "Союз", "term": {"ko": "소유즈 (의원 그룹)"}}]
-    with _tmp.TemporaryDirectory() as d:
-        pp, tp = _P(d) / "p.json", _P(d) / "t.json"
-        pp.write_text(_json.dumps(people, ensure_ascii=False), encoding="utf-8")
-        tp.write_text(_json.dumps(terms, ensure_ascii=False), encoding="utf-8")
-        g = build_glossary(pp, tp, {"ЦК": "중앙위원회"})
-    by = {x["ru"]: x for x in g}
-    check("source tagged", by["ЦК"]["source"] == "extra" and by["Союз"]["source"] == "terms"
-          and by["Бухарин"]["source"] == "people")
-    mark_enforcement(g, {})
-    check("only extra enforced", [x["ru"] for x in g if x["enforce"]] == ["ЦК"])
-    mark_enforcement(g, {"noEnforce": ["ЦК"], "enforce": ["Союз"]})
-    check("enforce/noEnforce override", [x["ru"] for x in g if x["enforce"]] == ["Союз"])
-
-
-def _glossary_validate_checks() -> None:
-    import re as _re
-
-    from runtime_tools.archival_translation.core import RUSSIAN, validate
-
-    terms = [{"ru": "НКВД", "ko": "내무인민위원부", "pattern": _re.compile("НКВД")}]
-    chunk = [(1, {"tag": "p", "lines": ["Приказ НКВД о мобилизации."]})]
-    bad = {1: ["동원에 관한 인민내무위원부(НКВД) 명령."]}   # 뒤집힌 표기
-    good = {1: ["동원에 관한 내무인민위원부(НКВД) 명령."]}
-    problems = validate(chunk, bad, RUSSIAN, terms)
-    check("glossary violation flagged", any("용어표 미준수" in p and "내무인민위원부" in p for p in problems))
-    check("glossary compliance passes", validate(chunk, good, RUSSIAN, terms) == [])
-    check("validate without terms unchanged", validate(chunk, good, RUSSIAN) == [])
-
-
-def _tm_prefill_checks() -> None:
-    from runtime_tools.archival_translation import core
-
-    with tempfile.TemporaryDirectory() as td:
-        old_db = tm.DEFAULT_DB
-        tm.DEFAULT_DB = Path(td) / "tm.sqlite3"
-        try:
-            tm.record_segments(
-                [("Приказ № 1.", "명령 제1호.")], lang_pair="ru-ko",
-                doc_id="old-spec", status="published",
-            )
-            tm.record_segments(
-                [("Приказ № 2.", "명령 제2호.")], lang_pair="ru-ko",
-                doc_id="old-spec", status="machine",
-            )
-            docs = [{"offset": 10, "blocks": [
-                {"tag": "p", "lines": ["Приказ № 1."]},
-                {"tag": "p", "lines": ["Приказ № 2."]},
-                {"tag": "p", "lines": []},
-            ]}]
-            events: list[dict] = []
-            filled = core._tm_prefill(docs, core.RUSSIAN, events.append)
-            check("prefill reuses published segment", filled.get(10) == ["명령 제1호."])
-            check("prefill refuses machine segment", 11 not in filled)
-            check("prefill skips empty blocks", 12 not in filled)
-            check("prefill emits tmReuse event", events and events[0]["event"] == "tmReuse")
-            # 재사용된 블록이 덮는 청크는 실행 대상에서 빠진다
-            chunks = [[(10, docs[0]["blocks"][0]), (12, docs[0]["blocks"][2])],
-                      [(11, docs[0]["blocks"][1])]]
-            runnable = [c for c in chunks
-                        if not all((idx in filled) or not b["lines"] for idx, b in c)]
-            check("fully covered chunk skipped", runnable == [chunks[1]])
-        finally:
-            tm.DEFAULT_DB = old_db
-
-
-def _term_soft_accept_checks() -> None:
+def _validate_checks() -> None:
+    """검증기는 형식·누락·미번역·길이만 본다. 용어표 표기는 검사하지 않는다."""
     import re as _re
 
     from llm import call_registry
     from runtime_tools.archival_translation import core
+    from runtime_tools.archival_translation.core import RUSSIAN, validate
 
     chunk = [(1, {"tag": "p", "lines": ["Приказ НКВД о мобилизации."]})]
-    glossary = [{"ru": "НКВД", "ko": "내무인민위원부",
-                 "pattern": _re.compile("НКВД"), "enforce": True}]
+    check("glossary rendering is not validated",
+          validate(chunk, {1: ["동원에 관한 인민내무위원부(НКВД) 명령."]}, RUSSIAN) == [])
+    check("verbatim echo still fails",
+          any("그대로 반환" in p for p in validate(chunk, {1: ["Приказ НКВД о мобилизации."]}, RUSSIAN)))
+
+    glossary = [{"ru": "НКВД", "ko": "내무인민위원부", "pattern": _re.compile("НКВД")}]
 
     class _StubCache:
-        def __init__(self):
-            self.written = {}
-
         def get(self, key):
             return None
 
         def put(self, key, blocks, meta):
-            self.written[key] = (blocks, meta)
+            pass
 
-    # 표기 위반(뒤집힌 인민내무위원부)이지만 그 외 검사는 전부 통과하는 응답
-    reply = "[[1|p]]\n동원에 관한 인민내무위원부(НКВД) 명령."
-    calls: list[int] = []
     original = call_registry.generate_sync
-    call_registry.generate_sync = lambda *a, **k: (calls.append(1) or reply)
+    calls: list[int] = []
     try:
-        events: list[dict] = []
-        cache = _StubCache()
+        # 용어표와 다른 표기라도 형식이 맞으면 1회에 통과
+        call_registry.generate_sync = lambda *a, **k: (calls.append(1) or "[[1|p]]\n동원에 관한 인민내무위원부(НКВД) 명령.")
         stats = core.Stats()
-        got = core._translate_chunk(
-            chunk, glossary, cache, core.Options(retries=2), stats, events.append
-        )
-        check("term-only failure soft-accepts", got == {1: ["동원에 관한 인민내무위원부(НКВД) 명령."]})
-        check("soft-accept retried once first", len(calls) == 2)
-        check("soft-accept emits termWarnings", any(e.get("event") == "termWarnings" for e in events))
-        check(
-            "soft-accept counts stats",
-            stats.translated == 1 and stats.term_warnings == 1 and stats.failed == 0,
-        )
-        check(
-            "soft-accept caches with warnings",
-            any("termWarnings" in meta for _, meta in cache.written.values()),
-        )
-
-        # enforce=False(noEnforce) 항목은 아예 위반이 아니므로 1회에 통과
-        calls.clear()
-        glossary2 = [dict(glossary[0], enforce=False)]
-        stats2 = core.Stats()
-        core._translate_chunk(
-            chunk, glossary2, _StubCache(), core.Options(retries=2), stats2, lambda e: None
-        )
-        check("noEnforce entry not enforced", len(calls) == 1 and stats2.term_warnings == 0)
-
+        got = core._translate_chunk(chunk, glossary, _StubCache(), core.Options(retries=2), stats, lambda e: None)
+        check("different rendering accepted first try", len(calls) == 1 and stats.translated == 1 and 1 in got)
         # 치명 문제(원문 그대로 반환)는 여전히 실패로 올라온다
         call_registry.generate_sync = lambda *a, **k: "[[1|p]]\nПриказ НКВД о мобилизации."
         try:
-            core._translate_chunk(
-                chunk, glossary, _StubCache(), core.Options(retries=1), core.Stats(), lambda e: None
-            )
+            core._translate_chunk(chunk, glossary, _StubCache(), core.Options(retries=1), core.Stats(), lambda e: None)
             check("fatal problems still fail", False)
         except RuntimeError:
             check("fatal problems still fail", True)
@@ -393,10 +294,8 @@ def main() -> int:
     _post_edit_checks()
     _backfill_align_checks()
     _status_filter_checks()
-    _glossary_build_checks()
-    _glossary_validate_checks()
+    _validate_checks()
     _tm_prefill_checks()
-    _term_soft_accept_checks()
     _prepare_scan_checks()
     _tm_example_checks()
     if FAILURES:

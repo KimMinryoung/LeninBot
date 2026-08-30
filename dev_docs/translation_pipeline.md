@@ -8,7 +8,7 @@
 | 엔진 | `runtime_tools/archival_translation/` | `scripts/translate_*.py` 4종 |
 | 단위 | HTML 블록, `[[번호\|태그]]` 마커, 청크(기본 3,500자) | 문서/행 통짜 1회 호출 |
 | 용어집 | CommuLingo 스냅샷 + 스펙 `glossary.extra`, 청크 등장 항목만 주입(상한 60) | 프롬프트 내장 소사전 |
-| 검증 | 결정론 5종 + 위반 항목 첨부 교정 재시도 | 결정론 검사 + 교정 재시도 1회 |
+| 검증 | 결정론 4종(마커·원문반환·한국어부재/문자잔존·길이) + 사유 첨부 교정 재시도. 용어표는 검사 안 함 | 결정론 검사 + 교정 재시도 1회 |
 | 캐시/이어하기 | 내용 해시 JSONL, 청크 단위 | 없음(스킵 조건이 재개 역할) |
 | 진입점 | `scripts/translate_archival_documents.py`, `api_routes/archival_translation.py` | systemd `research-document-translation.timer` + 수동 |
 
@@ -18,7 +18,7 @@
 
 - **실행**: `venv/bin/python scripts/translate_archival_documents.py --spec <id>`. 프로바이더 호출은 LLM 게이트웨이 프록시(`:8110`)를 지나고 키는 프록시가 주입하므로 **credstore·sudo·systemd-run이 필요 없다** (예전 `run-archival-translation.sh` 래퍼와 `LoadCredentialEncrypted` 안내는 삭제됨). `--plan`은 모델을 부르지 않고 슬라이싱·청킹·견적만 낸다. 같은 실행은 `POST /admin/archival-translation/run`으로도 된다.
 - **모델·max_tokens·thinking은 registry가 결정한다**: `config/llm_call_sites.json`의 `archival_document_translation_ru`/`_zh` 항목(또는 `LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL`). `call_registry.resolve()`는 항목 값을 호출부 기본값보다 우선하므로 CLI·API·`Options`에는 model 옵션이 **없다** — 예전 `--model`/`--max-tokens`는 조용히 무시되던 죽은 옵션이라 제거했다. 후보 모델은 `--compare provider/model[,+think,+effort=high]`로 같은 청크를 나란히 뽑아 본 뒤 registry 항목을 고친다. `--compare`의 preflight는 변형에 적힌 provider마다 검사한다.
-- **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 주입 용어 목록, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. 사후 용어 검사가 프롬프트에 주입된 목록과 같은 목록을 보는 것도 여기서 보장된다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
+- **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
 - **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서·검증기(`parse_response`/`validate`)가 바뀌어 옛 캐시의 판정을 믿을 수 없을 때만 올린다.
 
 ## 번역 메모리 (TM)
@@ -40,7 +40,7 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 검증 레이어
 
-- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한/용어표 준수) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. 용어표 검사는 그 청크에 실제로 주입된 항목만 대상으로 하며(모델은 못 본 표기를 지킬 수 없다), **오탐 방어가 두 겹이다**: 재시도를 소진하고도 용어표 문제만 남으면 실패 대신 경고로 낮춰 통과시키고(`termWarnings` 이벤트·stats, 판단은 발행 전 통독과 postEdits 몫), 다의어라 상습 오탐인 항목은 스펙의 `glossary.noEnforce` 목록에 올려 주입은 하되 강제하지 않는다. 형식·누락·미번역 검사는 오탐이 없으므로 여전히 실패로 처리한다.
+- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. **용어표 준수는 검사하지 않는다** (2026-08-30 제거): 표면 일치 검사는 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌(Каменева)을 가릴 수 없고, 그 검사가 교정 재시도로 모델의 옳은 첫 번역을 뒤집어 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"을 발행시켰다. 용어표는 프롬프트에 참고로 주입될 뿐이며, 표기 통일은 발행 전 통독 + 스펙 postEdits 몫이다.
 - 사이트 공통(`scripts/_translation_common.py`): `field_translation_problems()` — 한글 잔존율(원문이 한국어인 긴 필드), 원문 그대로 반환(짧은 필드), HTML 태그 열 보존, URL 보존. `translate_db_content.py`와 스모크가 사용.
 - research markdown: 제목 깊이 열·한글 잔존율·내부 보고서 링크 보존(`_validate_translation`). `translate_markdown_with_retry()`가 검증 실패 사유를 시스템 프롬프트에 붙여 1회 재번역한다(reflection 1회, 반복 자기수정 없음).
 - 오프라인 스모크: `scripts/smoke_translation_memory.py`(TM + 공용 검증기, 맨 클론에서 실행 가능), `scripts/smoke_archival_translation.py`(frontend 체크아웃 필요).
@@ -63,16 +63,16 @@ UNIQUE(lang_pair, doc_id, source, target)
 | §2.1 한국어 출력 팽창 | ✅ | `SourceLanguage.output_ratio` (RU 0.9 / ZH 1.8) |
 | §2.2 코퍼스 단위 용어집 | ⚠️ | CommuLingo DB(상태·출처·리비전 있음)가 코퍼스 용어집, 파이프라인은 스냅샷을 읽기 전용 소비. 스냅샷 갱신은 수동 단계 |
 | §2.2 사전 스캔(PREPARE) | ⚠️ | RU: `scripts/scan_archival_terms.py` — 약어·문장 중간 대문자 낱말을 용어집과 대조해 미등재 후보만 보고, 채택·표기는 사람이 결정. ZH: 대소문자 신호가 없어 NER 도입 전까지 수동 |
-| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_entries_for()` + 상한 60, 주입 목록과 사후 검사 목록이 동일(`_prepare_chunk`) |
+| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_for()` + 상한 60 |
 | §2.2 표기 변형 매칭 | ✅ | 러시아어 곡용 변형 + 경계 가드, 중국어 무경계 |
-| §2.2 다의어 항목 차단 | ✅ | `glossary.exclude` — 이 문서 문맥에서 거의 항상 다른 뜻인 항목은 **주입 자체를 뺀다**. `noEnforce`는 검사만 끄고 프롬프트엔 여전히 "반드시 쓸 것"으로 들어가, 1925 대회 번역에서 Союз(의원 그룹)→Советский Союз, Октябрьский(인명)→10월 혁명, два лагеря(두 진영론)→두 진영에 씌워진 채 발행됐다(postEdits로 교정). 스냅샷의 성(姓)만 딴 인물 항목과 보통명사가 겹치는 표제어가 상습 원인. exclude는 주입 목록을 바꾸므로 캐시 키가 바뀐다 |
+| §2.2 다의어 항목 차단 | ✅ | `glossary.exclude` — 이 문서 문맥에서 거의 항상 다른 뜻인 항목은 주입에서 뺀다 (주입 목록이 바뀌므로 캐시 키가 바뀐다) |
 | §2.3 TM 정렬 쌍 저장 | ✅ | 이번 변경. v1은 적재 우선 |
 | §2.3 완전 일치 재사용 | ✅ | 검수 등급 한정, 청크 경계 보존(`_tm_prefill`) |
 | §2.3 유사 세그먼트 예시 주입 | ✅ | 스펙 고정 방식: `scripts/suggest_tm_examples.py`가 검수 세그먼트를 어휘 겹침으로 추천 → 사람이 스펙 `tmExamples`에 채택 → 청크 프롬프트의 «참고 번역례»로 주입. 동적 주입은 캐시 키를 흔들어 의도적으로 배제 |
 | §2.4 번역투 금지 목록 이식 | ✅ | 이번 변경 (RU·ZH 프롬프트) |
 | §2.4 스타일 규칙 캐시 위치 | ✅ | 시스템 프롬프트 고정 + 캐시 키 포함 |
 | §2.5 문장 수/길이 급감 | ⚠️ | 문장 수 대신 실측 기반 길이 하한(RU 0.25 / ZH 0.7) |
-| §2.5 용어집 준수 사후 검사 | ✅ | **스펙 `extra`(+`enforce` 지명) 항목만** 위반→교정 재시도. 스냅샷 인물·용어 항목은 참고로 주입만 한다 — 1925 대회 번역에서 첫 시도는 옳았는데 검증기가 스냅샷의 Союз(의원 그룹)·Октябрьский(인명)·Каменева(카메네프 속격) 표기를 재시도로 강요해 틀리게 만들었다. 자동 항목은 문맥을 모르므로 강제할 자격이 없다 |
+| §2.5 용어집 준수 사후 검사 | ❌ | 의도적으로 제거(2026-08-30). 표면 일치 검사는 다의어·격변화 충돌에서 오탐을 내고 재시도로 옳은 번역을 뒤집었다. 표기 통일은 통독 + postEdits |
 | §2.5 숫자·마크업 보존 | ⚠️ | 표 숫자는 코드 보존, 사이트는 태그 열·URL 검사(이번 추가). 본문 숫자 대조는 없음 |
 | §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
 | §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |

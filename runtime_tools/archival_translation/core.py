@@ -251,7 +251,6 @@ class Stats:
     translated: int = 0
     retried: int = 0
     failed: int = 0
-    term_warnings: int = 0
     # 워커 스레드들이 같은 객체를 올린다. 속성 += 는 원자적이지 않으므로
     # 갱신은 add()로 모은다.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -262,8 +261,7 @@ class Stats:
 
     def as_dict(self) -> dict:
         return {"cached": self.cached, "translated": self.translated,
-                "retried": self.retried, "failed": self.failed,
-                "termWarnings": self.term_warnings}
+                "retried": self.retried, "failed": self.failed}
 
 
 # ── spec loading ─────────────────────────────────────────────────────
@@ -462,15 +460,15 @@ def build_glossary(people_path: Path, terms_path: Path,
     seen: set[str] = set()
     entries: list[dict] = []
 
-    def add(display_ru: str, ko: str, surfaces: list[str], source: str) -> None:
+    def add(display_ru: str, ko: str, surfaces: list[str]) -> None:
         if display_ru in seen or not ko:
             return
         seen.add(display_ru)
-        entries.append({"ru": display_ru, "ko": ko, "source": source,
+        entries.append({"ru": display_ru, "ko": ko,
                         "pattern": _pattern(surfaces, lang.bounded)})
 
     for ru, ko in (extra or {}).items():
-        add(ru, ko, [ru], "extra")
+        add(ru, ko, [ru])
 
     people = json.loads(people_path.read_text(encoding="utf-8")).get("people", [])
     for p in people:
@@ -488,38 +486,26 @@ def build_glossary(people_path: Path, terms_path: Path,
             # used to.
             family_ru = cyr.split()[-1]
             if len(family_ru) >= 4:
-                add(family_ru, family_ko, _variants(family_ru), "people")
+                add(family_ru, family_ko, _variants(family_ru))
             continue
         # Chinese: pin the whole name. A Chinese surname is one character and
         # matching it alone would fire on every 李 in the text; the full name
         # is what the source actually writes, and it is unambiguous.
         full_ko = ((p.get("name") or {}).get("ko") or "").strip()
         if len(cyr) >= 2 and full_ko:
-            add(cyr, full_ko, [cyr], "people")
+            add(cyr, full_ko, [cyr])
 
     for t in json.loads(terms_path.read_text(encoding="utf-8")):
         original = (t.get("original") or "").strip()
         term = ((t.get("term") or {}).get("ko") or "").strip()
         if original and term and lang.script.search(original):
-            add(original, term, [original], "terms")
+            add(original, term, [original])
 
     return entries
 
 
-def mark_enforcement(glossary: list[dict], spec_glossary: dict) -> None:
-    """Which entries the validator may fail a chunk over: spec ``extra`` and
-    ``enforce`` names, minus ``noEnforce``. Snapshot entries are advisory."""
-    no_enforce = set(spec_glossary.get("noEnforce") or [])
-    force = set(spec_glossary.get("enforce") or [])
-    for g in glossary:
-        g["enforce"] = ((g.get("source") == "extra" or g["ru"] in force)
-                        and g["ru"] not in no_enforce)
-
-
 def glossary_entries_for(text: str, glossary: list[dict], limit: int) -> list[dict]:
-    """이 텍스트에 등장하는 용어표 항목들 — 프롬프트 주입과 사후 검사가 같은
-    목록을 봐야 한다. 모델은 자기가 못 본 항목을 지킬 수 없으므로, 검사도
-    주입된(limit 안의) 항목만 대상으로 한다."""
+    """이 텍스트에 등장하는 용어표 항목들 (프롬프트에 참고로 주입된다)."""
     hits = [g for g in glossary if g["pattern"].search(text)]
     return hits[:limit]
 
@@ -573,8 +559,12 @@ def parse_response(text: str) -> dict[int, list[str]]:
 
 
 def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
-             lang: SourceLanguage | None = None,
-             glossary_terms: list[dict] | None = None) -> list[str]:
+             lang: SourceLanguage | None = None) -> list[str]:
+    """형식·누락·미번역·길이만 본다. 용어표 준수는 검사하지 않는다 — 표면
+    일치로는 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌을 가릴 수
+    없고, 그 검사가 교정 재시도로 모델의 옳은 첫 번역을 뒤집어 놓은 적이
+    있다(1925 대회 문서). 용어표는 프롬프트에 참고로 주입될 뿐이고, 표기
+    통일은 발행 전 통독과 스펙 postEdits가 맡는다."""
     lang = lang or RUSSIAN
     problems = []
     # A block with no lines (an all-numeric table) sends only its marker and
@@ -627,19 +617,6 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         src_len = sum(len(ln) for ln in block["lines"])
         if src_len > 200 and len(joined) < src_len * lang.short_ratio:
             problems.append(f"[[{idx}]] 번역문이 지나치게 짧음 ({len(joined)}자 < 원문 {src_len}자)")
-
-        # 용어표 준수: 프롬프트는 "표에 있는 항목은 반드시 그 표기를 쓴다"고
-        # 지시하지만, 지시만으로는 긴 청크에서 희석된다(인수인계 P1). 원문에
-        # 항목이 등장하는데 번역문에 확정 표기가 없으면 위반이고, 그 사유가
-        # 교정 재시도로 돌아가 모델이 스스로 고친다. 검사 대상은 이 청크에
-        # 실제로 주입된 항목뿐이다 — 못 본 표기를 요구하는 것은 검사가 아니라
-        # 복권이다.
-        for term in glossary_terms or []:
-            if not term.get("enforce", True):
-                continue
-            if term["pattern"].search(source) and term["ko"] not in joined:
-                problems.append(
-                    f"[[{idx}]] 용어표 미준수: {term['ru']} → \"{term['ko']}\" 표기를 쓸 것")
     return problems
 
 
@@ -675,16 +652,13 @@ def _cache_path(spec: dict, override: Path | None) -> Path:
 # ── translation ──────────────────────────────────────────────────────
 
 def _prepare_chunk(chunk, glossary, opts: Options,
-                   lang: SourceLanguage | None = None) -> tuple[str, list[dict], str]:
-    """(prompt, injected glossary entries, cache key) for one chunk.
-
-    프롬프트 주입과 사후 검사는 같은 용어 목록을 봐야 하고, run()의 pending
-    집계와 워커는 같은 키를 봐야 한다. 한 자리에서 한 번만 만든다.
-    """
+                   lang: SourceLanguage | None = None) -> tuple[str, str]:
+    """(prompt, cache key) for one chunk — run()의 pending 집계와 워커가 같은
+    키를 봐야 하므로 한 자리에서 한 번만 만든다."""
     body = render_chunk(chunk)
-    terms = glossary_entries_for(body, glossary, opts.glossary_limit)
-    prompt = _render_prompt(chunk, body, [(g["ru"], g["ko"]) for g in terms])
-    return prompt, terms, _chunk_key(prompt, opts, lang)
+    terms = glossary_for(body, glossary, opts.glossary_limit)
+    prompt = _render_prompt(chunk, body, terms)
+    return prompt, _chunk_key(prompt, opts, lang)
 
 
 def _chunk_prompt(chunk, glossary, opts: Options) -> str:
@@ -736,12 +710,12 @@ def _chunk_key(prompt: str, opts: Options,
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
                      progress: Callable[[dict], None],
                      lang: SourceLanguage | None = None,
-                     prepared: tuple[str, list[dict], str] | None = None) -> dict[int, list[str]]:
+                     prepared: tuple[str, str] | None = None) -> dict[int, list[str]]:
     from llm import call_registry
 
     lang = lang or RUSSIAN
     # run()은 pending 집계 때 이미 만든 것을 넘긴다; 직접 부르는 쪽은 여기서 만든다.
-    prompt, chunk_terms, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
+    prompt, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
 
     cached = cache.get(key)
     if cached:
@@ -766,24 +740,10 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
             time.sleep(2 * attempt)
             continue
         got = parse_response(raw)
-        problems = validate(chunk, got, lang, chunk_terms)
+        problems = validate(chunk, got, lang)
         if not problems:
             cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
             stats.add("translated")
-            return got
-        if attempt == opts.retries and all("용어표 미준수" in p for p in problems):
-            # 용어표 문제"만" 남았고 재시도도 소진됐다면 실패 대신 경고로
-            # 낮춘다. 다의어 문맥에서는 확정 표기가 아닌 번역이 옳을 수 있고,
-            # 그 판단은 검사가 아니라 사람 몫이다(발행 전 통독 + postEdits).
-            # 형식·누락·미번역과 달리 오탐 가능성이 있는 검사이므로, 오탐
-            # 하나가 문서 전체를 막게 두지 않는다. 상습 오탐 항목은 스펙의
-            # glossary.noEnforce에 올려 강제 대상에서 뺀다.
-            cache.put(key, got, {"attempt": attempt, "chars": len(prompt),
-                                 "termWarnings": problems})
-            stats.add("translated")
-            stats.add("term_warnings", len(problems))
-            progress({"event": "termWarnings",
-                      "blocks": [chunk[0][0], chunk[-1][0]], "problems": problems})
             return got
         correction = (
             "\n\n(직전 응답에 다음 문제가 있었다. 같은 입력을 형식에 맞게 다시 번역하라.\n"
@@ -1215,20 +1175,9 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     glossary = build_glossary(Path(spec["glossary"]["people"]),
                               Path(spec["glossary"]["terms"]),
                               spec["glossary"].get("extra"), lang)
-    # 준수 강제(위반 → 교정 재시도)는 사람이 이 스펙에 직접 쓴 extra 항목에만
-    # 건다. 스냅샷에서 자동으로 딸려 온 인물·용어 항목은 참고로 주입만 한다.
-    # 1925 대회 번역에서 모델의 첫 시도는 전부 옳았는데, 검증기가 스냅샷의
-    # Союз(의원 그룹)·Октябрьский(인명)·Каменева(카메네프의 속격) 표기를
-    # 재시도로 강요해 틀리게 만들었다. 자동 항목은 문맥을 모르므로 강제할
-    # 자격이 없다.
-    mark_enforcement(glossary, spec["glossary"])
-    # glossary.exclude: 이 스펙에서는 용어표에서 아예 빼는 항목의 원문 표기.
-    # noEnforce는 사후 검사만 끄고 프롬프트에는 "반드시 이 표기를 쓸 것"으로
-    # 여전히 주입된다 — 그래서 1925 대회 번역에서 스냅샷의 Союз(두마 의원
-    # 그룹)가 Советский Союз에, Октябрьский(인명)이 Октябрьская революция에
-    # 씌워져 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"이 발행됐다.
-    # 다의어가 이 문서의 문맥에서 거의 항상 다른 뜻이면 검사가 아니라 주입을
-    # 막아야 한다. 주입 목록이 바뀌므로 해당 청크의 캐시 키도 바뀐다.
+    # glossary.exclude: 이 스펙에서는 용어표에서 아예 빼는 항목의 원문 표기
+    # (이 문서의 문맥에서 거의 항상 다른 뜻인 다의어). 주입 목록이 바뀌므로
+    # 해당 청크의 캐시 키도 바뀐다.
     exclude = set(spec["glossary"].get("exclude") or [])
     if exclude:
         glossary = [g for g in glossary if g["ru"] not in exclude]
@@ -1376,7 +1325,7 @@ def run(spec: dict, opts: Options | None = None,
     runnable = [c for c in chunks
                 if not all((idx in tm_filled) or not b["lines"] for idx, b in c)]
     prepared_chunks = [_prepare_chunk(c, glossary, opts, lang) for c in runnable]
-    pending = sum(1 for _, _, key in prepared_chunks if cache.get(key) is None)
+    pending = sum(1 for _, key in prepared_chunks if cache.get(key) is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
