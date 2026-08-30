@@ -1213,6 +1213,16 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     no_enforce = set(spec["glossary"].get("noEnforce") or [])
     for g in glossary:
         g["enforce"] = g["ru"] not in no_enforce
+    # glossary.exclude: 이 스펙에서는 용어표에서 아예 빼는 항목의 원문 표기.
+    # noEnforce는 사후 검사만 끄고 프롬프트에는 "반드시 이 표기를 쓸 것"으로
+    # 여전히 주입된다 — 그래서 1925 대회 번역에서 스냅샷의 Союз(두마 의원
+    # 그룹)가 Советский Союз에, Октябрьский(인명)이 Октябрьская революция에
+    # 씌워져 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"이 발행됐다.
+    # 다의어가 이 문서의 문맥에서 거의 항상 다른 뜻이면 검사가 아니라 주입을
+    # 막아야 한다. 주입 목록이 바뀌므로 해당 청크의 캐시 키도 바뀐다.
+    exclude = set(spec["glossary"].get("exclude") or [])
+    if exclude:
+        glossary = [g for g in glossary if g["ru"] not in exclude]
     chunks = [c for d in docs for c in chunk_document(d, opts.max_chars)]
     if opts.limit_chunks:
         chunks = chunks[: opts.limit_chunks]
