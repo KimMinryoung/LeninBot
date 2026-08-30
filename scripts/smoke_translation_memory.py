@@ -58,16 +58,36 @@ def _tm_checks() -> None:
 
         tm.record_segments([("товарищ", "동무")], lang_pair="ru-ko", doc_id="d1", db_path=db)
         tm.record_segments(
+            [("товарищ", "벗")], lang_pair="ru-ko", doc_id="d3", status="published", db_path=db
+        )
+        got = tm.exact_matches(["товарищ"], lang_pair="ru-ko", db_path=db)
+        check("published row beats machine", got.get("товарищ") == "벗")
+        tm.record_segments(
             [("товарищ", "동지")], lang_pair="ru-ko", doc_id="d2", status="reviewed", db_path=db
         )
         got = tm.exact_matches(["товарищ", "нет такого", ""], lang_pair="ru-ko", db_path=db)
-        check("reviewed row wins lookup", got.get("товарищ") == "동지")
+        check("reviewed row beats published", got.get("товарищ") == "동지")
         check("missing source absent from lookup", "нет такого" not in got)
         check("other lang pair is invisible", tm.exact_matches(["товарищ"], lang_pair="zh-ko", db_path=db) == {})
 
+        # 같은 쌍이 나중에 더 높은 상태로 오면 승격되고, 낮은 상태로는 내려가지 않는다
+        upgraded = tm.record_segments(
+            [("товарищ", "동무")], lang_pair="ru-ko", doc_id="d1", status="published", db_path=db
+        )
+        check("machine row upgraded to published", upgraded == 1)
+        downgraded = tm.record_segments(
+            [("товарищ", "동무")], lang_pair="ru-ko", doc_id="d1", status="machine", db_path=db
+        )
+        check("status never downgrades", downgraded == 0)
+
         s = tm.stats(db_path=db)
-        check("stats totals", s["total"] == 4 and s["byLangPair"].get("ru-ko") == 4)
-        check("stats statuses", s["byStatus"].get("machine") == 3 and s["byStatus"].get("reviewed") == 1)
+        check("stats totals", s["total"] == 5 and s["byLangPair"].get("ru-ko") == 5)
+        check(
+            "stats statuses",
+            s["byStatus"].get("machine") == 2
+            and s["byStatus"].get("published") == 2
+            and s["byStatus"].get("reviewed") == 1,
+        )
 
 
 def _helper_checks() -> None:
@@ -118,10 +138,25 @@ def _field_checks() -> None:
     )
 
 
+def _post_edit_checks() -> None:
+    from runtime_tools.archival_translation.core import apply_post_edits
+
+    spec = {"postEdits": {"인민내무위원부": "내무인민위원부", "Ульмером": "울메르와"}}
+    lines = ["인민내무위원부(НКВД)의 명령.", "Ульмером 함께.", "무관한 줄."]
+    fixed = apply_post_edits(lines, spec)
+    check(
+        "post edits substituted",
+        fixed == ["내무인민위원부(НКВД)의 명령.", "울메르와 함께.", "무관한 줄."],
+    )
+    check("empty post edits pass through", apply_post_edits(lines, {}) == lines)
+    check("line count preserved", len(fixed) == len(lines))
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
     _field_checks()
+    _post_edit_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
