@@ -1,0 +1,80 @@
+# Translation Pipeline
+
+두 개의 독립된 파이프라인이 있다. 공유하는 것은 LLM 호출 경로(`llm/call_registry.py` → gateway/proxy)와 `scripts/_translation_common.py`의 헬퍼뿐이다.
+
+| | A. 사료(archival) 파이프라인 | B. 사이트 콘텐츠 파이프라인 |
+|---|---|---|
+| 방향 | RU→KO, ZH→KO | KO→EN |
+| 엔진 | `runtime_tools/archival_translation/` | `scripts/translate_*.py` 4종 |
+| 단위 | HTML 블록, `[[번호\|태그]]` 마커, 청크(기본 3,500자) | 문서/행 통짜 1회 호출 |
+| 용어집 | CommuLingo 스냅샷 + 스펙 `glossary.extra`, 청크 등장 항목만 주입(상한 60) | 프롬프트 내장 소사전 |
+| 검증 | 결정론 5종 + 위반 항목 첨부 교정 재시도 | 결정론 검사 + 교정 재시도 1회 |
+| 캐시/이어하기 | 내용 해시 JSONL, 청크 단위 | 없음(스킵 조건이 재개 역할) |
+| 진입점 | `scripts/translate_archival_documents.py`, `api_routes/archival_translation.py` | systemd `research-document-translation.timer` + 수동 |
+
+설계 원칙은 `~/uploads`로 전달된 번역기 인수인계 문서(2026-08-30)를 따른다: LLM은 청크 번역기로만 쓰고, 용어 일관성·연속성·검증은 결정론적 레이어가 책임진다. 모델 호출은 전부 `call_registry`의 feature 단위 설정(`config/llm_call_sites.json`)을 지난다.
+
+## 번역 메모리 (TM)
+
+`runtime_tools/translation_memory.py`. SQLite(`output/translation_memory.sqlite3`)의 단일 테이블:
+
+```
+segments(id, lang_pair, source, target, doc_id, block_id,
+         status 'machine'|'reviewed', provider, model, created_at)
+UNIQUE(lang_pair, doc_id, source, target)
+```
+
+- **적재 경로**: 사료 파이프라인 `run()`이 성공한 청크의 블록 쌍을 자동 적재한다(`_record_translation_memory`, 실패는 `tmFailed` 이벤트로만 남고 번역을 깨지 않는다). `translate_db_content.py`는 행 갱신 성공 시 짧은 필드(title 등) 쌍을 적재한다.
+- **백필**: `python scripts/backfill_translation_memory.py` — 기존 청크 캐시(JSONL)를 스펙 재계획으로 원문과 재정렬해 적재. API 호출·자격증명 불필요. `--stats`로 집계 확인.
+- **조회**: `exact_matches(sources, lang_pair=...)` — reviewed가 machine을 이기고, 같은 상태면 새 행이 이긴다. v1은 적재 우선이며 완전 일치 재사용·예시 주입은 이 테이블 위에 후속으로 얹는다.
+
+## 검증 레이어
+
+- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도.
+- 사이트 공통(`scripts/_translation_common.py`): `field_translation_problems()` — 한글 잔존율(원문이 한국어인 긴 필드), 원문 그대로 반환(짧은 필드), HTML 태그 열 보존, URL 보존. `translate_db_content.py`와 스모크가 사용.
+- research markdown: 제목 깊이 열·한글 잔존율·내부 보고서 링크 보존(`_validate_translation`). `translate_markdown_with_retry()`가 검증 실패 사유를 시스템 프롬프트에 붙여 1회 재번역한다(reflection 1회, 반복 자기수정 없음).
+- 오프라인 스모크: `scripts/smoke_translation_memory.py`(TM + 공용 검증기, 맨 클론에서 실행 가능), `scripts/smoke_archival_translation.py`(frontend 체크아웃 필요).
+
+## 스타일 자산
+
+- 번역투 금지 목록(writer/prompts.py에서 이식): ~것이다 반복, ~의 사슬, 되어지다 이중 피동, 그/그녀 남용, 한자어+하다 편중 — 사료 시스템 프롬프트(RU·ZH) 양쪽에 있다. 시스템 프롬프트는 청크 캐시 키에 포함되므로 프롬프트 수정은 캐시를 자동 무효화한다(frozen 스펙은 애초에 재실행이 거부된다).
+- 문장부호 규칙은 한 곳에 있지 않다: ZH 프롬프트(《》·「」·굽은 따옴표·着重号), 조립기의 `quotes:"curly"` 정규화, 스펙별 `register` 문자열, em-dash 정책(`commulingo_strip_em_dashes.py`).
+
+## 인수인계 체크리스트 대조 (2026-08-30 기준)
+
+✅ 충족 / ⚠️ 부분 / ❌ 미충족. 사료 파이프라인 기준이며 사이트 파이프라인은 괄호로 표시.
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| §2.1 청크 크기 1.5k~3k토큰 | ⚠️ | 문자 기준 3,500자(RU ≈ 1.6k토큰)로 범위 안. 토큰 환산은 `chars_per_token` 추정 (사이트: ❌ 통짜, 60k자 캡) |
+| §2.1 표·각주 경계 보존 | ✅ | 블록 단위 청킹이라 중간 절단이 없고, 표 숫자는 모델을 거치지 않는다 |
+| §2.1 직전 청크 맥락 주입 | ❌ | 의도적 설계: 청크 독립 + 병렬, 문서 간 규칙(주석 병기 1회, 따옴표)은 조립기가 집행. 도입하려면 병렬성 포기 필요 — 테스트셋(§5-5) 이후 판단 |
+| §2.1 청크 ID·재조립·부분 재시도 | ✅ | 마커 + 내용 해시 캐시, 실패분만 재호출 |
+| §2.1 한국어 출력 팽창 | ✅ | `SourceLanguage.output_ratio` (RU 0.9 / ZH 1.8) |
+| §2.2 코퍼스 단위 용어집 | ⚠️ | CommuLingo DB(상태·출처·리비전 있음)가 코퍼스 용어집, 파이프라인은 스냅샷을 읽기 전용 소비. 스냅샷 갱신은 수동 단계 |
+| §2.2 사전 스캔(PREPARE) | ❌ | 없음. 신규 고유명사는 스펙 `glossary.extra`에 사람이 채운다 — 남은 로드맵 |
+| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_for()` + 상한 60 |
+| §2.2 표기 변형 매칭 | ✅ | 러시아어 곡용 변형 + 경계 가드, 중국어 무경계 |
+| §2.3 TM 정렬 쌍 저장 | ✅ | 이번 변경. v1은 적재 우선 |
+| §2.3 유사 세그먼트 예시 주입 / 완전 일치 재사용 | ❌ | 후속. `exact_matches()`가 토대 |
+| §2.4 번역투 금지 목록 이식 | ✅ | 이번 변경 (RU·ZH 프롬프트) |
+| §2.4 스타일 규칙 캐시 위치 | ✅ | 시스템 프롬프트 고정 + 캐시 키 포함 |
+| §2.5 문장 수/길이 급감 | ⚠️ | 문장 수 대신 실측 기반 길이 하한(RU 0.25 / ZH 0.7) |
+| §2.5 용어집 준수 사후 검사 | ❌ | 주입만 하고 번역문 정규식 확인 없음 — 남은 로드맵 |
+| §2.5 숫자·마크업 보존 | ⚠️ | 표 숫자는 코드 보존, 사이트는 태그 열·URL 검사(이번 추가). 본문 숫자 대조는 없음 |
+| §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
+| §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |
+| §2.6 위치 지정 편집 정제 | — | 정제 단계 자체가 없다(P5의 회귀 위험이 없는 상태). 필요해지면 diff 반환으로 설계 |
+| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드 |
+| §2.7 Batch API | ❌ | 미지원 — 남은 로드맵(야간 타이머 작업이 후보) |
+| §2.7 토큰·비용 기록 | ✅ | `record_llm_call` 감사 + `plan()` 사전 견적 |
+| §2.8 고정 테스트셋·자동 지표 | ❌ | 없음 — 남은 로드맵 §5-5 (모델 교체 재평가의 전제) |
+
+## 남은 로드맵 (우선순위 순)
+
+1. 용어집 준수 사후 검사 — 주입한 용어표 항목이 번역문에 실제로 쓰였는지 정규식 확인, 위반은 교정 재시도에 포함.
+2. PREPARE 사전 스캔 — 번역 전 문서 전체에서 고유명사 후보 추출 → 스냅샷 대조 → 신규만 제안 큐.
+3. TM 완전 일치 재사용(비용 0) → 유사 세그먼트 예시 주입.
+4. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제.
+5. Batch API 경로(야간 타이머 작업 50% 할인).
+6. 사이트 파이프라인 청킹 — 60k자 캡을 넘는 문서가 생기면 사료 엔진의 마커 방식 재사용.

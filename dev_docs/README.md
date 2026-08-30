@@ -28,6 +28,7 @@
 | `monitoring.md` | 감시·알림 체계 — 외부 워치독, 복제 점검, 알림 채널, 사각지대 |
 | `knowledge_graph_design.md` | Neo4j/Graphiti KG 런타임 구조 |
 | `knowledge_graph_schema.md` | KG typed entity/edge schema |
+| `translation_pipeline.md` | 사료(RU·ZH→KO)·사이트(KO→EN) 번역 파이프라인, 번역 메모리, 검증 레이어 |
 | `vector_corpus_reingestion_handoff.md` | Windows GPU PC에서 vector corpus 재등록 시 필요한 metadata/chunking 인수인계 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
 | `autonomous_project.md` | hourly autonomous project loop |

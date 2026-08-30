@@ -24,9 +24,7 @@ import research_store
 from db import execute as db_execute, query as db_query
 from scripts.translate_research_markdown import (
     FEATURE,
-    _call_translator,
-    _validate_translation,
-    normalize_translated_markdown,
+    translate_markdown_with_retry,
 )
 
 
@@ -107,11 +105,9 @@ def main() -> int:
         markdown = row["markdown"]
         try:
             print(f"translating {slug} ({len(markdown):,} chars) via {FEATURE}")
-            translated = _call_translator(
-                markdown,
-            )
-            translated = normalize_translated_markdown(translated)
-            _validate_translation(markdown, translated, max_hangul_ratio=args.max_hangul_ratio)
+            # 검증 실패 시 위반 항목을 첨부해 1회 재번역한다 — 예전에는 제목
+            # 깊이 하나가 어긋나면 완성본을 통째로 버렸다.
+            translated = translate_markdown_with_retry(markdown, max_hangul_ratio=args.max_hangul_ratio)
             _update_translation(row, translated)
             changed += 1
             print(f"updated {slug}: {len(translated):,} English chars")

@@ -70,7 +70,7 @@ def _slug_to_path(slug_or_path: str) -> Path:
     return path
 
 
-from _translation_common import hangul_ratio as _hangul_ratio
+from scripts._translation_common import hangul_ratio as _hangul_ratio
 
 
 def _heading_signature(markdown: str) -> list[str]:
@@ -123,11 +123,15 @@ def _validate_translation(source: str, translated: str, *, max_hangul_ratio: flo
         )
 
 
-def _call_translator(markdown: str) -> str:
-    """게이트웨이를 지나는 원샷 호출."""
+def _call_translator(markdown: str, *, correction: str = "") -> str:
+    """게이트웨이를 지나는 원샷 호출.
+
+    correction은 직전 시도의 검증 실패 사유다. 원문에 섞으면 모델이 그 문장까지
+    번역할 수 있으므로 시스템 프롬프트 뒤에 붙인다.
+    """
     from llm.call_registry import generate_sync
 
-    text = generate_sync(FEATURE, markdown, system=SYSTEM_PROMPT)
+    text = generate_sync(FEATURE, markdown, system=SYSTEM_PROMPT + correction)
     if not text:
         # generate_sync는 실패 원인을 삼키고 None을 준다. HTTP 오류·정책 거부·
         # 빈 완성 어느 쪽인지는 llm_gateway.audit과 [llm-registry] 경고에 남는다.
@@ -136,6 +140,34 @@ def _call_translator(markdown: str) -> str:
             f"(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
         )
     return _strip_outer_fence(text)
+
+
+def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attempts: int = 2) -> str:
+    """호출→정규화→검증을 한 번에. 검증 실패는 사유를 다음 시도에 알려 재번역한다.
+
+    예전에는 검증 실패가 곧 문서 실패였다: 제목 깊이 하나가 어긋나면 2만 토큰짜리
+    완성본을 통째로 버리고 사람이 다시 돌렸다. 실패 사유는 이미 문장으로 나오므로,
+    그 문장을 다음 호출에 붙여 한 번은 모델이 스스로 고치게 한다 — 사료 파이프라인의
+    교정 재시도와 같은 패턴이다. 반복 자기수정 루프는 두지 않는다(인수인계 §3:
+    reflection 1회).
+    """
+    correction = ""
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        translated = normalize_translated_markdown(_call_translator(source, correction=correction))
+        try:
+            _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
+            return translated
+        except ValueError as exc:
+            last_error = exc
+            correction = (
+                "\n\nThe previous attempt failed validation:\n"
+                f"- {exc}\n"
+                "Re-translate the full document, fixing exactly this problem and changing nothing else."
+            )
+            print(f"validation failed (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
+    assert last_error is not None
+    raise last_error
 
 
 def translate_one(
@@ -153,10 +185,7 @@ def translate_one(
 
     source = source_path.read_text(encoding="utf-8")
     print(f"translating: {source_path.name} ({len(source):,} chars) via {FEATURE}")
-    translated = normalize_translated_markdown(
-        _call_translator(source)
-    )
-    _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
+    translated = translate_markdown_with_retry(source, max_hangul_ratio=max_hangul_ratio)
     if dry_run:
         print(f"dry-run ok: {source_path.stem} ({len(translated):,} chars)")
         return output_path
