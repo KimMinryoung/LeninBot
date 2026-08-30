@@ -873,14 +873,84 @@ def stray_cyrillic(text: str, allowed: list[str] | None = None,
     return sorted(set(found))
 
 
+# 앞말의 받침에 따라 모양이 바뀌는 조사. (모음 뒤 꼴, 받침 뒤 꼴). 긴 것이
+# 먼저 오도록 나열한다 — "이라"를 "이"로 먼저 잡으면 안 된다.
+_PARTICLE_PAIRS = [
+    ("였", "이었"), ("라", "이라"), ("란", "이란"), ("나", "이나"), ("든", "이든"),
+    ("며", "이며"), ("랑", "이랑"), ("여", "이여"), ("로", "으로"),
+    ("는", "은"), ("가", "이"), ("를", "을"), ("와", "과"), ("야", "아"),
+]
+_AFTER_VOWEL = {v: c for v, c in _PARTICLE_PAIRS}
+_AFTER_CODA = {c: v for v, c in _PARTICLE_PAIRS}
+
+
+def _coda(ch: str) -> int | None:
+    """한글 음절의 받침 번호 (0=없음, 8=ㄹ), 한글 음절이 아니면 None."""
+    o = ord(ch)
+    return (o - 0xAC00) % 28 if 0xAC00 <= o <= 0xD7A3 else None
+
+
+def _repair_particle(dst: str, tail: str) -> str:
+    """치환한 낱말 ``dst`` 바로 뒤에 오는 조사 ``tail``이 dst의 받침과 어긋나면 고친다.
+
+    문자열 치환은 앞말만 바꾸고 조사는 그대로 두므로 "소비에트 소유즈와/로/는"이
+    "소비에트 연방와/로/는"이 되어 발행됐다(1925 대회 문서). 판정은 치환 자리
+    바로 뒤, 그것도 dst의 받침과 **어긋나는** 조사에만 한다 — 맞는 조사와
+    조사가 아닌 글자는 건드리지 않는다. 받침 뒤 꼴을 모음 뒤 꼴로 되돌리는
+    방향은 은/이/을/과/으로만 한다: "이다/이라/이었"은 모음 뒤에서도 문어에서
+    허용되는 꼴이라 틀렸다고 볼 수 없다. ㄹ받침 뒤의 "로"는 옳으므로 그대로,
+    "으로"는 "로"로 줄인다.
+    """
+    coda = _coda(dst[-1]) if dst else None
+    if coda is None:
+        return tail
+    if coda == 0:
+        # 모음 뒤에서도 허용되는 '이-' 계열은 먼저 걸러 '이'로 오인하지 않는다.
+        if tail.startswith(("이었", "이라", "이란", "이나", "이든", "이며", "이랑", "이여", "이다")):
+            return tail
+        for c, v in (("으로", "로"), ("은", "는"), ("이", "가"), ("을", "를"), ("과", "와")):
+            if tail.startswith(c):
+                return v + tail[len(c):]
+        return tail
+    for v, c in _PARTICLE_PAIRS:
+        if tail.startswith(v):
+            if v == "로" and coda == 8:
+                return tail
+            return c + tail[len(v):]
+    if coda == 8 and tail.startswith("으로"):
+        return "로" + tail[len("으로"):]
+    return tail
+
+
+def _replace_with_particles(line: str, src: str, dst: str) -> str:
+    if src not in line:
+        return line
+    out, pos = [], 0
+    while True:
+        i = line.find(src, pos)
+        if i < 0:
+            out.append(line[pos:])
+            return "".join(out)
+        out.append(line[pos:i])
+        out.append(dst)
+        rest = line[i + len(src):]
+        fixed = _repair_particle(dst, rest[:3])
+        if fixed != rest[:3]:
+            out.append(fixed)
+            pos = i + len(src) + 3
+        else:
+            pos = i + len(src)
+
+
 def apply_post_edits(lines: list[str], spec: dict) -> list[str]:
-    """spec.postEdits 치환을 블록 줄들에 적용한다.
+    """spec.postEdits 치환을 블록 줄들에 적용한다. 치환 뒤 조사도 맞춘다.
 
     조립기의 fix()가 하는 세 가지 중 postEdits만 가져온다. 따옴표 정규화는
     표기 취향이고, 주석 병기 축약(gloss dedupe)은 문서 안의 위치(첫 등장)에
     묶여 있어 세그먼트 단위로 옮기면 틀린다. postEdits는 오역 교정이므로
     세그먼트 자체의 품질이고, TM에 적재되는 쌍에도 반영되어야 발행본과 같은
-    텍스트가 남는다.
+    텍스트가 남는다. 조립기도 같은 함수를 쓴다 — 두 군데가 따로 치환하면
+    조사 처리처럼 한쪽만 고쳐지는 일이 생긴다.
     """
     edits = spec.get("postEdits") or {}
     if not edits:
@@ -888,7 +958,7 @@ def apply_post_edits(lines: list[str], spec: dict) -> list[str]:
     out = []
     for line in lines:
         for src, dst in edits.items():
-            line = line.replace(src, dst)
+            line = _replace_with_particles(line, src, dst)
         out.append(line)
     return out
 
@@ -909,8 +979,7 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     def fix(line: str) -> str:
         if curly_quotes:
             line = _STRAIGHT_PAIR.sub("\u201c\\1\u201d", line)
-        for ru, ko in edits.items():
-            line = line.replace(ru, ko)
+        line = apply_post_edits([line], spec)[0] if edits else line
         return dedupe(line)
 
     # 해제와 문서별 주석은 엮은이가 쓴 글이지 사료가 아니다. 같은 <p>로 흘리면
