@@ -5,27 +5,23 @@ Translates the block ranges a spec names (Soviet official documents
 reproduced inside a saved archive page) and writes a CommuLingo reference
 fragment. Scope rules and the source-drift guards live in the module.
 
-The DeepSeek key lives in systemd's encrypted credstore, not in .env, so run
-this through systemd-run rather than plain python:
+Provider calls go through the LLM gateway proxy (llm_proxy, :8110), which
+injects the real key, so no credential or sudo is needed:
 
-  sudo systemd-run --pipe --quiet --collect -p User=grass \
-    -p WorkingDirectory=/home/grass/leninbot \
-    -p LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred \
-    /home/grass/leninbot/venv/bin/python scripts/translate_archival_documents.py \
-      --spec nkvd-1937-documents
+  venv/bin/python scripts/translate_archival_documents.py --spec nkvd-1937-documents
 
-The same run is available without sudo over the admin API, which already
-mounts that credential:
+The same run is available over the admin API:
 
   POST /admin/archival-translation/run  {"specId": "nkvd-1937-documents"}
 
-Passing the key by hand instead works too, but export it from somewhere real
-(DEEPSEEK_API_KEY="$(cat /path/to/key)") rather than typing a literal — a
-placeholder pasted verbatim reaches the provider as an Authorization header
-and fails on ASCII encoding, not on authentication.
+Model, max_tokens and thinking come from the language pair's registry entry
+(config/llm_call_sites.json: archival_document_translation_{ru,zh}); there is
+no CLI override because the registry would ignore it. Use --compare to try
+candidates side by side before changing the entry.
 
---plan needs no key: it prints the slicing, chunking and cost estimate.
-Chunks are cached by content hash, so re-running pays only for what changed.
+--plan prints the slicing, chunking and cost estimate without calling the
+model. Chunks are cached by content hash, so re-running pays only for what
+changed.
 """
 
 from __future__ import annotations
@@ -59,9 +55,7 @@ def main() -> int:
                     help=f"스펙 id ({at.SPEC_DIR} 안의 파일명, 확장자 제외)")
     ap.add_argument("--out", type=Path, help="출력 fragment 경로 (기본: 스펙의 output)")
     ap.add_argument("--cache", type=Path, help="청크 캐시 JSONL")
-    ap.add_argument("--model", default="deepseek-v4-flash")
     ap.add_argument("--max-chars", type=int, default=3500, dest="max_chars")
-    ap.add_argument("--max-tokens", type=int, default=8000, dest="max_tokens")
     ap.add_argument("--glossary-limit", type=int, default=60, dest="glossary_limit")
     ap.add_argument("--concurrency", type=int, default=5)
     ap.add_argument("--retries", type=int, default=3)
@@ -80,7 +74,7 @@ def main() -> int:
     args = ap.parse_args()
 
     opts = at.Options(
-        model=args.model, max_chars=args.max_chars, max_tokens=args.max_tokens,
+        max_chars=args.max_chars,
         glossary_limit=args.glossary_limit, concurrency=args.concurrency,
         retries=args.retries, limit_chunks=args.limit_chunks,
         cache_path=args.cache, out_path=args.out,
@@ -116,7 +110,7 @@ def main() -> int:
                 if r.get("error"):
                     print(f"  {r['variant']:42} 실패: {r['error'][:50]}")
                     continue
-                label = f"{r['variant']} think={r.get('thinking',{}) and r['thinking']['type']}"
+                label = f"{r['variant']} think={(r.get('thinking') or {}).get('type')}"
                 print(f"  {label:42} {r['seconds']:6.1f} {len(r['problems']):9}")
             print(f"\n비교 문서: {out}")
             return 0

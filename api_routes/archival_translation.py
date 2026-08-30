@@ -39,7 +39,6 @@ class RunRequest(BaseModel):
     limitChunks: int = Field(default=0, ge=0, le=1000)
     concurrency: int = Field(default=5, ge=1, le=16)
     retries: int = Field(default=3, ge=1, le=5)
-    model: str | None = None
 
 
 def _options(req: RunRequest) -> at.Options:
@@ -48,8 +47,6 @@ def _options(req: RunRequest) -> at.Options:
         concurrency=req.concurrency,
         retries=req.retries,
     )
-    if req.model:
-        opts.model = req.model
     return opts
 
 

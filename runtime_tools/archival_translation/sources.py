@@ -9,10 +9,10 @@ the pipeline works on. A block is a dict::
 signature lines, an address block) so the translation can be checked
 line-for-line and reassembled without guessing.
 
-Only ``militera`` exists today. It is deliberately the sole adapter rather
-than a "general HTML" one: each archive marks up documents differently, and a
-parser that guesses across formats silently mis-slices instead of failing.
-Add the next adapter when there is a second real source to design against.
+There is one adapter per archive (``ADAPTERS``), deliberately not a
+"general HTML" one: each archive marks up documents differently, and a parser
+that guesses across formats silently mis-slices instead of failing. Add the
+next adapter when there is a real source to design against.
 """
 
 from __future__ import annotations

@@ -43,7 +43,10 @@ CACHE_DIR = ROOT / "output" / "archival_translations"
 # config/llm_call_sites.json의 해당 항목을 고치거나
 # LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL 환경변수를 쓴다.
 # 교체 전에 --compare로 같은 청크를 후보 모델들로 나란히 뽑아 확인할 것.
-PROMPT_VERSION = "2"  # bump to invalidate every cached chunk
+# 캐시 키에는 시스템 프롬프트 해시와 유저 프롬프트 전문이 이미 들어간다
+# (_chunk_key). 이 상수는 프롬프트가 아니라 파서·검증기(parse_response,
+# validate)가 바뀌어 옛 캐시의 판정을 믿을 수 없게 됐을 때만 올린다.
+PROMPT_VERSION = "2"
 
 _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # Any tag an adapter emits, not a fixed list. Pinning it to militera's tags
@@ -230,9 +233,10 @@ def language_for(spec: dict | None) -> SourceLanguage:
 
 @dataclass
 class Options:
-    model: str = "deepseek-v4-flash"
+    """실행 옵션. 모델·max_tokens·thinking은 여기 없다 — 언어쌍별 registry
+    항목(config/llm_call_sites.json)이 결정하고, 호출부에서 넘긴 값은
+    registry가 무시한다. 바꾸려면 그 파일이나 LLM_SITE_*_MODEL 환경변수."""
     max_chars: int = 3500
-    max_tokens: int = 8000
     glossary_limit: int = 60
     concurrency: int = 5
     retries: int = 3
@@ -328,12 +332,6 @@ def load_blocks(source: dict) -> list[dict]:
             f"  actual: {digest}")
     adapter = sources.get_adapter(source.get("format"))
     return adapter(src.read_text(encoding="utf-8"))
-
-
-def extract_blocks(spec: dict) -> list[dict]:
-    """Blocks of the spec-level source. Specs whose documents each name their
-    own source have no spec-level one; use slice_documents instead."""
-    return load_blocks(spec["source"])
 
 
 def _anchor_offset(blocks: list[dict], source: dict) -> int:
@@ -690,7 +688,7 @@ def _chunk_key(prompt: str, opts: Options,
     from llm import call_registry
 
     lang = lang or RUSSIAN
-    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
+    profile = call_registry.resolve(lang.feature)
     # The system prompt belongs in the key too. Without it, editing the
     # translation rules silently reuses output produced under the old ones
     # unless someone remembers to bump PROMPT_VERSION by hand — and a
@@ -723,9 +721,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     last_reason = "원인 미상"
     for attempt in range(1, opts.retries + 1):
         raw = call_registry.generate_sync(
-            lang.feature, prompt + correction, system=lang.system_prompt,
-            model=opts.model, max_tokens=opts.max_tokens,
-        )
+            lang.feature, prompt + correction, system=lang.system_prompt)
         if not raw:
             # generate_sync swallows the provider exception and returns None,
             # logging the cause itself. Surface at least that it happened —
@@ -867,9 +863,6 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     edits = spec.get("postEdits") or {}
     dedupe = gloss_deduper()
 
-    # 한국어 문헌은 인용부호로 홑낫표를 쓴다. 문체 지시에 적어 두어도 모델은
-    # 청크마다 "…"와 “…”를 섞어 내놓고, 그 흔들림은 한 문서 안에서 눈에 띈다.
-    # 짝이 맞는 것만 바꾸므로 인치 기호나 한쪽만 남은 따옴표는 건드리지 않는다.
     # 서고의 관행은 인용문에 따옴표, 문헌·사건 이름에 홑낫표다. 모델은 청크마다
     # 곧은 따옴표와 굽은 따옴표를 섞어 내놓으므로 짝이 맞는 것만 굽은 쪽으로
     # 모은다. 인치 기호나 한쪽만 남은 따옴표는 건드리지 않는다.
@@ -1039,7 +1032,7 @@ def preflight(opts: Options | None = None, lang: SourceLanguage | None = None) -
     lang = lang or RUSSIAN
     from llm import call_registry
 
-    profile = call_registry.resolve(lang.feature, model=opts.model)
+    profile = call_registry.resolve(lang.feature)
     try:
         connection = call_registry.resolve_provider_connection(profile.provider)
     except ValueError:
@@ -1071,7 +1064,7 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
     lang = language_for(spec)
     from llm import call_registry
 
-    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
+    profile = call_registry.resolve(lang.feature)
     executor = call_registry._EXECUTORS.get(profile.provider)
     if executor is None:
         raise SpecError(f"등록되지 않은 provider: {profile.provider}")
@@ -1133,7 +1126,7 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
     opts = opts or Options()
     prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
     chunks, glossary, lang = prepared["_chunks"], prepared["_glossary"], prepared["_lang"]
-    base = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
+    base = call_registry.resolve(lang.feature)
 
     results = []
     for variant in variants:
@@ -1208,7 +1201,7 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     from llm import call_registry
     from llm.provider_registry import openai_compatible_pricing
 
-    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
+    profile = call_registry.resolve(lang.feature)
     price = openai_compatible_pricing(profile.model)
     thinking_on = (profile.extra.get("thinking") or {}).get("type") == "enabled"
     tokens_in = total / lang.chars_per_token
@@ -1301,7 +1294,7 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
                 block_ids.append(idx)
         if not pairs:
             return
-        profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
+        profile = call_registry.resolve(lang.feature)
         inserted = translation_memory.record_segments(
             pairs, lang_pair=f"{lang.code}-ko", doc_id=spec.get("id", "unnamed"),
             block_ids=block_ids, provider=profile.provider, model=profile.model)
