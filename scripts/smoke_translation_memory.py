@@ -152,11 +152,33 @@ def _post_edit_checks() -> None:
     check("line count preserved", len(fixed) == len(lines))
 
 
+def _backfill_align_checks() -> None:
+    import json as _json
+
+    from scripts.backfill_translation_memory import align_cached_blocks
+
+    source = {5: "Приказ № 1.", 6: "Приказ № 2.", 9: "Подпись."}
+    cache_lines = [
+        _json.dumps({"key": "old", "blocks": {"5": ["옛 번역."], "7": ["원문에 없는 블록."]}}),
+        "",
+        _json.dumps({"key": "new", "blocks": {"5": ["명령 제1호."], "6": ["명령 제2호."], "8": []}}),
+    ]
+    spec = {"postEdits": {"명령 제2호": "제2호 명령"}}
+    pairs, block_ids = align_cached_blocks(source, cache_lines, spec)
+    check("later cache record wins", ("Приказ № 1.", "명령 제1호.") in pairs)
+    check("stale target for same block dropped", all(t != "옛 번역." for _, t in pairs))
+    check("block absent from source skipped", 7 not in block_ids)
+    check("empty cached block skipped", 8 not in block_ids)
+    check("post edits applied in alignment", ("Приказ № 2.", "제2호 명령.") in pairs)
+    check("block ids sorted and aligned", block_ids == [5, 6])
+
+
 def main() -> int:
     _tm_checks()
     _helper_checks()
     _field_checks()
     _post_edit_checks()
+    _backfill_align_checks()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
