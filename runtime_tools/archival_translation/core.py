@@ -38,7 +38,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC_DIR = ROOT / "config" / "archival_translation"
 CACHE_DIR = ROOT / "output" / "archival_translations"
 
-FEATURE = "archival_document_translation"
+# 모델 라우팅은 언어쌍별이다: RU→KO와 ZH→KO는 서로 다른 registry feature를
+# 쓴다(SourceLanguage.feature). 어느 쌍의 모델을 바꾸려면
+# config/llm_call_sites.json의 해당 항목을 고치거나
+# LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_{RU,ZH}_MODEL 환경변수를 쓴다.
+# 교체 전에 --compare로 같은 청크를 후보 모델들로 나란히 뽑아 확인할 것.
 PROMPT_VERSION = "2"  # bump to invalidate every cached chunk
 
 _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -184,6 +188,11 @@ class SourceLanguage:
     # the cost estimate.
     chars_per_token: float
     output_ratio: float
+    # Registry feature for this pair (config/llm_call_sites.json). 언어쌍마다
+    # 다른 provider·model을 태울 수 있는 라우팅 지점이다. 캐시 키는 feature
+    # 이름이 아니라 resolve된 provider·model·thinking으로 만들어지므로,
+    # feature를 나눠도 항목 값이 같으면 기존 캐시는 그대로 유효하다.
+    feature: str
 
 
 RUSSIAN = SourceLanguage(
@@ -192,6 +201,7 @@ RUSSIAN = SourceLanguage(
     stray_word=re.compile(r"[А-Яа-яЁёІіЇїЄє][А-Яа-яЁёІіЇїЄє\-]*"),
     stray_min=3, short_ratio=0.25, bounded=True,
     chars_per_token=2.2, output_ratio=0.9,
+    feature="archival_document_translation_ru",
 )
 
 CHINESE = SourceLanguage(
@@ -200,6 +210,7 @@ CHINESE = SourceLanguage(
     stray_word=re.compile(r"[㐀-䶿一-鿿]+"),
     stray_min=1, short_ratio=0.7, bounded=False,
     chars_per_token=1.4, output_ratio=1.8,
+    feature="archival_document_translation_zh",
 )
 
 LANGUAGES = {lang.code: lang for lang in (RUSSIAN, CHINESE)}
@@ -641,13 +652,14 @@ def _chunk_key(prompt: str, opts: Options,
     """
     from llm import call_registry
 
-    profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+    lang = lang or RUSSIAN
+    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
     # The system prompt belongs in the key too. Without it, editing the
     # translation rules silently reuses output produced under the old ones
     # unless someone remembers to bump PROMPT_VERSION by hand — and a
     # constant that has to be remembered is a constant that gets forgotten.
     system_hash = hashlib.sha256(
-        (lang or RUSSIAN).system_prompt.encode("utf-8")).hexdigest()[:16]
+        lang.system_prompt.encode("utf-8")).hexdigest()[:16]
     fingerprint = (f"{profile.provider}\0{profile.model}\0"
                    f"{profile.extra.get('thinking')}\0{system_hash}")
     return hashlib.sha256(
@@ -672,7 +684,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     last_reason = "원인 미상"
     for attempt in range(1, opts.retries + 1):
         raw = call_registry.generate_sync(
-            FEATURE, prompt + correction, system=lang.system_prompt,
+            lang.feature, prompt + correction, system=lang.system_prompt,
             model=opts.model, max_tokens=opts.max_tokens,
         )
         if not raw:
@@ -962,17 +974,19 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
 
 # ── public entry points ──────────────────────────────────────────────
 
-def preflight(opts: Options | None = None) -> None:
+def preflight(opts: Options | None = None, lang: SourceLanguage | None = None) -> None:
     """Fail fast on a credential that cannot possibly work.
 
     call_registry.generate_sync swallows the provider exception and returns
     None, so without this check a bad key surfaces only as every chunk
-    failing its full retry budget with no stated cause.
+    failing its full retry budget with no stated cause. 언어쌍마다 provider가
+    다를 수 있으므로 검사할 feature도 lang을 따른다.
     """
     opts = opts or Options()
+    lang = lang or RUSSIAN
     from llm import call_registry
 
-    profile = call_registry.resolve(FEATURE, model=opts.model)
+    profile = call_registry.resolve(lang.feature, model=opts.model)
     try:
         connection = call_registry.resolve_provider_connection(profile.provider)
     except ValueError:
@@ -1001,15 +1015,18 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
     from a rejected request.
     """
     opts = opts or Options()
+    lang = language_for(spec)
     from llm import call_registry
 
-    profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
     executor = call_registry._EXECUTORS.get(profile.provider)
     if executor is None:
         raise SpecError(f"등록되지 않은 provider: {profile.provider}")
 
+    sample = ("다음을 한국어로: Приказ народного комиссара."
+              if lang.code == "ru" else "다음을 한국어로: 中央委员会的决定。")
     cases: list[tuple[str, str, str]] = [
-        ("minimal", "당신은 번역기다.", "다음을 한국어로: Приказ народного комиссара."),
+        ("minimal", "당신은 번역기다.", sample),
     ]
     if spec is not None:
         prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": 1}))
@@ -1063,7 +1080,7 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
     opts = opts or Options()
     prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
     chunks, glossary, lang = prepared["_chunks"], prepared["_glossary"], prepared["_lang"]
-    base = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+    base = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
 
     results = []
     for variant in variants:
@@ -1130,7 +1147,7 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     from llm import call_registry
     from llm.provider_registry import openai_compatible_pricing
 
-    profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+    profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
     price = openai_compatible_pricing(profile.model)
     thinking_on = (profile.extra.get("thinking") or {}).get("type") == "enabled"
     tokens_in = total / lang.chars_per_token
@@ -1184,7 +1201,7 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
                 block_ids.append(idx)
         if not pairs:
             return
-        profile = call_registry.resolve(FEATURE, model=opts.model, max_tokens=opts.max_tokens)
+        profile = call_registry.resolve(lang.feature, model=opts.model, max_tokens=opts.max_tokens)
         inserted = translation_memory.record_segments(
             pairs, lang_pair=f"{lang.code}-ko", doc_id=spec.get("id", "unnamed"),
             block_ids=block_ids, provider=profile.provider, model=profile.model)
@@ -1222,7 +1239,7 @@ def run(spec: dict, opts: Options | None = None,
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
-        preflight(opts)
+        preflight(opts, lang)
     emit({"event": "plan", "pending": pending,
           **{k: v for k, v in prepared.items() if not k.startswith("_")}})
 
