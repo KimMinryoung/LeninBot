@@ -24,9 +24,11 @@ segments(id, lang_pair, source, target, doc_id, block_id,
 UNIQUE(lang_pair, doc_id, source, target)
 ```
 
+- **상태 3단계** (조회 우선순위 machine < published < reviewed): `machine`은 파이프라인 원출력, `published`는 frozen(발행) 스펙에서 온 쌍 — 문서 통독 검수는 거쳤지만 세그먼트 개별 확인은 아니라는 사실을 그대로 남긴 중간 상태, `reviewed`는 그 쌍 자체를 사람이 확인한 것. 같은 쌍이 더 높은 상태로 다시 오면 승격되고 내려가지는 않는다.
 - **적재 경로**: 사료 파이프라인 `run()`이 성공한 청크의 블록 쌍을 자동 적재한다(`_record_translation_memory`, 실패는 `tmFailed` 이벤트로만 남고 번역을 깨지 않는다). `translate_db_content.py`는 행 갱신 성공 시 짧은 필드(title 등) 쌍을 적재한다.
-- **백필**: `python scripts/backfill_translation_memory.py` — 기존 청크 캐시(JSONL)를 스펙 재계획으로 원문과 재정렬해 적재. API 호출·자격증명 불필요. `--stats`로 집계 확인.
-- **조회**: `exact_matches(sources, lang_pair=...)` — reviewed가 machine을 이기고, 같은 상태면 새 행이 이긴다. v1은 적재 우선이며 완전 일치 재사용·예시 주입은 이 테이블 위에 후속으로 얹는다.
+- **postEdits 반영**: 캐시에는 모델 원출력이 남지만, 사람이 스펙 `postEdits`로 고친 오역 교정은 적재 전에 같은 치환으로 반영된다(`apply_post_edits`). 따옴표 정규화와 병기 축약은 문서 위치에 묶인 처리라 세그먼트에는 적용하지 않는다.
+- **백필**: `python scripts/backfill_translation_memory.py` — 기존 청크 캐시(JSONL)를 스펙 재계획으로 원문과 재정렬해 적재. frozen 스펙은 `published`로 들어간다. API 호출·자격증명 불필요. `--stats`로 집계 확인.
+- **조회**: `exact_matches(sources, lang_pair=...)` — 상태 우선순위대로 이기고, 같은 상태면 새 행이 이긴다. v1은 적재 우선이며 완전 일치 재사용·예시 주입은 이 테이블 위에 후속으로 얹는다(재사용은 reviewed/published 한정으로 시작할 것).
 
 ## 검증 레이어
 

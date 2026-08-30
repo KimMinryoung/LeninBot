@@ -36,6 +36,7 @@ from runtime_tools.archival_translation.core import (
     _cache_path,
     _chunk_key,
     _chunk_prompt,
+    apply_post_edits,
 )
 
 
@@ -60,11 +61,18 @@ def backfill_spec(spec_id: str) -> dict:
             lines = blocks.get(idx)
             if not lines:
                 continue
-            pairs.append(("\n".join(block["lines"]), "\n".join(lines)))
+            # 캐시에는 모델 원출력이 있고, 사람이 postEdits로 고친 결과는 조립
+            # 단계에만 있었다. 같은 치환을 적용해야 발행본과 같은 텍스트가
+            # TM에 남는다.
+            pairs.append(("\n".join(block["lines"]), "\n".join(apply_post_edits(lines, spec))))
             block_ids.append(idx)
 
+    # frozen 스펙은 발행 전 사람이 통독한 문서다. 세그먼트 하나하나를 확인한
+    # 것은 아니므로 reviewed가 아니라 published — 문서 단위 검수라는 사실
+    # 그대로를 상태로 남긴다.
+    status = "published" if spec.get("frozen") else "machine"
     inserted = translation_memory.record_segments(
-        pairs, lang_pair=f"{lang.code}-ko", doc_id=spec_id, block_ids=block_ids
+        pairs, lang_pair=f"{lang.code}-ko", doc_id=spec_id, block_ids=block_ids, status=status
     )
     return {
         "spec": spec_id,
@@ -72,6 +80,7 @@ def backfill_spec(spec_id: str) -> dict:
         "cacheMisses": misses,
         "segments": len(pairs),
         "inserted": inserted,
+        "status": status,
     }
 
 

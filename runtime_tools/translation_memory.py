@@ -14,9 +14,12 @@ and prompt-example injection can build on the same table later without a
 migration. Recording must never break a translation run — callers wrap it in
 try/except and report, they do not propagate.
 
-Statuses:
-    machine   pipeline output, unreviewed (the default)
-    reviewed  a human confirmed the pair; reviewed rows win on lookup
+Statuses (lookup precedence: machine < published < reviewed):
+    machine    pipeline output, unreviewed (the default)
+    published  the pair comes from a frozen (published) archival spec — the
+               document as a whole passed a human read-through before
+               publication, but no one confirmed this segment individually
+    reviewed   a human confirmed this specific pair
 """
 
 from __future__ import annotations
@@ -66,7 +69,12 @@ def record_segments(
     model: str | None = None,
     db_path: Path | str | None = None,
 ) -> int:
-    """Store aligned (source, target) pairs. Idempotent; returns rows inserted.
+    """Store aligned (source, target) pairs. Returns rows inserted or upgraded.
+
+    Idempotent: re-recording an existing pair changes nothing, except that a
+    higher status wins — a pair first stored as machine at translation time
+    and later backfilled from a frozen spec is upgraded to published instead
+    of being silently ignored. A status never goes down this way.
 
     Empty sides are skipped rather than rejected: an archival block whose
     translation is legitimately empty (a spacer) is not a segment.
@@ -81,12 +89,16 @@ def record_segments(
         rows.append((lang_pair, source, target, doc_id, block_id, status, provider, model))
     if not rows:
         return 0
+    rank = "CASE {} WHEN 'reviewed' THEN 2 WHEN 'published' THEN 1 ELSE 0 END"
     with _connect(db_path) as conn:
         before = conn.total_changes
         conn.executemany(
-            "INSERT OR IGNORE INTO segments"
+            "INSERT INTO segments"
             " (lang_pair, source, target, doc_id, block_id, status, provider, model)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (lang_pair, doc_id, source, target) DO UPDATE SET"
+            "   status = excluded.status"
+            f" WHERE {rank.format('excluded.status')} > {rank.format('segments.status')}",
             rows,
         )
         return conn.total_changes - before
@@ -100,8 +112,9 @@ def exact_matches(
 ) -> dict[str, str]:
     """source text → target for exact matches.
 
-    reviewed 행이 machine 행을 이기고, 같은 상태에서는 새 행이 이긴다 —
-    정렬을 그 순서로 두고 dict를 덮어쓰게 해서, 마지막에 남는 행이 승자다.
+    reviewed > published > machine 순서로 이기고, 같은 상태에서는 새 행이
+    이긴다 — 정렬을 그 순서로 두고 dict를 덮어쓰게 해서, 마지막에 남는 행이
+    승자다.
     """
     out: dict[str, str] = {}
     cleaned = [s.strip() for s in sources if (s or "").strip()]
@@ -114,7 +127,7 @@ def exact_matches(
             rows = conn.execute(
                 f"SELECT source, target FROM segments"
                 f" WHERE lang_pair = ? AND source IN ({marks})"
-                " ORDER BY (status = 'reviewed'), id",
+                " ORDER BY CASE status WHEN 'reviewed' THEN 2 WHEN 'published' THEN 1 ELSE 0 END, id",
                 [lang_pair, *batch],
             ).fetchall()
             for source, target in rows:

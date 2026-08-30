@@ -775,6 +775,26 @@ def stray_cyrillic(text: str, allowed: list[str] | None = None,
     return sorted(set(found))
 
 
+def apply_post_edits(lines: list[str], spec: dict) -> list[str]:
+    """spec.postEdits 치환을 블록 줄들에 적용한다.
+
+    조립기의 fix()가 하는 세 가지 중 postEdits만 가져온다. 따옴표 정규화는
+    표기 취향이고, 주석 병기 축약(gloss dedupe)은 문서 안의 위치(첫 등장)에
+    묶여 있어 세그먼트 단위로 옮기면 틀린다. postEdits는 오역 교정이므로
+    세그먼트 자체의 품질이고, TM에 적재되는 쌍에도 반영되어야 발행본과 같은
+    텍스트가 남는다.
+    """
+    edits = spec.get("postEdits") or {}
+    if not edits:
+        return lines
+    out = []
+    for line in lines:
+        for src, dst in edits.items():
+            line = line.replace(src, dst)
+        out.append(line)
+    return out
+
+
 def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> str:
     # Mechanical repairs for words the model left in Russian mid-sentence.
     # They live in the spec, not in the fragment, so a re-run from cache
@@ -1157,7 +1177,10 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
                 lines = got.get(idx)
                 if not lines:
                     continue
-                pairs.append(("\n".join(block["lines"]), "\n".join(lines)))
+                pairs.append((
+                    "\n".join(block["lines"]),
+                    "\n".join(apply_post_edits(lines, spec)),
+                ))
                 block_ids.append(idx)
         if not pairs:
             return
