@@ -22,6 +22,7 @@ import re
 from typing import Callable
 
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
+_LETTER_RE = re.compile(r"[^\W\d_]")  # 어느 문자 체계든 글자 하나
 BLOCK_RE = re.compile(r"(?is)<(h3|h5|p|blockquote)\b[^>]*>(.*?)</\1>")
 INNER_P_RE = re.compile(r"(?is)<p\b[^>]*>(.*?)</p>")
 
@@ -320,7 +321,10 @@ def generic_html(raw: str, *, selector: str, drop: list[str] | None = None,
         vocab, seen = [], set()
         for row in rows:
             for cell in row:
-                if cell and CYRILLIC_RE.search(cell) and cell not in seen:
+                # 글자가 든 칸만 번역 어휘로 낸다 — 숫자·기호 칸은 모델을 거치지
+                # 않는다. 키릴만 보던 것을 라틴 문자 저본(FRUS 각서의 수지 표)까지
+                # 넓혔다: 표 머리(England, $ millions)가 영어로 남으면 안 된다.
+                if cell and _LETTER_RE.search(cell) and cell not in seen:
                     seen.add(cell)
                     vocab.append(cell)
         return {"tag": "table", "rows": rows, "lines": vocab}

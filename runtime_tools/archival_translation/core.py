@@ -448,6 +448,13 @@ def _decode_page(data: bytes) -> str:
     declared = (m.group(1).decode("ascii", "ignore").lower() if m else "")
     if declared in ("windows-1251", "cp1251", "win-1251"):
         return data.decode("cp1251", errors="replace")
+    # 라틴 문자 저본(documentarchiv.de ISO-8859-1, der-fuehrer.org cp1252)도
+    # 선언을 따른다 — UTF-8 실패 뒤 cp1251로 물러서면 움라우트가 키릴로 깨진다.
+    if declared and declared not in ("utf-8", "utf8"):
+        try:
+            return data.decode(declared, errors="replace")
+        except LookupError:
+            pass
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
