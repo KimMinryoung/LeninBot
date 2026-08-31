@@ -28,6 +28,7 @@ from llm.tool_loop_common import (
 )
 from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
 from llm.provider_registry import anthropic_pricing_table
+from llm.instrumented_clients import with_audit_owner
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +478,7 @@ class _ClaudeProtocolAdapter:
             kwargs["thinking"] = self.thinking
         if self.output_config is not None:
             kwargs["output_config"] = self.output_config
+        kwargs = with_audit_owner(self.client, kwargs, "loop")
         if self.on_progress is None:
             call = self.client.messages.create(**kwargs)
             if self.provider_idle_timeout_sec:

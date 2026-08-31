@@ -193,6 +193,7 @@ _HELP_TEXT = """\
 /task <내용> — 백그라운드 태스크 등록
 /status — 시스템 대시보드
 /report <id> — 태스크 리포트 재전송
+/llm_balance \\[1~30] — LLM 공식 잔액/비용 및 로컬 감사액
 
 *채널*
 /channel info — 브로드캐스트 대상/권한 확인
@@ -1366,6 +1367,42 @@ async def cmd_provider(message: Message):
         f"태스크 provider: {config.get('task_provider', 'default')}\n"
         f"태스크: {_ctx['tier_to_display'](config['task_model'], _effective_task_provider())}"
     )
+
+
+async def cmd_llm_balance(message: Message):
+    """Show official provider billing data and deduplicated local spend."""
+    if not _ctx["is_allowed"](message.from_user.id):
+        return
+
+    parts = (message.text or "").split()
+    days = 30
+    if len(parts) > 2:
+        await message.answer("사용법: /llm_balance [1~30]")
+        return
+    if len(parts) == 2:
+        try:
+            days = int(parts[1])
+        except ValueError:
+            await message.answer("사용법: /llm_balance [1~30]")
+            return
+        if not 1 <= days <= 30:
+            await message.answer("조회 기간은 1~30일이어야 합니다.")
+            return
+
+    await message.chat.do("typing")
+    try:
+        from llm.gateway import proxy_base
+        from scripts.llm_balances import collect, format_telegram_report
+
+        report = await asyncio.to_thread(
+            collect,
+            proxy_base() or "http://127.0.0.1:8110",
+            days,
+        )
+        await message.answer(format_telegram_report(report))
+    except Exception as e:
+        logger.exception("cmd_llm_balance failed")
+        await message.answer(f"⚠️ LLM 잔액 조회 실패: {_exception_summary(e)}")
 
 
 async def handle_photo(message: Message):
@@ -2748,6 +2785,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_deploy, Command("deploy"))
     router.message.register(cmd_fallback, Command("fallback"))
     router.message.register(cmd_provider, Command("provider"))
+    router.message.register(cmd_llm_balance, Command("llm_balance"))
     router.message.register(cmd_modify, Command("modify"))
     router.message.register(cmd_config, Command("config"))
     router.message.register(cmd_agents, Command("agents"))

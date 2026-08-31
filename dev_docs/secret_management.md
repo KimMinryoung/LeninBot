@@ -1,6 +1,6 @@
 # Secret Management
 
-최종 확인 기준: 2026-08-05 코드 트리.
+최종 확인 기준: 2026-08-29 코드 트리.
 
 Production services read secrets from systemd credentials. Local development can still use `.env`. The common access layer is `secrets_loader.py`.
 
@@ -23,8 +23,10 @@ Credential filename is the lowercased env var name:
 | Env var | Credential file |
 |---|---|
 | `ANTHROPIC_API_KEY` | `anthropic_api_key` |
+| `ANTHROPIC_ADMIN_KEY` | `anthropic_admin_key` |
 | `WRITER_ACCESS_KEY` | `writer_access_key` |
 | `OPENAI_API_KEY` | `openai_api_key` |
+| `OPENAI_ADMIN_KEY` | `openai_admin_key` |
 | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
 | `MOONSHOT_API_KEY` | `moonshot_api_key` |
 | `GEMINI_API_KEY` | `gemini_api_key` |
@@ -58,7 +60,7 @@ Relevant implementation files:
 
 ## Per-Service Notes
 
-- `leninbot-llm-proxy.service` is the sole production custodian for `anthropic_api_key`, `deepseek_api_key`, `moonshot_api_key`, `openai_api_key`, and `gemini_api_key`. LLM-consuming services receive placeholders and start after the proxy is ready; `scripts/remove_llm_provider_keys.sh` removes stale provider-key mounts. KG and Writer do not have separate provider credentials: they use the shared Gemini and Anthropic keys.
+- `leninbot-llm-proxy.service` is the sole production custodian for `anthropic_api_key`, `deepseek_api_key`, `moonshot_api_key`, `openai_api_key`, and `gemini_api_key`. LLM-consuming services receive placeholders and start after the proxy is ready; `scripts/remove_llm_provider_keys.sh` removes stale provider-key mounts. KG and Writer do not have separate provider credentials: they use the shared Gemini and Anthropic keys. Optional `openai_admin_key` and `anthropic_admin_key` credentials also mount only here and are never attached to a generic passthrough route: they can call only the fixed read-only organization cost-report endpoints exposed as `/billing/openai` and `/billing/claude`.
   - **Custody is enforced, not conventional (2026-08-14).** The unit runs under `DynamicUser=yes`, a per-boot transient UID, not `User=grass`. systemd grants the decrypted credentials in `/run/credentials/leninbot-llm-proxy.service/` to the service user alone, so while the proxy ran as `grass` every `grass` process (the curator lanes, an operator shell, any ad hoc script) could read the real provider keys and bypass the proxy; under a dynamic UID no other local account can, and the only path to a provider is an HTTP call to `127.0.0.1:8110`, which the proxy audits and budget-gates. `root` is unaffected — this is a boundary against `grass`-level access and accidental direct calls, not against host root.
   - The dynamic UID reads the source tree via `SupplementaryGroups=grass` (the tree under `/home/grass`, mode 0750, is group-readable). It does not read provider keys from `.env` (those are credstore-only via `CREDENTIALS_DIRECTORY`), but `secrets_loader.load_dotenv()` opens `/home/grass/leninbot/.env` on import for DB config, so **`.env` must be mode 0640 group `grass`** (not 0600) or the proxy's `llm_audit_log` writes fail with `Permission denied` and budget enforcement silently fails open. `.env` holds no real provider keys, so group-`grass` read widens nothing beyond what `grass` already owns.
 - `leninbot-roleplay.service` no longer mounts `deepseek_api_key`; its tool/database/search credentials remain service-local and model traffic uses the proxy.
@@ -72,5 +74,6 @@ Relevant implementation files:
 ## Operational Notes
 
 - A service restart is required after credential rotation because clients and `get_secret()` cache values in-process.
+- Add optional cost-report credentials with `scripts/manage_secrets.py add OPENAI_ADMIN_KEY` / `ANTHROPIC_ADMIN_KEY`, then run `scripts/apply_credentials_dropin.sh`. Until then `scripts/llm-balances` reports the deduplicated local audit estimate instead of failing.
 - Shell exports and `.env` values take precedence during the bridge via `setdefault`, so local development can override credentials intentionally.
 - `PROJECT_ROOT` is derived from `secrets_loader.py` location when not set, so clones should not need a machine-specific project-root secret.

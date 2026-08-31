@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -84,6 +85,38 @@ PROVIDERS: dict[str, dict] = {
                "auth": ("bearer",)},
     "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secret": "GEMINI_API_KEY",
                "auth": ("x-goog-api-key",)},
+}
+
+# Billing reads are deliberately NOT added as passthrough providers.  The
+# optional admin credentials can read organization-wide financial data and in
+# some providers carry broader administrative authority than an inference key.
+# They are therefore usable only through the fixed read-only endpoints below;
+# no caller can choose an arbitrary upstream admin path.
+BILLING_PROVIDERS: dict[str, dict] = {
+    "deepseek": {
+        "kind": "balance",
+        "upstream": "https://api.deepseek.com/user/balance",
+        "secret": "DEEPSEEK_API_KEY",
+        "auth": "bearer",
+    },
+    "kimi": {
+        "kind": "balance",
+        "upstream": "https://api.moonshot.ai/v1/users/me/balance",
+        "secret": "MOONSHOT_API_KEY",
+        "auth": "bearer",
+    },
+    "openai": {
+        "kind": "cost",
+        "upstream": "https://api.openai.com/v1/organization/costs",
+        "secret": "OPENAI_ADMIN_KEY",
+        "auth": "bearer",
+    },
+    "claude": {
+        "kind": "cost",
+        "upstream": "https://api.anthropic.com/v1/organizations/cost_report",
+        "secret": "ANTHROPIC_ADMIN_KEY",
+        "auth": "anthropic-admin",
+    },
 }
 
 # Hop-by-hop plus everything we replace. Content-Length is recomputed by
@@ -184,6 +217,109 @@ def build_forward_headers(incoming: dict, provider_cfg: dict, key: str) -> dict:
     return headers
 
 
+def billing_request(
+    provider: str, days: int, *, now: datetime | None = None,
+) -> tuple[dict, dict]:
+    """Return fixed upstream request params and non-secret auth metadata.
+
+    Kept pure so the security boundary and provider-specific date formats are
+    unit-testable without making a network request.
+    """
+    cfg = BILLING_PROVIDERS[provider]
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    start = now - timedelta(days=days)
+    if provider == "openai":
+        params = {
+            "start_time": int(start.timestamp()),
+            "end_time": int(now.timestamp()),
+            "bucket_width": "1d",
+            "limit": min(days + 1, 180),
+        }
+    elif provider == "claude":
+        params = {
+            "starting_at": start.isoformat().replace("+00:00", "Z"),
+            "ending_at": now.isoformat().replace("+00:00", "Z"),
+            "bucket_width": "1d",
+            "limit": min(days + 1, 31),
+        }
+    else:
+        params = {}
+    return cfg, params
+
+
+def billing_headers(auth: str, key: str) -> dict[str, str]:
+    if auth == "anthropic-admin":
+        return {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "accept": "application/json",
+        }
+    return {"authorization": f"Bearer {key}", "accept": "application/json"}
+
+
+def normalize_billing_response(provider: str, payload: dict, days: int) -> dict:
+    """Normalize incompatible provider billing payloads for the operator CLI."""
+    if provider == "deepseek":
+        balances = [
+            {
+                "currency": str(item.get("currency") or ""),
+                "available": float(item.get("total_balance") or 0),
+                "granted": float(item.get("granted_balance") or 0),
+                "cash": float(item.get("topped_up_balance") or 0),
+            }
+            for item in payload.get("balance_infos", [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "provider": provider,
+            "status": "ok",
+            "kind": "balance",
+            "can_call": bool(payload.get("is_available")),
+            "balances": balances,
+        }
+    if provider == "kimi":
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        return {
+            "provider": provider,
+            "status": "ok" if payload.get("status") else "error",
+            "kind": "balance",
+            "can_call": float(data.get("available_balance") or 0) > 0,
+            "balances": [{
+                "currency": "USD",
+                "available": float(data.get("available_balance") or 0),
+                "granted": float(data.get("voucher_balance") or 0),
+                "cash": float(data.get("cash_balance") or 0),
+            }],
+        }
+
+    amounts: dict[str, float] = {}
+    for bucket in payload.get("data", []):
+        if not isinstance(bucket, dict):
+            continue
+        for result in bucket.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            if provider == "openai":
+                amount = result.get("amount") or {}
+                value = amount.get("value", 0) if isinstance(amount, dict) else 0
+                currency = str(amount.get("currency") or "USD") if isinstance(amount, dict) else "USD"
+            else:
+                value = result.get("amount", 0)
+                currency = str(result.get("currency") or "USD")
+            amounts[currency.upper()] = amounts.get(currency.upper(), 0.0) + float(value or 0)
+    return {
+        "provider": provider,
+        "status": "ok",
+        "kind": "cost",
+        "window_days": days,
+        "costs": [
+            {"currency": currency, "amount": round(amount, 8)}
+            for currency, amount in sorted(amounts.items())
+        ],
+        "has_more": bool(payload.get("has_more")),
+    }
+
+
 async def relay_and_record(
     upstream: httpx.Response, *, caller: str | None, provider: str | None,
     model: str | None, label: str, started: float,
@@ -239,6 +375,59 @@ async def health():
         "providers_without_key": missing,
     }
     return JSONResponse(payload, status_code=200 if not missing else 503)
+
+
+@app.get("/billing/{provider}")
+async def billing(provider: str, days: int = 30):
+    """Read a provider balance/cost report through a fixed, read-only path.
+
+    This endpoint is localhost-only with the rest of the proxy.  Missing
+    optional admin credentials are a normal state and return a structured 200
+    response so the operator CLI can fall back to the local audit estimate.
+    """
+    if provider not in BILLING_PROVIDERS:
+        return JSONResponse(
+            {"provider": provider, "status": "unsupported"}, status_code=404,
+        )
+    if not 1 <= days <= 30:
+        return JSONResponse(
+            {"provider": provider, "status": "invalid_days", "allowed": "1..30"},
+            status_code=400,
+        )
+    cfg, params = billing_request(provider, days)
+    key = _credential(cfg["secret"])
+    if not key:
+        return JSONResponse({
+            "provider": provider,
+            "status": "credential_missing",
+            "required_credential": cfg["secret"],
+        })
+
+    started = time.monotonic()
+    try:
+        response = await _http_client().get(
+            cfg["upstream"],
+            headers=billing_headers(cfg["auth"], key),
+            params=params,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("provider returned a non-object JSON payload")
+        normalized = normalize_billing_response(provider, payload, days)
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
+        logger.warning("billing lookup failed for %s: %s", provider, e)
+        return JSONResponse({
+            "provider": provider,
+            "status": "upstream_error",
+            "error": e.__class__.__name__,
+        }, status_code=502)
+
+    logger.info(
+        "billing lookup %s ok in %dms",
+        provider, int((time.monotonic() - started) * 1000),
+    )
+    return JSONResponse(normalized)
 
 
 @app.api_route("/{provider}/{path:path}", methods=["GET", "POST"])

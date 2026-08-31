@@ -9,6 +9,36 @@ from llm.gateway import check_llm_call, record_llm_call
 from llm.tool_loop_common import estimate_text_tokens
 
 
+_AUDIT_OWNER_KWARG = "_leninbot_audit_owner"
+_AUDIT_OWNER_SENTINEL = object()
+
+
+def with_audit_owner(client, kwargs: dict, owner: str) -> dict:
+    """Mark a request whose usage is recorded by a higher-level seam.
+
+    Only LeninBot's audited wrappers understand the private marker.  Raw SDK
+    clients receive the original kwargs unchanged, while a wrapper removes the
+    marker before forwarding the request and skips its own policy/audit event.
+    Request preparation (caller headers and DeepSeek thinking defaults) still
+    runs, so loop-owned calls retain their transport contract without counting
+    the same response once as ``external_sdk`` and again as ``loop``.
+    """
+    if not getattr(client, "_leninbot_audit_wrapper", False):
+        return kwargs
+    return {**kwargs, _AUDIT_OWNER_KWARG: (_AUDIT_OWNER_SENTINEL, owner)}
+
+
+def _pop_audit_owner(kwargs: dict) -> str | None:
+    marker = kwargs.pop(_AUDIT_OWNER_KWARG, None)
+    if (
+        isinstance(marker, tuple)
+        and len(marker) == 2
+        and marker[0] is _AUDIT_OWNER_SENTINEL
+    ):
+        return str(marker[1])
+    return None
+
+
 def _gemini_usage(response) -> dict[str, int]:
     meta = getattr(response, "usage_metadata", None)
     return {
@@ -153,6 +183,7 @@ class _AuditedAsyncMessages:
 
     async def create(self, *args, **kwargs):
         model = _model_arg(args, kwargs)
+        audit_owner = _pop_audit_owner(kwargs)
         # DeepSeek V4 turns thinking on when the request says nothing, and the
         # reasoning shares max_tokens with the reply: a call that only wants
         # text can spend the whole budget deliberating and return an empty text
@@ -161,14 +192,16 @@ class _AuditedAsyncMessages:
         # silence here means "not asked for" rather than "leave it to the
         # provider".
         self._prepare(kwargs)
-        check_llm_call(
-            surface="external_sdk", caller=self._caller,
-            provider=self._provider, model=model,
-        )
+        if audit_owner is None:
+            check_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model,
+            )
         started = time.monotonic()
         try:
             response = await self._messages.create(*args, **kwargs)
         except Exception as exc:
+            # A failed attempt has no higher-level usage row to duplicate.
             record_llm_call(
                 surface="external_sdk", caller=self._caller,
                 provider=self._provider, model=model, label="messages.create",
@@ -177,21 +210,24 @@ class _AuditedAsyncMessages:
                 estimate_cost=False,
             )
             raise
-        record_llm_call(
-            surface="external_sdk", caller=self._caller,
-            provider=self._provider, model=model, label="messages.create",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            **_anthropic_usage(response),
-        )
+        if audit_owner is None:
+            record_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model, label="messages.create",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                **_anthropic_usage(response),
+            )
         return response
 
     def stream(self, *args, **kwargs):
         model = _model_arg(args, kwargs)
+        audit_owner = _pop_audit_owner(kwargs)
         self._prepare(kwargs)
-        check_llm_call(
-            surface="external_sdk", caller=self._caller,
-            provider=self._provider, model=model,
-        )
+        if audit_owner is None:
+            check_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model,
+            )
         # Returns the SDK's own async context manager untouched: the caller
         # consumes the stream and records its usage (llm/claude_loop does).
         return self._messages.stream(*args, **kwargs)
@@ -211,6 +247,7 @@ class AuditedAsyncAnthropic:
     """
 
     def __init__(self, client, *, caller: str, provider: str, thinking_off: bool = False):
+        self._leninbot_audit_wrapper = True
         self._client = client
         self.messages = _AuditedAsyncMessages(client.messages, caller, provider, thinking_off)
 
@@ -221,10 +258,14 @@ class AuditedAsyncAnthropic:
 def _openai_usage(response) -> dict[str, int]:
     usage = getattr(response, "usage", None)
     details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+    if details and not cached:
+        cached = getattr(details, "cached_tokens", 0) or 0
     return {
         "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
         "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
-        "cache_read": getattr(details, "cached_tokens", 0) or 0,
+        "cache_read": cached,
+        "cache_create": getattr(details, "cache_write_tokens", 0) or 0,
     }
 
 
@@ -242,17 +283,20 @@ class _AuditedOpenAIEndpoint:
 
     async def create(self, *args, **kwargs):
         model = _model_arg(args, kwargs)
+        audit_owner = _pop_audit_owner(kwargs)
         headers = dict(kwargs.get("extra_headers") or {})
         headers.setdefault("x-llm-caller", self._caller)
         kwargs["extra_headers"] = headers
-        check_llm_call(
-            surface="external_sdk", caller=self._caller,
-            provider=self._provider, model=model,
-        )
+        if audit_owner is None:
+            check_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model,
+            )
         started = time.monotonic()
         try:
             response = await self._endpoint.create(*args, **kwargs)
         except Exception as exc:
+            # A failed attempt has no higher-level usage row to duplicate.
             record_llm_call(
                 surface="external_sdk", caller=self._caller,
                 provider=self._provider, model=model, label=self._label,
@@ -264,12 +308,13 @@ class _AuditedOpenAIEndpoint:
         # A streamed response is an iterator with no usage until it is drained;
         # the caller that drains it owns the accounting.
         usage = ({} if kwargs.get("stream") else _openai_usage(response))
-        record_llm_call(
-            surface="external_sdk", caller=self._caller,
-            provider=self._provider, model=model, label=self._label,
-            latency_ms=int((time.monotonic() - started) * 1000),
-            estimate_cost=not kwargs.get("stream"), **usage,
-        )
+        if audit_owner is None:
+            record_llm_call(
+                surface="external_sdk", caller=self._caller,
+                provider=self._provider, model=model, label=self._label,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                estimate_cost=not kwargs.get("stream"), **usage,
+            )
         return response
 
 
@@ -291,6 +336,7 @@ class AuditedAsyncOpenAI:
     """
 
     def __init__(self, client, *, caller: str, provider: str):
+        self._leninbot_audit_wrapper = True
         self._client = client
         self.chat = _AuditedChat(client.chat, caller, provider)
         self.embeddings = _AuditedOpenAIEndpoint(

@@ -2066,6 +2066,7 @@ async def bot_main():
         BotCommand(command="help", description="커맨드 목록"),
         BotCommand(command="task", description="백그라운드 태스크 등록"),
         BotCommand(command="status", description="시스템 대시보드"),
+        BotCommand(command="llm_balance", description="LLM 잔액·비용 조회"),
         BotCommand(command="report", description="태스크 리포트 재전송"),
         BotCommand(command="config", description="설정 패널"),
         BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),

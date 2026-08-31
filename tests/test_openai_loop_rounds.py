@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, patch
 import llm.openai_tool_loop as openai_tool_loop
 import llm.tool_loop_common as tool_loop_common
 from llm.openai_tool_loop import chat_with_tools
+from llm.instrumented_clients import AuditedAsyncOpenAI
 
 
 def _usage(prompt=1000, completion=100):
@@ -70,6 +71,7 @@ class FakeSDKClient:
                 return item
 
         self.chat = SimpleNamespace(completions=_Completions())
+        self.embeddings = SimpleNamespace(create=None)
 
 
 def _fake_batch_factory(results_by_name, skip_names=()):
@@ -102,6 +104,23 @@ BASE_KWARGS = dict(
 
 
 class TestPlainTextTurn(unittest.TestCase):
+    def test_audited_client_defers_usage_audit_to_loop(self):
+        raw = FakeSDKClient([_resp("ok")])
+        client = AuditedAsyncOpenAI(raw, caller="openai_client", provider="openai")
+        with patch("llm.instrumented_clients.check_llm_call") as client_check, \
+             patch("llm.instrumented_clients.record_llm_call") as client_record, \
+             patch("llm.agent_loop.record_llm_call") as loop_record:
+            result = asyncio.run(chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="gpt-5.6-luna",
+                **BASE_KWARGS,
+            ))
+        self.assertEqual(result, "ok")
+        client_check.assert_not_called()
+        client_record.assert_not_called()
+        loop_record.assert_called_once()
+        self.assertEqual(raw.calls[0]["extra_headers"]["x-llm-caller"], "openai_client")
+
     def test_returns_text_and_tracker(self):
         client = FakeSDKClient([_resp("최종 답변")])
         tracker = {}

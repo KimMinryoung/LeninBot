@@ -43,6 +43,7 @@ from llm.provider_registry import (
     OPENAI_COMPATIBLE_PRICING as OPENAI_PRICING,
     openai_compatible_pricing,
 )
+from llm.instrumented_clients import with_audit_owner
 
 logger = logging.getLogger(__name__)
 
@@ -95,33 +96,36 @@ def _side_effect_fallback_report(err: Exception, details: list[str]) -> str:
     )
 
 
-def _pricing_for_model(model: str) -> dict[str, float]:
-    return openai_compatible_pricing(model)
+def _pricing_for_model(model: str, input_tokens: int = 0) -> dict[str, float]:
+    return openai_compatible_pricing(model, input_tokens=input_tokens)
 
 
 def _calculate_cost(usage, model: str) -> float:
     """Calculate USD cost from an OpenAI usage object."""
-    pricing = _pricing_for_model(model)
-    cost = 0.0
-
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    pricing = _pricing_for_model(model, prompt_tokens)
+    cost = 0.0
 
     cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
     miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    cache_write_tokens = getattr(details, "cache_write_tokens", 0) or 0
     if miss_tokens or cached_tokens:
-        cost += miss_tokens * pricing["input"]
+        ordinary_input = max(0, miss_tokens - cache_write_tokens)
+        cost += ordinary_input * pricing["input"]
+        cost += cache_write_tokens * pricing.get("cache_write", pricing["input"])
         cost += cached_tokens * pricing["cached_input"]
         cost += completion_tokens * pricing["output"]
         return cost
 
     cached_tokens = 0
-    details = getattr(usage, "prompt_tokens_details", None)
     if details:
         cached_tokens = getattr(details, "cached_tokens", 0) or 0
 
-    non_cached_input = prompt_tokens - cached_tokens
+    non_cached_input = max(0, prompt_tokens - cached_tokens - cache_write_tokens)
     cost += non_cached_input * pricing["input"]
+    cost += cache_write_tokens * pricing.get("cache_write", pricing["input"])
     cost += cached_tokens * pricing["cached_input"]
     cost += completion_tokens * pricing["output"]
     return cost
@@ -706,6 +710,8 @@ async def _call_sdk(
         if include_parallel_tool_calls:
             kwargs["parallel_tool_calls"] = parallel_tool_calls
 
+    kwargs = with_audit_owner(client, kwargs, "loop")
+
     if on_progress is None:
         call = client.chat.completions.create(**kwargs)
         if idle_timeout_sec:
@@ -1194,13 +1200,19 @@ class _OpenAIProtocolAdapter:
         cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
         miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
         details = getattr(usage, "prompt_tokens_details", None)
+        cache_write_tokens = getattr(details, "cache_write_tokens", 0) or 0
         if details and not cached_tokens:
             cached_tokens = getattr(details, "cached_tokens", 0) or 0
-        non_cached = miss_tokens or (prompt_tokens - cached_tokens)
+        non_cached = max(
+            0,
+            (miss_tokens if miss_tokens else prompt_tokens - cached_tokens)
+            - cache_write_tokens,
+        )
         logger.info(
-            "%s usage [%s model=%s]: in=%d (cached=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
+            "%s usage [%s model=%s]: in=%d (cached=%d cache_write=%d uncached=%d) out=%d → $%.4f (total: $%.4f / $%.2f)",
             label, self.active_usage_label, billed_model, prompt_tokens, cached_tokens,
-            non_cached, completion_tokens, call_cost, current_total, self.state.budget_usd,
+            cache_write_tokens, non_cached, completion_tokens, call_cost,
+            current_total, self.state.budget_usd,
         )
 
     def track_cost(self, response, label):
@@ -1218,11 +1230,13 @@ class _OpenAIProtocolAdapter:
         details = getattr(usage, "prompt_tokens_details", None)
         if details and not cached_tokens:
             cached_tokens = getattr(details, "cached_tokens", 0) or 0
+        cache_write_tokens = getattr(details, "cache_write_tokens", 0) or 0
         self.state.add_cost(
             call_cost, model=billed_model, label=label,
             tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
             tokens_out=getattr(usage, "completion_tokens", 0) or 0,
             cache_read=cached_tokens,
+            cache_create=cache_write_tokens,
         )
         self._log_sdk_usage(label, usage, call_cost, self.state.total_cost, billed_model)
         return True

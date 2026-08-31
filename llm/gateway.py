@@ -215,6 +215,7 @@ def estimate_cost_usd(
         OPENAI_COMPATIBLE_PRICING,
         anthropic_pricing_table,
         deepseek_price_triple,
+        openai_compatible_pricing,
     )
 
     def _lookup(table: dict) -> dict | None:
@@ -238,7 +239,9 @@ def estimate_cost_usd(
                 "output": out / 1_000_000,
                 "cached_input": hit / 1_000_000,
             }
-        return _lookup(OPENAI_COMPATIBLE_PRICING)
+        if _lookup(OPENAI_COMPATIBLE_PRICING) is None:
+            return None
+        return openai_compatible_pricing(model, input_tokens=tokens_in)
 
     def _anthropic_cost(p: dict) -> float:
         return (
@@ -249,9 +252,10 @@ def estimate_cost_usd(
         )
 
     def _prompt_total_cost(p: dict) -> float:
-        non_cached = max(0, tokens_in - cache_read)
+        non_cached = max(0, tokens_in - cache_read - cache_create)
         return (
             non_cached * p["input"]
+            + cache_create * p.get("cache_write", p["input"])
             + cache_read * p.get("cached_input", p["input"])
             + tokens_out * p["output"]
         )

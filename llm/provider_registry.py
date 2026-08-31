@@ -53,11 +53,17 @@ MODEL_DISPLAY_NAMES = {
 }
 
 
-def _per_token(input_price: float, output_price: float, cached: float) -> dict[str, float]:
+def _per_token(
+    input_price: float,
+    output_price: float,
+    cached: float,
+    cache_write: float | None = None,
+) -> dict[str, float]:
     return {
         "input": input_price / 1_000_000,
         "output": output_price / 1_000_000,
         "cached_input": cached / 1_000_000,
+        "cache_write": (input_price if cache_write is None else cache_write) / 1_000_000,
     }
 
 
@@ -112,13 +118,22 @@ def deepseek_price_triple(
 
 
 OPENAI_COMPATIBLE_PRICING = {
-    "gpt-5.6-sol": _per_token(5.00, 30.00, 0.50),
-    # 2026-07-30 인하: Terra -20%, Luna -80%. 롱컨텍스트 티어(2x)는 미반영.
-    "gpt-5.6-terra": _per_token(2.00, 12.00, 0.20),
-    "gpt-5.6-luna": _per_token(0.20, 1.20, 0.02),
+    # OpenAI standard short-context rates, audited 2026-08-29. GPT-5.6 cache
+    # writes cost 1.25x ordinary input. Sol's $4/$20 promotional price lasts
+    # at least through 2026-11-21.
+    "gpt-5.6-sol": _per_token(4.00, 20.00, 0.40, 5.00),
+    "gpt-5.6-terra": _per_token(2.00, 12.00, 0.20, 2.50),
+    "gpt-5.6-luna": _per_token(0.20, 1.20, 0.02, 0.25),
     # DeepSeek is intentionally NOT a static row: its price is time-of-day
     # dependent since 2026-08-16 and is resolved via deepseek_price_triple().
     "kimi-k3": _per_token(3.00, 15.00, 0.30),
+}
+
+GPT56_LONG_CONTEXT_THRESHOLD = 272_000
+_OPENAI_GPT56_LONG_CONTEXT_PRICING = {
+    "gpt-5.6-sol": _per_token(8.00, 30.00, 0.80, 10.00),
+    "gpt-5.6-terra": _per_token(4.00, 18.00, 0.40, 5.00),
+    "gpt-5.6-luna": _per_token(0.40, 1.80, 0.04, 0.50),
 }
 
 
@@ -127,6 +142,14 @@ OPENAI_COMPATIBLE_PRICING = {
 # cached prompt tokens with OpenAI-like semantics, but has its own models and
 # prices.  See dev_docs/llm_gateway.md for the pricing-source link/date.
 GEMINI_PRICING = {
+    # 2026-08-31 갱신: 현행 라인업은 pro=3.1-pro-preview(stable 별칭 없음,
+    # 3.5 Pro는 존재하지 않음), flash=3.7, flash-lite=3.5로 고정한다(사용자
+    # 결정 — 3.5/3.6 flash는 선택지로 두지 않음). >200K 입력의 $4/$18 장문
+    # 티어는 미모델링. 3.7 Flash는 출시가 $0.75/$3.75, 2027-01-01부터
+    # $1.50/$7.50 예정. 캐시 입력가는 관례(입력의 10%) — 3.1 Pro만 공식 $0.20.
+    # 2.5/3.1 구모델 행은 라이브 call site들이 아직 쓰므로 가격 산정용으로만 유지.
+    "gemini-3.1-pro-preview": _per_token(2.00, 12.00, 0.20),
+    "gemini-3.7-flash": _per_token(0.75, 3.75, 0.075),
     "gemini-3.5-flash-lite": _per_token(0.30, 2.50, 0.03),
     "gemini-3.1-flash-lite": _per_token(0.25, 1.50, 0.025),
     "gemini-2.5-flash-lite": _per_token(0.10, 0.40, 0.01),
@@ -136,20 +159,13 @@ GEMINI_PRICING = {
 
 
 def openai_compatible_pricing(
-    model: str, now: datetime | None = None
+    model: str, now: datetime | None = None, *, input_tokens: int = 0,
 ) -> dict[str, float]:
     """Return pricing for an exact or provider-pinned model ID.
 
     DeepSeek rows are time-of-day dependent (peak/off-peak) and resolved live;
+    GPT-5.6 uses the full-request long-context tier above 272K input tokens;
     everything else is a static row with a Terra fallback for unknowns."""
-    # 2026-08-31 갱신: 현행 라인업은 pro=3.1-pro-preview(stable 별칭 없음,
-    # 3.5 Pro는 존재하지 않음), flash=3.7, flash-lite=3.5로 고정한다(사용자
-    # 결정 — 3.5/3.6 flash는 선택지로 두지 않음). >200K 입력의 $4/$18 장문
-    # 티어는 미모델링. 3.7 Flash는 출시가 $0.75/$3.75, 2027-01-01부터
-    # $1.50/$7.50 예정. 캐시 입력가는 관례(입력의 10%) — 3.1 Pro만 공식 $0.20.
-    # 2.5/3.1 구모델 행은 라이브 call site들이 아직 쓰므로 가격 산정용으로만 유지.
-    "gemini-3.1-pro-preview": _per_token(2.00, 12.00, 0.20),
-    "gemini-3.7-flash": _per_token(0.75, 3.75, 0.075),
     triple = deepseek_price_triple(model, now)
     if triple is not None:
         miss, out, hit = triple
@@ -158,11 +174,21 @@ def openai_compatible_pricing(
             "output": out / 1_000_000,
             "cached_input": hit / 1_000_000,
         }
+    resolved_key = None
     if model in OPENAI_COMPATIBLE_PRICING:
-        return OPENAI_COMPATIBLE_PRICING[model]
-    for base, price in OPENAI_COMPATIBLE_PRICING.items():
-        if model.startswith(base + "-") or model.startswith(base + "."):
-            return price
+        resolved_key = model
+    else:
+        for base in OPENAI_COMPATIBLE_PRICING:
+            if model.startswith(base + "-") or model.startswith(base + "."):
+                resolved_key = base
+                break
+    if resolved_key is not None:
+        if (
+            input_tokens > GPT56_LONG_CONTEXT_THRESHOLD
+            and resolved_key in _OPENAI_GPT56_LONG_CONTEXT_PRICING
+        ):
+            return _OPENAI_GPT56_LONG_CONTEXT_PRICING[resolved_key]
+        return OPENAI_COMPATIBLE_PRICING[resolved_key]
     return OPENAI_COMPATIBLE_PRICING["gpt-5.6-terra"]
 
 

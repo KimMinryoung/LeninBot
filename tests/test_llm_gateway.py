@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -31,6 +32,13 @@ def _policy(**overrides):
     return {**gw._DEFAULTS, **overrides}
 
 
+class _PreDeepSeekRepricing(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2026, 8, 1, tzinfo=timezone.utc)
+        return value if tz is None else value.astimezone(tz)
+
+
 class TestInferProvider(unittest.TestCase):
     def test_known_prefixes(self):
         self.assertEqual(infer_provider("claude-fable-5"), "claude")
@@ -47,6 +55,30 @@ class TestInferProvider(unittest.TestCase):
 
 
 class TestEstimateCost(unittest.TestCase):
+    def test_gpt56_sol_promotional_short_context_price(self):
+        cost = estimate_cost_usd(
+            "gpt-5.6-sol", tokens_in=100_000, tokens_out=100_000,
+        )
+        self.assertAlmostEqual(cost, 0.1 * 4.00 + 0.1 * 20.00, places=6)
+
+    def test_gpt56_long_context_prices_full_request(self):
+        cost = estimate_cost_usd(
+            "gpt-5.6-sol", tokens_in=300_000, tokens_out=100_000,
+        )
+        self.assertAlmostEqual(cost, 0.3 * 8.00 + 0.1 * 30.00, places=6)
+
+    def test_gpt56_cache_write_has_distinct_price(self):
+        cost = estimate_cost_usd(
+            "gpt-5.6-sol",
+            tokens_in=100_000,
+            cache_read=25_000,
+            cache_create=50_000,
+        )
+        self.assertAlmostEqual(
+            cost, 0.025 * 4.00 + 0.025 * 0.40 + 0.05 * 5.00, places=6,
+        )
+
+    @patch("llm.provider_registry.datetime", _PreDeepSeekRepricing)
     def test_anthropic_semantics_input_excludes_cache(self):
         # deepseek-v4-flash: in 0.14, out 0.28, cache_read 0.0028 per M
         cost = estimate_cost_usd(
@@ -68,10 +100,11 @@ class TestEstimateCost(unittest.TestCase):
         # includes the cached share, which must be re-priced, not double-billed.
         cost = estimate_cost_usd(
             "gpt-5.6-luna",
-            tokens_in=2_000_000, tokens_out=0, cache_read=1_000_000,
+            tokens_in=200_000, tokens_out=0, cache_read=100_000,
         )
-        self.assertAlmostEqual(cost, 0.20 + 0.02, places=6)
+        self.assertAlmostEqual(cost, 0.02 + 0.002, places=6)
 
+    @patch("llm.provider_registry.datetime", _PreDeepSeekRepricing)
     def test_overlapping_model_uses_explicit_protocol_semantics(self):
         openai_cost = estimate_cost_usd(
             "deepseek-v4-flash", tokens_in=2_000_000,
@@ -176,6 +209,7 @@ class TestRecordLLMCall(unittest.TestCase):
         self.assertEqual(row["cost_usd"], 0.0123)
         self.assertEqual(row["status"], "ok")
 
+    @patch("llm.provider_registry.datetime", _PreDeepSeekRepricing)
     def test_cost_autofilled_from_pricing(self):
         with patch.object(gw, "_emit") as emit:
             record_llm_call(

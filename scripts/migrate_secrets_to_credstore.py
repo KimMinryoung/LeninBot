@@ -28,6 +28,7 @@ TIER_A = [
     "ADMIN_API_KEY",
     "AI_DIARY_API_KEY",
     "ALIBABA_API_KEY",
+    "ANTHROPIC_ADMIN_KEY",
     "ANTHROPIC_API_KEY",
     "BRAVE_SEARCH_API_KEY",
     "WRITER_ACCESS_KEY",
@@ -44,6 +45,7 @@ TIER_A = [
     "MOONSHOT_API_KEY",
     "NEO4J_PASSWORD",
     "OPENAI_API_KEY",
+    "OPENAI_ADMIN_KEY",
     "OPENROUTER_API_KEY",
     "R2_CF_API_TOKEN",
     "REPLICATE_API_TOKEN",
@@ -59,15 +61,17 @@ TIER_A = [
 # Narrower services list only the application/tool secrets they actually use.
 # ═══════════════════════════════════════════════════════════════════════════
 _LLM_PROVIDER_KEYS = {
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "ANTHROPIC_ADMIN_KEY", "ANTHROPIC_API_KEY",
+    "OPENAI_ADMIN_KEY", "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "GEMINI_API_KEY",
 }
 _FULL = set(TIER_A) - _LLM_PROVIDER_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
-    # Base provider keys are declared in the static proxy unit. Keep emitting
-    # an empty generated drop-in so a prior scoped-key mount is overwritten.
-    "leninbot-llm-proxy": set(),
+    # Base provider keys are declared in the static proxy unit. Optional admin
+    # keys are emitted only after they exist in credstore and are consumed only
+    # by the proxy's fixed read-only cost-report endpoints.
+    "leninbot-llm-proxy": {"ANTHROPIC_ADMIN_KEY", "OPENAI_ADMIN_KEY"},
 
     # Agent hosts — broad tool access, all non-provider Tier A secrets.
     "leninbot-api": _FULL,

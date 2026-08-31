@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import llm.claude_loop as claude_loop
 from llm.claude_loop import chat_with_tools
+from llm.instrumented_clients import AuditedAsyncAnthropic
 
 
 def _usage(inp=100, out=50):
@@ -84,6 +85,31 @@ TOOLS = [{
 
 
 class TestPlainTextTurn(unittest.TestCase):
+    def test_audited_client_defers_usage_audit_to_loop(self):
+        raw = FakeClient([_response([_text_block("ok")])])
+        client = AuditedAsyncAnthropic(
+            raw, caller="deepseek_anthropic_direct", provider="deepseek",
+            thinking_off=True,
+        )
+        with patch("llm.instrumented_clients.check_llm_call") as client_check, \
+             patch("llm.instrumented_clients.record_llm_call") as client_record, \
+             patch("llm.agent_loop.record_llm_call") as loop_record:
+            result = asyncio.run(chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="deepseek-v4-flash",
+                tools=[], tool_handlers={}, system_prompt="sys",
+                budget_usd=1.0,
+            ))
+        self.assertEqual(result, "ok")
+        client_check.assert_not_called()
+        client_record.assert_not_called()
+        loop_record.assert_called_once()
+        self.assertEqual(raw.calls[0]["thinking"], {"type": "disabled"})
+        self.assertEqual(
+            raw.calls[0]["extra_headers"]["x-llm-caller"],
+            "deepseek_anthropic_direct",
+        )
+
     def test_returns_text_and_tracker(self):
         client = FakeClient([_response([_text_block("최종 답변")])])
         tracker = {}

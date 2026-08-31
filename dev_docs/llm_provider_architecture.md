@@ -115,11 +115,19 @@ DeepSeek Anthropic-compatible thinking is controlled by environment variables:
 
 Claude aliases are resolved lazily through Anthropic Models API and cached in-process. OpenAI, DeepSeek, Kimi, and local model IDs resolve synchronously from `llm/provider_registry.py` or local backend config. GPT-5.6 uses the official Sol/Terra/Luna family mapping and does not silently fall back to an older GPT generation when a model is unavailable. Kimi currently has one model in all three tiers, so the tier changes budget/display grouping but not the upstream model ID.
 
-Current registry pricing follows the provider documentation: GPT-5.6 Sol/Terra/Luna
-are respectively `$5/$30`, `$2.50/$15`, `$1/$6` per million uncached input/output
-tokens (cached input `$0.50/$0.25/$0.10`). Claude Opus 5 is `$5/$25` and Sonnet 5
-uses its `$2/$10` launch price through 2026-08-31, then `$3/$15`; the 1-hour cache
-write/read rows are derived from those rates. Sources: [OpenAI GPT-5.6 models](https://developers.openai.com/api/docs/models), [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview), [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Current registry pricing follows the provider documentation (audited 2026-08-29).
+GPT-5.6 Sol/Terra/Luna Standard short-context uncached input/output rates are
+respectively `$4/$20`, `$2/$12`, `$0.20/$1.20` per million tokens; cached input is
+`$0.40/$0.20/$0.02`, and cache writes are `$5/$2.50/$0.25`. Sol's `$4/$20`
+promotional rate is guaranteed at least through 2026-11-21. Requests above 272K
+input tokens use the long-context rates for the full request: Sol `$8/$30`, Terra
+`$4/$18`, Luna `$0.40/$1.80` (cached input `$0.80/$0.40/$0.04`, cache writes
+`$10/$5/$0.50`). The loop and gateway price `cache_write_tokens` separately and
+select the long tier from total input usage. Sources: [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), [GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol), [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+
+Claude Opus 5 is `$5/$25` and Sonnet 5 uses its `$2/$10` launch price through
+2026-08-31, then `$3/$15`; the 1-hour cache write/read rows are derived from those
+rates. Sources: [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview), [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 
 Kimi non-secret and secret settings:
 
@@ -140,6 +148,8 @@ Each `AgentSpec` may set `provider` and `model`. `None` means follow task config
 |---|---|
 | `programmer` | `provider="codex"`; Codex CLI owns the actual code execution tool loop |
 | `autonomous_project` | DeepSeek Pro, lower budget, publication finalization tools |
+| `commulingo_curator` | DeepSeek Pro for Korean people/glossary document creation and enrichment |
+| `commulingo_event_curator` | DeepSeek Pro for Korean history-event document sections and updates |
 | `browser`, `scout`, `stasova`, `diary` | DeepSeek by default |
 | `analyst`, `diplomat`, `visualizer` | inherit task config unless overridden |
 

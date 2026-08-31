@@ -296,6 +296,34 @@ class TestBuildTcList(unittest.TestCase):
 
 
 class TestCalculateCost(unittest.TestCase):
+    def test_gpt56_sol_promotional_price_and_cache_write(self):
+        usage = SimpleNamespace(
+            prompt_tokens=100_000,
+            completion_tokens=10_000,
+            prompt_cache_hit_tokens=0,
+            prompt_cache_miss_tokens=0,
+            prompt_tokens_details=SimpleNamespace(
+                cached_tokens=20_000,
+                cache_write_tokens=30_000,
+            ),
+        )
+        cost = _calculate_cost(usage, "gpt-5.6-sol")
+        expected = 50_000 * 4e-6 + 20_000 * 0.4e-6 + 30_000 * 5e-6 + 10_000 * 20e-6
+        self.assertAlmostEqual(cost, expected)
+
+    def test_gpt56_long_context_tier(self):
+        usage = SimpleNamespace(
+            prompt_tokens=300_000,
+            completion_tokens=100_000,
+            prompt_cache_hit_tokens=0,
+            prompt_cache_miss_tokens=0,
+            prompt_tokens_details=None,
+        )
+        self.assertAlmostEqual(
+            _calculate_cost(usage, "gpt-5.6-luna"),
+            300_000 * 0.4e-6 + 100_000 * 1.8e-6,
+        )
+
     def test_deepseek_style_cache_fields(self):
         usage = SimpleNamespace(
             prompt_tokens=0, completion_tokens=100,

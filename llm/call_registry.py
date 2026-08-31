@@ -253,6 +253,7 @@ def _openai_usage(response) -> dict:
         "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
         "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
         "cache_read": cached,
+        "cache_create": getattr(details, "cache_write_tokens", 0) or 0,
     }
 
 

@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-14 (프록시 transport 감사를 스트림 종료 시점으로 이동, CLI 합계·거부 표시, DeepSeek thinking 기본 off 주입).
+최종 확인: 2026-08-29 (툴 루프 SDK 이중 감사 제거, GPT-5.6 가격·캐시 쓰기·장문 티어 갱신).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -28,6 +28,11 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 
 새 호출부를 만들 때: 루프면 `chat_with_tools`를, 원샷이면 registry `generate()`를
 쓰는 한 자동으로 seam을 지난다. 그 밖의 직접 SDK 호출은 만들지 말 것.
+`bot_config`의 SDK 객체는 애드혹 직접 사용도 놓치지 않도록 `AuditedAsyncAnthropic`/
+`AuditedAsyncOpenAI`로 감싸지만, 툴 루프 요청은 `with_audit_owner(..., "loop")`로 소유자를
+표시한다. 래퍼는 caller 헤더·DeepSeek thinking 기본값은 그대로 주입하면서 자체
+`external_sdk` 정책/비용 행만 생략하고, `LoopState.add_cost`가 유일한 과금 행을 쓴다.
+따라서 같은 비스트리밍 응답이 `external_sdk`와 `loop`에 중복 집계되지 않는다.
 
 ## API
 
@@ -62,16 +67,24 @@ OpenAI 호환과 Gemini는 prompt_tokens가 캐시 히트를 **포함**한다. D
 가격은 [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)의
 2026-08-05 standard tier를 기준으로 `provider_registry.GEMINI_PRICING`에 둔다.
 
+GPT-5.6은 OpenAI 호환 의미론에서도 입력을 ordinary/cache-read/cache-write 세 종류로
+나눈다. `usage.prompt_tokens_details.cache_write_tokens`를 `cache_create`에 보존하고,
+ordinary input에서는 cache read와 write를 모두 뺀 뒤 각각 공식 단가로 다시 계산한다.
+272K 입력 토큰을 초과하면 전체 요청에 long-context 단가(입력 2배·출력 1.5배)를
+적용한다. 현재 Standard 단가는 `dev_docs/llm_provider_architecture.md`에 정리한다.
+
 DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-17 00:00)부터
 평면 단가를 버리고 피크(UTC 01–04·06–10시)/오프피크(그 외, 피크의 절반) 티어로
 바뀐다. 정적 표에 두지 않고 `provider_registry.deepseek_price_triple(model, now)`가
 호출 시각으로 해석하며, `anthropic_pricing_table()`·`openai_compatible_pricing()`·
 `gateway.estimate_cost_usd()`가 이를 경유한다. 컷오버 전은 옛 평면 단가. 큐레이터
-레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]) — 다만
-이 재가격이 계기가 되어 2026-08-14에 큐레이터 두 스펙(people/event)은 GPT-5.6
-Luna(`openai`/`gpt56luna`)로 옮겼다(블라인드 벤치 품질 동급, 비용 ~절반; 바인딩은
-`bot_config.resolve_agent_tool_loop`가 스펙에서 해석). DeepSeek 시간대 단가는
-webchat 등 남은 DeepSeek 호출부의 과금에 계속 쓰인다.
+레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]).
+2026-08-14에는 비용 절감을 위해 큐레이터 두 스펙(people/event)을 GPT-5.6 Luna로
+옮겼지만, 한국어 공개 문서에서 외국어 토큰 혼입이 반복되어 2026-08-29부터 두 레인
+모두 DeepSeek V4 Pro(`deepseek`/`deepseek_pro`)를 사용한다. 바인딩은
+`bot_config.resolve_agent_tool_loop`가 스펙과 `config/agent_runtime.json`에서 해석한다.
+DeepSeek 시간대 단가는 이 큐레이터들과 webchat 등 모든 DeepSeek 호출부의 과금에
+계속 쓰인다.
 
 ## 정책 설정 계층 (mtime 핫리로드)
 
@@ -183,6 +196,34 @@ moonshot / openai / gemini다. KG와 Writer도 각각 공용 gemini/anthropic ro
 proxy unit의 `ExecStartPost=wait_llm_proxy_ready.py`가 200까지 기다리므로 소비 unit의
 `Wants/After=leninbot-llm-proxy.service`는 실제 readiness 뒤 시작을 보장한다.
 
+### 잔액·비용 통합 조회
+
+`scripts/llm-balances [--days 1..30] [--json]`은 provider 공식 재무 정보와
+`llm_audit_log`의 로컬 비용 추정액을 한 표에 표시한다. DeepSeek
+`GET /user/balance`와 Kimi `GET /v1/users/me/balance`는 기본 inference key로 실시간
+잔액을 읽는다. OpenAI `/v1/organization/costs`와 Claude
+`/v1/organizations/cost_report`는 각각 선택적 `OPENAI_ADMIN_KEY`와
+`ANTHROPIC_ADMIN_KEY`가 있을 때만 공식 기간 비용을 읽고, 없으면 로컬 감사액만
+표시한다. Gemini는 일반 API key만으로 통합 가능한 잔액 API가 없어 로컬 감사액만
+표시하며 로컬 Qwen은 무과금이다.
+
+같은 보고서는 owner 전용 Telegram 명령 `/llm_balance [1~30]`에서도 조회할 수 있다.
+기간 기본값은 30일이며 `/` 자동완성 메뉴와 `/help`에 노출된다. Telegram 서비스는
+자신의 읽기 전용 DB 연결로 로컬 감사액을 집계하고 공식 값은 localhost LLM proxy의
+고정 billing route를 통해 읽는다.
+
+Admin credential은 범용 `/{provider}/{path}` map에 등록하지 않는다. 로컬 전용
+`/billing/{deepseek|kimi|openai|claude}`가 provider별 고정 GET 경로와 날짜 파라미터만
+만들 수 있으므로, 비용 조회를 위해 넣은 조직 Admin 키로 다른 관리 API를 호출할 수
+없다. Admin 키가 credstore에 없으면 구조화된 `credential_missing`을 반환하며
+`/health` readiness에는 영향을 주지 않는다.
+
+로컬 비용 집계는 `surface=proxy`의 비과금 transport 행과 과거
+`external_sdk` 기본 wrapper caller(`openai_client`, `deepseek_anthropic_direct` 등)를
+제외한다. 2026-08-29 이전 툴 루프가 같은 응답을 SDK와 loop 양쪽에 기록한 기간까지
+30일 합계에 포함하더라도 중복 과금하지 않기 위한 호환 필터다. feature 이름을 가진
+진짜 direct SDK 호출(예: `kg_graphiti`)은 계속 포함한다.
+
 ## Enforcement — 키 제거 완료 (2026-08-05)
 
 `scripts/remove_llm_provider_keys.sh`(root)로 13개 서비스에서 anthropic/deepseek/
@@ -220,9 +261,12 @@ Razvedchik의 독자 `cloud_llm.py`는 2026-08-05 삭제했다. 댓글·관찰·
 
 ## 테스트
 
-`tests/test_llm_gateway.py` (허메틱 22케이스): provider 추론, 비용 추정(양쪽 토큰
-의미론·dated 모델 프리픽스·미지 모델 None), 정책(shadow/enforce/예산/fail-open),
-LoopState seam 전달. 루프 계약 회귀는 기존 `test_*_loop_rounds.py`가 잡는다.
+`tests/test_llm_gateway.py`: provider 추론, 비용 추정(양쪽 토큰 의미론·GPT-5.6
+cache-write/장문 티어·dated 모델 프리픽스·미지 모델 None), 정책
+(shadow/enforce/예산/fail-open), LoopState seam 전달. 루프 계약 회귀와 SDK 래퍼의
+단일 감사 소유권은 `test_*_loop_rounds.py`가 잡는다.
+`tests/test_llm_balances.py`는 Admin 키 고정 경로, provider 응답 정규화, 과거 중복
+wrapper 제외 SQL, query-db TSV 파싱과 CLI/Telegram 표시 계약을 검증한다.
 
 ## 짧게 사는 프로세스의 감사 유실 (2026-08-06)
 
