@@ -499,7 +499,11 @@ def slice_documents(spec: dict) -> list[dict]:
         source = entry.get("source") or spec.get("source")
         if not source:
             raise SpecError(f"{entry['id']}: no source (neither spec nor document)")
-        key = source["path"]
+        # 같은 파일이라도 selector·nth·drop·anchor가 다르면 다른 블록 목록이다
+        # — 경로만으로 캐시하면 둘째 문서가 첫 셀렉터의 블록을 재사용해
+        # "range start moved"로 죽는다(CIA 포즈난 스펙 작성 중 발견).
+        key = json.dumps({k: source.get(k) for k in ("path", "format", "selector", "nth", "drop", "anchor")},
+                         sort_keys=True, ensure_ascii=False)
         if key not in cache:
             cache[key] = load_blocks(source)
         # A document may pin its own band. Without one the band falls out of
