@@ -27,6 +27,62 @@
       "effort": "high"
     }
   },
+  "archival_document_translation_it": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.2,
+    "max_tokens": 48000,
+    "timeout": 600,
+    "thinking": {
+      "type": "enabled"
+    },
+    "output_config": {
+      "effort": "high"
+    },
+    "note": "이탈리아어 사료 → 한국어 번역. 2026-08-31 라틴 문자 언어 지원(core.SourceLanguage latin=True)과 함께 신설, 값은 _ru와 동일하게 시작. 언어쌍별로 다른 provider·model을 태우는 라우팅 지점 — 바꾸기 전에 translate_archival_documents.py --compare로 같은 청크를 후보 모델로 나란히 뽑아 볼 것. 캐시 키는 resolve된 provider·model·thinking으로 만들어지므로 값을 바꾸면 그 언어의 기존 청크는 재번역된다."
+  },
+  "archival_document_translation_fr": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.2,
+    "max_tokens": 48000,
+    "timeout": 600,
+    "thinking": {
+      "type": "enabled"
+    },
+    "output_config": {
+      "effort": "high"
+    },
+    "note": "프랑스어 사료 → 한국어 번역. 2026-08-31 라틴 문자 언어 지원(core.SourceLanguage latin=True)과 함께 신설, 값은 _ru와 동일하게 시작. 언어쌍별로 다른 provider·model을 태우는 라우팅 지점 — 바꾸기 전에 translate_archival_documents.py --compare로 같은 청크를 후보 모델로 나란히 뽑아 볼 것. 캐시 키는 resolve된 provider·model·thinking으로 만들어지므로 값을 바꾸면 그 언어의 기존 청크는 재번역된다."
+  },
+  "archival_document_translation_de": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.2,
+    "max_tokens": 48000,
+    "timeout": 600,
+    "thinking": {
+      "type": "enabled"
+    },
+    "output_config": {
+      "effort": "high"
+    },
+    "note": "독일어 사료 → 한국어 번역. 2026-08-31 라틴 문자 언어 지원(core.SourceLanguage latin=True)과 함께 신설, 값은 _ru와 동일하게 시작. 언어쌍별로 다른 provider·model을 태우는 라우팅 지점 — 바꾸기 전에 translate_archival_documents.py --compare로 같은 청크를 후보 모델로 나란히 뽑아 볼 것. 캐시 키는 resolve된 provider·model·thinking으로 만들어지므로 값을 바꾸면 그 언어의 기존 청크는 재번역된다."
+  },
+  "archival_document_translation_en": {
+    "provider": "deepseek_anthropic",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.2,
+    "max_tokens": 48000,
+    "timeout": 600,
+    "thinking": {
+      "type": "enabled"
+    },
+    "output_config": {
+      "effort": "high"
+    },
+    "note": "영어 사료 → 한국어 번역. 2026-08-31 라틴 문자 언어 지원(core.SourceLanguage latin=True)과 함께 신설, 값은 _ru와 동일하게 시작. 언어쌍별로 다른 provider·model을 태우는 라우팅 지점 — 바꾸기 전에 translate_archival_documents.py --compare로 같은 청크를 후보 모델로 나란히 뽑아 볼 것. 캐시 키는 resolve된 provider·model·thinking으로 만들어지므로 값을 바꾸면 그 언어의 기존 청크는 재번역된다."
+  },
   "archival_term_extraction": {
     "provider": "deepseek",
     "model": "deepseek-v4-flash",

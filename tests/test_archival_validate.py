@@ -110,3 +110,48 @@ class GlossaryPatternBoundary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LatinSourceLanguages(unittest.TestCase):
+    """라틴 문자 저본(EN/DE/FR/IT): 잔여 검사는 소문자를 품은 4자 이상 낱말만 미번역로
+    보고, 약어와 괄호 원문은 통과시킨다. 용어표 경계는 로마자 기준이다."""
+
+    def test_latin_languages_are_registered(self):
+        from runtime_tools.archival_translation.core import LANGUAGES
+        for code in ("en", "de", "fr", "it"):
+            self.assertIn(code, LANGUAGES)
+            self.assertTrue(LANGUAGES[code].latin)
+            self.assertEqual(LANGUAGES[code].feature, f"archival_document_translation_{code}")
+
+    def test_acronyms_and_parenthesised_originals_are_not_holes(self):
+        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        html = ("<p>소련은 NATO와 ICBM 문제에서 윌슨(Wilson) 대통령의 입장을 물었다. "
+                "SHAEF는 e.g. 4th 군단을 언급했다.</p>")
+        self.assertEqual(stray_cyrillic(html, None, ENGLISH), [])
+
+    def test_untranslated_english_word_is_a_hole(self):
+        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        html = "<p>최고사령관은 the Supreme Command 가 lodgement 지역을 지킬 것을 지시했다.</p>"
+        self.assertEqual(stray_cyrillic(html, None, ENGLISH), ["Command", "Supreme", "lodgement"])
+
+    def test_allowed_latin_words_are_kept(self):
+        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        html = "<p>작전명 Overlord는 유지한다.</p>"
+        self.assertEqual(stray_cyrillic(html, ["Overlord"], ENGLISH), [])
+
+    def test_validate_flags_verbatim_echo_and_accepts_translation(self):
+        from runtime_tools.archival_translation.core import ENGLISH
+        src = ("The Supreme Commander directs that all forces shall consolidate the "
+               "lodgement area before advancing inland, and that supply over the beaches "
+               "be given priority over every other consideration.")
+        ko = ["최고사령관은 모든 부대가 내륙으로 진격하기 전에 상륙 지역을 공고히 하고, "
+              "해안을 통한 보급을 다른 어떤 고려보다 우선할 것을 지시한다."]
+        self.assertEqual(validate(_chunk(src), {10: ko}, ENGLISH), [])
+        problems = validate(_chunk(src), {10: [src]}, ENGLISH)
+        self.assertTrue(problems and "그대로 반환" in problems[0])
+
+    def test_glossary_pattern_is_bounded_by_latin_letters(self):
+        from runtime_tools.archival_translation.core import _pattern
+        pat = _pattern(["Kerr"], True)
+        self.assertIsNotNone(pat.search("Ambassador Kerr wrote"))
+        self.assertIsNone(pat.search("Kerrigan"))

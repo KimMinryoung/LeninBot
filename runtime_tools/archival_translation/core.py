@@ -58,6 +58,7 @@ _SPEC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MARKER_RE = re.compile(r"\[\[(\d+)\|([a-z][a-z0-9]*)\]\][ \t]*\n?")
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
+LATIN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]")
 HANGUL_RE = re.compile(r"[가-힣]")
 # 원문/번역문의 "문장이 끝났다"는 신호. validate()의 끊김 검사가 쓴다.
 _SENTENCE_END_SRC = re.compile(r'[.!?…»”"\)\]。！？」』]$')
@@ -202,6 +203,9 @@ class SourceLanguage:
     # 이름이 아니라 resolve된 provider·model·thinking으로 만들어지므로,
     # feature를 나눠도 항목 값이 같으면 기존 캐시는 그대로 유효하다.
     feature: str
+    # 라틴 문자 저본: 용어표 표면을 인물 familyName.en / 용어 term.en에서 뽑고,
+    # 경계 검사와 잔여 검사를 로마자 기준으로 한다.
+    latin: bool = False
 
 
 RUSSIAN = SourceLanguage(
@@ -222,7 +226,84 @@ CHINESE = SourceLanguage(
     feature="archival_document_translation_zh",
 )
 
-LANGUAGES = {lang.code: lang for lang in (RUSSIAN, CHINESE)}
+
+def _latin_prompt(label: str, era: str, examples: str) -> str:
+    """라틴 문자 저본(영어·독일어·프랑스어·이탈리아어) 공용 시스템 프롬프트.
+    러시아어 프롬프트와 원칙은 같고, 표기 규칙만 다르다: 인명은 원어 발음대로
+    음차하고 첫 등장에서 괄호에 로마자 원문을 그대로 두며, 기관 약어(NATO,
+    SHAEF, OKW)는 통용 약어를 그대로 쓴다."""
+    return f"""당신은 {era} {label} 공문서를 한국어로 옮기는 사료 번역자다.
+원문은 국가·군·정당 기관의 공식 문서(지령, 조약, 외교 전문, 회의록, 성명)이며, 역사
+연구용 참고 문헌으로 공개된다.
+
+번역 원칙
+- 1차 사료다. 내용을 요약·생략·완곡화·현대화하지 않는다. 원문에 있는 정보는 하나도
+  빠뜨리지 않는다.
+- 그러나 {label} 어순을 한국어에 옮기지 않는다. 긴 복문, 삽입절, 명사구 연쇄를
+  그대로 한 문장에 담으려 하면 한국어로 읽을 수 없는 문장이 된다. 필요하면 문장을
+  나누고 어순을 한국어에 맞게 재배열한다. 정보 보존이 기준이고, 문장 경계 보존은
+  기준이 아니다.
+- 완성된 번역문은 한국어 문어로 자연스럽게 읽혀야 한다. 번역투로 뻣뻣하더라도
+  원문 구조를 흉내 내는 쪽을 택하지 말 것.
+- 번역투 금지: "~것이다"를 버릇처럼 반복하지 말 것. "~의"를 사슬처럼 잇지 말 것.
+  "되어지다" 같은 이중 피동을 쓰지 말 것. 대명사를 기계적으로 "그/그녀/그것"으로
+  옮기지 말 것 — 한국어는 아는 주어를 생략한다. 문맥이 허락하면 한자어+하다보다
+  고유어 동사를 고른다.
+- 원문의 관료적·군사적 문체와 완곡어법 자체는 그대로 옮긴다. 원문이 모호하면 모호한
+  채로 둔다. 다의어를 사전 첫 번째 뜻으로 기계적으로 옮기지 말 것. {examples}
+- 문서 번호, 날짜, 조항 번호, 수량, 직위, 서명, 문서보관소 출처 표기는 정확히 보존한다.
+- 원문에 없는 설명·주석·머리말·꼬리말을 절대 덧붙이지 않는다. 번역문만 출력한다.
+
+표기
+- 기관·직위·용어는 아래 용어표를 따른다. 용어표에 있는 항목은 반드시 그 표기를 쓴다.
+- 용어표에 없는 인명은 원어 발음에 따라 음차하고, 처음 나올 때만 괄호에 로마자 원문을
+  그대로 병기한다. 이후에는 한국어 표기만 쓴다.
+- 기관·작전·무기 약어(NATO, SHAEF, OKW, ICBM 등)는 용어표 표기를 쓰되, 용어표에 없으면
+  처음 나올 때 풀어 쓰고 괄호에 통용 약어를 둔 뒤 이후에는 약어만 쓴다. 로마자 약어는
+  번역문에 그대로 남겨도 된다.
+- 지명은 통용 한국어 표기(런던, 베를린, 바르샤바)를 쓰고, 통용 표기가 없는 작은 지명은
+  원어 발음대로 음차하며 처음 나올 때 괄호에 원문을 둔다.
+- Korea·Korean은 1948년 이전 문맥에서 "조선"·"조선인"으로 옮긴다.
+
+출력 형식 (엄격)
+- 입력의 각 단락은 [[번호|태그]] 마커로 시작한다. 같은 마커를 같은 순서로 그대로
+  반환하고, 마커 바로 다음 줄부터 그 단락의 번역문을 쓴다.
+- 마커를 빠뜨리거나, 없는 마커를 만들거나, 두 단락을 한 마커로 합치지 않는다.
+- 한 마커 안의 줄바꿈 개수는 원문과 같게 유지한다.
+- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다."""
+
+
+# 라틴 문자 저본의 「미번역 잔여」: 번역문에는 약어(NATO, ICBM)와 첫 등장의 괄호 원문이
+# 정당하게 남으므로, 둘째 글자가 소문자인 4자 이상 낱말만 미번역으로 본다. 괄호 안은
+# stray_cyrillic이 이미 빼고 본다.
+_LATIN_STRAY = re.compile(r"\b[A-Za-zÀ-ÖØ-öø-ÿ][a-zà-öø-ÿß][A-Za-zÀ-ÖØ-öø-ÿ'’\-]+")
+
+
+def _latin(code: str, label: str, era: str, examples: str, feature: str,
+           chars_per_token: float, output_ratio: float) -> "SourceLanguage":
+    return SourceLanguage(
+        code=code, label=label, system_prompt=_latin_prompt(label, era, examples),
+        script=LATIN_RE, stray_word=_LATIN_STRAY,
+        stray_min=4, short_ratio=0.2, bounded=True,
+        chars_per_token=chars_per_token, output_ratio=output_ratio,
+        feature=feature, latin=True,
+    )
+
+
+ENGLISH = _latin("en", "영어", "20세기",
+                 "예: \"appreciation\"은 군사 문서에서 \"감사\"가 아니라 \"정세 판단\"이다.",
+                 "archival_document_translation_en", 4.0, 0.55)
+GERMAN = _latin("de", "독일어", "20세기",
+                "예: \"Weisung\"은 \"지시\"가 아니라 총통 \"지령\"이고, \"Aufmarsch\"는 \"행진\"이 아니라 \"전개(집결)\"다.",
+                "archival_document_translation_de", 3.5, 0.5)
+FRENCH = _latin("fr", "프랑스어", "20세기",
+                "예: \"ordonnance\"는 해방기 임시정부 문맥에서 \"명령\"(법률 효력의 명령)이다.",
+                "archival_document_translation_fr", 3.8, 0.5)
+ITALIAN = _latin("it", "이탈리아어", "20세기",
+                 "예: \"ordine del giorno\"는 \"일정\"이 아니라 회의에 제출된 \"결의안\"이다.",
+                 "archival_document_translation_it", 3.8, 0.5)
+
+LANGUAGES = {lang.code: lang for lang in (RUSSIAN, CHINESE, ENGLISH, GERMAN, FRENCH, ITALIAN)}
 
 
 def language_for(spec: dict | None) -> SourceLanguage:
@@ -470,7 +551,8 @@ def _pattern(surfaces: list[str], bounded: bool = True) -> re.Pattern:
     # 대안은 반드시 묶는다. 묶지 않으면 lookbehind는 첫 대안에만, lookahead는 마지막
     # 대안에만 걸려 "Горбаче"(Горбач의 전치격)가 "Горбачев" 안에서 매칭된다 —
     # 1989 결의 감사에서 고르바초프를 그리고리 고르바치로 바꾸라는 제안이 나온 원인.
-    return re.compile(rf"(?<![А-Яа-яЁё])(?:{alts})(?![А-Яа-яЁё])")
+    cls = "А-Яа-яЁё" if any(CYRILLIC_RE.search(x) for x in surfaces) else "A-Za-zÀ-ÖØ-öø-ÿ"
+    return re.compile(rf"(?<![{cls}])(?:{alts})(?![{cls}])")
 
 
 def build_glossary(people_path: Path, terms_path: Path,
@@ -500,6 +582,14 @@ def build_glossary(people_path: Path, terms_path: Path,
 
     people = json.loads(people_path.read_text(encoding="utf-8")).get("people", [])
     for p in people:
+        if lang.latin:
+            # 라틴 문자 저본: 사전의 영어 성(姓)이 표면이다. 독일어·프랑스어 문서의
+            # 러시아·독일 인명은 영어 표기와 대체로 같고, 다르면 스펙 extra로 준다.
+            fam_en = ((p.get("familyName") or {}).get("en") or "").strip()
+            fam_ko = ((p.get("familyName") or {}).get("ko") or "").strip()
+            if len(fam_en) >= 4 and fam_ko and LATIN_RE.search(fam_en):
+                add(fam_en, fam_ko, [fam_en])
+            continue
         cyr = (p.get("cyrillic") or "").strip()
         if not cyr or not lang.script.search(cyr):
             continue
@@ -526,6 +616,17 @@ def build_glossary(people_path: Path, terms_path: Path,
     for t in json.loads(terms_path.read_text(encoding="utf-8")):
         original = (t.get("original") or "").strip()
         term = ((t.get("term") or {}).get("ko") or "").strip()
+        if lang.latin:
+            # 영어 표제어 가운데 고유명사꼴(대문자로 시작, 5자 이상)만 표면으로
+            # 쓴다. "party", "terror" 같은 보통명사를 사전 항목에 묶으면 문맥마다
+            # 틀린 표기를 강요하게 된다. original이 로마자면 그것도 표면에 더한다.
+            en = ((t.get("term") or {}).get("en") or "").strip()
+            surfaces = [x for x in (en, original)
+                        if x and len(x) >= 5 and x[0].isupper() and LATIN_RE.search(x)
+                        and not CYRILLIC_RE.search(x)]
+            if surfaces and term:
+                add(surfaces[0], term, surfaces)
+            continue
         if original and term and lang.script.search(original):
             add(original, term, [original])
 
