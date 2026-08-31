@@ -63,6 +63,9 @@ def main() -> int:
                     help="앞에서 N개 청크만 번역 (연기 테스트용)")
     ap.add_argument("--plan", "--dry-run", action="store_true", dest="plan_only",
                     help="모델을 호출하지 않고 계획만 출력")
+    ap.add_argument("--reassemble", action="store_true",
+                    help="캐시를 블록 번호로 재조립해 fragment만 다시 쓴다 "
+                         "(LLM 호출 없음 — 모델·프롬프트 교체 후 postEdits 손질용)")
     ap.add_argument("--probe", action="store_true",
                     help="provider를 직접 한 번 호출해 응답·finish_reason·usage를 그대로 출력")
     ap.add_argument("--compare",
@@ -115,6 +118,13 @@ def main() -> int:
                 label = f"{r['variant']} think={(r.get('thinking') or {}).get('type')}"
                 print(f"  {label:42} {r['seconds']:6.1f} {len(r['problems']):9}")
             print(f"\n비교 문서: {out}")
+            return 0
+
+        if args.reassemble:
+            res = at.reassemble(spec, opts)
+            print(f"재조립: 블록 {res['blocks']}개 → {res['output']} ({res['bytes']:,} bytes)")
+            if res["strayCyrillic"]:
+                print(f"키릴 잔존: {res['strayCyrillic']}")
             return 0
 
         if args.probe:

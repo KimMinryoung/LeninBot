@@ -16,7 +16,7 @@ from .core import (
     Options,
     SourceLanguage,
     SpecError,
-    assemble,
+    assemble, reassemble,
     build_glossary,
     chunk_document,
     compare,

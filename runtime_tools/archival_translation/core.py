@@ -23,6 +23,7 @@ import html as htmllib
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -107,7 +108,15 @@ SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기�
   반환하고, 마커 바로 다음 줄부터 그 단락의 번역문을 쓴다.
 - 마커를 빠뜨리거나, 없는 마커를 만들거나, 두 단락을 한 마커로 합치지 않는다.
 - 한 마커 안의 줄바꿈 개수는 원문과 같게 유지한다.
-- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다."""
+- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다.
+
+표기 규칙 보강 (위반이 잦아 명시함 — 엄격히 지킬 것)
+- 인명의 이니셜(М. С., Ю. Д. 등)은 키릴 문자 그대로 유지한다. 로마자(M. S., Yu. D.)로
+  바꾸는 것은 금지.
+- 괄호 원어 병기는 위에서 허용한 두 경우(용어표에 없는 인명의 첫 등장, 기관 약어의
+  첫 등장)에만 쓴다. 그 밖의 어떤 낱말에도 괄호 병기를 덧붙이지 않는다 — 지명(예레반,
+  카라바흐 등), 일반 명사, 이미 나온 이름, 용어표에 있는 항목에 병기를 붙이는 것은 금지.
+- 원문에 없는 비칭·경멸 어감을 더하지 않는다 (турок은 "투르크인"이지 "튀르크놈"이 아니다)."""
 
 
 SYSTEM_PROMPT_ZH = """당신은 1960년대 중국공산당의 공식 문건을 한국어로 옮기는 사료
@@ -1327,7 +1336,12 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
             # The registry executor, not a hand-rolled client: probing a
             # different code path than run() uses is how a "working" probe
             # coexists with a failing run.
-            content = executor(profile, prompt, system) or ""
+            raw = executor(profile, prompt, system)
+            if isinstance(raw, tuple):
+                if len(raw) > 2:
+                    record["truncated"] = bool(raw[2])
+                raw = raw[0]
+            content = raw or ""
             record.update({
                 "ok": bool(content.strip()),
                 "contentChars": len(content),
@@ -1413,6 +1427,22 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
             "chars": sum(len(l) for b in source.values() for l in b["lines"])}
 
 
+def glossary_collision_pairs(glossary: list[dict]) -> list[tuple[str, str]]:
+    """(여성형/남성 생격 표면, 남성형) ru 쌍 — 함께 주입되면 위험한 충돌.
+
+    러시아어 남성 성의 생격·대격(-а)은 같은 성의 여성형 주격과 표기가 같다.
+    사전에 두 사람이 모두 있으면 남성형의 굴절 표면(доклад Ежова)이 여성
+    항목에 매칭되어 잘못된 표기가 주입된다 — 포스펠로프 보고서의
+    Ежова→예조바 사례. 주입 내용은 건드리지 않고 운영자에게 경고만 한다;
+    여성 본인이 등장하지 않는 문서는 spec glossary.exclude로 뺀다.
+    """
+    by_ru = {}
+    for g in glossary:
+        by_ru.setdefault(g["ru"], g["ko"])
+    return sorted((ru + "а", ru) for ru, ko in by_ru.items()
+                  if by_ru.get(ru + "а") not in (None, ko))
+
+
 def plan(spec: dict, opts: Options | None = None) -> dict:
     """Slice, chunk and price a run without calling the model."""
     opts = opts or Options()
@@ -1427,6 +1457,12 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     exclude = set(spec["glossary"].get("exclude") or [])
     if exclude:
         glossary = [g for g in glossary if g["ru"] not in exclude]
+    doc_text = " ".join(ln for d in docs for b in d["blocks"] for ln in b["lines"])
+    for fem, masc in glossary_collision_pairs(glossary):
+        if fem in doc_text:
+            print(f"경고: 용어표 충돌 — 원문의 {fem}이 {masc}의 생격 표면일 수 있는데 "
+                  f"여성형 항목이 주입된다. 이 문서에 {fem} 본인이 등장하지 않으면 "
+                  f"spec glossary.exclude에 {fem!r}를 넣을 것.", file=sys.stderr)
     chunks = [c for d in docs for c in chunk_document(d, opts.max_chars)]
     if opts.limit_chunks:
         chunks = chunks[: opts.limit_chunks]
@@ -1537,6 +1573,65 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
         emit({"event": "tm", "segments": len(pairs), "inserted": inserted})
     except Exception as e:
         emit({"event": "tmFailed", "error": str(e)})
+
+
+
+def reassemble(spec: dict, opts: Options | None = None) -> dict:
+    """캐시 레코드를 블록 번호로 직접 조립해 fragment만 다시 쓴다 (LLM 호출 없음).
+
+    run()의 캐시 조회 키에는 provider·model·system_hash가 들어가므로, 모델을
+    교체하거나 프롬프트를 고친 뒤에는 옛 문서의 postEdits 손질이 전체 재번역이
+    되어 버린다. 발행본 손질은 번역을 새로 만드는 일이 아니라 이미 확정된
+    번역을 다시 배치하는 일이므로, 키를 무시하고 레코드의 블록 번호로 조립한다.
+    캐시에는 청킹·프롬프트를 바꿔 가며 만든 이력 레코드가 섞여 있을 수 있다.
+    블록 집합이 현재 청킹의 어느 청크와도 일치하지 않는 레코드는 다른 청킹
+    시절의 고아이므로 배제한다 — 포스펠로프 재조립에서 last-wins가 고아
+    레코드의 대체 번역을 집어 발행문이 바뀐 사례. 같은 청크의 레코드가 여럿
+    이면 나중 레코드(재시도 최신본)가 이긴다. 비어 있는 블록이 남으면 고아
+    레코드로 채우되 경고하고, 그래도 남으면 구멍 난 문서 대신 예외를 낸다.
+    """
+    opts = opts or Options()
+    if spec.get("frozen"):
+        raise SpecError(
+            f"{spec.get('id')}: 완료된 스펙이라 재실행이 막혀 있다 (frozen: {spec['frozen']})")
+    prepared = plan(spec, opts)
+    docs, chunks, lang = prepared["_docs"], prepared["_chunks"], prepared["_lang"]
+
+    chunk_sets = {frozenset(idx for idx, b in c if b["lines"]) for c in chunks}
+    records = list(Cache(_cache_path(spec, opts.cache_path)).data.values())
+    translated: dict[int, list[str]] = {}
+    for rec in records:
+        blocks = {int(k): v for k, v in rec["blocks"].items()}
+        if frozenset(blocks) in chunk_sets:
+            translated.update(blocks)
+
+    expected = {idx for c in chunks for idx, b in c if b["lines"]}
+    orphan_filled = sorted(expected - translated.keys())
+    if orphan_filled:
+        for rec in records:
+            for k, v in rec["blocks"].items():
+                if int(k) in orphan_filled:
+                    translated[int(k)] = v
+        print(f"경고: 블록 {orphan_filled}는 현재 청킹과 일치하는 레코드가 없어 "
+              f"고아 레코드에서 채웠다. --max-chars가 번역 당시와 같은지 확인할 것.",
+              file=sys.stderr)
+    # run()과 같은 우선순위: 검수 등급 TM 세그먼트가 모델 번역을 덮는다.
+    # 이걸 빠뜨리면 발행문이 TM 문구에서 캐시 문구로 슬그머니 바뀐다.
+    translated.update(_tm_prefill(docs, lang, lambda _e: None))
+
+    missing = sorted(expected - translated.keys())
+    if missing:
+        raise SpecError(
+            f"{spec.get('id')}: 캐시에 없는 블록 {missing} — 재조립으로는 채울 수 없다. "
+            "새로 번역해야 하는 변경이면 run()을 쓸 것.")
+
+    out_path = opts.out_path or Path(spec["output"])
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    html = assemble(spec, docs, translated)
+    out_path.write_text(html, encoding="utf-8")
+    return {"output": str(out_path), "bytes": out_path.stat().st_size,
+            "blocks": len(translated),
+            "strayCyrillic": stray_cyrillic(html, spec.get("allowedCyrillic"), lang)}
 
 
 def run(spec: dict, opts: Options | None = None,

@@ -349,7 +349,8 @@ class TestRegistryProviderConnections(unittest.TestCase):
                 with patch.dict(os.environ, {"DEEPSEEK_ANTHROPIC_BASE_URL": ""}):
                     with self.assertRaises(core.SpecError) as raised:
                         core.preflight()
-        self.assertIn("DEEPSEEK_API_KEY", str(raised.exception))
+        # 2026-08-31 archival RU가 gemini-3.1-pro-preview로 교체됨
+        self.assertIn("GEMINI_API_KEY", str(raised.exception))
 
 
 class TestEvaluatePolicy(unittest.TestCase):
