@@ -338,7 +338,9 @@ def generic_html(raw: str, *, selector: str, drop: list[str] | None = None,
             continue
         if not is_leaf(el):
             continue
-        lines = [ln for ln in _text(str(el)).split("\n") if ln]
+        # 저장 HTML의 원시 줄바꿈은 편집기의 줄 접기이지 문서의 줄 구조가 아니다
+        # (hrono.ru는 문단마다 70자쯤에서 접는다). 줄 구조로 남기는 것은 <br>뿐.
+        lines = [ln for ln in _text(re.sub(r"\s*\n\s*", " ", str(el))).split("\n") if ln]
         if lines:
             blocks.append({"tag": _HTML_TAG_MAP[el.name], "lines": lines})
             covered += sum(len(ln) for ln in lines)

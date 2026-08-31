@@ -37,6 +37,12 @@ class GenericHtml(unittest.TestCase):
         self.assertEqual(blocks[0]["lines"], ["ПОСТАНОВЛЕНИЕ"])
         self.assertEqual(blocks[3]["lines"], ["Подпись", "Керенский"])
 
+    def test_raw_newlines_inside_a_paragraph_are_not_line_breaks(self):
+        page = '<div id="c"><p>Первая строка абзаца,\n    вторая строка того же абзаца.</p><p>Подпись<br>Ленин</p></div>'
+        blocks = generic_html(page, selector="#c")
+        self.assertEqual(blocks[0]["lines"], ["Первая строка абзаца, вторая строка того же абзаца."])
+        self.assertEqual(blocks[1]["lines"], ["Подпись", "Ленин"])
+
     def test_nth_match_selects_the_second_cell(self):
         page = '<table><tr><td class="c">Меню</td><td class="c"><p>Текст документа.</p></td></tr></table>'
         self.assertEqual(generic_html(page, selector="td.c", nth=1)[0]["lines"], ["Текст документа."])
