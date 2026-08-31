@@ -19,6 +19,7 @@ Evolve Cyber-Lenin from a linear RAG chatbot into the most intelligent autonomou
 - `dev_docs/llm_gateway.md` — LLM 게이트웨이 — 모든 LLM 호출의 단일 seam (정책 게이트 + llm_audit_log 스펜드 감사 + 키 격리 프록시 llm_proxy/, shadow→enforce, 운영 CLI)
 - `dev_docs/llm_provider_architecture.md` — 프로바이더 라우팅, agent_loop 공유 엔진 + 프로토콜 어댑터 구조, 모델/가격/추론 정책
 - `dev_docs/standby_operations.md` — 스트리밍 스탠바이(hel1) 활용법·승격 런북·재시드 절차
+- `dev_docs/translation_pipeline.md` — 사료·리서치 번역 파이프라인 — 스펙/청크 캐시/TM/검증, 언어쌍별 registry 항목(RU·라틴계=Gemini 3.1 Pro, ZH=DeepSeek), 발행본 손질은 postEdit→`--reassemble`, 용어표 충돌 경고
 - `dev_docs/monitoring.md` — 감시·알림 체계 (VM 밖 워치독 Worker, 복제 점검, 알림 채널, 사각지대)
 
 Update these documents as phases are completed.
