@@ -1,0 +1,184 @@
+{
+  "id": "italy-surrender-instruments-1943-1945",
+  "title": "이탈리아 항복 문서 세 건 — 카시빌레 휴전(1943년 9월 3일), 항복 문서(9월 29일), 카세르타 독일군 항복(1945년 4월 29일)",
+  "byline": "연합군 최고사령부 / 이탈리아 정부 / 독일군 남서부 총사령부",
+  "bylineNote": "1943년 9월 3일 시칠리아 카시빌레, 9월 29일 몰타 앞바다 HMS 넬슨 함상, 1945년 4월 29일 카세르타 서명",
+  "headnote": [
+    "이탈리아 전선의 시작과 끝을 표시하는 항복 문서 세 건이다. 첫째는 1943년 9월 3일 시칠리아 카시빌레의 올리브 숲에서 카스텔라노 준장이 바돌리오 정부를 대표해 서명한 열두 개 조의 「짧은 휴전」이다. 적대 행위의 즉시 중지, 함대와 항공기의 연합군 인도, 코르시카와 본토 기지의 인도를 담았고, 제12조는 「정치·경제·재정에 관한 다른 조건」이 뒤따를 것을 예고했다. 휴전은 9월 8일 저녁 아이젠하워와 바돌리오의 방송으로 공표되었고, 이튿날 연합군이 살레르노에 상륙했다.",
+    "둘째는 9월 29일 몰타 앞바다의 영국 전함 넬슨 함상에서 바돌리오와 아이젠하워가 서명한 44개 조의 「긴 휴전」, 곧 이탈리아 항복 문서다. 제1조가 「이탈리아 육·해·공군은 무조건 항복한다」로 시작하며, 무솔리니와 파시스트 지도자의 인도(제29조), 파시스트 조직의 해산(제30조), 인종·신조에 따른 차별법의 폐지(제31조), 연합국 통제위원회의 설치(제37조)를 규정했다. 셋째는 1945년 4월 29일 카세르타의 연합군 사령부에서 독일군 남서부 총사령관 피팅호프와 SS 대장 볼프의 대리인이 서명한 지역 항복 문서와 세 부록(육군·해군·공군에 대한 명령)이다. 「선라이즈 작전」으로 알려진 비밀 교섭의 결과로, 5월 2일 발효하여 독일의 전면 항복보다 엿새 앞서 이탈리아 전선을 끝냈다.",
+    "저본은 예일 로스쿨 아발론 프로젝트가 미국 조약집(61 Stat. 2740, 2742; Treaties and Other International Acts Series 1604; 『United States and Italy 1936-1946: Documentary Record』)을 옮긴 전자판이다. 세 문서 모두 영어본이 정본이며, 항복 문서 제44조 뒤에 「영어본이 정문이다」라고 명시되어 있다. 조약집의 편집 표제와 법령집 인용, 카세르타 문서의 「[번역]」 표시는 옮기지 않았다. 「United Nations」는 이 시기 문서에서 국제기구가 아니라 연합국을 뜻하므로 「연합국」으로 옮겼다."
+  ],
+  "bibliography": [
+    "카시빌레 휴전: Armistice with Italy, Fairfield Camp, Sicily, September 3, 1943. 서명 드와이트 D. 아이젠하워(연합군 최고사령관), 주세페 카스텔라노 준장(바돌리오 원수 대리). 61 Stat. 2740; TIAS 1604",
+    "항복 문서(「긴 휴전」): Instrument of Surrender of Italy, signed at Malta, September 29, 1943. 서명 피에트로 바돌리오 원수, 드와이트 D. 아이젠하워 장군. 61 Stat. 2742; TIAS 1604",
+    "카세르타 항복: Instrument of Local Surrender of German and Other Forces Under the Command or Control of the German Commander-in-Chief Southwest, signed at Caserta, April 29, 1945, with appendixes. 발효 1945년 4월 29일, 부록은 5월 2일. 수록 United States and Italy 1936-1946: Documentary Record, Department of State Publication 2669 (1946), p. 128",
+    "번역 저본: 예일 로스쿨 아발론 프로젝트(Avalon Project) 전자판. 국가 간 공식 문서이자 미국 정부 간행물로 저작권 보호 대상이 아니다"
+  ],
+  "sourceLang": "en",
+  "output": "/home/grass/frontend/data/commulingo/docs/italy-surrender-instruments-1943-1945.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "United Nations": "연합국",
+      "the United Nations": "연합국",
+      "Allied Forces": "연합군",
+      "Allied Force": "연합군",
+      "Commander-in-Chief of the Allied Forces": "연합군 최고사령관",
+      "Commander in Chief of the Allied Forces": "연합군 최고사령관",
+      "Allied Commander-in-Chief": "연합군 최고사령관",
+      "Allied Commander in Chief": "연합군 최고사령관",
+      "Commander-in-Chief, Allied Force": "연합군 최고사령관",
+      "Supreme Allied Commander": "연합군 최고사령관",
+      "Allied Command": "연합군 사령부",
+      "Allied Military Government": "연합군 군정",
+      "Control Commission": "통제위원회",
+      "Head of the Italian Government": "이탈리아 정부 수반",
+      "Italian Government": "이탈리아 정부",
+      "Italian Supreme Command": "이탈리아 최고사령부",
+      "Italian High Command": "이탈리아 최고사령부",
+      "Marshal Pietro Badoglio": "피에트로 바돌리오 원수",
+      "Badoglio": "바돌리오",
+      "Eisenhower": "아이젠하워",
+      "Castellano": "카스텔라노",
+      "Benito Mussolini": "베니토 무솔리니",
+      "Harold Macmillan": "해럴드 맥밀런",
+      "Robert Murphy": "로버트 머피",
+      "Kenneth Strong": "케네스 스트롱",
+      "Walter B. Smith": "월터 B. 스미스",
+      "Bedell Smith": "베델 스미스",
+      "Royer Dick": "로이어 딕",
+      "German Commander-in-Chief Southwest": "독일군 남서부 총사령관",
+      "Commander-in-Chief Southwest": "남서부 총사령관",
+      "Army Group C": "C집단군",
+      "German Authority": "독일 측 당국",
+      "German Land Forces": "독일 육군 부대",
+      "German Naval Forces": "독일 해군 부대",
+      "von Vietinghoff-Scheel": "폰 피팅호프셸",
+      "Vietinghoff": "피팅호프",
+      "Karl Wolff": "카를 볼프",
+      "Wolff": "볼프",
+      "Schweinitz": "슈바이니츠",
+      "Wenner": "베너",
+      "Waffen-SS": "무장친위대",
+      "SS-Obergruppenfuhrer": "SS 대장",
+      "SS-Sturmbannfuhrer": "SS 소령",
+      "Fascist Militia (MVSN)": "파시스트 민병대(MVSN)",
+      "Fascist Militia": "파시스트 민병대",
+      "Fascist": "파시스트",
+      "war material": "전쟁 물자",
+      "War Material": "전쟁 물자",
+      "merchant shipping": "상선",
+      "Italian territory": "이탈리아 영토",
+      "Corsica": "코르시카",
+      "Malta": "몰타",
+      "Caserta": "카세르타",
+      "Sicily": "시칠리아",
+      "Fairfield Camp": "페어필드 캠프",
+      "A.F.H.Q.": "연합군 사령부(AFHQ)",
+      "HQ 15 Army Group": "제15집단군 사령부",
+      "prisoners of war": "전쟁포로",
+      "Armistice": "휴전",
+      "Instrument of Surrender": "항복 문서",
+      "Appendix": "부록",
+      "Luftwaffe": "독일 공군",
+      "U-boats": "유보트"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "cassibile-short",
+      "titleKo": "카시빌레 휴전 협정 (1943년 9월 3일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.text-properties",
+        "path": "/home/grass/frontend/docs/cassibile-armistice-1943-avalon.html",
+        "sha256": "63edf35ad67844882878b9d0f4659f1e91f7d11bc3a3467758a0c51a3841cffe"
+      },
+      "blocks": [
+        4,
+        37
+      ],
+      "startsWith": "FAIRFIELD CAMP SICILY",
+      "endsWith": "Assistant Chief of Staff, G-3 A.F.H.Q.",
+      "register": "한다체. 휴전 조건을 적은 군사 문서다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 머리의 장소·날짜 줄과 「The following conditions … presented by」로 이어지는 서두의 짧은 줄들은 원문의 줄 단위를 지켜 각각 한 줄로 옮긴다. (2) 조항 번호 「1.」…「12.」는 「제1조」…「제12조」로 옮긴다. (3) 대문자로 적힌 이름과 직함은 보통 표기로 옮긴다. (4) 끝의 서명부는 이름과 직함을 줄바꿈 없이 한 덩어리로 옮긴다. (5) 「United Nations」는 「연합국」이다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "cassibile-long",
+      "titleKo": "이탈리아 항복 문서 (1943년 9월 29일, 몰타)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div.text-properties",
+        "path": "/home/grass/frontend/docs/cassibile-armistice-1943-long-avalon.html",
+        "sha256": "dce81b26bab8b94c664fffc8bca06e3a6d8ac452ff3f3e1877339199ecf73972"
+      },
+      "blocks": [
+        4,
+        115
+      ],
+      "startsWith": "INSTRUMENT OF SURRENDER OF ITALY",
+      "endsWith": "Commander-in-Chief, Allied Force",
+      "register": "한다체. 국가 간 항복 문서다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 「Whereas」로 시작하는 전문의 단락은 「…이므로」로 이어지는 문장으로 옮기되 원문 단락을 합치지 않는다. (2) 조항 번호 「1.」…「44.」는 「제1조」…「제44조」로 옮긴다. (3) 조 안의 (A) (B) (C) 항 기호는 그대로 둔다. (4) 「United Nations」는 「연합국」, 「Allied Commander-in-Chief」는 「연합군 최고사령관」이다. (5) 끝의 서명부는 이름과 직함을 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "caserta-head",
+      "titleKo": "독일군 남서부 총사령관 휘하 독일군과 그 밖의 부대의 지역 항복 문서 (1945년 4월 29일, 카세르타)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div.text-properties",
+        "path": "/home/grass/frontend/docs/caserta-surrender-1945-avalon.html",
+        "sha256": "5cdeaf824b0d2a82c2d321494d57f4c4221b2aa659f28abac9991b500c550dc8",
+        "drop": [
+          "a[href=\"#b1\"]"
+        ]
+      },
+      "blocks": [
+        1,
+        2
+      ],
+      "startsWith": "Instrument of Local Surrender of German",
+      "endsWith": "",
+      "register": "한다체. 조약집의 문서 표제와 조인 정보 두 줄이다. 첫 줄은 문서 제목으로, 둘째 줄은 서명·발효 정보와 출전으로 각각 한 줄로 옮기고 출전의 간행물 이름은 원문 그대로 둔다."
+    },
+    {
+      "id": "caserta-body",
+      "titleKo": "",
+      "heading": false,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div.text-properties",
+        "path": "/home/grass/frontend/docs/caserta-surrender-1945-avalon.html",
+        "sha256": "5cdeaf824b0d2a82c2d321494d57f4c4221b2aa659f28abac9991b500c550dc8",
+        "drop": [
+          "a[href=\"#b1\"]"
+        ]
+      },
+      "blocks": [
+        4,
+        158
+      ],
+      "startsWith": "1. The German Commander-in-Chief Southwest hereby surrenders",
+      "endsWith": "[Footnote in original.]",
+      "register": "한다체. 항복 문서 본문과 부록 A·B·C(육군·해군·공군에 대한 명령)다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 본문의 항목 번호 1.~6.과 부록의 번호·소항목(a. b. c., (1) (2))은 원문 기호를 그대로 둔다. (2) 부록 제목 「APPENDIX \"A\" …」와 소제목(\"Stay-Put\" Order 등)은 제목답게 짧게 옮긴다. (3) 서명부(SCHWEINITZ … WENNER … MORGAN)는 이름과 직함을 한 덩어리로 옮긴다. (4) 대문자로 적힌 지명(ITALY, AUSTRIA)은 보통 표기로 옮긴다. (5) 마지막의 원주 「(1) Until such time …」은 「(1)」 번호를 유지하고 「[원문의 각주]」로 끝맺는다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ]
+}

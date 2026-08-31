@@ -62,7 +62,10 @@ HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
 LATIN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]")
 HANGUL_RE = re.compile(r"[가-힣]")
 # 원문/번역문의 "문장이 끝났다"는 신호. validate()의 끊김 검사가 쓴다.
-_SENTENCE_END_SRC = re.compile(r'[.!?…»”"\)\]。！？」』]$')
+# 원문이 「문장 부호로 끝난다」는 마침표·물음표·느낌표(닫는 따옴표·괄호가 뒤따를
+# 수 있다)를 뜻한다. 닫는 괄호만으로 끝나는 서명부("… 작전참모(G-3)")를 문장으로
+# 보면 마침표 없는 번역 꼬리가 끊김으로 오판된다(카시빌레 휴전 서명부, 3회 실패).
+_SENTENCE_END_SRC = re.compile(r'[.!?…。！？][»”"\)\]」』]*$')
 _SENTENCE_END_TGT = re.compile(r'[.!?…。」』”"\)\]:;]$')
 
 SYSTEM_PROMPT = """당신은 1930년대 소련 공문서를 한국어로 옮기는 사료 번역자다.
@@ -750,7 +753,16 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         # instructed output, not untranslated input. Measure what is left
         # outside the parentheses.
         outside = re.sub(r"[(（][^)）]*[)）]", " ", joined)
-        cyr = len(lang.script.findall(outside))
+        if lang.latin:
+            # 라틴 문자 저본: 로마자 한 글자 한 글자가 아니라 「낱말」이 남았는지
+            # 본다. 항목 기호(a), I., III.), 이니셜(W. L.), 약어(AFHQ, TIAS),
+            # 단위·수식($2¼)은 한국어 번역문에 정당하게 남는다 — 지령 16호와
+            # 클레이턴 각서가 "a) 육군:", "I. 일반", "W. L. 클레이턴"으로 3회
+            # 재시도 끝에 실패한 뒤 바꿨다. 낱말 기준은 stray_cyrillic과 같다.
+            cyr = sum(len(w) for w in lang.stray_word.findall(outside)
+                      if len(w) >= lang.stray_min)
+        else:
+            cyr = len(lang.script.findall(outside))
         if cyr / max(len(outside.strip()), 1) > 0.15:
             problems.append(
                 f"[[{idx}]] {lang.label}가 그대로 남음 ({cyr}자): {outside.strip()[:40]}…")

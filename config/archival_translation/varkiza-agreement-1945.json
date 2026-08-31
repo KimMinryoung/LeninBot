@@ -1,0 +1,102 @@
+{
+  "id": "varkiza-agreement-1945",
+  "title": "바르키자 협정 — 그리스 정부와 EAM의 협정 (1945년 2월 12일)",
+  "byline": "그리스 왕국 정부 / 민족해방전선(EAM)",
+  "bylineNote": "1945년 2월 12일 아테네 외무부에서 서명. 미국 국무부 영역",
+  "headnote": [
+    "1944년 12월 아테네에서 한 달 넘게 이어진 영국군·정부군과 ELAS의 시가전, 이른바 「12월 사건」(데켐브리아나)을 끝낸 협정이다. 1945년 2월 2일부터 아테네 남쪽 바르키자에서 열린 회의에서 정부 대표단(외무장관 소피아노풀로스, 내무장관 랄리스, 농업장관 마크로풀로스)과 EAM 중앙위원회 대표단(그리스 공산당 서기장 시안토스, EAM 서기 파르찰리디스, 인민공화연맹 사무총장 치리모코스)이 아홉 조에 합의했다. 자유의 회복과 계엄 해제, 12월 3일 이후 정치범죄에 대한 사면, 인질 석방, 국민군의 재편, 저항군 특히 ELAS와 민병대(EP)의 무장 해제, 공직과 치안 기관의 숙정, 그리고 연내 국민투표와 제헌의회 선거가 그 내용이다.",
+    "협정은 EAM이 무기를 내려놓는 대가로 정치적 자유와 사면을 약속받은 문서지만, 사면은 「정치범죄」에 한정되어 좌파 대원들이 「보통법 범죄」로 기소될 길을 열어 두었고, 국민군 재편은 정부 측 인력만 남기는 결과가 되었다. 이후 우파 조직의 보복, 이른바 「백색 테러」가 이어졌고 1946년 내전이 재개되면서 협정은 무너졌다. 그리스 내전의 첫 국면이 어떤 조건으로 봉합되었는지, 그리고 왜 그 봉합이 오래가지 못했는지를 읽게 하는 문서다.",
+    "저본은 그리스어 원문이 아니라 미국 국무부가 『미국 외교문서』(FRUS) 1945년 제8권에 실은 영어 번역본이다. 따라서 이 번역은 중역이며, 조문의 한국어 표기는 영역의 용어를 따랐다. 협정에 딸린 사면법 초안과 무장 해제 의정서는 저본에 실려 있지 않아 옮기지 못했다. FRUS 편집자 주 번호와 쪽 표시는 옮기지 않았고, 「Article I—Liberties」 같은 조 제목은 원문 배치대로 한 줄로 두었다."
+  ],
+  "bibliography": [
+    "원제: Agreement Between the Greek Government and EAM, Athens, February 12, 1945. 국립문서기록관리청(NARA) RG 59, Decimal File 868.00/3–645 (아테네 대사관 발송 국무부 영역)",
+    "수록: Foreign Relations of the United States: Diplomatic Papers, 1945, Volume VIII, The Near East and Africa, Document 63 (워싱턴: 국무부 역사국)",
+    "그리스어 원문: Συμφωνία της Βάρκιζας, 1945년 2월 12일. 그리스어 위키문헌에 공식본이 있으며 대조에만 썼다",
+    "번역 저본: 국무부 역사국(history.state.gov) 전자판. 국가 간 공식 협정문이며 미국 정부 간행물로 퍼블릭 도메인이다"
+  ],
+  "sourceLang": "en",
+  "output": "/home/grass/frontend/data/commulingo/docs/varkiza-agreement-1945.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "EAM": "민족해방전선(EAM)",
+      "ELAS": "그리스 인민해방군(ELAS)",
+      "ELAN": "그리스 인민해방해군(ELAN)",
+      "National Civil Guard": "국민민병대",
+      "E.P.": "EP",
+      "ELD": "인민공화연맹(ELD)",
+      "Union of Popular Republicans": "인민공화연맹",
+      "Greek Communist Party": "그리스 공산당",
+      "Central Committee of EAM": "EAM 중앙위원회",
+      "Hellenic Government": "그리스 정부",
+      "Royal Hellenic Government": "그리스 왕국 정부",
+      "Government Delegation": "정부 대표단",
+      "EAM Delegation": "EAM 대표단",
+      "Sacred Squadron": "신성대대",
+      "Allied High Command": "연합군 최고사령부",
+      "National Army": "국민군",
+      "Gendarmerie": "헌병대",
+      "City Police": "도시경찰",
+      "Security Services": "치안 기관",
+      "Constituent Assembly": "제헌의회",
+      "Constitutional Act": "헌법령",
+      "Martial law": "계엄",
+      "martial law": "계엄",
+      "plebiscite": "국민투표",
+      "Amnesty": "사면",
+      "amnesty": "사면",
+      "Hostages": "인질",
+      "Purge": "숙정",
+      "purge": "숙정",
+      "Demobilisation": "무장 해제와 동원 해제",
+      "demobilised": "동원 해제되다",
+      "en disponibilité": "대기 발령",
+      "Atlantic Charter": "대서양 헌장",
+      "Teheran": "테헤란",
+      "Varkiza": "바르키자",
+      "Piraeus": "피레우스",
+      "Sofianopoulos": "소피아노풀로스",
+      "Rallis": "랄리스",
+      "Macropoulos": "마크로풀로스",
+      "Siantos": "시안토스",
+      "Partsalides": "파르찰리디스",
+      "Tsirimokos": "치리모코스",
+      "Varsamis": "바르사미스",
+      "Preamble": "전문(前文)",
+      "occupation": "점령기"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "agreement",
+      "titleKo": "그리스 정부와 EAM의 협정",
+      "heading": false,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.tei-div3#d63",
+        "drop": [
+          "a.tei-pb1",
+          "a.note"
+        ],
+        "path": "/home/grass/frontend/docs/varkiza-agreement-1945-frus.html",
+        "sha256": "b68319d85ddfb712350b997d5f5af097329e7755ed450b0fe9a79e24987f707a"
+      },
+      "blocks": [
+        1,
+        40
+      ],
+      "startsWith": "Agreement Between the Greek Government and EAM",
+      "endsWith": "G. Varsamis",
+      "register": "한다체. 정부와 정치 조직 사이의 공식 협정문이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 'Article I—Liberties' 같은 조 제목은 '제1조 자유'처럼 '제N조 제목'으로 한 줄에 옮긴다(로마 숫자를 아라비아 숫자로). (2) 머리의 '[Translation]'은 '[번역]'으로 옮긴다. (3) 'Preamble'은 '전문'으로 옮긴다. (4) 기관·조직 약어(EAM, ELAS, ELAN, EP, ELD)는 용어표대로 처음에 풀어 쓰고 이후 약어만 쓴다. (5) 끝의 서명자 일곱 명은 한 줄에 한 명씩 음차한다. (6) 인명·지명은 그리스어 통용 표기로 음차한다.",
+      "tagMap": {
+        "li": "p",
+        "h3": "p"
+      }
+    }
+  ]
+}

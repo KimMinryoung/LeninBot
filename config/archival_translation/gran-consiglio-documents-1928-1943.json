@@ -1,0 +1,129 @@
+{
+  "id": "gran-consiglio-documents-1928-1943",
+  "title": "파시즘 대평의회 — 1928년 대평의회법, 1943년 7월 24~25일 그란디 결의안, 바돌리오의 9월 8일 포고",
+  "byline": "이탈리아 왕국 / 파시즘 대평의회 / 피에트로 바돌리오",
+  "bylineNote": "1928년 12월 9일 법률 제2693호; 1943년 7월 24~25일 대평의회 결의; 1943년 9월 8일 라디오 포고",
+  "headnote": [
+    "파시즘 대평의회를 둘러싼 문서 세 건이다. 대평의회는 1923년 무솔리니가 당 지도부의 자문 기구로 만든 것을 1928년 12월 9일 법률 제2693호가 「정권의 모든 활동을 조정하고 통합하는 최고 기관」으로 국가기관화한 것이다. 이 법은 수상이 당연직 의장이 되고, 왕위 계승, 수상의 권한, 조합·협동체 질서, 교황청과의 관계, 영토를 바꾸는 조약 같은 「헌법적 성격의 문제」에 대평의회의 의견을 반드시 듣도록 하며, 수상 후보 명단을 국왕에게 제출하는 권한까지 주었다. 알베르토 헌장 아래 형식상 남아 있던 의회제 위에 당 기관을 헌법 기구로 얹은 이 법이 파시즘 국가의 골격이다.",
+    "둘째 문서는 그 대평의회가 무솔리니를 무너뜨린 결의다. 연합군이 시칠리아에 상륙한 지 보름 뒤인 1943년 7월 24일 밤부터 25일 새벽까지 열린 회의에서 디노 그란디가 낸 결의안은 「모든 국가 기능의 즉각 복원」을 요구하며 국왕에게 헌장 제5조에 따른 군 통수권과 「최고의 결정 주도권」을 맡으라고 청한다. 무솔리니의 이름은 한 번도 나오지 않지만 뜻은 분명했고, 표결은 찬성 19, 반대 8(기권 1)이었다. 이튿날 국왕 비토리오 에마누엘레 3세는 무솔리니를 해임해 체포하고 바돌리오 원수에게 정부를 맡겼다. 1928년 법이 만든 기관이 그 법의 조항을 근거로 정권을 끝낸 셈이다.",
+    "셋째 문서는 바돌리오가 1943년 9월 8일 저녁 라디오로 읽은 네 문장의 포고다. 9월 3일 카시빌레에서 비밀리에 서명한 휴전을 연합군 측이 먼저 발표하자 이탈리아 정부도 이를 확인했고, 「다른 곳에서 오는 공격에는 대응한다」는 마지막 문장이 독일군에 대한 유일한 지침이었다. 이 모호한 방송 뒤 국왕과 정부는 로마를 떠났고 이탈리아군은 지휘 없이 독일군에 무장 해제되었다. 저본은 각각 이탈리아어 전자판이다. 1928년 법은 bibliotecafascista 전자판을 normattiva 조문과 대조했고, 그란디 결의안은 이탈리아어 위키문헌 판, 바돌리오 포고는 이탈리아어 위키백과에 실린 방송 원문을 옮겼다. 조문의 「Art. N.」은 「제N조」로, 항목 번호 1° 2°는 그대로 두었다."
+  ],
+  "bibliography": [
+    "1928년 12월 9일 법률 제2693호 「파시즘 대평의회의 조직과 권한」(Legge 9 dicembre 1928, n. 2693, Ordinamento e attribuzioni del Gran Consiglio del Fascismo). 『관보』(Gazzetta Ufficiale) 1928년 12월 11일 제287호. 번역 저본은 bibliotecafascista.blogspot.com 전자판(normattiva.it 조문과 대조). 법령으로 저작권 보호 대상이 아니다",
+    "그란디 결의안(Ordine del giorno Grandi). 1943년 7월 24~25일 파시즘 대평의회 회의에서 찬성 19, 반대 8, 기권 1로 가결. 번역 저본은 이탈리아어 위키문헌 전자판. 국가기관의 결의로 옮겼으나 기초자 디노 그란디(1988년 사망)의 저작으로 볼 여지가 있어 저작권 검토가 남아 있다",
+    "바돌리오의 휴전 포고(Proclama Badoglio). 1943년 9월 8일 19시 42분 EIAR 라디오 방송. 번역 저본은 이탈리아어 위키백과 「Proclama Badoglio dell'8 settembre 1943」 항목에 실린 방송 원문. 정부 수반의 공식 포고로 저작권 보호 대상이 아니다"
+  ],
+  "sourceLang": "it",
+  "output": "/home/grass/frontend/data/commulingo/docs/gran-consiglio-documents-1928-1943.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "Gran Consiglio del Fascismo": "파시즘 대평의회",
+      "Gran Consiglio": "대평의회",
+      "Partito Nazionale Fascista": "국가파시스트당",
+      "Capo del Governo": "정부 수반",
+      "Primo Ministro Segretario di Stato": "수상 겸 국무장관",
+      "Segretario del Partito Nazionale Fascista": "국가파시스트당 서기장",
+      "Direttorio del Partito Nazionale Fascista": "국가파시스트당 지도부",
+      "quadrumviri della Marcia su Roma": "로마 진군의 4인 지도자",
+      "Marcia su Roma": "로마 진군",
+      "Milizia volontaria per la sicurezza nazionale": "국가안보의용민병대",
+      "Camera dei deputati": "하원",
+      "Senato del Regno": "왕국 상원",
+      "Senato": "상원",
+      "Ministri Segretari di Stato": "국무장관인 각료들",
+      "Sottosegretario di Stato alla Presidenza del Consiglio": "내각 수상실 차관",
+      "Accademia d'Italia": "이탈리아 아카데미",
+      "Istituto fascista di cultura": "파시스트 문화연구소",
+      "Opera nazionale Balilla": "국립 발릴라 사업단",
+      "Tribunale speciale per la difesa dello Stato": "국가방위특별재판소",
+      "Confederazioni nazionali fasciste di sindacati": "파시스트 전국 노동조합 연맹",
+      "Ente nazionale per la cooperazione": "국립 협동조합 공단",
+      "ordinamento sindacale e corporativo": "조합·협동체 질서",
+      "Santa Sede": "교황청",
+      "Corona": "왕실",
+      "Statuto del Regno": "왕국 헌장",
+      "Guardasigilli": "국새상서",
+      "Gazzetta Ufficiale del Regno": "왕국 관보",
+      "Regio decreto": "칙령",
+      "Vittorio Emanuele III": "비토리오 에마누엘레 3세",
+      "Mussolini": "무솔리니",
+      "Rocco": "로코",
+      "Grandi": "그란디",
+      "Badoglio": "바돌리오",
+      "Eisenhower": "아이젠하워",
+      "Risorgimento": "리소르지멘토",
+      "Dinastia di Savoia": "사보이아 왕가",
+      "Sicilia": "시칠리아",
+      "Forze armate": "군",
+      "Corporazioni": "협동체",
+      "armistizio": "휴전",
+      "forze alleate anglo-americane": "영미 연합군"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "레알레(Reale) 칙령": "국왕 칙령"
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "legge-2693",
+      "titleKo": "파시즘 대평의회의 조직과 권한에 관한 법률 — 1928년 12월 9일 법률 제2693호",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.post-body",
+        "path": "/home/grass/frontend/docs/legge-gran-consiglio-1928-bibliotecafascista.html",
+        "sha256": "50aad54b19849e021ad6cd95e84172b8ed7764beeaee1408051f66a66eef800e"
+      },
+      "blocks": [
+        0,
+        70
+      ],
+      "startsWith": "Vittorio Emanuele III",
+      "endsWith": "il Guardasigilli: Rocco.",
+      "register": "한다체. 법률 조문이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 'Art. N.'은 '제N조'로 옮기고 한 줄로 둔다. (2) 조문 안의 항목 번호 1° 2° 3°는 '1° 2° 3°' 그대로 보존한다. (3) 머리의 '국왕이 재가하고 공포한다'는 공포문과 끝의 날짜·서명(Vittorio Emanuele. / Mussolini - Rocco. / Visto, il Guardasigilli: Rocco.)은 각각 한 줄로 옮기고, 인명은 음차한다. (4) 'Anno VII'은 '파시스트 기원 7년'으로 옮긴다. (5) 법령·기관 이름은 용어표를 따르고, 처음 나올 때만 괄호에 원어를 둔다."
+    },
+    {
+      "id": "odg-grandi",
+      "titleKo": "그란디 결의안 — 파시즘 대평의회 회의 (1943년 7월 24~25일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "#box_esterno",
+        "path": "/home/grass/frontend/docs/ordine-del-giorno-grandi-1943-wikisource.html",
+        "sha256": "18b12cb07a2d5ef0324123da7c036b6ab2df81813b1df519425b934afc0dc04e"
+      },
+      "blocks": [
+        3,
+        8
+      ],
+      "startsWith": "Il Gran Consiglio, riunendosi in questi giorni di supremo cimento",
+      "endsWith": "della nostra Augusta Dinastia di Savoia.",
+      "register": "한다체. 회의체의 결의문으로, 「대평의회는 …하며; …을 선언하며; …을 확인하며; …을 요청한다」가 한 문장으로 이어진 다섯 단락이다. 단락마다 원문의 동사(volge, proclama, afferma, dichiara, invita)를 살려 '…한다.'로 끝맺되 단락 경계는 원문대로 둔다. 표기 규칙: (1) 'Maestà del Re'는 '국왕 폐하'로 옮긴다. (2) 'articolo 5 dello Statuto del Regno'는 '왕국 헌장 제5조'로 옮긴다. (3) 'Patria'는 '조국'으로, 'Nazione'은 '국민'으로 옮긴다. (4) 인명·지명은 음차하고 경어체를 쓰지 않는다."
+    },
+    {
+      "id": "proclama-badoglio",
+      "titleKo": "바돌리오의 휴전 포고 — 라디오 방송 (1943년 9월 8일)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div.itwiki-template-citazione-singola",
+        "path": "/home/grass/frontend/docs/badoglio-proclama-1943-09-08-wikipedia.html",
+        "sha256": "2d8fc356ab97045aeb745646b392fb0c6b07649b17dae3b0287a947412787dd7"
+      },
+      "blocks": [
+        0,
+        2
+      ],
+      "startsWith": "«Il governo italiano, riconosciuta la impossibilità",
+      "endsWith": "da qualsiasi altra provenienza.»",
+      "register": "한다체. 정부 수반의 방송 포고문이다. 저본이 인용문으로 감싼 앞뒤의 « »는 옮기지 않고 본문만 옮긴다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 'generale Eisenhower, comandante in capo delle forze alleate anglo-americane'는 '영미 연합군 총사령관 아이젠하워 장군'으로 옮긴다. (2) 'armistizio'는 '휴전'으로 옮긴다. (3) 두 단락 경계는 원문대로 둔다."
+    }
+  ]
+}

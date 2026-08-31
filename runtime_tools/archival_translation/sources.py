@@ -355,7 +355,17 @@ def generic_html(raw: str, *, selector: str, drop: list[str] | None = None,
         # on blank lines instead, so the prose is not lost between the few
         # real block elements.
         blocks = []
-        for para in re.split(r"\n\s*\n", _text(str(root))):
+        # 폴백 경로도 원시 줄바꿈은 접는다: 빈 줄만 문단 경계, <br>만 줄 구조.
+        # FRUS 페이지(history.state.gov)가 이 경로를 타면서 편집기 접기가
+        # 블록 줄로 넘어가 번역문이 40자마다 토막 났다(케넌 각서).
+        loose = re.sub(r"(?is)<br\s*/?>", "\x00", str(root))
+        # 블록 태그의 경계는 빈 줄과 같은 문단 경계다 — 이것을 먼저 표시해야
+        # 아래에서 줄바꿈을 접을 때 </p>\n<p> 사이가 한 문단으로 붙지 않는다.
+        loose = re.sub(r"(?is)</?(?:p|div|li|h[1-6]|blockquote|tr|table|pre)\b[^>]*>", "\x01", loose)
+        loose = re.sub(r"\n\s*\n", "\x01", loose)
+        loose = re.sub(r"\s*\n\s*", " ", loose)
+        loose = loose.replace("\x01", "\n\n").replace("\x00", "<br>")
+        for para in re.split(r"\n\s*\n", _text(loose)):
             lines = [ln for ln in para.split("\n") if ln]
             if lines:
                 blocks.append({"tag": "p", "lines": lines})

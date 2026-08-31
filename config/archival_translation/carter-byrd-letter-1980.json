@@ -1,0 +1,60 @@
+{
+  "id": "carter-byrd-letter-1980",
+  "title": "카터 대통령이 버드 상원의원에게 — SALT II 조약 비준 심의 연기 요청 (1980년 1월 3일)",
+  "byline": "지미 카터",
+  "bylineNote": "1980년 1월 3일 워싱턴. 상원 다수당 원내대표 로버트 버드에게",
+  "headnote": [
+    "소련의 아프가니스탄 침공 여드레 뒤, 카터 대통령이 상원 다수당 원내대표 버드에게 SALT II 조약의 비준 동의 심의를 미뤄 달라고 요청한 서한이다. 조약을 철회하는 것이 아니라 「소련의 행동에 대한 의회와 나의 대응」에 집중하기 위해 토론을 늦추는 것이며, 조약이 여전히 국가안보에 이롭다고 믿는다고 썼다. 1979년 6월 빈에서 서명된 조약은 이로써 상원 표결에 오르지 못했고, 데탕트 시대의 마지막 군축 조약은 비준 없이 양측이 「준수」하는 상태로 1980년대를 맞았다. 저본은 미국 국무부 외교문서집 『FRUS 1969–1976』 제33권(SALT II)에 수록된 문서 246의 국무부 역사국 전자판이며, 편집자 각주는 옮기지 않았다."
+  ],
+  "bibliography": [
+    "Letter From President Carter to Senator Byrd, Washington, January 3, 1980. Foreign Relations of the United States, 1969–1976, Volume XXXIII: SALT II, 1972–1980, Document 246",
+    "번역 저본: 미국 국무부 역사국(Office of the Historian) FRUS 전자판. 미국 정부 저작물로 저작권 보호 대상이 아니다"
+  ],
+  "sourceLang": "en",
+  "output": "/home/grass/leninbot/output/archival_translations/merge-staging/carter-byrd-letter-1980.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "Senator Byrd": "버드 상원의원",
+      "Byrd": "버드",
+      "SALT II Treaty": "SALT II 조약",
+      "Treaty": "조약",
+      "Senate": "상원",
+      "Soviet invasion of Afghanistan": "소련의 아프가니스탄 침공",
+      "Congress": "의회",
+      "national security interest": "국가안보상의 이익",
+      "Jimmy Carter": "지미 카터",
+      "Washington": "워싱턴"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "letter",
+      "titleKo": "카터 대통령이 버드 상원의원에게 (1980년 1월 3일)",
+      "heading": false,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.tei-div3#d246",
+        "drop": [
+          "a.tei-pb1",
+          "a.note"
+        ],
+        "path": "/home/grass/frontend/docs/carter-byrd-letter-1980-01-03-frus.html",
+        "sha256": "1b1783140eeb2d916c4582811958c089abd0ded2e5d9f246af0f79b857d7e2ea"
+      },
+      "blocks": [
+        1,
+        8
+      ],
+      "startsWith": "Washington, January 3, 1980.",
+      "endsWith": "Jimmy Carter",
+      "register": "합쇼체. 대통령이 상원의원에게 보낸 짧은 공식 서한이다. '~합니다/~입니다'로 옮긴다. 표기 규칙: (1) 날짜 줄 「Washington, January 3, 1980.」은 「워싱턴, 1980년 1월 3일.」로 옮긴다. (2) 「Dear Senator Byrd:」는 「버드 상원의원 귀하」로 옮긴다. (3) 「Sincerely,」는 「경구」로, 서명 「Jimmy Carter」는 「지미 카터」로 각각 한 줄로 옮긴다. (4) 조약 이름은 「SALT II 조약」으로 쓴다."
+    }
+  ],
+  "frozen": "2026-08-31 번역 후 detente-agreements-1972-1973.html에 HTML 병합 수록(스테이징 산출은 output/archival_translations/merge-staging/). 재실행 금지"
+}

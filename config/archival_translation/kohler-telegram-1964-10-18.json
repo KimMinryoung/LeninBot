@@ -1,0 +1,93 @@
+{
+  "id": "kohler-telegram-1964-10-18",
+  "title": "콜러 모스크바 대사의 국무부 전문 제1183호 — 흐루쇼프 실각의 성격에 관하여 (1964년 10월 18일)",
+  "byline": "포이 D. 콜러",
+  "bylineNote": "주소련 미국 대사, 1964년 10월 18일 18시 모스크바 발신",
+  "headnote": [
+    "흐루쇼프가 물러난 지 나흘 뒤 주소련 미국 대사 포이 콜러가 국무부에 보낸 분석 전문이다. 10월 14일 중앙위원회 전원회의는 흐루쇼프의 「사임 요청」을 받아들여 브레즈네프를 제1서기, 코시긴을 각료회의 의장으로 세웠고, 이튿날 신문에서 흐루쇼프의 이름이 사라졌다. 콜러는 이 「갑작스럽고 완전한」 축출을 스탈린 사후 권력 교체의 유형 속에 놓고 다섯 가지를 짚는다. 1957년 「반당 그룹」 사건에서 흐루쇼프 자신이 세운 원칙, 곧 중앙위원회가 정통성의 관리자라는 원칙이 이번에는 그를 향해 쓰였고, 그러나 결정을 발의하고 정책을 정하는 힘은 여전히 간부회 열두어 명에게 있으며, 제1서기 아래 두 번째 서기가 음모를 꾸밀 수 있는 구조가 남았고, 흐루쇼프가 열어 둔 여론은 그를 위해 움직이지 않았으며, 일은 끝나지 않았다는 것이다.",
+    "전문이 보여 주는 것은 실각 직후 서방이 소련 지도부의 작동 방식을 어떻게 읽었는가다. 콜러는 브레즈네프의 힘이 제한적이고 「집단 지도」가 현 정권의 지배적 특징이라고 보면서, 포드고르니·폴랸스키·보로노프·키릴렌코, 그리고 「지위가 오르고 있는」 안드로포프까지 다음 권력 재편의 후보로 꼽는다. 「제1서기와 수상의 두 모자」를 쓰려는 이가 결국 같은 함정에 빠질 것이라는 예측은 브레즈네프 시대의 실제 경로와 견주어 읽을 만하다.",
+    "저본은 미국 국무부 『미국 외교문서』(FRUS) 1964~1968년 제14권 소련 편의 문서 60이다. 전문 특유의 관사·조동사 생략은 한국어 문장으로 풀어 옮겼고, 단락 머리의 「첫째·둘째」는 그대로 두었다. FRUS 편집자 주와 쪽 표시는 옮기지 않았다."
+  ],
+  "bibliography": [
+    "원제: Telegram From the Embassy in the Soviet Union to the Department of State, Moscow, October 18, 1964, 6 p.m. (No. 1183). 국립문서기록관리청(NARA) RG 59, Central Files 1964–66, POL 15–1 USSR",
+    "수록: Foreign Relations of the United States, 1964–1968, Volume XIV, Soviet Union, Document 60 (워싱턴: 국무부 역사국)",
+    "번역 저본: 국무부 역사국(history.state.gov) 전자판. 미국 정부 저작물로 퍼블릭 도메인이다"
+  ],
+  "sourceLang": "en",
+  "output": "/home/grass/frontend/data/commulingo/docs/kohler-telegram-1964-10-18.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "Khrushchev": "흐루쇼프",
+      "Brezhnev": "브레즈네프",
+      "Kosygin": "코시긴",
+      "Mikoyan": "미코얀",
+      "Podgorny": "포드고르니",
+      "Polyansky": "폴랸스키",
+      "Voronov": "보로노프",
+      "Kirilenko": "키릴렌코",
+      "Kirichenko": "키리첸코",
+      "Kozlov": "코즐로프",
+      "Yefremov": "예프레모프",
+      "Polyakov": "폴랴코프",
+      "Andropov": "안드로포프",
+      "Beriya": "베리야",
+      "Stalin": "스탈린",
+      "Kohler": "콜러",
+      "Presidium": "간부회",
+      "Central Committee": "중앙위원회",
+      "plenum": "전원회의",
+      "plenums": "전원회의",
+      "First Secretary": "제1서기",
+      "Party Secretary": "당 서기",
+      "party secretaryship": "당 서기직",
+      "Premier": "각료회의 의장",
+      "RSFSR Premier": "러시아연방 각료회의 의장",
+      "RSFSR Party apparatus": "러시아연방 당 기구",
+      "candidate Presidium members": "간부회 후보위원",
+      "anti-party group": "반당 그룹",
+      "de-Stalinization campaign": "탈스탈린화 운동",
+      "collective leadership": "집단 지도",
+      "apparatchiks": "당 관료들",
+      "unperson": "존재하지 않는 인물",
+      "Embtel": "대사관 전문",
+      "Dept": "국무부",
+      "Embassy": "대사관",
+      "Department of State": "국무부",
+      "U–2 incident": "U-2 사건",
+      "shake-up of May 1960": "1960년 5월 개편"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "tel-1183",
+      "titleKo": "주소련 대사관이 국무부에 — 전문 제1183호",
+      "heading": false,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.tei-div3#d60",
+        "drop": [
+          "a.tei-pb1",
+          "a.note"
+        ],
+        "path": "/home/grass/frontend/docs/kohler-cable-1964-10-18-frus.html",
+        "sha256": "e7af161c3db9b66fbd2029e068be88e5edbf36e053555fe6665c40f9e815b3a5"
+      },
+      "blocks": [
+        1,
+        11
+      ],
+      "startsWith": "Moscow, October 18, 1964",
+      "endsWith": "Kohler",
+      "register": "한다체. 대사가 본국 외무부에 보낸 분석 전문이다. 전문체 특유의 관사·조동사·주어 생략(\"we should not assume that present installation is a stable one\")은 완전한 한국어 문장으로 풀어 옮기되 내용을 보태지 않는다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 머리의 발신지·일시 '모스크바, 1964년 10월 18일 18시'와 전문 번호 '1183.'은 원문 형식대로 둔다. (2) 단락 머리의 First, Second, Third, Fourth, Lastly는 '첫째, 둘째, 셋째, 넷째, 끝으로'로 옮긴다. (3) 인명은 용어표를 따르고 처음 나올 때만 괄호에 로마자를 둔다. (4) 끝의 서명 'Kohler'는 '콜러' 한 줄로 옮긴다. (5) 괄호 안의 삽입구는 괄호째 옮긴다.",
+      "tagMap": {
+        "li": "p"
+      }
+    }
+  ]
+}

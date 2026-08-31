@@ -19,3 +19,13 @@ class TableVocabulary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LooseTextFallback(unittest.TestCase):
+    def test_raw_line_wraps_are_joined_but_blank_lines_and_br_split(self):
+        html = ("<div id='d'>First line of a\nwrapped paragraph.\n\n"
+                "Second paragraph<br>with a hard break.</div>")
+        blocks = generic_html(html, selector="div#d")
+        self.assertEqual([b["lines"] for b in blocks],
+                         [["First line of a wrapped paragraph."],
+                          ["Second paragraph", "with a hard break."]])

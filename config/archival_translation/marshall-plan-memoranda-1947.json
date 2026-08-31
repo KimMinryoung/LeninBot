@@ -1,0 +1,138 @@
+{
+  "id": "marshall-plan-memoranda-1947",
+  "title": "마셜 플랜의 두 각서 — 케넌의 정책기획실 각서(1947년 5월 23일)와 클레이턴의 「유럽의 위기」(5월 27일)",
+  "byline": "조지 F. 케넌 / 윌리엄 L. 클레이턴",
+  "bylineNote": "미국 국무부 정책기획실 각서 PPS/1(1947년 5월 23일)과 경제담당 국무차관 각서(5월 27일)",
+  "headnote": [
+    "마셜 국무장관이 1947년 6월 5일 하버드 대학 졸업식에서 유럽 부흥 계획을 제안하기 직전, 국무부 안에서 그 계획의 골격을 만든 두 문서다. 첫째는 5월 초에 신설된 정책기획실이 실장 케넌의 이름으로 낸 첫 보고 PPS/1이다. 케넌은 유럽 문제의 근원이 공산주의가 아니라 전쟁이 남긴 경제적·사회적·정치적 탈진이며, 미국의 원조는 「공산주의와 싸우기 위해서가 아니라 유럽 사회의 건강을 회복하기 위해」 주어져야 하고, 계획의 주도권은 유럽인이 쥐되 미국은 「우호적 조언」에 그쳐야 하며, 원조는 유럽 전체를 아우르는 하나의 계획에 대해 이루어져야 한다고 썼다. 러시아가 참여를 거부하도록 조건을 짜야 한다는 계산도 이 문서에 이미 들어 있다.",
+    "둘째는 유럽 출장에서 돌아온 경제담당 국무차관 클레이턴이 마셜에게 낸 각서 「유럽의 위기」다. 클레이턴은 전쟁이 유럽 경제에 입힌 피해를 미국이 「크게 과소평가했다」고 쓰고, 영국·프랑스·이탈리아의 국제수지 적자와 석탄·곡물·해운의 부족을 수치로 제시한 뒤, 「연 60~70억 달러어치 물자를 3년간 무상으로」 공여하되 그것은 유럽 주요국이 함께 만드는 유럽 계획에 기초해야 한다고 결론지었다. 케넌의 원칙과 클레이턴의 수치가 합쳐진 것이 하버드 연설이며, 두 문서는 마셜 플랜이 소련 봉쇄의 무기이기 이전에 유럽 경제의 붕괴에 대한 진단이었음을 보여 준다.",
+    "저본은 미국 국무부 외교문서집 『Foreign Relations of the United States, 1947』 제3권(영국 연방과 유럽)에 수록된 문서 135·136의 국무부 역사국 전자판이다. 문서집의 쪽 표시와 편집자 각주는 옮기지 않았고, 케넌 각서에 딸린 첨부 문서의 항목 번호와 소제목은 원문대로 두었다. 클레이턴 각서의 수지 표는 원문의 표를 그대로 옮겼다."
+  ],
+  "bibliography": [
+    "케넌 각서: The Director of the Policy Planning Staff (Kennan) to the Under Secretary of State (Acheson), Washington, May 23, 1947. 국무부 문서번호 840.50 Recovery/5–2347. 정책기획실 보고 PPS/1 「Policy with Respect to American Aid to Western Europe」 첨부",
+    "클레이턴 각서: Memorandum by the Under Secretary of State for Economic Affairs (Clayton), 「The European Crisis」, Washington, May 27, 1947. 국무부 문서번호 840.50 Recovery/5–2747",
+    "수록: Foreign Relations of the United States, 1947, Volume III: The British Commonwealth; Europe (Washington: U.S. Government Printing Office, 1972), Documents 135, 136",
+    "번역 저본: 미국 국무부 역사국(Office of the Historian) FRUS 전자판. 미국 정부 저작물로 저작권 보호 대상이 아니다"
+  ],
+  "sourceLang": "en",
+  "output": "/home/grass/frontend/data/commulingo/docs/marshall-plan-memoranda-1947.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "Policy Planning Staff": "정책기획실",
+      "Planning Staff": "기획실",
+      "Director of the Policy Planning Staff": "정책기획실장",
+      "Under Secretary of State": "국무차관",
+      "Under Secretary of State for Economic Affairs": "경제담당 국무차관",
+      "Secretary of State": "국무장관",
+      "Department of State": "국무부",
+      "State Department": "국무부",
+      "the Department": "국무부",
+      "Mr. Acheson": "애치슨 차관",
+      "Acheson": "애치슨",
+      "Kennan": "케넌",
+      "Clayton": "클레이턴",
+      "Marshall": "마셜",
+      "Mr. Baruch": "버루크 씨",
+      "Baruch": "버루크",
+      "Truman Doctrine": "트루먼 독트린",
+      "President": "대통령",
+      "Congress": "의회",
+      "Administration": "행정부",
+      "Executive branch": "행정부",
+      "Economic Commission for Europe": "유럽경제위원회",
+      "United Nations": "국제연합",
+      "European Recovery Program": "유럽 부흥 계획",
+      "balance of payments": "국제수지",
+      "bread grains": "식량 곡물",
+      "Ruhr": "루르",
+      "US–UK Zone Germany": "독일 미·영 점령지구",
+      "Bizone": "미·영 통합 점령지구",
+      "western Europe": "서유럽",
+      "Western Europe": "서유럽",
+      "Eastern Europe": "동유럽",
+      "Great Britain": "영국",
+      "England": "영국",
+      "grant": "무상 공여",
+      "loan": "차관",
+      "Export-Import Bank": "수출입은행",
+      "International Bank": "국제부흥개발은행",
+      "the Russians": "러시아",
+      "Russia": "러시아",
+      "Soviet Union": "소련",
+      "communism": "공산주의",
+      "Communists": "공산주의자",
+      "Foreign Service": "외무직",
+      "Missions": "재외공관",
+      "Embassy": "대사관",
+      "secret": "비밀",
+      "[Enclosure]": "[첨부]",
+      "Summary": "요약",
+      "billions": "십억 달러",
+      "billion": "십억 달러",
+      "million tons": "백만 톤",
+      "million": "백만",
+      "$ millions": "백만 달러",
+      "millions": "백만"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "kennan",
+      "titleKo": "정책기획실장 케넌이 애치슨 국무차관에게 — 서유럽에 대한 미국 원조 정책에 관한 정책기획실의 견해(PPS/1) (1947년 5월 23일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div.tei-div3#d135",
+        "drop": [
+          "a.tei-pb1",
+          "a.note"
+        ],
+        "path": "/home/grass/frontend/docs/kennan-pps1-1947-05-23-frus.html",
+        "sha256": "9e1d333a13ecab4bf07c08e9f8d6c76f645041ac9527e796c7d13b48b27720ea"
+      },
+      "blocks": [
+        1,
+        36
+      ],
+      "startsWith": "The Director of the Policy Planning Staff",
+      "endsWith": "we should have to apply similar criteria.",
+      "register": "한다체. 국무부 내부 각서와 그 첨부 보고다. '~한다/~이다'로 옮기고 경어체를 쓰지 않되, 표지 메모(「Mr. Acheson:」으로 시작)는 차관에게 보내는 서한이므로 '~합니다'의 합쇼체로 옮긴다. 표기 규칙: (1) 머리의 발신·수신 표제, 「secret」, 날짜 줄은 각각 한 줄로 옮긴다. (2) 「[Enclosure]」는 「[첨부]」로, 「Summary」는 「요약」으로 옮긴다. (3) 첨부의 항목 번호(1. 2. … 8.)와 소항목(a. b. c., i. ii.)은 원문 기호를 그대로 둔다. (4) 인용 부호 안의 표현은 굽은 따옴표로 옮긴다. (5) 서명 「George F. Kennan」은 「조지 F. 케넌」 한 줄로 옮긴다. (6) 국가·기관은 통용 한국어 표기를 쓰고 원어를 병기하지 않는다.",
+      "tagMap": {
+        "h5": "p"
+      }
+    },
+    {
+      "id": "clayton",
+      "titleKo": "경제담당 국무차관 클레이턴의 각서 — 「유럽의 위기」 (1947년 5월 27일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div.tei-div3#d136",
+        "drop": [
+          "a.tei-pb1",
+          "a.note"
+        ],
+        "path": "/home/grass/frontend/docs/clayton-memo-1947-05-27-frus.html",
+        "sha256": "f4eef0eb43f8761faa9deaaf0da6355338b62d8d4e78e60d8f1beadc586165ea"
+      },
+      "blocks": [
+        1,
+        32
+      ],
+      "startsWith": "Memorandum by the Under Secretary of State for Economic Affairs",
+      "endsWith": "W. L. Clayton",
+      "register": "한다체. 국무장관에게 올린 짧은 각서로, 문장이 짧고 단정적이다. 그 리듬을 살려 짧게 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 첫 줄의 각서 표제와 「The European Crisis」는 각각 한 줄로 옮긴다. (2) 항목 번호(1.~10.)는 그대로 둔다. (3) 표의 수치와 단위(billions, million tons)는 그대로 보존하고 표 머리의 국가·품목 이름만 옮긴다. (4) 「These things must not happen.」 같은 한 문장 단락은 한 줄로 옮긴다. (5) 끝의 날짜와 서명 「W. L. Clayton」은 「W. L. 클레이턴」으로 옮긴다. (6) 각주 번호(Clayton1, Baruch2 같은 위첨자 숫자)는 옮기지 않는다.",
+      "tagMap": {
+        "h5": "p",
+        "table": "table"
+      }
+    }
+  ]
+}
