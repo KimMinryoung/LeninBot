@@ -99,7 +99,10 @@
     }
   },
   "allowedCyrillic": [],
-  "postEdits": {},
+  "postEdits": {
+    "관리위원회": "통제위원회",
+    "연합국 관리이사회": "연합국 통제위원회"
+  },
   "documents": [
     {
       "id": "protocol",
