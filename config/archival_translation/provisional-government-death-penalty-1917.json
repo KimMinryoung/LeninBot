@@ -54,7 +54,9 @@
   "output": "/home/grass/frontend/data/commulingo/docs/provisional-government-death-penalty-1917.html",
   "allowedCyrillic": [],
   "postEdits": {
-    "제청4.": "제청."
+    "제청4.": "제청.",
+    "안건4.": "안건.",
+    "군무성": "육군부"
   },
   "documents": [
     {
