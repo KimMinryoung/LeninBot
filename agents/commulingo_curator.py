@@ -1,4 +1,4 @@
-"""Dedicated low-cost curator for the CommuLingo people dictionary."""
+"""Dedicated quality-first curator for the CommuLingo people dictionary."""
 
 from agents.base import AgentSpec
 from llm.prompt_renderer import SystemPrompt
@@ -181,7 +181,7 @@ assert "__" not in _PROMPT, "unreplaced token in the CommuLingo curator prompt"
 
 COMMULINGO_CURATOR = AgentSpec(
     name="commulingo_curator",
-    description="Scheduled low-cost curator for one sourced CommuLingo people or glossary write per run",
+    description="Scheduled quality-first curator for one sourced CommuLingo people or glossary write per run",
     prompt_ir=SystemPrompt(identity=_PROMPT),
     tools=[
         "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people",
@@ -196,12 +196,12 @@ COMMULINGO_CURATOR = AgentSpec(
         "commulingo_person_create", "commulingo_person_update",
         "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
     ],
-    # 2026-08-14: deepseek_pro → GPT-5.6 Luna. The 2026-08-16 DeepSeek V4
-    # peak/off-peak repricing (~2x blended for this lane even off-peak) made
-    # Luna cheaper at equal blind-judged card quality (Luna won on grounding
-    # discipline, DeepSeek on epithet craft; bench 2026-08-14).
-    provider="openai",
-    model="gpt56luna",
+    # 2026-08-29: GPT-5.6 Luna → DeepSeek V4 Pro. Luna's lower token price
+    # did not offset recurring foreign-language leakage in Korean public text;
+    # the write-boundary script validator remains as a provider-independent
+    # final guard.
+    provider="deepseek",
+    model="deepseek_pro",
     budget_usd=0.35,
     max_rounds=16,
     max_input_tokens=160_000,

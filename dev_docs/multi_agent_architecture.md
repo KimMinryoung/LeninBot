@@ -39,6 +39,7 @@ Registered in `agents/__init__.py`:
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
 | `commulingo_curator` | scheduled CommuLingo people/glossary curator | DeepSeek V4 Pro; one direct, sourced edit per run; web research plus CommuLingo reads and target-specific narrow write tools only |
+| `commulingo_event_curator` | scheduled CommuLingo history-event document curator | DeepSeek V4 Pro; one sourced body section or event update per run; shared write-boundary language validation remains enabled |
 
 Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, input and output token ceilings, bounded output continuation, thinking policy, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
 

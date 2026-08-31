@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.commulingo_curator import COMMULINGO_CURATOR
+from agents.commulingo_event_curator import COMMULINGO_EVENT_CURATOR
 from runtime_tools.commulingo_people import (
     DENSE_SENTENCE_CHARS,
     FIELD_LIMITS,
@@ -70,8 +71,10 @@ class SectionCursor:
 SECTION_CURSOR = SectionCursor()
 
 
-assert COMMULINGO_CURATOR.provider == "openai"
-assert COMMULINGO_CURATOR.model == "gpt56luna"
+assert COMMULINGO_CURATOR.provider == "deepseek"
+assert COMMULINGO_CURATOR.model == "deepseek_pro"
+assert COMMULINGO_EVENT_CURATOR.provider == "deepseek"
+assert COMMULINGO_EVENT_CURATOR.model == "deepseek_pro"
 NARROW_TOOLS = {
     "commulingo_person_create", "commulingo_person_update",
     "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",

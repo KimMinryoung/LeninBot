@@ -180,10 +180,11 @@ COMMULINGO_EVENT_CURATOR = AgentSpec(
     ],
     finalization_tools=["commulingo_event_section_save", "commulingo_event_update"],
     terminal_tools=["commulingo_event_section_save", "commulingo_event_update"],
-    # 2026-08-14: deepseek_pro → GPT-5.6 Luna alongside the people curator
-    # (DeepSeek V4 repricing; see agents/commulingo_curator.py).
-    provider="openai",
-    model="gpt56luna",
+    # Keep public Korean document generation on the same quality-first model
+    # as the people/glossary curator. The shared write validator remains the
+    # provider-independent final guard against script leakage.
+    provider="deepseek",
+    model="deepseek_pro",
     # A section is several times the text of a person card and is researched from
     # more sources, so both the round count and the budget sit above the people
     # curator's 16 / $0.35. Neither has been the binding constraint on that lane
