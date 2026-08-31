@@ -257,6 +257,23 @@ class PostReport(unittest.TestCase):
         md = terms.render_post_markdown({"id": "t"}, rep, [])
         self.assertIn("범위 차이", md)
 
+    def test_inflection_variants_are_not_suggested(self):
+        self.assertTrue(terms._inflection_variant("법적으로 무효인", "법적으로 무효이고"))
+        self.assertTrue(terms._inflection_variant("노농동맹을", "노농동맹"))
+        self.assertFalse(terms._inflection_variant("라린", "루리예"))
+        self.assertFalse(terms._inflection_variant("소련", "소비에트 연방"))
+        self.assertFalse(terms._inflection_variant("카메네프", "카메네바"))  # 음차 차이는 활용이 아니다
+        self.assertTrue(terms._inflection_variant("서명한 순간부터 효력이 없다고", "서명한 순간부터 효력이 없는"))
+        gl = [{"ru": "недействительными с момента их подписания", "ko": "서명한 순간부터 효력이 없는",
+               "pattern": _pattern(["недействительными с момента их подписания"])}]
+        records = [_rec([
+            _term(1, "недействительными с момента их подписания", kind="term", target="서명한 순간부터 효력이 없다고",
+                  glossary="недействительными с момента их подписания"),
+        ], offered=[gl[0]["ru"]])]
+        rep = terms.post_report(records, gl, {}, {1: ["서명한 순간부터 효력이 없다고 인정한다."]})
+        self.assertEqual(rep["postEditsSnippet"], {})
+        self.assertTrue(rep["deviations"][0]["inflection"])
+
     def test_markdown_renders_every_section(self):
         rep = terms.post_report(self._records(), _glossary(), self.spec, self.targets)
         md = terms.render_post_markdown({"id": "t"}, rep, [9])

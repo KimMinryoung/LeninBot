@@ -85,5 +85,28 @@ class CacheRevalidation(unittest.TestCase):
             gen.assert_not_called()
 
 
+
+class StrayCyrillicSkipsEditorial(unittest.TestCase):
+    def test_bibliography_original_title_is_not_a_hole(self):
+        from runtime_tools.archival_translation.core import stray_cyrillic
+        html = ('<article><h1>제목</h1><aside class="doc-editorial"><p class="doc-editorial-label">엮은이 주</p>'
+                '<ul><li>원제: Приказ Народного комиссара обороны СССР № 227</li></ul></aside>'
+                '<p>본문에 남은 Ставка 한 낱말.</p><p>병기는 괜찮다(Жуков).</p></article>')
+        self.assertEqual(stray_cyrillic(html), ["Ставка"])
+
+
+class GlossaryPatternBoundary(unittest.TestCase):
+    def test_every_alternative_is_bounded(self):
+        from runtime_tools.archival_translation.core import _pattern, _variants
+        pat = _pattern(_variants("Горбач"))
+        self.assertIsNone(pat.search("Горбачев"))      # 전치격 'Горбаче'가 안에서 걸리면 안 된다
+        self.assertIsNone(pat.search("М. Горбачевым"))
+        self.assertEqual(pat.search("о Горбаче").group(0), "Горбаче")
+        self.assertEqual(pat.search("Горбача").group(0), "Горбача")
+        adj = _pattern(_variants("Октябрьский"))
+        self.assertEqual(adj.search("Октябрьского").group(0), "Октябрьского")
+        self.assertIsNone(adj.search("Октябрьскими"))  # 'Октябрьским'+'и': 뒤에 키릴이 붙으면 경계가 아니다
+
+
 if __name__ == "__main__":
     unittest.main()

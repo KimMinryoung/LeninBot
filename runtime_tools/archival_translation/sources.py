@@ -256,6 +256,119 @@ def _split_paragraphs(scope: str, emit: Callable[[str, str], None]) -> None:
         emit("h4" if bold else "p", bold.group(1) if bold else fragment)
 
 
+# ── generic, selector-scoped HTML ────────────────────────────────────
+
+_HTML_BLOCK_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "li", "table", "pre", "div")
+_HTML_TAG_MAP = {"h1": "h3", "h2": "h3", "h3": "h3", "h4": "h4", "h5": "h5", "h6": "h5",
+                 "p": "p", "blockquote": "blockquote", "li": "li", "pre": "p", "div": "p"}
+
+
+def generic_html(raw: str, *, selector: str, drop: list[str] | None = None,
+                 nth: int = 0) -> list[dict]:
+    """Parse any saved HTML page, scoped to one CSS selector the spec names.
+
+    The module's rule is one adapter per archive because a parser that
+    guesses across formats mis-slices silently. This one does not guess: the
+    spec says exactly which element holds the document (``source.selector``)
+    and which children to discard first (``source.drop`` — a footer, a
+    navigation list), and the usual sha256 + startsWith/endsWith guards
+    still decide what belongs to the document. A selector that matches
+    nothing is an error, not an empty document. Exists for the long tail of
+    single-document sites (hrono.ru, doc20vek.ru, kremlin.ru, coldwar.ru)
+    that each hold one or two sources and do not merit an adapter apiece.
+
+    Leaf block elements (a <p> that contains no other block) become blocks in
+    document order; a container whose prose is mostly loose text separated
+    by <br> — the 1990s document sites — is split on blank lines instead.
+    Tables come back like wikisource's: ``rows`` plus the cell ``lines``
+    vocabulary, so numbers never go through the model.
+    """
+    from bs4 import BeautifulSoup, Tag
+
+    soup = BeautifulSoup(raw, "lxml")
+    matches = soup.select(selector)
+    if not matches or nth >= len(matches):
+        raise ValueError(f"source.selector matched {len(matches)} element(s), wanted #{nth}: {selector!r}")
+    root = matches[nth]  # 표 레이아웃 사이트(hrono.ru)는 같은 셀렉터가 메뉴 칸과 본문 칸에 함께 걸린다
+    for sel in drop or []:
+        for el in root.select(sel):
+            el.decompose()
+    for el in root.find_all(["script", "style", "noscript"]):
+        el.decompose()
+
+    def is_leaf(el: Tag) -> bool:
+        return not el.find(list(_HTML_BLOCK_TAGS))
+
+    def inside_table(el: Tag) -> bool:
+        # 루트 안쪽 조상만 본다: 셀렉터가 표 셀(td.text)인 사이트에서 바깥 표
+        # 때문에 모든 블록이 "표 안"으로 잡혀 통째로 버려지면 안 된다.
+        parent = el.parent
+        while parent is not None and parent is not root:
+            if parent.name == "table":
+                return True
+            parent = parent.parent
+        return False
+
+    def table_block(el: Tag) -> dict | None:
+        rows = []
+        for tr in el.find_all("tr"):
+            cells = [" ".join(_text(str(c)).split("\n")) for c in tr.find_all(["td", "th"])]
+            if any(cells):
+                rows.append(cells)
+        if not rows:
+            return None
+        vocab, seen = [], set()
+        for row in rows:
+            for cell in row:
+                if cell and CYRILLIC_RE.search(cell) and cell not in seen:
+                    seen.add(cell)
+                    vocab.append(cell)
+        return {"tag": "table", "rows": rows, "lines": vocab}
+
+    blocks: list[dict] = []
+    covered = 0
+    for el in root.find_all(list(_HTML_BLOCK_TAGS)):
+        if inside_table(el):
+            continue  # 바깥 표가 행·칸째로 다룬다
+        if el.name == "table":
+            tb = table_block(el)
+            if tb:
+                blocks.append(tb)
+                covered += sum(len(c) for r in tb["rows"] for c in r)
+            continue
+        if not is_leaf(el):
+            continue
+        lines = [ln for ln in _text(str(el)).split("\n") if ln]
+        if lines:
+            blocks.append({"tag": _HTML_TAG_MAP[el.name], "lines": lines})
+            covered += sum(len(ln) for ln in lines)
+
+    total = len(re.sub(r"\s+", " ", root.get_text(" ")).strip())
+    if total and covered < total * 0.5:
+        # Loose text with <br> separators dominates: split the whole container
+        # on blank lines instead, so the prose is not lost between the few
+        # real block elements.
+        blocks = []
+        for para in re.split(r"\n\s*\n", _text(str(root))):
+            lines = [ln for ln in para.split("\n") if ln]
+            if lines:
+                blocks.append({"tag": "p", "lines": lines})
+    return blocks
+
+
+def parse(source: dict, raw: str) -> list[dict]:
+    """Dispatch on ``source.format``. ``html`` is the selector-scoped adapter
+    and needs ``source.selector``; the rest are the per-archive adapters."""
+    fmt = (source.get("format") or DEFAULT_ADAPTER).strip()
+    if fmt == "html":
+        selector = (source.get("selector") or "").strip()
+        if not selector:
+            raise KeyError("source.format 'html' needs source.selector")
+        return generic_html(raw, selector=selector, drop=source.get("drop"),
+                            nth=int(source.get("nth") or 0))
+    return get_adapter(fmt)(raw)
+
+
 ADAPTERS: dict[str, Callable[[str], list[dict]]] = {
     "militera": militera,
     "wikisource": wikisource,
@@ -269,5 +382,5 @@ DEFAULT_ADAPTER = "militera"
 def get_adapter(name: str | None) -> Callable[[str], list[dict]]:
     key = (name or DEFAULT_ADAPTER).strip()
     if key not in ADAPTERS:
-        raise KeyError(f"unknown source format {key!r} (have: {', '.join(sorted(ADAPTERS))})")
+        raise KeyError(f"unknown source format {key!r} (have: {', '.join(sorted(ADAPTERS))}, html)")
     return ADAPTERS[key]

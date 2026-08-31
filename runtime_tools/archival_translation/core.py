@@ -344,8 +344,24 @@ def load_blocks(source: dict) -> list[dict]:
         raise SpecError(
             f"{src.name}: source no longer matches spec\n  spec:   {source['sha256']}\n"
             f"  actual: {digest}")
-    adapter = sources.get_adapter(source.get("format"))
-    return adapter(src.read_text(encoding="utf-8"))
+    return sources.parse(source, _decode_page(src.read_bytes()))
+
+
+_CHARSET_RE = re.compile(rb'charset=["\']?\s*([A-Za-z0-9_-]+)', re.I)
+
+
+def _decode_page(data: bytes) -> str:
+    """저장된 페이지 바이트 → 문자열. 1990년대 문서 사이트(관보 전자판 등)는
+    windows-1251이라 UTF-8로 읽으면 본문이 통째로 깨진다. 선언된 charset을
+    따르고, 없으면 UTF-8을 시도한 뒤 cp1251로 물러선다."""
+    m = _CHARSET_RE.search(data[:4096])
+    declared = (m.group(1).decode("ascii", "ignore").lower() if m else "")
+    if declared in ("windows-1251", "cp1251", "win-1251"):
+        return data.decode("cp1251", errors="replace")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1251", errors="replace")
 
 
 def _anchor_offset(blocks: list[dict], source: dict) -> int:
@@ -451,7 +467,10 @@ def _pattern(surfaces: list[str], bounded: bool = True) -> re.Pattern:
     alts = "|".join(sorted((re.escape(s) for s in surfaces), key=len, reverse=True))
     if not bounded:
         return re.compile(alts)
-    return re.compile(rf"(?<![А-Яа-яЁё]){alts}(?![А-Яа-яЁё])")
+    # 대안은 반드시 묶는다. 묶지 않으면 lookbehind는 첫 대안에만, lookahead는 마지막
+    # 대안에만 걸려 "Горбаче"(Горбач의 전치격)가 "Горбачев" 안에서 매칭된다 —
+    # 1989 결의 감사에서 고르바초프를 그리고리 고르바치로 바꾸라는 제안이 나온 원인.
+    return re.compile(rf"(?<![А-Яа-яЁё])(?:{alts})(?![А-Яа-яЁё])")
 
 
 def build_glossary(people_path: Path, terms_path: Path,
@@ -861,6 +880,10 @@ def stray_cyrillic(text: str, allowed: list[str] | None = None,
     allowedCyrillic list; anything else is a hole in the translation.
     """
     lang = lang or RUSSIAN
+    # 엮은이 주 상자(해제·서지)는 엮은이가 쓴 글이지 번역 출력이 아니다. 서지의
+    # 원제(«Приказ НКО СССР № 227…»)가 통째로 미번역 잔여로 찍혀, 스펙마다
+    # 그 낱말들을 allowedCyrillic에 베껴 넣어야 했다. 상자는 검사에서 뺀다.
+    text = re.sub(r"(?is)<aside class=\"doc-editorial\">.*?</aside>", " ", text)
     outside = re.sub(r"[(（][^)）]*[)）]", " ", re.sub(r"<[^>]+>", " ", text))
     keep = set(allowed or [])
     found = []

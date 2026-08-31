@@ -555,6 +555,37 @@ def _span_mismatch(a: str, b: str) -> bool:
     return x != y and (x in y or y in x)
 
 
+_KO_ENDINGS = {
+    "", "는", "은", "이", "가", "을", "를", "의", "과", "와", "로", "으로", "에", "에서", "도", "만",
+    "인", "이고", "이다", "이며", "이라", "이란", "이라는", "이었다", "였다", "다", "다고", "라고",
+    "한", "하고", "하는", "하며", "한다", "했다", "할", "된", "되고", "되는", "된다", "되었다", "될",
+    "적", "적인", "적으로", "들",
+}
+
+
+def _inflection_variant(a: str, b: str) -> bool:
+    """두 표기가 어미·조사만 다른 같은 말이면 True: '법적으로 무효인' / '법적으로
+    무효이고', '노농동맹을' / '노농동맹'. 한국어는 낱말 끝에서 굴절하므로, 공통
+    앞부분 뒤에 남는 꼬리가 둘 다 어미·조사 목록 안에 있으면 표기가 다른 게 아니라
+    문장에 맞춰 활용한 것이다. 꼬리를 목록으로 제한하는 이유: 그냥 '끝 두 글자
+    차이'로 잡으면 '카메네바'/'카메네프' 같은 음차 차이까지 같은 말이 된다.
+    용어표의 구 단위 항목(«недействительными с момента их подписания» → '서명한
+    순간부터 효력이 없는')이 문장 속에서 '…효력이 없다고'로 나온 것을 이탈로 제안하면
+    postEdits가 문법을 부순다."""
+    x, y = _norm(a), _norm(b)
+    if x == y or not x or not y:
+        return False
+    common = 0
+    for cx, cy in zip(x, y):
+        if cx != cy:
+            break
+        common += 1
+    if common < 2:
+        return False
+    tail_x, tail_y = x[common:].strip(), y[common:].strip()
+    return tail_x in _KO_ENDINGS and tail_y in _KO_ENDINGS
+
+
 def _covered_by_post_edits(target: str, blocks: list[int],
                            targets: dict[int, list[str]], spec: dict) -> list[int]:
     """postEdits를 적용하면 그 표기가 사라지는(줄어드는) 블록들.
@@ -607,12 +638,13 @@ def post_report(records: list[dict], glossary: list[dict], spec: dict,
             return {"target": t, "blocks": blocks, "covered": cover[t],
                     "remaining": remaining[t], "senses": sorted(senses),
                     "senseDisjoint": disjoint, "linked": linked,
-                    "spanMismatch": bool(canonical) and _span_mismatch(t, canonical)}
+                    "spanMismatch": bool(canonical) and _span_mismatch(t, canonical),
+                    "inflection": bool(canonical) and _inflection_variant(t, canonical)}
 
         def suggest(v):
             if not v["remaining"] or canonical is None or _norm(v["target"]) == _norm(canonical):
                 return
-            if v["spanMismatch"]:
+            if v["spanMismatch"] or v["inflection"]:
                 return
             # 용어표 항목이 있으면 그 항목에 연결된 표기만 제안한다 — 연결이 없는
             # 것은 LLM이 다른 대상으로 본 것이다(Союз의 '연방'). 항목이 없으면
@@ -648,13 +680,15 @@ def post_report(records: list[dict], glossary: list[dict], spec: dict,
                 covered = [b for b in linked_blocks if b in cover[t]]
                 rem = [b for b in linked_blocks if b not in cover[t]]
                 span = _span_mismatch(t, entry["ko"])
+                inflected = _inflection_variant(t, entry["ko"])
                 deviations.append({
                     "lemma": g["lemma"], "kind": g["kind"],
                     "glossary": entry["ru"], "expected": entry["ko"], "target": t,
                     "blocks": linked_blocks, "covered": covered, "remaining": rem,
                     "senses": g["targetSenses"].get(t, []), "spanMismatch": span,
+                    "inflection": inflected,
                 })
-                if rem and not span:
+                if rem and not span and not inflected:
                     suggestions.setdefault(t, entry["ko"])
 
     failed = [r["blocks"] for r in records if r.get("error")]
@@ -728,6 +762,8 @@ def render_post_markdown(spec: dict, report: dict, missing_blocks: list[int]) ->
                 note.append("용어표 항목에 연결되지 않음 — 다른 대상일 수 있음")
             if v["spanMismatch"]:
                 note.append("범위 차이 — 한쪽이 다른 쪽을 품음, 제안 제외")
+            if v["inflection"]:
+                note.append("어미·조사 차이 — 같은 표기, 제안 제외")
             sense = f" — sense: {' / '.join(v['senses'])}" if v["senses"] else ""
             out.append(f"- 소수: **{v['target']}** ×{len(v['blocks'])} [{_blocks(v['blocks'])}]{sense}"
                        + (f" ({'; '.join(note)})" if note else ""))
@@ -739,6 +775,8 @@ def render_post_markdown(spec: dict, report: dict, missing_blocks: list[int]) ->
             status = "postEdits 적용됨"
         elif d["spanMismatch"]:
             status = "범위 차이(추출 구절이 용어표 항목보다 넓거나 좁음) — 제안 제외"
+        elif d["inflection"]:
+            status = "어미·조사 차이 — 같은 표기, 제안 제외"
         elif d["covered"]:
             status = f"일부만 적용, 남은 블록 {_blocks(d['remaining'])}"
         else:

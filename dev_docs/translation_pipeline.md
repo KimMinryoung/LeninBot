@@ -21,6 +21,10 @@
 - **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
 - **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서(`parse_response`)가 바뀌어 옛 레코드의 블록 분할을 믿을 수 없을 때만 올린다 — 검증기 강화는 캐시 재심사가 흡수한다.
 
+## 저본 어댑터
+
+`runtime_tools/archival_translation/sources.py`. 문서고마다 어댑터 하나(`militera`, `wikisource`, `stalinism`, `libru`, `marxists`)가 원칙이고, 2026-08-31에 **셀렉터 범위 범용 어댑터 `html`**을 더했다: 스펙의 `source.selector`(CSS 셀렉터)가 문서를 담은 요소를, `source.drop`(선택)이 먼저 버릴 자식(공유 버튼, 내비게이션)을 지정한다. "일반 HTML 파서는 조용히 잘못 자른다"는 원칙은 유지된다 — 이 어댑터는 추측하지 않고 스펙이 지목한 요소만 읽으며, 셀렉터가 아무것도 못 찾으면 빈 문서가 아니라 오류다. sha256·startsWith/endsWith 가드는 그대로 적용된다. 문서 한두 건씩 흩어져 있는 사이트(hrono.ru, doc20vek.ru, kremlin.ru 법령은행, coldwar.ru)를 위한 것이다. 리프 블록 요소(p·h*·blockquote·li·pre)를 문서 순서대로 뽑고, `<br>`로만 나눈 느슨한 본문이 절반을 넘으면 빈 줄 기준으로 다시 나눈다. 표는 wikisource와 같은 방식(rows + 칸 어휘)이다. 같은 셀렉터가 메뉴 칸과 본문 칸에 함께 걸리는 표 레이아웃 사이트를 위해 `source.nth`(0부터, 몇 번째 일치인지)를 둔다. 저장 페이지는 `core._decode_page`가 선언된 charset(windows-1251 등)을 따라 읽고, 선언이 없으면 UTF-8 → cp1251 순으로 물러선다(1989년 관보 전자판이 cp1251). 디스패치는 `sources.parse(source, raw)`. 2026-08-31 실사용: kremlin.ru 법령은행(`div.reader_act_body`), 1000dokumente.de(`div#tab3 div.text-ru`), vedomosti.sssr.su(`body` + 블록 범위로 관보 한 호에서 한 항목 절단), hrono.ru(`td[valign="top"][align="left"]`), istmat.org HTML 노드(`div.field-name-body`), grachev62.narod.ru(`body`). istmat.org의 "문서" 노드와 docs.historyrussia.org(ЭБИД)는 PDF 스캔·이미지 뷰어라 텍스트 어댑터로는 열 수 없다(2026-08-31 확인).
+
 ## 번역 메모리 (TM)
 
 `runtime_tools/translation_memory.py`. SQLite(`output/translation_memory.sqlite3`)의 단일 테이블:
