@@ -265,9 +265,9 @@
   },
   "kg_extraction_small": {
     "provider": "gemini",
-    "model": "gemini-2.5-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "managed": "model-only",
-    "note": "KG graphiti 보조(small) 모델 — 고볼륨이라 저가 2.5 유지, 2.5 폐기 공지 시 3.1로"
+    "note": "KG graphiti 보조(small) 모델 — 고볼륨이라 저가 2.5 유지, 2.5 폐기 공지 시 3.1로 2026-08-31 사용자 결정으로 저가 유지 철회, 2.5→3.5-flash-lite (최신 lite, 가격 3배 감수)."
   },
   "kg_embedding": {
     "provider": "gemini",
@@ -311,30 +311,30 @@
   },
   "kg_entity_classification": {
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.7-flash",
     "temperature": 0.0,
     "max_tokens": 4096,
     "timeout": 120,
     "json_mode": true,
-    "note": "지식그래프의 타입 없는 엔티티를 Person/Organization/... 으로 분류. scripts/classify_untyped_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+    "note": "지식그래프의 타입 없는 엔티티를 Person/Organization/... 으로 분류. scripts/classify_untyped_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다. 2026-08-31 gemini-2.5-flash→3.7-flash (현행 라인업 통일: pro=3.1-pro-preview/flash=3.7/flash-lite=3.5)."
   },
   "kg_entity_merge_grouping": {
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.7-flash",
     "temperature": 0.0,
     "max_tokens": 8192,
     "timeout": 120,
     "json_mode": true,
-    "note": "지식그래프 중복 엔티티 이름 묶기. skills/kg-maintenance/scripts/merge_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+    "note": "지식그래프 중복 엔티티 이름 묶기. skills/kg-maintenance/scripts/merge_entities.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다. 2026-08-31 gemini-2.5-flash→3.7-flash (현행 라인업 통일)."
   },
   "kg_edge_name_normalization": {
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.7-flash",
     "temperature": 0.0,
     "max_tokens": 16384,
     "timeout": 120,
     "json_mode": true,
-    "note": "지식그래프 엣지 이름 정규화. skills/kg-maintenance/scripts/normalize_edge_names.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다."
+    "note": "지식그래프 엣지 이름 정규화. skills/kg-maintenance/scripts/normalize_edge_names.py 전용. 2026-08-06 게이트웨이 편입 — 그전에는 os.getenv로 실키를 직접 읽어 프로바이더를 직접 불렀고, 그래서 비용도 정책도 감사에 안 잡혔다. 2026-08-31 gemini-2.5-flash→3.7-flash (현행 라인업 통일)."
   },
   "kg_type_assignment": {
     "provider": "claude",
