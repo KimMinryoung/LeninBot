@@ -142,6 +142,14 @@ def openai_compatible_pricing(
 
     DeepSeek rows are time-of-day dependent (peak/off-peak) and resolved live;
     everything else is a static row with a Terra fallback for unknowns."""
+    # 2026-08-31 갱신: 현행 라인업은 pro=3.1-pro-preview(stable 별칭 없음,
+    # 3.5 Pro는 존재하지 않음), flash=3.7, flash-lite=3.5로 고정한다(사용자
+    # 결정 — 3.5/3.6 flash는 선택지로 두지 않음). >200K 입력의 $4/$18 장문
+    # 티어는 미모델링. 3.7 Flash는 출시가 $0.75/$3.75, 2027-01-01부터
+    # $1.50/$7.50 예정. 캐시 입력가는 관례(입력의 10%) — 3.1 Pro만 공식 $0.20.
+    # 2.5/3.1 구모델 행은 라이브 call site들이 아직 쓰므로 가격 산정용으로만 유지.
+    "gemini-3.1-pro-preview": _per_token(2.00, 12.00, 0.20),
+    "gemini-3.7-flash": _per_token(0.75, 3.75, 0.075),
     triple = deepseek_price_triple(model, now)
     if triple is not None:
         miss, out, hit = triple

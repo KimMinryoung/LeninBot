@@ -1386,12 +1386,19 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
             prompt = _chunk_prompt(chunk, glossary, opts)
             started = time.time()
             try:
-                raw = executor(profile, prompt, lang.system_prompt) or ""
+                raw = executor(profile, prompt, lang.system_prompt)
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
                 break
             seconds += time.time() - started
-            got = parse_response(raw)
+            # Executors return (text, usage) or (text, usage, truncated)
+            # since the 2026-08-30 truncation guard; older ones returned str.
+            if isinstance(raw, tuple):
+                if len(raw) > 2 and raw[2]:
+                    problems.append(
+                        f"청크 {chunk[0][0]}: max_tokens로 잘림 (truncated)")
+                raw = raw[0]
+            got = parse_response(raw or "")
             problems.extend(validate(chunk, got, lang))
             blocks.update(got)
         results.append({
