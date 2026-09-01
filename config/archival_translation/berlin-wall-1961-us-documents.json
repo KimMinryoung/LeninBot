@@ -8,10 +8,8 @@
     "저본은 『미국 외교문서』 1961~1963년 제14권 문서 105·194·195·197이다. 8월 13일 전문 제176호는 FRUS에 실려 있지 않다. 전문 머리의 번호와 배포 지시는 원문 형식대로 두었고, 관사를 생략한 전문체는 한국어 문장으로 풀었다. Senat은 「시정부」, Senator는 「시참사」로 옮겼다. 미국 정부 저작물로 퍼블릭 도메인이다."
   ],
   "bibliography": [
-    "원제: Telegram From the Mission at Berlin to the Department of State, Berlin, August 13, 1961, 7 p.m. (No. 185). NARA RG 59, Central Files, 762.00/8-1361",
-    "원제: Telegram From the Embassy in the Soviet Union to the Department of State, Moscow, October 27, 1961, 5 p.m. (No. 1378); Telegram From the Mission at Berlin to the Department of State, Berlin, October 27, 1961, 8 p.m. (No. 856); Telegram From the Department of State to the Mission at Berlin, Washington, October 27, 1961, 10:03 p.m. (No. 620). NARA RG 59, Central Files, 762.0221/10-2761",
-    "수록: Foreign Relations of the United States, 1961–1963, Volume XIV, Berlin Crisis, 1961–1962, Documents 105, 194, 195, 197 (워싱턴: 국무부 역사국)",
-    "번역 저본: 국무부 역사국(history.state.gov) 전자판. 미국 정부 저작물로 퍼블릭 도메인이다"
+    "Foreign Relations of the United States, 1961–1963, Vol. XIV, Berlin Crisis, 1961–1962, Documents 105, 194, 195, 197 (NARA RG 59, Central Files 762.00/8-1361; 762.0221/10-2761). 퍼블릭 도메인",
+    "번역 저본: 국무부 역사국(history.state.gov) 전자판"
   ],
   "sourceLang": "en",
   "output": "/home/grass/frontend/data/commulingo/docs/berlin-wall-1961-us-documents.html",
