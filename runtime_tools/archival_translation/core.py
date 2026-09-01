@@ -484,23 +484,32 @@ _CHARSET_RE = re.compile(rb'charset=["\']?\s*([A-Za-z0-9_-]+)', re.I)
 
 def _decode_page(data: bytes) -> str:
     """저장된 페이지 바이트 → 문자열. 1990년대 문서 사이트(관보 전자판 등)는
-    windows-1251이라 UTF-8로 읽으면 본문이 통째로 깨진다. 선언된 charset을
-    따르고, 없으면 UTF-8을 시도한 뒤 cp1251로 물러선다."""
+    windows-1251이라 UTF-8로 읽으면 본문이 통째로 깨진다. 순서: (1) 바이트가
+    엄격 UTF-8로 풀리고 비ASCII를 담고 있으면 UTF-8 — 선언이 무엇이든. cp1251·
+    latin-1 바이트는 엄격 UTF-8에서 거의 반드시 실패하므로 안전하고, 반대로
+    marxists.org처럼 `charset=iso-8859-1`을 선언해 놓고 UTF-8을 내보내는 사이트가
+    있다(2026-09-01 stalin-1929-great-break 재조립이 "range start moved"로 죽은
+    회귀 — 선언을 무조건 따르게 한 8-31 수정의 부작용). (2) 선언된 charset
+    (documentarchiv.de ISO-8859-1, der-fuehrer.org cp1252, 관보 cp1251).
+    (3) UTF-8, (4) cp1251."""
+    try:
+        text = data.decode("utf-8")
+        if any(ord(c) > 127 for c in text):
+            return text
+    except UnicodeDecodeError:
+        text = None
     m = _CHARSET_RE.search(data[:4096])
     declared = (m.group(1).decode("ascii", "ignore").lower() if m else "")
     if declared in ("windows-1251", "cp1251", "win-1251"):
         return data.decode("cp1251", errors="replace")
-    # 라틴 문자 저본(documentarchiv.de ISO-8859-1, der-fuehrer.org cp1252)도
-    # 선언을 따른다 — UTF-8 실패 뒤 cp1251로 물러서면 움라우트가 키릴로 깨진다.
     if declared and declared not in ("utf-8", "utf8"):
         try:
             return data.decode(declared, errors="replace")
         except LookupError:
             pass
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        return data.decode("cp1251", errors="replace")
+    if text is not None:
+        return text
+    return data.decode("cp1251", errors="replace")
 
 
 def _anchor_offset(blocks: list[dict], source: dict) -> int:

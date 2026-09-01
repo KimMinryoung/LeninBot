@@ -4,15 +4,11 @@
   "byline": "연합군 최고사령부 / 이탈리아 정부 / 독일군 남서부 총사령부",
   "bylineNote": "1943년 9월 3일 시칠리아 카시빌레, 9월 29일 몰타 앞바다 HMS 넬슨 함상, 1945년 4월 29일 카세르타 서명",
   "headnote": [
-    "이탈리아 전선의 시작과 끝을 표시하는 항복 문서 세 건이다. 첫째는 1943년 9월 3일 시칠리아 카시빌레의 올리브 숲에서 카스텔라노 준장이 바돌리오 정부를 대표해 서명한 열두 개 조의 「짧은 휴전」이다. 적대 행위의 즉시 중지, 함대와 항공기의 연합군 인도, 코르시카와 본토 기지의 인도를 담았고, 제12조는 「정치·경제·재정에 관한 다른 조건」이 뒤따를 것을 예고했다. 휴전은 9월 8일 저녁 아이젠하워와 바돌리오의 방송으로 공표되었고, 이튿날 연합군이 살레르노에 상륙했다.",
-    "둘째는 9월 29일 몰타 앞바다의 영국 전함 넬슨 함상에서 바돌리오와 아이젠하워가 서명한 44개 조의 「긴 휴전」, 곧 이탈리아 항복 문서다. 제1조가 「이탈리아 육·해·공군은 무조건 항복한다」로 시작하며, 무솔리니와 파시스트 지도자의 인도(제29조), 파시스트 조직의 해산(제30조), 인종·신조에 따른 차별법의 폐지(제31조), 연합국 통제위원회의 설치(제37조)를 규정했다. 셋째는 1945년 4월 29일 카세르타의 연합군 사령부에서 독일군 남서부 총사령관 피팅호프와 SS 대장 볼프의 대리인이 서명한 지역 항복 문서와 세 부록(육군·해군·공군에 대한 명령)이다. 「선라이즈 작전」으로 알려진 비밀 교섭의 결과로, 5월 2일 발효하여 독일의 전면 항복보다 엿새 앞서 이탈리아 전선을 끝냈다.",
-    "저본은 예일 로스쿨 아발론 프로젝트가 미국 조약집(61 Stat. 2740, 2742; Treaties and Other International Acts Series 1604; 『United States and Italy 1936-1946: Documentary Record』)을 옮긴 전자판이다. 세 문서 모두 영어본이 정본이며, 항복 문서 제44조 뒤에 「영어본이 정문이다」라고 명시되어 있다. 조약집의 편집 표제와 법령집 인용, 카세르타 문서의 「[번역]」 표시는 옮기지 않았다. 「United Nations」는 이 시기 문서에서 국제기구가 아니라 연합국을 뜻하므로 「연합국」으로 옮겼다."
+    "이탈리아 전선의 시작과 끝을 표시하는 항복 문서 세 건이다. 1943년 9월 3일 카시빌레에서 서명된 열두 개 조의 「짧은 휴전」, 9월 29일 몰타 앞바다 넬슨 함상에서 바돌리오와 아이젠하워가 서명한 44개 조의 항복 문서(「긴 휴전」), 그리고 1945년 4월 29일 카세르타에서 독일군 남서부 총사령관의 대리인이 서명해 5월 2일 발효한 지역 항복 문서와 육·해·공군 부록이다. 세 문서 모두 영어본이 정본이다. 조약집의 편집 표제와 법령집 인용은 옮기지 않았고, 이 시기의 「United Nations」는 「연합국」으로 옮겼다."
   ],
   "bibliography": [
-    "카시빌레 휴전: Armistice with Italy, Fairfield Camp, Sicily, September 3, 1943. 서명 드와이트 D. 아이젠하워(연합군 최고사령관), 주세페 카스텔라노 준장(바돌리오 원수 대리). 61 Stat. 2740; TIAS 1604",
-    "항복 문서(「긴 휴전」): Instrument of Surrender of Italy, signed at Malta, September 29, 1943. 서명 피에트로 바돌리오 원수, 드와이트 D. 아이젠하워 장군. 61 Stat. 2742; TIAS 1604",
-    "카세르타 항복: Instrument of Local Surrender of German and Other Forces Under the Command or Control of the German Commander-in-Chief Southwest, signed at Caserta, April 29, 1945, with appendixes. 발효 1945년 4월 29일, 부록은 5월 2일. 수록 United States and Italy 1936-1946: Documentary Record, Department of State Publication 2669 (1946), p. 128",
-    "번역 저본: 예일 로스쿨 아발론 프로젝트(Avalon Project) 전자판. 국가 간 공식 문서이자 미국 정부 간행물로 저작권 보호 대상이 아니다"
+    "원제: Armistice with Italy, September 3, 1943 (61 Stat. 2740); Instrument of Surrender of Italy, September 29, 1943 (61 Stat. 2742; TIAS 1604); Instrument of Local Surrender … Caserta, April 29, 1945 (Department of State Publication 2669, p. 128)",
+    "번역 저본: 예일 로스쿨 아발론 프로젝트 전자판. 미국 정부 간행물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
   "output": "/home/grass/frontend/data/commulingo/docs/italy-surrender-instruments-1943-1945.html",

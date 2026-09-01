@@ -23,6 +23,11 @@ class DecodePage(unittest.TestCase):
     def test_undeclared_falls_back_to_cp1251(self):
         self.assertIn("Приказ", _decode_page("<p>Приказ</p>".encode("cp1251")))
 
+    def test_declared_latin1_but_utf8_bytes_is_read_as_utf8(self):
+        # marxists.org: charset=iso-8859-1 선언, 실제는 UTF-8 (2026-09-01 회귀)
+        html = '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"><p>Истекший год был годом великого перелома</p>'.encode("utf-8")
+        self.assertIn("великого перелома", _decode_page(html))
+
     def test_unknown_declared_charset_ignored(self):
         self.assertIn("ok", _decode_page(b'<meta charset="x-nonsense"><p>ok</p>'))
 
