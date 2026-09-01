@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from runtime_tools.archival_translation.core import (
-    Cache, Options, RUSSIAN, Stats, _cached_blocks, _translate_chunk, validate,
+    Cache, GERMAN, Options, RUSSIAN, Stats, _cached_blocks, _translate_chunk, validate,
 )
 
 _SRC = ("Смысл плана Дауэса состоит в том, что Германия должна выплатить Антанте "
@@ -155,3 +155,27 @@ class LatinSourceLanguages(unittest.TestCase):
         pat = _pattern(["Kerr"], True)
         self.assertIsNotNone(pat.search("Ambassador Kerr wrote"))
         self.assertIsNone(pat.search("Kerrigan"))
+
+
+class ForeignScript(unittest.TestCase):
+    """2026-09-01 --compare: GPT-5.6 Terra가 문장 한가운데 조지아·벵골 문자를 섞어
+    냈고, 키릴·한글만 보던 validate()가 조지아어 건을 통과시켰다."""
+
+    def test_georgian_in_korean_is_flagged(self):
+        got = {10: ["정치국은 სწორედ 이러한 접근에 기초하여 이번 전원회의를 진행해야 한다고 봅니다. "
+                    "이 부분에서 그 계획은 진흙 발로 서 있습니다."]}
+        problems = validate(_chunk(_SRC), got, RUSSIAN)
+        self.assertTrue(any("대상 밖 문자 혼입" in p for p in problems), problems)
+
+    def test_bengali_in_latin_source_is_flagged(self):
+        src = "The Policy Planning Staff does not see communist activities as the root of the difficulties."
+        got = {10: ["정책기획실은 তথ 공산주의 활동을 서유럽이 겪는 어려움의 근본 원인으로 보지 않는다."]}
+        problems = validate(_chunk(src), got, GERMAN)
+        self.assertTrue(any("대상 밖 문자 혼입" in p for p in problems), problems)
+
+    def test_allowed_scripts_pass(self):
+        # 한글·로마자 약어·키릴 병기·한자 병기·그리스 문자는 정당한 출력이다.
+        got = {10: ["도스 플랜(план Дауэса)의 의미는 독일이 앙탕트(Entente)에 약 1300억 금 마르크(金)를 "
+                    "α 단계에 걸쳐 지불해야 한다는 데 있습니다. 이 부분에서 그 계획은 진흙 발로 서 있습니다."]}
+        problems = validate(_chunk(_SRC), got, RUSSIAN)
+        self.assertFalse(any("대상 밖 문자" in p for p in problems), problems)

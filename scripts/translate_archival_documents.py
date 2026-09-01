@@ -72,6 +72,9 @@ def main() -> int:
                     help="같은 청크를 여러 모델로 번역해 비교. "
                          "쉼표 구분 'provider/model' (뒤에 +think, +effort=high 가능)")
     ap.add_argument("--compare-chunks", type=int, default=2, dest="compare_chunks")
+    ap.add_argument("--compare-chunk-ids", dest="compare_chunk_ids",
+                    help="비교할 청크 번호(0부터, 쉼표 구분). 주면 --compare-chunks 대신 "
+                         "이 청크들만 — 함정이 든 청크를 고정 테스트셋으로 쓸 때")
     ap.add_argument("--compare-out", type=Path, dest="compare_out",
                     help="비교 결과 마크다운 경로")
     args = ap.parse_args()
@@ -95,7 +98,9 @@ def main() -> int:
             # 비교 대상은 registry의 provider가 아니라 변형마다 다르다.
             for provider in dict.fromkeys(v.partition("+")[0].partition("/")[0] for v in variants):
                 at.preflight(opts, at.language_for(spec), provider=provider)
-            report = at.compare(spec, variants, opts, args.compare_chunks)
+            chunk_ids = ([int(x) for x in args.compare_chunk_ids.split(",") if x.strip()]
+                         if args.compare_chunk_ids else None)
+            report = at.compare(spec, variants, opts, args.compare_chunks, chunk_ids=chunk_ids)
             out = args.compare_out or Path(f"/tmp/compare-{spec['id']}.md")
             lines = [f"# 번역 모델 비교 — {spec['id']}",
                      f"\n대상 {report['chars']:,}자\n"]

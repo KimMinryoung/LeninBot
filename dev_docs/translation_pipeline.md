@@ -36,6 +36,32 @@
 - **Gemini 선불 크레딧 소진(429 RESOURCE_EXHAUSTED)**: 배치 중반에 크레딧이 떨어져 `german-constitutions-1949`(11청크), `italy-surrender-instruments-1943-1945`(1청크), `marshall-plan-memoranda-1947`(폴백 수정으로 케넌 청크 전부 재번역 필요)이 대기. 충전 후 `--spec <id>`로 재실행하면 성공 청크는 캐시에서 나온다. 빈 응답 재시도 3회는 시간만 쓰므로 429가 보이면 바로 멈추는 게 낫다.
 - 발행 뒤 큐 처리는 스크래치 `gaps-done.sql` 형식(UPDATE … status='done', resolved_id, resolution 앞에 처리 메모), manifest 등록은 `manifest-drafts.json` + `publish.py`(HTML이 있는 항목만).
 
+## 라틴계 프롬프트 «표기 규칙 보강» + 고정 함정 청크 비교 (2026-09-01)
+
+- **첫 EN/DE/IT 배치 통독 결과**: 산문은 좋았으나 고유명사·관용어 층에서 반복 실수 — `decreto Reale`→"레알레 칙령"(형용사를 인명으로), `Hessen`→"게센"(러시아어 전사 습관 누출), `Dnjepr`→"드니프로"(1942년 문서에 현대 표기), `Vereine und Gesellschaften`→"사단과 회사", 조항 제목에 임의 낫표 「제25조」(postEdit 29건), 라틴 이니셜 음차 "지. 시안토스 / 제이. 소피아노풀로스". RU 프롬프트의 «표기 규칙 보강» 블록에 상응하는 것이 라틴계 프롬프트에 없었던 것이 원인의 절반.
+- `core._latin_prompt`에 공용 «표기 규칙 보강»(이니셜 로마자 유지, 원어 발음 음차, 원문 시대 지명, 낫표 금지, 관용어≠고유명사)을 붙이고 `_latin(..., notation=)`으로 언어별 함정 예시를 덧붙인다(EN: Khrushchev/Kiev, DE: Vereine/Seestreitkräfte, FR: décret/arrêté/직함, IT: decreto Reale). **시스템 프롬프트 해시가 캐시 키에 들어가므로 EN/DE/FR/IT 청크 캐시는 전부 무효** — 발행된 12건은 `run()`을 다시 돌리면 전면 재번역이 된다. 발행본 손질은 `--reassemble`만 쓰고, 새 스펙부터 새 프롬프트가 적용된다.
+- `--compare-chunk-ids 2,3`: 문서 앞 N청크 대신 지정한 청크(0부터, 현재 청킹)로 비교한다. 함정이 든 청크를 고정 테스트셋으로 쓰기 위한 것(로드맵 1의 첫 조각). 청크 번호는 `plan()`의 `_chunks`에서 원문 문자열로 찾는다.
+- `gran-consiglio-documents-1928-1943`의 `proclama-badoglio` 블록 범위 `[0,2]→[0,4]`: 번역(08-31 23:38)은 `<br>` 재분할 이전 파서로 2블록이었고, 직후 커밋(1f6bce1, 23:39)부터 4블록이라 `plan()`이 "range end moved"로 죽었다. 발행본은 온전하므로 그대로 두되 캐시 레코드는 현 청킹과 안 맞는 고아다(다음 `run()`에서 그 청크만 재번역, `--reassemble`이면 고아 채움 경고).
+
+## 모델 비교 2라운드 — Gemini·GPT·Claude·DeepSeek (2026-09-01)
+
+`--compare-chunk-ids`로 16청크 × 5변형(`gemini/gemini-3.1-pro-preview`, `openai/gpt-5.6-terra+effort=high`, `claude/claude-opus-5`, `claude/claude-sonnet-5`, `deepseek_anthropic/deepseek-v4-pro+think`). 1라운드는 표기 함정 청크(기본법 2·3, 지령41 3, 대평의회법 0, 바르키자 3, 고르바초프 0·1, 숨가이트 0·1), 2라운드는 난문(스탈린 1925 결론연설 60·64, 부하린 1926 26, 통합반대파 40, 콜러 전문 1, 케넌 PPS/1 1, 그란디 결의안 2). 보고서 `output/archival_translations/compare-20260901-*.md`, `compare-20260901-hard-*.md`. 판정은 파일마다 원문 대조 통독(포크 3 + 직접 1).
+
+- **표기 함정은 새 라틴 프롬프트로 5모델 전부 통과**(Reale→왕령, Dnjepr→드네프르, 이니셜 로마자 유지, Vereine→결사와 단체). 이 청크들은 더 이상 변별력이 없다. 예외: GPT만 청크 하나에서 「제10조」 낫표 재발, Sonnet은 `왕령(decreto Reale)` 병기.
+- **「게센」의 진짜 원인은 용어표**: 인물사전의 보리스 게센(Hessen) 항목이 라틴 표면 `Hessen`에 걸려 `Hessen→게센`으로 주입됐다. 용어표를 프롬프트 예시보다 우선한 GPT·Opus·Sonnet이 "게센", Gemini·DeepSeek이 "헤센". 스펙 `glossary.exclude: ["Hessen"]`로 처리. 라틴 문서에서 인물 성(姓) 단독 표면 매칭은 같은 사고를 또 낼 수 있다(예조바 사례의 라틴판).
+- **GPT-5.6 Terra(effort=high)는 후보 탈락**: 16청크 중 3청크에서 문장 한가운데 벵골 문자(`তথ তথ…` 뒤 블록 5개 무응답)·조지아 문자(`정치국은 სწორედ 이러한`)를 냈다. 산문·정확성은 이론 산문(부하린)에서 1위였으나 이 급 사고가 나면 검증기 없이 못 쓴다 → **`validate()`에 «대상 밖 문자 혼입» 검사 추가**(`foreign_letters()`: 유니코드 범주 L* 중 한글·로마자·키릴·한자·가나·그리스 밖의 글자. 원문자 ①·분수 ¼는 범주 No라 통과). 전 캐시 13,986블록 재심사 오탐 0.
+- **난문 판정 요약** (파일별 순위):
+  - 스탈린 1925 속기록: Opus > Sonnet > DeepSeek > Gemini > GPT. Gemini는 삽입구 `(Смех, аплодисменты.)` 3곳과 소제목을 키릴로 남김(run()에서는 stray 검사가 재시도로 잡을 유형). GPT는 지노비예프 "전환" 방향 오역 + 청크 붕괴.
+  - 통합반대파: Opus > DeepSeek > Gemini(«подкулачников»→"반쿨라크" 오역) > Sonnet(лишенцы→"피선거권 상실자") > GPT.
+  - 부하린 1926: GPT > Opus > Gemini > Sonnet > DeepSeek(주어·목적어 뒤집은 순환문). «известную полосу»는 5모델 전부 정답 — 이 함정도 소진.
+  - 고르바초프 1987: Opus > Gemini > Sonnet > DeepSeek > GPT. Gemini는 «레닌(Ленин)»·«(ЦК КПСС)» 재병기(어제 재검증에서 0이었던 위반이 재발), Opus는 "동지들/동지 여러분" 혼용·"정치국원/콜호즈원" 용어표 대조 필요.
+  - 콜러 전문·케넌 PPS/1(분석 산문): Opus > GPT > Sonnet > Gemini > DeepSeek. Gemini "Again, paradoxically"→"다시 말해 역설적이게도", "feels"→"느낀다" 직역; DeepSeek "apparent belief"→"표면적으로 지녔던 신념".
+  - 바르키자(조약): Gemini > Sonnet > DeepSeek > GPT > Opus — Opus가 누적 조건("사면법 적용 대상 **중** 점령기 가담자")을 두 집단으로 분리(자격 범위가 달라지는 실질 오역).
+  - 기본법: DeepSeek > Sonnet > Opus("Kein Deutscher"→"어떠한 도이처도") > Gemini(출판의 자유/교육의 자유/망명권 — 법률 관용 표기 약함) > GPT("학문의 자유" 오역, 낫표).
+  - 그란디 결의안(한 문장짜리 5단락): Gemini ≥ Opus > GPT ≈ Sonnet(문장 분해) > DeepSeek(관계절 오결합). 지령 41: 5모델 차이 없음.
+- **결론**: 어느 모델도 무결점이 아니다. 종합하면 **Opus 5가 산문·문맥(속기록 수사, 분석문, 이론 산문)에서 가장 강하고 결함이 용어 관행 층(동무/동지, 총회/전원회의, 도이처)에 몰려 있어 용어표·postEdits로 잡히는 종류**인 반면, Gemini는 산문 좋고 조약·미사여구에 강하나 다의어(반쿨라크, again)와 병기 규율에서 반복 실수, DeepSeek은 법률문에 안정적이나 구문 오결합·직역투와 청크당 5~16분. 값은 Opus $5/$25가 Gemini $2/$12의 2.5배. 라우팅 변경은 사용자 결정 — 이 근거로 (a) RU 속기록·분석 산문 스펙은 Opus, (b) 조약·법령·지령은 Gemini 유지, 같은 언어쌍 안에서도 문서 종류로 가르려면 `SourceLanguage.feature`가 아니라 스펙 단위 feature 오버라이드가 필요하다(미구현).
+- 운영 관찰: `compare()`는 executor를 직접 불러 `llm_audit_log`에 토큰·비용이 안 남는다(프록시 전송 행만 남고 토큰 0). 이번 2라운드 지출은 토큰 실측이 없어 추정치(≈$4~5)만 있다. DeepSeek+think는 청크당 최대 962초 — 스탈린 청크에서 병렬 5워커여도 문서 하나에 시간이 너무 든다.
+
 ## 저본 어댑터
 
 `runtime_tools/archival_translation/sources.py`. 문서고마다 어댑터 하나(`militera`, `wikisource`, `stalinism`, `libru`, `marxists`)가 원칙이고, 2026-08-31에 **셀렉터 범위 범용 어댑터 `html`**을 더했다: 스펙의 `source.selector`(CSS 셀렉터)가 문서를 담은 요소를, `source.drop`(선택)이 먼저 버릴 자식(공유 버튼, 내비게이션)을 지정한다. "일반 HTML 파서는 조용히 잘못 자른다"는 원칙은 유지된다 — 이 어댑터는 추측하지 않고 스펙이 지목한 요소만 읽으며, 셀렉터가 아무것도 못 찾으면 빈 문서가 아니라 오류다. sha256·startsWith/endsWith 가드는 그대로 적용된다. 문서 한두 건씩 흩어져 있는 사이트(hrono.ru, doc20vek.ru, kremlin.ru 법령은행, coldwar.ru)를 위한 것이다. 리프 블록 요소(p·h*·blockquote·li·pre)를 문서 순서대로 뽑고, `<br>`로만 나눈 느슨한 본문이 절반을 넘으면 빈 줄 기준으로 다시 나눈다. 표는 wikisource와 같은 방식(rows + 칸 어휘)이다. 같은 셀렉터가 메뉴 칸과 본문 칸에 함께 걸리는 표 레이아웃 사이트를 위해 `source.nth`(0부터, 몇 번째 일치인지)를 둔다. 저장 페이지는 `core._decode_page`가 선언된 charset(windows-1251 등)을 따라 읽고, 선언이 없으면 UTF-8 → cp1251 순으로 물러선다(1989년 관보 전자판이 cp1251). 디스패치는 `sources.parse(source, raw)`. 2026-08-31 실사용: kremlin.ru 법령은행(`div.reader_act_body`), 1000dokumente.de(`div#tab3 div.text-ru`), vedomosti.sssr.su(`body` + 블록 범위로 관보 한 호에서 한 항목 절단), hrono.ru(`td[valign="top"][align="left"]`), istmat.org HTML 노드(`div.field-name-body`), grachev62.narod.ru(`body`). istmat.org의 "문서" 노드와 docs.historyrussia.org(ЭБИД)는 PDF 스캔·이미지 뷰어라 텍스트 어댑터로는 열 수 없다(2026-08-31 확인).
@@ -110,6 +136,6 @@ UNIQUE(lang_pair, doc_id, source, target)
 
 ## 남은 로드맵 (우선순위 순)
 
-1. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제.
+1. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제. (2026-09-01: `--compare-chunk-ids`와 난문 16청크 목록이 첫 조각. 표기 함정 청크는 프롬프트 보강으로 변별력을 잃었으니 테스트셋은 난문 위주로.)
 2. Batch API 경로(야간 타이머 작업 50% 할인).
 3. 사이트 파이프라인 청킹 — 60k자 캡을 넘는 문서가 생기면 사료 엔진의 마커 방식 재사용.

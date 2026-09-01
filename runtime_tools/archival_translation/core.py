@@ -61,6 +61,21 @@ CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁіІїЇєЄ]")
 HAN_RE = re.compile(r"[㐀-䶿一-鿿]")
 LATIN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]")
 HANGUL_RE = re.compile(r"[가-힣]")
+# 번역문에 정당하게 나올 수 있는 문자 집합: 한글·로마자(확장 포함)·키릴·한자·가나·
+# 그리스. 이 밖의 「글자」(유니코드 범주 L*)가 섞이면 모델의 토큰 사고다 —
+# 2026-09-01 --compare에서 GPT-5.6 Terra(effort=high)가 벵골 문자(তথ), 조지아
+# 문자(სწორედ)를 문장 한가운데 섞어 냈는데 조지아어 건은 validate()가 0건으로
+# 통과시켰다(키릴·한글 검사만 있었다). 범주를 L*로 한정하는 이유: ①⑲ 같은
+# 원문자와 ¼½ 분수는 범주 No라 정당한 출력이다(九评 각주 번호, 클레이턴 각서).
+_ALLOWED_LETTER_RE = re.compile(
+    r"[가-힣ㄱ-ㅣA-Za-zÀ-ÖØ-öø-ÿĀ-žƀ-ɏḀ-ỿЀ-ӿ一-鿿㐀-䶿豈-﫿々〆ぁ-ゟァ-ヿͰ-Ͽ]")
+
+
+def foreign_letters(text: str) -> list[str]:
+    """번역문에 섞인 제3의 문자(벵골·조지아·아랍…)를 돌려준다."""
+    import unicodedata
+    return [c for c in text
+            if unicodedata.category(c).startswith("L") and not _ALLOWED_LETTER_RE.match(c)]
 # 원문/번역문의 "문장이 끝났다"는 신호. validate()의 끊김 검사가 쓴다.
 # 원문이 「문장 부호로 끝난다」는 마침표·물음표·느낌표(닫는 따옴표·괄호가 뒤따를
 # 수 있다)를 뜻한다. 닫는 괄호만으로 끝나는 서명부("… 작전참모(G-3)")를 문장으로
@@ -239,11 +254,12 @@ CHINESE = SourceLanguage(
 )
 
 
-def _latin_prompt(label: str, era: str, examples: str) -> str:
+def _latin_prompt(label: str, era: str, examples: str, notation: str = "") -> str:
     """라틴 문자 저본(영어·독일어·프랑스어·이탈리아어) 공용 시스템 프롬프트.
     러시아어 프롬프트와 원칙은 같고, 표기 규칙만 다르다: 인명은 원어 발음대로
     음차하고 첫 등장에서 괄호에 로마자 원문을 그대로 두며, 기관 약어(NATO,
-    SHAEF, OKW)는 통용 약어를 그대로 쓴다."""
+    SHAEF, OKW)는 통용 약어를 그대로 쓴다. `notation`은 언어별 표기 함정(첫
+    EN/DE/IT 배치에서 실제로 난 것)을 «표기 규칙 보강» 블록 끝에 덧붙인다."""
     return f"""당신은 {era} {label} 공문서를 한국어로 옮기는 사료 번역자다.
 원문은 국가·군·정당 기관의 공식 문서(지령, 조약, 외교 전문, 회의록, 성명)이며, 역사
 연구용 참고 문헌으로 공개된다.
@@ -282,7 +298,19 @@ def _latin_prompt(label: str, era: str, examples: str) -> str:
   반환하고, 마커 바로 다음 줄부터 그 단락의 번역문을 쓴다.
 - 마커를 빠뜨리거나, 없는 마커를 만들거나, 두 단락을 한 마커로 합치지 않는다.
 - 한 마커 안의 줄바꿈 개수는 원문과 같게 유지한다.
-- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다."""
+- 마커 줄과 번역문 외에 어떤 텍스트도 출력하지 않는다.
+
+표기 규칙 보강 (위반이 잦아 명시함 — 엄격히 지킬 것)
+- 인명의 로마자 이니셜(G. Siantos, J. Sofianopoulos 등)은 로마자 그대로 두고 성만
+  음차한다: "G. 시안토스". 이니셜을 "지.", "제이."처럼 소리 나는 대로 적는 것은 금지.
+- 지명·인명은 {label} 발음으로 음차한다. 다른 언어의 전사 습관을 끌어오지 말 것 —
+  독일어 Hessen은 "헤센"이지 러시아어식 "게센"이 아니다.
+- 지명은 문서가 쓰인 시대의 통용 표기를 쓴다. 현재의 국경·공식 명칭으로 고치지 않는다
+  (1942년 독일군 문서의 Dnjepr는 "드네프르"이지 "드니프로"가 아니다).
+- 원문에 없는 낫표·따옴표·강조 표시를 덧붙이지 않는다. 조항 제목 "Artikel 25"는
+  "제25조"이지 "「제25조」"가 아니다.
+- 법령·공문의 관용 표현을 고유명사로 오인하지 말 것. 형용사·직함이 대문자로 시작해도
+  이름이 아니다.{notation}"""
 
 
 # 라틴 문자 저본의 「미번역 잔여」: 번역문에는 약어(NATO, ICBM)와 첫 등장의 괄호 원문이
@@ -292,9 +320,9 @@ _LATIN_STRAY = re.compile(r"\b[A-Za-zÀ-ÖØ-öø-ÿ][a-zà-öø-ÿß][A-Za-zÀ-
 
 
 def _latin(code: str, label: str, era: str, examples: str, feature: str,
-           chars_per_token: float, output_ratio: float) -> "SourceLanguage":
+           chars_per_token: float, output_ratio: float, notation: str = "") -> "SourceLanguage":
     return SourceLanguage(
-        code=code, label=label, system_prompt=_latin_prompt(label, era, examples),
+        code=code, label=label, system_prompt=_latin_prompt(label, era, examples, notation),
         script=LATIN_RE, stray_word=_LATIN_STRAY,
         stray_min=4, short_ratio=0.2, bounded=True,
         chars_per_token=chars_per_token, output_ratio=output_ratio,
@@ -304,16 +332,27 @@ def _latin(code: str, label: str, era: str, examples: str, feature: str,
 
 ENGLISH = _latin("en", "영어", "20세기",
                  "예: \"appreciation\"은 군사 문서에서 \"감사\"가 아니라 \"정세 판단\"이다.",
-                 "archival_document_translation_en", 4.0, 0.55)
+                 "archival_document_translation_en", 4.0, 0.55,
+                 notation="\n- 영어 문서 속 러시아·동유럽 인명·지명은 영어 철자가 아니라"
+                          " 원어 발음으로 음차한다 — Khrushchev는 \"흐루쇼프\", Kiev는"
+                          " \"키예프\"(1991년 이전 문서).")
 GERMAN = _latin("de", "독일어", "20세기",
                 "예: \"Weisung\"은 \"지시\"가 아니라 총통 \"지령\"이고, \"Aufmarsch\"는 \"행진\"이 아니라 \"전개(집결)\"다.",
-                "archival_document_translation_de", 3.5, 0.5)
+                "archival_document_translation_de", 3.5, 0.5,
+                notation="\n- \"Vereine und Gesellschaften\"(기본법 9조)은 \"사단과 회사\"가"
+                         " 아니라 \"결사와 단체\"이고, \"leichte Seestreitkräfte\"는"
+                         " \"경해군 병력\"이 아니라 \"경(輕)함정 전력\"이다.")
 FRENCH = _latin("fr", "프랑스어", "20세기",
                 "예: \"ordonnance\"는 해방기 임시정부 문맥에서 \"명령\"(법률 효력의 명령)이다.",
-                "archival_document_translation_fr", 3.8, 0.5)
+                "archival_document_translation_fr", 3.8, 0.5,
+                notation="\n- \"décret\"는 \"법령\", \"arrêté\"는 \"행정명령\"이며,"
+                         " \"le Général\"처럼 대문자로 적힌 직함은 이름이 아니다.")
 ITALIAN = _latin("it", "이탈리아어", "20세기",
                  "예: \"ordine del giorno\"는 \"일정\"이 아니라 회의에 제출된 \"결의안\"이다.",
-                 "archival_document_translation_it", 3.8, 0.5)
+                 "archival_document_translation_it", 3.8, 0.5,
+                 notation="\n- \"decreto Reale\"·\"Regio decreto\"는 \"왕령\"이다 —"
+                          " Reale는 인명이 아니라 \"국왕의\"라는 형용사이며 \"레알레 칙령\"은"
+                          " 오역이다.")
 
 LANGUAGES = {lang.code: lang for lang in (RUSSIAN, CHINESE, ENGLISH, GERMAN, FRENCH, ITALIAN)}
 
@@ -747,6 +786,14 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         # Cyrillic prose to render.
         if src_cyr >= 4 and not HANGUL_RE.search(joined):
             problems.append(f"[[{idx}]] 한국어가 없음: {joined[:40]}…")
+
+        # 제3의 문자(벵골·조지아·아랍…)는 어떤 저본에서도 번역문에 나올 이유가
+        # 없다 — 모델의 토큰 사고이며 재시도로 고쳐진다.
+        foreign = foreign_letters(joined)
+        if foreign:
+            problems.append(
+                f"[[{idx}]] 대상 밖 문자 혼입 ({len(foreign)}자, {''.join(foreign[:6])!r}): "
+                f"{joined[:40]}…")
 
         # The prompt mandates the original in parentheses for a name's first
         # occurrence and for archive citations, so parenthesised Cyrillic is
@@ -1379,20 +1426,31 @@ def probe(spec: dict | None = None, opts: Options | None = None) -> list[dict]:
 
 
 def compare(spec: dict, variants: list[str], opts: Options | None = None,
-            chunks_wanted: int = 2) -> dict:
+            chunks_wanted: int = 2, chunk_ids: list[int] | None = None) -> dict:
     """Translate the same chunks with several models for side-by-side review.
 
     Picking a model by argument is guesswork; this runs the candidates over
     identical input under the current prompt so the choice rests on the
     output. A variant is "provider/model", optionally "+think" to enable
-    DeepSeek reasoning or "+effort=high" for the OpenAI tiers.
+    DeepSeek reasoning or "+effort=high" for the OpenAI tiers. `chunk_ids`
+    picks specific chunks (0-based, current chunking) instead of the first
+    `chunks_wanted` — for a fixed set of known-trap chunks rather than
+    whatever happens to be at the front of the document.
     """
     import dataclasses
 
     from llm import call_registry
 
     opts = opts or Options()
-    prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
+    if chunk_ids:
+        prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": 0}))
+        wanted = sorted(set(chunk_ids))
+        missing = [i for i in wanted if i >= len(prepared["_chunks"])]
+        if missing:
+            raise SpecError(f"chunk ids {missing} out of range (chunks={len(prepared['_chunks'])})")
+        prepared["_chunks"] = [prepared["_chunks"][i] for i in wanted]
+    else:
+        prepared = plan(spec, Options(**{**opts.__dict__, "limit_chunks": chunks_wanted}))
     chunks, glossary, lang = prepared["_chunks"], prepared["_glossary"], prepared["_lang"]
     base = call_registry.resolve(lang.feature)
 

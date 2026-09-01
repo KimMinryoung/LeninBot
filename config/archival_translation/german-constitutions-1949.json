@@ -105,7 +105,10 @@
       "Bonn am Rhein": "라인 강변의 본",
       "Adenauer": "아데나워",
       "Dieckmann": "디크만"
-    }
+    },
+    "exclude": [
+      "Hessen"
+    ]
   },
   "allowedCyrillic": [],
   "postEdits": {
