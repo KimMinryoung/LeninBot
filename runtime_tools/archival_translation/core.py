@@ -660,6 +660,13 @@ def build_glossary(people_path: Path, terms_path: Path,
             fam_ko = ((p.get("familyName") or {}).get("ko") or "").strip()
             if len(fam_en) >= 4 and fam_ko and LATIN_RE.search(fam_en):
                 add(fam_en, fam_ko, [fam_en])
+                # 성(姓) 단독 표면은 문서에 전체 이름이나 이니셜+성이 한 번은
+                # 있어야 주입한다 — anchor_latin_people() 참조.
+                entries[-1]["person"] = {
+                    "full_en": ((p.get("name") or {}).get("en") or "").strip(),
+                    "given_en": ((p.get("givenName") or {}).get("en") or "").strip(),
+                    "family_en": fam_en,
+                }
             continue
         cyr = (p.get("cyrillic") or "").strip()
         if not cyr or not lang.script.search(cyr):
@@ -702,6 +709,48 @@ def build_glossary(people_path: Path, terms_path: Path,
             add(original, term, [original])
 
     return entries
+
+
+def _latin_anchor_pattern(person: dict) -> re.Pattern | None:
+    """전체 이름(«Lucius D. Clay», «Lucius Clay»)이나 이니셜+성(«L. Clay»)."""
+    fam = person.get("family_en") or ""
+    if not fam:
+        return None
+    alts = [rf"\b[A-Z]\.\s?{re.escape(fam)}\b"]
+    given = (person.get("given_en") or "").split()
+    full = (person.get("full_en") or "").split()
+    for words in (full, given + [fam] if given else []):
+        if len(words) >= 2 and words[-1] == fam:
+            alts.append(r"\s+".join(re.escape(w) for w in words))
+        if given and words is full:
+            alts.append(rf"\b{re.escape(given[0])}\s+{re.escape(fam)}\b")
+    return re.compile("|".join(f"(?:{a})" for a in alts))
+
+
+def anchor_latin_people(glossary: list[dict], text: str) -> tuple[list[dict], list[dict]]:
+    """라틴 문자 저본: 인물사전에서 온 성(姓) 단독 항목은 문서 어딘가에 전체
+    이름이나 이니셜+성이 있을 때만 주입한다. 없으면 빼고, 그 성이 본문에
+    표면으로는 있는 항목을 둘째 값으로 돌려준다(경고용).
+
+    배경: 영어 성 하나가 다른 언어의 보통명사·지명·다른 사람과 겹친다 —
+    Hessen(보리스 게센 → 헤센 주), August(탈하이머 → 7. August), Benjamin(발터
+    벤야민 → 힐데 베냐민), First(«First reports»), Soviet. 2026-08-31~09-01 스펙
+    다섯 건 연속으로 glossary.exclude를 손으로 넣어야 했다. 러시아어는 격변화
+    경계 검사가 이 역할을 일부 하지만 로마자 성은 그런 신호가 없다.
+    스펙 extra 항목과 용어(term) 항목은 이 검사를 받지 않는다.
+    """
+    kept, dropped = [], []
+    for g in glossary:
+        person = g.get("person")
+        if not person:
+            kept.append(g)
+            continue
+        anchor = _latin_anchor_pattern(person)
+        if anchor is not None and anchor.search(text):
+            kept.append(g)
+        elif g["pattern"].search(text):
+            dropped.append(g)
+    return kept, dropped
 
 
 def glossary_entries_for(text: str, glossary: list[dict], limit: int) -> list[dict]:
@@ -1548,6 +1597,13 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
     if exclude:
         glossary = [g for g in glossary if g["ru"] not in exclude]
     doc_text = " ".join(ln for d in docs for b in d["blocks"] for ln in b["lines"])
+    if lang.latin:
+        full_text = "\n".join(ln for d in docs for b in d["blocks"] for ln in b["lines"])
+        glossary, unanchored = anchor_latin_people(glossary, full_text)
+        if unanchored:
+            print("안내: 인물사전 성(姓) 단독 표면 미주입 — 문서에 전체 이름·이니셜이 없음: "
+                  + ", ".join(f"{g['ru']}({g['ko']})" for g in unanchored)
+                  + ". 실제로 그 인물이면 spec glossary.extra에 넣을 것.", file=sys.stderr)
     for fem, masc in glossary_collision_pairs(glossary):
         if fem in doc_text:
             print(f"경고: 용어표 충돌 — 원문의 {fem}이 {masc}의 생격 표면일 수 있는데 "
