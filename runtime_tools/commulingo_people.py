@@ -221,11 +221,15 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
 
 # Nations whose people write the family name first, and the joiner between
 # family and given per language. Korean text fuses Korean/Chinese/Vietnamese
-# names (김무정, 펑더화이, 호찌민) and keeps the space for Japanese
-# (도쿠다 규이치); English follows each nation's own romanization — family
+# names (김무정, 펑더화이, 호찌민) and keeps the space for Japanese and
+# Hungarian (도쿠다 규이치, 카다르 야노시 — Korean orthography follows the
+# Hungarian order); English follows each nation's own romanization — family
 # first for Korean/Chinese/Vietnamese (Kim Mu-chong, Peng Dehuai, Le Duan),
-# given first for Japanese (Sen Katayama). Port of frontend
-# data/commulingo/native-script.js (FAMILY_FIRST) — keep the two in sync.
+# given first for Japanese and Hungarian (Sen Katayama, János Kádár). Keyed on
+# citizenship alone: Tőkés (Romanian papers) and 허가이 (Soviet) follow their
+# citizenship's order; mononyms and fused tokens go wholly to familyName.
+# Port of frontend data/commulingo/native-script.js (FAMILY_FIRST) — keep the
+# two in sync; frontend scripts/audit-person-name-order.js checks the rows.
 _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "korea": {"ko": "", "en": " "},
     "north-korea": {"ko": "", "en": " "},
@@ -233,6 +237,7 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "china": {"ko": "", "en": " "},
     "vietnam": {"ko": "", "en": " "},
     "japan": {"ko": " ", "en": None},
+    "hungary": {"ko": " ", "en": None},
 }
 
 
@@ -1442,7 +1447,7 @@ def _collapse_spaces(value) -> str:
 
 def _split_full_name(full: str, lang: str = "en", codes=()) -> tuple[str, str]:
     """(given, family) from a full name: family = last token, given = the rest,
-    except family-first nationalities (korea/china/vietnam/japan), which lead
+    except family-first nationalities (korea/china/vietnam/japan/hungary), which lead
     with the family name (Kim Mu-chong, 도쿠다 규이치).
     Single-token names (김일성, 카모) go wholly to family."""
     name = _collapse_spaces(full)
