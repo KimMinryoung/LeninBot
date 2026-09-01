@@ -1,0 +1,158 @@
+{
+  "id": "berlin-wall-1961-sed-documents",
+  "title": "베를린 장벽 1961 — 동독 측 문서: 울브리히트의 국제 기자회견 「아무도 장벽을 세울 의도가 없습니다」(6월 15일)와 통일사회당 정치국 제39/61호 비상회의 의사록(8월 7일)",
+  "byline": "발터 울브리히트 / 독일 통일사회당 중앙위원회 정치국",
+  "bylineNote": "1961년 6월 15일 동베를린 국제 기자회견 속기 발췌; 1961년 8월 7일 정치국 비상회의 의사록 제39/61호",
+  "sourceLang": "de",
+  "headnote": [
+    "장벽이 세워지기 두 달 전과 엿새 전의 동독 측 문서 두 건이다. 첫째는 1961년 6월 15일 국가평의회 의장 발터 울브리히트가 동베를린에서 연 국제 기자회견의 속기 발췌다. 서베를린을 「자유도시」로 만들자는 소련의 제안이 브란덴부르크 문에 국경을 세운다는 뜻이냐는 프랑크푸르터 룬트샤우 기자 아네마리 도에르의 추가 질문에, 울브리히트는 서독에 동독의 건설 노동자를 동원해 벽을 쌓기를 바라는 사람들이 있는 모양이라며 「아무도 장벽을 세울 의도가 없습니다」라고 답했다. 질문에 없던 「장벽」이라는 말을 먼저 꺼낸 것은 울브리히트였고, 이 한 문장은 8월 13일 이후 동독 국가의 거짓말을 상징하는 말이 되었다. 이어지는 답변은 서베를린 영토가 동독 영토에 속하며 서베를린이 중립화되면 국경 문제가 생긴다는 논리를 편다.",
+    "둘째는 1961년 8월 7일 월요일 통일사회당 중앙위원회 정치국 비상회의의 의사록 제39/61호다. 8월 3~5일 모스크바에서 열린 바르샤바조약기구 당 제1서기 회의에서 흐루쇼프가 국경 폐쇄에 동의한 직후, 울브리히트가 그 회의를 보고하고 정치국이 그의 발언을 「만장일치로 승인」한 자리다. 의사록은 짧은 항목들로 이루어져 있다: 8월 11일 인민의회를 소집해 「인신매매」와의 투쟁에 관한 결의로 각료회의에 전권을 주고, 「예정된 통제 조치」는 각료회의 결정에 따라 「토요일에서 일요일로 넘어가는 밤」에 시작한다. 12~13일 밤 국경 폐쇄의 날짜를 정한 문장이 이 한 줄이며, 「장벽」이나 「국경 폐쇄」라는 말은 어디에도 없다. 그 사이에 코트부스와 노이브란덴부르크의 「아동 납치」 사건, 우주비행사 티토프에게 보낼 축전, 대중조직 업무 개편 같은 일상 안건이 섞여 있어 이 결정이 어떤 관료적 형식 속에서 내려졌는지 보여 준다.",
+    "저본은 chronik-der-mauer.de(연방정치교육원, 현대사연구센터 포츠담, 독일방송문서보관소 공동)의 전자판이다. 기자회견은 저본이 『독일정책 문서집』에서 옮긴 발췌본 그대로이고, 의사록은 연방문서보관소 SAPMO 소장 원본(DY 30/J IV 2/2A/841)의 전사본이다. 의사록의 항목 번호 없는 목록 형식과 안건(Tagesordnung)·결정의 구분은 저본대로 두었다. 국가기관의 공문서와 공개 기자회견 기록으로 저작권 보호 대상이 아니다. 같은 사건의 미국 측 문서(8월 13일 베를린 공관 전문과 10월 27일 프리드리히슈트라세 위기 전문 세 건, FRUS 1961~1963 제14권 문서 105·194·195·197)는 별도 문서로 수록한다."
+  ],
+  "bibliography": [
+    "원제: Internationale Pressekonferenz des Staatsrats-Vorsitzenden der DDR, Walter Ulbricht, in Ost-Berlin, 15. Juni 1961 (Abschrift, Auszug). 출전: Dokumente zur Deutschlandpolitik IV/6 (1961), 925쪽 이하. 번역 저본: chronik-der-mauer.de 전자판",
+    "원제: Protokoll Nr. 39/61 der außerordentlichen Sitzung des Politbüros des Zentralkomitees der SED am Montag, 7. August 1961. 원본: SAPMO-BArch, DY 30/J IV 2/2A/841, Bl. 1–3. 번역 저본: chronik-der-mauer.de 전자판",
+    "국가기관의 공문서와 공개 기자회견 기록으로 저작권 보호 대상이 아니다"
+  ],
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [
+      "August",
+      "Benjamin"
+    ],
+    "extra": {
+      "Walter Ulbricht": "발터 울브리히트",
+      "Ulbricht": "울브리히트",
+      "Annamarie Doherr": "아네마리 도에르",
+      "Doherr": "도에르",
+      "Frankfurter Rundschau": "프랑크푸르터 룬트샤우",
+      "Staatsrats-Vorsitzenden": "국가평의회 의장",
+      "Staatsrat": "국가평의회",
+      "Herr Vorsitzender": "의장님",
+      "Freien Stadt": "자유도시",
+      "Freie Stadt": "자유도시",
+      "Staatsgrenze": "국경",
+      "Brandenburger Tor": "브란덴부르크 문",
+      "Westberlin": "서베를린",
+      "Westberlins": "서베를린",
+      "Westdeutschland": "서독",
+      "Westdeutschlands": "서독",
+      "Deutschen Demokratischen Republik": "독일민주공화국",
+      "Deutsche Demokratische Republik": "독일민주공화국",
+      "Hauptstadt der DDR": "동독의 수도",
+      "DDR": "동독",
+      "Bauarbeiter": "건설 노동자",
+      "Mauer": "장벽",
+      "Neutralisierung": "중립화",
+      "vertragliche Regelung": "조약에 의한 규율",
+      "Abschrift": "전사본",
+      "Auszug": "발췌",
+      "Politbüro": "정치국",
+      "Politbüros": "정치국",
+      "Zentralkomitee": "중앙위원회",
+      "Zentralkomitees": "중앙위원회",
+      "ZK": "중앙위원회",
+      "SED": "통일사회당",
+      "Sekretariat": "서기국",
+      "Ministerrat": "각료회의",
+      "Ministerrates": "각료회의",
+      "Volkskammer": "인민의회",
+      "Bezirksleitung Berlin": "베를린 지구당",
+      "1. Bezirkssekretären": "지구당 제1서기들",
+      "1. Sekretäre": "제1서기들",
+      "Genosse": "동지",
+      "Genossen": "동지",
+      "Genossin": "동지",
+      "Berichterstatter": "보고자",
+      "Warschauer Vertrages": "바르샤바조약",
+      "Kommunistischen und Arbeiterparteien": "공산당·노동자당",
+      "Wirtschaftsfragen": "경제 문제",
+      "Kundgebung": "집회",
+      "Karl Liebknechts": "카를 리프크네히트",
+      "Potsdamer Platz": "포츠담 광장",
+      "Apel": "아펠",
+      "Bolz": "볼츠",
+      "Stoph": "슈토프",
+      "Maron": "마론",
+      "Norden": "노르덴",
+      "Titow": "티토프",
+      "Kosmonauten": "우주비행사",
+      "Abrüstung": "군축",
+      "Noten der Sowjetunion": "소련의 각서",
+      "Menschenhandel": "인신매매",
+      "Vollmachten": "전권",
+      "Betriebsdelegationen": "기업소 대표단",
+      "Maßnahmen zur Kontrolle": "통제 조치",
+      "Kindesraubes": "아동 납치",
+      "Kindesräuber": "아동 납치범",
+      "Bezirken Cottbus und Neubrandenburg": "코트부스와 노이브란덴부르크 지구",
+      "Minister des Innern": "내무장관",
+      "Minister für Justiz": "법무장관",
+      "Haftbefehl": "체포영장",
+      "Bonner Regierung": "본 정부",
+      "Ministerium für Auswärtige Angelegenheiten": "외무부",
+      "UNO": "유엔",
+      "Weltraumflug": "우주비행",
+      "Massenorganisationen": "대중조직",
+      "Beisammensein": "친목 모임"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "임시 회의 의사록 제39/61호": "비상회의 의사록 제39/61호",
+    "관계의 조약에 의한 규율을 지지합니다": "관계를 조약으로 규정하는 것을 지지합니다",
+    "이 문제들을 규율하는 가장 간단하고": "이 문제들을 해결하는 가장 간단하고",
+    "국경에 적용되는 규율과 베를린을 위해 마련되는 규율 사이": "국경에 적용되는 규정과 베를린을 위해 마련되는 규정 사이",
+    "본 정부에 아이들의 반환": "본(Bonn) 정부에 아이들의 반환"
+  },
+  "quotes": "curly",
+  "output": "/home/grass/frontend/data/commulingo/docs/berlin-wall-1961-sed-documents.html",
+  "documents": [
+    {
+      "id": "ulbricht-pk-1961-06-15",
+      "titleKo": "발터 울브리히트의 국제 기자회견 — 동베를린, 1961년 6월 15일 (속기 발췌)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#content > div.article",
+        "path": "/home/grass/frontend/docs/ulbricht-pk-1961-06-15-chronik-der-mauer.html",
+        "sha256": "a4c8f72e4b20851d70a60f509ab3d629484ba24d5ac1ce3b8e487673420f519a"
+      },
+      "blocks": [
+        1,
+        6
+      ],
+      "startsWith": "Internationale Pressekonferenz des Staatsrats-Vorsitzenden der DDR",
+      "endsWith": "für Berlin getroffen werden. [...]",
+      "register": "기자회견 속기다. 첫 블록의 표제와 '전사본 [발췌]'는 한 줄씩 그대로 옮긴다. 질문과 답변은 화자 표시를 살려 '아네마리 도에르(프랑크푸르터 룬트샤우):', '발터 울브리히트:'로 시작하고, 발언 본문은 공개 석상의 구어 합쇼체('~입니다/~습니까')로 옮긴다. 표기 규칙: (1) 'Niemand hat die Absicht, eine Mauer zu errichten.'은 '아무도 장벽을 세울 의도가 없습니다.'로 옮긴다. (2) 'Freie Stadt'는 '자유도시', 'Staatsgrenze'는 '국경', 'Westberlin'은 '서베를린'으로 옮긴다. (3) 저본의 생략 표시 '[...]'는 그대로 둔다. (4) 울브리히트의 완곡하고 우회적인 어법 자체는 풀어 쓰지 않고 그대로 옮긴다.",
+      "tagMap": {
+        "blockquote": "p"
+      }
+    },
+    {
+      "id": "politbuero-39-61",
+      "titleKo": "통일사회당 중앙위원회 정치국 비상회의 의사록 제39/61호 — 1961년 8월 7일 월요일",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#content > div.article",
+        "path": "/home/grass/frontend/docs/sed-politbuero-1961-08-07-chronik-der-mauer.html",
+        "sha256": "1ac971ec4ca1fde867ec8137e21ef9df46dff76099fa6364a3a3aa03535699dc"
+      },
+      "blocks": [
+        0,
+        15
+      ],
+      "startsWith": "Protokoll Nr. 39/61",
+      "endsWith": "der Massenorganisationen zu beschäftigen.",
+      "register": "한다체의 회의 의사록이다. '~한다/~하기로 한다/~에게 위임한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 앞의 두 표제 블록(회의 명칭, '정치국 회의실에서')은 한 줄씩 그대로 옮긴다. (2) 처음 세 항목은 안건(Tagesordnung)이고 그다음부터는 결정이다. 항목 하나를 번역문 하나로 옮기고, 항목 안의 줄바꿈('Berichterstatter: Genosse Ulbricht')은 원문대로 별도 줄로 둔다. (3) 'Genosse/Genossin X'는 'X 동지'로 옮긴다. 법무장관 'Genossin Benjamin'(힐데 베냐민)은 '베냐민 동지'로 옮긴다. (4) 날짜 '7. August 1961', '11.8.61', '14.8.'은 각각 '1961년 8월 7일', '1961년 8월 11일', '8월 14일'로 옮긴다. (5) 'Maßnahmen zur Kontrolle'는 '통제 조치', 'Menschenhandel'은 '인신매매', 'Kindesraub'는 '아동 납치'로 옮기며 완곡어법을 풀어 쓰지 않는다. (6) 'die Volkskammer ist einzuberufen' 같은 비인칭 지시문은 '인민의회를 소집한다'처럼 한다체 지시문으로 옮긴다.",
+      "tagMap": {
+        "blockquote": "p",
+        "li": "li"
+      }
+    }
+  ]
+}
