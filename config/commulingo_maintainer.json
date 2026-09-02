@@ -8,5 +8,10 @@
   "new_lane_enabled": false,
   "term_lane_enabled": false,
   "enrich_non_soviet_revolutionaries": true,
-  "new_person_focus": "all"
+  "new_person_focus": "all",
+  "enrich_runs_per_batch": 2,
+  "enrich_extra_runs_when_gap_empty": 1,
+  "enrich_batch_time_budget_sec": 420,
+  "stale_priority_every": 2,
+  "stale_priority_days": 30
 }

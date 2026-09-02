@@ -376,10 +376,16 @@ try:
         return []
     maintainer.db_query = capture_selection
     assert maintainer.select_sparse_person(30, enrich_non_soviet_revolutionaries=False) is None
+    assert maintainer.select_sparse_person(30, prefer_stale=True, stale_days=45) is None
+    stale_params = captured_selection["params"]
 finally:
     maintainer.db_query = original_db_query
-assert captured_selection["params"]["enrich_non_soviet_revolutionaries"] is False
+assert stale_params["prefer_stale"] is True and stale_params["stale_days"] == 45
+assert stale_params["enrich_non_soviet_revolutionaries"] is True
 assert "excluded_role.category_id = 'non-soviet-revolutionary'" in captured_selection["sql"]
+assert "COALESCE(lm.at, p.created_at) < NOW() - %(stale_days)s * INTERVAL '1 day'" in captured_selection["sql"]
+# Default (non-stale) selection keeps the old ordering switch off.
+assert maintainer.select_sparse_person.__defaults__[-2] is False
 
 assert maintainer.choose_mode(
     {**cfg, "mode": "auto", "new_person_every": 1},
@@ -766,7 +772,7 @@ def assert_enrich_failure_cooldown():
 
     seen = []
 
-    def fake_select(recent, forced, incomplete, non_soviet, exclude_ids=None):
+    def fake_select(recent, forced, incomplete, non_soviet, exclude_ids=None, **_kw):
         seen.append(list(exclude_ids or []))
         return None
 
@@ -783,5 +789,45 @@ def assert_enrich_failure_cooldown():
 
 
 assert_enrich_failure_cooldown()
+
+
+def assert_stale_turn_and_run_plan():
+    """Every Nth applied edit flips the queue to stale-first; the enrich lane
+    lands several edits per batch slot, plus the gap worker's slot when its
+    queue is empty."""
+    base = maintainer.load_config(Path("/nonexistent"))
+    assert base["enrich_runs_per_batch"] == 2
+    assert base["enrich_extra_runs_when_gap_empty"] == 1
+    assert base["stale_priority_every"] == 2 and base["stale_priority_days"] == 30
+    original_count = maintainer.completed_run_count
+    original_pending = maintainer.pending_person_gap_count
+    try:
+        maintainer.completed_run_count = lambda: 3
+        assert maintainer.stale_turn(base) is True          # (3 + 1) % 2 == 0
+        maintainer.completed_run_count = lambda: 4
+        assert maintainer.stale_turn(base) is False
+        assert maintainer.stale_turn({**base, "stale_priority_every": 0}) is False
+        assert maintainer.stale_turn({**base, "stale_priority_every": 1}) is True
+
+        maintainer.pending_person_gap_count = lambda: 5
+        enrich = SimpleNamespace(runs=0, mode="enrich", candidate="")
+        assert maintainer.planned_runs(enrich, base) == 2
+        maintainer.pending_person_gap_count = lambda: 0
+        assert maintainer.planned_runs(enrich, base) == 3
+        assert maintainer.planned_runs(SimpleNamespace(runs=4, mode="enrich", candidate=""), base) == 4
+        assert maintainer.planned_runs(SimpleNamespace(runs=0, mode="enrich", candidate="x"), base) == 1
+        assert maintainer.planned_runs(SimpleNamespace(runs=0, mode="auto", candidate=""), base) == 1
+        assert maintainer.planned_runs(SimpleNamespace(runs=0, mode="new", candidate=""), base) == 1
+
+        def boom():
+            raise RuntimeError("db down")
+        maintainer.pending_person_gap_count = boom
+        assert maintainer.planned_runs(enrich, base) == 2, "a failed count keeps the base runs"
+    finally:
+        maintainer.completed_run_count = original_count
+        maintainer.pending_person_gap_count = original_pending
+
+
+assert_stale_turn_and_run_plan()
 
 print("commulingo maintainer smoke ok")

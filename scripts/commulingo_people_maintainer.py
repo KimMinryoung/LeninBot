@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +35,7 @@ from runtime_tools.commulingo_people import (
     _surname, sentence_budget, sentence_prescription,
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from scripts import commulingo_budget_guard as budget_guard
 from tool_gateway.results import ToolRejection
 from tool_gateway.security import caller_scope, new_run_context
 
@@ -71,6 +73,27 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
         "term_lane_enabled": True,
         # Pause this semantic category without narrowing all other enrichment.
         "enrich_non_soviet_revolutionaries": True,
+        # How many enrich edits one `--mode enrich` invocation (one batch slot)
+        # lands. The batch gave enrichment one slot against the gap worker's
+        # one create, and the gap worker's ~25 cards a day then absorbed every
+        # slot (2026-08-29..09-01: 76 of 76 enriched cards were under 30 days
+        # old). More slots per batch is the lever; the daily cap still binds.
+        "enrich_runs_per_batch": 2,
+        # Extra enrich runs when the person gap queue is empty, i.e. the batch
+        # slot the gap worker would have used goes to existing cards instead.
+        "enrich_extra_runs_when_gap_empty": 1,
+        # Stop starting further runs once this much wall-clock has gone, so a
+        # multi-run invocation stays inside the unit's TimeoutStartSec and the
+        # 20-minute batch spacing: the unit allows 900s, a retry-heavy run has
+        # taken 10 minutes, so no run starts past the seventh minute.
+        "enrich_batch_time_budget_sec": 420,
+        # Every Nth enrich run (by the lane's applied-edit count) puts cards no
+        # curator lane has touched for stale_priority_days at the head of the
+        # queue, ahead of the standard-field gaps that newly created cards
+        # arrive with. Without it the gap worker's fresh cards, which land
+        # missing a `moment`, outrank every older card forever. 0 disables.
+        "stale_priority_every": 2,
+        "stale_priority_days": 30,
         # New-person discovery is independently focusable.
         "new_person_focus": "all",
         # Era groups the absence roster covers. Empty derives it from the focus
@@ -95,6 +118,11 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["new_lane_enabled"] = bool(cfg["new_lane_enabled"])
     cfg["term_lane_enabled"] = bool(cfg["term_lane_enabled"])
     cfg["enrich_non_soviet_revolutionaries"] = bool(cfg["enrich_non_soviet_revolutionaries"])
+    cfg["enrich_runs_per_batch"] = max(1, int(cfg["enrich_runs_per_batch"]))
+    cfg["enrich_extra_runs_when_gap_empty"] = max(0, int(cfg["enrich_extra_runs_when_gap_empty"]))
+    cfg["enrich_batch_time_budget_sec"] = max(0, int(cfg["enrich_batch_time_budget_sec"]))
+    cfg["stale_priority_every"] = max(0, int(cfg["stale_priority_every"]))
+    cfg["stale_priority_days"] = max(1, int(cfg["stale_priority_days"]))
     if cfg["new_person_focus"] not in {"all", "soviet_institutions", "old_regime"}:
         raise ValueError("new_person_focus must be all, soviet_institutions, or old_regime")
     if not isinstance(cfg["roster_groups"], list):
@@ -276,12 +304,16 @@ def select_sparse_person(
     incomplete_recent_days: int | None = None,
     enrich_non_soviet_revolutionaries: bool = True,
     exclude_ids: list[str] | None = None,
+    prefer_stale: bool = False,
+    stale_days: int = 30,
 ) -> dict | None:
     params = {
         "recent_days": recent_days,
         "incomplete_days": incomplete_recent_days if incomplete_recent_days is not None else recent_days,
         "forced_id": forced_id.strip(),
         "exclude_ids": list(exclude_ids or []),
+        "prefer_stale": bool(prefer_stale),
+        "stale_days": max(1, int(stale_days)),
         "major_prom": MAJOR_PROMINENCE,
         "minor_max": MINOR_PROMINENCE_MAX,
         "major_stub": MAJOR_BIO_STUB,
@@ -308,6 +340,13 @@ def select_sparse_person(
              LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
              LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
+             -- Last write by any curator lane. Drives both the recency cooldown
+             -- in HAVING and the stale-first ordering below.
+             LEFT JOIN LATERAL (
+                  SELECT MAX(rev.created_at) AS at FROM commulingo_people_revisions rev
+                   WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
+                     AND rev.changed_by LIKE 'commulingo-maintainer%%'
+             ) lm ON TRUE
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
               AND NOT (p.id = ANY(%(exclude_ids)s))
               AND (
@@ -321,13 +360,9 @@ def select_sparse_person(
                     )
                   )
             GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
-                     p.citizenship_code, p.origin_code, r.person_id
+                     p.citizenship_code, p.origin_code, p.created_at, r.person_id, lm.at
            HAVING %(forced_id)s <> ''
-               OR (COALESCE((
-                    SELECT MAX(rev.created_at) FROM commulingo_people_revisions rev
-                     WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
-                       AND rev.changed_by LIKE 'commulingo-maintainer%%'
-                  ), TIMESTAMP '-infinity') < NOW() - (
+               OR (COALESCE(lm.at, TIMESTAMP '-infinity') < NOW() - (
                     CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                               OR COALESCE(p.moment_ko, '') = ''
                               OR COALESCE(p.citizenship_code, '') = ''
@@ -363,6 +398,13 @@ def select_sparse_person(
                   CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
                          OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
                   CASE WHEN COALESCE(p.citizenship_code, '') = '' THEN 0 ELSE 1 END ASC,
+                  -- Stale-first turn: a card no curator lane has written to in
+                  -- stale_days (never-touched cards count from creation) goes
+                  -- ahead of the moment/stub/section keys below. Off on the other
+                  -- turns, so fresh cards' missing moments still get filled.
+                  CASE WHEN %(prefer_stale)s
+                            AND COALESCE(lm.at, p.created_at) < NOW() - %(stale_days)s * INTERVAL '1 day'
+                       THEN 0 ELSE 1 END ASC,
                   -- Stub bios and missing moments move up the queue. A bio that merely
                   -- runs long does NOT: the shorter standard applies to what the curator
                   -- writes from now on, and the cards already written stay as they are
@@ -814,16 +856,47 @@ def claim_person(person_id: str) -> bool:
     return True
 
 
+def stale_turn(config: dict) -> bool:
+    """Whether the next enrich run is a stale-first turn.
+
+    Counted on the lane's applied edits, so a run that lands nothing (no_edit,
+    failure) repeats the same turn: the card it stepped over is on cooldown, so
+    the repeat reaches the next stale card instead of falling back to a fresh
+    one.
+    """
+    every = int(config.get("stale_priority_every") or 0)
+    if every <= 0:
+        return False
+    return (completed_run_count() + 1) % every == 0
+
+
+def pending_person_gap_count() -> int:
+    """Person gaps the gap worker would claim next: pending, or abandoned claims."""
+    row = db_query_one(
+        """SELECT COUNT(*)::int AS n
+             FROM commulingo_curation_gaps
+            WHERE kind = 'person'
+              AND (status = 'pending'
+                   OR (status = 'claimed' AND claimed_at < NOW() - INTERVAL '40 minutes'))"""
+    )
+    return int((row or {}).get("n") or 0)
+
+
 def select_claimable_person(
     config: dict, candidate_id: str, attempts: int = 5,
     exclude_ids: list[str] | None = None,
 ) -> dict | None:
     """The sparsest person this run can hold exclusively, or None."""
     skipped: list[str] = list(exclude_ids or [])
+    prefer_stale = stale_turn(config)
+    if prefer_stale:
+        logger.info("stale-first turn: cards untouched for %dd lead the queue",
+                    config["stale_priority_days"])
     for _ in range(attempts):
         candidate = select_sparse_person(
             config["recent_days"], candidate_id, config["incomplete_recent_days"],
             config["enrich_non_soviet_revolutionaries"], exclude_ids=skipped,
+            prefer_stale=prefer_stale, stale_days=config["stale_priority_days"],
         )
         if not candidate:
             return None
@@ -1542,7 +1615,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["auto", "enrich", "new"], default="auto")
     parser.add_argument("--candidate", default="", help="Force an existing person id (enrich mode only).")
     parser.add_argument("--print-candidate", action="store_true", help="Print the selected candidate without calling the model.")
+    parser.add_argument("--runs", type=int, default=0,
+                        help="Edits to land in this invocation. 0 = config enrich_runs_per_batch "
+                             "for an unforced enrich run, otherwise 1.")
     return parser.parse_args()
+
+
+def planned_runs(args: argparse.Namespace, config: dict) -> int:
+    """How many edits this invocation should land.
+
+    Only an unforced `--mode enrich` invocation (the batch's enrich lane) gets
+    the multi-run treatment; auto/new and a forced --candidate stay at one.
+    """
+    if args.runs > 0:
+        return args.runs
+    if args.mode != "enrich" or args.candidate:
+        return 1
+    runs = int(config["enrich_runs_per_batch"])
+    extra = int(config["enrich_extra_runs_when_gap_empty"])
+    if extra > 0:
+        try:
+            pending = pending_person_gap_count()
+        except Exception as exc:  # noqa: BLE001 - a failed count must not cost the base runs
+            logger.warning("could not count the person gap queue: %s", exc)
+            pending = -1
+        if pending == 0:
+            logger.info("person gap queue is empty; adding %d enrich run(s)", extra)
+            runs += extra
+    return runs
 
 
 def main() -> int:
@@ -1560,11 +1660,39 @@ def main() -> int:
         print(json.dumps(select_sparse_person(
             config["recent_days"], args.candidate, config["incomplete_recent_days"],
             config["enrich_non_soviet_revolutionaries"],
+            prefer_stale=stale_turn(config), stale_days=config["stale_priority_days"],
         ), ensure_ascii=False, default=str, indent=2))
         return 0
-    result = asyncio.run(run_once(mode=args.mode, candidate_id=args.candidate, config=config))
-    print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
-    return 0
+
+    runs = planned_runs(args, config)
+    time_budget = int(config["enrich_batch_time_budget_sec"])
+    started = time.monotonic()
+    failures = 0
+    for index in range(runs):
+        if index > 0:
+            elapsed = time.monotonic() - started
+            if time_budget > 0 and elapsed > time_budget:
+                logger.info("time budget spent (%.0fs > %ds); stopping after %d of %d run(s)",
+                            elapsed, time_budget, index, runs)
+                break
+            # Each run's result JSON is what the guard sums, so re-check between
+            # runs rather than trusting the unit's one ExecCondition at start.
+            if budget_guard.main() != 0:
+                logger.info("daily cap reached; stopping after %d of %d run(s)", index, runs)
+                break
+        try:
+            result = asyncio.run(run_once(mode=args.mode, candidate_id=args.candidate, config=config))
+        except Exception:
+            # Logged as a traceback (the lane digest counts those), then on to
+            # the next run: the failed card is on cooldown, the next pick differs.
+            # A single-run invocation keeps its old contract and raises.
+            if runs == 1:
+                raise
+            failures += 1
+            logger.exception("run %d of %d failed", index + 1, runs)
+            continue
+        print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
+    return 1 if failures and failures == runs else 0
 
 
 if __name__ == "__main__":
