@@ -341,10 +341,14 @@ def select_sparse_person(
              LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
              LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
              -- Last write by any curator lane. Drives both the recency cooldown
-             -- in HAVING and the stale-first ordering below.
+             -- in HAVING and the stale-first ordering below. entity_id is the
+             -- person id or "<id>/<child>", so the part before any '/' is the
+             -- person; this form uses frontend migration 158's expression index
+             -- (2.6 s → 15 ms per poll — the old `= OR LIKE` pattern could not
+             -- use an index because the prefix comes from the outer row).
              LEFT JOIN LATERAL (
                   SELECT MAX(rev.created_at) AS at FROM commulingo_people_revisions rev
-                   WHERE (rev.entity_id = p.id OR rev.entity_id LIKE p.id || '/%%')
+                   WHERE split_part(rev.entity_id, '/', 1) = p.id
                      AND rev.changed_by LIKE 'commulingo-maintainer%%'
              ) lm ON TRUE
             WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)

@@ -70,7 +70,11 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    # maxmemory + volatile-lru: only keys with a TTL are evicted (sessions and
+    # the frontend's caches carry one); without a cap Redis grows until the
+    # host runs out and then *writes* fail (noeviction). Applied at runtime on
+    # 2026-09-02 with CONFIG SET; this line makes it survive a recreate.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
