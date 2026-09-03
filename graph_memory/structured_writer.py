@@ -100,6 +100,15 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
     t_type = fact["object_type"]
     pred = fact["predicate"]
 
+    # Common nouns and schema labels are not entities (2026-09-03: 국가/개인/
+    # 경찰/Organization nodes from the first document extraction). Lazy import:
+    # kg_runtime.identity imports this module's schema helpers.
+    from kg_runtime.identity import is_generic_entity_name
+    for side in ("subject_name", "object_name"):
+        if is_generic_entity_name(fact[side]):
+            return (f"fact[{idx}] {side} '{fact[side]}' is a generic noun or type label, not an entity; "
+                    "name the concrete actor (person, organization, place, titled work) or drop the fact")
+
     agent_entity_types = VALID_ENTITY_TYPES if allow_sync_predicates else VALID_ENTITY_TYPES - SYNC_ONLY_ENTITY_TYPES
     agent_predicates = VALID_PREDICATES if allow_sync_predicates else VALID_PREDICATES - SYNC_ONLY_PREDICATES
 

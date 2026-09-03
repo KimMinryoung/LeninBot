@@ -135,6 +135,10 @@ class LLMParsingTests(unittest.TestCase):
         self.assertEqual([f["subject_name"] for f in llm], ["카를 마르크스"])
         self.assertNotIn("국가", {f["object_name"] for f in facts})
         self.assertIn("generic common noun", dx.EXTRACTION_SYSTEM)
+        from graph_memory.structured_writer import validate_fact
+        err = validate_fact({"subject_name": "정부", "subject_type": "Organization", "predicate": "Statement",
+                             "object_name": "금리 인하", "object_type": "Policy", "fact": "정부가 말했다"}, 0)
+        self.assertIn("generic noun", err or "")   # agent write_kg_structured path too
 
     def test_parse_tolerates_bare_list_and_garbage(self):
         self.assertEqual(len(dx.parse_llm_facts('[{"a": 1}, 2]')), 1)

@@ -350,15 +350,10 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
     """Validate model output against the agent schema (Document/Reference are
     NOT allowed here), stamp provenance, and add Document→Entity mentions."""
     from graph_memory.structured_writer import validate_fact
-    from kg_runtime.identity import is_generic_entity_name
 
     doc = document_side(rec)
     out, seen_entities = [], set()
     for i, f in enumerate(raw_facts[:MAX_LLM_FACTS]):
-        generic = [f.get(k) for k in ("subject_name", "object_name") if is_generic_entity_name(f.get(k))]
-        if generic:
-            logger.info("[doc-extract] %s: dropped fact %d: generic entity %s", rec.ref, i, generic)
-            continue
         fact = {k: f.get(k) for k in ("subject_name", "subject_type", "predicate", "object_name",
                                       "object_type", "fact", "valid_at")}
         for side in ("subject", "object"):
