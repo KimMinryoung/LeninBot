@@ -6,8 +6,8 @@ restore: since 2026-09-03 the daily R2 backup is text-only (the archive with
 embeddings passed the Cloudflare upload limit), so a restored graph must be
 re-embedded with this script before vector search works again.
 
-Uses the same Gemini embedder as graph_memory.service so the new embeddings
-are interchangeable with graphiti-managed ones.
+Uses the same Gemini embedder as graph_memory.service (through the LLM proxy)
+so the new embeddings are interchangeable with graphiti-managed ones.
 
 Usage:
     python embed_missing_facts.py             # dry-run (counts only)
@@ -18,8 +18,11 @@ import asyncio
 import os
 import time
 
+import sys
+
 from dotenv import load_dotenv
 load_dotenv("/home/grass/leninbot/.env")
+sys.path.insert(0, "/home/grass/leninbot")
 
 from neo4j import GraphDatabase
 
@@ -27,6 +30,23 @@ NEO4J_URI = os.environ["NEO4J_URI"]
 NEO4J_USER = os.environ["NEO4J_USER"]
 NEO4J_PASS = os.environ["NEO4J_PASSWORD"]
 NEO4J_DB = os.environ.get("NEO4J_DATABASE", "neo4j")
+
+
+def make_embedder():
+    """Same embedder graph_memory.service builds: Gemini through the LLM proxy
+    (policy + audit seam; the real key lives only in the proxy), model from the
+    kg_embedding registry site."""
+    from google import genai
+    from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+    from llm.call_registry import resolve as resolve_call_site
+    from llm.gateway import provider_endpoint
+    from llm.instrumented_clients import AuditedGenAIClient
+
+    base, key = provider_endpoint("gemini", None, (os.getenv("GEMINI_API_KEY") or "").strip())
+    raw = genai.Client(api_key=key, **({"http_options": {"base_url": base}} if base else {}))
+    model = resolve_call_site("kg_embedding", model="gemini-embedding-001").model
+    return GeminiEmbedder(config=GeminiEmbedderConfig(api_key=key, embedding_model=model),
+                          client=AuditedGenAIClient(raw, caller="kg_embed_missing"))
 
 
 def fetch_missing_embedding_edges(driver) -> list[dict]:
@@ -55,9 +75,7 @@ def fetch_missing_embedding_entities(driver) -> list[dict]:
 
 async def embed_entities(entities: list[dict], execute: bool):
     """name_embedding for entities; same embedder, same write-back pattern."""
-    from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
-    embedder = GeminiEmbedder(config=GeminiEmbedderConfig(
-        api_key=os.environ["GEMINI_API_KEY"], embedding_model="gemini-embedding-001"))
+    embedder = make_embedder()
     print(f"  embedding {len(entities)} entity names via Gemini...")
     results, failed, t0 = [], 0, time.time()
     for i, n in enumerate(entities, 1):
@@ -86,15 +104,9 @@ async def embed_entities(entities: list[dict], execute: bool):
 
 async def embed_all(edges: list[dict], execute: bool):
     """Generate embeddings via the same GeminiEmbedder graph_memory uses."""
-    from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
-    embedder = GeminiEmbedder(
-        config=GeminiEmbedderConfig(
-            api_key=os.environ["GEMINI_API_KEY"],
-            embedding_model="gemini-embedding-001",
-        )
-    )
+    embedder = make_embedder()
 
-    print(f"  embedding {len(edges)} facts via Gemini (gemini-embedding-001)...")
+    print(f"  embedding {len(edges)} facts via Gemini...")
     results = []
     failed = 0
     t0 = time.time()
