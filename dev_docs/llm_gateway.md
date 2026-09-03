@@ -89,7 +89,7 @@ systemd 밖 프로세스(INVOCATION_ID 없음)가 낸 LLM 행은 `label`에 ` [a
 **INSERT 전용 롤 (선택, 권장):** `.env`의 `AUDIT_DB_USER`와 credential
 `AUDIT_DB_PASSWORD`가 있으면 프록시는 그 롤로 별도 커넥션 풀을 연다. 없으면
 메인 DB 유저(`db_password`)로 INSERT 한다 — 동작은 같고 최소권한만 덜하다.
-롤은 `schema_migrations.py --only audit-sink-role`이 만든다 (CREATE/ALTER ROLE +
+한 줄 설치: `sudo scripts/install_audit_sink_role.sh` (아래 네 단계를 순서대로 수행). 수동으로 하면 롤은 `schema_migrations.py --only audit-sink-role`이 만든다 (CREATE/ALTER ROLE +
 두 표 INSERT + 시퀀스 + `llm_audit_log` SELECT(지출 합계용)). 순서: (1) sudo
 `manage_secrets.py add AUDIT_DB_PASSWORD`, (2) `.env`에 `AUDIT_DB_USER=leninbot_audit`,
 (3) 마이그레이션, (4) 유닛의 주석 처리된 `LoadCredentialEncrypted=audit_db_password`
