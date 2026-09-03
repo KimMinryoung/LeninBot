@@ -368,7 +368,8 @@ async def write_structured_facts(
 
     def _remember_hints(uuid: str, side: dict) -> None:
         h = identity_hints.setdefault(
-            uuid, {"external_ids": [], "aliases": [], "summary": "", "name_ko": None, "name_en": None},
+            uuid, {"external_ids": [], "aliases": [], "summary": "", "name_ko": None, "name_en": None,
+                   "name": side["name"]},
         )
         if side["external_id"] and side["external_id"] not in h["external_ids"]:
             h["external_ids"].append(side["external_id"])
@@ -518,7 +519,7 @@ async def write_structured_facts(
                     session, uuid,
                     external_ids=hints["external_ids"], aliases=hints["aliases"],
                     name_ko=hints["name_ko"], name_en=hints["name_en"],
-                    summary=hints["summary"] or None,
+                    summary=hints["summary"] or None, name=hints.get("name"),
                 )
             identity_updates += 1
         except Exception as exc:

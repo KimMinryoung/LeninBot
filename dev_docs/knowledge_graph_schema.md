@@ -30,11 +30,12 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 |------|------|------|
 | `external_ids` | list[str] | 다른 저장소의 안정 id. `commulingo:person:<slug>`, `commulingo:term:<slug>`, `commulingo:event:<slug>`, `commulingo:office:<id>`, `commulingo:location:<slug>`, `research:<slug>`, `archival:<id>`, `autonote:<id>`, `collection:<kind>` |
 | `aliases` | list[str] | 표시용 별칭 (영문명·키릴·한국어 별칭 등) |
-| `alias_keys` | list[str] | `normalize_alias_key()` 정규화 키 — name·name_ko·name_en·aliases 전부. 해석과 AliasIndex 매칭에 사용 |
+| `alias_keys` | list[str] | `normalize_alias_key()` 정규화 키 — name·name_ko·name_en과 **강한** 별칭(완전한 이름 형태). 해석과 AliasIndex 매칭에 사용 |
+| `weak_keys` | list[str] | 성(姓)만 있는 별칭 등 단독으로 실체를 특정 못 하는 키("카스트로", "Khrushchev", "레닌"). 해석에는 같은 라벨 노드가 정확히 하나일 때만, 검색 매칭에는 유일할 때만 쓴다 (`is_weak_alias`) |
 | `name_ko` / `name_en` | str | 언어별 정식 명칭 |
 | `alias_text` | str | aliases를 " / "로 이은 문자열 (풀텍스트 인덱스 `entity_alias_text`) |
 
-엔티티 해석 순서(`resolve_entity_*`): ① `external_ids` 포함 ② 정규화 키·정확 이름 일치(그룹 무관, 같은 라벨만; 라벨 불일치는 로그) ③ `KG_RESOLVE_EMBEDDING_NN=1`일 때 이름 임베딩 최근접(cosine ≥ 0.92, 같은 라벨).
+엔티티 해석 순서(`resolve_entity_*`): ① `external_ids` 포함 ② 강한 키·정확 이름 일치(그룹 무관, 같은 라벨만; 라벨 불일치는 로그) ③ 약한 키 — 같은 라벨 노드가 정확히 하나일 때만 ④ `KG_RESOLVE_EMBEDDING_NN=1`일 때 이름 임베딩 최근접(cosine ≥ 0.92, 같은 라벨). 들어오는 엔티티의 약한 별칭은 조회에 쓰지 않는다 — 2026-09-03 첫 미러에서 성 별칭이 피델·라울 카스트로 등 40쌍을 한 노드로 묶은 뒤 도입한 규칙.
 
 ---
 

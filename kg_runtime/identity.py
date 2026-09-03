@@ -40,7 +40,7 @@ from graph_memory.config import NAME_NORMALIZATION
 
 logger = logging.getLogger(__name__)
 
-IDENTITY_PROPS = ("external_ids", "aliases", "alias_keys", "name_ko", "name_en", "alias_text")
+IDENTITY_PROPS = ("external_ids", "aliases", "alias_keys", "weak_keys", "name_ko", "name_en", "alias_text")
 
 _WS_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[\"'“”‘’`´.,;:!?()\[\]{}<>«»、。·‧#*|/\\]")
@@ -91,6 +91,42 @@ def alias_keys_for(*values) -> list[str]:
     return keys
 
 
+def is_weak_alias(alias, name) -> bool:
+    """A *weak* alias is one that cannot identify the entity on its own: a
+    single token of a multi-token name (surnames: "카스트로", "Khrushchev",
+    "Хрущёв") or a very short single token. Weak aliases are kept for display
+    and for unambiguous search matching, but never drive entity resolution —
+    on 2026-09-03 surname aliases merged Fidel and Raúl Castro into one node.
+    """
+    ak, nk = normalize_alias_key(alias), normalize_alias_key(name)
+    if not ak or ak == nk:
+        return False
+    a_tokens, n_tokens = ak.split(" "), nk.split(" ")
+    if len(a_tokens) == 1 and len(n_tokens) >= 2:
+        return True
+    if len(a_tokens) == 1 and len(ak) <= 3:
+        return True
+    return False
+
+
+def split_alias_keys(name: str, aliases, *extra_names) -> tuple[list[str], list[str]]:
+    """(strong_keys, weak_keys) for a node: the name and any full-form alias
+    (and name_ko/name_en) are strong; surname-like aliases are weak."""
+    strong = alias_keys_for(name, *[x for x in extra_names if x])
+    weak: list[str] = []
+    for a in aliases or ():
+        if not a:
+            continue
+        k = normalize_alias_key(a)
+        if not k or k in strong or k in weak:
+            continue
+        if is_weak_alias(a, name):
+            weak.append(k)
+        else:
+            strong.append(k)
+    return strong, weak
+
+
 def _dedupe_strings(values) -> list[str]:
     out: list[str] = []
     for v in values or ():
@@ -115,10 +151,12 @@ def build_identity_props(
     for extra in (name_ko, name_en):
         if extra and extra != name and extra not in alias_list:
             alias_list.append(extra)
+    strong, weak = split_alias_keys(name, alias_list, name_ko, name_en)
     props = {
         "external_ids": _dedupe_strings(external_ids),
         "aliases": alias_list,
-        "alias_keys": alias_keys_for(name, name_ko, name_en, alias_list),
+        "alias_keys": strong,
+        "weak_keys": weak,
         "alias_text": " / ".join(alias_list),
     }
     if name_ko:
@@ -153,6 +191,15 @@ ORDER BY same_label DESC, rels DESC
 LIMIT 5
 """
 
+# Weak-key fallback: only when exactly ONE same-label node carries the key
+# (an unambiguous surname). Two Castros → no match → a new node.
+CYPHER_RESOLVE_BY_WEAK_KEY = """
+MATCH (n:Entity)
+WHERE $etype IN labels(n) AND any(k IN $keys WHERE k IN coalesce(n.weak_keys, []))
+RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels
+LIMIT 2
+"""
+
 CYPHER_RESOLVE_BY_EMBEDDING = """
 CALL db.index.vector.queryNodes('entity_name_embedding', 5, $vec)
 YIELD node, score
@@ -167,14 +214,17 @@ MATCH (n:Entity {uuid: $uuid})
 WITH n,
      coalesce(n.external_ids, []) + $external_ids AS ids_raw,
      coalesce(n.aliases, []) + $aliases AS aliases_raw,
-     coalesce(n.alias_keys, []) + $alias_keys AS keys_raw
+     coalesce(n.alias_keys, []) + $alias_keys AS keys_raw,
+     coalesce(n.weak_keys, []) + $weak_keys AS weak_raw
 WITH n,
      reduce(acc = [], x IN ids_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS ids,
      reduce(acc = [], x IN aliases_raw | CASE WHEN x IS NULL OR x = '' OR x = n.name OR x IN acc THEN acc ELSE acc + x END) AS als,
-     reduce(acc = [], x IN keys_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS keys
+     reduce(acc = [], x IN keys_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS keys,
+     reduce(acc = [], x IN weak_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS weak
 SET n.external_ids = ids,
     n.aliases = als,
     n.alias_keys = keys,
+    n.weak_keys = [w IN weak WHERE NOT w IN keys],
     n.alias_text = reduce(s = '', a IN als | s + CASE WHEN s = '' THEN '' ELSE ' / ' END + a),
     n.name_ko = coalesce($name_ko, n.name_ko),
     n.name_en = coalesce($name_en, n.name_en),
@@ -233,14 +283,16 @@ MATCH (canon:Entity {uuid: $canon_uuid}), (dup:Entity {uuid: $dup_uuid})
 WITH canon, dup,
      coalesce(canon.external_ids, []) + coalesce(dup.external_ids, []) AS ids_raw,
      coalesce(canon.aliases, []) + [dup.name] + coalesce(dup.aliases, []) AS aliases_raw,
-     coalesce(canon.alias_keys, []) + [toLower(dup.name)] + coalesce(dup.alias_keys, []) AS keys_raw
-WITH canon, dup,
+     coalesce(canon.alias_keys, []) + [toLower(dup.name)] + coalesce(dup.alias_keys, []) AS keys_raw,
+     coalesce(canon.weak_keys, []) + coalesce(dup.weak_keys, []) AS weak_raw
+WITH canon, dup, weak_raw,
      reduce(acc = [], x IN ids_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS ids,
      reduce(acc = [], x IN aliases_raw | CASE WHEN x IS NULL OR x = '' OR x = canon.name OR x IN acc THEN acc ELSE acc + x END) AS als,
      reduce(acc = [], x IN keys_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS keys
 SET canon.external_ids = ids,
     canon.aliases = als,
     canon.alias_keys = keys,
+    canon.weak_keys = [w IN reduce(acc = [], x IN weak_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) WHERE NOT w IN keys],
     canon.alias_text = reduce(s = '', a IN als | s + CASE WHEN s = '' THEN '' ELSE ' / ' END + a),
     canon.name_ko = coalesce(canon.name_ko, dup.name_ko),
     canon.name_en = coalesce(canon.name_en, dup.name_en),
@@ -257,7 +309,7 @@ RETURN count(*) AS cnt
 CYPHER_ALIAS_INDEX_LOAD = """
 MATCH (n:Entity)
 RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-       coalesce(n.alias_keys, []) AS keys
+       coalesce(n.alias_keys, []) AS keys, coalesce(n.weak_keys, []) AS weak_keys
 """
 
 IDENTITY_INDEX_STATEMENTS = (
@@ -281,7 +333,11 @@ class ResolveResult:
 
 
 def _lookup_params(name: str, aliases=()) -> tuple[list[str], list[str]]:
-    names = _dedupe_strings([name, *aliases])
+    """Exact names and strong keys used for lookup. Weak (surname-like)
+    aliases of the incoming entity are NOT used — they would attach it to
+    any namesake."""
+    strong_aliases = [a for a in _dedupe_strings(aliases) if not is_weak_alias(a, name)]
+    names = _dedupe_strings([name, *strong_aliases])
     keys = alias_keys_for(names)
     return names, keys
 
@@ -297,6 +353,15 @@ def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResul
         name, entity_type, best.get("name"), [l for l in (best.get("labels") or []) if l != "Entity"],
     )
     return ResolveResult(None, "label_conflict", best.get("name"), list(best.get("labels") or []))
+
+
+def _pick_weak_hit(rows: list[dict], name: str) -> ResolveResult:
+    if len(rows) == 1:
+        r = rows[0]
+        return ResolveResult(r["uuid"], "weak_alias", r.get("name"), list(r.get("labels") or []))
+    if len(rows) > 1:
+        logger.info("[KG identity] '%s' matches several nodes by surname alias — not reused", name)
+    return ResolveResult(None, "none")
 
 
 def resolve_entity_sync(
@@ -316,7 +381,11 @@ def resolve_entity_sync(
     if not names:
         return ResolveResult(None, "none")
     rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)]
-    return _pick_key_hit(rows, entity_type, name)
+    hit = _pick_key_hit(rows, entity_type, name)
+    if hit.found or hit.method == "label_conflict":
+        return hit
+    weak_rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)]
+    return _pick_weak_hit(weak_rows, name)
 
 
 async def resolve_entity_async(
@@ -343,6 +412,11 @@ async def resolve_entity_async(
     hit = _pick_key_hit(rows, entity_type, name)
     if hit.found or hit.method == "label_conflict":
         return hit
+    result = await session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)
+    weak_rows = [dict(r) async for r in result]
+    hit = _pick_weak_hit(weak_rows, name)
+    if hit.found:
+        return hit
     if embedder is not None and embedding_nn_enabled():
         try:
             vec = await embedder.create(input_data=[name])
@@ -364,16 +438,23 @@ def embedding_nn_enabled() -> bool:
 
 # ── Identity upsert ──────────────────────────────────────────────────────────
 
-def _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary) -> dict:
+def _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name=None) -> dict:
     alias_list = _dedupe_strings(aliases)
     for extra in (name_ko, name_en):
         if extra and extra not in alias_list:
             alias_list.append(extra)
+    strong, weak = split_alias_keys(name or "", alias_list, name_ko, name_en)
+    if not name:
+        # unknown canonical name: nothing can be judged weak against it, but a
+        # single short token is still too ambiguous to resolve on
+        strong = [k for k in alias_keys_for(alias_list, name_ko, name_en) if len(k.split(" ")) > 1 or len(k) > 3]
+        weak = [k for k in alias_keys_for(alias_list, name_ko, name_en) if k not in strong]
     return {
         "uuid": uuid,
         "external_ids": _dedupe_strings(external_ids),
         "aliases": alias_list,
-        "alias_keys": alias_keys_for(alias_list, name_ko, name_en),
+        "alias_keys": strong,
+        "weak_keys": weak,
         "name_ko": name_ko,
         "name_en": name_en,
         "summary": summary,
@@ -381,16 +462,18 @@ def _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary) -> di
 
 
 def upsert_identity_sync(session, uuid: str, *, external_ids=(), aliases=(),
-                         name_ko=None, name_en=None, summary=None) -> dict | None:
-    """Union external ids / aliases into an existing node (sync session)."""
-    params = _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary)
+                         name_ko=None, name_en=None, summary=None, name=None) -> dict | None:
+    """Union external ids / aliases into an existing node (sync session).
+    ``name`` (the node's canonical name, if known) decides which aliases are
+    weak; without it single short tokens are treated as weak."""
+    params = _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name)
     rec = session.run(CYPHER_UPSERT_IDENTITY, **params).single()
     return dict(rec) if rec else None
 
 
 async def upsert_identity_async(session, uuid: str, *, external_ids=(), aliases=(),
-                                name_ko=None, name_en=None, summary=None) -> dict | None:
-    params = _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary)
+                                name_ko=None, name_en=None, summary=None, name=None) -> dict | None:
+    params = _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name)
     result = await session.run(CYPHER_UPSERT_IDENTITY, **params)
     rec = await result.single()
     return dict(rec) if rec else None
@@ -509,13 +592,22 @@ class AliasIndex:
     # loading -------------------------------------------------------------
     def load_rows(self, rows) -> None:
         keys: dict[str, list[tuple[str, str, list[str]]]] = {}
+        weak: dict[str, list[tuple[str, str, list[str]]]] = {}
         for r in rows:
             uuid, name = r.get("uuid"), r.get("name")
             if not uuid or not name:
                 continue
             labels = [l for l in (r.get("labels") or []) if l != "Entity"]
+            entry = (uuid, name, labels)
             for k in alias_keys_for(name, *(r.get("keys") or [])):
-                keys.setdefault(k, []).append((uuid, name, labels))
+                keys.setdefault(k, []).append(entry)
+            for k in alias_keys_for(*(r.get("weak_keys") or [])):
+                weak.setdefault(k, []).append(entry)
+        # Surname-style keys only count when they point at exactly one entity
+        # and no entity owns that key as a strong one.
+        for k, entries in weak.items():
+            if k not in keys and len({e[0] for e in entries}) == 1:
+                keys[k] = entries[:1]
         with self._lock:
             self._keys = keys
             self._loaded_at = time.monotonic()

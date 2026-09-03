@@ -166,11 +166,15 @@ RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, coalesce(n.summary, 
        coalesce(n.aliases, []) AS aliases, coalesce(n.external_ids, []) AS external_ids
 """
 
+# Active first; substantive predicates (Involvement, Affiliation, Statement…)
+# before curated Reference links; then newest. Without the predicate rank a
+# CommuLingo person's 60 term references would crowd out the dated facts.
 _NEIGHBORHOOD_CYPHER = """
 MATCH (n:Entity {uuid: $uuid})
 MATCH (n)-[r:RELATES_TO]-(m:Entity)
-WITH r, (r.expired_at IS NULL) AS active
-ORDER BY active DESC, coalesce(r.valid_at, r.created_at) DESC
+WITH r, (r.expired_at IS NULL) AS active,
+     CASE WHEN r.name = 'Reference' THEN 1 ELSE 0 END AS ref_rank
+ORDER BY active DESC, ref_rank ASC, coalesce(r.valid_at, r.created_at) DESC
 RETURN r.uuid AS uuid, active
 LIMIT $cap
 """

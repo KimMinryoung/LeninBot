@@ -104,6 +104,40 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(keys, ["lenin", "v i lenin", "레닌"])
 
 
+class WeakAliasTests(unittest.TestCase):
+    def test_surname_is_weak(self):
+        self.assertTrue(identity.is_weak_alias("카스트로", "피델 카스트로"))
+        self.assertTrue(identity.is_weak_alias("Khrushchev", "니키타 흐루쇼프"))
+        self.assertTrue(identity.is_weak_alias("Хрущёв", "니키타 흐루쇼프"))
+        self.assertTrue(identity.is_weak_alias("레닌", "블라디미르 레닌"))
+        self.assertFalse(identity.is_weak_alias("Nikita Khrushchev", "니키타 흐루쇼프"))
+        self.assertFalse(identity.is_weak_alias("Никита Хрущёв", "니키타 흐루쇼프"))
+        self.assertFalse(identity.is_weak_alias("Joseph Stalin", "Stalin"))
+        self.assertTrue(identity.is_weak_alias("스탈린", "Stalin"))  # short single token
+        self.assertFalse(identity.is_weak_alias("", "x"))
+
+    def test_split_alias_keys(self):
+        strong, weak = identity.split_alias_keys("피델 카스트로", ["Fidel Castro", "카스트로", "Castro"], None, "Fidel Castro")
+        self.assertEqual(strong, ["피델 카스트로", "fidel castro"])
+        self.assertEqual(weak, ["카스트로", "castro"])
+
+    def test_lookup_ignores_incoming_weak_aliases(self):
+        names, keys = identity._lookup_params("라울 카스트로", ["Raúl Castro", "카스트로", "Castro"])
+        self.assertIn("Raúl Castro", names)
+        self.assertNotIn("카스트로", names)
+        self.assertNotIn("castro", keys)
+
+    def test_weak_key_resolution_requires_uniqueness(self):
+        two = [{"uuid": "fidel", "name": "피델 카스트로", "labels": ["Entity", "Person"]},
+               {"uuid": "raul", "name": "라울 카스트로", "labels": ["Entity", "Person"]}]
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_WEAK_KEY: two})
+        hit = identity.resolve_entity_sync(session, name="카스트로", entity_type="Person")
+        self.assertFalse(hit.found)
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_WEAK_KEY: two[:1]})
+        hit = identity.resolve_entity_sync(session, name="카스트로", entity_type="Person")
+        self.assertEqual((hit.uuid, hit.method), ("fidel", "weak_alias"))
+
+
 class IdentityPropsTests(unittest.TestCase):
     def test_build_identity_props(self):
         props = identity.build_identity_props(
@@ -117,6 +151,10 @@ class IdentityPropsTests(unittest.TestCase):
         self.assertEqual(props["aliases"], ["Nikita Khrushchev", "Никита Хрущёв"])
         self.assertIn("nikita khrushchev", props["alias_keys"])
         self.assertIn("니키타 흐루쇼프", props["alias_keys"])
+        self.assertEqual(props["weak_keys"], [])
+        props2 = identity.build_identity_props("니키타 흐루쇼프", aliases=["흐루쇼프", "Khrushchev"])
+        self.assertEqual(props2["weak_keys"], ["흐루쇼프", "khrushchev"])
+        self.assertNotIn("흐루쇼프", props2["alias_keys"])
         self.assertEqual(props["alias_text"], "Nikita Khrushchev / Никита Хрущёв")
         self.assertEqual(props["name_en"], "Nikita Khrushchev")
 
@@ -217,7 +255,8 @@ class UpsertAndMergeTests(unittest.TestCase):
         )
         self.assertEqual(params["external_ids"], ["a:1"])
         self.assertEqual(params["aliases"], ["Alias", "이름", "Name"])
-        self.assertEqual(params["alias_keys"], ["alias", "이름", "name"])
+        self.assertEqual(params["alias_keys"], ["alias", "name"])   # unknown name: short tokens are weak
+        self.assertEqual(params["weak_keys"], ["이름"])
         self.assertEqual(params["summary"], "sum")
 
     def test_merge_sync_runs_full_sequence_and_skips_self(self):
@@ -276,6 +315,17 @@ class AliasIndexTests(unittest.TestCase):
             {"uuid": "u-us", "name": "United States", "labels": ["Entity", "Organization"], "keys": []},
             {"uuid": "u-short", "name": "AI", "labels": ["Entity", "Concept"], "keys": []},
         ])
+
+    def test_weak_keys_indexed_only_when_unique(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([
+            {"uuid": "fidel", "name": "피델 카스트로", "labels": ["Entity", "Person"], "keys": [], "weak_keys": ["카스트로"]},
+            {"uuid": "raul", "name": "라울 카스트로", "labels": ["Entity", "Person"], "keys": [], "weak_keys": ["카스트로"]},
+            {"uuid": "lenin", "name": "블라디미르 레닌", "labels": ["Entity", "Person"], "keys": [], "weak_keys": ["레닌"]},
+        ])
+        self.assertEqual([h.uuid for h in idx.match("레닌이 말했다")], ["lenin"])
+        self.assertEqual([h.uuid for h in idx.match("카스트로가 말했다")], [])
+        self.assertEqual([h.uuid for h in idx.match("라울 카스트로가 말했다")], ["raul"])
 
     def test_korean_substring_match_with_particle(self):
         hits = self.idx.match("민주노총이 파업을 선언했다")

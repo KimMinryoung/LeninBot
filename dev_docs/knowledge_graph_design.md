@@ -51,12 +51,13 @@ Every Entity may carry `external_ids`, `aliases`, `alias_keys`, `name_ko`, `name
 `kg_runtime.identity.resolve_entity_{sync,async}` is the single resolver for the structured writer and the sync jobs:
 
 1. `external_id ∈ n.external_ids` — definitive, label ignored
-2. normalized key (`normalize_alias_key`: NFKC, lowercase, punctuation/hyphens → space, `NAME_NORMALIZATION` as the final map) ∈ `alias_keys`, or exact/lowercase name — any `group_id`, **same label required**; a different-label hit is logged (`label_conflict`) and not reused
-3. `KG_RESOLVE_EMBEDDING_NN=1` (default off): name-embedding nearest neighbour on `entity_name_embedding`, cosine ≥ `KG_RESOLVE_EMBEDDING_NN_THRESHOLD` (0.92), same label
+2. normalized **strong** key (`normalize_alias_key`: NFKC, lowercase, punctuation/hyphens → space, `NAME_NORMALIZATION` as the final map) ∈ `alias_keys`, or exact/lowercase name — any `group_id`, **same label required**; a different-label hit is logged (`label_conflict`) and not reused
+3. **weak** key (`weak_keys`: surname-like single-token aliases, `is_weak_alias`) — only when exactly one same-label node carries it; the incoming entity's own weak aliases are never used for lookup. Added after the first mirror run merged 40 namesake pairs (Fidel/Raúl Castro) through surname aliases.
+4. `KG_RESOLVE_EMBEDDING_NN=1` (default off): name-embedding nearest neighbour on `entity_name_embedding`, cosine ≥ `KG_RESOLVE_EMBEDDING_NN_THRESHOLD` (0.92), same label
 
 `upsert_identity_*` unions ids/aliases into an existing node (and fills an empty summary); `merge_entity_nodes_*` is the one merge implementation (edges moved with same-predicate dedupe, MENTIONS moved, summary filled, identity unioned, duplicate DETACH DELETEd) — `skills/kg-maintenance/scripts/merge_entities.py` and `kg_runtime.admin.kg_merge_entities` delegate to it. After every free-text episode, `post_episode_merge` folds new nodes into same-label nodes that share an alias key across groups (graphiti only searches resolution candidates inside the episode's own `group_id`, which is how one entity became five nodes).
 
-`AliasIndex` caches `alias_key → [(uuid, name, labels)]` in-process (one Cypher, 10-minute TTL). `match(text)` finds entities named in free text without any embedding call: Korean keys (≥2 chars) match as substrings because particles attach to names, Latin keys (≥4 chars) as whole tokens, longest match wins.
+`AliasIndex` caches `alias_key → [(uuid, name, labels)]` in-process (one Cypher, 10-minute TTL); weak keys are indexed only when they point at exactly one entity ("레닌" yes, "카스트로" no). `match(text)` finds entities named in free text without any embedding call: Korean keys (≥2 chars) match as substrings because particles attach to names, Latin keys (≥4 chars) as whole tokens, longest match wins.
 
 `group_id` is a domain tag on episodes and edges; entity resolution ignores it. Sync entities use `commulingo` / `documents` (`config.SYNC_GROUP_IDS`), which are **not** in the `write_kg_structured` enum.
 
