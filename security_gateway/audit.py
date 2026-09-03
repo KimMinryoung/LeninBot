@@ -5,7 +5,9 @@ Dual sink, both non-fatal:
      journald; queryable via ``ops/logs.py``). Always emitted, synchronously.
   2. A best-effort row in the ``tool_audit_log`` Postgres table, written from a
      single background worker thread so it never blocks the async tool loop and
-     never raises into tool execution.
+     never raises into tool execution. Since 2026-09-04 the row is POSTed to
+     the LLM proxy's audit sink (audit_sink.py) — the proxy is the only
+     process that inserts, so callers need no DB password.
 
 Tool arguments are redacted (secret-looking keys masked) and truncated before
 they are recorded.
@@ -74,18 +76,6 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS tool_audit_log_scope_ts_idx ON tool_audit_log (scope_type, scope_id, ts DESC) WHERE scope_type IS NOT NULL AND scope_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS tool_audit_log_chat_ts_idx ON tool_audit_log (chat_log_id, ts DESC) WHERE chat_log_id IS NOT NULL",
 ]
-
-_INSERT = """
-INSERT INTO tool_audit_log
-    (interface, agent_name, user_id, is_owner, task_id, session_id, request_id,
-     parent_request_id, scope_type, scope_id, chat_log_id, tool_name, risk_class,
-     decision, enforced, deny_reason, args_summary, result_status, latency_ms, error_excerpt)
-VALUES (%(interface)s, %(agent_name)s, %(user_id)s, %(is_owner)s, %(task_id)s,
-        %(session_id)s, %(request_id)s, %(parent_request_id)s, %(scope_type)s,
-        %(scope_id)s, %(chat_log_id)s,
-        %(tool_name)s, %(risk_class)s, %(decision)s, %(enforced)s, %(deny_reason)s,
-        %(args_summary)s, %(result_status)s, %(latency_ms)s, %(error_excerpt)s)
-"""
 
 _IMMUTABILITY_DDL = """
 CREATE OR REPLACE FUNCTION prevent_tool_audit_log_mutation()
@@ -165,25 +155,41 @@ _worker_started = False
 _worker_lock = threading.Lock()
 
 
-def _drain_one(row: dict) -> None:
-    try:
-        from db import get_conn
+_DRAIN_BATCH = 50
+_insert_failed_before = False
 
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(_INSERT, row)
-            conn.commit()
+
+def _drain_batch(rows: list[dict]) -> None:
+    """Persist a batch: POST to the proxy sink (audit_sink.mode() == "proxy"),
+    else insert directly (the proxy itself, or no proxy configured)."""
+    global _insert_failed_before
+    import audit_sink
+
+    if audit_sink.mode() == "proxy":
+        audit_sink.post_rows("tool", rows)
+        return
+    try:
+        audit_sink.insert_rows("tool", rows)
+        _insert_failed_before = False
     except Exception as e:
-        logger.warning("audit DB insert failed (dropped): %s", e)
+        log = logger.debug if _insert_failed_before else logger.warning
+        log("audit DB insert failed (%d row(s) dropped): %s", len(rows), e)
+        _insert_failed_before = True
 
 
 def _worker_loop() -> None:
     while True:
-        row = _DB_QUEUE.get()
+        rows = [_DB_QUEUE.get()]
+        while len(rows) < _DRAIN_BATCH:
+            try:
+                rows.append(_DB_QUEUE.get_nowait())
+            except queue.Empty:
+                break
         try:
-            _drain_one(row)
+            _drain_batch(rows)
         finally:
-            _DB_QUEUE.task_done()
+            for _ in rows:
+                _DB_QUEUE.task_done()
 
 
 def _ensure_worker() -> None:

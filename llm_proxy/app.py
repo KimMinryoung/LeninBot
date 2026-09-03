@@ -18,6 +18,10 @@ apply_deepseek_thinking_default) — requests that state a thinking value
 pass through byte-identical.
 
 Routes:  /{provider}/{path}  →  {upstream}/{path}   (GET/POST)
+         POST /audit/{llm|tool} — audit sink: the ONLY process that inserts
+         into llm_audit_log / tool_audit_log (audit_sink.py; localhost-only,
+         row/body caps, column whitelist). GET /audit/spend/today feeds the
+         budget policy of client processes.
 Auth:    incoming x-api-key / authorization / x-goog-api-key are stripped
          and replaced with the provider's real key from credstore.
 Binding: 127.0.0.1 only. Single-tenant VM; no local token layer.
@@ -42,9 +46,14 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+import audit_sink
 from llm.gateway import evaluate_policy, record_llm_call
 
 logger = logging.getLogger("llm_proxy")
+
+# This process is the audit sink: its own gateway rows insert directly
+# instead of being POSTed back to itself.
+audit_sink.set_local_sink(True)
 
 
 def _credential(name: str) -> str:
@@ -373,8 +382,47 @@ async def health():
     payload = {
         "status": "ok" if not missing else "not_ready",
         "providers_without_key": missing,
+        # Informational only: a DB outage must not take LLM traffic down.
+        "audit_sink": audit_sink.sink_health(),
     }
     return JSONResponse(payload, status_code=200 if not missing else 503)
+
+
+@app.post("/audit/{kind}")
+async def audit_ingest(kind: str, request: Request):
+    """Append audit rows. 400 for a malformed payload (the client drops it),
+    503 when Postgres is unavailable (the client logs and drops it)."""
+    if kind not in audit_sink.TABLES:
+        return JSONResponse({"error": f"unknown audit ledger {kind!r}"}, status_code=404)
+    body = await request.body()
+    if len(body) > audit_sink.MAX_BODY_BYTES:
+        return JSONResponse({"error": "payload too large"}, status_code=413)
+    try:
+        rows = audit_sink.normalize_rows(kind, json.loads(body))
+    except (ValueError, TypeError) as e:
+        logger.warning("audit sink rejected %s payload: %s", kind, e)
+        return JSONResponse({"error": str(e)}, status_code=400)
+    try:
+        n = await _run_blocking(audit_sink.insert_rows, kind, rows)
+    except Exception as e:
+        logger.warning("audit sink insert failed (%d %s row(s)): %s", len(rows), kind, e)
+        return JSONResponse({"error": f"db unavailable: {e.__class__.__name__}"}, status_code=503)
+    return JSONResponse({"inserted": n})
+
+
+@app.get("/audit/spend/today")
+async def audit_spend_today():
+    try:
+        spend = await _run_blocking(audit_sink.today_spend)
+    except Exception as e:
+        logger.warning("audit sink spend read failed: %s", e)
+        return JSONResponse({"error": f"db unavailable: {e.__class__.__name__}"}, status_code=503)
+    return JSONResponse({"spend": spend})
+
+
+async def _run_blocking(fn, *args):
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
 @app.get("/billing/{provider}")

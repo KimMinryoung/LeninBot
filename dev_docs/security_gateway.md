@@ -125,6 +125,14 @@ a fallback, but no local socket is opened before this validation succeeds.
 
 ## Audit table
 
+**Write path (2026-09-04):** the worker thread in `audit.py` no longer inserts
+itself; it batches rows to the LLM proxy's audit sink (`POST /audit/tool`,
+`audit_sink.py` — see `dev_docs/llm_gateway.md` "감사 싱크"). The proxy is the
+only process that writes `tool_audit_log`, optionally through an INSERT-only
+role, so tool callers need no DB password and ad-hoc runs are audited too.
+With no `proxy_base` configured (tests, standalone tools) the worker inserts
+directly as before.
+
 `tool_audit_log` (applied via `scripts/schema_migrations.py --only tool-audit-log`,
 no startup DDL): `ts, interface, agent_name, user_id, is_owner, task_id, session_id,
 request_id, parent_request_id, scope_type, scope_id, chat_log_id, tool_name,
