@@ -304,6 +304,11 @@ Guidelines:
 - Entity names: Korean canonical form for Korean people/organizations (e.g. 민주노총, 김문수); well-known
   international entities in English (e.g. United States, Anthropic, Nikita Khrushchev). Put the other
   language form in *_aliases. Countries and governments are Organization, not Location.
+- Entities must be specific named things (proper nouns: a person, a named organization, a place, a
+  named policy/event/work). NEVER use a generic common noun as an entity — not 국가, 정부, 개인, 경찰,
+  청년, 주주, 기관, 외국인, "the state", "individuals", "workers" — and never a type label as a name.
+  Attach such claims to the concrete actor the document names (e.g. 마르크스 —Statement→ 『국가와 혁명』),
+  or drop the fact. Facts using generic entities are discarded.
 - "fact" must be a self-contained sentence in the document's language, with dates/numbers when present.
 - Never extract the document itself, its author's persona, internal task ids, file names or code.
 """ % (_ENTITY_TYPES, _PREDICATES, MAX_LLM_FACTS)
@@ -345,10 +350,15 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
     """Validate model output against the agent schema (Document/Reference are
     NOT allowed here), stamp provenance, and add Document→Entity mentions."""
     from graph_memory.structured_writer import validate_fact
+    from kg_runtime.identity import is_generic_entity_name
 
     doc = document_side(rec)
     out, seen_entities = [], set()
     for i, f in enumerate(raw_facts[:MAX_LLM_FACTS]):
+        generic = [f.get(k) for k in ("subject_name", "object_name") if is_generic_entity_name(f.get(k))]
+        if generic:
+            logger.info("[doc-extract] %s: dropped fact %d: generic entity %s", rec.ref, i, generic)
+            continue
         fact = {k: f.get(k) for k in ("subject_name", "subject_type", "predicate", "object_name",
                                       "object_type", "fact", "valid_at")}
         for side in ("subject", "object"):

@@ -37,6 +37,10 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             if not node:
                 continue
             active = [e for e in edges if not e.get("expired_at")] or edges
+            # A node whose only facts are "document X mentions it" has nothing
+            # worth recalling; injecting it just pads the prompt with noise.
+            if not any(e.get("predicate") != "Reference" for e in active):
+                continue
             summary = (node.get("summary") or "").strip()
             if len(summary) > 160:
                 summary = summary[:160].rstrip() + "…"
@@ -49,8 +53,8 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
         if not lines:
             return ""
         body = "\n".join(lines)
-        logger.info("[KG recall] injected %d entity(ies): %s", len(hits[:max_entities]),
-                    ", ".join(h.name for h in hits[:max_entities]))
+        injected = [ln[2:].split(":", 1)[0] for ln in lines if not ln.startswith("  ")]
+        logger.info("[KG recall] injected %d entity(ies): %s", len(injected), ", ".join(injected))
         if (provider or "claude") == "claude":
             return (
                 "<knowledge-graph>\n"

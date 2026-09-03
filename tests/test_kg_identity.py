@@ -375,6 +375,43 @@ class AliasIndexTests(unittest.TestCase):
     def test_no_text(self):
         self.assertEqual(self.idx.match(""), [])
 
+    def test_korean_key_must_start_a_word(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([
+            {"uuid": "riga", "name": "리가", "labels": ["Entity", "Location"], "keys": ["riga"]},
+            {"uuid": "ussr", "name": "소련", "labels": ["Entity", "Location"], "keys": []},
+        ])
+        # 2026-09-03: "우리가" / "리델리가" recalled Riga into worldbuilding chats.
+        self.assertEqual(idx.match("날것의 자연은 우리가 자원을 모으지 못하게 한다"), [])
+        self.assertEqual(idx.match("리델리가 연방의 중앙정계에 진출하는 것은"), [])
+        self.assertEqual([h.uuid for h in idx.match("리가에서 발트의 길이 시작됐다")], ["riga"])
+        self.assertEqual([h.uuid for h in idx.match("1936년 소련의 헌법")], ["ussr"])
+        self.assertEqual([h.uuid for h in idx.match("(소련) 헌법")], ["ussr"])
+        self.assertEqual([h.uuid for h in idx.match("소련에서는 소련이라는 소련께서는")], ["ussr"])
+        self.assertEqual(idx.match("스탈린주의 소련군"), [])   # compound words are other concepts
+
+    def test_weak_key_needs_particle_or_word_end(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([
+            {"uuid": "manifesto", "name": "공산당 선언", "labels": ["Entity", "Concept"], "keys": [], "weak_keys": ["선언"]},
+        ])
+        self.assertEqual(idx.match("민주노총이 파업을 선언했다"), [])
+        self.assertEqual([h.uuid for h in idx.match("선언을 읽었다")], ["manifesto"])
+
+    def test_generic_names_never_indexed(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([
+            {"uuid": "state", "name": "국가", "labels": ["Entity", "Concept"], "keys": ["국가 권력"]},
+            {"uuid": "org", "name": "Organization", "labels": ["Entity", "Organization"], "keys": []},
+            {"uuid": "glob", "name": "Global", "labels": ["Entity", "Location"], "keys": ["세계"]},
+            {"uuid": "marx", "name": "카를 마르크스", "labels": ["Entity", "Person"], "keys": [], "weak_keys": ["개인"]},
+        ])
+        self.assertEqual(idx.match("국가의 공권력이 개인에게 폭력을 휘두른다"), [])
+        self.assertEqual(idx.match("the Organization went Global 세계"), [])
+        self.assertTrue(identity.is_generic_entity_name("경찰"))
+        self.assertTrue(identity.is_generic_entity_name("Organization"))
+        self.assertFalse(identity.is_generic_entity_name("대한민국 경찰청"))
+
 
 if __name__ == "__main__":
     unittest.main()

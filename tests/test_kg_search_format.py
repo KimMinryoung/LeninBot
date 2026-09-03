@@ -150,6 +150,16 @@ class RecallTests(unittest.TestCase):
              mock.patch.object(kgs, "_alias_hits", return_value=[]):
             self.assertEqual(recall.entity_gated_kg_block("아무 이름 없음", "claude"), "")
 
+    def test_mention_only_node_is_skipped(self):
+        hit = AliasHit("u1", "국세청", ["Organization"], "국세청")
+        node = {"uuid": "u1", "name": "국세청", "summary": "", "labels": ["Entity", "Organization"]}
+        edges = [{"uuid": "e1", "tier": "note", "expired_at": None, "subject": "문서 A", "predicate": "Reference",
+                  "object": "국세청", "fact": "문서 'A'에 국세청이 언급된다", "source": "documents"}]
+        with mock.patch.dict(os.environ, {"KG_ENTITY_GATED_RECALL": "1"}), \
+             mock.patch.object(kgs, "_alias_hits", return_value=[hit]), \
+             mock.patch.object(kgs, "_entity_neighborhood", return_value=(node, edges)):
+            self.assertEqual(recall.entity_gated_kg_block("국세청 조사", "claude"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,6 +120,22 @@ class LLMParsingTests(unittest.TestCase):
         self.assertEqual({m["object_name"] for m in mentions}, {"니키타 흐루쇼프", "비밀연설"})
         self.assertEqual(mentions[0]["subject_type"], "Document")
 
+    def test_generic_entities_are_dropped(self):
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x", "published_at": None})
+        raw = [
+            {"subject_name": "국가", "subject_type": "Concept", "predicate": "Causation",
+             "object_name": "계급 적대", "object_type": "Concept", "fact": "국가는 계급 적대의 산물이다"},
+            {"subject_name": "European Union", "subject_type": "Organization", "predicate": "PolicyEffect",
+             "object_name": "Organization", "object_type": "Organization", "fact": "type label as a name"},
+            {"subject_name": "카를 마르크스", "subject_type": "Person", "predicate": "Statement",
+             "object_name": "국가와 혁명", "object_type": "Concept", "fact": "마르크스는 국가론을 썼다"},
+        ]
+        facts = dx.llm_facts(rec, raw)
+        llm = [f for f in facts if f["attributes"].get("extraction") == "llm"]
+        self.assertEqual([f["subject_name"] for f in llm], ["카를 마르크스"])
+        self.assertNotIn("국가", {f["object_name"] for f in facts})
+        self.assertIn("generic common noun", dx.EXTRACTION_SYSTEM)
+
     def test_parse_tolerates_bare_list_and_garbage(self):
         self.assertEqual(len(dx.parse_llm_facts('[{"a": 1}, 2]')), 1)
         self.assertEqual(dx.parse_llm_facts("no json here"), [])

@@ -46,6 +46,41 @@ _WS_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[\"'“”‘’`´.,;:!?()\[\]{}<>«»、。·‧#*|/\\]")
 _HANGUL_RE = re.compile(r"[가-힣]")
 _LATIN_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# What may follow a Korean name inside the same word: a particle/copula, or
+# nothing. "민주노총이", "소련의", "레닌께서는" match; "선언했다" (verb stem) and
+# "스탈린주의" (a different concept) do not.
+_KO_PARTICLES = (
+    "이라고", "이라는", "이라면", "에서는", "으로는", "으로도", "으로서", "으로써", "에게는", "에게서",
+    "한테는", "한테서", "께서는", "부터는", "까지는", "에서도", "이었다", "였다", "이다", "인가", "인데",
+    "이며", "이고", "이자", "이나", "이든", "이란", "라는", "라고", "라면", "에서", "으로", "에게",
+    "한테", "께서", "부터", "까지", "처럼", "만큼", "보다", "조차", "마저", "밖에", "이", "가", "은", "는",
+    "을", "를", "의", "에", "와", "과", "도", "로", "만", "든", "나", "야", "여", "측", "쪽", "님", "씨", "님이",
+)
+_KO_AFTER_RE = "(?:" + "|".join(sorted(map(re.escape, _KO_PARTICLES), key=len, reverse=True)) + ")?(?![가-힣])"
+
+# Names that are common nouns or schema labels, not entities. They never enter
+# the alias index (so no auto-match, no mention edge, no recall) and the
+# document extractor drops LLM facts that use them. On 2026-09-03 the doc
+# extractor created nodes named 국가/개인/경찰/Organization and the recall
+# block injected them into fantasy-worldbuilding chats.
+GENERIC_ENTITY_NAMES = frozenset({
+    # schema / type labels
+    "entity", "document", "person", "organization", "location", "asset", "incident",
+    "policy", "campaign", "concept", "role", "industry", "global", "unknown",
+    # generic English nouns
+    "government", "state", "the state", "individual", "individuals", "people", "society",
+    "economy", "market", "company", "companies", "workers", "citizens", "police", "world",
+    # generic Korean nouns
+    "국가", "국가 권력", "공권력", "정부", "개인", "개인투자자", "개인 투자자", "경찰", "기관", "청년", "청년층",
+    "주주", "외국인", "세계", "사회", "경제", "시장", "기업", "사람", "인간", "인류", "국민", "시민",
+    "노동자", "노동력", "자본", "조직", "단체", "취업자", "협력사", "소비자", "투자자", "언론",
+    "정치", "역사", "문서", "보고서", "기사",
+})
+
+
+def is_generic_entity_name(value) -> bool:
+    """True when ``value`` normalizes to a common noun or a schema label."""
+    return normalize_alias_key(value) in GENERIC_ENTITY_NAMES
 
 EMBED_NN_THRESHOLD = float(os.getenv("KG_RESOLVE_EMBEDDING_NN_THRESHOLD", "0.92"))
 
@@ -612,8 +647,9 @@ class AliasIndex:
     """Cache ``alias_key -> [(uuid, name, labels)]`` for cheap text matching.
 
     Loaded with one Cypher; refreshed after ``ttl`` seconds. ``match()`` needs
-    no embedding call: Korean keys match as substrings (particles attach to
-    names), Latin keys match as whole tokens.
+    no embedding call: Korean keys match at a word start (particles attach to
+    names, so the key may end mid-word), Latin keys match as whole tokens.
+    Generic names (``GENERIC_ENTITY_NAMES``) are never indexed.
     """
 
     def __init__(self, ttl: float = 600.0, min_hangul: int = 2, min_latin: int = 4):
@@ -635,8 +671,12 @@ class AliasIndex:
             labels = [l for l in (r.get("labels") or []) if l != "Entity"]
             entry = (uuid, name, labels)
             for k in alias_keys_for(name, *(r.get("keys") or [])):
+                if k in GENERIC_ENTITY_NAMES:
+                    continue
                 keys.setdefault(k, []).append(entry)
             for k in alias_keys_for(*(r.get("weak_keys") or [])):
+                if k in GENERIC_ENTITY_NAMES:
+                    continue
                 weak.setdefault(k, []).append(entry)
         # Surname-style keys only count when they point at exactly one entity
         # and no entity owns that key as a strong one.
@@ -688,7 +728,10 @@ class AliasIndex:
             if not self._eligible(key):
                 continue
             if _HANGUL_RE.search(key):
-                if key in norm:
+                # The key must START a word ("우리가" / "리델리가" must not match
+                # 리가) and may only be followed by a particle ("선언했다" must
+                # not match the weak alias 선언 of 공산당 선언).
+                if key in norm and re.search(r"(?<![가-힣])" + re.escape(key) + _KO_AFTER_RE, norm):
                     hits.append((key, entries))
             elif " " in key:
                 if f" {key} " in padded:
