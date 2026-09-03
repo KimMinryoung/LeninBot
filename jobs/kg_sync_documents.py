@@ -116,8 +116,11 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         if limit is not None and stats["processed"] >= limit:
             break
         try:
+            # ``full`` widens the candidate set to every document; it never
+            # forces re-extraction — unchanged hashes are still skipped, so a
+            # weekly full pass costs nothing (and no LLM spend) for stable docs.
             res = dx.extract_document(rec, names=names, alias_index=idx, use_llm=use_llm,
-                                      force=full, existing_sha=existing.get(rec.ref))
+                                      force=False, existing_sha=existing.get(rec.ref))
         except Exception as exc:
             logger.exception("[kg-sync documents] %s failed", rec.ref)
             stats["errors"].append(f"{rec.ref}: {exc}")

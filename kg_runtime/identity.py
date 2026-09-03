@@ -186,7 +186,7 @@ WHERE n.name IN $names
 OPTIONAL MATCH (n)-[r:RELATES_TO]-()
 WITH n, count(r) AS rels
 RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, rels,
-       ($etype IN labels(n)) AS same_label
+       ($etype IN labels(n)) AS same_label, coalesce(n.external_ids, []) AS external_ids
 ORDER BY same_label DESC, rels DESC
 LIMIT 5
 """
@@ -196,7 +196,7 @@ LIMIT 5
 CYPHER_RESOLVE_BY_WEAK_KEY = """
 MATCH (n:Entity)
 WHERE $etype IN labels(n) AND any(k IN $keys WHERE k IN coalesce(n.weak_keys, []))
-RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels
+RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, coalesce(n.external_ids, []) AS external_ids
 LIMIT 2
 """
 
@@ -342,6 +342,36 @@ def _lookup_params(name: str, aliases=()) -> tuple[list[str], list[str]]:
     return names, keys
 
 
+def _id_namespace(external_id: str | None) -> str | None:
+    """'commulingo:person:khrushchev' -> 'commulingo:person:' (one id per node per namespace)."""
+    if not external_id or ":" not in external_id:
+        return None
+    return external_id.rsplit(":", 1)[0] + ":"
+
+
+def _namespace_conflict(row: dict, external_id: str | None) -> bool:
+    """True when the candidate already carries a *different* id from the same
+    namespace — a CommuLingo namesake (two 'Vladimir Komarov' entries) must
+    never fold into one node, whatever their aliases say."""
+    ns = _id_namespace(external_id)
+    if not ns:
+        return False
+    return any(x.startswith(ns) and x != external_id for x in (row.get("external_ids") or []))
+
+
+def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str | None, name: str) -> list[dict]:
+    out = []
+    for r in rows:
+        if exclude_uuid and r.get("uuid") == exclude_uuid:
+            continue
+        if _namespace_conflict(r, external_id):
+            logger.info("[KG identity] '%s' (%s) matches '%s' which already carries another id in that namespace — not reused",
+                        name, external_id, r.get("name"))
+            continue
+        out.append(r)
+    return out
+
+
 def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResult:
     if not rows:
         return ResolveResult(None, "none")
@@ -371,8 +401,11 @@ def resolve_entity_sync(
     entity_type: str,
     external_id: str | None = None,
     aliases=(),
+    exclude_uuid: str | None = None,
 ) -> ResolveResult:
-    """Deterministic resolution on a sync neo4j session (jobs, scripts)."""
+    """Deterministic resolution on a sync neo4j session (jobs, scripts).
+    ``exclude_uuid`` lets maintenance passes resolve a node against everything
+    but itself."""
     if external_id:
         rec = session.run(CYPHER_RESOLVE_BY_EXTERNAL_ID, eid=external_id).single()
         if rec:
@@ -381,10 +414,12 @@ def resolve_entity_sync(
     if not names:
         return ResolveResult(None, "none")
     rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)]
+    rows = _filter_rows(rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
     hit = _pick_key_hit(rows, entity_type, name)
     if hit.found or hit.method == "label_conflict":
         return hit
     weak_rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)]
+    weak_rows = _filter_rows(weak_rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
     return _pick_weak_hit(weak_rows, name)
 
 
@@ -408,12 +443,12 @@ async def resolve_entity_async(
     if not names:
         return ResolveResult(None, "none")
     result = await session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)
-    rows = [dict(r) async for r in result]
+    rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
     hit = _pick_key_hit(rows, entity_type, name)
     if hit.found or hit.method == "label_conflict":
         return hit
     result = await session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)
-    weak_rows = [dict(r) async for r in result]
+    weak_rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
     hit = _pick_weak_hit(weak_rows, name)
     if hit.found:
         return hit

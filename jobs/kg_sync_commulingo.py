@@ -649,8 +649,9 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         return stats
 
     stats["expired"] = expire_edges(to_expire)
-    stats["redirects"] = apply_redirects(src.redirects)
     stats["write"] = write_facts(to_write)
+    # After the writes so a first (full) run already sees the canonical nodes.
+    stats["redirects"] = apply_redirects(src.redirects)
     if stats["write"]["errors"]:
         stats["error"] = f"{len(stats['write']['errors'])} batch(es) failed: {stats['write']['errors'][0][:200]}"
     return stats

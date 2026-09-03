@@ -127,6 +127,30 @@ class WeakAliasTests(unittest.TestCase):
         self.assertNotIn("카스트로", names)
         self.assertNotIn("castro", keys)
 
+    def test_namespace_conflict_blocks_namesake_merge(self):
+        rows = [{"uuid": "k1", "name": "블라디미르 코마로프", "labels": ["Entity", "Person"], "rels": 3,
+                 "same_label": True, "external_ids": ["commulingo:person:vladimir-komarov"]}]
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_KEY: rows})
+        hit = identity.resolve_entity_sync(
+            session, name="블라디미르 코마로프", entity_type="Person",
+            external_id="commulingo:person:vladimir-komarov-cosmonaut", aliases=["Vladimir Komarov"],
+        )
+        self.assertFalse(hit.found)
+        # same id (re-run) or no id → reuse
+        hit = identity.resolve_entity_sync(session, name="블라디미르 코마로프", entity_type="Person",
+                                           external_id="commulingo:person:vladimir-komarov")
+        self.assertEqual(hit.uuid, "k1")
+        hit = identity.resolve_entity_sync(session, name="블라디미르 코마로프", entity_type="Person")
+        self.assertEqual(hit.uuid, "k1")
+
+    def test_exclude_uuid(self):
+        rows = [{"uuid": "self", "name": "Stalin", "labels": ["Entity", "Person"], "rels": 100, "same_label": True, "external_ids": []},
+                {"uuid": "twin", "name": "Joseph Stalin", "labels": ["Entity", "Person"], "rels": 50, "same_label": True,
+                 "external_ids": ["commulingo:person:stalin"]}]
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_KEY: rows})
+        self.assertEqual(identity.resolve_entity_sync(session, name="Stalin", entity_type="Person").uuid, "self")
+        self.assertEqual(identity.resolve_entity_sync(session, name="Stalin", entity_type="Person", exclude_uuid="self").uuid, "twin")
+
     def test_weak_key_resolution_requires_uniqueness(self):
         two = [{"uuid": "fidel", "name": "피델 카스트로", "labels": ["Entity", "Person"]},
                {"uuid": "raul", "name": "라울 카스트로", "labels": ["Entity", "Person"]}]
