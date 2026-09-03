@@ -245,7 +245,12 @@ class GraphMemoryService:
                 client=_proxied_genai_client(),
             )
 
+            # graphiti forces batch_size=1 for gemini-embedding-001 (a Vertex
+            # limit); the Gemini API behind the proxy accepts multi-content
+            # requests (verified 2026-09-03), so batch to cut request volume.
+            embed_batch = int(os.getenv("KG_EMBED_BATCH_SIZE", "32") or 32)
             embedder = RetryingGeminiEmbedder(
+                batch_size=max(1, embed_batch),
                 config=GeminiEmbedderConfig(
                     api_key=gemini_api_key,
                     embedding_model=_resolve_call_site("kg_embedding", model="gemini-embedding-001").model,
