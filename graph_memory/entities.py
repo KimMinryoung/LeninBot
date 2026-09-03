@@ -538,6 +538,43 @@ class Industry(BaseModel):
 
 
 # ============================================================
+# 11. 문서 (Document) — 동기화 전용 (2026-09-03)
+# ============================================================
+
+class Document(BaseModel):
+    """
+    다른 저장소에 발행된 문서 노드 — 리서치 문서, 사료 번역 발행본,
+    자율 프로젝트 종합 노트. 저장소 미러 잡(jobs/kg_sync_documents)만 생성하며
+    LLM 추출과 write_kg_structured 툴에는 노출되지 않는다.
+    Document→Entity 연결은 Reference 엣지(reference_type=about|mentions).
+    """
+    doc_kind: Optional[str] = Field(
+        None,
+        description="research / archival / autonomous_note"
+    )
+    slug: Optional[str] = Field(
+        None,
+        description="Store-local identifier (research slug, archival manifest id, note id)"
+    )
+    url: Optional[str] = Field(
+        None,
+        description="Public URL when the document is published"
+    )
+    lang: Optional[str] = Field(
+        None,
+        description="Primary language code (ko / en / ru ...)"
+    )
+    published_at: Optional[str] = Field(
+        None,
+        description="Publication date (ISO)"
+    )
+    content_sha256: Optional[str] = Field(
+        None,
+        description="Content hash used for idempotent re-extraction"
+    )
+
+
+# ============================================================
 # 엔티티 타입 레지스트리
 # ============================================================
 
@@ -552,4 +589,5 @@ ENTITY_TYPES = {
     "Concept": Concept,
     "Role": Role,
     "Industry": Industry,
+    "Document": Document,   # 동기화 전용 — 툴/추출에서는 SYNC_ONLY_ENTITY_TYPES로 제외
 }

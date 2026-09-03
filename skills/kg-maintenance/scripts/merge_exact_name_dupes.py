@@ -13,9 +13,10 @@ Usage:
 
 The script highlights groups where the duplicate nodes carry
 *different* type labels (e.g. one Location + one Organization). Those
-are still merged, since identical names with different LLM-assigned
-types are almost always the same real-world entity that the entity
-resolver mis-typed once. The label of the highest-degree node wins.
+are skipped by default (listed for manual review) and merged only with
+--include-label-mismatch, in which case the label of the highest-degree
+node wins. Merges go through kg_runtime.identity.merge_entity_nodes_sync,
+which also keeps the merged names as aliases.
 """
 import argparse
 import json
@@ -54,6 +55,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.strip())
     parser.add_argument("--execute", action="store_true",
                         help="Actually perform the merges (default: dry-run)")
+    parser.add_argument("--include-label-mismatch", action="store_true",
+                        help="Also merge groups whose nodes carry different type labels "
+                             "(default: skip them and list them for manual review)")
     args = parser.parse_args()
 
     driver = get_driver()
@@ -130,6 +134,12 @@ def main():
             print(f"    - {p['canonical_display']}: {set(map(tuple, p['label_sets']))}")
         if len(label_mismatch_groups) > 30:
             print(f"    ... and {len(label_mismatch_groups) - 30} more")
+
+    if not args.include_label_mismatch and label_mismatch_groups:
+        merge_plan = [p for p in merge_plan if not p["label_mismatch"]]
+        total_dups = sum(len(p["duplicates"]) for p in merge_plan)
+        print(f"  Skipping {len(label_mismatch_groups)} label-mismatch groups "
+              f"(--include-label-mismatch to merge them) → {len(merge_plan)} groups, {total_dups} nodes")
 
     if not args.execute:
         print("\n[DRY RUN] No changes made. Re-run with --execute to apply.")

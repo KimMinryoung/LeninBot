@@ -45,9 +45,17 @@ def backup(include_embeddings: bool = True):
             RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                    n.summary AS summary, n.group_id AS group_id,
                    n.created_at AS created_at,
-                   n.name_embedding AS name_embedding
+                   n.name_embedding AS name_embedding,
+                   // identity layer + typed attributes (2026-09-03): every other
+                   // property, so a restore keeps external_ids / aliases / Document props.
+                   [k IN keys(n) WHERE NOT k IN ['uuid', 'name', 'summary', 'group_id', 'created_at', 'name_embedding', 'labels']
+                    | [k, n[k]]] AS props
         """)
-        entity_list = [dict(r) for r in entities]
+        entity_list = []
+        for r in entities:
+            row = dict(r)
+            row["props"] = {k: v for k, v in (row.pop("props") or [])}
+            entity_list.append(row)
 
         # ── RELATES_TO edges ──
         # NOTE: r.episodes is required by graphiti's EntityEdge Pydantic model

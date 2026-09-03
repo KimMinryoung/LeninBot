@@ -86,6 +86,9 @@ WRITER_TOOLS = frozenset({
     # that uses web_search internally — both belong to the writer surface.
     "research_web",
     "web_search",
+    # Read-only graph lookup: people/events/terms mirrored from CommuLingo,
+    # research and archival documents, dated facts (2026-09-03).
+    "knowledge_graph_search",
     # Read-only lookup in the CommuLingo people dictionary (Soviet-history
     # reference for fiction). All CommuLingo write tools stay off this surface.
     "commulingo_people",

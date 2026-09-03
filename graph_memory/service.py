@@ -54,7 +54,15 @@ from .config import (
     EXCLUDED_ENTITY_TYPES,
     NEWS_PREPROCESS_PROMPT_TEMPLATE,
     CUSTOM_EXTRACTION_INSTRUCTIONS,
+    SYNC_ONLY_ENTITY_TYPES,
+    SYNC_ONLY_PREDICATES,
 )
+
+# Schema handed to graphiti's LLM extractor: the sync-only types (Document,
+# Reference) are written by mirror jobs only and must not be extracted from
+# free text.
+EXTRACTION_ENTITY_TYPES = {k: v for k, v in ENTITY_TYPES.items() if k not in SYNC_ONLY_ENTITY_TYPES}
+EXTRACTION_EDGE_TYPES = {k: v for k, v in EDGE_TYPES.items() if k not in SYNC_ONLY_PREDICATES}
 from .conformance import validate_episode_result, apply_hard_fixes
 
 logger = logging.getLogger(__name__)
@@ -277,6 +285,9 @@ class GraphMemoryService:
             # 반쯤 초기화된 인스턴스가 "완료"로 남지 않도록 드라이버를 닫는다.
             try:
                 await graphiti.build_indices_and_constraints()
+                # Identity layer (external_ids / aliases) fulltext index.
+                from kg_runtime.identity import ensure_identity_indexes
+                await ensure_identity_indexes(graph_driver.client, neo4j_database)
             except BaseException:
                 await graph_driver.client.close()
                 raise
@@ -438,13 +449,28 @@ class GraphMemoryService:
             source_description=source_description,
             reference_time=reference_time,
             group_id=group_id,
-            entity_types=ENTITY_TYPES,
-            edge_types=EDGE_TYPES,
+            entity_types=EXTRACTION_ENTITY_TYPES,
+            edge_types=EXTRACTION_EDGE_TYPES,
             edge_type_map=EDGE_TYPE_MAP,
             excluded_entity_types=EXCLUDED_ENTITY_TYPES,
             custom_extraction_instructions=CUSTOM_EXTRACTION_INSTRUCTIONS,
         )
         logger.info("[graphiti] add_episode 완료")
+
+        # ── Cross-group identity merge ──
+        # graphiti resolves candidates only inside the episode's group_id, so
+        # a node created here may duplicate a same-label node from another
+        # group. Fold it in deterministically (alias-key match, no LLM).
+        try:
+            from kg_runtime.identity import post_episode_merge
+            async with graphiti.driver.client.session(
+                database=os.getenv("NEO4J_DATABASE", "neo4j")
+            ) as _session:
+                merged = await post_episode_merge(_session, getattr(result, "nodes", None) or [])
+            if merged:
+                logger.info("[graphiti] post-episode merge: %d node(s) folded", len(merged))
+        except Exception as exc:
+            logger.warning("[graphiti] post-episode merge skipped (non-fatal): %s", exc)
 
         # ── Conformance gate ──
         # Validate the just-created entities/edges against the schema. Hard

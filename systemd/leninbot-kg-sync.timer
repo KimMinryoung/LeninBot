@@ -1,0 +1,11 @@
+[Unit]
+Description=LeninBot KG sync timer (nightly, after commulingo-batch 02:00 KST and kg-backup 03:00 KST)
+
+[Timer]
+# 04:00 KST = 19:00 UTC
+OnCalendar=*-*-* 19:00:00 UTC
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

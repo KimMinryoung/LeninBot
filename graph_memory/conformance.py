@@ -192,7 +192,9 @@ def validate_episode_result(
         if src_type and tgt_type and e_name is not None:
             allowed_for_pair = set(edge_type_map.get((src_type, tgt_type), []))
             allowed_wildcard = set(edge_type_map.get(("Entity", "Entity"), []))
-            if e_name not in allowed_for_pair and e_name not in allowed_wildcard:
+            from .config import sync_predicate_allowed
+            if (e_name not in allowed_for_pair and e_name not in allowed_wildcard
+                    and not sync_predicate_allowed(src_type, tgt_type, e_name)):
                 report.edge_type_map_violations.append({
                     "edge_uuid": e_uuid,
                     "name": e_name,

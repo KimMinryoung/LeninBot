@@ -1787,6 +1787,15 @@ async def handle_web_chat(
             if preflight_context:
                 preflight_tool_detail = f"[preflight] vector_search({json.dumps({'query': preflight_query, 'layer': 'core_theory', 'author': 'Gramsci', 'num_results': 3}, ensure_ascii=False)})"
     runtime_parts = [runtime_context, _build_web_model_context(profile, provider=provider)]
+    # Entity-gated KG recall (KG_ENTITY_GATED_RECALL=1): alias match only, no embedding.
+    try:
+        from kg_runtime.recall import entity_gated_kg_block
+        kg_recall_context = await asyncio.to_thread(entity_gated_kg_block, message, provider)
+    except Exception as _kg_exc:
+        logger.debug("KG recall skipped: %s", _kg_exc)
+        kg_recall_context = ""
+    if kg_recall_context:
+        runtime_parts.append(kg_recall_context)
     if tone_policy_context:
         runtime_parts.append(tone_policy_context)
     if feedback_context:
