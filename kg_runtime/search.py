@@ -661,6 +661,8 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
 
     # Mini entity views for alias hits (multiple matched entities).
     sections: list[str] = []
+    shown_nodes: set[str] = set()
+    shown_edges: set[str] = set()
     for hit in hits[:2]:
         try:
             node, edges = _entity_neighborhood(hit.uuid, cap=MINI_NEIGHBORHOOD_CAP)
@@ -669,12 +671,14 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
             continue
         if not node:
             continue
-        seen_nodes.add(node["uuid"])
-        for e in edges:
-            seen_edges.add(e["uuid"])
+        shown_nodes.add(node["uuid"])
+        shown_edges.update(e["uuid"] for e in edges)
         sections.append(_format_kg_results(
             [node], edges, entity_header=f"[Knowledge Graph: entity view — {node.get('name')} (matched via '{hit.key}')]",
         ))
+    # Don't repeat what the entity views already showed.
+    all_nodes = [n for n in all_nodes if n.get("uuid") not in shown_nodes]
+    all_edges = [e for e in all_edges if e.get("uuid") not in shown_edges]
 
     if not all_nodes and not all_edges and not sections:
         return None
