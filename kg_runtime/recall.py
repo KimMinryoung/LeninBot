@@ -49,6 +49,8 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
         if not lines:
             return ""
         body = "\n".join(lines)
+        logger.info("[KG recall] injected %d entity(ies): %s", len(hits[:max_entities]),
+                    ", ".join(h.name for h in hits[:max_entities]))
         if (provider or "claude") == "claude":
             return (
                 "<knowledge-graph>\n"
