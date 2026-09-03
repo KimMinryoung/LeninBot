@@ -65,6 +65,7 @@ def process_scout_report_to_kg(
     report: str,
     task_content: str = "",
     agent_type: str = "scout",
+    task_id: int | None = None,
 ) -> dict:
     """
     Parse scout task report and auto-save factual findings to Knowledge Graph.
@@ -145,7 +146,8 @@ def process_scout_report_to_kg(
         # Write to KG
         result = add_kg_episode(
             content=episode_content,
-            name=f"scout-patrol-{datetime.now(KST).strftime('%Y%m%d-%H%M%S')}",
+            name=f"scout-patrol-{datetime.now(KST).strftime('%Y%m%d-%H%M%S')}"
+                 + (f"-t{task_id}" if task_id else ""),
             source_type="osint_news",
             group_id=group_id,
         )

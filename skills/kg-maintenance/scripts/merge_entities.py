@@ -135,93 +135,29 @@ def select_canonical(entities_in_group: list[dict]) -> tuple[dict, list[dict]]:
 
 
 def merge_one_group(driver, canonical: dict, duplicates: list[dict], execute: bool) -> dict:
-    """Merge duplicates into canonical. Returns stats."""
+    """Merge duplicates into canonical. Returns stats.
+
+    The Cypher lives in ``kg_runtime.identity.merge_entity_nodes_sync`` (one
+    implementation shared with the structured writer's post-episode merge and
+    the sync jobs); this wrapper keeps the dry-run bookkeeping.
+    """
     stats = {"canonical": canonical["name"], "canonical_uuid": canonical["uuid"],
              "merged": [], "edges_moved": 0, "mentions_moved": 0}
-
-    canon_uuid = canonical["uuid"]
-
     for dup in duplicates:
-        dup_uuid = dup["uuid"]
-        dup_name = dup["name"]
-        stats["merged"].append({"name": dup_name, "uuid": dup_uuid})
+        stats["merged"].append({"name": dup["name"], "uuid": dup["uuid"]})
+    if not execute:
+        return stats
 
-        if not execute:
-            continue
+    import sys as _sys
+    _root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    if _root not in _sys.path:
+        _sys.path.insert(0, os.path.abspath(_root))
+    from kg_runtime.identity import merge_entity_nodes_sync
 
-        with driver.session(database=NEO4J_DB) as s:
-            # ── Move outgoing RELATES_TO ──
-            # NOTE: previous version did `OPTIONAL MATCH (canon)-[existing]->(t)`
-            # and then referenced `canon.uuid` inside a CALL subquery. When the
-            # OPTIONAL MATCH didn't bind (the common case — no pre-existing edge),
-            # `canon` was NULL and `canon.uuid` silently produced no rows, so
-            # the CREATE never ran, count(*) returned 0, and the next
-            # `DETACH DELETE dup` then destroyed the edge. The fix: don't rely
-            # on `canon` from OPTIONAL MATCH; re-MATCH it via the parameter.
-            moved = s.run("""
-                MATCH (dup:Entity {uuid: $dup_uuid})-[r:RELATES_TO]->(t)
-                WHERE t.uuid <> $canon_uuid
-                WITH dup, r, t
-                OPTIONAL MATCH (:Entity {uuid: $canon_uuid})-[existing:RELATES_TO]->(t)
-                WHERE existing.name = r.name
-                WITH dup, r, t, existing
-                WHERE existing IS NULL
-                MATCH (canon:Entity {uuid: $canon_uuid})
-                CREATE (canon)-[r2:RELATES_TO]->(t)
-                SET r2 = properties(r)
-                DELETE r
-                RETURN count(r2) AS cnt
-            """, dup_uuid=dup_uuid, canon_uuid=canon_uuid)
-            stats["edges_moved"] += moved.single()["cnt"]
-
-            # ── Move incoming RELATES_TO ──
-            moved = s.run("""
-                MATCH (src)-[r:RELATES_TO]->(dup:Entity {uuid: $dup_uuid})
-                WHERE src.uuid <> $canon_uuid
-                WITH src, r, dup
-                OPTIONAL MATCH (src)-[existing:RELATES_TO]->(:Entity {uuid: $canon_uuid})
-                WHERE existing.name = r.name
-                WITH src, r, dup, existing
-                WHERE existing IS NULL
-                MATCH (canon:Entity {uuid: $canon_uuid})
-                CREATE (src)-[r2:RELATES_TO]->(canon)
-                SET r2 = properties(r)
-                DELETE r
-                RETURN count(r2) AS cnt
-            """, dup_uuid=dup_uuid, canon_uuid=canon_uuid)
-            stats["edges_moved"] += moved.single()["cnt"]
-
-            # ── Move MENTIONS ──
-            moved = s.run("""
-                MATCH (ep)-[r:MENTIONS]->(dup:Entity {uuid: $dup_uuid})
-                WITH ep, r, dup
-                OPTIONAL MATCH (ep)-[existing:MENTIONS]->(canon:Entity {uuid: $canon_uuid})
-                WITH ep, r, dup, existing
-                WHERE existing IS NULL
-                CALL {
-                    WITH ep
-                    MATCH (c:Entity {uuid: $canon_uuid_inner})
-                    CREATE (ep)-[:MENTIONS]->(c)
-                    RETURN c
-                }
-                DELETE r
-                RETURN count(*) AS cnt
-            """, dup_uuid=dup_uuid, canon_uuid=canon_uuid, canon_uuid_inner=canon_uuid)
-            stats["mentions_moved"] += moved.single()["cnt"]
-
-            # ── Merge summary if canonical has none ──
-            if not canonical["summary"] and dup.get("summary"):
-                s.run("""
-                    MATCH (c:Entity {uuid: $uuid})
-                    SET c.summary = $summary
-                """, uuid=canon_uuid, summary=dup["summary"])
-
-            # ── Delete duplicate (and its remaining edges) ──
-            s.run("""
-                MATCH (dup:Entity {uuid: $dup_uuid})
-                DETACH DELETE dup
-            """, dup_uuid=dup_uuid)
-
+    with driver.session(database=NEO4J_DB) as s:
+        result = merge_entity_nodes_sync(s, canonical["uuid"], [d["uuid"] for d in duplicates])
+    stats["edges_moved"] = result["edges_moved"]
+    stats["mentions_moved"] = result["mentions_moved"]
     return stats
 
 

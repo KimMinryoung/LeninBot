@@ -90,6 +90,8 @@ developer MCP clients
 | `leninbot-autonomous.service` | `venv/bin/python -m jobs.autonomous_project` | one autonomous project tick |
 | `leninbot-experience.service` | `jobs/experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
+| `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --limit 40` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (증분, 7일마다 전체) |
+| `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
 | `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one direct, sourced CommuLingo edit; two-stage validated new-person creation, enrich fallback/cooldown, and gateway-owned DeepSeek inference policy |
 | `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | independent new-person discovery/create lane |
 | `leninbot-commulingo-enrich.service` | `scripts/commulingo_people_parallel.py --mode enrich` | independent existing-person enrichment lane |
@@ -122,7 +124,7 @@ Public HTTPS terminates at Nginx for `cyber-lenin.com` with a Cloudflare Origin 
 | PostgreSQL (`leninbot-pg`, pgvector/pg17, `127.0.0.1:5434`; 활성 `leninbot` + `writer` DBs — Supabase에서 2026-07-28 이전, `db_migration_plan.md`) | `db.py`, `task_store.py`, `memory_store/*`, `jobs/autonomous_project.py`, `services/email_bridge.py`, `security_gateway/audit.py`, `writer/store.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata, writer projects/messages/manuscripts/revisions, `tool_audit_log` (per-call security audit) |
 | PostgreSQL `legacy_game` DB (`leninbot-pg` 내부, 런타임 미사용·읽기 전용 보관) | 운영자 전용; `scripts/backup_main_db_to_r2.py`, `scripts/restore_db.py` | 옛 게임의 `story_scenes` 415행. main DB에서 2026-07-29 분리했으며 일일 로컬/R2 백업 및 DRI 복구 범위에 포함 |
 | pgvector | `corpus/*`, `memory_store/experiential.py` | core theory, modern analysis, self-produced analysis, experience memory vectors |
-| Neo4j | `graph_memory/*`, `kg_runtime/*` | typed KG entities, relations, Graphiti episodes |
+| Neo4j | `graph_memory/*`, `kg_runtime/*`, `jobs/kg_sync*` | typed KG entities, relations, Graphiti episodes; 저장소 간 허브 — CommuLingo·리서치·사료 문서가 external_ids로 미러됨 (`dev_docs/knowledge_graph_design.md`) |
 | Redis | `redis_state.py` | live task progress/state, active task registry, mission board, task-chain summaries |
 | R2 | `shared.py`, publication/runtime tools | public uploaded files and generated media |
 

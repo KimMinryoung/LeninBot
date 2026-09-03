@@ -380,6 +380,19 @@ def build_writer_tools(project_id: int) -> tuple[list[dict], dict]:
         except Exception:
             logger.exception("writer: research_web tool unavailable; continuing with manuscript search only")
 
+    # Knowledge-graph lookup (read-only): CommuLingo people/events/terms,
+    # research and archival documents, dated facts. Spec + handler come from
+    # the shared runtime registry so the writer sees the same tool as everyone.
+    try:
+        from runtime_tools.registry import TOOLS as _RT_TOOLS, TOOL_HANDLERS as _RT_HANDLERS
+        _kg_spec = next((t for t in _RT_TOOLS if t.get("name") == "knowledge_graph_search"), None)
+        _kg_handler = _RT_HANDLERS.get("knowledge_graph_search")
+        if _kg_spec and _kg_handler:
+            tools.append(_kg_spec)
+            handlers["knowledge_graph_search"] = _kg_handler
+    except Exception:
+        logger.exception("writer: knowledge_graph_search unavailable; continuing without it")
+
     # Enforce the gateway profile: the declared allow-list is authoritative.
     allowed = profile_tool_names(WRITER_PROFILE)
     dropped = [t["name"] for t in tools if t["name"] not in allowed]

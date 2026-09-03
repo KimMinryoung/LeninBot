@@ -184,7 +184,7 @@ COMMULINGO_CURATOR = AgentSpec(
     description="Scheduled quality-first curator for one sourced CommuLingo people or glossary write per run",
     prompt_ir=SystemPrompt(identity=_PROMPT),
     tools=[
-        "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people",
+        "wiki_search", "wiki_get", "web_search", "fetch_url", "knowledge_graph_search", "commulingo_people",
         "commulingo_person_create", "commulingo_person_update",
         "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
     ],

@@ -1583,6 +1583,10 @@ async def handle_message(message: Message):
 
     # Auto-recall: fetch relevant past experiences for runtime context injection
     experience_context = await _fetch_relevant_experiences(user_text, _provider)
+    # Entity-gated KG recall (KG_ENTITY_GATED_RECALL=1; alias match only, no embedding)
+    kg_recall_context = await _fetch_kg_recall(user_text, _provider)
+    if kg_recall_context:
+        experience_context = "\n\n".join(p for p in (experience_context, kg_recall_context) if p)
 
     # Mission context: inject active mission timeline
     from telegram.mission import build_mission_context
@@ -1764,6 +1768,16 @@ async def handle_message(message: Message):
 
 
 # ── Auto-Recall & Reflection (experiential learning) ─────────────────
+
+async def _fetch_kg_recall(user_text: str, provider: str = "claude") -> str:
+    """Knowledge-graph block for entities named in the message (flag-gated, cheap)."""
+    try:
+        from kg_runtime.recall import entity_gated_kg_block
+        return await asyncio.to_thread(entity_gated_kg_block, user_text, provider)
+    except Exception as e:
+        logger.debug("KG recall failed (non-critical): %s", e)
+        return ""
+
 
 async def _fetch_relevant_experiences(user_text: str, provider: str = "claude") -> str:
     """Search experiential_memory for insights relevant to the user's message.

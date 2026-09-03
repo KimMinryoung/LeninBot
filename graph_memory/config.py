@@ -352,6 +352,43 @@ NAME_NORMALIZATION = {
 }
 
 
+# ============================================================
+# 동기화 전용 스키마 (에이전트 툴·LLM 추출에서 숨김)
+# ============================================================
+#
+# Document 노드와 Reference 엣지는 저장소 미러 잡(jobs/kg_sync_*)만 쓴다.
+# structured_writer.validate_fact(allow_sync_predicates=True)로만 통과하고,
+# graphiti 자유텍스트 추출에는 EXTRACTION_* 부분집합(service.py)이 전달된다.
+
+SYNC_ONLY_ENTITY_TYPES = {"Document"}
+SYNC_ONLY_PREDICATES = {"Reference"}
+
+# Reference 엣지가 허용되는 (소스, 타겟) 쌍. EDGE_TYPE_MAP에는 넣지 않는다 —
+# 그 맵은 graphiti 추출기에 그대로 전달되므로 추출기가 모르는 술어가 섞이면 안 된다.
+# "Document"는 모든 타겟에 Reference 가능.
+REFERENCE_EDGE_PAIRS = {
+    ("Concept", "Concept"),
+    ("Person", "Concept"),
+    ("Organization", "Concept"),
+    ("Concept", "Incident"),
+    ("Concept", "Campaign"),
+    ("Concept", "Person"),
+    ("Incident", "Concept"),
+}
+
+
+def sync_predicate_allowed(source_type: str, target_type: str, predicate: str) -> bool:
+    """True if a sync-only predicate is valid for the pair (mirror jobs only)."""
+    if predicate != "Reference":
+        return False
+    if source_type == "Document":
+        return True
+    return (source_type, target_type) in REFERENCE_EDGE_PAIRS
+
+# 동기화 잡이 쓰는 group_id (write_kg_structured 툴 enum에는 넣지 않는다)
+SYNC_GROUP_IDS = ("commulingo", "documents")
+
+
 EPISODE_SOURCE_MAP = {
     # 소스 카테고리        → (EpisodeType, source_description)
     "osint_news":          ("text",    "Open source news article"),

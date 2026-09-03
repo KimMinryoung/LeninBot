@@ -73,6 +73,7 @@ def _restore_entities(tx, entities: list[dict]) -> int:
             n.group_id = row.group_id,
             n.created_at = row.created_at,
             n.name_embedding = row.name_embedding
+        SET n += coalesce(row.props, {{}})
         """
         for chunk in _batched(rows):
             tx.run(query, rows=chunk)

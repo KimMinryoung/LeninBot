@@ -760,7 +760,19 @@ def _get_person(person_id: str) -> dict | None:
                 (person_id,),
             )
             person["office_rows"] = [dict(r) for r in cur.fetchall()]
-            return person
+    # Cross-store hub: facts other pipelines (news, research, analysts) attached
+    # to this person's graph node. Flag-gated with the KG recall feature; one
+    # cheap Cypher by external id, never fatal.
+    try:
+        from kg_runtime.recall import enabled as _kg_recall_enabled
+        if _kg_recall_enabled():
+            from kg_runtime.search import kg_facts_for_external_id
+            facts = kg_facts_for_external_id(f"commulingo:person:{person_id}", limit=5)
+            if facts:
+                person["kg_facts"] = facts
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("commulingo get_person kg_facts skipped: %s", exc)
+    return person
 
 
 def _search_all(q: str, limit: int) -> dict:

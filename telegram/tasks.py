@@ -1232,6 +1232,15 @@ def _build_task_context_content(
     except Exception as e:
         logger.debug("Experience recall for task %d failed: %s", task_id, e)
 
+    # Entity-gated KG recall (KG_ENTITY_GATED_RECALL=1): facts for entities the
+    # task names, alias match only — no embedding call.
+    kg_recall_ctx = ""
+    try:
+        from kg_runtime.recall import entity_gated_kg_block
+        kg_recall_ctx = entity_gated_kg_block(content[:1500], context_provider)
+    except Exception as e:
+        logger.debug("KG recall for task %d failed: %s", task_id, e)
+
     diary_web_ctx = ""
     diary_activity_ctx = ""
     if agent_type == "diary":
@@ -1245,6 +1254,7 @@ def _build_task_context_content(
         part for part in (
             state_ctx,
             experiences_ctx,
+            kg_recall_ctx,
             diary_activity_ctx,
             diary_web_ctx,
             mission_ctx,
@@ -1382,6 +1392,7 @@ async def _persist_task_success(
                 report=report,
                 task_content=content,
                 agent_type="scout",
+                task_id=task.get("id"),
             )
             if kg_result.get("status") == "ok":
                 logger.info(

@@ -97,82 +97,37 @@ def kg_delete_episode(episode_name: str) -> dict:
 def kg_merge_entities(source_name: str, target_name: str) -> dict:
     """Merge source entity into target entity in KG.
 
-    Transfers all relationships from source to target, then deletes source.
+    Transfers all relationships from source to target (through
+    ``kg_runtime.identity.merge_entity_nodes_sync``, which also unions
+    external ids / aliases and keeps the source name as an alias), then
+    deletes source.
 
     Args:
         source_name: Name of the entity to merge FROM (will be deleted).
         target_name: Name of the entity to merge INTO (will be kept).
 
-    Returns dict with 'transferred_relations', 'transferred_mentions', 'deleted_source'.
+    Returns dict with 'edges_moved', 'mentions_moved', 'deleted_source', 'merged_into'.
     """
+    from kg_runtime.identity import merge_entity_nodes_sync
+
     try:
         with _get_neo4j_sync_driver() as (sync_driver, neo4j_db):
-            def _merge(tx):
-                # Check both entities exist
-                check = list(tx.run(
+            with sync_driver.session(database=neo4j_db) as session:
+                check = list(session.run(
                     "MATCH (s:Entity {name: $src}) MATCH (t:Entity {name: $tgt}) "
-                    "RETURN s.uuid AS src_uuid, t.uuid AS tgt_uuid",
+                    "RETURN s.uuid AS src_uuid, t.uuid AS tgt_uuid LIMIT 1",
                     src=source_name, tgt=target_name
                 ))
                 if not check:
                     return {"error": f"One or both entities not found: '{source_name}', '{target_name}'"}
-
-                # Transfer outgoing RELATES_TO from source to target. Preserve
-                # all Graphiti-required properties so cleanup cannot create
-                # parser-breaking legacy edges.
-                r1 = list(tx.run(
-                    "MATCH (t:Entity {name: $tgt}) "
-                    "MATCH (s:Entity {name: $src})-[r:RELATES_TO]->(x:Entity) "
-                    "MERGE (t)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(x) "
-                    "SET nr += properties(r), "
-                    "    nr.group_id = coalesce(r.group_id, 'legacy'), "
-                    "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
-                    "    nr.episodes = coalesce(r.episodes, []), "
-                    "    nr.fact = coalesce(r.fact, ''), "
-                    "    nr.name = coalesce(r.name, 'RELATES_TO') "
-                    "DELETE r RETURN count(r) AS cnt",
-                    src=source_name, tgt=target_name
-                ))
-
-                # Transfer incoming RELATES_TO to source from target
-                r2 = list(tx.run(
-                    "MATCH (t:Entity {name: $tgt}) "
-                    "MATCH (x:Entity)-[r:RELATES_TO]->(s:Entity {name: $src}) "
-                    "MERGE (x)-[nr:RELATES_TO {fact: coalesce(r.fact, ''), episodes: coalesce(r.episodes, [])}]->(t) "
-                    "SET nr += properties(r), "
-                    "    nr.group_id = coalesce(r.group_id, 'legacy'), "
-                    "    nr.created_at = coalesce(r.created_at, datetime('1970-01-01T00:00:00Z')), "
-                    "    nr.episodes = coalesce(r.episodes, []), "
-                    "    nr.fact = coalesce(r.fact, ''), "
-                    "    nr.name = coalesce(r.name, 'RELATES_TO') "
-                    "DELETE r RETURN count(r) AS cnt",
-                    src=source_name, tgt=target_name
-                ))
-
-                # Transfer MENTIONS
-                r3 = list(tx.run(
-                    "MATCH (t:Entity {name: $tgt}) "
-                    "MATCH (e:Episodic)-[r:MENTIONS]->(s:Entity {name: $src}) "
-                    "MERGE (e)-[:MENTIONS]->(t) "
-                    "DELETE r RETURN count(r) AS cnt",
-                    src=source_name, tgt=target_name
-                ))
-
-                # Delete source
-                tx.run("MATCH (s:Entity {name: $src}) DELETE s", src=source_name)
-
-                return {
-                    "transferred_outgoing": r1[0]["cnt"] if r1 else 0,
-                    "transferred_incoming": r2[0]["cnt"] if r2 else 0,
-                    "transferred_mentions": r3[0]["cnt"] if r3 else 0,
-                    "deleted_source": source_name,
-                    "merged_into": target_name,
-                }
-
-            with sync_driver.session(database=neo4j_db) as session:
-                result = session.execute_write(_merge)
-            if "error" not in result:
-                result["integrity"] = check_kg_integrity()
+                stats = merge_entity_nodes_sync(session, check[0]["tgt_uuid"], [check[0]["src_uuid"]])
+            result = {
+                "edges_moved": stats["edges_moved"],
+                "mentions_moved": stats["mentions_moved"],
+                "deleted_source": source_name,
+                "merged_into": target_name,
+                "integrity": check_kg_integrity(),
+            }
             return result
     except Exception as e:
         logger.error("[shared] kg_merge_entities error: %s", e)

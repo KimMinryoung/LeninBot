@@ -103,6 +103,7 @@ def add_kg_structured(
     mission_id: int | None = None,
     trust_tier: str = "unverified",
     provenance_footer: str = "",
+    allow_sync_predicates: bool = False,
 ) -> dict:
     """Write structured facts to the KG (sync — for scripts/cron).
 
@@ -124,6 +125,7 @@ def add_kg_structured(
             mission_id=mission_id,
             trust_tier=trust_tier,
             provenance_footer=provenance_footer,
+            allow_sync_predicates=allow_sync_predicates,
         )
     except Exception as e:
         logger.error("[shared] add_kg_structured error: %s", e)

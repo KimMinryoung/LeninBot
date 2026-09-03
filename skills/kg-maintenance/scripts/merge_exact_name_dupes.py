@@ -13,9 +13,10 @@ Usage:
 
 The script highlights groups where the duplicate nodes carry
 *different* type labels (e.g. one Location + one Organization). Those
-are still merged, since identical names with different LLM-assigned
-types are almost always the same real-world entity that the entity
-resolver mis-typed once. The label of the highest-degree node wins.
+are skipped by default (listed for manual review) and merged only with
+--include-label-mismatch, in which case the label of the highest-degree
+node wins. Merges go through kg_runtime.identity.merge_entity_nodes_sync,
+which also keeps the merged names as aliases.
 """
 import argparse
 import json
@@ -44,16 +45,30 @@ def fetch_entities_with_labels(driver):
             OPTIONAL MATCH (n)-[r]-()
             WITH n, count(r) AS rel_count
             RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary,
-                   labels(n) AS labels, rel_count
+                   labels(n) AS labels, rel_count,
+                   coalesce(n.external_ids, []) AS external_ids
             ORDER BY n.name
         """)
         return [dict(r) for r in result]
+
+
+def has_id_conflict(ents: list[dict]) -> bool:
+    """True when two nodes carry different external ids in the same namespace
+    (e.g. CommuLingo namesakes 'nikolai-kuznetsov-navy' vs '-engine-designer'):
+    identical names, distinct people — never merge."""
+    # Two identity-bearing nodes (each mirrored from a store record) are
+    # separate records by definition — CommuLingo namesakes, or a glossary
+    # term and a history event that share a title.
+    return sum(1 for e in ents if e.get("external_ids")) >= 2
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.strip())
     parser.add_argument("--execute", action="store_true",
                         help="Actually perform the merges (default: dry-run)")
+    parser.add_argument("--include-label-mismatch", action="store_true",
+                        help="Also merge groups whose nodes carry different type labels "
+                             "(default: skip them and list them for manual review)")
     args = parser.parse_args()
 
     driver = get_driver()
@@ -73,6 +88,12 @@ def main():
 
     dup_groups = {n: ents for n, ents in by_name.items() if len(ents) > 1}
     print(f"  {len(dup_groups)} duplicate groups (exact name match)")
+    id_conflicts = {n: ents for n, ents in dup_groups.items() if has_id_conflict(ents)}
+    if id_conflicts:
+        print(f"  {len(id_conflicts)} groups are distinct entities sharing a name (different external ids) — skipped:")
+        for n in list(id_conflicts)[:20]:
+            print(f"    - {n}")
+        dup_groups = {n: ents for n, ents in dup_groups.items() if n not in id_conflicts}
 
     if not dup_groups:
         print("\nNo exact-name duplicates. Nothing to do.")
@@ -84,6 +105,13 @@ def main():
     label_mismatch_groups = []
     for name, ents in sorted(dup_groups.items(), key=lambda kv: -sum(e["rel_count"] for e in kv[1])):
         canonical, duplicates = select_canonical(ents)
+        # An identity-bearing node (external ids from a store) is always the
+        # survivor: its label, ids and curated summary must not be lost to a
+        # higher-degree news node of the same name.
+        with_ids = [e for e in ents if e.get("external_ids")]
+        if with_ids and canonical not in with_ids:
+            canonical = max(with_ids, key=lambda e: e["rel_count"])
+            duplicates = [e for e in ents if e is not canonical]
         # Note label diversity (excluding the always-present 'Entity' base label)
         label_sets = []
         for e in ents:
@@ -130,6 +158,12 @@ def main():
             print(f"    - {p['canonical_display']}: {set(map(tuple, p['label_sets']))}")
         if len(label_mismatch_groups) > 30:
             print(f"    ... and {len(label_mismatch_groups) - 30} more")
+
+    if not args.include_label_mismatch and label_mismatch_groups:
+        merge_plan = [p for p in merge_plan if not p["label_mismatch"]]
+        total_dups = sum(len(p["duplicates"]) for p in merge_plan)
+        print(f"  Skipping {len(label_mismatch_groups)} label-mismatch groups "
+              f"(--include-label-mismatch to merge them) → {len(merge_plan)} groups, {total_dups} nodes")
 
     if not args.execute:
         print("\n[DRY RUN] No changes made. Re-run with --execute to apply.")

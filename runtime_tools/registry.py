@@ -298,11 +298,16 @@ TOOLS = [
     {
         "name": "knowledge_graph_search",
         "description": (
-            "Search Neo4j KG for geopolitical entities and relationships. "
-            "Do not invent English names for Korean organizations/publications; "
-            "prefer canonical names already used in KG, e.g. '디아마트 (DiaMat)' "
-            "and '웹진 반란(Uprising)'. Preserve Korean person names such as "
-            "'신현준' instead of romanizing them."
+            "Search the knowledge graph (Neo4j): people, organizations, events, concepts, "
+            "policies and documents across current affairs, the CommuLingo Soviet-history "
+            "dictionary (people/terms/events, Korean canonical names) and published research/"
+            "archival documents. Facts come back as 'Subject —Predicate→ Object: fact' with "
+            "validity dates, trust tier and source. When the query names one known entity the "
+            "result is that entity's full neighbourhood (aliases, external ids, active and "
+            "expired facts). Do not invent English names for Korean organizations/publications; "
+            "prefer canonical names already used in KG, e.g. '디아마트 (DiaMat)' and "
+            "'웹진 반란(Uprising)'. Preserve Korean person names such as '신현준' or '니키타 흐루쇼프' "
+            "instead of romanizing them."
         ),
         "input_schema": {
             "type": "object",
@@ -318,6 +323,22 @@ TOOLS = [
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Results count (1-20).", "default": 10},
+                "entity": {
+                    "type": "string",
+                    "description": (
+                        "Optional exact entity name or alias (e.g. '니키타 흐루쇼프', 'Nikita Khrushchev'). "
+                        "Returns that entity's neighbourhood instead of a semantic search."
+                    ),
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "entity", "semantic"],
+                    "description": (
+                        "auto (default): entity view when the query names exactly one known entity, "
+                        "else semantic search. entity: force the entity view. semantic: force hybrid search."
+                    ),
+                    "default": "auto",
+                },
             },
             "required": ["query"],
         },
@@ -423,11 +444,19 @@ async def _exec_vector_search(
         return ToolFailure(f"Vector search failed: {e}")
 
 
-async def _exec_kg_search(query: str, num_results: int = 10) -> str:
-    """Execute knowledge graph search via chatbot module."""
+async def _exec_kg_search(query: str, num_results: int = 10, entity: str | None = None,
+                          mode: str = "auto") -> str:
+    """Execute knowledge graph search (entity view or semantic) off the event loop."""
     try:
         from kg_runtime.search import search_knowledge_graph
-        result = await asyncio.to_thread(search_knowledge_graph, query, num_results)
+        try:
+            num_results = max(1, min(int(num_results), 20))
+        except (TypeError, ValueError):
+            num_results = 10
+        result = await asyncio.to_thread(
+            search_knowledge_graph, query, num_results, None,
+            entity=(entity or "").strip() or None, mode=mode or "auto",
+        )
         return result or "No knowledge graph results found."
     except Exception as e:
         logger.error("kg_search error: %s", e)

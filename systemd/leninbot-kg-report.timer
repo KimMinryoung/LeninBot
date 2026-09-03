@@ -1,0 +1,10 @@
+[Unit]
+Description=LeninBot KG weekly health report timer (Mon 09:30 KST)
+
+[Timer]
+# 09:30 KST = 00:30 UTC Monday
+OnCalendar=Mon *-*-* 00:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

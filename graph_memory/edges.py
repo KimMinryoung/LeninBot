@@ -436,6 +436,32 @@ class Causation(BaseModel):
 
 
 # ============================================================
+# 13. Reference — 동기화 전용 (2026-09-03)
+# ============================================================
+
+class Reference(BaseModel):
+    """
+    문서·큐레이션 참조 관계. 저장소 미러 잡만 쓴다 (툴/추출 비노출).
+
+    - Document → Entity: 문서가 엔티티를 다룸/언급 (about | mentions)
+    - Concept ↔ Concept: 용어 상호 참조, 상위 용어 (related_term | parent_term | category)
+    - Person → Concept: 용어와 연관된 인물 (person_term), 시대 그룹 (people_group)
+    - Concept → Incident: 용어와 연관된 사건 (event_term)
+    """
+    reference_type: Optional[str] = Field(
+        None,
+        description=(
+            "about / mentions / related_term / parent_term / category / "
+            "person_term / event_term / people_group"
+        )
+    )
+    note: Optional[str] = Field(
+        None,
+        description="Short curator note for the link, if any"
+    )
+
+
+# ============================================================
 # 엣지 타입 레지스트리
 # ============================================================
 
@@ -452,4 +478,5 @@ EDGE_TYPES = {
     "Participation": Participation,
     "Statement": Statement,
     "Causation": Causation,
+    "Reference": Reference,   # 동기화 전용 — 툴/추출에서는 SYNC_ONLY_PREDICATES로 제외
 }

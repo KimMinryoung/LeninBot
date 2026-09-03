@@ -245,6 +245,18 @@
     "managed": "model-only",
     "note": "KG 임베딩 모델 (graph_memory/service.py에서 조회, KG_EMBED_MAX_RPS 페이싱)"
   },
+  "kg_document_extraction": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash-lite",
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "timeout": 120,
+    "json_mode": true,
+    "env": [
+      "KG_DOC_EXTRACT_MODEL"
+    ],
+    "note": "발행 문서(리서치·사료·자율 노트) → write_kg_structured 형식 fact ≤15 추출 (kg_runtime/doc_extract.py). KG_DOC_EXTRACT_LLM=1일 때만 호출. 문서당 ~10k in/1k out, 백필 ≈$1 일회, 이후 월 <$0.05"
+  },
   "research_spelling_proofread": {
     "provider": "openai",
     "model": "gpt-5.6-luna",
