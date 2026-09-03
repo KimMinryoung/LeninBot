@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 Generate fact_embedding for any RELATES_TO edge that has a fact text but no
-embedding. Used after the recover_lost_edges.py recovery, since the pre-recovery
-backup did not preserve embeddings.
+embedding, and name_embedding for any Entity node that lacks one. Used after a
+restore: since 2026-09-03 the daily R2 backup is text-only (the archive with
+embeddings passed the Cloudflare upload limit), so a restored graph must be
+re-embedded with this script before vector search works again.
 
 Uses the same Gemini embedder as graph_memory.service so the new embeddings
 are interchangeable with graphiti-managed ones.
@@ -38,6 +40,48 @@ def fetch_missing_embedding_edges(driver) -> list[dict]:
                    a.name AS source_name, b.name AS target_name
         """)
         return [dict(r) for r in rows]
+
+
+def fetch_missing_embedding_entities(driver) -> list[dict]:
+    """Entity nodes that have a name but no name_embedding."""
+    with driver.session(database=NEO4J_DB) as s:
+        rows = s.run("""
+            MATCH (n:Entity)
+            WHERE n.name IS NOT NULL AND n.name <> '' AND n.name_embedding IS NULL
+            RETURN n.uuid AS uuid, n.name AS name
+        """)
+        return [dict(r) for r in rows]
+
+
+async def embed_entities(entities: list[dict], execute: bool):
+    """name_embedding for entities; same embedder, same write-back pattern."""
+    from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+    embedder = GeminiEmbedder(config=GeminiEmbedderConfig(
+        api_key=os.environ["GEMINI_API_KEY"], embedding_model="gemini-embedding-001"))
+    print(f"  embedding {len(entities)} entity names via Gemini...")
+    results, failed, t0 = [], 0, time.time()
+    for i, n in enumerate(entities, 1):
+        text = (n["name"] or "").replace("\n", " ").strip()
+        try:
+            results.append({"uuid": n["uuid"], "embedding": await embedder.create(input_data=[text])})
+        except Exception as exc:
+            failed += 1
+            if failed <= 5:
+                print(f"  [embed error] uuid={n['uuid'][:8]} {exc}")
+        if i % 25 == 0:
+            print(f"  ... {i}/{len(entities)} embedded ({i / (time.time() - t0):.1f}/s, {failed} failed)")
+        await asyncio.sleep(0.05)
+    print(f"  embedded {len(results)}/{len(entities)} entity names ({failed} failed)")
+    if not execute:
+        return
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
+    written = 0
+    with driver.session(database=NEO4J_DB) as s:
+        for r in results:
+            s.run("MATCH (n:Entity {uuid: $uuid}) SET n.name_embedding = $emb", uuid=r["uuid"], emb=r["embedding"])
+            written += 1
+    driver.close()
+    print(f"  wrote {written}/{len(results)} name embeddings")
 
 
 async def embed_all(edges: list[dict], execute: bool):
@@ -106,11 +150,19 @@ def main():
 
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
     edges = fetch_missing_embedding_edges(driver)
+    entities = fetch_missing_embedding_entities(driver)
     driver.close()
+
+    print(f"Entities with name but no name_embedding: {len(entities)}")
+    if entities:
+        if args.execute:
+            asyncio.run(embed_entities(entities, execute=True))
+        else:
+            print(f"[DRY RUN] Would embed {len(entities)} entity names. Re-run with --execute.")
 
     print(f"Edges with fact but no fact_embedding: {len(edges)}")
     if not edges:
-        print("Nothing to do.")
+        print("Nothing to do for edges.")
         return
 
     # Show a few examples

@@ -109,7 +109,7 @@ Scripts:
 - `scripts/smoke_kg_search_modes.py [--out FILE]` — renders representative queries for before/after comparison
 - `scripts/kg_backfill_summaries.py [--execute]` — fills empty summaries from the node's best facts (no LLM)
 - `skills/kg-maintenance/scripts/merge_exact_name_dupes.py` / `merge_entities.py` — duplicate cleanup (now through `identity.merge_entity_nodes_sync`)
-- `skills/kg-maintenance/scripts/backup_kg.py` / `restore_kg.py` — now carry every extra node property (`props`), so identity/Document props survive a restore; `scripts/backup_kg_to_r2.py` daily
+- `skills/kg-maintenance/scripts/backup_kg.py` / `restore_kg.py` — now carry every extra node property (`props`), so identity/Document props survive a restore; `scripts/backup_kg_to_r2.py` daily, **text-only since 2026-09-03** (with embeddings the archive reached 435 MB after the hub redesign and the Cloudflare REST upload failed with 413; the ~2026-09-02 archive was 147 MB). After a restore, run `skills/kg-maintenance/scripts/embed_missing_facts.py --execute` to regenerate both entity `name_embedding` and edge `fact_embedding` (Gemini `gemini-embedding-001`) before vector search is usable —
 - `scripts/kg_enricher.py`, `scripts/ingest_reports_to_kg.py` — dormant
 - `mcp_gateway.tools`: `kg_integrity_check` (inspect) and `kg_maintenance_run` (operator, `execute=true` + `confirm=APPLY_KG_MAINTENANCE`)
 

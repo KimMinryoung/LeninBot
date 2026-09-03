@@ -43,7 +43,10 @@ LOCAL_RETENTION_DAYS = 3  # keep today + yesterday + day-before under data/kg_ba
 
 
 def main() -> int:
-    ts = _dump_kg(include_embeddings=True)
+    # Text only: with embeddings the archive passed 435 MB on 2026-09-03 and the
+    # Cloudflare REST upload failed (413). Re-embed after a restore with
+    # skills/kg-maintenance/scripts/embed_missing_facts.py.
+    ts = _dump_kg(include_embeddings=False)
 
     backup_dir = ROOT / "data" / "kg_backups"
     dump_files = [
