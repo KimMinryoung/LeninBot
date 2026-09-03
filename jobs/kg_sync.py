@@ -84,7 +84,7 @@ def _load_source(name: str):
 
 
 def run_source(name: str, *, full: bool = False, limit: int | None = None,
-               dry_run: bool = False, since: datetime | None = None) -> dict:
+               dry_run: bool = False, since: datetime | None = None, force: bool = False) -> dict:
     """Run one source; returns its stats dict (also persisted unless dry-run)."""
     mod = _load_source(name)
     state = get_state(name)
@@ -106,7 +106,8 @@ def run_source(name: str, *, full: bool = False, limit: int | None = None,
 
     logger.info("[kg-sync] %s: %s (since=%s, limit=%s, dry_run=%s)", name, reason, since, limit, dry_run)
     t0 = time.monotonic()
-    stats = mod.run(since=since, full=full, limit=limit, dry_run=dry_run)
+    extra = {"force": True} if (force and name == "documents") else {}
+    stats = mod.run(since=since, full=full, limit=limit, dry_run=dry_run, **extra)
     stats = dict(stats or {})
     stats.update({"mode": "full" if full else "incremental", "reason": reason,
                   "elapsed_s": round(time.monotonic() - t0, 1), "dry_run": dry_run})
@@ -122,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--full", action="store_true", help="full reconciliation pass")
     parser.add_argument("--limit", type=int, default=None, help="cap items processed (documents: docs; commulingo: facts)")
     parser.add_argument("--dry-run", action="store_true", help="compute facts, write nothing")
+    parser.add_argument("--force", action="store_true",
+                        help="documents: re-extract even when the content hash is unchanged (LLM backfill)")
     parser.add_argument("--notify-on-error", action="store_true", help="Telegram notify on failure")
     parser.add_argument("--json", action="store_true", help="print stats as JSON only")
     args = parser.parse_args(argv)
@@ -132,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for name in [s.strip() for s in args.source.split(",") if s.strip()]:
         try:
-            results[name] = run_source(name, full=args.full, limit=args.limit, dry_run=args.dry_run)
+            results[name] = run_source(name, full=args.full, limit=args.limit, dry_run=args.dry_run, force=args.force)
             if results[name].get("error"):
                 failed = True
         except Exception as exc:

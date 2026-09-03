@@ -45,10 +45,21 @@ def fetch_entities_with_labels(driver):
             OPTIONAL MATCH (n)-[r]-()
             WITH n, count(r) AS rel_count
             RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary,
-                   labels(n) AS labels, rel_count
+                   labels(n) AS labels, rel_count,
+                   coalesce(n.external_ids, []) AS external_ids
             ORDER BY n.name
         """)
         return [dict(r) for r in result]
+
+
+def has_id_conflict(ents: list[dict]) -> bool:
+    """True when two nodes carry different external ids in the same namespace
+    (e.g. CommuLingo namesakes 'nikolai-kuznetsov-navy' vs '-engine-designer'):
+    identical names, distinct people — never merge."""
+    # Two identity-bearing nodes (each mirrored from a store record) are
+    # separate records by definition — CommuLingo namesakes, or a glossary
+    # term and a history event that share a title.
+    return sum(1 for e in ents if e.get("external_ids")) >= 2
 
 
 def main():
@@ -77,6 +88,12 @@ def main():
 
     dup_groups = {n: ents for n, ents in by_name.items() if len(ents) > 1}
     print(f"  {len(dup_groups)} duplicate groups (exact name match)")
+    id_conflicts = {n: ents for n, ents in dup_groups.items() if has_id_conflict(ents)}
+    if id_conflicts:
+        print(f"  {len(id_conflicts)} groups are distinct entities sharing a name (different external ids) — skipped:")
+        for n in list(id_conflicts)[:20]:
+            print(f"    - {n}")
+        dup_groups = {n: ents for n, ents in dup_groups.items() if n not in id_conflicts}
 
     if not dup_groups:
         print("\nNo exact-name duplicates. Nothing to do.")
@@ -88,6 +105,13 @@ def main():
     label_mismatch_groups = []
     for name, ents in sorted(dup_groups.items(), key=lambda kv: -sum(e["rel_count"] for e in kv[1])):
         canonical, duplicates = select_canonical(ents)
+        # An identity-bearing node (external ids from a store) is always the
+        # survivor: its label, ids and curated summary must not be lost to a
+        # higher-degree news node of the same name.
+        with_ids = [e for e in ents if e.get("external_ids")]
+        if with_ids and canonical not in with_ids:
+            canonical = max(with_ids, key=lambda e: e["rel_count"])
+            duplicates = [e for e in ents if e is not canonical]
         # Note label diversity (excluding the always-present 'Entity' base label)
         label_sets = []
         for e in ents:

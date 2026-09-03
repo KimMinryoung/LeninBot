@@ -74,7 +74,7 @@ def load_records(kinds=ORDER, *, since: datetime | None = None) -> list[dx.DocRe
 
 
 def run(*, since: datetime | None = None, full: bool = False, limit: int | None = None,
-        dry_run: bool = False, kinds=ORDER, use_llm: bool | None = None) -> dict:
+        dry_run: bool = False, kinds=ORDER, use_llm: bool | None = None, force: bool = False) -> dict:
     use_llm = dx.llm_enabled() if use_llm is None else use_llm
     recs = load_records(kinds, since=None if full else since)
     stats: dict = {"documents": len(recs), "by_kind": {}, "llm": use_llm, "processed": 0,
@@ -120,7 +120,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
             # forces re-extraction — unchanged hashes are still skipped, so a
             # weekly full pass costs nothing (and no LLM spend) for stable docs.
             res = dx.extract_document(rec, names=names, alias_index=idx, use_llm=use_llm,
-                                      force=False, existing_sha=existing.get(rec.ref))
+                                      force=force, existing_sha=existing.get(rec.ref))
         except Exception as exc:
             logger.exception("[kg-sync documents] %s failed", rec.ref)
             stats["errors"].append(f"{rec.ref}: {exc}")
