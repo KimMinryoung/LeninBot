@@ -54,8 +54,50 @@ record_llm_call(surface=..., caller=..., model=..., tokens_in=..., tokens_out=..
 
 1. `llm_gateway.audit` 로거의 `llm_call {json}` 라인 → journald (항상, 동기)
 2. `llm_audit_log` PG 테이블 (메인 DB) — 백그라운드 워커 스레드, fire-and-forget.
-   큐 2000건 초과분·DB 실패분은 드롭 (로그만). `LENINBOT_LLM_AUDIT_DB=0`이면
-   DB 싱크 생략 (유닛 테스트 러너가 설정; ad-hoc read-only 가드 소음 방지에도 사용 가능).
+   큐 2000건 초과분·싱크 실패분은 드롭 (로그만). `LENINBOT_LLM_AUDIT_DB=0`이면
+   DB 싱크 생략 (유닛 테스트 러너가 설정).
+
+### 감사 싱크 — 프록시가 유일한 DB 기록자 (2026-09-04)
+
+이전에는 행을 만든 모든 프로세스가 직접 INSERT 했다. 그래서 서비스마다 전권 DB
+비밀번호가 필요했고, 시크릿이 없는 애드혹 스크립트는 감사 행을 조용히 버렸다
+(2026-09-03 재임베딩 스크립트가 그 예). 이제 `audit_sink.py` 하나가 양쪽 장부
+(`llm_audit_log`, `tool_audit_log`)의 컬럼 화이트리스트·캡·INSERT를 갖고, 기록
+경로는 세 가지 모드로 갈린다 (`audit_sink.mode()`):
+
+| 모드 | 조건 | 동작 |
+|---|---|---|
+| `local` | `llm_proxy.app`가 import 시 `set_local_sink(True)` | 프록시 자신의 행은 직접 INSERT |
+| `proxy` | 정책의 `proxy_base` 설정됨 (프로덕션 기본) | 워커가 최대 50행씩 `POST {proxy}/audit/{llm\|tool}` |
+| `db` | proxy_base 없음 (테스트·독립 도구) | 예전처럼 직접 INSERT |
+
+`LENINBOT_AUDIT_SINK=db|proxy`로 강제할 수 있다. 워커·큐·`flush_audit()` 계약은
+그대로다 — 바뀐 것은 배치 드레인과 DB INSERT가 HTTP POST로 바뀐 것뿐이다.
+
+프록시 쪽: `POST /audit/{kind}`는 본문 1 MB·200행 캡, 미지 컬럼은 400(스키마
+드리프트는 테스트에서 드러나야지 null로 묻히면 안 된다), 문자열은 캡으로 잘라
+저장, DB 장애는 503(클라이언트가 로그 남기고 드롭). `GET /audit/spend/today`는
+클라이언트 프로세스의 예산 정책(`_today_spend`)이 읽는다 — 프록시가 권위 판정
+지점이므로 클라이언트가 DB를 읽을 이유가 없어졌다. `/health`에 `audit_sink`
+필드가 붙지만 상태 코드에는 영향 없다: DB 장애가 LLM 트래픽을 막으면 안 된다.
+
+클라이언트 쪽: POST 타임아웃 3초, 연결 실패는 0.5초 후 1회 재시도(프록시
+재시작 블립 흡수), 4xx는 재시도 없음. 실패 첫 회 WARNING, 반복은 DEBUG.
+systemd 밖 프로세스(INVOCATION_ID 없음)가 낸 LLM 행은 `label`에 ` [adhoc]`이
+붙어 비용 보고서에서 서비스와 구분된다.
+
+**INSERT 전용 롤 (선택, 권장):** `.env`의 `AUDIT_DB_USER`와 credential
+`AUDIT_DB_PASSWORD`가 있으면 프록시는 그 롤로 별도 커넥션 풀을 연다. 없으면
+메인 DB 유저(`db_password`)로 INSERT 한다 — 동작은 같고 최소권한만 덜하다.
+롤은 `schema_migrations.py --only audit-sink-role`이 만든다 (CREATE/ALTER ROLE +
+두 표 INSERT + 시퀀스 + `llm_audit_log` SELECT(지출 합계용)). 순서: (1) sudo
+`manage_secrets.py add AUDIT_DB_PASSWORD`, (2) `.env`에 `AUDIT_DB_USER=leninbot_audit`,
+(3) 마이그레이션, (4) 유닛의 주석 처리된 `LoadCredentialEncrypted=audit_db_password`
+해제 + daemon-reload + 프록시 재시작. 파일이 없는 LoadCredentialEncrypted는 유닛
+시작을 실패시키므로 (1) 전에 (4)를 하면 안 된다.
+
+읽기 쪽 운영 CLI(`scripts/security_gateway.py audit`, `llm_registry_cli`)는 여전히
+DB 읽기 권한이 필요하다 — 싱크는 쓰기만 다룬다.
 
 컬럼: ts, surface(loop|oneshot|external_sdk|browser_use|vision|proxy), caller(에이전트명/feature키), provider, model,
 label(라운드 라벨), tokens_in/out, cache_read/create, cost_usd, latency_ms,

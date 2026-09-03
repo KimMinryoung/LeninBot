@@ -124,6 +124,12 @@ def _llm_audit_log() -> None:
     ensure_llm_audit_log_table()
 
 
+def _audit_sink_role() -> None:
+    from audit_sink import ensure_audit_role
+
+    print(ensure_audit_role())
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
@@ -142,6 +148,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("web-chat-feedback", _web_chat_feedback),
     ("writer-tables", _writer_tables),
     ("llm-audit-log", _llm_audit_log),
+    ("audit-sink-role", _audit_sink_role),
 ]
 
 

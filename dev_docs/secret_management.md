@@ -50,6 +50,8 @@ Do not add real secrets to repository files. `config.json.example` and `.env` ex
 
 Use `scripts/manage_secrets.py` for listing, adding, rotating, and inspecting credential metadata. Production systemd units should use `LoadCredentialEncrypted=`.
 
+`AUDIT_DB_PASSWORD` (optional): password of the INSERT-only Postgres role the LLM proxy uses as the audit sink (`audit_sink.py`). Mounted only by `leninbot-llm-proxy.service`; pair with `AUDIT_DB_USER` in `.env` and `schema_migrations.py --only audit-sink-role`. Absent → the proxy inserts audit rows with the main `db_password`.
+
 Relevant implementation files:
 
 - `secrets_loader.py`

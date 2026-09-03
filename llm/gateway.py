@@ -19,8 +19,10 @@ putting a proxy hop in front of streaming + prompt-cache breakpoints + thinking
 replay would risk regressions in exactly the provider mechanics the adapters
 exist to protect. Audit follows security_gateway/audit.py: a structured JSON
 line on the ``llm_gateway.audit`` logger (journald), plus a best-effort row in
-the ``llm_audit_log`` Postgres table from one background worker thread. Neither
-sink may ever raise into, or block, an LLM call.
+the ``llm_audit_log`` Postgres table from one background worker thread — since
+2026-09-04 delivered through the proxy's audit sink (audit_sink.py) so only the
+proxy needs the DB password. Neither sink may ever raise into, or block, an
+LLM call.
 
 Policy (tracked defaults + ignored local overrides, hot-reloaded on mtime):
 
@@ -301,17 +303,14 @@ def _today_spend() -> dict[str, float] | None:
         if _spend_cache is not None and now - _spend_cache_at < _SPEND_CACHE_TTL_SEC:
             return _spend_cache
     try:
-        from db import query
+        import audit_sink
 
-        rows = query(
-            """SELECT COALESCE(provider, '?') AS provider,
-                      COALESCE(SUM(cost_usd), 0)::float AS spend
-                 FROM llm_audit_log
-                WHERE ts >= date_trunc('day', now() AT TIME ZONE 'utc')
-                  AND status IN ('ok', 'error')
-                GROUP BY 1""",
-        )
-        spend = {str(r["provider"]): float(r["spend"]) for r in rows or []}
+        if audit_sink.mode() == "proxy":
+            spend = audit_sink.fetch_today_spend()
+            if spend is None:
+                return None
+        else:
+            spend = audit_sink.today_spend()
     except Exception as e:
         logger.warning("[llm-gateway] daily spend unavailable (fail-open): %s", e)
         return None
@@ -420,16 +419,6 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS llm_audit_log_provider_ts_idx ON llm_audit_log (provider, ts DESC)",
 ]
 
-_INSERT = """
-INSERT INTO llm_audit_log
-    (surface, caller, provider, model, label, tokens_in, tokens_out,
-     cache_read, cache_create, cost_usd, latency_ms, status, error_excerpt)
-VALUES (%(surface)s, %(caller)s, %(provider)s, %(model)s, %(label)s,
-        %(tokens_in)s, %(tokens_out)s, %(cache_read)s, %(cache_create)s,
-        %(cost_usd)s, %(latency_ms)s, %(status)s, %(error_excerpt)s)
-"""
-
-
 def ensure_llm_audit_log_table() -> None:
     """Create the llm_audit_log table and indexes. Applied via schema_migrations."""
     from db import get_conn
@@ -448,31 +437,42 @@ _worker_lock = threading.Lock()
 _insert_failed_before = False
 
 
-def _drain_one(row: dict) -> None:
-    global _insert_failed_before
-    try:
-        from db import get_conn
+_DRAIN_BATCH = 50
 
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(_INSERT, row)
-            conn.commit()
+
+def _drain_batch(rows: list[dict]) -> None:
+    """Persist a batch: POST to the proxy sink (audit_sink.mode() == "proxy"),
+    else insert directly (the proxy itself, or no proxy configured)."""
+    global _insert_failed_before
+    import audit_sink
+
+    if audit_sink.mode() == "proxy":
+        audit_sink.post_rows("llm", rows)
+        return
+    try:
+        audit_sink.insert_rows("llm", rows)
         _insert_failed_before = False
     except Exception as e:
         # First failure at WARNING, repeats at DEBUG: an ad-hoc process under
         # the read-only DB guard would otherwise warn on every single call.
         log = logger.debug if _insert_failed_before else logger.warning
-        log("llm audit DB insert failed (dropped): %s", e)
+        log("llm audit DB insert failed (%d row(s) dropped): %s", len(rows), e)
         _insert_failed_before = True
 
 
 def _worker_loop() -> None:
     while True:
-        row = _DB_QUEUE.get()
+        rows = [_DB_QUEUE.get()]
+        while len(rows) < _DRAIN_BATCH:
+            try:
+                rows.append(_DB_QUEUE.get_nowait())
+            except queue.Empty:
+                break
         try:
-            _drain_one(row)
+            _drain_batch(rows)
         finally:
-            _DB_QUEUE.task_done()
+            for _ in rows:
+                _DB_QUEUE.task_done()
 
 
 def _ensure_worker() -> None:
@@ -542,6 +542,12 @@ def _emit(row: dict, *, warn: bool = False) -> None:
         )
         if os.getenv("LENINBOT_LLM_AUDIT_DB", "1") == "0":
             return
+        import audit_sink
+
+        if not audit_sink.is_service_process():
+            # Ad-hoc scripts now reach the ledger through the proxy sink;
+            # mark them so cost reports can separate them from services.
+            row["label"] = ((row.get("label") or "") + " [adhoc]").strip()
         _ensure_worker()
         try:
             _DB_QUEUE.put_nowait(row)
