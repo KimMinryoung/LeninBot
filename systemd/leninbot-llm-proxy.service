@@ -40,10 +40,10 @@ UMask=0077
 # with name binding, shared with the credstore layout in
 # dev_docs/secret_management.md.
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
-# Audit sink INSERT-only role (dev_docs/llm_gateway.md "감사 싱크"). Enable after
-# `manage_secrets.py add AUDIT_DB_PASSWORD` + `schema_migrations.py --only audit-sink-role`;
-# a LoadCredentialEncrypted= pointing at a missing file fails the unit at start.
-#LoadCredentialEncrypted=audit_db_password:/etc/credstore.encrypted/audit_db_password.cred
+# Audit sink INSERT-only role (dev_docs/llm_gateway.md "감사 싱크"), installed by
+# scripts/install_audit_sink_role.sh on 2026-09-04. The credential must exist
+# before this line: a missing file fails the unit at start.
+LoadCredentialEncrypted=audit_db_password:/etc/credstore.encrypted/audit_db_password.cred
 LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key.cred
 LoadCredentialEncrypted=deepseek_api_key:/etc/credstore.encrypted/deepseek_api_key.cred
 LoadCredentialEncrypted=moonshot_api_key:/etc/credstore.encrypted/moonshot_api_key.cred
