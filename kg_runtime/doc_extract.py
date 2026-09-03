@@ -37,6 +37,20 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def josa(word: str, pair: str) -> str:
+    """Korean particle by final consonant: josa("레닌", "은/는") -> "은"."""
+    with_batchim, without = pair.split("/")
+    if not word:
+        return without
+    ch = word[-1]
+    if "가" <= ch <= "힣":
+        return with_batchim if (ord(ch) - 0xAC00) % 28 else without
+    if ch.isdigit():
+        return with_batchim if ch in "01367" else without
+    return with_batchim if ch.lower() in "lmnr" else without
+
+
 GROUP_ID = "documents"
 AGENT = "kg_sync_documents"
 LLM_FEATURE = "kg_document_extraction"
@@ -207,7 +221,7 @@ def collection_fact(rec: DocRecord) -> dict:
     obj = {"name": col["name"], "type": "Concept", "external_id": col["external_id"],
            "aliases": col["aliases"], "summary": col["summary"]}
     return _fact(document_side(rec), "Reference", obj,
-                 f"'{rec['title']}'{'' if rec.get('published_at') is None else ' (' + rec['published_at'] + ')'}은(는) {col['name']}에 수록된 문서이다",
+                 f"'{rec['title']}'{'' if rec.get('published_at') is None else ' (' + rec['published_at'] + ')'}{josa(rec['title'], '은/는')} {col['name']}에 수록된 문서이다",
                  _doc_attrs(rec, "collection", reference_type="collection"),
                  valid_at=rec.get("published_at"))
 
@@ -227,14 +241,14 @@ def curated_link_facts(rec: DocRecord, names: dict[str, dict[str, str]]) -> list
                 continue
             obj = {"name": name, "type": types[kind], "external_id": f"commulingo:{kind}:{slug}"}
             facts.append(_fact(
-                doc, "Reference", obj, f"문서 '{rec['title']}'은(는) {name}을(를) 다룬다",
+                doc, "Reference", obj, f"문서 '{rec['title']}'{josa(rec['title'], '은/는')} {name}{josa(name, '을/를')} 다룬다",
                 _doc_attrs(rec, f"about:{kind}:{slug}", reference_type="about"),
                 valid_at=rec.get("published_at"),
             ))
     return facts
 
 
-def mention_facts(rec: DocRecord, alias_index, *, exclude_external_ids: set[str] = frozenset()) -> list[dict]:
+def mention_facts(rec: DocRecord, alias_index) -> list[dict]:
     """Document→Entity Reference(mentions) for alias-index hits in the title,
     description and opening text. No embedding, no LLM."""
     if alias_index is None:
@@ -258,7 +272,7 @@ def mention_facts(rec: DocRecord, alias_index, *, exclude_external_ids: set[str]
             break
         obj = {"name": h.name, "type": label}
         facts.append(_fact(
-            doc, "Reference", obj, f"문서 '{rec['title']}'에 {h.name}이(가) 언급된다",
+            doc, "Reference", obj, f"문서 '{rec['title']}'에 {h.name}{josa(h.name, '이/가')} 언급된다",
             _doc_attrs(rec, f"mention:{h.uuid[:8]}", reference_type="mentions"),
             valid_at=rec.get("published_at"),
         ))
@@ -358,7 +372,7 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
             seen_entities.add(key)
             obj = {"name": key[0], "type": key[1], "aliases": fact.get(f"{side}_aliases") or []}
             out.append(_fact(
-                doc, "Reference", obj, f"문서 '{rec['title']}'에 {key[0]}이(가) 언급된다",
+                doc, "Reference", obj, f"문서 '{rec['title']}'에 {key[0]}{josa(key[0], '이/가')} 언급된다",
                 _doc_attrs(rec, f"llm-mention:{i}:{side}", reference_type="mentions"),
                 valid_at=rec.get("published_at"),
             ))
@@ -381,10 +395,16 @@ def build_document_facts(rec: DocRecord, *, names: dict[str, dict[str, str]] | N
                          alias_index=None, use_llm: bool = False) -> list[dict]:
     facts = [collection_fact(rec)]
     facts.extend(curated_link_facts(rec, names or {}))
-    linked_ids = {f.get("object_external_id") for f in facts}
-    facts.extend(mention_facts(rec, alias_index, exclude_external_ids=linked_ids))
+    # A curated "about" link already says the document covers the entity;
+    # a weaker "mentions" link for the same name is noise.
+    linked_names = {f["object_name"] for f in facts}
+    facts.extend(f for f in mention_facts(rec, alias_index) if f["object_name"] not in linked_names)
     if use_llm:
-        facts.extend(run_llm_extraction(rec))
+        linked_names |= {f["object_name"] for f in facts if f["predicate"] == "Reference"}
+        for f in run_llm_extraction(rec):
+            if f["predicate"] == "Reference" and f["object_name"] in linked_names:
+                continue
+            facts.append(f)
     # dedupe by sync_key
     seen, out = set(), []
     for f in facts:
