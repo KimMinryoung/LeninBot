@@ -54,6 +54,12 @@ KEEP = {
     "Iran": {"이란", "이란 정부", "테헤란", "이란 이슬람공화국", "Islamic Republic of Iran"},
     "Islamic Revolutionary Guard Corps": {"IRGC", "이란 혁명수비대", "이란 이슬람혁명수비대", "혁명수비대"},
 }
+# Korean canonical names for the hubs above. A single-token Korean alias of
+# a multi-token English name (소련 / Soviet Union) is otherwise classed as a
+# surname-style *weak* key and loses to the LLM's duplicate 소련 [Location]
+# node in the alias index; name_ko makes it a strong key.
+NAME_KO = {"United States": "미국", "Soviet Union": "소련", "SpaceX": "스페이스X", "Iran": "이란",
+           "Islamic Revolutionary Guard Corps": "이란 혁명수비대"}
 # (node name, alias) pairs that are simply wrong
 STRIP = {
     ("Bab-el-Mandeb Strait", "홍해"), ("박재현", "재현"), ("김세연", "세연"), ("오달수", "달수"), ("최수빈", "수빈"),
@@ -121,21 +127,23 @@ def step_aliases(session, execute: bool) -> list[dict]:
             elif (name, a) in STRIP:
                 bad = True
             (removed if bad else kept).append(a)
-        if not removed:
+        name_ko = NAME_KO.get(name) or n["name_ko"]
+        if not removed and name_ko == n["name_ko"]:
             continue
-        strong, weak = split_alias_keys(name, kept, n["name_ko"], n["name_en"])
+        strong, weak = split_alias_keys(name, kept, name_ko, n["name_en"])
         plan.append({"uuid": n["uuid"], "name": name, "removed": removed, "kept": kept,
-                     "alias_keys": strong, "weak_keys": weak})
+                     "alias_keys": strong, "weak_keys": weak, "name_ko": name_ko})
     print(f"[2] alias strip: {len(plan)} node(s), {sum(len(p['removed']) for p in plan)} alias(es)")
     for p in plan:
-        print(f"    - {p['name']}: -{p['removed']}")
+        print(f"    - {p['name']}: -{p['removed']}" + (f" name_ko={p['name_ko']}" if p.get('name_ko') else ""))
     if execute:
         for p in plan:
             session.run("""
                 MATCH (n:Entity {uuid: $uuid})
                 SET n.aliases = $aliases, n.alias_keys = $keys, n.weak_keys = $weak,
-                    n.alias_text = $text""", uuid=p["uuid"], aliases=p["kept"], keys=p["alias_keys"],
-                        weak=p["weak_keys"], text=" / ".join(p["kept"])).consume()
+                    n.alias_text = $text, n.name_ko = coalesce($name_ko, n.name_ko)""",
+                        uuid=p["uuid"], aliases=p["kept"], keys=p["alias_keys"], weak=p["weak_keys"],
+                        text=" / ".join(p["kept"]), name_ko=p.get("name_ko")).consume()
         print("    applied")
     return plan
 

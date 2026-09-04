@@ -223,9 +223,13 @@ class ResolveSyncTests(unittest.TestCase):
                  "rels": 4, "same_label": False},
             ],
         })
-        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Location")
+        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Concept")
         self.assertIsNone(hit.uuid)
         self.assertEqual(hit.method, "label_conflict")
+        # 2026-09-04: a country typed Location by the extractor is the same
+        # node as the Organization one (no more 미국/소련 [Location] twins).
+        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Location")
+        self.assertEqual((hit.uuid, hit.method), ("u-org", "alias"))
 
     def test_no_match(self):
         session = FakeSyncSession({})
@@ -448,6 +452,13 @@ class UntrustedSourceTests(unittest.TestCase):
             owned_keys={"samsung bio"},
         )
         self.assertEqual(out, ["삼바 노조", "Samsung Biologics Union"])
+
+    def test_location_and_organization_are_compatible(self):
+        rows = [{"uuid": "us", "name": "United States", "labels": ["Entity", "Organization"], "same_label": False}]
+        hit = identity._pick_key_hit(rows, "Location", "미국")
+        self.assertEqual(hit.uuid, "us")
+        rows = [{"uuid": "p", "name": "Stalin", "labels": ["Entity", "Person"], "same_label": False}]
+        self.assertEqual(identity._pick_key_hit(rows, "Location", "Stalin").method, "label_conflict")
 
     def test_generic_names_cover_alias_pollution_words(self):
         for word in ("정권", "노조", "회사", "선언", "음모", "여당", "대통령", "http"):

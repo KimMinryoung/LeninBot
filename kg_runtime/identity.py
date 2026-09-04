@@ -441,11 +441,21 @@ def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str
     return out
 
 
+# A country or government is one thing whether the extractor called it an
+# Organization or a Location; strict label matching made the first document
+# run create 미국/소련/이란/독일 [Location] twins of the English-named nodes.
+_COMPATIBLE_LABELS = frozenset({"Organization", "Location"})
+
+
+def _labels_compatible(entity_type: str, labels) -> bool:
+    return entity_type in _COMPATIBLE_LABELS and any(l in _COMPATIBLE_LABELS for l in (labels or ()))
+
+
 def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResult:
     if not rows:
         return ResolveResult(None, "none")
     best = rows[0]
-    if best.get("same_label"):
+    if best.get("same_label") or _labels_compatible(entity_type, best.get("labels")):
         return ResolveResult(best["uuid"], "alias", best.get("name"), list(best.get("labels") or []))
     logger.info(
         "[KG identity] label conflict: '%s' (%s) matches '%s' %s — not reused",
