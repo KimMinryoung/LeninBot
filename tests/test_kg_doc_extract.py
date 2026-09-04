@@ -140,6 +140,30 @@ class LLMParsingTests(unittest.TestCase):
                              "object_name": "금리 인하", "object_type": "Policy", "fact": "정부가 말했다"}, 0)
         self.assertIn("generic noun", err or "")   # agent write_kg_structured path too
 
+    def test_llm_sides_are_untrusted_and_mentions_skip_broad_keys(self):
+        from graph_memory.structured_writer import _side
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x", "published_at": None})
+        raw = [{"subject_name": "소련", "subject_type": "Organization", "predicate": "OrgRelation",
+                "object_name": "United States", "object_type": "Organization", "fact": "미소 데탕트",
+                "subject_aliases": ["Soviet Union"], "object_aliases": ["미국"]}]
+        facts = dx.llm_facts(rec, raw)
+        llm = [f for f in facts if f["attributes"].get("extraction") == "llm"][0]
+        self.assertFalse(_side(llm, "subject")["trusted"])
+        self.assertFalse(_side(llm, "object")["trusted"])
+        doc_side = [f for f in facts if f["subject_type"] == "Document"][0]
+        self.assertTrue(_side(doc_side, "subject")["trusted"])   # document node carries its ref
+
+        class _Idx:
+            def __init__(self):
+                self.kwargs = None
+
+            def match(self, text, limit=5, **kw):
+                self.kwargs = kw
+                return []
+        idx = _Idx()
+        dx.mention_facts(rec, idx)
+        self.assertEqual(idx.kwargs, {"broad": False})
+
     def test_parse_tolerates_bare_list_and_garbage(self):
         self.assertEqual(len(dx.parse_llm_facts('[{"a": 1}, 2]')), 1)
         self.assertEqual(dx.parse_llm_facts("no json here"), [])

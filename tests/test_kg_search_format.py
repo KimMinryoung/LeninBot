@@ -150,6 +150,27 @@ class RecallTests(unittest.TestCase):
              mock.patch.object(kgs, "_alias_hits", return_value=[]):
             self.assertEqual(recall.entity_gated_kg_block("아무 이름 없음", "claude"), "")
 
+    def test_reference_edges_are_not_rendered(self):
+        hit = AliasHit("u1", "노동당", ["Organization"], "노동당")
+        node = {"uuid": "u1", "name": "노동당", "summary": "", "labels": ["Entity", "Organization"]}
+        ref = {"uuid": "e0", "tier": "note", "expired_at": None, "subject": "문서 A", "predicate": "Reference",
+               "object": "노동당", "fact": "문서 'A'에 노동당이 언급된다", "source": "documents"}
+        real = {"uuid": "e1", "tier": "anchor", "expired_at": None, "subject": "노동당", "predicate": "Statement",
+                "object": "사회주의", "fact": "강령", "source": "analyst"}
+        with mock.patch.dict(os.environ, {"KG_ENTITY_GATED_RECALL": "1"}), \
+             mock.patch.object(kgs, "_alias_hits", return_value=[hit]), \
+             mock.patch.object(kgs, "_entity_neighborhood", return_value=(node, [ref, ref, real, ref])):
+            block = recall.entity_gated_kg_block("노동당 강령", "claude")
+        self.assertIn("—Statement→", block)
+        self.assertNotIn("Reference", block)
+        self.assertNotIn("언급된다", block)
+
+    def test_recall_asks_for_non_broad_hits(self):
+        with mock.patch.dict(os.environ, {"KG_ENTITY_GATED_RECALL": "1"}), \
+             mock.patch.object(kgs, "_alias_hits", return_value=[]) as hits:
+            recall.entity_gated_kg_block("사회주의는 왜", "claude")
+        self.assertFalse(hits.call_args.kwargs.get("broad", True))
+
     def test_mention_only_node_is_skipped(self):
         hit = AliasHit("u1", "국세청", ["Organization"], "국세청")
         node = {"uuid": "u1", "name": "국세청", "summary": "", "labels": ["Entity", "Organization"]}

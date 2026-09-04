@@ -75,6 +75,33 @@ GENERIC_ENTITY_NAMES = frozenset({
     "주주", "외국인", "세계", "사회", "경제", "시장", "기업", "사람", "인간", "인류", "국민", "시민",
     "노동자", "노동력", "자본", "조직", "단체", "취업자", "협력사", "소비자", "투자자", "언론",
     "정치", "역사", "문서", "보고서", "기사",
+    # 2026-09-04: common nouns the document extractor handed out as *aliases*
+    # (정권 → 폴란드통일노동자당, 노조 → 삼성바이오로직스 상생노조, 회사 → Samsung
+    # Biologics, 선언 → 공산당 선언, 음모 → 반소비에트 음모 활동, 여당 → 국민의힘 …).
+    # A key here is never indexed, never accepted as an alias, never an entity.
+    "정권", "정부군", "반군", "노조", "노동조합", "회사", "선언", "음모", "대출", "수출", "수입", "고용", "강연",
+    "여당", "야당", "반동", "반란", "혁명", "전쟁", "파업", "시위", "선거", "협정", "조약", "법안", "개혁",
+    "위기", "대통령", "총리", "장관", "서기장", "인민위원", "당", "정당", "군", "군대", "의회", "법원", "재판",
+    "국채", "금리", "유가", "원유", "환율", "물가", "매출", "서클", "지도부", "당국", "관계자", "전문가",
+    "http", "https", "www", "url",
+    "president", "minister", "party", "army", "congress", "parliament", "court", "war", "revolution",
+    "strike", "protest", "election", "treaty", "agreement", "crisis", "reform", "union", "regime",
+})
+
+# Broad concept / category names that ARE legitimate entities (searchable on
+# request) but must not be auto-recalled or auto-linked from free text: a chat
+# about "에너지 전환 정책" is not about the 정의당 faction 전환, and "사회주의"
+# names half the corpus. Used by AliasIndex.match(broad=False).
+BROAD_ENTITY_KEYS = frozenset({
+    "사회주의", "사회주의자", "자본주의", "공산주의", "제국주의", "노동계급", "노동운동", "에너지", "농민", "건설",
+    "외교", "자동화", "극우", "극좌", "재벌", "인플레이션", "헌법", "국회", "비상", "전환", "주체", "조선",
+    "소비에트", "협동조합", "소상공인", "자영업자", "비정규직", "개량주의", "자유주의", "파시즘", "국제주의",
+    "세계혁명", "계획경제", "신자유주의", "이론가", "유럽", "중동", "아시아", "아프리카", "민주주의", "독재",
+    "관료", "관료제", "농업", "반도체", "종북", "폐업", "영끌", "해빙", "전진",
+    "socialism", "capitalism", "communism", "imperialism", "working class", "energy", "inflation",
+    "democracy", "europe", "asia", "africa", "middle east", "dictatorship",
+    # surname-style weak aliases that collide with ordinary Korean words
+    "하니",
 })
 
 
@@ -367,11 +394,18 @@ class ResolveResult:
         return self.uuid is not None
 
 
-def _lookup_params(name: str, aliases=()) -> tuple[list[str], list[str]]:
+def _lookup_params(name: str, aliases=(), *, trusted: bool = True) -> tuple[list[str], list[str]]:
     """Exact names and strong keys used for lookup. Weak (surname-like)
     aliases of the incoming entity are NOT used — they would attach it to
-    any namesake."""
-    strong_aliases = [a for a in _dedupe_strings(aliases) if not is_weak_alias(a, name)]
+    any namesake.
+
+    ``trusted=False`` (no external id: LLM document extraction, agent
+    writes) looks up by *name only*. On 2026-09-03 an LLM fact whose aliases
+    overlapped a United States key resolved its Soviet subject onto the
+    United States node, and the union that followed gave that node 소련/
+    중국/프랑스/스탈린/CIA/연준 as aliases — every counterparty it had ever
+    shared a fact with."""
+    strong_aliases = [a for a in _dedupe_strings(aliases) if not is_weak_alias(a, name)] if trusted else []
     names = _dedupe_strings([name, *strong_aliases])
     keys = alias_keys_for(names)
     return names, keys
@@ -437,15 +471,16 @@ def resolve_entity_sync(
     external_id: str | None = None,
     aliases=(),
     exclude_uuid: str | None = None,
+    trusted: bool = True,
 ) -> ResolveResult:
     """Deterministic resolution on a sync neo4j session (jobs, scripts).
     ``exclude_uuid`` lets maintenance passes resolve a node against everything
-    but itself."""
+    but itself. ``trusted=False`` ignores ``aliases`` for lookup."""
     if external_id:
         rec = session.run(CYPHER_RESOLVE_BY_EXTERNAL_ID, eid=external_id).single()
         if rec:
             return ResolveResult(rec["uuid"], "external_id", rec["name"], list(rec["labels"] or []))
-    names, keys = _lookup_params(name, aliases)
+    names, keys = _lookup_params(name, aliases, trusted=trusted)
     if not names:
         return ResolveResult(None, "none")
     rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)]
@@ -466,6 +501,7 @@ async def resolve_entity_async(
     external_id: str | None = None,
     aliases=(),
     embedder=None,
+    trusted: bool = True,
 ) -> ResolveResult:
     """Same as ``resolve_entity_sync`` on an async session, plus the optional
     name-embedding nearest-neighbour step when ``KG_RESOLVE_EMBEDDING_NN=1``."""
@@ -474,7 +510,7 @@ async def resolve_entity_async(
         rec = await result.single()
         if rec:
             return ResolveResult(rec["uuid"], "external_id", rec["name"], list(rec["labels"] or []))
-    names, keys = _lookup_params(name, aliases)
+    names, keys = _lookup_params(name, aliases, trusted=trusted)
     if not names:
         return ResolveResult(None, "none")
     result = await session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)
@@ -504,6 +540,55 @@ async def resolve_entity_async(
 
 def embedding_nn_enabled() -> bool:
     return os.getenv("KG_RESOLVE_EMBEDDING_NN", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ── Untrusted alias hygiene ──────────────────────────────────────────────────
+
+# Keys among $keys that some other node already owns as its name or a strong
+# alias key. An untrusted alias that names another entity is not an alias.
+CYPHER_OWNED_KEYS = """
+MATCH (n:Entity)
+WHERE n.uuid <> coalesce($exclude_uuid, '')
+  AND (toLower(n.name) IN $keys OR any(k IN $keys WHERE k IN coalesce(n.alias_keys, [])))
+UNWIND [k IN $keys WHERE k = toLower(n.name) OR k IN coalesce(n.alias_keys, [])] AS k
+RETURN DISTINCT k
+"""
+
+
+def filter_untrusted_aliases(name: str, aliases, owned_keys=()) -> list[str]:
+    """Aliases an untrusted source (LLM extraction, agent write) may give a
+    NEW node: drop generic nouns, keys owned by another node, single-token
+    Korean aliases of two characters or fewer (정권/노조 material), and
+    anything equal to the name. Trusted (registry-backed) sources bypass this.
+    """
+    own = normalize_alias_key(name)
+    owned = set(owned_keys or ())
+    out: list[str] = []
+    for a in _dedupe_strings(aliases):
+        k = normalize_alias_key(a)
+        if not k or k == own or k in GENERIC_ENTITY_NAMES or k in owned:
+            continue
+        if " " not in k and _HANGUL_RE.search(k) and len(k) <= 2:
+            continue
+        if " " not in k and not _HANGUL_RE.search(k) and len(k) <= 3:
+            continue
+        out.append(a)
+    return out
+
+
+def owned_keys_sync(session, keys, exclude_uuid: str | None = None) -> set[str]:
+    keys = [k for k in _dedupe_strings(keys) if k]
+    if not keys:
+        return set()
+    return {r["k"] for r in session.run(CYPHER_OWNED_KEYS, keys=keys, exclude_uuid=exclude_uuid)}
+
+
+async def owned_keys_async(session, keys, exclude_uuid: str | None = None) -> set[str]:
+    keys = [k for k in _dedupe_strings(keys) if k]
+    if not keys:
+        return set()
+    result = await session.run(CYPHER_OWNED_KEYS, keys=keys, exclude_uuid=exclude_uuid)
+    return {r["k"] async for r in result}
 
 
 # ── Identity upsert ──────────────────────────────────────────────────────────
@@ -713,9 +798,11 @@ class AliasIndex:
             return len(key.replace(" ", "")) >= self.min_hangul
         return len(key) >= self.min_latin
 
-    def match(self, text: str, limit: int = 5) -> list[AliasHit]:
+    def match(self, text: str, limit: int = 5, *, broad: bool = True) -> list[AliasHit]:
         """Entities whose alias key occurs in ``text``; longest keys first,
-        overlapping shorter keys dropped."""
+        overlapping shorter keys dropped. ``broad=False`` (recall, document
+        mentions) skips ``BROAD_ENTITY_KEYS`` — category words that name a
+        real node but say nothing about what the text is about."""
         norm = normalize_alias_key(text)
         if not norm:
             return []
@@ -726,6 +813,8 @@ class AliasIndex:
         hits: list[tuple[str, list[tuple[str, str, list[str]]]]] = []
         for key, entries in keys:
             if not self._eligible(key):
+                continue
+            if not broad and key in BROAD_ENTITY_KEYS:
                 continue
             if _HANGUL_RE.search(key):
                 # The key must START a word ("우리가" / "리델리가" must not match

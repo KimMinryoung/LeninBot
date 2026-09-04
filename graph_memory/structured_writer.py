@@ -145,12 +145,13 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
 
 async def find_canonical_entity_uuid(
     driver_client, database: str, name: str, entity_type: str,
-    *, external_id: str | None = None, aliases=(), embedder=None,
+    *, external_id: str | None = None, aliases=(), embedder=None, trusted: bool = True,
 ) -> str | None:
     """Resolve an existing entity through the identity layer
     (``kg_runtime.identity.resolve_entity_async``): external id, then
     normalized alias/name match across group_ids (same label required), then
-    the optional name-embedding step. Returns None if no match."""
+    the optional name-embedding step. Returns None if no match.
+    ``trusted=False`` resolves by name only (aliases are ignored)."""
     async with driver_client.session(database=database) as session:
         hit = await resolve_entity_async(
             session,
@@ -159,8 +160,21 @@ async def find_canonical_entity_uuid(
             external_id=external_id,
             aliases=aliases,
             embedder=embedder,
+            trusted=trusted,
         )
         return hit.uuid
+
+
+async def _untrusted_aliases(driver_client, database: str, name: str, aliases) -> list[str]:
+    """Aliases an untrusted side may give a NEW node (see
+    ``kg_runtime.identity.filter_untrusted_aliases``)."""
+    from kg_runtime.identity import alias_keys_for, filter_untrusted_aliases, owned_keys_async
+    candidates = filter_untrusted_aliases(name, aliases)
+    if not candidates:
+        return []
+    async with driver_client.session(database=database) as session:
+        owned = await owned_keys_async(session, alias_keys_for(candidates))
+    return filter_untrusted_aliases(name, candidates, owned)
 
 
 # ── Build phase ───────────────────────────────────────────────────────────────
@@ -247,14 +261,19 @@ def _side(fact: dict, side: str) -> dict:
     aliases = fact.get(f"{side}_aliases") or ()
     if isinstance(aliases, str):
         aliases = [aliases]
+    external_id = fact.get(f"{side}_external_id") or None
     return {
         "name": fact[f"{side}_name"],
         "type": fact[f"{side}_type"],
-        "external_id": fact.get(f"{side}_external_id") or None,
+        "external_id": external_id,
         "aliases": [a for a in aliases if a],
         "summary": fact.get(f"{side}_summary") or "",
         "name_ko": fact.get(f"{side}_name_ko") or None,
         "name_en": fact.get(f"{side}_name_en") or None,
+        # Only a registry-backed side (CommuLingo row, document manifest) may
+        # change an existing node's identity or resolve through its aliases.
+        # LLM-extracted and agent-written sides carry no external id.
+        "trusted": bool(external_id),
     }
 
 
@@ -394,22 +413,33 @@ async def write_structured_facts(
         """Return (uuid, is_new). Reuses an existing node through the identity
         resolver (external id → alias/name across groups → optional NN)."""
         name, etype = side["name"], side["type"]
+        trusted = side.get("trusted", True)
         key = (side["external_id"] or name, etype)
         if key in entity_lookup_cache:
             uuid = entity_lookup_cache[key]
-            _remember_hints(uuid, side)
+            if trusted or uuid in new_uuids:
+                _remember_hints(uuid, side)
             return uuid, uuid in new_uuids
         existing = await find_canonical_entity_uuid(
             driver_client, database, name, etype,
             external_id=side["external_id"], aliases=side["aliases"], embedder=embedder,
+            trusted=trusted,
         )
         if existing:
             entity_lookup_cache[key] = existing
-            _remember_hints(existing, side)
+            # An untrusted side attaches its edge and nothing else: no alias
+            # union, no summary, no name_ko/name_en (2026-09-03 United States
+            # pollution).
+            if trusted:
+                _remember_hints(existing, side)
             return existing, False
         new_uuid = str(uuid4())
         entity_lookup_cache[key] = new_uuid
         new_uuids.add(new_uuid)
+        if not trusted:
+            side = dict(side)
+            side["aliases"] = await _untrusted_aliases(driver_client, database, name, side["aliases"])
+            side["summary"] = ""
         _remember_hints(new_uuid, side)
         return new_uuid, True
 

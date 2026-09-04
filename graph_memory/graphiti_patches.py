@@ -267,6 +267,20 @@ def normalize_entity_names_in_text(text: str) -> str:
         return text
 
     def _replace(match: re.Match) -> str:
-        return _NAME_NORM_MAP.get(match.group(0).lower(), match.group(0))
+        raw = match.group(0)
+        key = raw.lower()
+        # A short Latin abbreviation (us/uk/un/who/imf …) is only an
+        # abbreviation when written in capitals. Case-insensitive matching
+        # turned "Kim Jong Un" into "Kim Jong United Nations", "telling an
+        # employee who …" into "… World Health Organization …" and the pronoun
+        # "us" into "United States" (2026-09-04 audit).
+        if _is_short_abbreviation(key) and raw.replace(".", "") != raw.replace(".", "").upper():
+            return raw
+        return _NAME_NORM_MAP.get(key, raw)
 
     return _NAME_NORM_PATTERN.sub(_replace, text)
+
+
+def _is_short_abbreviation(key: str) -> bool:
+    letters = key.replace(".", "")
+    return letters.isascii() and letters.isalpha() and len(letters) <= 4

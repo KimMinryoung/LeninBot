@@ -489,14 +489,15 @@ def fetch_kg_stats() -> dict:
 
 # ── Entity matching ───────────────────────────────────────────────────────────
 
-def _alias_hits(text: str, limit: int = 5):
-    """Alias-index hits for ``text`` (empty on any failure)."""
+def _alias_hits(text: str, limit: int = 5, *, broad: bool = True):
+    """Alias-index hits for ``text`` (empty on any failure). ``broad=False``
+    skips category words (사회주의, 에너지 …) — used by recall."""
     try:
         from kg_runtime.identity import get_alias_index
         idx = get_alias_index()
         if not idx.ensure_loaded():
             return []
-        return idx.match(text, limit=limit)
+        return idx.match(text, limit=limit, broad=broad)
     except Exception as exc:
         logger.debug("[KG] alias match skipped: %s", exc)
         return []

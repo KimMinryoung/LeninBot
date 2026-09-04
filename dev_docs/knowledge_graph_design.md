@@ -1,6 +1,6 @@
 # Knowledge Graph Design
 
-최종 확인 기준: 2026-09-03 코드 트리 (저장소 간 허브 재설계).
+최종 확인 기준: 2026-09-04 코드 트리 (저장소 간 허브 재설계 + 별칭 오염 수리).
 
 Cyber-Lenin's knowledge graph is the **hub across the project's knowledge stores**: CommuLingo people/terms/events, published research and archival documents, and news/analysis facts written by agents all live in one Neo4j graph. Every mirrored node carries stable external ids, so the same real-world entity converges on one node regardless of which store or agent mentioned it first. The public runtime talks through `kg_runtime/`; Graphiti/Neo4j implementation details live under `graph_memory/`.
 
@@ -32,6 +32,8 @@ Graphiti/Neo4j objects are sensitive to event-loop ownership. `kg_runtime/servic
 - `collect_kg_futures()` waits for multiple submitted tasks
 - transient connection failures mark the singleton unhealthy and apply a 120-second retry cooldown
 
+`NAME_NORMALIZATION` (abbreviation → canonical, `graph_memory/config.py`) is applied to episode bodies and structured fact names by `graphiti_patches.normalize_entity_names_in_text`; since 2026-09-04 a short Latin key (≤4 letters: us, un, who, imf …) only expands when written in capitals — case-insensitive matching had produced "Kim Jong United Nations" and "telling an employee World Health Organization asked".
+
 `graph_memory/service.py` uses the models registered in `config/llm_call_sites.json` (`kg_extraction_main`, `kg_extraction_small`, `kg_embedding`; see `dev_docs/llm_call_registry.md`). Embedding calls go through a bounded retry wrapper for transient `429`/`503` (`KG_EMBED_RETRY_DELAYS`, default `5,15,45`) and a client-side pacer (`KG_EMBED_MAX_RPS`, default 2 req/s, `0` disables). The structured writer pre-embeds nodes and facts in batches of 50 (`_embed_in_batches`) so a 200-fact sync batch costs a handful of embedding requests, not hundreds. KG uses the proxy-owned shared `GEMINI_API_KEY`. Hermetic smoke: `scripts/smoke_kg_embed_limiter.py`.
 
 Direct Cypher (no Graphiti) goes through `kg_runtime.search._get_neo4j_sync_driver()`; `NEO4J_PASSWORD` comes from `secrets_loader.get_secret` (systemd credential), so ad-hoc runs export it from `/run/credentials/<unit>/neo4j_password`.
@@ -56,6 +58,10 @@ Every Entity may carry `external_ids`, `aliases`, `alias_keys`, `name_ko`, `name
 4. `KG_RESOLVE_EMBEDDING_NN=1` (default off): name-embedding nearest neighbour on `entity_name_embedding`, cosine ≥ `KG_RESOLVE_EMBEDDING_NN_THRESHOLD` (0.92), same label
 
 `upsert_identity_*` unions ids/aliases into an existing node (and fills an empty summary); `merge_entity_nodes_*` is the one merge implementation (edges moved with same-predicate dedupe, MENTIONS moved, summary filled, identity unioned, duplicate DETACH DELETEd) — `skills/kg-maintenance/scripts/merge_entities.py` and `kg_runtime.admin.kg_merge_entities` delegate to it. After every free-text episode, `post_episode_merge` folds new nodes into same-label nodes that share an alias key across groups (graphiti only searches resolution candidates inside the episode's own `group_id`, which is how one entity became five nodes).
+
+**Trusted vs untrusted sides (2026-09-04).** A fact side is *trusted* only when it carries an `external_id` (CommuLingo rows, document manifest entries, Document nodes). An untrusted side — every LLM-extracted document fact, every agent `write_kg_structured` triple — is resolved **by name only** (its aliases are not lookup keys), may **never change an existing node's identity** (no alias/name_ko/name_en/summary union), and when it creates a new node its aliases pass `filter_untrusted_aliases` (no generic nouns, nothing another node already owns as name or strong key, no single-token Korean alias of ≤2 chars or Latin of ≤3). Why: on 2026-09-03 the first document extraction resolved a Soviet subject onto `United States` through an overlapping LLM alias and then unioned everything into it — the node ended up with 60 aliases (소련, 중국, 프랑스, 스탈린, CIA, 연준 …), every later '소련' mention attached to it, and the recall block answered "소련은 왜 무너졌지?" with tariff facts. `skills/kg-maintenance/scripts/repair_alias_pollution.py` (dry-run by default) strips the poisoned aliases, deletes every `doc_ref` edge and orphaned `documents`-group node, and repairs fact text mangled by the abbreviation map; `python -m jobs.kg_sync --source documents --full --force` then rebuilds the document layer under the new rules.
+
+`GENERIC_ENTITY_NAMES` also blocks the common nouns that run handed out as aliases (정권, 노조, 회사, 선언, 음모, 여당, 대통령, http …). `BROAD_ENTITY_KEYS` (사회주의, 노동계급, 에너지, 전환, 비상, 하니 …) are real, searchable nodes that `AliasIndex.match(broad=False)` skips for recall and document mentions — a chat about 에너지 전환 정책 is not about the 정의당 faction 전환.
 
 `AliasIndex` caches `alias_key → [(uuid, name, labels)]` in-process (one Cypher, 10-minute TTL); weak keys are indexed only when they point at exactly one entity ("레닌" yes, "카스트로" no). `match(text)` finds entities named in free text without any embedding call: Korean keys (≥2 chars) match as substrings because particles attach to names, Latin keys (≥4 chars) as whole tokens, longest match wins.
 
@@ -95,7 +101,7 @@ Typical `group_id` values for agent writes: `geopolitics_conflict`, `diplomacy`,
 4. Output: `- [tier|expired] 주어 —Predicate→ 목적어: fact (valid 1953-01-01 → 1964-10-01; src: commulingo)` and `- 이름 [Person] (aka: …; id: commulingo:person:x): summary`.
 5. Graphiti failures still fall back to the direct-Cypher text match (now including `alias_text`).
 
-**Entity-gated recall** (`KG_ENTITY_GATED_RECALL=1`, default off): `kg_runtime.recall.entity_gated_kg_block(text, provider)` renders a `<knowledge-graph>` block (Markdown for non-Claude) for up to two entities named in a message/task — alias match + neighbourhood, zero LLM/embedding cost. A hit whose active facts are all `Reference` (document mentions only) is skipped — nothing to recall. Injected next to the experience block in `telegram/commands.py`, `telegram/tasks.py` and `services/web_chat.py`. The same flag lets `commulingo_people get_person` append `kg_facts` (non-mirror facts attached to the person's node).
+**Entity-gated recall** (`KG_ENTITY_GATED_RECALL=1`, default off): `kg_runtime.recall.entity_gated_kg_block(text, provider)` renders a `<knowledge-graph>` block (Markdown for non-Claude) for up to two entities named in a message/task — alias match (`broad=False`) + neighbourhood, zero LLM/embedding cost. `Reference` edges (document mentions) never appear in the block and a hit with nothing else is skipped — before 2026-09-04 four of six recalled lines were "문서 X에 언급된다". Injected next to the experience block in `telegram/commands.py`, `telegram/tasks.py` and `services/web_chat.py`. The same flag lets `commulingo_people get_person` append `kg_facts` (non-mirror facts attached to the person's node).
 
 Tool exposure: `knowledge_graph_search` is available to analyst, diary, general, autonomous, the Telegram/web/A2A/MCP surfaces, and since 2026-09-03 to both CommuLingo curators and the writer surface (`WRITER_TOOLS`). Vector corpus search (`vector_search`) stays separate.
 

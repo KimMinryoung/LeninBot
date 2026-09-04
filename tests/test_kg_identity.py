@@ -394,9 +394,14 @@ class AliasIndexTests(unittest.TestCase):
         idx = identity.AliasIndex()
         idx.load_rows([
             {"uuid": "manifesto", "name": "공산당 선언", "labels": ["Entity", "Concept"], "keys": [], "weak_keys": ["선언"]},
+            {"uuid": "krupskaya", "name": "나데즈다 크룹스카야", "labels": ["Entity", "Person"], "keys": [], "weak_keys": ["크룹스카야"]},
         ])
         self.assertEqual(idx.match("민주노총이 파업을 선언했다"), [])
-        self.assertEqual([h.uuid for h in idx.match("선언을 읽었다")], ["manifesto"])
+        # 2026-09-04: 선언 alone fired on every declaration in the corpus — it is a
+        # generic noun now and never indexed, even as a weak key.
+        self.assertEqual(idx.match("선언을 읽었다"), [])
+        self.assertEqual([h.uuid for h in idx.match("크룹스카야를 읽었다")], ["krupskaya"])
+        self.assertEqual(idx.match("크룹스카야주의자"), [])
 
     def test_generic_names_never_indexed(self):
         idx = identity.AliasIndex()
@@ -411,6 +416,59 @@ class AliasIndexTests(unittest.TestCase):
         self.assertTrue(identity.is_generic_entity_name("경찰"))
         self.assertTrue(identity.is_generic_entity_name("Organization"))
         self.assertFalse(identity.is_generic_entity_name("대한민국 경찰청"))
+
+
+class UntrustedSourceTests(unittest.TestCase):
+    """2026-09-04: an LLM/agent side (no external id) resolves by name only and
+    may not give aliases that belong to someone else or are common nouns."""
+
+    def test_lookup_ignores_aliases_when_untrusted(self):
+        names, keys = identity._lookup_params("소련 정부", ["미국", "Soviet government"], trusted=False)
+        self.assertEqual(names, ["소련 정부"])
+        self.assertNotIn("미국", keys)
+        names, keys = identity._lookup_params("소련 정부", ["Soviet government"], trusted=True)
+        self.assertIn("soviet government", keys)
+
+    def test_resolve_sync_untrusted_does_not_use_alias_keys(self):
+        seen = {}
+
+        def by_key(params):
+            seen.update(params)
+            return []
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_KEY: by_key})
+        identity.resolve_entity_sync(session, name="소련", entity_type="Organization",
+                                     aliases=["United States"], trusted=False)
+        self.assertEqual(seen["names"], ["소련"])
+        self.assertEqual(seen["keys"], ["소련"])
+
+    def test_filter_untrusted_aliases(self):
+        out = identity.filter_untrusted_aliases(
+            "삼성바이오로직스 상생노조",
+            ["노조", "회사", "삼바 노조", "Samsung Biologics Union", "정권", "SBL", "Samsung Bio", "삼성바이오로직스 상생노조"],
+            owned_keys={"samsung bio"},
+        )
+        self.assertEqual(out, ["삼바 노조", "Samsung Biologics Union"])
+
+    def test_generic_names_cover_alias_pollution_words(self):
+        for word in ("정권", "노조", "회사", "선언", "음모", "여당", "대통령", "http"):
+            self.assertTrue(identity.is_generic_entity_name(word), word)
+
+    def test_alias_index_broad_false_skips_category_words(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([
+            {"uuid": "u1", "name": "사회주의", "labels": ["Entity", "Concept"], "keys": ["사회주의"], "weak_keys": []},
+            {"uuid": "u2", "name": "전환", "labels": ["Entity", "Organization"], "keys": ["전환"], "weak_keys": []},
+            {"uuid": "u3", "name": "국가보안법", "labels": ["Entity", "Policy"], "keys": ["국가보안법"], "weak_keys": []},
+        ])
+        text = "사회주의 에너지 전환 정책과 국가보안법 폐지"
+        self.assertEqual({h.name for h in idx.match(text)}, {"사회주의", "전환", "국가보안법"})
+        self.assertEqual({h.name for h in idx.match(text, broad=False)}, {"국가보안법"})
+
+    def test_generic_alias_is_never_indexed(self):
+        idx = identity.AliasIndex()
+        idx.load_rows([{"uuid": "u1", "name": "폴란드통일노동자당", "labels": ["Entity", "Organization"],
+                        "keys": ["폴란드통일노동자당", "정권"], "weak_keys": []}])
+        self.assertEqual(idx.match("정권 교체가 필요하다"), [])
 
 
 if __name__ == "__main__":

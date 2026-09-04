@@ -28,18 +28,19 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
     try:
         from kg_runtime.search import _alias_hits, _entity_neighborhood, _format_edge_line
 
-        hits = _alias_hits(text[:2000], limit=max_entities)
+        hits = _alias_hits(text[:2000], limit=max_entities, broad=False)
         if not hits:
             return ""
         lines: list[str] = []
         for hit in hits[:max_entities]:
-            node, edges = _entity_neighborhood(hit.uuid, cap=max_facts)
+            node, edges = _entity_neighborhood(hit.uuid, cap=max_facts * 3)
             if not node:
                 continue
             active = [e for e in edges if not e.get("expired_at")] or edges
-            # A node whose only facts are "document X mentions it" has nothing
-            # worth recalling; injecting it just pads the prompt with noise.
-            if not any(e.get("predicate") != "Reference" for e in active):
+            # "Document X mentions it" edges are bookkeeping, not knowledge:
+            # they neither qualify a node for recall nor appear in the block.
+            active = [e for e in active if e.get("predicate") != "Reference"]
+            if not active:
                 continue
             summary = (node.get("summary") or "").strip()
             if len(summary) > 160:

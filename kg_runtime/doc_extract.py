@@ -254,7 +254,7 @@ def mention_facts(rec: DocRecord, alias_index) -> list[dict]:
     if alias_index is None:
         return []
     scan = " ".join([rec["title"], rec.get("description") or "", (rec.get("text") or "")[:MENTION_SCAN_CHARS]])
-    hits = alias_index.match(scan, limit=MAX_MENTIONS * 2)
+    hits = alias_index.match(scan, limit=MAX_MENTIONS * 2, broad=False)
     doc = document_side(rec)
     facts = []
     seen_names: set[str] = set()
