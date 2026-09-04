@@ -441,14 +441,21 @@ def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str
     return out
 
 
-# A country or government is one thing whether the extractor called it an
-# Organization or a Location; strict label matching made the first document
-# run create 미국/소련/이란/독일 [Location] twins of the English-named nodes.
-_COMPATIBLE_LABELS = frozenset({"Organization", "Location"})
+# Label compatibility for name/alias hits. Only Person is strict: a person
+# never folds into a non-person and vice versa. Every other pair is the same
+# thing under a different extractor label — a country typed Location vs
+# Organization, a treaty typed Policy vs the Concept term, a book typed Asset
+# vs the Document node, a company typed Asset (its stock) vs Organization.
+# Strict matching gave the 2026-09-04 re-sync 160 label conflicts and as many
+# twin nodes (미국/소련 [Location], 트루먼 독트린 [Policy], TSMC [Asset] …).
+STRICT_LABELS = frozenset({"Person"})
 
 
 def _labels_compatible(entity_type: str, labels) -> bool:
-    return entity_type in _COMPATIBLE_LABELS and any(l in _COMPATIBLE_LABELS for l in (labels or ()))
+    labels = [l for l in (labels or ()) if l != "Entity"]
+    if entity_type in STRICT_LABELS or any(l in STRICT_LABELS for l in labels):
+        return entity_type in labels
+    return True
 
 
 def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResult:

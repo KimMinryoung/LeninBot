@@ -223,13 +223,14 @@ class ResolveSyncTests(unittest.TestCase):
                  "rels": 4, "same_label": False},
             ],
         })
-        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Concept")
+        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Person")
         self.assertIsNone(hit.uuid)
         self.assertEqual(hit.method, "label_conflict")
-        # 2026-09-04: a country typed Location by the extractor is the same
-        # node as the Organization one (no more 미국/소련 [Location] twins).
-        hit = identity.resolve_entity_sync(session, name="Libya", entity_type="Location")
-        self.assertEqual((hit.uuid, hit.method), ("u-org", "alias"))
+        # 2026-09-04: only Person is strict — a country typed Location or a
+        # treaty typed Policy is the same node as the Organization/Concept one.
+        for etype in ("Location", "Concept", "Policy", "Asset"):
+            hit = identity.resolve_entity_sync(session, name="Libya", entity_type=etype)
+            self.assertEqual((hit.uuid, hit.method), ("u-org", "alias"), etype)
 
     def test_no_match(self):
         session = FakeSyncSession({})
@@ -453,12 +454,13 @@ class UntrustedSourceTests(unittest.TestCase):
         )
         self.assertEqual(out, ["삼바 노조", "Samsung Biologics Union"])
 
-    def test_location_and_organization_are_compatible(self):
+    def test_only_person_is_strict(self):
         rows = [{"uuid": "us", "name": "United States", "labels": ["Entity", "Organization"], "same_label": False}]
-        hit = identity._pick_key_hit(rows, "Location", "미국")
-        self.assertEqual(hit.uuid, "us")
+        self.assertEqual(identity._pick_key_hit(rows, "Location", "미국").uuid, "us")
         rows = [{"uuid": "p", "name": "Stalin", "labels": ["Entity", "Person"], "same_label": False}]
         self.assertEqual(identity._pick_key_hit(rows, "Location", "Stalin").method, "label_conflict")
+        rows = [{"uuid": "o", "name": "Clayton", "labels": ["Entity", "Organization"], "same_label": False}]
+        self.assertEqual(identity._pick_key_hit(rows, "Person", "Clayton").method, "label_conflict")
 
     def test_generic_names_cover_alias_pollution_words(self):
         for word in ("정권", "노조", "회사", "선언", "음모", "여당", "대통령", "http"):
