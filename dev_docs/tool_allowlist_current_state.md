@@ -60,6 +60,12 @@ Query construction lives in the shared `web_search` tool/schema descriptions,
 so every consumer of the registry receives the same guidance: one focused
 missing fact, exact entity/date/version anchors, likely source language, no
 answer-format instructions, and follow-up searches only for unresolved evidence.
+The shared descriptions fit the provider compaction limits (360 characters for
+the tool, 160 per schema description), so web and Telegram models receive the
+complete guidance instead of a truncated prefix. A regression test in
+`tests/test_web_search_queries.py` checks that compaction preserves the entire
+search definition in both Anthropic and OpenAI payload formats. This is prompt
+guidance, not a deterministic query rewriter or a guarantee of model compliance.
 Known source URLs should go directly to `fetch_url`. Historical years belong in
 the query; `time_range` filters page publication/update recency, not event dates.
 The current Tavily best-practices page recommends queries under 1,500 characters

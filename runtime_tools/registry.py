@@ -346,13 +346,11 @@ TOOLS = [
     {
         "name": "web_search",
         "description": (
-            "Search the web through the configured Tavily/Brave provider chain. Returns relevant snippets "
-            "with URLs. Use for current events, real-time data, and fact-checking. Snippets are leads, not "
-            "sources — fetch_url the page before citing a specific figure or quotation. "
-            "Reuse existing results; search only for missing evidence. For a multi-part task, start with "
-            "one focused question and add searches only for unresolved facts; do not preemptively fan out "
-            "paraphrases or translations. Use fetch_url directly when the source URL is already known. "
-            "Identical requests are briefly cached."
+            "Search via Tavily/Brave for missing evidence only; reuse prior results. "
+            "Start with one focused query; add queries only for unresolved facts, not preemptive "
+            "paraphrases/translations. If the URL is known, use fetch_url. Snippets are leads: "
+            "fetch the page before citing figures/quotes. Use domain parameters, not site operators. "
+            "Prefer queries under 400 chars."
         ),
         "input_schema": {
             "type": "object",
@@ -361,14 +359,8 @@ TOOLS = [
                     "type": "string",
                     "maxLength": 1500,
                     "description": (
-                        "One concise factual question or focused keywords, usually under 400 characters. "
-                        "Include the exact person/organization/product, relevant year/version/location, "
-                        "and the missing fact. Use the likely source language and original names where known; "
-                        "do not invent translations. No whole task prompts, answer-format instructions or "
-                        "unrelated questions. Preserve qualifiers instead of truncating. Example: "
-                        "'Python 3.12 asyncio.timeout cancellation behavior' with include_domains=['docs.python.org']. "
-                        "Use domain parameters instead of embedding site operators. Tavily accepts up to "
-                        "1500 characters; Brave allows 400 characters/50 words including domain operators."
+                        "One missing fact; brief keywords/question with exact names, year/version/location. "
+                        "Use source language/original names. No task prompts or answer-format demands."
                     ),
                 },
                 "max_results": {"type": "integer", "description": "Number of results (1-10).", "default": 5},
@@ -376,9 +368,8 @@ TOOLS = [
                     "type": "string",
                     "enum": ["ultra-fast", "fast", "basic", "advanced"],
                     "description": (
-                        "basic is the general default (1 Tavily credit). fast/ultra-fast prioritize latency. "
-                        "advanced returns focused extra context and costs twice as "
-                        "many Tavily credits, so reserve it for one specific difficult question."
+                        "Default basic: 1 Tavily credit. advanced: 2 credits, focused extra context; "
+                        "only for difficult unresolved facts. fast/ultra-fast prioritize latency."
                     ),
                     "default": "basic",
                 },
@@ -395,7 +386,7 @@ TOOLS = [
                 },
                 "include_domains": {
                     "type": "array", "items": {"type": "string"}, "maxItems": 10,
-                    "description": "Restrict to these domains and their subdomains, e.g. ['docs.python.org']. Prefer a short list of known official/primary sources; omit if the source is unknown. Bare hostnames only, no URLs, paths or wildcards. A strict filter may yield no results.",
+                    "description": "Strict domain/subdomain filter; may yield nothing. Prefer known primary sources; omit if unknown. Bare hosts only (docs.python.org), no URLs/paths/wildcards.",
                 },
                 "exclude_domains": {
                     "type": "array", "items": {"type": "string"}, "maxItems": 10,

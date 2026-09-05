@@ -10,6 +10,25 @@ from runtime_tools import web_search as search
 
 
 class QueryTests(unittest.IsolatedAsyncioTestCase):
+    def test_search_guidance_survives_provider_compaction(self):
+        from runtime_tools.registry import TOOLS
+        from tool_gateway.dispatcher import compact_tool_definitions
+
+        # Web and Telegram share this registry. Both model payload formats must
+        # retain every instruction, including nested parameter descriptions.
+        tool = next(t for t in TOOLS if t["name"] == "web_search")
+        openai_tool = {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["input_schema"],
+            },
+        }
+        for payload in (tool, openai_tool):
+            with self.subTest(format="openai" if "function" in payload else "anthropic"):
+                self.assertEqual(compact_tool_definitions([payload]), [payload])
+
     async def test_shared_schema_and_handler_forward_filters(self):
         import jsonschema
         import runtime_tools.registry as registry
