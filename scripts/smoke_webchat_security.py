@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -20,9 +21,13 @@ class _Req:
         self.client = type("Client", (), {"host": host})()
 
 
+@patch("db.query", new=lambda *args, **kwargs: [])
+@patch("db.query_one", new=lambda *args, **kwargs: None)
+@patch("db.execute", new=lambda *args, **kwargs: None)
 def main() -> int:
     from services import api
-    import services.web_chat as web_chat
+    import services.web_chat_store as store
+    import services.web_chat_text as text
     from services.web_personas import get_persona, render_system_prompt
 
     direct = _Req({"x-user-fingerprints": "fp-a,fp-b"})
@@ -60,13 +65,13 @@ def main() -> int:
         "chars 0:20 of 20 truncated=False\n\n"
         '<external source="url:https://archive.example/kpd/source">text</external>'
     )
-    source_urls = web_chat._extract_web_source_urls([search_detail, fetch_detail])
+    source_urls = text._extract_web_source_urls([search_detail, fetch_detail])
     assert source_urls == [
         "https://archive.example/kpd/source",
         "https://example.org/kpd-heidelberg",
     ]
 
-    normalized = web_chat._format_verified_url_footnotes(
+    normalized = text._format_verified_url_footnotes(
         "확인된 주장이다.[^7]\n\n"
         "[^7]: 기사 제목과 발행일 https://example.org/kpd-heidelberg",
         source_urls,
@@ -77,7 +82,7 @@ def main() -> int:
     )
     assert "기사 제목" not in normalized
 
-    added = web_chat._finalize_web_answer(
+    added = text._finalize_web_answer(
         "KPD Heidelberg의 1932년 활동을 확인해줘",
         "확인된 내용을 요약한다.",
         [search_detail],
@@ -87,14 +92,14 @@ def main() -> int:
     )
     assert "https://invented.example/source" not in added
 
-    uncited = web_chat._format_verified_url_footnotes(
+    uncited = text._format_verified_url_footnotes(
         "도구로 확인하지 않은 주장.[^9]\n\n"
         "[^9]: https://invented.example/source",
         [],
     )
     assert uncited == "도구로 확인하지 않은 주장."
 
-    blocked = web_chat._finalize_web_answer(
+    blocked = text._finalize_web_answer(
         "공개 일기에 적힌 민수의 주소와 직함을 지우고 비공개로 바꿔줘",
         "삭제했고 운영자에게도 전달했다. 민수는 서울의 간부다.",
         [],
@@ -102,9 +107,9 @@ def main() -> int:
     assert "읽기 전용" in blocked
     assert "운영자에게 요청을 전달할 수 없다" in blocked
     assert "민수" not in blocked and "서울" not in blocked and "간부" not in blocked
-    assert not web_chat._is_external_mutation_request("이 문장을 더 짧게 수정해줘")
-    assert not web_chat._is_external_mutation_request("관련 자료 링크를 보내줘")
-    assert web_chat._is_external_mutation_request("이메일로 자료를 보내줘")
+    assert not text._is_external_mutation_request("이 문장을 더 짧게 수정해줘")
+    assert not text._is_external_mutation_request("관련 자료 링크를 보내줘")
+    assert text._is_external_mutation_request("이메일로 자료를 보내줘")
 
     prompt = render_system_prompt(get_persona("cyber-lenin"), "openai")
     assert "Preserve the user's exact proper nouns, dates" in prompt
@@ -112,15 +117,15 @@ def main() -> int:
     assert "[^1]: https://example.com/source" in prompt
     assert "URL-only definitions" in prompt
 
-    original_query_one = web_chat.db_query_one
+    original_query_one = store.db_query_one
     captured: list[tuple[str, tuple]] = []
     try:
         def _capture(sql: str, params: tuple):
             captured.append((sql, params))
             return {"id": 42}
 
-        web_chat.db_query_one = _capture
-        assert web_chat._log_chat(
+        store.db_query_one = _capture
+        assert store._log_chat(
             "session", "fingerprint", "ua", "ip", "question", "answer",
             request_id="request-42", reserved_chat_log_id=42,
         ) == 42
@@ -129,7 +134,7 @@ def main() -> int:
         assert insert_params[:3] == (42, "request-42", "session")
         assert insert_sql.count("%s") == len(insert_params)
 
-        assert web_chat._update_chat_answer(
+        assert store._update_chat_answer(
             42, "fingerprint", "replacement", request_id="request-43"
         ) == 42
         update_sql, update_params = captured[-1]
@@ -137,7 +142,7 @@ def main() -> int:
         assert update_params[-3:] == ("request-43", 42, "fingerprint")
         assert update_sql.count("%s") == len(update_params)
     finally:
-        web_chat.db_query_one = original_query_one
+        store.db_query_one = original_query_one
 
     print("webchat security smoke ok")
     return 0

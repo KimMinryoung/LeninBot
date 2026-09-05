@@ -174,7 +174,18 @@ to body footnotes with URL-only definitions and drops citations to URLs that did
 not appear in this run's successful tool output. It also fails closed on requests
 to mutate stored/public content because the public persona tool profiles are
 read-only. The common prompt contract lives in `services/web_personas.py`; the
-enforcement and URL extraction live in `services/web_chat.py`.
+enforcement and URL extraction live in `services/web_chat_text.py`, alongside
+pure history, feedback, regeneration and tool-trace formatting.
+`services/web_chat_store.py` owns history/feedback queries and persistence;
+`services/web_chat.py` retains persona tools, provider invocation and the
+server-owned background/SSE lifecycle.
+
+The handler's `_invoke_web_model` shares OpenAI/Kimi call options while retaining
+Kimi-specific reasoning settings and the DeepSeek Anthropic-to-OpenAI failover
+path. String and dictionary responses are normalized once into the same public
+completion fields. Citation selection and rendering use the same parser, so
+Markdown destinations (including URLs with parentheses) keep their exact source
+association even when they occur beyond the first three retrieval results.
 
 ## Error Recovery and Tool Conversion
 

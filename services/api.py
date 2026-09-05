@@ -312,12 +312,8 @@ async def save_chat_feedback(request: ChatFeedbackRequest, http_req: Request):
     persona/session once, then marked consumed. Regeneration feedback is applied
     only to that regeneration request.
     """
-    from services.web_chat import (
-        _FEEDBACK_TONE_LABELS,
-        get_web_chat_log_for_feedback,
-        normalize_web_chat_tone_feedback,
-        save_web_chat_feedback,
-    )
+    from services.web_chat_store import get_web_chat_log_for_feedback, save_web_chat_feedback
+    from services.web_chat_text import _FEEDBACK_TONE_LABELS, normalize_web_chat_tone_feedback
 
     tone_feedback = normalize_web_chat_tone_feedback(request.tone_feedback)
     if request.tone_feedback and not tone_feedback:

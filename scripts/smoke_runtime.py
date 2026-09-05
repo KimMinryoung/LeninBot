@@ -1773,11 +1773,11 @@ async def _assert_telegram_project_show_includes_tick_signals() -> None:
 
 
 def _assert_web_feedback_is_one_shot() -> None:
-    import services.web_chat as web_chat
+    import services.web_chat_store as web_chat
+    from services.web_chat_text import _render_web_feedback_context
 
     original_query = web_chat.db_query
     original_query_one = web_chat.db_query_one
-    original_execute = web_chat.db_execute
     calls: dict[str, object] = {}
 
     def fake_query(sql, params=()):
@@ -1796,27 +1796,25 @@ def _assert_web_feedback_is_one_shot() -> None:
         calls["save_params"] = params
         return {"id": 12, "consumed_at": "now" if params[-1] is False else None}
 
-    def fake_execute(sql, params=()):
-        calls.setdefault("execute_calls", []).append((sql, params))
-
     try:
         web_chat.db_query = fake_query
         web_chat.db_query_one = fake_query_one
-        web_chat.db_execute = fake_execute
 
         rows = web_chat._load_web_feedback_rows(["fp1"], "sess1", "yezhov", 8)
         assert rows and rows[0]["id"] == 11
         assert "f.consumed_at IS NULL" in calls["load_sql"]
 
-        context = web_chat._render_web_feedback_context(rows, "deepseek")
+        context = _render_web_feedback_context(rows, "deepseek")
         assert "for this next answer only" in context
         assert "avoid repeating Khrushchev correction" in context
 
-        web_chat._mark_web_feedback_consumed([11])
-        execute_calls = calls.get("execute_calls") or []
-        assert execute_calls
-        assert "SET consumed_at = COALESCE(consumed_at, now())" in execute_calls[-1][0]
-        assert execute_calls[-1][1] == ([11],)
+        assert web_chat._log_chat(
+            "sess1", "fp1", "ua", "ip", "question", "answer", feedback_ids=[11],
+        ) == 12
+        assert "WITH saved AS (INSERT INTO chat_logs" in calls["save_sql"]
+        assert "UPDATE web_chat_feedback" in calls["save_sql"]
+        assert "AND EXISTS (SELECT 1 FROM saved)" in calls["save_sql"]
+        assert calls["save_params"][-1] == [11]
 
         saved = web_chat.save_web_chat_feedback(
             chat_log_id=5,
@@ -1833,7 +1831,6 @@ def _assert_web_feedback_is_one_shot() -> None:
     finally:
         web_chat.db_query = original_query
         web_chat.db_query_one = original_query_one
-        web_chat.db_execute = original_execute
 
 
 def _assert_web_political_line_dynamic_reload() -> None:

@@ -61,6 +61,27 @@ mutate it. Structured KG updates are reserved for trusted internal execution pat
 
 ### `POST /chat`
 
+Internal ownership: `services/web_chat.py` owns persona tools, provider calls and
+the background/SSE lifecycle. `services/web_chat_store.py` owns chat-history and
+feedback SQL, chat logging, regeneration updates, ID reservation and schema setup.
+`services/web_chat_text.py` owns pure history rendering/trimming, feedback and
+regeneration prompts, tool traces/usage summaries and answer finalization. API
+feedback handlers and schema migrations import directly from these owners.
+
+Within the handler, `_prepare_web_chat` resolves prompt inputs,
+`_invoke_web_model` adapts provider calls and normalizes completion metadata, and
+`_persist_web_answer` requires a saved message ID before a run can emit `answer`.
+A new answer and consumption of its pending written feedback commit in one SQL
+statement; failure leaves both uncommitted and emits the existing `error` event
+instead of a successful completion with a null ID. Regeneration update failures
+also emit `error`. This applies to detached runs as well; it does not add a durable
+retry queue for database outages.
+
+Session history uses one scoped query for the initial anchor and recent window,
+deduplicates their overlap and orders by `(created_at, id)` for stable timestamp
+ties. Accounts supersede fingerprints, and an empty/unowned session never falls
+back to another session's history.
+
 Request:
 
 ```json

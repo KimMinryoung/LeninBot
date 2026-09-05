@@ -87,14 +87,14 @@ def _tool_idempotency() -> None:
 
 
 def _chat_logs_persona() -> None:
-    from services.web_chat import ensure_chat_logs_persona_column
+    from services.web_chat_store import ensure_chat_logs_persona_column
 
     ensure_chat_logs_persona_column()
 
 
 def _web_chat_audit_correlation() -> None:
     from security_gateway.audit import ensure_tool_audit_log_table
-    from services.web_chat import ensure_chat_logs_persona_column
+    from services.web_chat_store import ensure_chat_logs_persona_column
 
     ensure_tool_audit_log_table()
     ensure_chat_logs_persona_column()
@@ -107,7 +107,7 @@ def _tool_audit_run_correlation() -> None:
 
 
 def _web_chat_feedback() -> None:
-    from services.web_chat import ensure_web_chat_feedback_table
+    from services.web_chat_store import ensure_web_chat_feedback_table
 
     ensure_web_chat_feedback_table()
 
