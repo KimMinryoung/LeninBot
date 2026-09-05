@@ -30,6 +30,56 @@ Tavily calls explicitly disable automatic depth promotion, omit answer/raw-page
 payloads, report credit usage to logs, and use two focused chunks per source
 only for explicitly requested advanced searches.
 
+Identical effective requests (normalized query, result count, depth, topic,
+time range, normalized include/exclude domain lists, provider order, TTL) reuse a bounded process-local LRU cache
+(256 entries). `WEB_SEARCH_CACHE_TTL_SECONDS` defaults to 300 seconds and is
+capped at 300; news/finance or `time_range=day` cap it at 60 seconds, and empty
+successful results at 30 seconds. Errors are never cached. Concurrent identical
+requests in the same event loop share one provider-chain task; cancellation of
+one waiter does not cancel the shared paid request. `use_cache=false` bypasses
+both reuse and coalescing for an explicitly fresh lookup; setting the TTL to 0
+disables both globally. Cache hits retain the external-source wrapper and log
+`cache=hit`; new/shared requests log `cache=miss`/`cache=coalesced`. No query or
+result is persisted by this cache. It does not share results between services
+or survive process restarts, and it is not a monthly spending cap.
+
+Cost basis: [Tavily pricing](https://docs.tavily.com/documentation/api-credits)
+charges basic search 1 credit and advanced 2 per request; reducing result count
+or omitting answer/raw content reduces context size, not those request credits.
+[Search best practices](https://docs.tavily.com/documentation/best-practices/best-practices-search)
+supports explicit depth control and focused queries. Keep basic as the default,
+reuse existing evidence, and reserve advanced for a specific unresolved question.
+Official tutorial/changelog descriptions disagree about ultra-fast pricing, so
+no savings estimate or default switch relies on that mode. Python/tool-schema
+changes require restarting the consuming services; timer jobs pick them up on
+their next process start. Verify without paid calls using
+`venv/bin/python -m unittest discover -s tests -p test_web_search_cache.py` and
+`venv/bin/python scripts/smoke_web_search_providers.py`.
+
+Query construction lives in the shared `web_search` tool/schema descriptions,
+so every consumer of the registry receives the same guidance: one focused
+missing fact, exact entity/date/version anchors, likely source language, no
+answer-format instructions, and follow-up searches only for unresolved evidence.
+Known source URLs should go directly to `fetch_url`. Historical years belong in
+the query; `time_range` filters page publication/update recency, not event dates.
+The current Tavily best-practices page recommends queries under 1,500 characters
+(older documentation said 400). The runtime normalizes whitespace but never
+truncates query text; over-1,500-character input returns a correction request
+without a paid search. Short queries (usually under 400 characters) remain the
+recommended default; no extra LLM rewrite/translation calls are added.
+
+`include_domains`/`exclude_domains` accept at most 10 bare hostnames each,
+covering the hostname and its subdomains. Lists are IDNA/lowercase normalized,
+deduplicated and sorted for cache reuse. URLs, paths, wildcards and entirely
+excluded include lists are rejected before calling providers. Tavily receives
+native domain parameters; Brave web/news receives `site:`/`OR`/`NOT site:`
+operators per its [operator reference](https://api-dashboard.search.brave.com/documentation/resources/search-operators).
+Brave queries exceeding 400 characters or 50 words after adding filters skip
+that provider without truncation or opening its failure circuit. Both providers'
+returned URLs are checked against the filters before formatting; filtered-empty
+responses do not trigger another paid search. Filters are strict, not boosts.
+Validate with `venv/bin/python -m unittest discover -s tests -p 'test_web_search*.py'`.
+
 - `runtime_tools/filesystem.py`: programmer-style filesystem and Python execution tools
 - `runtime_tools/fetch.py`: URL/file/document fetch and conversion tools
 - `runtime_tools/media.py`: image generation and browser automation tools

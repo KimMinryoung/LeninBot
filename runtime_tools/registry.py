@@ -348,19 +348,36 @@ TOOLS = [
         "description": (
             "Search the web through the configured Tavily/Brave provider chain. Returns relevant snippets "
             "with URLs. Use for current events, real-time data, and fact-checking. Snippets are leads, not "
-            "sources — fetch_url the page before citing a specific figure or quotation."
+            "sources — fetch_url the page before citing a specific figure or quotation. "
+            "Reuse existing results; search only for missing evidence. For a multi-part task, start with "
+            "one focused question and add searches only for unresolved facts; do not preemptively fan out "
+            "paraphrases or translations. Use fetch_url directly when the source URL is already known. "
+            "Identical requests are briefly cached."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query."},
+                "query": {
+                    "type": "string",
+                    "maxLength": 1500,
+                    "description": (
+                        "One concise factual question or focused keywords, usually under 400 characters. "
+                        "Include the exact person/organization/product, relevant year/version/location, "
+                        "and the missing fact. Use the likely source language and original names where known; "
+                        "do not invent translations. No whole task prompts, answer-format instructions or "
+                        "unrelated questions. Preserve qualifiers instead of truncating. Example: "
+                        "'Python 3.12 asyncio.timeout cancellation behavior' with include_domains=['docs.python.org']. "
+                        "Use domain parameters instead of embedding site operators. Tavily accepts up to "
+                        "1500 characters; Brave allows 400 characters/50 words including domain operators."
+                    ),
+                },
                 "max_results": {"type": "integer", "description": "Number of results (1-10).", "default": 5},
                 "search_depth": {
                     "type": "string",
                     "enum": ["ultra-fast", "fast", "basic", "advanced"],
                     "description": (
-                        "basic is the general default. fast/ultra-fast trade relevance for latency at the "
-                        "same Tavily credit cost. advanced returns focused extra context and costs twice as "
+                        "basic is the general default (1 Tavily credit). fast/ultra-fast prioritize latency. "
+                        "advanced returns focused extra context and costs twice as "
                         "many Tavily credits, so reserve it for one specific difficult question."
                     ),
                     "default": "basic",
@@ -374,7 +391,20 @@ TOOLS = [
                 "time_range": {
                     "type": "string",
                     "enum": ["day", "week", "month", "year"],
-                    "description": "Restrict results to this recency window. Omit for no restriction.",
+                    "description": "Filter by page publication/update recency. Use for current coverage; omit for historical research (put the historical year in query instead).",
+                },
+                "include_domains": {
+                    "type": "array", "items": {"type": "string"}, "maxItems": 10,
+                    "description": "Restrict to these domains and their subdomains, e.g. ['docs.python.org']. Prefer a short list of known official/primary sources; omit if the source is unknown. Bare hostnames only, no URLs, paths or wildcards. A strict filter may yield no results.",
+                },
+                "exclude_domains": {
+                    "type": "array", "items": {"type": "string"}, "maxItems": 10,
+                    "description": "Exclude these domains and their subdomains when known to be irrelevant. Bare hostnames only, maximum 10; omit by default.",
+                },
+                "use_cache": {
+                    "type": "boolean",
+                    "description": "Reuse identical searches for up to 5 minutes (news/finance/day: 60 seconds). Set false only when a fresh lookup is required; it makes another paid request.",
+                    "default": True,
                 },
             },
             "required": ["query"],
@@ -523,6 +553,9 @@ async def _exec_web_search(
     search_depth: str = "basic",
     topic: str = "general",
     time_range: str | None = None,
+    use_cache: bool = True,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
 ) -> str:
     return await execute_web_search(
         query=query,
@@ -530,6 +563,9 @@ async def _exec_web_search(
         search_depth=search_depth,
         topic=topic,
         time_range=time_range,
+        use_cache=use_cache,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
     )
 
 
