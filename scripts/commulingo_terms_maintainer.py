@@ -268,6 +268,7 @@ async def run_once() -> dict:
         interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id="commulingo_terms_maintainer",
     )
+    memory = maintainer.ResearchMemory(f"terms:{label}:{material}")
     for attempt in range(1, attempts + 1):
         tracker: dict = {}
         retry_note = "" if attempt == 1 else (
@@ -278,7 +279,7 @@ async def run_once() -> dict:
             "genuinely holds no unregistered concept, answer NO_CANDIDATE now."
         )
         with caller_scope(ctx):
-            result = await binding.chat(
+            result = await memory.chat(binding.chat,
                 [{"role": "user", "content": task + retry_note}],
                 client=binding.client,
                 model=binding.model,

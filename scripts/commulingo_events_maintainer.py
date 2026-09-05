@@ -460,6 +460,9 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     binding = resolve_agent_tool_loop(spec, policy)
 
     task = build_skeleton_task(event) if skeleton else build_task(event, brief)
+    memory = maintainer.ResearchMemory(
+        f"event:{event['id']}:{skeleton}:{event.get('body_ko') or ''}:{event.get('body_en') or ''}"
+    )
     ctx = new_run_context(
         interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id=f"commulingo_events:{SUGGESTED_BY}",
@@ -469,18 +472,16 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     result = ""
     for attempt in range(1, max(1, ATTEMPTS) + 1):
         tracker: dict = {}
-        # Each attempt is a fresh conversation, so the retry cannot say "use what
-        # you already found" — that research is gone. What it can do is cut the
-        # searching that made the first attempt run out of room to write.
+        # Research and rejected drafts survive attempts and process restarts.
         retry_note = "" if attempt == 1 else (
             "\n\nRETRY: the previous attempt ended without saving anything, which is the "
             "one way this run can fail. Almost always the cause is writing the draft into "
-            "the reply instead of into the tool call. This time: at most four research "
-            "calls, then write. The section text belongs in the `body` argument of "
+            "the reply instead of into the tool call. Reuse the saved research and "
+            "repair the saved draft. The section text belongs in the `body` argument of "
             f"`{WRITE_TOOL}` and nowhere else."
         )
         with caller_scope(ctx):
-            result = await binding.chat(
+            result = await memory.chat(binding.chat,
                 [{"role": "user", "content": task + retry_note}],
                 client=binding.client,
                 model=binding.model,

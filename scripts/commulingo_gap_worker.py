@@ -423,6 +423,7 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
                 task=task, spec=spec,
                 tools=stage_tools, handlers=stage_handlers, policy=policy,
                 stage=f"gap-{gap['kind']}", expect_edit=True, before_count=before,
+                research_key=f"commulingo_gap:{gap['id']}:{gap['kind']}",
                 finalization_tools=[write_name, "commulingo_no_edit"],
                 terminal_tools=[write_name, "commulingo_no_edit"],
                 no_edit_box=no_edit_box,

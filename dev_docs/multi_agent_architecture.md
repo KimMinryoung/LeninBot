@@ -54,6 +54,51 @@ boundary (`조지아` → `그루지야` in `ko` fields, including nested career
 event-link copy). The `citizenship` subtree is excluded so modern citizenship
 continues to display `조지아`.
 
+## CommuLingo Research Continuity
+
+`scripts/commulingo_research_memory.py` owns a local SQLite evidence store at
+ignored `data/commulingo_research.sqlite3`. People stages, gap workers, event
+stages and term stages reuse research across attempts and process restarts.
+Gap IDs and person IDs identify their work; event IDs plus current body content
+separate successive sections; term material identifies its survey. Other stages
+fall back to the exact task/stage identity. These keys prevent one target's
+draft from being supplied to another. No new search-count or daily-budget limit
+is introduced.
+
+Successful `web_search`, `fetch_url`, `wiki_search`, `wiki_get` and `vector_search`
+results are stored with exact arguments and retrieval timestamps for 14 days.
+News/finance/time-filtered search expires after 60 seconds, empty web searches
+after 5 minutes, and `use_cache=false` bypasses reuse. Mutable dictionary reads
+always run live. Complete results up to 120,000 characters can be replayed;
+larger results are not cached. Each attempt receives a bounded evidence preview
+(24k characters), the complete last rejected write payload/error, and a preview
+of the last assistant output marked as an unverified draft. External content
+retains the untrusted-source boundary; cached snippets do not become verified
+citations. Repeating an exact read recovers its complete saved text. The store
+purges records older than 14 days when opened; SQLite transactions merge
+independent calls without a shared JSON-file overwrite race.
+
+The URL-keyed, cross-task source-document archive is deliberately not implemented
+(operator decision: copyright concerns). Citations retain source URLs; this
+change only keeps the task-scoped, expiring working evidence described above.
+It does not create a permanent citation-document library or share full source
+copies across unrelated tasks. Cache hits do not extend retrieval timestamps.
+
+Schema rejections before handler execution are observed through the optional
+context-local `tool_gateway.observations` callback. Structured handler
+rejections also retain the full draft and citations. Known schema, field,
+length, punctuation and internal-reference errors enter repair mode: reuse
+saved evidence and correct the existing payload, with live `commulingo_people`
+lookups allowed; fresh external research is rejected until the write is repaired.
+Evidence-related/other rejections do not force this mode. A successful matching
+write clears the rejected draft. No write success is cached or replayed; gateway
+authorization, validation and audit still run before each wrapped handler.
+
+Verify with `venv/bin/python -m unittest discover -s tests -p test_commulingo_research_memory.py`.
+Scheduled processes pick up the code on their next start. Existing pre-change
+research cannot be recovered from argument-only audit logs; reuse starts with
+results captured after this change.
+
 ## Runtime Overlay
 
 `config/agent_runtime.json` can override registered specs without editing Python. The example file shows supported keys:

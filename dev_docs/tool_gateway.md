@@ -81,6 +81,16 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 
 ## Verification
 
+`tool_gateway.observations.argument_rejection_observer` is an optional
+ContextVar callback scoped to a curator chat. After authorization but on schema
+validation failure, the dispatcher supplies the tool name, attempted arguments
+and error so the curator can preserve its draft for repair. Callback failures
+are logged and never change the rejection or audit verdict; outside that scope
+the hook is inactive. The observer does not weaken validation or invoke tools.
+CommuLingo's handler wrappers may reuse dated research after gateway checks;
+the gateway itself still does not cache reads. See
+`multi_agent_architecture.md` for evidence retention and repair-mode behavior.
+
 For changes that touch this boundary, run at minimum:
 
 ```bash

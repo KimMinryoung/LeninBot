@@ -36,6 +36,7 @@ from runtime_tools.commulingo_people import (
 )
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from scripts import commulingo_budget_guard as budget_guard
+from scripts.commulingo_research_memory import ResearchMemory
 from tool_gateway.results import ToolRejection
 from tool_gateway.security import caller_scope, new_run_context
 
@@ -1315,8 +1316,10 @@ async def _call_curator_stage(
     policy, stage: str, expect_edit: bool, before_count: int,
     finalization_tools: list[str], terminal_tools: list[str],
     candidate_box: dict | None = None, no_edit_box: dict | None = None,
+    research_key: str | None = None,
 ) -> tuple[str, dict, dict | None]:
     binding = resolve_agent_tool_loop(spec, policy)
+    memory = ResearchMemory(research_key or f"{spec.name}:{stage}:{task}")
     attempts = 1 + max(0, int(policy.max_output_continuations))
     total_cost = 0.0
     total_rounds = 0
@@ -1340,7 +1343,7 @@ async def _call_curator_stage(
             + rejected_candidate_note((candidate_box or {}).get("rejected"))
         )
         try:
-            last_result = await binding.chat(
+            last_result = await memory.chat(binding.chat,
                 [{"role": "user", "content": task + retry_note}],
                 client=binding.client,
                 model=binding.model,
@@ -1477,6 +1480,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     task=build_new_person_task(candidate), spec=spec,
                     tools=create_tools, handlers=create_handlers, policy=policy,
                     stage="new-person creation", expect_edit=True, before_count=before,
+                    research_key=f"commulingo_person:{candidate['id']}:create",
                     finalization_tools=["commulingo_person_create"],
                     terminal_tools=["commulingo_person_create"],
                 )
@@ -1537,6 +1541,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     task=task, spec=spec,
                     tools=enrich_tools, handlers=enrich_handlers,
                     policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
+                    research_key=f"commulingo_person:{candidate['id']}:enrich",
                     finalization_tools=enrich_terminals,
                     terminal_tools=enrich_terminals,
                     no_edit_box=no_edit_box,

@@ -329,6 +329,9 @@ async def execute_tool(
                 f"missing required arguments {missing}{hint}"
             )
     except ToolArgumentValidationError as exc:
+        from tool_gateway.observations import observe_argument_rejection
+
+        observe_argument_rejection(name, args, exc)
         msg = f"Tool '{name}' arguments rejected: {exc}"
         logger.warning(msg)
         if log_event:
