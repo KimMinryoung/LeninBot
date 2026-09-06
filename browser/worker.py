@@ -230,6 +230,14 @@ async def execute_browser_task(task: dict) -> dict:
         task_id=None,
         finalization_tools=None,
         terminal_tools=None,
+        agent_name=None,
+        runtime_kind=None,
+        user_id=None,
+        session_id=None,
+        request_id=None,
+        parent_request_id=None,
+        scope_type=None,
+        scope_id=None,
     ):
         # Use only agent-filtered tools/handlers — not the full set
         merged_tools = list(extra_tools or [])
@@ -266,6 +274,28 @@ async def execute_browser_task(task: dict) -> dict:
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
         )
+        from tool_gateway.security import caller_scope, new_run_context
+        ctx_kwargs = {
+            "interface": "agent",
+            "agent_name": agent_name or spec.name,
+            "is_owner": True,
+            "request_id": request_id,
+        }
+        if user_id is not None:
+            ctx_kwargs["user_id"] = str(user_id)
+        if task_id is not None:
+            ctx_kwargs["task_id"] = str(task_id)
+        if session_id is not None:
+            ctx_kwargs["session_id"] = session_id
+        if parent_request_id is not None:
+            ctx_kwargs["parent_request_id"] = parent_request_id
+        if scope_type is not None:
+            ctx_kwargs["scope_type"] = scope_type
+        elif task_id is not None:
+            ctx_kwargs["scope_type"] = "telegram_task"
+        if scope_id is not None or task_id is not None:
+            ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
+        ctx = new_run_context(**ctx_kwargs)
         if provider == "deepseek":
             from llm.claude_loop import chat_with_tools as deepseek_chat
             from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
@@ -279,23 +309,25 @@ async def execute_browser_task(task: dict) -> dict:
                 thinking_budget_tokens=thinking_budget_tokens,
             )
             deepseek_params = resolve_inference_extra(call_policy, "deepseek")
-            return await deepseek_chat(
+            with caller_scope(ctx):
+                return await deepseek_chat(
+                    messages,
+                    client=client,
+                    model=resolved_model,
+                    **loop_kwargs,
+                    thinking=deepseek_params.get("thinking"),
+                    output_config=deepseek_params.get("output_config"),
+                )
+
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
+        with caller_scope(ctx):
+            return await openai_chat(
                 messages,
                 client=client,
                 model=resolved_model,
                 **loop_kwargs,
-                thinking=deepseek_params.get("thinking"),
-                output_config=deepseek_params.get("output_config"),
+                provider_label=provider,
             )
-
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        return await openai_chat(
-            messages,
-            client=client,
-            model=resolved_model,
-            **loop_kwargs,
-            provider_label=provider,
-        )
 
     async def _get_model():
         # process_task() uses this for progress metadata and fallback model lookup.
