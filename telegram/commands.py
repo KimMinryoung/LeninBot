@@ -191,6 +191,7 @@ _HELP_TEXT = """\
 
 *태스크*
 /task <내용> — 백그라운드 태스크 등록
+/curate <url> \\[메모] — 외부 글을 읽고 /hub 큐레이션 발행
 /status — 시스템 대시보드
 /report <id> — 태스크 리포트 재전송
 /llm_balance \\[1~30] — LLM 공식 잔액/비용 및 로컬 감사액
@@ -527,6 +528,13 @@ async def cmd_chat(message: Message):
     if not _ctx["is_allowed"](message.from_user.id):
         return
     await message.answer("이 명령은 더 이상 사용되지 않습니다. 직접 메시지를 보내세요.")
+
+
+async def cmd_curate(message: Message):
+    """`/curate <url> [메모]` — enqueue a hub_curator task; logic lives in telegram.curate."""
+    from telegram.curate import cmd_curate as _cmd_curate
+
+    await _cmd_curate(message, _ctx)
 
 
 async def cmd_task(message: Message):
@@ -2782,6 +2790,7 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_errors, Command("errors"))
     router.message.register(cmd_chat, Command("chat"))
     router.message.register(cmd_task, Command("task"))
+    router.message.register(cmd_curate, Command("curate"))
     router.message.register(cmd_image, Command("image"))
     router.message.register(cmd_stats, Command("stats"))
     router.message.register(cmd_status, Command("status"))
