@@ -89,6 +89,7 @@ def _deepl_translate_texts(
     target_lang: str,
     source_lang: str,
     tag_handling: str | None = None,
+    context: str = "",
 ) -> list[str]:
     import requests
 
@@ -102,8 +103,16 @@ def _deepl_translate_texts(
     }
     if tag_handling:
         payload["tag_handling"] = tag_handling
+    if context:
+        payload["context"] = context
 
     encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    if (len(encoded) > DEEPL_MAX_REQUEST_BYTES or len(texts) > 50) and len(texts) > 1:
+        mid = len(texts) // 2
+        return [value for batch in (texts[:mid], texts[mid:])
+                for value in _deepl_translate_texts(batch, api_key=api_key, api_base=api_base,
+                    target_lang=target_lang, source_lang=source_lang,
+                    tag_handling=tag_handling, context=context)]
     if len(encoded) > DEEPL_MAX_REQUEST_BYTES:
         raise ValueError(
             f"DeepL request too large ({len(encoded):,} bytes). "
@@ -145,8 +154,15 @@ def _translate_html_segments(
     text_indexes: list[int] = []
     cores: list[str] = []
     edges: dict[int, tuple[str, str]] = {}
+    protected_depth = 0
     for idx, part in enumerate(parts):
+        if re.match(r"<(?:code|pre|script|style)\b", part, re.I):
+            protected_depth += 1
+        if re.match(r"</(?:code|pre|script|style)\b", part, re.I):
+            protected_depth = max(0, protected_depth - 1)
         if not part or part.startswith("<"):
+            continue
+        if protected_depth:
             continue
         if not _HANGUL_RE.search(part):
             continue
@@ -157,13 +173,29 @@ def _translate_html_segments(
         cores.append(html.unescape(core))
         edges[idx] = (prefix, suffix)
 
-    translated = _deepl_translate_texts(
-        cores,
-        api_key=api_key,
-        api_base=api_base,
-        target_lang=target_lang,
-        source_lang=source_lang,
-    )
+    # Texts in a DeepL array do not share context. Group inline nodes by their
+    # enclosing paragraph/cell and supply that complete source as context.
+    boundary = re.compile(r"</?(?:p|div|li|td|th|h[1-6]|blockquote|section)\b", re.I)
+    groups = {}
+    contexts = {}
+    group = 0
+    for idx, part in enumerate(parts):
+        if boundary.match(part):
+            group += 1
+        groups[idx] = group
+        if part and not part.startswith("<"):
+            contexts.setdefault(group, []).append(part)
+    positions_by_group = {}
+    for i, idx in enumerate(text_indexes):
+        positions_by_group.setdefault(groups[idx], []).append(i)
+    translated = [""] * len(cores)
+    for group, positions in positions_by_group.items():
+        context = html.unescape(" ".join(contexts.get(group, [])))[:8000]
+        values = _deepl_translate_texts([cores[i] for i in positions],
+            api_key=api_key, api_base=api_base, target_lang=target_lang,
+            source_lang=source_lang, context=context)
+        for i, value in zip(positions, values):
+            translated[i] = value
     for idx, value in zip(text_indexes, translated):
         prefix, suffix = edges[idx]
         parts[idx] = prefix + html.escape(value, quote=False) + suffix
@@ -181,6 +213,10 @@ def _validate_translation(source: dict[str, Any], translated: dict[str, Any], *,
     validation_error = _validate_inner_html(cleaned["html_body_en"], "html_body_en")
     if validation_error:
         raise ValueError(validation_error)
+    from translation_runtime.structure import html_problems
+    problems = html_problems(str(source.get("html_body") or ""), cleaned["html_body_en"])
+    if problems:
+        raise ValueError("; ".join(problems))
 
     source_tags = _tag_sequence(str(source.get("html_body") or ""))
     translated_tags = _tag_sequence(cleaned["html_body_en"])
@@ -190,7 +226,9 @@ def _validate_translation(source: dict[str, Any], translated: dict[str, Any], *,
             f"(source={len(source_tags)} tags, translated={len(translated_tags)} tags)"
         )
 
-    ratio = _hangul_ratio(" ".join(cleaned.values()))
+    from translation_runtime.structure import HTMLSignature
+    visible_body = " ".join(HTMLSignature(cleaned["html_body_en"]).visible)
+    ratio = _hangul_ratio(" ".join([cleaned["title_en"], cleaned["summary_en"], visible_body]))
     if ratio > max_hangul_ratio:
         raise ValueError(f"translation still contains too much Hangul ({ratio:.1%}; max {max_hangul_ratio:.1%})")
 

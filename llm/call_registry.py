@@ -36,6 +36,7 @@ import logging
 import os
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -283,9 +284,13 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
         system_instruction=system or None,
         response_mime_type="application/json" if p.json_mode else None,
     )
+    started = time.monotonic()
     response = client.models.generate_content(
         model=p.model, contents=prompt, config=config,
     )
+    candidates = getattr(response, "candidates", None) or []
+    reason = str(getattr(candidates[0], "finish_reason", "")) if candidates else ""
+    _remember_attempt(_gemini_usage(response), "MAX_TOKENS" in reason, started)
     return (response.text or "").strip(), _gemini_usage(response)
 
 
@@ -310,6 +315,16 @@ class OutputBudgetExhausted(RuntimeError):
     """max_tokens를 상한까지 늘려도 완결된 응답을 받지 못했다."""
 
 
+_attempts = ContextVar("registry_generation_attempts", default=None)
+
+
+def _remember_attempt(usage: dict, truncated: bool, started: float) -> None:
+    attempts = _attempts.get()
+    if attempts is not None:
+        attempts.append({"usage": usage, "truncated": truncated,
+                         "latency_ms": int((time.monotonic() - started) * 1000)})
+
+
 def _reasoning_on(p: CallSiteProfile) -> bool:
     thinking = p.extra.get("thinking")
     if isinstance(thinking, dict):
@@ -322,7 +337,9 @@ def _with_output_budget(p: CallSiteProfile, call) -> tuple[str, dict]:
     max_tokens = p.max_tokens
     text, usage = "", {}
     for step in range(_OUTPUT_BUDGET_STEPS + 1):
+        started = time.monotonic()
         text, usage, hit_limit = call(max_tokens)
+        _remember_attempt(usage, hit_limit, started)
         if not hit_limit:
             return text, usage
         if text and not _reasoning_on(p):
@@ -402,6 +419,7 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tup
         **({"base_url": connection.base_url} if connection.base_url else {}),
     )
     kwargs: dict = {"system": system} if system else {}
+    started = time.monotonic()
     response = client.messages.create(
         model=p.model,
         max_tokens=p.max_tokens,
@@ -411,6 +429,7 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     text = " ".join(
         b.text for b in response.content if getattr(b, "type", "") == "text"
     ).strip()
+    _remember_attempt(_anthropic_usage(response), response.stop_reason == "max_tokens", started)
     return text, _anthropic_usage(response)
 
 
@@ -469,59 +488,112 @@ _EXECUTORS = {
 }
 
 
-def generate_sync(feature: str, prompt: str, *, system: str | None = None, **defaults) -> str | None:
-    """Run a one-shot generation for a registered feature (blocking).
+@dataclass(frozen=True)
+class GenerationResult:
+    text: str | None = None
+    error_kind: str | None = None
+    error: str | None = None
+    truncated: bool = False
+    usage: dict = field(default_factory=dict)
+    attempts: int = 0
+    latency_ms: int = 0
+    retry_after: float | None = None
 
-    Returns None on any failure — call sites keep their own fallbacks
-    (extractive summary, skip, default label) instead of blocking.
+    @property
+    def retryable(self) -> bool:
+        return self.error_kind in {"rate_limit", "transport", "server"}
+
+
+def _error_kind(exc: Exception) -> str:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    message = str(exc).lower()
+    if isinstance(exc, OutputBudgetExhausted):
+        return "output_budget"
+    if status in (401, 403):
+        return "authentication"
+    if status == 429:
+        # Gemini says "Quota exceeded for ... requests_per_minute" on a plain
+        # per-minute limit, so a 429 is transient unless the provider names
+        # an exhausted balance (OpenAI insufficient_quota).
+        return "quota" if "insufficient_quota" in message else "rate_limit"
+    if status in (402, 456) or any(s in message for s in
+            ("insufficient_quota", "insufficient balance", "credit balance", "billing")):
+        return "quota"
+    if isinstance(status, int) and status >= 500:
+        return "server"
+    if isinstance(exc, (TimeoutError, ConnectionError)) or any(
+            s in type(exc).__name__.lower() for s in ("timeout", "connection")):
+        return "transport"
+    return "provider"
+
+
+def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
+                      profile: CallSiteProfile | None = None, **defaults) -> GenerationResult:
+    """Audited one-shot result. Profile overrides are for explicit comparison runs.
+
+    Unlike generate_sync, consumers can reject truncation and classify retries.
+    Every internal output-budget attempt is audited, including discarded output.
     """
     from llm.gateway import LLMGatewayDenied, check_llm_call, record_llm_call
 
-    profile = resolve(feature, **defaults)
+    profile = profile or resolve(feature, **defaults)
     executor = _EXECUTORS.get(profile.provider)
-    if executor is None:
-        logger.error("[llm-registry] %s: unknown provider %r", feature, profile.provider)
-        return None
-    if not profile.model:
-        logger.error("[llm-registry] %s: no model configured", feature)
-        return None
-    # deepseek_anthropic is a protocol variant, not a distinct provider.
+    if executor is None or not profile.model:
+        return GenerationResult(error_kind="configuration", error="unknown provider or missing model")
     provider = "deepseek" if profile.provider == "deepseek_anthropic" else profile.provider
-    token_semantics = {
-        "deepseek_anthropic": "anthropic",
-        "claude": "anthropic",
-        "gemini": "gemini",
-    }.get(profile.provider, "openai")
+    semantics = {"deepseek_anthropic": "anthropic", "claude": "anthropic",
+                 "gemini": "gemini"}.get(profile.provider, "openai")
     try:
-        check_llm_call(
-            surface="oneshot", caller=feature,
-            provider=provider, model=profile.model,
-        )
-    except LLMGatewayDenied as e:
-        # Denial behaves like any other failure: the call site's own
-        # fallback (extractive summary, default label, skip) takes over.
-        logger.warning("[llm-registry] %s denied by llm gateway: %s", feature, e)
-        return None
+        check_llm_call(surface="oneshot", caller=feature, provider=provider, model=profile.model)
+    except LLMGatewayDenied as exc:
+        return GenerationResult(error_kind="policy", error=str(exc))
     started = time.monotonic()
+    attempts = []
+    token = _attempts.set(attempts)
+    text, error, kind, truncated, retry_after = None, None, None, False, None
     try:
-        text, usage = executor(profile, prompt, system)
-    except Exception as e:
-        record_llm_call(
-            surface="oneshot", caller=feature, provider=provider,
-            model=profile.model, status="error", error_excerpt=str(e),
-            latency_ms=int((time.monotonic() - started) * 1000),
-            token_semantics=token_semantics, estimate_cost=False,
-        )
+        raw = executor(profile, prompt, system)
+        text, usage = raw[:2]
+        truncated = bool(raw[2]) if len(raw) > 2 else False
+        if not attempts:
+            _remember_attempt(usage, truncated, started)
+        truncated = attempts[-1]["truncated"]
+        if not text:
+            kind, error = "empty", "provider returned empty text"
+    except Exception as exc:
+        error, kind = str(exc), _error_kind(exc)
+        truncated = kind == "output_budget"
+        response = getattr(exc, "response", None)
+        try:
+            retry_after = float(response.headers.get("retry-after"))
+        except (AttributeError, ValueError, TypeError):
+            pass
         logger.warning("[llm-registry] %s (%s/%s) failed: %s",
-                       feature, profile.provider, profile.model, e)
-        return None
-    record_llm_call(
-        surface="oneshot", caller=feature, provider=provider,
-        model=profile.model, latency_ms=int((time.monotonic() - started) * 1000),
-        token_semantics=token_semantics,
-        **usage,
-    )
-    return text or None
+                       feature, profile.provider, profile.model, exc)
+    finally:
+        _attempts.reset(token)
+    total_usage = {}
+    for attempt in attempts:
+        for key, value in attempt["usage"].items():
+            total_usage[key] = total_usage.get(key, 0) + (value or 0)
+        record_llm_call(surface="oneshot", caller=feature, provider=provider,
+                        model=profile.model, latency_ms=attempt["latency_ms"],
+                        token_semantics=semantics, **attempt["usage"])
+    if error:
+        record_llm_call(surface="oneshot", caller=feature, provider=provider,
+                        model=profile.model, status="error", error_excerpt=error,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        token_semantics=semantics, estimate_cost=False)
+    return GenerationResult(text=text or None, error_kind=kind, error=error,
+                            truncated=truncated, usage=total_usage,
+                            attempts=len(attempts) + int(bool(error) and kind not in {"output_budget", "empty"}),
+                            latency_ms=int((time.monotonic() - started) * 1000),
+                            retry_after=retry_after)
+
+
+def generate_sync(feature: str, prompt: str, *, system: str | None = None, **defaults) -> str | None:
+    """Compatibility API: retain historical text/None behavior for other callers."""
+    return generate_detailed(feature, prompt, system=system, **defaults).text
 
 
 async def generate(feature: str, prompt: str, *, system: str | None = None, **defaults) -> str | None:

@@ -133,7 +133,7 @@ def main() -> int:
     # roughly as long as the source line — a fixed-length stub would trip the
     # validator's short-translation rule, which is that rule working correctly.
     def _ko(line: str) -> str:
-        return ("가나다라마바사아자차카타파하 " * (len(line) // 14 + 1))[: max(len(line), 8)]
+        return ("가나다라마바사아자차카타파하 " * (len(line) // 14 + 1))[: max(len(line), 8)].rstrip() + "."
 
     stub = "\n\n".join(
         f"[[{idx}|{b['tag']}]]\n" + "\n".join(_ko(l) for l in b["lines"])
@@ -163,6 +163,7 @@ def main() -> int:
     # without this a refactor can leave an undefined name in the loop and every
     # check still passes.
     from llm import call_registry
+    import translation_runtime
 
     from runtime_tools.archival_translation import core
 
@@ -179,15 +180,14 @@ def main() -> int:
     # _translate_chunk은 이제 용어집 준수까지 검증하므로, 스텁도 샘플에 등장하는
     # 확정 표기를 실어야 통과한다 — 실제 모델에게 요구하는 것과 같은 조건이다.
     def _ko_with_terms(line: str) -> str:
-        needed = " ".join(t["ko"] for t in sample_terms if t["pattern"].search(line))
-        return (_ko(line) + (" " + needed if needed else "")).rstrip()
+        return _ko(line)
 
     stub_ok = "\n\n".join(
         f"[[{idx}|{b['tag']}]]\n" + "\n".join(_ko_with_terms(l) for l in b["lines"])
         for idx, b in sample)
 
-    original = call_registry.generate_sync
-    call_registry.generate_sync = lambda *a, **k: stub_ok
+    original = translation_runtime.generate_translation
+    translation_runtime.generate_translation = lambda *a, **k: stub_ok
     try:
         cache = _StubCache()
         stats = core.Stats()
@@ -197,15 +197,15 @@ def main() -> int:
         check("번역 루프가 캐시에 기록한다", len(cache.written) == 1)
         check("성공이 stats에 반영된다", stats.translated == 1 and stats.failed == 0)
 
-        call_registry.generate_sync = lambda *a, **k: ""  # provider가 빈 응답
+        translation_runtime.generate_translation = lambda *a, **k: ""  # provider가 빈 응답
         try:
             core._translate_chunk(sample, glossary, _StubCache(),
                                   at.Options(retries=1), core.Stats(), lambda e: None)
             check("빈 응답이면 실패로 올라온다", False, "예외가 나지 않았다")
         except RuntimeError as e:
-            check("빈 응답이면 실패로 올라온다", "빈 응답" in str(e), str(e))
+            check("빈 응답이면 실패로 올라온다", "빠진 마커" in str(e), str(e))
     finally:
-        call_registry.generate_sync = original
+        translation_runtime.generate_translation = original
 
     print("plan")
     prepared = at.plan(spec, at.Options())

@@ -278,8 +278,9 @@ moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninb
   (graphiti-core 내부 reranker — env로 AsyncOpenAI를 만드는 경로 — 를 프록시로).
   프록시 자신은 credential 파일 직독이라 이 env에 오염되지 않는다.
 - **롤백**: 각 파일 옆의 `.bak-llmkeys` 백업 복원 + `systemctl daemon-reload` + 재시작.
-- 키를 유지하는 예외: `leninbot-llm-proxy`(보관소)와
-  `research-document-translation`(직접 클라이언트 일회성 스크립트)뿐이다.
+- LLM provider 키 보관소는 `leninbot-llm-proxy`다.
+  `research-document-translation`도 현재는 registry와 프록시를 사용하는 소비자이며
+  provider 키를 마운트하지 않는다(DB credential만 사용).
 - **gemini도 편입 완료 (2026-08-05 2차)**: graphiti 추출·임베딩은 `client=`로
   프록시 경유 `genai.Client`를 주입받고, browser-use vision 폴백(ChatGoogle
   `http_options` / ChatOpenAI `base_url`)도 프록시 경유. gemini 키 제거 후
@@ -289,7 +290,7 @@ moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninb
 
 ## Seam 밖에 남은 호출
 
-- **수동 maintenance/일회성 스크립트** — `research-document-translation`,
+- **수동 maintenance/일회성 스크립트** —
   `scripts/classify_untyped_entities.py`, `skills/kg-maintenance/scripts/*`는 운영 상주
   서비스가 아니며 operator가 명시적으로 provider credential을 전달해 실행하는 경로다.
   서비스 keyless 경계에는 포함되지 않는다. CommUlingo Wikipedia-evidence 사건 링크
@@ -321,3 +322,9 @@ DB 싱크 워커는 daemon 스레드다. 오래 사는 서비스에서는 문제
 `atexit`에 자동으로 걸리므로 호출부가 따로 부를 필요는 없다. 대기 상한은
 `LENINBOT_LLM_AUDIT_FLUSH_SECONDS`(기본 5초)이고, 시간을 넘기면 남은 행 수를
 경고로 남기고 포기한다 — 종료 경로를 붙잡고 있는 것보다 낫다.
+
+## 번역 상세 결과와 재호출 계측 (2026-09-07 확인)
+
+`llm.call_registry.generate_detailed`는 text/error_kind/error/truncated/usage/attempts/latency_ms/retry_after를 반환한다. 기존 `generate_sync`는 이 결과의 text/None 호환 래퍼다. `profile=` 오버라이드를 사용하는 비교 실행도 같은 정책 검사와 감사 경로를 지난다. 내부 출력 예산 확대 시도는 버린 응답까지 각각 계측하며 상세 결과 usage는 합계다. 기존 요약 호출의 잘린 텍스트 반환 호환성은 유지하되 번역 공통 계층은 truncated를 거부한다. 영구 오류와 일시 오류 구분 및 번역 재시도 소유권은 `translation_runtime/`에 있다.
+
+표준 사료·연구 Markdown·DB JSON 번역은 공통 실행 계층을 사용한다. DeepL 정적 페이지는 별도 HTTP 어댑터이며, 사료 `--probe`는 진단용 executor 직접 호출이라 상세 registry 감사와 구분한다. 모델 기본값·재시도 단계·타이머·실행 명령은 [Translation Pipeline](translation_pipeline.md)을 따른다.

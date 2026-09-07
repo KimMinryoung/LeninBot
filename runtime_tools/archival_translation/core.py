@@ -26,7 +26,7 @@ import re
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -391,6 +391,9 @@ class Stats:
     failed: int = 0
     # 캐시에 있었지만 현재 검증기를 통과하지 못해 다시 번역한 청크 수.
     revalidated: int = 0
+    provider_calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
     # 워커 스레드들이 같은 객체를 올린다. 속성 += 는 원자적이지 않으므로
     # 갱신은 add()로 모은다.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -402,7 +405,8 @@ class Stats:
     def as_dict(self) -> dict:
         return {"cached": self.cached, "translated": self.translated,
                 "retried": self.retried, "failed": self.failed,
-                "revalidated": self.revalidated}
+                "revalidated": self.revalidated, "providerCalls": self.provider_calls,
+                "tokensIn": self.tokens_in, "tokensOut": self.tokens_out}
 
 
 # ── spec loading ─────────────────────────────────────────────────────
@@ -594,6 +598,18 @@ def slice_documents(spec: dict) -> list[dict]:
         examples = entry.get("tmExamples") or spec.get("tmExamples")
         chosen = [{**b, "register": entry.get("register"), "tmExamples": examples}
                   for b in chosen]
+        context_chars = int(spec.get("sourceContextChars", 0))
+        if not 0 <= context_chars <= 2000:
+            raise SpecError("sourceContextChars must be between 0 and 2000")
+        if context_chars:
+            section = entry.get("titleKo", "")
+            for i, block in enumerate(chosen):
+                if block["tag"].startswith("h"):
+                    section = " ".join(block["lines"])
+                block["sourceContext"] = {
+                    "title": entry.get("titleKo", ""), "section": section,
+                    "before": " ".join(chosen[i-1]["lines"])[-context_chars:] if i else "",
+                    "after": " ".join(chosen[i+1]["lines"])[:context_chars] if i+1 < len(chosen) else ""}
         docs.append({**entry, "blocks": chosen,
                      "offset": band + anchor_idx + start})
     return docs
@@ -641,12 +657,13 @@ def build_glossary(people_path: Path, terms_path: Path,
     seen: set[str] = set()
     entries: list[dict] = []
 
-    def add(display_ru: str, ko: str, surfaces: list[str]) -> None:
+    def add(display_ru: str, ko: str, surfaces: list[str]) -> dict | None:
         if display_ru in seen or not ko:
             return
         seen.add(display_ru)
         entries.append({"ru": display_ru, "ko": ko,
                         "pattern": _pattern(surfaces, lang.bounded)})
+        return entries[-1]
 
     for ru, ko in (extra or {}).items():
         add(ru, ko, [ru])
@@ -659,10 +676,12 @@ def build_glossary(people_path: Path, terms_path: Path,
             fam_en = ((p.get("familyName") or {}).get("en") or "").strip()
             fam_ko = ((p.get("familyName") or {}).get("ko") or "").strip()
             if len(fam_en) >= 4 and fam_ko and LATIN_RE.search(fam_en):
-                add(fam_en, fam_ko, [fam_en])
+                entry = add(fam_en, fam_ko, [fam_en])
+                if entry is None:
+                    continue
                 # 성(姓) 단독 표면은 문서에 전체 이름이나 이니셜+성이 한 번은
                 # 있어야 주입한다 — anchor_latin_people() 참조.
-                entries[-1]["person"] = {
+                entry["person"] = {
                     "full_en": ((p.get("name") or {}).get("en") or "").strip(),
                     "given_en": ((p.get("givenName") or {}).get("en") or "").strip(),
                     "family_en": fam_en,
@@ -766,6 +785,8 @@ def glossary_for(text: str, glossary: list[dict], limit: int) -> list[tuple[str,
 # ── chunking ─────────────────────────────────────────────────────────
 
 def chunk_document(doc: dict, max_chars: int) -> list[list[tuple[int, dict]]]:
+    if max_chars < 1:
+        raise SpecError("max_chars must be positive")
     numbered = [(doc["offset"] + i, b) for i, b in enumerate(doc["blocks"])]
     chunks: list[list[tuple[int, dict]]] = []
     cur: list[tuple[int, dict]] = []
@@ -776,7 +797,8 @@ def chunk_document(doc: dict, max_chars: int) -> list[list[tuple[int, dict]]]:
             # never strand a heading at the end of a chunk
             if cur[-1][1]["tag"] in ("h3", "h5"):
                 carried = cur.pop()
-                chunks.append(cur)
+                if cur:
+                    chunks.append(cur)
                 cur, size = [carried], sum(len(ln) for ln in carried[1]["lines"])
             else:
                 chunks.append(cur)
@@ -796,10 +818,23 @@ def render_chunk(chunk: list[tuple[int, dict]]) -> str:
 
 # ── response parsing and validation ──────────────────────────────────
 
+class ParsedBlocks(dict):
+    """Keep wire-format errors until validation; duplicate IDs must not disappear."""
+
+    def __init__(self):
+        super().__init__()
+        self.problems = []
+        self.tags = {}
+
+
 def parse_response(text: str) -> dict[int, list[str]]:
     marks = [(m.start(), m.end(), int(m.group(1))) for m in MARKER_RE.finditer(text)]
-    out: dict[int, list[str]] = {}
+    out = ParsedBlocks()
     for k, (_, end, idx) in enumerate(marks):
+        if idx in out.tags:
+            out.problems.append(f"중복 마커: {idx}")
+        marker = text[marks[k][0]:end]
+        out.tags[idx] = marker.split("|", 1)[1].split("]]", 1)[0]
         stop = marks[k + 1][0] if k + 1 < len(marks) else len(text)
         lines = [ln.strip() for ln in text[end:stop].strip().split("\n") if ln.strip()]
         if lines:
@@ -815,7 +850,11 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
     있다(1925 대회 문서). 용어표는 프롬프트에 참고로 주입될 뿐이고, 표기
     통일은 발행 전 통독과 스펙 postEdits가 맡는다."""
     lang = lang or RUSSIAN
-    problems = []
+    problems = list(getattr(got, "problems", []))
+    for idx, block in chunk:
+        tag = getattr(got, "tags", {}).get(idx)
+        if tag is not None and tag != block["tag"]:
+            problems.append(f"[[{idx}]] 태그 불일치: {tag} != {block['tag']}")
     # A block with no lines (an all-numeric table) sends only its marker and
     # owes no reply — do not fail the chunk when the model skips it.
     expected = {idx for idx, b in chunk if b["lines"]}
@@ -908,6 +947,7 @@ class Cache:
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
+        self._parts = None
         self.data: dict[str, dict] = {}
         if path.is_file():
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -917,6 +957,12 @@ class Cache:
 
     def get(self, key: str) -> dict | None:
         return self.data.get(key)
+
+    def parts(self):
+        with self.lock:
+            if self._parts is None:
+                self._parts = Cache(self.path.with_suffix(".parts.jsonl"))
+            return self._parts
 
     def put(self, key: str, blocks: dict[int, list[str]], meta: dict) -> None:
         rec = {"key": key, "blocks": {str(k): v for k, v in blocks.items()}, **meta}
@@ -958,7 +1004,12 @@ def _render_prompt(chunk, body: str, terms: list[tuple[str, str]]) -> str:
                         f"문장을 그대로 옮겨 쓰지 말 것)\n{rendered}\n\n")
     register = (chunk[0][1].get("register") or "").strip()
     register_line = f"문체: {register}\n\n" if register else ""
-    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n{example_text}{register_line}"
+    context = ""
+    if chunk[0][1].get("sourceContext"):
+        reference = {**chunk[0][1]["sourceContext"],
+                     "after": chunk[-1][1].get("sourceContext", {}).get("after", "")}
+        context = "참고 맥락 (번역·출력하지 말 것):\n" + json.dumps(reference, ensure_ascii=False) + "\n\n"
+    return (f"용어표 (반드시 이 표기를 쓸 것)\n{gloss_text}\n\n{example_text}{register_line}{context}"
             f"아래 단락들을 번역하라.\n\n{body}")
 
 
@@ -1002,16 +1053,18 @@ def _cached_blocks(cache: "Cache", key: str, chunk,
     if rec is None:
         return None, []
     blocks = {int(k): v for k, v in rec["blocks"].items()}
-    problems = validate(chunk, blocks, lang)
-    return (None, problems) if problems else (blocks, [])
+    from translation_runtime import validate_cached
+    return validate_cached(blocks, lambda value: validate(chunk, value, lang))
 
 
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
                      progress: Callable[[dict], None],
                      lang: SourceLanguage | None = None,
-                     prepared: tuple[str, str] | None = None) -> dict[int, list[str]]:
-    from llm import call_registry
-
+                     prepared: tuple[str, str] | None = None,
+                     abort: threading.Event | None = None,
+                     _count: bool = True) -> dict[int, list[str]]:
+    """_count=False: a sub-piece of an oversized block; only provider usage
+    is counted, so translated/failed still count whole chunks."""
     lang = lang or RUSSIAN
     # run()은 pending 집계 때 이미 만든 것을 넘긴다; 직접 부르는 쪽은 여기서 만든다.
     prompt, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
@@ -1025,41 +1078,75 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         progress({"event": "cacheInvalid", "blocks": [chunk[0][0], chunk[-1][0]],
                   "problems": stale[:3]})
 
-    correction = ""
-    last_reason = "원인 미상"
-    for attempt in range(1, opts.retries + 1):
-        raw = call_registry.generate_sync(
-            lang.feature, prompt + correction, system=lang.system_prompt)
-        if not raw:
-            # generate_sync swallows the provider exception and returns None,
-            # logging the cause itself. Surface at least that it happened —
-            # a silent retry here is how a bad key burns every chunk before
-            # anyone sees why.
-            last_reason = "빈 응답 (provider 오류는 llm-registry 로그 참조)"
-            stats.add("retried")
-            progress({"event": "retry", "blocks": [chunk[0][0], chunk[-1][0]],
-                      "attempt": attempt, "problems": [last_reason]})
-            correction = "\n\n(직전 응답이 비어 있었다. 형식을 지켜 다시 출력하라.)"
-            time.sleep(2 * attempt)
-            continue
-        got = parse_response(raw)
-        problems = validate(chunk, got, lang)
-        if not problems:
-            cache.put(key, got, {"attempt": attempt, "chars": len(prompt)})
-            stats.add("translated")
-            return got
-        correction = (
-            "\n\n(직전 응답에 다음 문제가 있었다. 같은 입력을 형식에 맞게 다시 번역하라.\n"
-            + "\n".join(f"- {p}" for p in problems) + ")"
-        )
-        last_reason = "; ".join(problems[:3])
+    # Oversized blocks retain their original assembly ID. Sub-results live in a
+    # separate cache so reassemble() cannot mistake a partial block for a whole one.
+    if any(sum(map(len, b["lines"])) > opts.max_chars for _, b in chunk):
+        from translation_runtime.structure import split_prose
+        subcache = cache.parts()
+        combined = {}
+        try:
+            for idx, block in chunk:
+                if not block["lines"]:
+                    continue
+                pieces = split_prose("\n".join(block["lines"]), opts.max_chars)
+                lines = []
+                for piece in pieces:
+                    subblock = {**block, "lines": piece.splitlines()}
+                    got = _translate_chunk([(idx, subblock)], glossary, subcache, opts,
+                                           stats, progress, lang, abort=abort, _count=False)
+                    lines.extend(got[idx])
+                combined[idx] = lines
+            problems = validate(chunk, combined, lang)
+            if problems:
+                raise RuntimeError("split block validation failed: " + "; ".join(problems))
+        except Exception:
+            stats.add("failed")
+            raise
+        cache.put(key, combined, {"split": True, "chars": len(prompt)})
+        stats.add("translated")
+        return combined
+
+    from translation_runtime import generate_translation, translate_validated
+
+    def account(result):
+        stats.add("provider_calls", result.attempts)
+        stats.add("tokens_in", result.usage.get("tokens_in", 0))
+        stats.add("tokens_out", result.usage.get("tokens_out", 0))
+        progress({"event": "usage", "blocks": [chunk[0][0], chunk[-1][0]],
+                  "attempts": result.attempts, "usage": result.usage,
+                  "latencyMs": result.latency_ms, "errorKind": result.error_kind})
+        if abort is not None and result.error_kind in {"authentication", "quota", "policy", "configuration"}:
+            abort.set()
+
+    def generate(correction):
+        if abort is not None and abort.is_set():
+            raise RuntimeError("번역 중단: provider 영구 오류")
+        return generate_translation(lang.feature, prompt, system=lang.system_prompt + correction,
+                                    on_result=account, cancelled=abort.is_set if abort else None)
+
+    def invalid(attempt, problems):
         stats.add("retried")
         progress({"event": "retry", "blocks": [chunk[0][0], chunk[-1][0]],
                   "attempt": attempt, "problems": problems[:3]})
 
-    stats.add("failed")
-    raise RuntimeError(
-        f"청크 {chunk[0][0]}–{chunk[-1][0]} 번역 실패 ({opts.retries}회 시도) — {last_reason}")
+    def correction(problems):
+        # 모델은 한국어 지시를 받는다. 공통 엔진의 영어 문구(플레이스홀더 언급)는
+        # 사료 형식과 무관하다.
+        return ("\n\n(직전 응답에 다음 문제가 있었다. 같은 입력을 형식에 맞게 다시 번역하라.\n"
+                + "\n".join(f"- {p}" for p in problems) + ")")
+
+    try:
+        got = translate_validated(generate=generate, parse=parse_response,
+                validate=lambda value: validate(chunk, value, lang), attempts=opts.retries,
+                store=lambda value: cache.put(key, value, {"chars": len(prompt)}),
+                on_invalid=invalid, correction=correction)
+    except Exception:
+        if _count:
+            stats.add("failed")
+        raise
+    if _count:
+        stats.add("translated")
+    return got
 
 
 # ── assembly ─────────────────────────────────────────────────────────
@@ -1535,11 +1622,19 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
 
         blocks: dict[int, list[str]] = {}
         problems, seconds, error = [], 0.0, None
+        usage, calls = {}, 0
         for chunk in chunks:
             prompt = _chunk_prompt(chunk, glossary, opts)
             started = time.time()
             try:
-                raw = executor(profile, prompt, lang.system_prompt)
+                response = call_registry.generate_detailed(
+                    lang.feature, prompt, system=lang.system_prompt, profile=profile)
+                calls += response.attempts
+                for k, v in response.usage.items():
+                    usage[k] = usage.get(k, 0) + v
+                if response.error_kind or response.truncated:
+                    raise RuntimeError(response.error or "truncated output")
+                raw = response.text
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
                 break
@@ -1558,6 +1653,7 @@ def compare(spec: dict, variants: list[str], opts: Options | None = None,
             "variant": variant, "provider": provider, "model": profile.model,
             "thinking": extra.get("thinking"), "effort": extra.get("reasoning_effort"),
             "error": error, "problems": problems, "seconds": round(seconds, 1),
+            "usage": usage, "providerCalls": calls,
             "blocks": blocks,
         })
 
@@ -1640,6 +1736,8 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
         "chunks": len(chunks),
         "chars": total,
         "estimatedUsd": round(est, 4),
+        "oversizedBlocks": [idx for c in chunks for idx, b in c
+                            if sum(map(len, b["lines"])) > opts.max_chars],
         "_docs": docs, "_glossary": glossary, "_chunks": chunks, "_lang": lang,
     }
 
@@ -1651,30 +1749,50 @@ _TM_REUSE_STATUSES = ("published", "reviewed")
 
 
 def _tm_prefill(docs: list[dict], lang: SourceLanguage,
-                emit: Callable[[dict], None]) -> dict[int, list[str]]:
+                emit: Callable[[dict], None], spec: dict | None = None) -> dict[int, list[str]]:
     """검수 등급 TM 세그먼트와 완전 일치하는 블록을 모델 없이 채운다.
 
     반복 문구(조문 서두, 서명부, 재수록 단락)는 이미 사람 검수를 거친 번역이
-    코퍼스에 있다. 완전 일치는 LLM 호출 비용이 0이고 회귀 위험도 0이다
-    (인수인계 §2.3). TM 실패는 재사용을 포기할 이유일 뿐 번역을 멈출 이유가
+    코퍼스에 있다. 완전 일치도 문맥이 달라질 수 있으므로 검증·충돌 보류와
+    문서별 제외 정책을 거친다. TM 실패는 재사용을 포기할 이유일 뿐 번역을 멈출 이유가
     아니므로 어떤 예외도 여기서 멈춘다.
     """
     try:
         from runtime_tools import translation_memory
 
+        policy = (spec or {}).get("tmReuse", {})
+        if policy.get("enabled") is False:
+            return {}
+        excluded = set(policy.get("excludeSources", []))
         source_by_idx: dict[int, str] = {}
+        blocks_by_idx = {}
         for doc in docs:
+            if doc.get("tmReuse") is False:
+                continue
             for i, block in enumerate(doc["blocks"]):
                 text = "\n".join(block["lines"]).strip()
-                if text:
+                if text and text not in excluded:
                     source_by_idx[doc["offset"] + i] = text
+                    blocks_by_idx[doc["offset"] + i] = block
         if not source_by_idx:
             return {}
+        decisions = {}
         hits = translation_memory.exact_matches(
             list(source_by_idx.values()), lang_pair=f"{lang.code}-ko",
-            statuses=_TM_REUSE_STATUSES)
-        filled = {idx: hits[text].split("\n")
-                  for idx, text in source_by_idx.items() if text in hits}
+            statuses=_TM_REUSE_STATUSES, reject_conflicts=True, decisions=decisions)
+        filled = {}
+        for idx, text in source_by_idx.items():
+            if text not in hits:
+                if decisions.get(text, {}).get("conflict"):
+                    emit({"event": "tmConflict", "block": idx})
+                continue
+            candidate = {idx: hits[text].split("\n")}
+            problems = validate([(idx, blocks_by_idx[idx])], candidate, lang)
+            if problems:
+                emit({"event": "tmInvalid", "block": idx, "problems": problems})
+                continue
+            filled.update(candidate)
+            emit({"event": "tmSelected", "block": idx, **decisions.get(text, {})})
         if filled:
             emit({"event": "tmReuse", "blocks": len(filled)})
         return filled
@@ -1763,7 +1881,7 @@ def reassemble(spec: dict, opts: Options | None = None) -> dict:
               file=sys.stderr)
     # run()과 같은 우선순위: 검수 등급 TM 세그먼트가 모델 번역을 덮는다.
     # 이걸 빠뜨리면 발행문이 TM 문구에서 캐시 문구로 슬그머니 바뀐다.
-    translated.update(_tm_prefill(docs, lang, lambda _e: None))
+    translated.update(_tm_prefill(docs, lang, lambda _e: None, spec))
 
     missing = sorted(expected - translated.keys())
     if missing:
@@ -1774,7 +1892,8 @@ def reassemble(spec: dict, opts: Options | None = None) -> dict:
     out_path = opts.out_path or Path(spec["output"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html = assemble(spec, docs, translated)
-    out_path.write_text(html, encoding="utf-8")
+    from translation_runtime.storage import atomic_write
+    atomic_write(out_path, html)
     return {"output": str(out_path), "bytes": out_path.stat().st_size,
             "blocks": len(translated),
             "strayCyrillic": stray_cyrillic(html, spec.get("allowedCyrillic"), lang)}
@@ -1784,7 +1903,12 @@ def run(spec: dict, opts: Options | None = None,
         progress: Callable[[dict], None] | None = None) -> dict:
     """Translate every chunk and (unless limit_chunks) write the fragment."""
     opts = opts or Options()
-    emit = progress or (lambda _e: None)
+    tm_decisions = []
+    def emit(event):
+        if event.get("event") in {"tmSelected", "tmConflict", "tmInvalid"}:
+            tm_decisions.append(event)
+        if progress:
+            progress(event)
 
     # 끝난 스펙은 다시 돌리지 않는다. 조립기는 output을 통째로 다시 쓰므로,
     # 공개된 문서에 스펙이 재현할 수 없는 손질(스펙 밖에서 더한 문서, 손으로
@@ -1804,7 +1928,7 @@ def run(spec: dict, opts: Options | None = None,
 
     cache = Cache(_cache_path(spec, opts.cache_path))
 
-    tm_filled = _tm_prefill(docs, lang, emit)
+    tm_filled = _tm_prefill(docs, lang, emit, spec)
     # TM이 청크의 모든(비어 있지 않은) 블록을 덮으면 그 청크는 모델도 캐시도
     # 필요 없다. 일부만 덮인 청크는 통째로 돌린다 — 덮인 블록만 빼고 청크를
     # 다시 자르면 프롬프트가 달라져 기존 청크 캐시가 전부 무효가 되고,
@@ -1826,13 +1950,16 @@ def run(spec: dict, opts: Options | None = None,
     stats = Stats()
     started = time.time()
 
+    abort = threading.Event()
     with ThreadPoolExecutor(max_workers=opts.concurrency) as pool:
         futures = [pool.submit(_translate_chunk, c, glossary, cache, opts, stats,
-                               emit, lang, prep)
+                               emit, lang, prep, abort)
                    for c, prep in zip(runnable, prepared_chunks)]
         succeeded: list[tuple[list, dict[int, list[str]]]] = []
         failures = []
-        for i, (fut, chunk) in enumerate(zip(futures, runnable), 1):
+        by_future = dict(zip(futures, runnable))
+        for i, fut in enumerate(as_completed(futures), 1):
+            chunk = by_future[fut]
             span = [chunk[0][0], chunk[-1][0]]
             try:
                 succeeded.append((chunk, fut.result()))
@@ -1870,9 +1997,23 @@ def run(spec: dict, opts: Options | None = None,
     out_path = opts.out_path or Path(spec["output"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html = assemble(spec, docs, translated)
-    out_path.write_text(html, encoding="utf-8")
+    from translation_runtime.storage import atomic_write
+    atomic_write(out_path, html)
     result["output"] = str(out_path)
     result["bytes"] = out_path.stat().st_size
+    from translation_runtime.structure import semantic_review
+    review = []
+    for doc in docs:
+        for i, block in enumerate(doc["blocks"]):
+            idx = doc["offset"] + i
+            issues = semantic_review("\n".join(block["lines"]),
+                "\n".join(apply_post_edits(translated.get(idx, []), spec)))
+            if issues:
+                review.append({"block": idx, "issues": issues})
+    review_path = _cache_path(spec, opts.cache_path).with_suffix(".review.json")
+    atomic_write(review_path, json.dumps({"review": review, "tmDecisions": tm_decisions},
+                                        ensure_ascii=False, indent=2))
+    result["reviewOutput"] = str(review_path)
     result["strayCyrillic"] = stray_cyrillic(html, spec.get("allowedCyrillic"), lang)
     emit({"event": "done", **result})
     return result

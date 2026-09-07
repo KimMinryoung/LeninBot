@@ -320,6 +320,30 @@ Message request:
 | `GET` | `/email/internal-approved` | list inbound emails approved for internal delivery |
 | `POST` | `/email/messages/{message_id}/internal-deliver` | deliver approved inbound email to internal input path |
 
+### Archival Translation
+
+2026-09-07 확인. `services/api.py`에 포함된 `api_routes/archival_translation.py`가 소유하며 위 admin 인증을 사용한다.
+
+| Method | Path | Result |
+|---|---|---|
+| `GET` | `/admin/archival-translation/specs` | 등록 스펙과 캐시·출력 상태를 담은 `{"specs": [...]}` |
+| `POST` | `/admin/archival-translation/plan` | 모델 호출 없이 슬라이싱·청킹·견적. 내부 `_` 필드를 제외한 JSON |
+| `POST` | `/admin/archival-translation/run` | 번역 진행·완료를 `application/x-ndjson`으로 스트리밍 |
+
+두 POST는 같은 요청 모델을 사용한다:
+
+```json
+{"specId": "nkvd-1937-documents", "limitChunks": 0, "concurrency": 5, "retries": 3}
+```
+
+`specId`는 필수이며 파일 경로나 URL을 받지 않는다. 나머지는 선택 필드로 `limitChunks`는 0~1000(기본 0), `concurrency`는 1~16(기본 5), `retries`는 총 시도 수 1~5(기본 3)다. 모델·출력 예산은 registry가 결정한다. `limitChunks > 0`이면 처리한 청크를 캐시하지만 최종 fragment은 쓰지 않는다.
+
+`plan` 결과에는 문서·청크 수, `oversizedBlocks`, 모델·견적 등이 포함된다. `run`은 프로세스 내부 잠금으로 한 실행만 허용한다(경합 시 409). 사전 스펙/preflight 오류는 400, 요청 모델 위반은 422다. 스트림 시작 뒤의 예외는 `error` 이벤트로 전달되므로 HTTP 상태만으로 성공을 판단하지 않는다.
+
+진행 이벤트는 `plan`, `cacheInvalid`, `retry`, `usage`, `chunk`, `chunkFailed`, TM 관련 이벤트, `done`/`error`다. `usage`는 사용량·지연·오류 종류를, `tmSelected`는 선택 상태·출처·세그먼트 ID를, `tmConflict`/`tmInvalid`는 재사용 보류를 알린다. `done`의 `failures`가 비었는지와 `output`을 함께 확인한다. 청크 실패 또는 부분 실행에서는 `output`이 null이며, 전체 성공 결과에는 `stats`, `reviewOutput`, 잔존 문자 보고 등이 포함된다. frozen 스펙의 실행은 거부한다.
+
+LLM 키는 프록시가 주입한다. 공통 실행·검증·재시도, CLI 재조립, DB 마이그레이션 현황은 [Translation Pipeline](translation_pipeline.md)을 따른다.
+
 ### Private Report Request
 
 `POST /private-reports`:

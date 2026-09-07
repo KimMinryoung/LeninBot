@@ -56,7 +56,7 @@ systemd timers
         |-- leninbot-autonomous.timer -> jobs/autonomous_project.py
         |-- leninbot-experience.timer -> jobs/experience_writer.py
         |-- leninbot-kg-integrity.timer -> scripts/check_kg_integrity.py
-        |-- research-document-translation.timer -> scripts/static_page_translation_pipeline.py
+        |-- research-document-translation.timer -> scripts/translate_research_documents.py + scripts/translate_db_content.py
         |-- leninbot-email-poller.timer -> scripts/email_poll_once.py
         |-- leninbot-commulingo-maintainer.timer -> scripts/commulingo_people_maintainer.py (legacy combined lane)
         |-- leninbot-commulingo-new.timer -> scripts/commulingo_people_parallel.py --mode new
@@ -196,3 +196,5 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - Services do not run startup DDL. Apply `scripts/schema_migrations.py` before deploying code that depends on new tables, columns, indexes, or constraints. The roleplay bot's tables are the `roleplay-tables` migration (`ensure_roleplay_tables` in `telegram/schema.py`).
 - Every tool call from every interface funnels through `tool_gateway.dispatcher.execute_tool`, where the **tool security gateway** validates the provider-visible JSON Schema, authorizes against one policy, atomically consumes capped Redis rate limits, and writes a `tool_audit_log` row + structured journal line. Unknown taxonomy, invalid arguments, authorization errors, capped rate-store outages, and stable-scope idempotency-store outages fail closed. Successful scoped side effects are recorded in Postgres `tool_idempotency`; handler exceptions become `outcome_unknown` and are not replayed. Owner-gating and over-cap decisions still follow `gateway_enforce_mode`, while web-chat/A2A restrictions, taxonomy denial, and rate-store outage denial are always enforced. Inspect with `scripts/security_gateway.py {policy,check,audit}`. Full design: `dev_docs/security_gateway.md`.
 - `leninbot-roleplay.service` is a **separate identity**, not Cyber-Lenin. It runs `telegram/roleplay_bot.py`: owner-gated, DeepSeek over the Anthropic-compatible endpoint via `claude_loop` (thinking on, kept out of replies), a hot-reloaded persona at `identity/roleplay_persona.md`, its own isolated chat tables, and a narrow read-only tool set (see `tool_allowlist_current_state.md`). Runtime config is the `ROLEPLAY_*` env vars; the bot token is `ROLEPLAY_BOT_TOKEN`.
+
+번역 실행의 공통 소유자는 `translation_runtime/`이다. 사료·연구 Markdown·DB JSON 어댑터가 공통 호출/검증 재시도를 사용하고, DeepL 정적 페이지는 별도 HTTP 경로에서 HTML 검증을 공유한다. 운영 `leninbot.research_documents.markdown_en_source_sha256` 마이그레이션은 2026-09-07 적용·검증했다. 형식별 경계, 타이머 정의, 캐시·TM·원문 최신성 및 평가 방법은 [Translation Pipeline](translation_pipeline.md)을 따른다.
