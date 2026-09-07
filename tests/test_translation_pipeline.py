@@ -283,6 +283,17 @@ class ReviewFixes(unittest.TestCase):
             status_code = 402
         self.assertEqual(registry._error_kind(DeepSeekError('Insufficient Balance')), 'quota')
 
+    def test_untagged_fence_diagram_is_translatable(self):
+        source = '설명\n\n```\n호르무즈 봉쇄\n    → 수입 직격\n```\n\n```python\nx = "한글"\n```\n'
+        masked, spans = protect_markdown(source)
+        self.assertIn('호르무즈 봉쇄', masked)
+        self.assertNotIn('x = "한글"', masked)
+        self.assertEqual(restore_markdown(masked, spans), source)
+        translated = source.replace('설명', 'Note').replace('호르무즈 봉쇄', 'Hormuz blockade').replace('수입 직격', 'imports hit')
+        self.assertEqual(markdown_problems(source, translated), [])
+        self.assertTrue(markdown_problems(source, translated.replace('    → imports hit\n', '')))
+        self.assertTrue(markdown_problems(source, translated.replace('"한글"', '"Korean"')))
+
     def test_fence_roundtrip_is_exact(self):
         source = '# 제목\n\n```text\nLayer 3\n```\n\n각 레이어는 독립적이다.\n\n    indented\n\n끝.\n'
         self.assertEqual(restore_markdown(*protect_markdown(source)), source)

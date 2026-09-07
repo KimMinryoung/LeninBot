@@ -40,6 +40,7 @@ Translate the user's Korean markdown document into polished, publication-quality
 Requirements:
 - Preserve markdown structure exactly: headings, lists, blockquotes, tables, code fences, links, footnotes, and horizontal rules.
 - Translate prose and visible Korean text; keep URLs and markdown link destinations unchanged.
+- Fenced blocks without a language tag are text diagrams: translate the Korean labels inside them, keep exactly the same number of lines, and keep arrows, box characters, and column alignment. Fenced blocks with a language tag and inline code arrive as placeholders; leave those untouched.
 - Do not summarize, omit, expand, fact-check, or add commentary.
 - Preserve the author's Marxist, anti-imperialist analytical stance without softening it.
 - Use domain-aware terminology:

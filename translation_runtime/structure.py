@@ -64,6 +64,16 @@ def markdown_parser():
     return MarkdownIt("commonmark", {"html": True}).enable("table")
 
 
+def fence_translatable(info: str) -> bool:
+    """Untagged fences are text diagrams whose Korean labels must be translated.
+
+    In the research corpus 59 of 63 untagged fences carry Korean (flow charts,
+    layer tables), while tagged fences (python, java, yaml…) hold real code
+    with Korean comments and stay protected together with inline code.
+    """
+    return (info or "").strip().lower() in {"", "text", "txt", "plain", "plaintext"}
+
+
 def markdown_signature(text: str):
     env = {}
     tokens = markdown_parser().parse(text, env)
@@ -71,7 +81,10 @@ def markdown_signature(text: str):
     for token in tokens:
         if token.type != "inline":
             structure.append((token.type, token.tag, token.nesting))
-        if token.type in ("fence", "code_block"):
+        if token.type == "fence" and fence_translatable(token.info):
+            # Diagram text may change, but every line (arrows, boxes) must survive.
+            code.append((token.type, token.info, token.content.count("\n")))
+        elif token.type in ("fence", "code_block"):
             code.append((token.type, token.info, token.content))
         if token.type == "html_block":
             html.append(token.content)
@@ -116,6 +129,8 @@ def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
     lines = text.splitlines(keepends=True)
     spans = []
     for token in markdown_parser().parse(text):
+        if token.type == "fence" and fence_translatable(token.info):
+            continue
         if token.type in ("fence", "code_block") and token.map:
             spans.append(token.map)
     for start, end in reversed(spans):
@@ -125,7 +140,9 @@ def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
     masked = "".join(lines)
     masked = re.sub(r"<(code|pre|script|style)\b[^>]*>.*?</\1\s*>",
                     lambda m: keep(m[0]), masked, flags=re.DOTALL | re.IGNORECASE)
-    masked = re.sub(r"(`+)(.+?)\1", lambda m: keep(m[0]), masked, flags=re.DOTALL)
+    # Single-line only: with DOTALL the delimiters of an untagged fence would
+    # match as one giant inline span and hide the diagram again.
+    masked = re.sub(r"(`+)(.+?)\1", lambda m: keep(m[0]), masked)
     # Protect raw HTML tags/attributes, but leave their visible prose translatable.
     masked = re.sub(r"<!--.*?-->|</?[A-Za-z][^>]*>", lambda m: keep(m[0]), masked,
                     flags=re.DOTALL)
