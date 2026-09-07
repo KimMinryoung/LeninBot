@@ -1,0 +1,126 @@
+{
+  "id": "german-annihilation-orders-1941-1944",
+  "title": "독일군의 도시 말살 지시 — 「페테르부르크 시의 장래」 지령(1941년 9월 22일·29일)과 힘러의 바르샤바 파괴 명령 회고(1944년 9월 21일 연설 발췌)",
+  "byline": "독일 국방군 최고사령부·해군전쟁지휘부 / 하인리히 힘러",
+  "bylineNote": "1941년 9월 22일 지령 Ia 1601/41 제1~3항, 9월 29일 해군전쟁지휘부 참모장 명령(뉘른베르크 문서 C-124) 발췌; 1944년 9월 21일 예거회에 군관구 사령관 회의 연설 발췌",
+  "sourceLang": "de",
+  "headnote": [
+    "레닌그라드와 바르샤바, 두 도시를 지도에서 지우겠다는 독일 측 문서 세 토막이다. 1941년 9월 22일자 지령 「페테르부르크 시의 장래」는 포위망을 닫은 뒤 포격과 공습으로 도시를 지워 버리고 항복 제의는 거부하라고 정하며, 북부집단군에 전달된 사본으로 전해진다. 같은 번호를 단 9월 29일 해군전쟁지휘부 참모장의 명령은 주민의 생존과 식량 문제를 「우리가 풀 수도 없고 풀어서도 안 된다」고 못 박은 부분이 뉘른베르크 기소장에 인용되어 남았다. 힘러는 1944년 9월 21일 군관구 사령관들 앞에서 바르샤바 봉기 소식을 듣고 히틀러에게 한 말과 「집집마다 불태우고 폭파하라」는 자신의 명령을 회고했다. 세 문서 모두 전문이 아니라 발췌이며, 저본이 전하는 범위만 옮겼다."
+  ],
+  "bibliography": [
+    "원문: Weisung Nr. Ia 1601/41 „Die Zukunft der Stadt Petersburg“, 22.9.1941 (Heeresgruppe Nord 전달본); Befehl des Chefs des Stabes der Seekriegsleitung, Stab 1a 1601/41, 29.9.1941, IMT-Dokument C-124; Rede Heinrich Himmlers vor den Wehrkreisbefehlshabern, Jägerhöhe, 21.9.1944, BArch NS 19/4015, zit. n. Hans von Krannhals, Der Warschauer Aufstand 1944, Frankfurt am Main 1962, S. 308",
+    "번역 저본: 9월 22일 지령은 fluchschrift.de 「Deutsche Verbrechen」 페이지의 인용, 9월 29일 명령은 zeno.org 수록 뉘른베르크 국제군사재판 기소장(기소 항목 3 E)의 인용, 힘러 연설은 deutscheundpolen.de 전자판 발췌. 지령과 명령은 국가기관의 공문서로 저작권 보호 대상이 아니며, 힘러 연설은 짧은 발췌다"
+  ],
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [],
+    "extra": {
+      "Der Führer": "총통",
+      "Führer": "총통",
+      "Mein Führer": "총통 각하",
+      "Petersburg": "페테르부르크",
+      "die Stadt Petersburg": "페테르부르크 시",
+      "Sowjetrußland": "소비에트 러시아",
+      "Finnland": "핀란드",
+      "Kriegsmarine": "해군",
+      "Marine": "해군",
+      "OKW": "국방군 최고사령부",
+      "Seekriegsleitung": "해군전쟁지휘부",
+      "Werften": "조선소",
+      "Artilleriefeuer aller Kaliber": "모든 구경의 포격",
+      "Kapitulation": "항복",
+      "Existenzkrieg": "생존 전쟁",
+      "Aufstand": "봉기",
+      "Warschau": "바르샤바",
+      "Polen": "폴란드인",
+      "Tannenberg": "타넨베르크",
+      "Häuserblock": "가구(街區)",
+      "Etappe": "후방 부대",
+      "Etappenschweine": "후방의 돼지들",
+      "Frontsoldaten": "전선 병사",
+      "Soldatenstäbe": "군 참모부",
+      "Stäbe": "참모부",
+      "Wehrkreisbefehlshabern": "군관구 사령관",
+      "Auszug": "발췌",
+      "Auszüge": "발췌"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "그런 소식을 얼마나 아주 침착하게 받아들여야 하는지에 대한 본보기로 이 말씀을 드리고자 합니다": "그런 소식을 어떻게 아주 침착하게 받아들여야 하는지 보여 주는 본보기로 이 말씀을 드리고자 합니다",
+    "폴란드인 문제는 역사적으로": "폴란드 문제는 역사적으로",
+    "여러분이 그렇게 생각하신다면, 예, 필요하다면 저는 그렇습니다.": "그렇게 부르고 싶으시다면, 예, 필요하다면 저는 그렇습니다.",
+    "평지로 만들 계획이다": "지표면과 같게 만들 계획이다"
+  },
+  "quotes": "curly",
+  "output": "/home/grass/frontend/data/commulingo/docs/german-annihilation-orders-1941-1944.html",
+  "documents": [
+    {
+      "id": "weisung-1941-09-22",
+      "titleKo": "지령 제Ia 1601/41호 「페테르부르크 시의 장래」 (1941년 9월 22일, 발췌)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
+      },
+      "blocks": [
+        1,
+        4
+      ],
+      "startsWith": "1. Der Führer hat beschlossen",
+      "endsWith": "ist dies abzulehnen …",
+      "register": "한다체. 군 지령의 발췌 세 항이다. '~한다/~하기로 한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 항 번호 「1.」 「2.」 「3.」은 그대로 둔다. (2) 「Der Führer」는 「총통」, 「Petersburg」는 「페테르부르크」(레닌그라드로 바꾸지 않는다), 「OKW」는 「국방군 최고사령부」, 「Kriegsmarine」는 「해군」으로 옮긴다. (3) 마지막의 말줄임표 「…」는 저본의 생략 표시이므로 그대로 둔다. (4) 「vom Erdboden zu vertilgen」 「dem Erdboden gleichzumachen」 같은 표현은 완곡하게 다듬지 않고 「지표면에서 없애 버린다」 「지표면과 같게 만든다」처럼 직설적으로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "skl-1941-09-29",
+      "titleKo": "해군전쟁지휘부 참모장 명령 제1a 1601/41호 (1941년 9월 29일, 발췌 — 뉘른베르크 문서 C-124)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
+      },
+      "blocks": [
+        5,
+        9
+      ],
+      "startsWith": "»… Der Führer ist entschlossen",
+      "endsWith": "unsererseits nicht.«",
+      "register": "한다체. 해군 참모부 명령의 발췌 두 토막이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 각 인용 토막 앞뒤의 겹낫표 「»…」 「«」는 저본(기소장)의 인용 표시이므로 굽은 큰따옴표와 말줄임표로 옮기되 생략 표시를 지우지 않는다. (2) 「Der Führer」는 「총통」, 「Petersburg」는 「페테르부르크」, 「Marine」는 「해군」, 「OKW」는 「국방군 최고사령부」로 옮긴다. (3) 「Da das Problem … nicht gelöst werden kann und soll.」은 「…풀 수도 없고 풀어서도 안 되므로.」처럼 원문의 미완결 문장 형태를 살린다. (4) 「Existenzkrieg」는 「생존 전쟁」으로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "himmler-1944-09-21",
+      "titleKo": "하인리히 힘러의 군관구 사령관 회의 연설 — 바르샤바 봉기에 관하여 (1944년 9월 21일, 발췌)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
+      },
+      "blocks": [
+        10,
+        11
+      ],
+      "startsWith": "Wie ich die Nachricht vom Aufstand hörte",
+      "endsWith": "wo die Leichen liegen.",
+      "register": "군 고위 장교들 앞에서 한 연설의 발췌로, 1인칭 구어 합쇼체('~했습니다/~입니다')로 옮긴다. 표기 규칙: (1) 힘러가 히틀러에게 했다는 말(‚Mein Führer, … kein großes Problem mehr sein.‘)은 굽은 작은따옴표 안의 인용으로 유지하며, 그 안에서 「Mein Führer」는 「총통 각하」로 옮긴다. (2) 「Sie können sich nun denken, ich sei ein furchtbarer Barbar.」 「Wenn Sie so wollen: ja, das bin ich」처럼 청중에게 건네는 말은 청중을 향한 어조를 살린다. (3) 「Der Befehl lautete:」 뒤의 명령문은 「집집마다 불태우고 폭파한다」처럼 명령의 내용을 직설적으로 옮긴다. (4) 「Etappenschweine」는 「후방의 돼지들」로, 「Etappe」는 「후방 부대」로, 속어와 경멸은 다듬지 않는다. (5) 저본의 편자 표시 「(!)」와 「nach und kommen」 같은 저본의 오식은 고치지 않고 「(!)」는 그대로, 오식은 문맥대로 「우리 뒤에 올」로 옮긴다. (6) 「Tannenberg」는 「타넨베르크」로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "id": "clnai-insurrection-documents-1945",
+  "title": "이탈리아 총봉기 1945 — CLNAI의 「항복이냐 파멸이냐!」 포고(4월 19일), 봉기 지침 제1호(4월 21일), 페르티니의 총파업 호소(4월 25일)",
+  "byline": "북이탈리아 민족해방위원회(CLNAI) / 자유의용군단 총사령부 / 산드로 페르티니",
+  "bylineNote": "1945년 4월 19일 포고, 4월 21일 지침 제1호, 4월 25일 밀라노 자유 라디오 방송",
+  "sourceLang": "it",
+  "headnote": [
+    "1945년 4월 북이탈리아 총봉기의 문서 세 건이다. 4월 19일 민족해방위원회와 자유의용군단 사령부의 포고는 나치·파시스트 병력에 무조건 항복 아니면 섬멸이라는 최후통첩을 내걸고, 4월 21일 지침 제1호는 봉기 파업이 선포되면 노동자가 자기 공장으로 모여 설비를 지키고 그곳에서 부대를 편성하라고 정하며, 4월 25일 페르티니의 방송은 밀라노 총파업을 선포한다. 지침의 대괄호 안 보충은 저본 편집자의 것이며, 원문의 「Gap」「Sap」은 GAP·SAP로 두었다."
+  ],
+  "bibliography": [
+    "원제: CLNAI–Comando generale del CVL, «Arrendersi o perire!» (19 aprile 1945); CLNAI, Direttive per l'insurrezione nazionale, n. 1 (21 aprile 1945); Appello radiofonico di Sandro Pertini, Radio Milano Libertà (25 aprile 1945)",
+    "번역 저본: 지침은 Centro studi della Resistenza(storiaxxisecolo.it) 전자판, 포고와 방송은 이탈리아어 위키백과 「Arrendersi o perire!」 항목의 인용 전문. 민족해방위원회의 공개 포고·지침으로 저작권 보호 대상이 아니다"
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/clnai-insurrection-documents-1945.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [],
+    "extra": {
+      "Comitato di liberazione nazionale Alta Italia": "북이탈리아 민족해방위원회",
+      "Comitato di Liberazione Nazionale Alta Italia": "북이탈리아 민족해방위원회",
+      "Comitato di liberazione nazionale": "민족해방위원회",
+      "Comitato di Liberazione Nazionale": "민족해방위원회",
+      "CLNAI": "북이탈리아 민족해방위원회",
+      "Cln": "민족해방위원회",
+      "CLN": "민족해방위원회",
+      "Corpo volontari della libertà": "자유의용군단",
+      "Corpo dei Volontari della Libertà": "자유의용군단",
+      "Corpo dei volontari della libertà": "자유의용군단",
+      "Gap": "GAP",
+      "Sap": "SAP",
+      "comitati di agitazione": "선동위원회",
+      "sciopero insurrezionale": "봉기 파업",
+      "sciopero generale": "총파업",
+      "insurrezione nazionale": "전국 봉기",
+      "nazifascisti": "나치·파시스트",
+      "nazifasciste": "나치·파시스트",
+      "nazifascista": "나치·파시스트",
+      "Nazioni Unite": "연합국",
+      "Germania hitleriana": "히틀러의 독일",
+      "cricca hitleriana e fascista": "히틀러와 파시스트 도당",
+      "esercito repubblicano": "공화국군",
+      "governo fascista repubblicano": "파시스트 공화국 정부",
+      "resa incondizionata": "무조건 항복",
+      "patrioti": "애국자",
+      "formazioni patriottiche": "애국 부대",
+      "formazioni armate": "무장 부대",
+      "formazioni militari patriottiche": "애국 군사 부대",
+      "squadre di assalto": "돌격대",
+      "squadre dei patrioti": "애국자 분대",
+      "maestranze": "노동자들",
+      "operai": "노동자",
+      "impiegati": "사무원",
+      "tecnici": "기술자",
+      "lavoratori": "근로자",
+      "stabilimenti": "공장",
+      "officine": "작업장",
+      "cantieri": "건설 현장",
+      "Comando militare della piazza": "지구 군사령부",
+      "attesista": "관망주의",
+      "Genova": "제노바",
+      "Torino": "토리노",
+      "Milano": "밀라노"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "민주주의 인민들의 동맹국들이 거둘 최종적인 승리": "민주적 인민들의 연합국 열강이 거둘 최종적인 승리",
+    "독일인들에게 복무하며": "독일군에 봉사하며",
+    "극적이고도 마지막인 구원의 길": "마지막이자 최후의 구원의 길",
+    "지침과 암호는": "지침과 구호는",
+    "애국자 무리가 분열되고": "애국자 대중이 분열되고",
+    "우리와 우리나라에": "우리와 우리 나라에"
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "arrendersi-o-perire",
+      "titleKo": "항복이냐 파멸이냐! — 민족해방위원회와 자유의용군단 총사령부의 포고 (1945년 4월 19일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
+      },
+      "blocks": [
+        17,
+        22
+      ],
+      "startsWith": "La battaglia finale contro la Germania hitleriana",
+      "endsWith": "non gli è stata offerta un’estrema ed ultima via di salvezza.",
+      "register": "한다체. 무장 저항 조직이 적에게 내거는 최후통첩 포고다. '~한다/~이다'로 옮기고 경어체를 쓰지 않으며, 포고문의 단호한 수사(반복·명령·경고)를 누그러뜨리지 않는다. 표기 규칙: (1) 단독 행의 「Arrendersi o perire!」는 「항복이냐 파멸이냐!」 한 줄로 옮긴다. (2) 「Comitato di liberazione nazionale」은 「민족해방위원회」, 「Nazioni Unite」는 「연합국」이다. (3) 「cosiddetto」는 「이른바」로 옮긴다. (4) 원문의 줄표(–) 삽입구는 줄표로 유지한다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "direttive-n1",
+      "titleKo": "전국 봉기 지침 제1호 — 민족해방위원회, 선동위원회, 노동자·기술자·사무원에게 (1945년 4월 21일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
+      },
+      "blocks": [
+        1,
+        16
+      ],
+      "startsWith": "Ai Cln, ai comitati di agitazione",
+      "endsWith": "se tale sarà l'ordine ricevuto.",
+      "register": "한다체. 봉기 조직에 내리는 행동 지침이다. '~한다/~해야 한다'로 옮기고 경어체를 쓰지 않으며, 「dovranno」「debbono」「bisogna」의 지시·당위 어조를 살린다. 표기 규칙: (1) 첫 줄의 수신처(「Ai Cln, ai comitati di agitazione, ali operai, ai tecnici, agli impiegati:」)와 둘째 줄의 문서 제목·날짜는 각각 한 줄로 옮긴다. (2) 「Gap」「Sap」는 GAP·SAP로 그대로 두고, 「Corpo volontari della libertà」는 「자유의용군단」이다. (3) 저본 편집자의 대괄호 보충 [poste, telegrafi, …], [operi, impiegati, tecnici, ecc.], [Gap, Sap, ecc.]은 대괄호를 유지한 채 안의 말만 옮긴다. (4) 「operai, impiegati, tecnici, lavoratori tutti」처럼 나열이 반복될 때는 원문의 반복을 줄이지 않는다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "pertini-appello",
+      "titleKo": "산드로 페르티니의 총파업 호소 — 밀라노 자유 라디오 방송 (1945년 4월 25일)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
+      },
+      "blocks": [
+        23,
+        24
+      ],
+      "startsWith": "Cittadini, lavoratori! Sciopero generale",
+      "endsWith": "arrendersi o perire.",
+      "register": "라디오로 대중에게 외치는 짧은 호소다. 「Cittadini, lavoratori!」는 「시민 여러분, 노동자 여러분!」으로 부르고, 명령형 「ponete」는 「들이대십시오」처럼 합쇼체 명령으로 옮긴다. 명사 나열의 구호(「Sciopero generale contro …」)는 문장으로 풀지 말고 구호의 리듬대로 옮긴다. 「arrendersi o perire」는 「항복이냐 파멸이냐」로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ]
+}

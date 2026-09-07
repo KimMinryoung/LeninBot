@@ -1,0 +1,163 @@
+{
+  "id": "overlord-shaef-documents-1944",
+  "title": "오버로드 작전 — 연합군 최고사령부 문서 두 건: 전략공군 폭격 지령(1944년 4월 17일)과 아이젠하워의 상륙 이틀째 전황 보고 SCAF 48(6월 8일)",
+  "byline": "연합원정군 최고사령부(SHAEF) / 드와이트 D. 아이젠하워",
+  "bylineNote": "1944년 4월 17일 최고사령관 지령; 1944년 6월 8일 연합참모본부 앞 전문 SCAF 48",
+  "sourceLang": "en",
+  "headnote": [
+    "노르망디 상륙을 앞뒤로 둔 연합군 최고사령부 문서 두 건이다. 4월 17일 지령은 미 전략공군과 영국 폭격기사령부를 상륙 준비 기간에 최고사령관 아래로 두면서 독일 전투기 전력의 소모와 철도망 파괴를 두 임무로 정한 이른바 「수송 계획」의 근거 문서이고, SCAF 48은 상륙 이틀째인 6월 8일 아이젠하워가 구축함으로 해안을 둘러본 뒤 연합참모본부에 보낸 첫 종합 보고다. 전문의 절차어(PD·CMA·PARAGRAPH 따위)는 문장부호와 단락으로 되돌렸고, 대문자 타자 원문은 보통 표기로 옮겼다."
+  ],
+  "bibliography": [
+    "원제: Directive by the Supreme Commander to U.S.S.T.A.F. and Bomber Command for support of 'Overlord' during the preparatory period, 17 April 1944 — C. Webster & N. Frankland, The Strategic Air Offensive against Germany 1939–1945, vol. IV, Appendix 8 (xxxviii), HMSO 1961, pp. 167–170; SCAF 48, Eisenhower to the Combined Chiefs of Staff, 8 June 1944 — Dwight D. Eisenhower Library, Pre-Presidential Papers",
+    "번역 저본: 영국 공식 전사 제4권의 archive.org OCR 텍스트(왕실 저작권 만료, 지령 자체는 SHAEF 공문서)와 아이젠하워 도서관 스캔 이미지 전사본(미국 정부 기록으로 저작권 보호 대상이 아니다)"
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/overlord-shaef-documents-1944.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [
+      "First",
+      "Soviet",
+      "August",
+      "Benjamin"
+    ],
+    "extra": {
+      "Supreme Commander": "최고사령관",
+      "Supreme Allied Commander": "연합군 최고사령관",
+      "Deputy Supreme Allied Commander": "연합군 부최고사령관",
+      "U.S.S.T.A.F.": "미 전략공군(USSTAF)",
+      "Commanding General, U.S.S.T.A.F.": "미 전략공군 사령관",
+      "Bomber Command": "폭격기사령부",
+      "R.A.F. Bomber Command": "영국 공군 폭격기사령부",
+      "strategical Air Forces": "전략공군",
+      "strategical air forces": "전략공군",
+      "strategic air forces": "전략공군",
+      "Air Forces": "공군",
+      "German Air Force": "독일 공군",
+      "German air force": "독일 공군",
+      "Combined Bomber offensive": "연합 폭격 공세",
+      "combined Bomber offensive": "연합 폭격 공세",
+      "lodgment area": "교두보 지역",
+      "air superiority": "제공권",
+      "rail communications": "철도 교통",
+      "rail transportation system": "철도 수송 체계",
+      "precision targets": "정밀 표적",
+      "blind bombing technique": "맹목 폭격",
+      "ball bearing": "볼베어링",
+      "Air Ministry": "공군성",
+      "Air Commander-in-Chief": "공군 총사령관",
+      "A.E.A.F.": "연합원정공군(AEAF)",
+      "'CROSSBOW'": "「크로스보」",
+      "S.O.E.": "특수작전집행부(SOE)",
+      "15th Air Force": "제15공군",
+      "8th Air Force": "제8공군",
+      "transportation plan": "수송 계획",
+      "Battle of ITALY": "이탈리아 전투",
+      "German Fleet": "독일 함대",
+      "By Command of General Eisenhower": "아이젠하워 대장의 명에 따라",
+      "Chief of Staff": "참모장",
+      "W. B. Smith": "W. B. 스미스",
+      "Combined Chiefs of Staff": "연합참모본부",
+      "AGWAR": "육군부(AGWAR)",
+      "SHAEF": "연합원정군 최고사령부(SHAEF)",
+      "SHAEF CP": "SHAEF 지휘소",
+      "Advance Headquarters": "전방 사령부",
+      "Admiral Ramsay": "램지 제독",
+      "Ramsay": "램지",
+      "General Bradley": "브래들리 장군",
+      "Bradley": "브래들리",
+      "General Montgomery": "몽고메리 장군",
+      "Montgomery": "몽고메리",
+      "Kirk": "커크",
+      "Vian": "비언",
+      "Douglas-Pennant": "더글러스페넌트",
+      "Oliver": "올리버",
+      "Cotentin Peninsula": "코탕탱 반도",
+      "Carentan": "카랑탕",
+      "Bayeux": "바이외",
+      "Beach O": "O 해안(오마하)",
+      "O Beach": "O 해안",
+      "One Hundred First Airborne Division": "제101공수사단",
+      "Eighty-Second Airborne": "제82공수사단",
+      "Seventh Corps": "제7군단",
+      "Fifth Corps": "제5군단",
+      "Fiftieth British Division": "영국 제50사단",
+      "Third British and Third Canadian Divisions": "영국 제3사단과 캐나다 제3사단",
+      "Seventh Armored Division": "제7기갑사단",
+      "Second and Ninetieth Divisions": "제2사단과 제90사단",
+      "panzer divisions": "기갑사단",
+      "Naval Force Commander": "해군 부대 사령관",
+      "DD tanks": "DD 전차(수륙양용 전차)",
+      "LCTs": "전차상륙정(LCT)",
+      "LSTs": "전차상륙함(LST)",
+      "Rhino ferries": "라이노 페리",
+      "Teller mines": "텔러 지뢰",
+      "touchdown areas": "상륙 지점",
+      "field works": "야전 진지",
+      "fixed batteries": "고정 포대",
+      "naval gunfire": "함포 사격",
+      "landing craft": "상륙정",
+      "D plus one": "D+1일",
+      "maintenance groups": "정비반",
+      "Top Secret": "1급 비밀",
+      "End of message": "전문 끝",
+      "Eisenhower": "아이젠하워",
+      "General Eisenhower": "아이젠하워 대장"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "다른 해안에서는 DD 전차(수륙양용 전차)를": "다른 해안에서는 DD 전차를",
+    "램지(Ramsay) 제독과 내가": "램지 제독과 내가",
+    "몽고메리(Montgomery) 장군, 브래들리(Bradley) 장군": "몽고메리(Montgomery) 장군, 브래들리 장군",
+    "이 지령은 「오버로드」가 대륙에 확립된 후 검토 대상이 된다.": "이 지령은 「오버로드」가 대륙에 자리 잡은 뒤 재검토한다.",
+    "(서명) W. B. 스미스, 중장, 총참모부, 참모장.": "(서명) W. B. 스미스, 중장(GSC), 참모장."
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "directive-1944-04-17",
+      "titleKo": "최고사령관이 미 전략공군과 폭격기사령부에 내린 「오버로드」 준비 기간 지원 지령 (1944년 4월 17일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/overlord-shaef-documents-1944-prepared.html",
+        "sha256": "8b7c71a1c744cabba4e55ed1a808ab25bcf7b1c5903dcdc4106f682f9564866a"
+      },
+      "blocks": [
+        0,
+        41
+      ],
+      "startsWith": "17th April 1944.",
+      "endsWith": "Lieutenant General, GSC, Chief of Staff.",
+      "register": "한다체. 최고사령관이 두 전략공군에 내린 군사 지령이다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 첫 블록의 날짜는 한 줄로 옮긴다. (2) 대문자 절 제목(OVERALL MISSION, PARTICULAR MISSION, U.S.S.T.A.F., R.A.F. BOMBER COMMAND, TARGETS IN S.E. EUROPE …)은 짧은 제목으로 옮긴다(총괄 임무, 특정 임무, 미 전략공군, 영국 공군 폭격기사령부, 남동유럽의 표적, 그 밖의 목표, 「크로스보」, SOE 작전, 수송 계획의 정치적 측면, 지령의 개정). (3) 단락 번호 「1.」…「15.」와 소항목 기호 (a) (b), (i) (ii) (iii)는 원문 기호를 그대로 둔다. (4) 「Equal first priority:」 「Second priority:」 「Third priority:」는 「공동 1순위:」 「2순위:」 「3순위:」로 옮긴다. (5) 작전명 'OVERLORD' 'CROSSBOW'는 「오버로드」 「크로스보」로, 대문자 지명(BERLIN, MEDITERRANEAN, BALKANS, UNITED KINGDOM)은 보통 표기로 옮긴다. (6) 끝의 「By Command of General Eisenhower.」와 서명부는 각각 한 줄로 옮기고 「(Sgd.)」는 「(서명)」으로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    },
+    {
+      "id": "scaf-48",
+      "titleKo": "아이젠하워가 연합참모본부에 — 상륙 해안 시찰 보고, 전문 SCAF 48 (1944년 6월 8일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/overlord-shaef-documents-1944-prepared.html",
+        "sha256": "8b7c71a1c744cabba4e55ed1a808ab25bcf7b1c5903dcdc4106f682f9564866a"
+      },
+      "blocks": [
+        41,
+        56
+      ],
+      "startsWith": "SHAEF Message Form.",
+      "endsWith": "End of message.",
+      "register": "한다체. 최고사령관이 연합참모본부에 보낸 1인칭 전황 보고 전문이다. '~했다/~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 머리의 서식 줄 네 개(SHAEF Message Form. Top Secret. / From … / To … / Ref. No. …)는 각각 한 줄로 짧게 옮긴다(예: 「발신: SHAEF 지휘소, 최고사령관. 발신 일시: 1944년 6월 8일.」). (2) 본문 첫 단락의 괄호 「(To the Combined Chiefs of Staff from Eisenhower, cite SHSAC. This is SCAF number forty-eight.)」는 괄호째 「(연합참모본부 앞, 아이젠하워 발, SHSAC 인용. 본 전문은 SCAF 제48호.)」로 옮긴다. (3) 부대명은 용어표를 따르되 숫자는 아라비아 숫자로 쓴다(제101공수사단, 제82공수사단, 제7군단, 제5군단, 영국 제50사단). (4) 「Beach O」 「O Beach」는 처음 나올 때 「O 해안(오마하)」, 이후 「O 해안」으로 옮긴다. (5) 제독·장군의 이름은 용어표를 따르고 처음 나올 때만 괄호에 로마자를 둔다. (6) 「D plus one」은 「D+1일」로 옮긴다. (7) 마지막 「End of message.」는 「전문 끝.」 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ]
+}
