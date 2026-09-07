@@ -104,3 +104,10 @@ Telegram 재시작(명령 등록) → 검토 서비스 첫 실행 → 타이머 
 frontend 런타임 코드는 바뀌지 않으며 기존 공통 승인 서비스를 사용한다.
 중지/복구: review.timer를 멈추고 실행 중인 review.service가 종료됐는지 확인한다.
 필요하면 이전 Python 코드로 복귀하되 큐·판단·근거 테이블은 보존한다.
+
+## 출신 국가 코드 확장 (2026-09-07)
+
+Frontend 국기·지도와 Python 허용 코드에 serbia, croatia, slovenia, montenegro,
+bosnia-herzegovina, switzerland를 함께 등록했다. 유고슬라비아는 소속 국가로 유지하고
+출신 배경은 출생지가 아닌 문헌의 민족·가계·자기인식으로 구분한다. 혼합 배경은
+단일 국가 코드에 가려지지 않도록 한영 라벨과 주장 근거에 함께 기록한다.

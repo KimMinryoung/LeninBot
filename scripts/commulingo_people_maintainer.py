@@ -269,7 +269,7 @@ NATIONALITY_CODES = (
     "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
     "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
     "kyrgyzstan, poland, finland, germany, east-germany, austria, hungary, czechia, "
-    "romania, bulgaria, yugoslavia, france, italy, spain, uk, netherlands, belgium, usa, "
+    "romania, bulgaria, yugoslavia, serbia, croatia, slovenia, montenegro, bosnia-herzegovina, switzerland, france, italy, spain, uk, netherlands, belgium, usa, "
     "cuba, argentina, chile, china, japan, india, turkey, greece, vietnam, north-korea, south-korea, "
     "albania, angola, burkina-faso, congo, ghana, guinea-bissau, indonesia, "
     "mozambique, peru, trinidad, portugal, brazil, el-salvador, grenada, guyana, "
