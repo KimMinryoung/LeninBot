@@ -61,7 +61,7 @@ def cmd_list(status: str) -> int:
 
 
 def _fetch(cur, sid: int) -> dict | None:
-    cur.execute("SELECT * FROM commulingo_agent_suggestions WHERE id = %s", (sid,))
+    cur.execute("SELECT * FROM commulingo_agent_suggestions WHERE id = %s FOR UPDATE", (sid,))
     return cur.fetchone()
 
 
@@ -76,6 +76,18 @@ def cmd_show(sid: int) -> int:
 
 
 def cmd_review(sid: int, approve: bool, note: str) -> int:
+    from runtime_tools.commulingo_person_service import call_person_service
+    with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        candidate = _fetch(cur, sid)
+    if candidate and candidate["target_type"] in {"person", "person_section"}:
+        try:
+            result = call_person_service({"command": "review", "suggestionId": sid,
+                "approve": approve, "note": note, "changedBy": f"agent-suggestion:{sid}"})
+        except ValueError as exc:
+            print(f"cannot review: {exc}")
+            return 1
+        print(_dumps(result))
+        return 0
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         row = _fetch(cur, sid)
         if not row:

@@ -35,6 +35,7 @@
 | `translation_pipeline.md` | 사료(RU/ZH/EN/DE/FR/IT→KO)·사이트(KO→EN) 공통 실행, 검증·캐시·TM, 원문 최신성, DB 적용 상태와 평가 |
 | `vector_corpus_reingestion.md` | 코퍼스 manifest·metadata·chunking·재등록과 감사 절차 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
+| `commulingo_editorial.md` | 인물 공통 저장·출처·검토·보강 상태와 배포 계약 |
 | `autonomous_project.md` | hourly autonomous project loop |
 | `skill_import_design.md` | 외부 skill import/conversion 설계 |
 | `x402_design.md` | Base USDC x402 payment demo/runtime |

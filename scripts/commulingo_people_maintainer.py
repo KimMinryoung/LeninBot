@@ -279,7 +279,8 @@ NATIONALITY_CODES = (
 
 def person_tier(candidate: dict) -> dict:
     """Derive the bio-length band for a candidate from its prominence signals."""
-    prominence = int(candidate.get("event_count") or 0) + int(candidate.get("office_count") or 0)
+    # Graph connectivity is not a historical-importance score.
+    prominence = 2
     is_major = prominence >= MAJOR_PROMINENCE
     is_minor = prominence <= MINOR_PROMINENCE_MAX
     tier = "major" if is_major else "minor" if is_minor else "standard"
@@ -308,142 +309,50 @@ def select_sparse_person(
     prefer_stale: bool = False,
     stale_days: int = 30,
 ) -> dict | None:
-    params = {
-        "recent_days": recent_days,
-        "incomplete_days": incomplete_recent_days if incomplete_recent_days is not None else recent_days,
-        "forced_id": forced_id.strip(),
-        "exclude_ids": list(exclude_ids or []),
-        "prefer_stale": bool(prefer_stale),
-        "stale_days": max(1, int(stale_days)),
-        "major_prom": MAJOR_PROMINENCE,
-        "minor_max": MINOR_PROMINENCE_MAX,
-        "major_stub": MAJOR_BIO_STUB,
-        "std_stub": STANDARD_BIO_STUB,
-        "minor_stub": MINOR_BIO_STUB,
-        "max_sections": MAX_SECTIONS,
-        "enrich_non_soviet_revolutionaries": enrich_non_soviet_revolutionaries,
-    }
-    rows = db_query(
-        """SELECT p.id, p.group_id, p.name_ko, p.name_en,
-                  LENGTH(COALESCE(p.bio_ko, '')) AS bio_chars,
-                  CASE WHEN COALESCE(p.epithet_ko, '') = '' THEN 0 ELSE 1 END AS has_epithet,
-                  COUNT(DISTINCT c.id)::int AS career_count,
-                  COUNT(DISTINCT s.id)::int AS section_count,
-                  COUNT(DISTINCT ep.event_id)::int AS event_count,
-                  COUNT(DISTINCT o.id)::int AS office_count,
-                  p.citizenship_code AS citizenship_code,
-                  p.origin_code AS origin_code,
-                  CASE WHEN COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END AS has_moment,
-                  CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END AS has_role
-             FROM commulingo_people p
-             LEFT JOIN commulingo_person_career_entries c ON c.person_id = p.id
-             LEFT JOIN commulingo_person_sections s ON s.person_id = p.id
-             LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
-             LEFT JOIN commulingo_history_event_people ep ON ep.person_id = p.id
-             LEFT JOIN commulingo_office_rows o ON o.person_id = p.id
-             -- Last write by any curator lane. Drives both the recency cooldown
-             -- in HAVING and the stale-first ordering below. entity_id is the
-             -- person id or "<id>/<child>", so the part before any '/' is the
-             -- person; this form uses frontend migration 158's expression index
-             -- (2.6 s → 15 ms per poll — the old `= OR LIKE` pattern could not
-             -- use an index because the prefix comes from the outer row).
-             LEFT JOIN LATERAL (
-                  SELECT MAX(rev.created_at) AS at FROM commulingo_people_revisions rev
-                   WHERE split_part(rev.entity_id, '/', 1) = p.id
-                     AND rev.changed_by LIKE 'commulingo-maintainer%%'
-             ) lm ON TRUE
-            WHERE (%(forced_id)s = '' OR p.id = %(forced_id)s)
-              AND NOT (p.id = ANY(%(exclude_ids)s))
-              AND (
-                    %(forced_id)s <> ''
-                    OR %(enrich_non_soviet_revolutionaries)s
-                    OR NOT EXISTS (
-                        SELECT 1
-                          FROM commulingo_person_roles excluded_role
-                         WHERE excluded_role.person_id = p.id
-                           AND excluded_role.category_id = 'non-soviet-revolutionary'
-                    )
-                  )
-            GROUP BY p.id, p.group_id, p.name_ko, p.name_en, p.bio_ko, p.epithet_ko, p.moment_ko,
-                     p.citizenship_code, p.origin_code, p.created_at, r.person_id, lm.at
-           HAVING %(forced_id)s <> ''
-               OR (COALESCE(lm.at, TIMESTAMP '-infinity') < NOW() - (
-                    CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
-                              OR COALESCE(p.moment_ko, '') = ''
-                              OR COALESCE(p.citizenship_code, '') = ''
-                              OR r.person_id IS NULL
-                              OR COUNT(DISTINCT c.id) = 0
-                              OR COUNT(DISTINCT ep.event_id) = 0
-                              OR COUNT(DISTINCT s.id) = 0
-                         THEN %(incomplete_days)s ELSE %(recent_days)s END * INTERVAL '1 day')
-                -- A card with every field filled falls through the enrich checklist to
-                -- its last step, "add one more section", which had no ceiling. When the
-                -- nationality step could not be satisfied in 2026-07 because the flag
-                -- code list carried no entry for their countries, the card stayed
-                -- "incomplete" on the 2-day cooldown and kept coming back: 카브랄 took 19
-                -- sections on 7/14 and 14 more on 7/15, and twelve other people ran to
-                -- 19-36. Once a card is complete AND at MAX_SECTIONS there is nothing
-                -- left to commission, so it leaves the queue instead of growing.
-                -- The event step is deliberately excluded from this test. It is the
-                -- other step a card can be unable to satisfy: the events dictionary
-                -- holds 24 Soviet events, so 카브랄, 루뭄바, 응크루마 and the rest of the
-                -- non-Soviet revolutionaries have nothing honest to link to, and the
-                -- checklist says never to force a weak connection. Requiring an event
-                -- link here would keep exactly the runaway cards in the queue with
-                -- every remaining step refusing to fire.
-                AND NOT (
-                        COUNT(DISTINCT s.id) >= %(max_sections)s
-                    AND COALESCE(p.bio_ko, '') <> '' AND COALESCE(p.epithet_ko, '') <> ''
-                    AND COALESCE(p.moment_ko, '') <> ''
-                    AND COALESCE(p.citizenship_code, '') <> ''
-                    AND r.person_id IS NOT NULL
-                    AND COUNT(DISTINCT c.id) > 0
-                ))
-            ORDER BY
-                  CASE WHEN COALESCE(p.bio_ko, '') = '' OR COALESCE(p.epithet_ko, '') = ''
-                         OR COUNT(DISTINCT c.id) = 0 OR r.person_id IS NULL THEN 0 ELSE 1 END ASC,
-                  CASE WHEN COALESCE(p.citizenship_code, '') = '' THEN 0 ELSE 1 END ASC,
-                  -- Stale-first turn: a card no curator lane has written to in
-                  -- stale_days (never-touched cards count from creation) goes
-                  -- ahead of the moment/stub/section keys below. Off on the other
-                  -- turns, so fresh cards' missing moments still get filled.
-                  CASE WHEN %(prefer_stale)s
-                            AND COALESCE(lm.at, p.created_at) < NOW() - %(stale_days)s * INTERVAL '1 day'
-                       THEN 0 ELSE 1 END ASC,
-                  -- Stub bios and missing moments move up the queue. A bio that merely
-                  -- runs long does NOT: the shorter standard applies to what the curator
-                  -- writes from now on, and the cards already written stay as they are
-                  -- rather than becoming a trimming campaign.
-                  CASE WHEN LENGTH(COALESCE(p.bio_ko, '')) <
-                             CASE WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) >= %(major_prom)s
-                                       THEN %(major_stub)s
-                                  WHEN COUNT(DISTINCT ep.event_id) + COUNT(DISTINCT o.id) <= %(minor_max)s
-                                       THEN %(minor_stub)s
-                                  ELSE %(std_stub)s END
-                         OR COALESCE(p.moment_ko, '') = '' THEN 0 ELSE 1 END ASC,
-                  -- No event-count term here. Promoting cards with zero event
-                  -- links put them at the head of the queue for the one step
-                  -- least able to satisfy them: on 2026-08-02, 488 of 1,236
-                  -- cards were complete except for an event link, and the
-                  -- events dictionary held 25 entries, all political peaks,
-                  -- with nothing an oil, shipbuilding or radar administrator
-                  -- could honestly attach to. The checklist forbids forcing a
-                  -- weak connection, so the promoted card reached step 5,
-                  -- found nothing, and had to spend rounds getting past it.
-                  -- The same reasoning already kept the event test out of the
-                  -- HAVING clause above, where a card leaves the queue; it was
-                  -- only ever inconsistent that promotion still used it.
-                  -- Cards with no event link are still served: enrich_step()
-                  -- commissions EVENTS whenever event_count is zero. They now
-                  -- arrive at their own turn instead of jumping the line.
-                  COUNT(DISTINCT s.id) ASC,
-                  CASE WHEN COUNT(DISTINCT c.id) <= 1 THEN 0 ELSE 1 END ASC,
-                  CASE WHEN r.person_id IS NULL THEN 0 ELSE 1 END ASC,
-                  LENGTH(COALESCE(p.bio_ko, '')) ASC,
-                  p.sort_order ASC
-            LIMIT 1""",
-        params,
-    )
+    params = {"forced": forced_id.strip(), "excluded": list(exclude_ids or []),
+              "recent": recent_days, "incomplete": incomplete_recent_days or 2,
+              "non_soviet": enrich_non_soviet_revolutionaries,
+              "stale": bool(prefer_stale), "stale_days": stale_days}
+    rows = db_query("""
+      WITH candidates AS (
+        SELECT p.*, p.group_id AS group_id_copy,
+          LENGTH(p.bio_ko) AS bio_chars, (p.epithet_ko<>'')::int AS has_epithet,
+          (p.moment_ko<>'')::int AS has_moment,
+          EXISTS(SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id)::int AS has_role,
+          (SELECT COUNT(*) FROM commulingo_person_career_entries c WHERE c.person_id=p.id)::int AS career_count,
+          (SELECT COUNT(*) FROM commulingo_person_sections s WHERE s.person_id=p.id)::int AS section_count,
+          (SELECT COUNT(*) FROM commulingo_history_event_people e WHERE e.person_id=p.id)::int AS event_count,
+          (SELECT COUNT(*) FROM commulingo_office_rows o WHERE o.person_id=p.id)::int AS office_count,
+          (SELECT COUNT(*) FROM commulingo_person_evidence e WHERE e.person_id=p.id)::int AS evidence_count,
+          COALESCE((SELECT jsonb_object_agg(e.topic,e.status) FROM commulingo_person_enrichment e
+                    WHERE e.person_id=p.id AND e.review_after>NOW() AND e.status<>'open'), '{}'::jsonb) AS editorial_states,
+          (SELECT MAX(r.created_at) FROM commulingo_people_revisions r
+            WHERE split_part(r.entity_id,'/',1)=p.id AND r.changed_by LIKE 'commulingo-maintainer%%') AS last_edit
+        FROM commulingo_people p
+        WHERE (%(forced)s='' OR p.id=%(forced)s) AND NOT(p.id=ANY(%(excluded)s))
+          AND (%(non_soviet)s OR NOT EXISTS(SELECT 1 FROM commulingo_person_roles r
+              WHERE r.person_id=p.id AND r.category_id='non-soviet-revolutionary'))
+          AND NOT EXISTS(SELECT 1 FROM commulingo_agent_suggestions q WHERE q.target_id=p.id
+              AND q.target_type IN ('person','person_section') AND q.status='pending')
+      ), ranked AS (
+        SELECT *, CASE
+          WHEN (bio_chars=0 OR has_epithet=0 OR career_count=0 OR has_role=0) AND NOT(editorial_states ? 'basics') THEN 1
+          WHEN evidence_count=0 AND NOT(editorial_states ? 'bio') THEN 7
+          WHEN ((bio_ko<>'' AND bio_en='') OR (moment_ko<>'' AND moment_en='') OR (epithet_ko<>'' AND epithet_en='')) AND NOT(editorial_states ? 'bio') THEN 8
+          WHEN (citizenship_code='' OR origin_code='') AND NOT(editorial_states ? 'nationality') THEN 2
+          WHEN has_moment=0 AND NOT(editorial_states ? 'moment') THEN 4
+          WHEN event_count=0 AND NOT(editorial_states ? 'events') THEN 5
+          WHEN section_count<12 AND NOT(editorial_states ? 'sections') THEN 6
+          ELSE 0 END AS editorial_step
+        FROM candidates
+      ) SELECT * FROM ranked WHERE editorial_step<>0
+        AND (%(forced)s<>'' OR COALESCE(last_edit,'-infinity') < NOW() -
+          (CASE WHEN editorial_step IN (1,2,4,7,8) THEN %(incomplete)s ELSE %(recent)s END)*INTERVAL '1 day')
+      ORDER BY CASE editorial_step WHEN 1 THEN 0 WHEN 7 THEN 1 WHEN 8 THEN 2 WHEN 2 THEN 3 WHEN 4 THEN 4 ELSE 5 END,
+        CASE WHEN %(stale)s AND COALESCE(last_edit,created_at)<NOW()-%(stale_days)s*INTERVAL '1 day' THEN 0 ELSE 1 END,
+        COALESCE(last_edit,created_at), sort_order, id
+      LIMIT 1
+    """, params)
     return rows[0] if rows else None
 
 
@@ -552,6 +461,8 @@ def enrich_step(candidate: dict) -> int:
     prose, not a count, so it stays a gate the model evaluates. It is offered
     only when steps 1 and 2 have passed, preserving the checklist's order.
     """
+    if "editorial_step" in candidate:
+        return int(candidate["editorial_step"])
     if (
         candidate["bio_chars"] == 0
         or not candidate["has_epithet"]
@@ -655,6 +566,8 @@ row in this run.
     # are already listed above.
     step = enrich_step(candidate)
     step_text = {
+        7: "EVIDENCE: research the least-supported important claim, correct it if necessary or add field-level evidence only. Include claim, source and page/section locator; do not lengthen the bio just to add a citation.",
+        8: "BILINGUAL GAP: preserve the existing language and supply the missing translation with the same substantiated claims and evidence.",
         1: _STEP_BASIC,
         2: _STEP_NATIONALITY_TEMPLATE.format(NATIONALITY_CODES=NATIONALITY_CODES),
         4: _STEP_MOMENT_TEMPLATE.format(MOMENT_SENTENCES=MOMENT_SENTENCES),
@@ -1170,22 +1083,26 @@ COMMULINGO_NO_EDIT_TOOL = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "status": {"type": "string", "enum": ["complete", "not_applicable", "sources_unavailable"]},
+            "sources": {"type": "array", "items": {"type": "string"}, "description": "References inspected, including unsuccessful evidence checks."},
             "reason": {
                 "type": "string",
                 "description": "One or two sentences: what was checked and why no write is warranted.",
             },
         },
-        "required": ["reason"],
+        "required": ["reason", "status", "sources"],
     },
 }
 
 
 def build_no_edit_handler(box: dict):
-    async def _no_edit(reason: str = "") -> str:
+    async def _no_edit(reason: str = "", status: str = "sources_unavailable", sources: list | None = None) -> str:
         reason = str(reason or "").strip()
         if not reason:
             raise ValueError("reason is required")
-        box["reason"] = reason
+        if status not in {"complete", "not_applicable", "sources_unavailable"}:
+            raise ValueError("invalid completion status")
+        box.update(reason=reason, status=status, sources=sources or [])
         return json.dumps({"ok": True}, ensure_ascii=False)
     return _no_edit
 
@@ -1320,6 +1237,16 @@ async def _call_curator_stage(
 ) -> tuple[str, dict, dict | None]:
     binding = resolve_agent_tool_loop(spec, policy)
     memory = ResearchMemory(research_key or f"{spec.name}:{stage}:{task}")
+    staged_result: dict = {}
+    def capture_pending(handler):
+        async def captured(**kwargs):
+            result = await handler(**kwargs)
+            if isinstance(result, str) and result.startswith("OK — pending:"):
+                staged_result["text"] = result
+            return result
+        return captured
+    handlers = {name: capture_pending(handler) if name in NARROW_WRITE_TOOLS else handler
+                for name, handler in handlers.items()}
     attempts = 1 + max(0, int(policy.max_output_continuations))
     total_cost = 0.0
     total_rounds = 0
@@ -1376,6 +1303,8 @@ async def _call_curator_stage(
                     raise RuntimeError(
                         f"unexpected edit count change during {stage}: {before_count} -> {after}"
                     )
+                if staged_result:
+                    return staged_result["text"], {"total_cost": total_cost, "rounds_used": total_rounds}, None
                 if no_edit_box is not None and no_edit_box.get("reason"):
                     # The curator judged the commissioned step needs no write and
                     # said so through the typed terminal — a completed run, not a
@@ -1408,8 +1337,8 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     from runtime_tools.commulingo_people import direct_apply_enabled
     from tool_gateway.inference import resolve_agent_inference_policy
 
-    if not direct_apply_enabled():
-        raise RuntimeError("config/commulingo_people.json direct_apply must be true")
+    # The shared service can stage a reviewed edit even in direct mode.
+    direct_apply_enabled()
 
     state = load_state()
     requested_mode = mode if mode != "auto" else None
@@ -1527,9 +1456,18 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "mode": chosen_mode,
                     "fallback_error": fallback_error,
                 }
-            task = build_task("enrich", candidate)
+            task = build_task("enrich", candidate) + (
+                "\nRead get_person for expectedRevision. Every factual write needs evidence entries: "
+                "field, claim, source exactly matching a citation, and locator (page or section). "
+                "Mark disputes explicitly. A pending review is a successful terminal; do not retry it. "
+                "Use no_edit complete/not_applicable/sources_unavailable only after research. "
+                "Section count is a ceiling, never a completion target."
+            )
             enrich_tools, enrich_handlers = stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
             no_edit_box: dict = {}
+            from runtime_tools.commulingo_person_service import call_person_service
+            baseline = call_person_service({"command": "read", "id": candidate["id"]})
+            topic = {1: "basics", 2: "nationality", 4: "moment", 5: "events", 6: "sections", 7: "bio", 8: "bio"}.get(enrich_step(candidate), "bio")
             enrich_tools = [*enrich_tools, COMMULINGO_NO_EDIT_TOOL]
             enrich_handlers = {
                 **enrich_handlers,
@@ -1567,6 +1505,10 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 state["new_cooldown_remaining"] -= 1
             no_edit_reason = no_edit_box.get("reason")
             if no_edit_reason:
+                call_person_service({"command": "enrichment", "id": candidate["id"], "topic": topic,
+                    "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
+                    "sources": no_edit_box.get("sources", []), "expectedRevision": baseline["revision"],
+                    "changedBy": "commulingo-maintainer"})
                 # A judged "nothing to write" completes the run without an edit, so
                 # the DB recency cooldown never fires — step over this card for the
                 # same window a failed one gets, or the next hour re-picks it.
@@ -1593,6 +1535,12 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "result": result,
                 }
 
+    if str(result).startswith("OK — pending:"):
+        save_state(state)
+        return {"status": "pending_review", "mode": chosen_mode,
+                "candidate": candidate and candidate.get("id"), "model": report_model,
+                "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
+                "rounds": int(tracker.get("rounds_used") or 0), "result": result}
     after = completed_run_count()
     # Every completed stage lands exactly one write (the burst-bug guard).
     max_edits = 1

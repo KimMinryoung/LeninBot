@@ -21,9 +21,8 @@ no restart needed):
   commulingo_agent_suggestions; the operator reviews and applies it with
   scripts/commulingo_suggestions.py (which reuses apply_edit below).
 
-The frontend keeps a 30s in-process cache and the page/API a ~30s CDN
-max-age, so applied edits appear on the public site within about a minute —
-no service restart or cache purge required.
+The frontend serves a periodically refreshed snapshot (default 60 seconds).
+Person writes and approvals use its shared Admin store through private local RPC.
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -40,6 +40,7 @@ from psycopg2.extras import RealDictCursor, execute_values
 
 from db import query as db_query, query_one as db_query_one, get_conn
 from tool_gateway.results import ToolFailure
+from runtime_tools.commulingo_person_service import call_person_service
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ _PERSON_PATCH_KEYS = frozenset({
     "name", "givenName", "familyName",
     "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "role", "citizenship", "origin", "nationalOrigin",
+    "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
 })
 
@@ -261,7 +263,7 @@ _OFFICE_ROW_PATCH_KEYS = frozenset({
 })
 
 # Long-form detail sections rendered on /commulingo/people/<id>.
-_SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources"})
+_SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "sources", "expectedRevision", "evidence", "reviewFlags"})
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 
 _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
@@ -745,33 +747,32 @@ def _office_snapshot(cur, office_id: str) -> dict | None:
 
 
 def _get_person(person_id: str) -> dict | None:
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            person = _person_snapshot(cur, person_id)
-            if person is None:
-                return None
-            cur.execute(
-                """SELECT r.id AS row_id, r.office_id, o.title_ko AS office_title_ko,
-                          r.period_label, r.body_ko, r.note_ko
-                   FROM commulingo_office_rows r
-                   JOIN commulingo_offices o ON o.id = r.office_id
-                   WHERE r.person_id = %s
-                   ORDER BY o.sort_order, r.sort_order, r.id""",
-                (person_id,),
-            )
-            person["office_rows"] = [dict(r) for r in cur.fetchall()]
-    # Cross-store hub: facts other pipelines (news, research, analysts) attached
-    # to this person's graph node. Flag-gated with the KG recall feature; one
-    # cheap Cypher by external id, never fatal.
-    try:
-        from kg_runtime.recall import enabled as _kg_recall_enabled
-        if _kg_recall_enabled():
-            from kg_runtime.search import kg_facts_for_external_id
-            facts = kg_facts_for_external_id(f"commulingo:person:{person_id}", limit=5)
-            if facts:
-                person["kg_facts"] = facts
-    except Exception as exc:  # pragma: no cover - best effort
-        logger.debug("commulingo get_person kg_facts skipped: %s", exc)
+    # The revision and fields are read in the shared store's one MVCC snapshot.
+    person = call_person_service({"command": "read", "id": person_id})
+    if person:
+        person["office_rows"] = [
+            {"row_id": r["id"], "office_id": r["officeId"], "office_title_ko": r["officeTitle"]["ko"],
+             "period_label": r["years"], "body_ko": r["body"]["ko"], "note_ko": r["note"]["ko"]}
+            for r in person.get("institutionRows", [])
+        ]
+        person["sections"] = [
+            {"slug": s["slug"], "heading": s["heading"], "sortOrder": s["sortOrder"],
+             "bodyChars": {lang: len(s["body"].get(lang) or "") for lang in ("ko", "en")}}
+            for s in person["sections"]
+        ]
+    if person:
+        # Cross-store hub: facts other pipelines (news, research, analysts) attached
+        # to this person's graph node. Flag-gated with the KG recall feature; one
+        # cheap Cypher by external id, never fatal.
+        try:
+            from kg_runtime.recall import enabled as _kg_recall_enabled
+            if _kg_recall_enabled():
+                from kg_runtime.search import kg_facts_for_external_id
+                facts = kg_facts_for_external_id(f"commulingo:person:{person_id}", limit=5)
+                if facts:
+                    person["kg_facts"] = facts
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug("commulingo get_person kg_facts skipped: %s", exc)
     return person
 
 
@@ -1742,142 +1743,6 @@ def _replace_career(cur, person_id: str, career: list):
         )
 
 
-def _apply_person_create(cur, person_id: str, patch: dict) -> None:
-    cur.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_people")
-    next_sort = cur.fetchone()["next_sort"]
-    sort_order = patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort
-    birth, death = _parse_life_years(patch.get("years") or "")
-    # Structured name parts (givenName/familyName win, legacy `name` is split);
-    # name_ko/en are stored as the DERIVED full name — never written separately.
-    codes = _name_order_codes(patch)
-    given_ko, family_ko, name_ko = _patch_name_parts(patch, "ko", codes=codes)
-    given_en, family_en, name_en = _patch_name_parts(patch, "en", codes=codes)
-    fate = patch.get("fate") or {}
-    citizenship = _nationality_values(patch, "citizenship") or ("", "", "")
-    origin = _nationality_values(patch, "origin") or ("", "", "")
-    cur.execute(
-        """INSERT INTO commulingo_people
-              (id, group_id, sort_order, initial, cyrillic, years_label, birth_year, death_year,
-               name_ko, name_en, given_name_ko, given_name_en, family_name_ko, family_name_en,
-               epithet_ko, epithet_en, bio_ko, bio_en,
-               moment_ko, moment_en,
-               fate_kind, fate_label_ko, fate_label_en,
-               citizenship_code, citizenship_label_ko, citizenship_label_en,
-               origin_code, origin_label_ko, origin_label_en, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s, %s, NOW())""",
-        (
-            person_id,
-            patch.get("groupId") or patch.get("group"),
-            sort_order,
-            "",
-            patch.get("cyrillic") or "",
-            patch.get("years") or "",
-            birth, death,
-            name_ko, name_en, given_ko, given_en, family_ko, family_en,
-            _localized(patch.get("epithet"), "ko"), _localized(patch.get("epithet"), "en"),
-            _localized(patch.get("bio"), "ko"), _localized(patch.get("bio"), "en"),
-            _localized(patch.get("moment"), "ko"), _localized(patch.get("moment"), "en"),
-            fate.get("kind") or "" if isinstance(fate, dict) else "",
-            _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "ko"), death),
-            _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "en"), death),
-            citizenship[0], citizenship[1], citizenship[2],
-            origin[0], origin[1], origin[2],
-        ),
-    )
-    _replace_patronymic(cur, person_id, _merge_patronymic_patch(patch))
-    _replace_aliases(cur, person_id, patch.get("aliases") or {
-        "ko": [name_ko], "en": [name_en],
-    })
-    _replace_scenes(cur, person_id, patch.get("scenes") or [])
-    _replace_career(cur, person_id, patch.get("career") or [])
-    if patch.get("role"):
-        _apply_person_role(cur, person_id, patch["role"])
-
-
-def _apply_person_update(cur, person_id: str, patch: dict) -> None:
-    sets, values = [], []
-
-    def set_col(column, value):
-        values.append(value)
-        sets.append(f"{column} = %s")
-
-    if "group" in patch or "groupId" in patch:
-        set_col("group_id", patch.get("groupId") or patch.get("group"))
-    if "cyrillic" in patch:
-        set_col("cyrillic", patch.get("cyrillic") or "")
-    if "years" in patch:
-        birth, death = _parse_life_years(patch.get("years") or "")
-        set_col("years_label", patch.get("years") or "")
-        set_col("birth_year", birth)
-        set_col("death_year", death)
-    if "name" in patch or "givenName" in patch or "familyName" in patch:
-        # Any name field recomputes all six name columns so the structured
-        # parts and the derived full name never diverge.
-        cur.execute(
-            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en,
-                      citizenship_code
-               FROM commulingo_people WHERE id = %s""",
-            (person_id,),
-        )
-        stored_name = dict(cur.fetchone() or {})
-        codes = _name_order_codes(patch, stored_name)
-        for lang in ("ko", "en"):
-            given, family, full = _patch_name_parts(patch, lang, stored_name, codes=codes)
-            set_col(f"name_{lang}", full)
-            set_col(f"given_name_{lang}", given)
-            set_col(f"family_name_{lang}", family)
-    if "epithet" in patch:
-        set_col("epithet_ko", _localized(patch.get("epithet"), "ko"))
-        set_col("epithet_en", _localized(patch.get("epithet"), "en"))
-    if "bio" in patch:
-        set_col("bio_ko", _localized(patch.get("bio"), "ko"))
-        set_col("bio_en", _localized(patch.get("bio"), "en"))
-    if "moment" in patch:
-        set_col("moment_ko", _localized(patch.get("moment"), "ko"))
-        set_col("moment_en", _localized(patch.get("moment"), "en"))
-    if "fate" in patch:
-        fate = patch.get("fate") or {}
-        # Death year comes from an incoming years patch if present, else the
-        # stored record, so the fate label is stripped against the right year.
-        if "years" in patch:
-            _, death = _parse_life_years(patch.get("years") or "")
-        else:
-            cur.execute("SELECT death_year FROM commulingo_people WHERE id = %s", (person_id,))
-            row = cur.fetchone()
-            death = row["death_year"] if row else None
-        set_col("fate_kind", fate.get("kind") or "" if isinstance(fate, dict) else "")
-        set_col("fate_label_ko", _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "ko"), death))
-        set_col("fate_label_en", _normalize_fate_label(_localized(fate.get("label") if isinstance(fate, dict) else None, "en"), death))
-    if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
-        set_col("sort_order", patch["sortOrder"])
-    for key, cols in (
-        ("citizenship", ("citizenship_code", "citizenship_label_ko", "citizenship_label_en")),
-        ("origin", ("origin_code", "origin_label_ko", "origin_label_en")),
-    ):
-        vals = _nationality_values(patch, key)
-        if vals is not None:
-            set_col(cols[0], vals[0])
-            set_col(cols[1], vals[1])
-            set_col(cols[2], vals[2])
-    if sets:
-        sets.append("updated_at = NOW()")
-        values.append(person_id)
-        cur.execute(f"UPDATE commulingo_people SET {', '.join(sets)} WHERE id = %s", values)
-    if "patronymic" in patch or "cyrillicPatronymic" in patch:
-        before_patronymic = _stored_patronymic_state(cur, person_id)
-        _replace_patronymic(cur, person_id, _merge_patronymic_patch(patch, before_patronymic))
-    if "aliases" in patch:
-        _replace_aliases(cur, person_id, patch.get("aliases") or {})
-    if "scenes" in patch:
-        _replace_scenes(cur, person_id, patch.get("scenes") or [])
-    if "career" in patch:
-        _replace_career(cur, person_id, patch.get("career") or [])
-    if "role" in patch:
-        _apply_person_role(cur, person_id, patch.get("role"))
-
-
 def _apply_office_row_create(cur, office_id: str, patch: dict) -> int:
     cur.execute(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_office_rows WHERE office_id = %s",
@@ -2005,6 +1870,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             "exactly as their own dictionary card does. Keep an original spelling "
             "only inside direct quotation marks (quoted spans are already exempt)."
         )
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext('commulingo-editorial-write'))")
     allowed = _PATCH_KEYS_BY_TARGET[target_type]
     unknown = set(patch) - allowed
     if unknown:
@@ -2966,22 +2832,8 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
     Caller owns the transaction: everything here (including the revision
     snapshot) commits or rolls back together.
     """
-    if target_type == "person":
-        if action == "create":
-            _apply_person_create(cur, target_id, patch)
-            snapshot = _person_snapshot(cur, target_id)
-            _write_revision(cur, "person", target_id, "create person", snapshot, changed_by)
-            return f"created person '{target_id}'"
-        if action == "update":
-            before = _person_snapshot(cur, target_id)
-            _apply_person_update(cur, target_id, patch)
-            after = _person_snapshot(cur, target_id)
-            _write_revision(cur, "person", target_id, "update person", {"before": before, "after": after}, changed_by)
-            return f"updated person '{target_id}' ({', '.join(sorted(patch)) or 'no fields'})"
-        before = _person_snapshot(cur, target_id)
-        cur.execute("DELETE FROM commulingo_people WHERE id = %s", (target_id,))
-        _write_revision(cur, "person", target_id, "delete person", before, changed_by)
-        return f"deleted person '{target_id}'"
+    if target_type in {"person", "person_section"}:
+        raise ValueError("person writes must use the shared editorial service, including approvals")
 
     if target_type == "term":
         if action == "create":
@@ -3014,76 +2866,6 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
                         {"before": before, "after": _event_snapshot(cur, target_id)}, changed_by)
         verb = "added" if action == "create" else "rewrote"
         return f"{verb} body section '{heading}' of event '{target_id}'"
-
-    if target_type == "person_section":
-        slug = patch["slug"]
-        entity_id = f"{target_id}/{slug}"
-
-        def section_row():
-            cur.execute(
-                """SELECT slug, sort_order, heading_ko, heading_en, body_ko, body_en, sources
-                   FROM commulingo_person_sections WHERE person_id = %s AND slug = %s""",
-                (target_id, slug),
-            )
-            row = cur.fetchone()
-            return dict(row) if row else None
-
-        if action == "delete":
-            before = section_row()
-            cur.execute(
-                "DELETE FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
-                (target_id, slug),
-            )
-            _write_revision(cur, "person_section", entity_id, "delete section", before, changed_by)
-            return f"deleted section '{slug}' of '{target_id}'"
-
-        before = section_row()
-        heading = patch.get("heading") or {}
-        body = patch.get("body") or {}
-        if action == "create":
-            cur.execute(
-                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_person_sections WHERE person_id = %s",
-                (target_id,),
-            )
-            next_sort = _section_sort_order(patch, heading, cur.fetchone()["next_sort"])
-            cur.execute(
-                """INSERT INTO commulingo_person_sections
-                      (person_id, slug, sort_order, heading_ko, heading_en,
-                       body_ko, body_en, sources, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
-                (
-                    target_id, slug, next_sort,
-                    _localized(heading, "ko"), _localized(heading, "en"),
-                    _localized(body, "ko"), _localized(body, "en"),
-                    json.dumps(patch.get("sources") or [], ensure_ascii=False),
-                ),
-            )
-            _write_revision(cur, "person_section", entity_id, "create section", section_row(), changed_by)
-            return f"created section '{slug}' of '{target_id}'"
-
-        sets, values = [], []
-        if "heading" in patch:
-            sets += ["heading_ko = %s", "heading_en = %s"]
-            values += [_localized(heading, "ko"), _localized(heading, "en")]
-        if "body" in patch:
-            sets += ["body_ko = %s", "body_en = %s"]
-            values += [_localized(body, "ko"), _localized(body, "en")]
-        if isinstance(patch.get("sortOrder"), int):
-            sets.append("sort_order = %s")
-            values.append(patch["sortOrder"])
-        if patch.get("sources"):
-            sets.append("sources = %s::jsonb")
-            values.append(json.dumps(patch["sources"], ensure_ascii=False))
-        if sets:
-            sets.append("updated_at = NOW()")
-            values += [target_id, slug]
-            cur.execute(
-                f"UPDATE commulingo_person_sections SET {', '.join(sets)} WHERE person_id = %s AND slug = %s",
-                values,
-            )
-        _write_revision(cur, "person_section", entity_id, "update section",
-                        {"before": before, "after": section_row()}, changed_by)
-        return f"updated section '{slug}' of '{target_id}'"
 
     if target_type == "history_event_person":
         person_id = patch["personId"]
@@ -3188,6 +2970,28 @@ def _public_page(target_type: str, target_id: str) -> str:
 
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
+    if target_type in {"person", "person_section"}:
+        fields = {k: v for k, v in patch.items() if k not in {"office_rows", "sections", "revision"}}
+        if "origin" in fields:
+            fields["nationalOrigin"] = fields.pop("origin")
+            fields["evidence"] = [{**e, "field": "nationalOrigin" if e.get("field") == "origin" else e.get("field")}
+                                  for e in fields.get("evidence", [])]
+        # Existing normalization/terminology repairs run before this boundary;
+        # all persistence validation, locks, evidence and suggestions run in JS.
+        if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
+            fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
+            fields["role"].pop("categoryId")
+        try:
+            result = call_person_service({"command": "submit", "target": target_type,
+                "action": action, "id": target_id, "fields": fields, "sources": sources,
+                "confidence": confidence, "changedBy": _SUGGESTED_BY,
+                "directApply": direct_apply_enabled()})
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return (f"OK — {result['status']}: {action} {target_type} '{target_id}'. "
+                f"Logged as edit #{result['suggestionId']}. "
+                + ("Pending review; no content changed." if result["status"] == "pending"
+                   else "Applied through the shared Admin store."))
     if target_type == "person_section" and not patch.get("sources"):
         # Section rows carry their own sources column; reuse the tool-level
         # citations so they survive into the rendered detail page data.
@@ -3284,6 +3088,14 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
     # screen. The whole-body ceiling is EVENT_BODY_CEILING below.
     "event_section_body": (2600, 5800),
 }
+
+# The same contract is imported by the JS storage validator. No duplicated
+# person ceilings in prompts/tool schemas and the persistence boundary.
+_EDITORIAL_CONTRACT = json.loads(Path(os.environ.get("COMMULINGO_PERSON_CONTRACT",
+    "/home/grass/frontend/data/commulingo/person-editorial-contract.json")).read_text())
+for _field in ("epithet", "bio", "moment", "fate_label"):
+    FIELD_LIMITS[_field] = tuple(_EDITORIAL_CONTRACT["limits"][_field])
+FIELD_LIMITS["section_body"] = tuple(_EDITORIAL_CONTRACT["limits"]["body"])
 
 # What one event body section should be written to, as (min, max) Korean
 # characters — the event twin of SECTION_BODY_TARGET. The two bodies that
@@ -3919,6 +3731,33 @@ async def _exec_commulingo_write(
         return _commulingo_error("internal_error", f"{type(e).__name__}: {e}", retryable=True)
 
 
+_EVIDENCE_SCHEMA = {
+    "type": "array", "maxItems": 50,
+    "items": {"type": "object", "additionalProperties": False,
+        "properties": {**{key: {"type": "string"} for key in
+            ("field", "claim", "source", "locator", "excerpt")},
+            "stance": {"type": "string", "enum": ["supports", "disputes"]}},
+        "required": ["field", "claim", "source", "locator"]},
+    "description": "For each changed factual field identify a claim and the cited page/section. source must match a citation. Use stance=disputes for conflicting evidence; it stages review.",
+}
+_PAIR_SCHEMA = {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}}
+_COLLECTION_SCHEMAS = {
+    "aliasEdits": {"lang": {"type": "string", "enum": ["ko", "en"]}, "value": {"type": "string"}, "replacement": {"type": "string"}},
+    "sceneEdits": {"scene": _PAIR_SCHEMA, "replacement": _PAIR_SCHEMA},
+    "careerEdits": {"id": {"type": "string"}, "entry": {"type": "object", "properties": {
+        "y": {"type": "string"}, "r": _BILINGUAL_TEXT_SCHEMA}, "additionalProperties": False}},
+}
+for _key, _properties in _COLLECTION_SCHEMAS.items():
+    _COMMULINGO_FIELD_SCHEMA["properties"][_key] = {"type": "array", "maxItems": 100,
+        "items": {"type": "object", "additionalProperties": False,
+            "properties": {"op": {"type": "string", "enum": ["add", "update", "remove"]}, **_properties}, "required": ["op"]}}
+
+_COMMULINGO_FIELD_SCHEMA["properties"].update({
+    "expectedRevision": {"type": "string", "description": "Copy revision from get_person. Required on update; never refresh it without reconciling a conflict."},
+    "evidence": _EVIDENCE_SCHEMA,
+    "reviewFlags": {"type": "array", "items": {"type": "string", "enum": ["identity_uncertain", "source_conflict"]}},
+})
+
 def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = ()) -> dict:
     return {
         "type": "object",
@@ -3932,6 +3771,7 @@ _PERSON_NARROW_KEYS = (
     "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
     "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
     "citizenship", "nationalOrigin", "aliases", "career", "role", "fate", "scenes",
+    "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )
 _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "startYear", "endYear",
@@ -3956,7 +3796,8 @@ _CITATIONS_SCHEMA = {
 def _person_write_tool(name: str, action: str) -> dict:
     required_fields = (
         "groupId", "epithet", "bio", "career", "role", "citizenship", "nationalOrigin",
-    ) if action == "create" else ()
+        "evidence",
+    ) if action == "create" else ("expectedRevision", "evidence")
     return {
         "name": name,
         "description": (
@@ -3967,7 +3808,8 @@ def _person_write_tool(name: str, action: str) -> dict:
             "nationalOrigin means national/ethnic "
             "background, never birthplace. Russian-style names must research and include a "
             "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
-            "A successful call ends the run."
+            "Each changed bio/moment/years/nationality needs evidence with claim, source and locator. "
+            "Conflicting evidence or large deletions are staged for review. A successful call ends the run."
         ),
         "input_schema": {
             "type": "object",
@@ -3992,6 +3834,8 @@ COMMULINGO_SECTION_SAVE_TOOL = {
     "input_schema": {
         "type": "object", "additionalProperties": False,
         "properties": {
+            "expected_revision": {"type": "string", "description": "Current get_person revision (also required to create a section)."},
+            "evidence": _EVIDENCE_SCHEMA,
             "action": {"type": "string", "enum": ["create", "update"]},
             "person_id": {"type": "string"},
             "slug": {"type": "string"},
@@ -4007,7 +3851,7 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             )},
             "citations": _CITATIONS_SCHEMA,
         },
-        "required": ["action", "person_id", "slug", "heading", "body", "citations"],
+        "required": ["action", "person_id", "slug", "heading", "body", "citations", "expected_revision", "evidence"],
     },
 }
 
@@ -4215,9 +4059,9 @@ async def _exec_commulingo_person_update(person_id: str, fields: dict, citations
 
 async def _exec_commulingo_section_save(
     action: str, person_id: str, slug: str, heading: dict, body: dict,
-    citations: list, sort_order: int | None = None,
+    citations: list, sort_order: int | None = None, expected_revision: str | None = None, evidence: list | None = None,
 ) -> str:
-    fields = {"slug": slug, "heading": heading, "body": body, "sources": citations}
+    fields = {"slug": slug, "heading": heading, "body": body, "sources": citations, "expectedRevision": expected_revision, "evidence": evidence or []}
     if sort_order is not None:
         fields["sortOrder"] = sort_order
     return await _exec_commulingo_write("person_section", action, person_id, citations, fields, None)
