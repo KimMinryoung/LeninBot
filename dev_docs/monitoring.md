@@ -94,3 +94,7 @@ curl -s "https://leninbot-watchdog.minryoung93.workers.dev/status/$(cat .watchdo
 - **복제 점검**: 스탠바이 컨테이너를 잠깐 중지하면 `exit 1`과 함께 슬롯 inactive·walreceiver 부재를 보고한다.
 
 셋 다 2026-08-01에 프로덕션에서 통과했다.
+
+## 번역 배치 실패 상태
+
+저장소의 `research-document-translation.service`는 `scripts/run_translation_batch.py`로 두 DB 번역 작업을 실행하고 하나라도 실패하면 exit 1을 반환한다. 보류된 검증 실패 행도 실패 상태에 포함하므로 호출이 없다는 이유로 정상처럼 보이지 않는다. 48시간 보류 정보는 `output/translation_failures/`에, 실행 결과는 journal에 있다. provider·통신 오류는 다음 정기 실행에서 다시 시도하며 무기한 보류는 없다. 2026-09-07 새 유닛 설치·daemon-reload 후 `ignore_errors=no`를 확인했다. 실제 번역 배치는 수동 실행하지 않았으며, 외부 워치독/텔레그램 알림 연결은 추가하지 않았다.

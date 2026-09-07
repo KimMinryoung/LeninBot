@@ -217,3 +217,57 @@ def split_prose(text: str, limit: int) -> list[str]:
     if text.strip():
         parts.append(text.strip())
     return parts
+
+
+def translate_oversized_markdown(source: str, translate, max_chars: int) -> str:
+    """Split a large top-level table/list and validate its reassembled structure.
+
+    Tables repeat the original header for each call; only the first translated
+    header is retained. Lists split at direct item boundaries, preserving the
+    original inter-item blank lines (tight/loose list semantics). An indivisible
+    row/item, fence or paragraph can still exceed the target size.
+    """
+    if len(source) <= max_chars:
+        return translate(source)
+    tokens = markdown_parser().parse(source)
+    if not tokens or tokens[0].type not in {'table_open', 'bullet_list_open', 'ordered_list_open'}:
+        return translate(source)
+    lines = source.splitlines(keepends=True)
+    root = tokens[0]
+    start, end = root.map
+    if ''.join(lines[:start]).strip() or ''.join(lines[end:]).strip():
+        return translate(source)
+    table = root.type == 'table_open'
+    if table:
+        header = ''.join(lines[start:start + 2])
+        cuts = list(range(start + 2, end)) + [end]
+    else:
+        header = ''
+        cuts = [t.map[0] for t in tokens if t.type == 'list_item_open' and t.level == 1] + [end]
+    if len(cuts) < 3:
+        return translate(source)
+    groups = []
+    current = ''
+    for a, b in zip(cuts, cuts[1:]):
+        item = ''.join(lines[a:b])
+        if current and len(header) + len(current) + len(item) > max_chars:
+            groups.append(current)
+            current = ''
+        current += item
+    if current:
+        groups.append(current)
+    if len(groups) == 1:
+        return translate(source)
+    results = []
+    for index, group in enumerate(groups):
+        translated = translate(header + group).strip('\n')
+        if table and index:
+            translated = '\n'.join(translated.splitlines()[2:])
+        # Keep the source gap, rather than making every list loose with '\n\n'.
+        gap = '\n' * max(1, len(group) - len(group.rstrip('\n')))
+        results.append(translated + gap)
+    result = ''.join(results).rstrip('\n') + '\n'
+    problems = markdown_problems(source, result)
+    if problems:
+        raise ValueError('split Markdown assembly failed: ' + '; '.join(problems))
+    return result

@@ -528,8 +528,11 @@ def _error_kind(exc: Exception) -> str:
 
 
 def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
-                      profile: CallSiteProfile | None = None, **defaults) -> GenerationResult:
+                      profile: CallSiteProfile | None = None, label: str | None = None,
+                      **defaults) -> GenerationResult:
     """Audited one-shot result. Profile overrides are for explicit comparison runs.
+    ``label`` lands in llm_audit_log.label so a batch (e.g. an archival spec id)
+    can be costed separately from its feature.
 
     Unlike generate_sync, consumers can reject truncation and classify retries.
     Every internal output-budget attempt is audited, including discarded output.
@@ -577,11 +580,11 @@ def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
         for key, value in attempt["usage"].items():
             total_usage[key] = total_usage.get(key, 0) + (value or 0)
         record_llm_call(surface="oneshot", caller=feature, provider=provider,
-                        model=profile.model, latency_ms=attempt["latency_ms"],
+                        model=profile.model, label=label, latency_ms=attempt["latency_ms"],
                         token_semantics=semantics, **attempt["usage"])
     if error:
         record_llm_call(surface="oneshot", caller=feature, provider=provider,
-                        model=profile.model, status="error", error_excerpt=error,
+                        model=profile.model, label=label, status="error", error_excerpt=error,
                         latency_ms=int((time.monotonic() - started) * 1000),
                         token_semantics=semantics, estimate_cost=False)
     return GenerationResult(text=text or None, error_kind=kind, error=error,

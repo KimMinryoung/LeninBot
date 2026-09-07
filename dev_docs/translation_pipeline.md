@@ -239,3 +239,10 @@ SELECT count(*) FROM research_documents
 - 청크의 첫 블록이 「SCAF 48」처럼 번역해도 같은 짧은 제목이면 검증기가 「원문을 그대로 반환함」으로 청크 전체를 거부한다(재시도 3회 소진). 제목 블록은 문장으로 바꾸거나 prepared 파일에서 뺀다. h1(titleKo)과 겹치는 원문 제목 h3는 빼는 쪽이 낫다.
 - 이미지만 있는 저본(SCAF 48)은 세션에서 직접 전사했다. 전신 절차어(PD·CMA·PARAGRAPH·REPEAT) 복원은 저본 단계에서 하고 해제에 밝힌다.
 - 그리스어 역본만 있는 후보(1675)는 `SourceLanguage`에 그리스어가 없어 보류했다.
+
+이 배치의 낭비(호출 43회 중 8회)를 없애려고 같은 날 네 가지를 고쳤다:
+
+- **라틴 저본의 「원문 그대로 반환」·「한국어가 없음」 검사**는 `script`(로마자 한 글자)가 아니라 `stray_word`(번역할 낱말)가 원문에 있을 때만 건다. 「SCAF 48」 같은 제목 블록을 올바르게 돌려준 응답을 세 번 거부하던 문제. 테스트 `LatinVerbatimHeading`.
+- **`--plan` 견적**: Gemini는 registry에 thinking 키가 없어도 동적 추론이 켜져 있으므로 추론 on으로 치고, 호출당 입력 오버헤드(`_CALL_OVERHEAD_TOKENS`=1,600)와 Gemini 추론 토큰(`_GEMINI_REASONING_TOKENS_PER_CALL`=4,000)을 더한다. 2026-09-07 4묶음 실측(입력 오버헤드 1,460~1,900, 추론 2,700~5,500/호출)에서 뽑은 상수다. 옛 견적 $0.32 → 새 견적 $2.01, 실제 $2.37(낭비 호출 포함).
+- **감사 라벨**: `Options.label`(기본 스펙 id) → `generate_translation(label=)` → `call_registry.generate_detailed(label=)` → `llm_audit_log.label`. 애드혹 실행은 게이트웨이가 ` [adhoc]`을 덧붙이므로 `label LIKE '<spec id>%'`로 문서별 비용을 뽑는다.
+- **청크 캐시 키의 블록 번호 독립**: `_chunk_key`가 마커의 블록 번호를 청크 안 순번으로 바꿔 해시한다. 앞 블록을 빼거나 문서를 끼워 넣어 번호가 밀려도 내용이 같은 청크는 캐시에 맞고, `_cached_blocks`가 원문 해시 순서 일치를 확인한 뒤 새 번호로 옮겨 다시 기록한다. 구키 레코드는 `_legacy_chunk_key` 폴백으로 찾아 새 키로 이관한다(같은 날 71개 캐시 전부 한 번 훑어 이관; 2026-08-31 모델 교체 이전 레코드는 어차피 키가 안 맞아 `--reassemble`의 해시 대조에만 쓰인다). 테스트 `RenumberedCache`. 검증: 오버로드 저본 맨 앞에 블록 하나를 끼운 사본으로 pending 4→1.

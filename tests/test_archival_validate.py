@@ -179,3 +179,55 @@ class ForeignScript(unittest.TestCase):
                     "α 단계에 걸쳐 지불해야 한다는 데 있습니다. 이 부분에서 그 계획은 진흙 발로 서 있습니다."]}
         problems = validate(_chunk(_SRC), got, RUSSIAN)
         self.assertFalse(any("대상 밖 문자" in p for p in problems), problems)
+
+
+class LatinVerbatimHeading(unittest.TestCase):
+    def test_untranslatable_code_heading_is_not_an_echo(self):
+        # 「SCAF 48」처럼 번역해도 원문과 같은 제목 블록은 실패가 아니다 (2026-09-07).
+        from runtime_tools.archival_translation.core import ENGLISH
+        chunk = [(10, {"tag": "h3", "lines": ["SCAF 48"]}),
+                 (11, {"tag": "p", "lines": ["Losses have been considerable in this force."]})]
+        self.assertEqual(validate(chunk, {10: ["SCAF 48"], 11: ["이 부대의 손실이 상당했다."]}, ENGLISH), [])
+        problems = validate(chunk, {10: ["SCAF 48"], 11: ["Losses have been considerable in this force."]}, ENGLISH)
+        self.assertTrue(problems and "그대로 반환" in problems[0])
+
+
+class RenumberedCache(unittest.TestCase):
+    """블록 번호가 밀려도 내용이 같은 청크는 캐시에 맞는다 (2026-09-07)."""
+
+    def _prepared(self, chunk):
+        from runtime_tools.archival_translation.core import _legacy_chunk_key, _prepare_chunk
+        prompt, key = _prepare_chunk(chunk, [], Options(), RUSSIAN)
+        return prompt, key, _legacy_chunk_key(prompt, Options(), RUSSIAN)
+
+    def test_key_ignores_block_numbers_but_not_content(self):
+        a = self._prepared(_chunk(_SRC))
+        b = self._prepared([(500, {"tag": "p", "lines": [_SRC]})])
+        c = self._prepared(_chunk(_SRC + " Ещё."))
+        self.assertEqual(a[1], b[1])
+        self.assertNotEqual(a[2], b[2])
+        self.assertNotEqual(a[1], c[1])
+
+    def test_record_from_old_numbering_is_remapped_and_refiled(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Cache(Path(d) / "c.jsonl")
+            old = _chunk(_SRC)
+            _, key, _ = self._prepared(old)
+            from runtime_tools.archival_translation.core import _block_source_hashes
+            cache.put(key, {10: _FULL}, {"sourceHashes": _block_source_hashes(old)})
+            new = [(500, {"tag": "p", "lines": [_SRC]})]
+            self.assertEqual(_cached_blocks(cache, key, new, RUSSIAN), ({500: _FULL}, []))
+            # 옮겨 쓴 결과가 현재 번호로 다시 기록돼 --reassemble의 해시 대조에 걸린다
+            self.assertEqual(cache.get(key)["sourceHashes"], _block_source_hashes(new))
+            changed = [(500, {"tag": "p", "lines": [_SRC + " Ещё."]})]
+            self.assertEqual(_cached_blocks(cache, key, changed, RUSSIAN)[0], None)
+
+    def test_legacy_key_record_is_found_and_migrated(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Cache(Path(d) / "c.jsonl")
+            chunk = _chunk(_SRC)
+            _, key, legacy = self._prepared(chunk)
+            cache.put(legacy, {10: _FULL}, {"attempt": 1})
+            self.assertEqual(_cached_blocks(cache, key, chunk, RUSSIAN), (None, []))
+            self.assertEqual(_cached_blocks(cache, key, chunk, RUSSIAN, legacy), ({10: _FULL}, []))
+            self.assertIsNotNone(cache.get(key))

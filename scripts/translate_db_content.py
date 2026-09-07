@@ -2,7 +2,7 @@
 """Translate frontend DB posts/diaries/hub curations into English columns.
 
 Korean originals stay in title/content. English translations are written to
-title_en/content_en only when missing, so publishing can remain Korean-first.
+title_en/content_en when missing or when the observed source changes.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from secrets_loader import get_secret
 from translation_runtime import TranslationProviderError
+from translation_runtime.batch_state import BatchState
 from scripts._translation_common import (
     TranslationCallError,
     field_translation_problems,
@@ -106,16 +107,9 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
         where = "WHERE id = ANY(%s)"
         params.append(ids)
     elif not force:
-        if target_name == "curation":
-            where = (
-                "WHERE NULLIF(BTRIM(COALESCE(title_en, '')), '') IS NULL "
-                "OR NULLIF(BTRIM(COALESCE(selection_rationale_en, '')), '') IS NULL "
-                "OR NULLIF(BTRIM(COALESCE(context_en, '')), '') IS NULL"
-            )
-        else:
-            where = "WHERE NULLIF(BTRIM(COALESCE(title_en, '')), '') IS NULL OR NULLIF(BTRIM(COALESCE(content_en, '')), '') IS NULL"
+        where = f"WHERE ({_missing_translation_sql(target_name)}) OR translation_source_sha256 IS DISTINCT FROM {_source_hash_sql(target_name)}"
     order_column = "published_at" if target_name == "curation" else "created_at"
-    order_limit = f"ORDER BY {order_column} DESC"
+    order_limit = f"ORDER BY {order_column} DESC, id DESC"
     if limit > 0:
         order_limit += " LIMIT %s"
         params.append(limit)
@@ -125,7 +119,7 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
                 f"""
                 SELECT id, title, source_title, selection_rationale, context,
                        title_en, source_title_en, selection_rationale_en, context_en,
-                       published_at
+                       published_at, {_source_hash_sql(target_name)} AS translation_current_sha256
                 FROM {table}
                 {where}
                 {order_limit}
@@ -135,14 +129,51 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
         else:
             cur.execute(
                 f"""
-                SELECT id, title, content, title_en, content_en, created_at
+                SELECT id, title, content, title_en, content_en, created_at,
+                       {_source_hash_sql(target_name)} AS translation_current_sha256
                 FROM {table}
                 {where}
                 {order_limit}
                 """,
                 params,
             )
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+    return rows
+
+
+def _source_fields(target_name):
+    return ('title', 'source_title', 'selection_rationale', 'context') if target_name == 'curation' else ('title', 'content')
+
+
+def _source_hash_sql(target_name):
+    fields = ', '.join(_source_fields(target_name))
+    return f"encode(sha256(convert_to(jsonb_build_array({fields})::text, 'UTF8')), 'hex')"
+
+
+def _missing_translation_sql(target_name):
+    fields = ('title_en', 'selection_rationale_en', 'context_en') if target_name == 'curation' else ('title_en', 'content_en')
+    return ' OR '.join(f"NULLIF(BTRIM(COALESCE({field}, '')), '') IS NULL" for field in fields)
+
+
+def translation_freshness_migration_sql():
+    """Initialize complete legacy translations once; reruns never bless stale rows.
+
+    Existing translations are preserved as a baseline, not claimed to be checked.
+    The column and its baseline are created in the caller's same transaction.
+    """
+    statements = []
+    for kind, target in TARGETS.items():
+        table = target['table']
+        statements.append(f"""DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                           WHERE attrelid = '{table}'::regclass
+                             AND attname = 'translation_source_sha256' AND NOT attisdropped) THEN
+                ALTER TABLE {table} ADD COLUMN translation_source_sha256 TEXT;
+                UPDATE {table} SET translation_source_sha256 = {_source_hash_sql(kind)}
+                 WHERE NOT ({_missing_translation_sql(kind)});
+            END IF;
+        END $$""")
+    return statements
 
 
 def _parse_json_response(text: str) -> dict[str, str]:
@@ -244,7 +275,8 @@ def _update_row(conn, target_name: str, table: str, row_id: int, translated: dic
                    SET title_en = %s,
                        source_title_en = COALESCE(NULLIF(%s, ''), source_title_en),
                        selection_rationale_en = %s,
-                       context_en = %s
+                       context_en = %s,
+                       translation_source_sha256 = {_source_hash_sql(target_name)}
                  WHERE id = %s AND title IS NOT DISTINCT FROM %s
                    AND source_title IS NOT DISTINCT FROM %s
                    AND selection_rationale IS NOT DISTINCT FROM %s
@@ -261,7 +293,7 @@ def _update_row(conn, target_name: str, table: str, row_id: int, translated: dic
             )
         else:
             cur.execute(
-                f"UPDATE {table} SET title_en = %s, content_en = %s WHERE id = %s AND title IS NOT DISTINCT FROM %s AND content IS NOT DISTINCT FROM %s",
+                f"UPDATE {table} SET title_en = %s, content_en = %s, translation_source_sha256 = {_source_hash_sql(target_name)} WHERE id = %s AND title IS NOT DISTINCT FROM %s AND content IS NOT DISTINCT FROM %s",
                 [translated["title_en"], translated["content_en"], row_id, row.get("title"), row.get("content")],
             )
         if cur.rowcount != 1:
@@ -310,18 +342,29 @@ def translate_target(
     force: bool,
     dry_run: bool,
     select_only: bool,
+    retry_failed: bool = False,
 ) -> tuple[int, str, list[str]]:
     target = TARGETS[target_name]
     env = _load_frontend_env()
     conn = _connect_db(env)
+    state = BatchState()
     changed = 0
     failures: list[str] = []
     try:
-        if target_name == "curation":
+        if target_name == "curation" and not select_only and not dry_run:
             _ensure_curation_columns(conn)
-        rows = _select_rows(conn, target_name, target["table"], ids=ids, limit=limit, force=force)
+        rows = _select_rows(conn, target_name, target["table"], ids=ids, limit=0, force=force)
+        attempted = 0
         print(f"{target_name}: selected {len(rows)} row(s)")
         for row in rows:
+            key, fingerprint = f"{target_name}:{row['id']}", row["translation_current_sha256"]
+            if not (retry_failed or force or ids or select_only or dry_run) and state.deferred(key, fingerprint):
+                failures.append(f"{key}: validation cooldown")
+                print(f"deferred {key}")
+                continue
+            if limit > 0 and attempted >= limit:
+                break
+            attempted += 1
             print(f"translating {target_name}#{row['id']}: {row.get('title') or ''}")
             if select_only:
                 continue
@@ -334,6 +377,8 @@ def translate_target(
             try:
                 translated = _call_translator(row, label=target["label"])
             except Exception as exc:
+                if not dry_run and not select_only:
+                    state.failed(key, fingerprint, exc)
                 failures.append(f"{target_name}#{row['id']}: {exc}")
                 print(f"failed {target_name}#{row['id']}: {exc}", file=sys.stderr)
                 if isinstance(exc, TranslationProviderError) and exc.result.error_kind in {
@@ -350,10 +395,16 @@ def translate_target(
                 _update_row(conn, target_name, target["table"], int(row["id"]), translated, row)
             except Exception as exc:
                 conn.rollback()
+                if not dry_run and not select_only:
+                    state.failed(key, fingerprint, exc)
                 failures.append(f"{target_name}#{row['id']}: {exc}")
                 continue
-            _record_tm(target_name, row, translated)
             changed += 1
+            try:
+                state.succeeded(key, fingerprint)
+            except Exception as exc:
+                failures.append(f"{key}: translation saved but cooldown cleanup failed: {exc}")
+            _record_tm(target_name, row, translated)
             print(f"updated {target_name}#{row['id']}: {translated['title_en']}")
     finally:
         conn.close()
@@ -372,6 +423,7 @@ def main() -> int:
     # LLM_SITE_DB_CONTENT_TRANSLATION_MODEL을 쓴다. 예전의
     # --model/--base-url/--max-tokens는 레지스트리가 값을 쥔 뒤로 아무 효과가
     # 없어서 없앴다 — 먹지 않는 플래그를 남겨 두는 편이 더 나쁘다.
+    parser.add_argument("--retry-failed", action="store_true", help="Bypass saved retry delays and validation quarantine.")
     args = parser.parse_args()
 
     names = ["posts", "diary", "curation"] if args.kind == "all" else [args.kind]
@@ -387,6 +439,7 @@ def main() -> int:
                 force=args.force,
                 dry_run=args.dry_run,
                 select_only=args.select_only,
+                retry_failed=args.retry_failed,
             )
             changed_total += changed
             failures.extend(row_failures)

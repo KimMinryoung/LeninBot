@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 from translation_runtime.storage import atomic_write, source_hash
 from translation_runtime.structure import (markdown_problems, markdown_chunks,
-    protect_markdown, restore_markdown, semantic_review)
+    protect_markdown, restore_markdown, semantic_review, translate_oversized_markdown)
 from scripts._translation_common import generate_translation
 
 RESEARCH_DIR = ROOT / "research"
@@ -137,20 +137,20 @@ def _validate_translation(source: str, translated: str, *, max_hangul_ratio: flo
         )
 
 
-def _call_translator(markdown: str, *, correction: str = "") -> str:
+def _call_translator(markdown: str, *, correction: str = "", on_result=None) -> str:
     """게이트웨이를 지나는 원샷 호출.
 
     correction은 직전 시도의 검증 실패 사유다. 원문에 섞으면 모델이 그 문장까지
     번역할 수 있으므로 시스템 프롬프트 뒤에 붙인다.
     """
-    text = generate_translation(FEATURE, markdown, system=SYSTEM_PROMPT + correction)
+    text = generate_translation(FEATURE, markdown, system=SYSTEM_PROMPT + correction, on_result=on_result)
     return _strip_outer_fence(text)
 
 
 
 
 def _translate_segment(source: str, *, max_hangul_ratio: float, attempts: int,
-                       cached=None, store=None) -> str:
+                       cached=None, store=None, on_result=None) -> str:
     from translation_runtime import translate_validated
     masked, protected = protect_markdown(source)
 
@@ -170,13 +170,13 @@ def _translate_segment(source: str, *, max_hangul_ratio: float, attempts: int,
     return translate_validated(
         generate=lambda correction: _call_translator(masked, correction=(
             "\nPreserve every TRKEEP placeholder exactly, including its number of occurrences."
-            + correction)), parse=parse, validate=validate, attempts=attempts,
+            + correction), **({"on_result": on_result} if on_result else {})), parse=parse, validate=validate, attempts=attempts,
         cached=cached, store=store)
 
 
 def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attempts: int = 2,
                                   cache_dir: Path | None = None, max_chars: int = 8000,
-                                  review_path: Path | None = None) -> str:
+                                  review_path: Path | None = None, on_result=None) -> str:
     """Validated structural chunks; reuse successes after a failed document run."""
     from llm.call_registry import resolve
     if attempts < 1 or max_chars < 1:
@@ -186,7 +186,7 @@ def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attem
     profile.pop("note", None)
     chunks = markdown_chunks(source, max_chars)
     translated_chunks = []
-    for source_chunk in chunks:
+    def translate_leaf(source_chunk):
         fingerprint = json.dumps({"version": 1, "source": source_chunk, "profile": profile,
                                   "system": SYSTEM_PROMPT}, sort_keys=True, ensure_ascii=False)
         key = source_hash(fingerprint)
@@ -198,10 +198,13 @@ def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attem
             except (ValueError, KeyError, TypeError):
                 pass
         translated = _translate_segment(source_chunk, max_hangul_ratio=max_hangul_ratio,
-            attempts=attempts, cached=cached,
+            attempts=attempts, cached=cached, on_result=on_result,
             store=lambda value: atomic_write(path, json.dumps({
                 "sourceHash": source_hash(source_chunk), "target": value}, ensure_ascii=False)))
-        translated_chunks.append(translated.strip())
+        return translated
+
+    for source_chunk in chunks:
+        translated_chunks.append(translate_oversized_markdown(source_chunk, translate_leaf, max_chars).strip())
     translated = "\n\n".join(translated_chunks) + "\n"
     _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
     if review_path:

@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 import research_store
 from translation_runtime import TranslationProviderError
+from translation_runtime.batch_state import BatchState
 from db import execute_returning_rowcount, query as db_query
 from scripts.translate_research_markdown import (
     FEATURE,
@@ -99,20 +100,31 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="Retranslate even when markdown_en already exists.")
     parser.add_argument("--dry-run", action="store_true", help="Only list selected rows; do not call the translation API.")
     parser.add_argument("--max-hangul-ratio", type=float, default=0.03)
+    parser.add_argument("--retry-failed", action="store_true", help="Bypass saved retry delays and validation quarantine.")
     args = parser.parse_args()
 
-    rows = _select_rows(limit=args.limit, max_chars=args.max_chars, force=args.force)
+    rows = _select_rows(limit=0, max_chars=args.max_chars, force=args.force)
     print(f"selected {len(rows)} research document(s)")
     if args.dry_run:
-        for row in rows:
+        for row in (rows[:args.limit] if args.limit > 0 else rows):
             print(f"would translate {row['slug']} ({len(row['markdown']):,} chars)")
         return 0
 
+    state = BatchState()
     failures = 0
     changed = 0
+    attempted = 0
     for row in rows:
         slug = row["slug"]
         markdown = row["markdown"]
+        key, fingerprint = f"research:{row['id']}", source_hash(markdown)
+        if not args.retry_failed and not args.force and state.deferred(key, fingerprint):
+            print(f"deferred {slug}: validation cooldown")
+            failures += 1
+            continue
+        if args.limit > 0 and attempted >= args.limit:
+            break
+        attempted += 1
         try:
             print(f"translating {slug} ({len(markdown):,} chars) via {FEATURE}")
             # 검증 실패 시 위반 항목을 첨부해 1회 재번역한다 — 예전에는 제목
@@ -121,9 +133,11 @@ def main() -> int:
                 review_path=ROOT / "output" / "translation_reviews" / f"research-{row['id']}.json")
             _update_translation(row, translated)
             changed += 1
+            state.succeeded(key, fingerprint)
             print(f"updated {slug}: {len(translated):,} English chars")
         except Exception as exc:
             failures += 1
+            state.failed(key, fingerprint, exc)
             print(f"failed {slug}: {exc}", file=sys.stderr)
             if isinstance(exc, TranslationProviderError) and exc.result.error_kind in {
                     "authentication", "quota", "policy", "configuration"}:

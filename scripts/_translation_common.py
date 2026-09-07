@@ -15,6 +15,7 @@ happened to be scripts/.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -37,6 +38,15 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+def _unique_json_object(pairs):
+    data = {}
+    for key, value in pairs:
+        if key in data:
+            raise ValueError(f"duplicate translation JSON key: {key}")
+        data[key] = value
+    return data
+
+
 def parse_json_object(text: str, keys: list[str] | None = None) -> dict[str, Any]:
     """Parse a JSON object out of a model reply.
 
@@ -48,20 +58,21 @@ def parse_json_object(text: str, keys: list[str] | None = None) -> dict[str, Any
     """
     raw = strip_code_fences(text)
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=_unique_json_object)
     except json.JSONDecodeError as exc:
         start = raw.find("{")
         end = raw.rfind("}")
         try:
             if start < 0 or end <= start:
                 raise
-            data = json.loads(raw[start : end + 1])
+            data = json.loads(raw[start : end + 1], object_pairs_hook=_unique_json_object)
         except json.JSONDecodeError:
             if not keys:
                 raise
             data = _lenient_json_strings(raw, keys)
             if data is None:
-                raise exc
+                raise ValueError("ambiguous or unrecoverable translation JSON") from exc
+            logging.getLogger(__name__).warning("Recovered malformed translation JSON; fields=%s", list(data))
     if not isinstance(data, dict):
         raise ValueError("translation output is not a JSON object")
     return data
@@ -76,22 +87,28 @@ def _lenient_json_strings(raw: str, keys: list[str]) -> dict[str, str] | None:
     """
     out: dict[str, str] = {}
     alternatives = "|".join(re.escape(k) for k in keys)
-    for key in keys:
-        match = re.search(r'"%s"\s*:\s*"' % re.escape(key), raw)
-        if not match:
-            continue
-        rest = raw[match.end():]
-        stop = re.search(r'"\s*,\s*"(?:%s)"\s*:' % alternatives, rest)
-        if stop:
-            value = rest[: stop.start()]
+    matches = list(re.finditer(r'(?<!\\)"(' + alternatives + r')"\s*:\s*"', raw))
+    found = [m[1] for m in matches]
+    # Never guess between a real field and a JSON example embedded in its prose.
+    if not matches or len(found) != len(set(found)) or found != [k for k in keys if k in found]:
+        return None
+    if not re.fullmatch(r'\s*\{\s*', raw[:matches[0].start()]):
+        return None
+    for index, match in enumerate(matches):
+        if index + 1 < len(matches):
+            value = raw[match.end():matches[index + 1].start()]
+            trailing = re.search(r'"\s*,\s*$', value)
         else:
-            trailing = re.search(r'"\s*\}?\s*$', rest)
-            if not trailing:
-                return None
-            value = rest[: trailing.start()]
+            value = raw[match.end():]
+            trailing = re.search(r'"\s*\}?\s*$', value)
+        if not trailing:
+            return None
+        value = value[:trailing.start()]
+        if re.search(r'(?<!\\)"[^"\n]+"\s*:', value):
+            return None
         escaped = re.sub(r'(?<!\\)"', r'\\"', value)
         try:
-            out[key] = json.loads(f'"{escaped}"')
+            out[match[1]] = json.loads(f'"{escaped}"')
         except json.JSONDecodeError:
             return None
     return out or None

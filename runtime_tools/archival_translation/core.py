@@ -18,7 +18,9 @@ costs only what changed.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import itertools
 import html as htmllib
 import json
 import logging
@@ -381,6 +383,8 @@ class Options:
     limit_chunks: int = 0
     cache_path: Path | None = None
     out_path: Path | None = None
+    # 감사 로그(llm_audit_log.label)에 남길 스펙 id. run()/reassemble()이 채운다.
+    label: str | None = None
 
 
 @dataclass
@@ -874,14 +878,19 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
 
         # Verbatim echo of the input is the real passthrough failure, and it
         # is unambiguous — check it before the ratio heuristics.
-        if src_cyr and joined.strip() == source.strip():
+        # 라틴 저본에는 「SCAF 48」처럼 번역해도 원문과 같은 제목·기호 블록이
+        # 있다. script(로마자 한 글자)가 아니라 stray_word(번역할 낱말)가 있을
+        # 때만 그대로 반환을 실패로 본다.
+        translatable = lang.stray_word.search(source) if lang.latin else src_cyr
+        if translatable and joined.strip() == source.strip():
             problems.append(f"[[{idx}]] 원문을 그대로 반환함: {source[:40]}…")
             continue
 
         # A block with nothing to translate (a number, a bare «№ 43») has no
         # Korean and should not: only demand Hangul where the source had
         # Cyrillic prose to render.
-        if src_cyr >= 4 and not HANGUL_RE.search(joined):
+        has_prose = bool(translatable) if lang.latin else src_cyr >= 4
+        if has_prose and not HANGUL_RE.search(joined):
             problems.append(f"[[{idx}]] 한국어가 없음: {joined[:40]}…")
 
         # 제3의 문자(벵골·조지아·아랍…)는 어떤 저본에서도 번역문에 나올 이유가
@@ -953,6 +962,7 @@ class Cache:
             for line in path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     rec = json.loads(line)
+                    self.data.pop(rec["key"], None)
                     self.data[rec["key"]] = rec
 
     def get(self, key: str) -> dict | None:
@@ -967,6 +977,7 @@ class Cache:
     def put(self, key: str, blocks: dict[int, list[str]], meta: dict) -> None:
         rec = {"key": key, "blocks": {str(k): v for k, v in blocks.items()}, **meta}
         with self.lock:
+            self.data.pop(key, None)
             self.data[key] = rec
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as f:
@@ -1014,7 +1025,7 @@ def _render_prompt(chunk, body: str, terms: list[tuple[str, str]]) -> str:
 
 
 def _chunk_key(prompt: str, opts: Options,
-               lang: SourceLanguage | None = None) -> str:
+               lang: SourceLanguage | None = None, *, positional: bool = True) -> str:
     """Cache key. Resolving the profile needs no credential, so this is safe
     to compute before preflight.
 
@@ -1036,12 +1047,44 @@ def _chunk_key(prompt: str, opts: Options,
         lang.system_prompt.encode("utf-8")).hexdigest()[:16]
     fingerprint = (f"{profile.provider}\0{profile.model}\0"
                    f"{profile.extra.get('thinking')}\0{system_hash}")
+    if positional:
+        # 마커의 블록 번호를 청크 안 순번으로 바꿔 키를 만든다. 앞쪽 블록 하나를
+        # 빼거나 문서를 끼워 넣어 번호가 밀려도 내용이 같은 청크는 캐시에 맞는다
+        # (2026-09-07: 제목 블록 둘을 뺐더니 본문 그대로인 4청크가 전부 재번역됐다).
+        # 번호가 다른 레코드는 _cached_blocks가 원문 해시 순서로 대조한 뒤 옮긴다.
+        counter = itertools.count()
+        prompt = MARKER_RE.sub(lambda m: f"[[{next(counter)}|{m.group(2)}]]\n", prompt)
     return hashlib.sha256(
         f"{PROMPT_VERSION}\0{fingerprint}\0{prompt}".encode("utf-8")).hexdigest()
 
 
+def _legacy_chunk_key(prompt: str, opts: Options, lang: SourceLanguage | None = None) -> str:
+    """2026-09-07 이전 키(블록 번호 포함). 기존 캐시 레코드를 찾는 용도로만 쓴다."""
+    return _chunk_key(prompt, opts, lang, positional=False)
+
+
+def _block_source_hashes(chunk) -> dict[str, str]:
+    """Independent of model/prompt, but includes the source tag and exact lines."""
+    return {str(idx): hashlib.sha256(json.dumps(
+        {"tag": block["tag"], "lines": block["lines"]},
+        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        for idx, block in chunk if block["lines"]}
+
+
+def _write_assembly_snapshot(out_path, spec, chunks, translated, html, tm_decisions):
+    from translation_runtime.storage import atomic_write
+    atomic_write(out_path.with_suffix(".assembly.json"), json.dumps({
+        "version": 1, "specId": spec.get("id"),
+        "outputHash": hashlib.sha256(html.encode()).hexdigest(),
+        "sourceHashes": _block_source_hashes([b for c in chunks for b in c]),
+        "blocks": {str(k): v for k, v in translated.items()},
+        "tmDecisions": tm_decisions,
+    }, ensure_ascii=False, indent=2))
+
+
 def _cached_blocks(cache: "Cache", key: str, chunk,
-                   lang: SourceLanguage | None = None) -> tuple[dict[int, list[str]] | None, list[str]]:
+                   lang: SourceLanguage | None = None,
+                   legacy_key: str | None = None) -> tuple[dict[int, list[str]] | None, list[str]]:
     """캐시 레코드를 현재 검증기로 다시 심사해 (블록들, 문제들)을 돌려준다.
 
     캐시는 그 레코드를 저장할 당시의 validate()를 통과했다는 뜻이지 지금의
@@ -1050,11 +1093,32 @@ def _cached_blocks(cache: "Cache", key: str, chunk,
     그것만 다시 번역한다. 문제가 없으면 (블록들, []), 레코드가 없으면 (None, []),
     있지만 걸리면 (None, 문제들)."""
     rec = cache.get(key)
+    if rec is None and legacy_key:
+        rec = cache.get(legacy_key)
     if rec is None:
         return None, []
+    current = _block_source_hashes(chunk)
+    recorded = rec.get("sourceHashes")
     blocks = {int(k): v for k, v in rec["blocks"].items()}
+    if recorded is not None and recorded != current:
+        # 번호만 밀린 레코드: 블록별 원문 해시가 같은 순서로 일치해야 옮겨 쓴다.
+        old_ids = sorted(recorded, key=int)
+        new_ids = sorted(current, key=int)
+        if [recorded[k] for k in old_ids] != [current[k] for k in new_ids]:
+            return None, ["cache source hashes differ from current source"]
+        old_all = sorted(blocks)
+        new_all = sorted(idx for idx, _ in chunk)
+        if len(old_all) != len(new_all):
+            return None, ["cache source hashes differ from current source"]
+        renumber = dict(zip(old_all, new_all))
+        blocks = {renumber[k]: v for k, v in blocks.items()}
     from translation_runtime import validate_cached
-    return validate_cached(blocks, lambda value: validate(chunk, value, lang))
+    accepted, problems = validate_cached(blocks, lambda value: validate(chunk, value, lang))
+    if accepted is not None and (recorded != current or cache.get(key) is None):
+        # An exact current prompt key proves provenance even for legacy records;
+        # a renumbered or legacy-keyed hit is re-filed under the current key.
+        cache.put(key, blocks, {"sourceHashes": current})
+    return accepted, problems
 
 
 def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
@@ -1069,7 +1133,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     # run()은 pending 집계 때 이미 만든 것을 넘긴다; 직접 부르는 쪽은 여기서 만든다.
     prompt, key = prepared or _prepare_chunk(chunk, glossary, opts, lang)
 
-    cached, stale = _cached_blocks(cache, key, chunk, lang)
+    cached, stale = _cached_blocks(cache, key, chunk, lang, _legacy_chunk_key(prompt, opts, lang))
     if cached is not None:
         stats.add("cached")
         return cached
@@ -1083,6 +1147,8 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     if any(sum(map(len, b["lines"])) > opts.max_chars for _, b in chunk):
         from translation_runtime.structure import split_prose
         subcache = cache.parts()
+        original_body = render_chunk(chunk)
+        prefix = prompt[:-len(original_body)] if original_body and prompt.endswith(original_body) else None
         combined = {}
         try:
             for idx, block in chunk:
@@ -1092,8 +1158,13 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
                 lines = []
                 for piece in pieces:
                     subblock = {**block, "lines": piece.splitlines()}
-                    got = _translate_chunk([(idx, subblock)], glossary, subcache, opts,
-                                           stats, progress, lang, abort=abort, _count=False)
+                    subchunk = [(idx, subblock)]
+                    # Preserve the parent chunk's fixed glossary, register and
+                    # reference context, including frozen evaluation prompts.
+                    subprompt = prefix + render_chunk(subchunk) if prefix is not None else None
+                    subprepared = (subprompt, _chunk_key(subprompt, opts, lang)) if subprompt is not None else None
+                    got = _translate_chunk(subchunk, glossary, subcache, opts,
+                                           stats, progress, lang, prepared=subprepared, abort=abort, _count=False)
                     lines.extend(got[idx])
                 combined[idx] = lines
             problems = validate(chunk, combined, lang)
@@ -1102,7 +1173,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         except Exception:
             stats.add("failed")
             raise
-        cache.put(key, combined, {"split": True, "chars": len(prompt)})
+        cache.put(key, combined, {"split": True, "chars": len(prompt), "sourceHashes": _block_source_hashes(chunk)})
         stats.add("translated")
         return combined
 
@@ -1122,7 +1193,8 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
         if abort is not None and abort.is_set():
             raise RuntimeError("번역 중단: provider 영구 오류")
         return generate_translation(lang.feature, prompt, system=lang.system_prompt + correction,
-                                    on_result=account, cancelled=abort.is_set if abort else None)
+                                    on_result=account, cancelled=abort.is_set if abort else None,
+                                    label=opts.label)
 
     def invalid(attempt, problems):
         stats.add("retried")
@@ -1138,7 +1210,7 @@ def _translate_chunk(chunk, glossary, cache, opts: Options, stats: Stats,
     try:
         got = translate_validated(generate=generate, parse=parse_response,
                 validate=lambda value: validate(chunk, value, lang), attempts=opts.retries,
-                store=lambda value: cache.put(key, value, {"chars": len(prompt)}),
+                store=lambda value: cache.put(key, value, {"chars": len(prompt), "sourceHashes": _block_source_hashes(chunk)}),
                 on_invalid=invalid, correction=correction)
     except Exception:
         if _count:
@@ -1678,6 +1750,10 @@ def glossary_collision_pairs(glossary: list[dict]) -> list[tuple[str, str]]:
                   if by_ru.get(ru + "а") not in (None, ko))
 
 
+_CALL_OVERHEAD_TOKENS = 1_600
+_GEMINI_REASONING_TOKENS_PER_CALL = 4_000
+
+
 def plan(spec: dict, opts: Options | None = None) -> dict:
     """Slice, chunk and price a run without calling the model."""
     opts = opts or Options()
@@ -1717,10 +1793,23 @@ def plan(spec: dict, opts: Options | None = None) -> dict:
 
     profile = call_registry.resolve(lang.feature)
     price = openai_compatible_pricing(profile.model)
-    thinking_on = (profile.extra.get("thinking") or {}).get("type") == "enabled"
-    tokens_in = total / lang.chars_per_token
-    # Reasoning tokens bill as output; high effort roughly doubles it.
-    tokens_out = total * lang.output_ratio / 1.6 * (2.0 if thinking_on else 1.0)
+    thinking = (profile.extra.get("thinking") or {}).get("type")
+    explicit_thinking = thinking == "enabled"
+    # Gemini는 registry에 thinking 키가 없어도 동적 추론이 기본으로 켜져 있다.
+    # 이를 off로 치면 견적이 실측의 1/7로 나온다(2026-09-07 4묶음, $0.32 대 $2.37).
+    dynamic_thinking = profile.provider == "gemini" and thinking != "disabled"
+    thinking_on = explicit_thinking or dynamic_thinking
+    calls = len(chunks)
+    # 호출마다 시스템 프롬프트·용어표·문체 지시가 붙는다. 2026-09-07 실측 호출당
+    # 1,460~1,900 입력 토큰.
+    tokens_in = total / lang.chars_per_token + calls * _CALL_OVERHEAD_TOKENS
+    tokens_out = total * lang.output_ratio / 1.6
+    if explicit_thinking:
+        # Reasoning tokens bill as output; high effort roughly doubles it.
+        tokens_out *= 2.0
+    if dynamic_thinking:
+        # 같은 실측에서 Gemini 3.1 Pro 추론 토큰은 호출당 2,700~5,500.
+        tokens_out += calls * _GEMINI_REASONING_TOKENS_PER_CALL
     est = tokens_in * price["input"] + tokens_out * price["output"]
     return {
         "id": spec.get("id"),
@@ -1841,18 +1930,10 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
 
 
 def reassemble(spec: dict, opts: Options | None = None) -> dict:
-    """캐시 레코드를 블록 번호로 직접 조립해 fragment만 다시 쓴다 (LLM 호출 없음).
+    """Reassemble source-verified blocks, pinning the last publication's TM choices.
 
-    run()의 캐시 조회 키에는 provider·model·system_hash가 들어가므로, 모델을
-    교체하거나 프롬프트를 고친 뒤에는 옛 문서의 postEdits 손질이 전체 재번역이
-    되어 버린다. 발행본 손질은 번역을 새로 만드는 일이 아니라 이미 확정된
-    번역을 다시 배치하는 일이므로, 키를 무시하고 레코드의 블록 번호로 조립한다.
-    캐시에는 청킹·프롬프트를 바꿔 가며 만든 이력 레코드가 섞여 있을 수 있다.
-    블록 집합이 현재 청킹의 어느 청크와도 일치하지 않는 레코드는 다른 청킹
-    시절의 고아이므로 배제한다 — 포스펠로프 재조립에서 last-wins가 고아
-    레코드의 대체 번역을 집어 발행문이 바뀐 사례. 같은 청크의 레코드가 여럿
-    이면 나중 레코드(재시도 최신본)가 이긴다. 비어 있는 블록이 남으면 고아
-    레코드로 채우되 경고하고, 그래도 남으면 구멍 난 문서 대신 예외를 낸다.
+    Model/prompt changes do not invalidate source hashes. Legacy records require
+    an exact current prompt key before they can be upgraded without a model call.
     """
     opts = opts or Options()
     if spec.get("frozen"):
@@ -1861,39 +1942,50 @@ def reassemble(spec: dict, opts: Options | None = None) -> dict:
     prepared = plan(spec, opts)
     docs, chunks, lang = prepared["_docs"], prepared["_chunks"], prepared["_lang"]
 
-    chunk_sets = {frozenset(idx for idx, b in c if b["lines"]) for c in chunks}
-    records = list(Cache(_cache_path(spec, opts.cache_path)).data.values())
-    translated: dict[int, list[str]] = {}
-    for rec in records:
-        blocks = {int(k): v for k, v in rec["blocks"].items()}
-        if frozenset(blocks) in chunk_sets:
-            translated.update(blocks)
+    flat = [b for chunk in chunks for b in chunk]
+    hashes = _block_source_hashes(flat)
+    out_path = opts.out_path or Path(spec["output"])
+    snapshot_path = out_path.with_suffix(".assembly.json")
+    translated = {}
+    tm_decisions = []
+    if snapshot_path.is_file():
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        if (snapshot.get("specId") != spec.get("id") or not out_path.is_file()
+                or snapshot.get("outputHash") != hashlib.sha256(out_path.read_bytes()).hexdigest()):
+            raise SpecError("발행본과 assembly snapshot이 다르다. 수동 편집/불완전 저장을 먼저 확인할 것.")
+        if snapshot.get("sourceHashes") != hashes:
+            raise SpecError("재조립 원문이 발행 당시와 다르다. 변경 원문은 run()으로 번역할 것.")
+        translated = {int(k): v for k, v in snapshot["blocks"].items()}
+        tm_decisions = snapshot.get("tmDecisions", [])
+    else:
+        cache = Cache(_cache_path(spec, opts.cache_path))
+        # Legacy records can be upgraded only through an exact current prompt key.
+        for chunk in chunks:
+            prompt, key = _prepare_chunk(chunk, prepared["_glossary"], opts, lang)
+            _cached_blocks(cache, key, chunk, lang, _legacy_chunk_key(prompt, opts, lang))
+        for rec in cache.data.values():
+            recorded = rec.get("sourceHashes", {})
+            for k, value in rec["blocks"].items():
+                if k in hashes and recorded.get(k) == hashes[k]:
+                    translated[int(k)] = value
+        # First snapshot captures the TM choices; subsequent reassembly is pinned.
+        translated.update(_tm_prefill(docs, lang, tm_decisions.append, spec))
 
-    expected = {idx for c in chunks for idx, b in c if b["lines"]}
-    orphan_filled = sorted(expected - translated.keys())
-    if orphan_filled:
-        for rec in records:
-            for k, v in rec["blocks"].items():
-                if int(k) in orphan_filled:
-                    translated[int(k)] = v
-        print(f"경고: 블록 {orphan_filled}는 현재 청킹과 일치하는 레코드가 없어 "
-              f"고아 레코드에서 채웠다. --max-chars가 번역 당시와 같은지 확인할 것.",
-              file=sys.stderr)
-    # run()과 같은 우선순위: 검수 등급 TM 세그먼트가 모델 번역을 덮는다.
-    # 이걸 빠뜨리면 발행문이 TM 문구에서 캐시 문구로 슬그머니 바뀐다.
-    translated.update(_tm_prefill(docs, lang, lambda _e: None, spec))
-
-    missing = sorted(expected - translated.keys())
+    missing = sorted(int(k) for k in hashes if int(k) not in translated)
     if missing:
-        raise SpecError(
-            f"{spec.get('id')}: 캐시에 없는 블록 {missing} — 재조립으로는 채울 수 없다. "
-            "새로 번역해야 하는 변경이면 run()을 쓸 것.")
+        raise SpecError(f"원문 일치를 증명할 수 없는 캐시 블록 {missing}. run()으로 검증·번역할 것.")
+    for chunk in chunks:
+        ids = {idx for idx, _ in chunk}
+        problems = validate(chunk, {k: v for k, v in translated.items() if k in ids}, lang)
+        if problems:
+            raise SpecError("재조립 검증 실패: " + "; ".join(problems))
 
     out_path = opts.out_path or Path(spec["output"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html = assemble(spec, docs, translated)
     from translation_runtime.storage import atomic_write
     atomic_write(out_path, html)
+    _write_assembly_snapshot(out_path, spec, chunks, translated, html, tm_decisions)
     return {"output": str(out_path), "bytes": out_path.stat().st_size,
             "blocks": len(translated),
             "strayCyrillic": stray_cyrillic(html, spec.get("allowedCyrillic"), lang)}
@@ -1903,6 +1995,8 @@ def run(spec: dict, opts: Options | None = None,
         progress: Callable[[dict], None] | None = None) -> dict:
     """Translate every chunk and (unless limit_chunks) write the fragment."""
     opts = opts or Options()
+    if opts.label is None:
+        opts = dataclasses.replace(opts, label=spec.get("id"))
     tm_decisions = []
     def emit(event):
         if event.get("event") in {"tmSelected", "tmConflict", "tmInvalid"}:
@@ -1936,8 +2030,8 @@ def run(spec: dict, opts: Options | None = None,
     runnable = [c for c in chunks
                 if not all((idx in tm_filled) or not b["lines"] for idx, b in c)]
     prepared_chunks = [_prepare_chunk(c, glossary, opts, lang) for c in runnable]
-    pending = sum(1 for c, (_, key) in zip(runnable, prepared_chunks)
-                  if _cached_blocks(cache, key, c, lang)[0] is None)
+    pending = sum(1 for c, (prompt, key) in zip(runnable, prepared_chunks)
+                  if _cached_blocks(cache, key, c, lang, _legacy_chunk_key(prompt, opts, lang))[0] is None)
     # Re-assembling a fully cached run (a postEdits tweak, a headnote change)
     # makes no API call, so demanding a credential for it would be wrong.
     if pending:
@@ -1999,6 +2093,7 @@ def run(spec: dict, opts: Options | None = None,
     html = assemble(spec, docs, translated)
     from translation_runtime.storage import atomic_write
     atomic_write(out_path, html)
+    _write_assembly_snapshot(out_path, spec, chunks, translated, html, tm_decisions)
     result["output"] = str(out_path)
     result["bytes"] = out_path.stat().st_size
     from translation_runtime.structure import semantic_review

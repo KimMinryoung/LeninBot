@@ -17,7 +17,7 @@ class TranslationProviderError(TranslationCallError):
 
 
 def generate_translation(feature: str, prompt: str, *, system: str, on_result=None,
-                         cancelled=None) -> str:
+                         cancelled=None, label: str | None = None) -> str:
     """Retry transient transport failures only; validation retries belong to callers."""
     import random
     import time
@@ -26,7 +26,7 @@ def generate_translation(feature: str, prompt: str, *, system: str, on_result=No
     for attempt in range(3):
         if cancelled and cancelled():
             raise TranslationCallError("translation run stopped after a permanent provider error")
-        result = generate_detailed(feature, prompt, system=system)
+        result = generate_detailed(feature, prompt, system=system, label=label)
         if on_result:
             on_result(result)
         if result.text and not result.truncated and not result.error_kind:

@@ -43,6 +43,16 @@ def _research_documents() -> None:
     ensure_research_table()
 
 
+def _translation_freshness() -> None:
+    from db import get_conn
+    from scripts.translate_db_content import translation_freshness_migration_sql
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL lock_timeout = '5s'")
+        for statement in translation_freshness_migration_sql():
+            cur.execute(statement)
+
+
 def _publication_records() -> None:
     from publication_records import ensure_publish_record_table
 
@@ -135,6 +145,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("telegram-summaries", _telegram_summaries),
     ("roleplay-tables", _roleplay_tables),
     ("research-documents", _research_documents),
+    ("translation-freshness", _translation_freshness),
     ("publication-records", _publication_records),
     ("site-publishing", _site_publishing),
     ("experiential-memory", _experiential_memory),
