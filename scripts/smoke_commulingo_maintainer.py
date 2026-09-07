@@ -91,8 +91,8 @@ assert COMMULINGO_CURATOR.max_output_continuations == 2
 assert COMMULINGO_CURATOR.thinking_policy == "tool_loop"
 assert "Verified nicknames" in COMMULINGO_CURATOR.prompt_ir.identity
 assert "given name + surname ONLY" in COMMULINGO_CURATOR.prompt_ir.identity
-assert "Birthplace and work in the Ukrainian SSR alone never suffice" in maintainer.CARD_STYLE_GUIDANCE
-assert "Jewish ancestry alone does not create a separate" in maintainer.CARD_STYLE_GUIDANCE
+assert "출생지, 활동지, 시민권만으로 출신 배경을 추정" in maintainer.CARD_STYLE_GUIDANCE
+assert "혼합 출신은 확인된 배경을 한·영 label에 함께 보존" in maintainer.CARD_STYLE_GUIDANCE
 # The prescribed sentence count and the ceiling it is written under must agree.
 # When they disagreed by one sentence (4-5 prescribed, 4 affordable), 17 of 19
 # curator tool rejections in a day were a fifth bio sentence overflowing both
