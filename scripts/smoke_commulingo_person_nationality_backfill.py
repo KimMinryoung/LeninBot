@@ -24,11 +24,7 @@ assert by_id["pak-hon-yong"]["new_origin"] == "korea"
 assert by_id["bogdan-knunyants"]["new_citizenship"] == "russia"
 assert by_id["bogdan-knunyants"]["new_origin"] == "armenia"
 
-sql = mod.build_sql(changes)
-assert "COALESCE(citizenship_code,'')=''" in sql
-assert "COALESCE(origin_code,'')=''" in sql
-assert "origin_code='armenia'" in sql
-assert "BEGIN;" in sql and "COMMIT;" in sql
+assert not hasattr(mod, 'build_sql'), 'report must not generate direct SQL writes'
 
 try:
     mod.plan([{"id": "new-unknown", "name": "D", "citizenship": "", "origin": ""}])

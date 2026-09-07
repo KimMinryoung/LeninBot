@@ -18,3 +18,18 @@ def call_person_service(request: dict):
     if not response.get("ok"):
         raise ValueError(f"{response.get('code') or response.get('status')}: {response.get('error')}")
     return response["result"]
+
+
+def apply_person_spec(path):
+    """Apply an explicit sourced/versioned spec via the atomic Admin upsert CLI."""
+    from pathlib import Path
+    spec = json.loads(Path(path).read_text())
+    container = os.environ.get("COMMULINGO_FRONTEND_CONTAINER", "leninbot-frontend")
+    completed = subprocess.run(
+        ["docker", "exec", "-i", container, "node", "/app/scripts/commulingo-people-upsert.js", "-"],
+        input=json.dumps(spec, ensure_ascii=False), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=False,
+    )
+    if completed.returncode:
+        raise RuntimeError(completed.stderr.strip() or "CommuLingo Admin upsert failed")
+    return completed.stdout.strip()

@@ -278,7 +278,7 @@ NATIONALITY_CODES = (
 
 
 def person_tier(candidate: dict) -> dict:
-    """Derive the bio-length band for a candidate from its prominence signals."""
+    """Use a standard bio-length band without deriving importance from graph size."""
     # Graph connectivity is not a historical-importance score.
     prominence = 2
     is_major = prominence >= MAJOR_PROMINENCE
@@ -530,7 +530,7 @@ row in this run.
     )
     if tier["is_major"]:
         tier_line = (
-            f"- prominence tier: MAJOR (linked events + offices = {tier['prominence']}). "
+            f"- prominence tier: MAJOR (editorial length band). "
             f"Korean bio: {sentences} — a ceiling, not a quota."
         )
         bio_step = (
@@ -542,7 +542,7 @@ row in this run.
         )
     elif tier["is_minor"]:
         tier_line = (
-            f"- prominence tier: MINOR (linked events + offices = {tier['prominence']}). "
+            f"- prominence tier: MINOR (editorial length band). "
             f"Korean bio {sentences} — keep it short."
         )
         bio_step = (

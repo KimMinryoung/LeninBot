@@ -7,7 +7,7 @@ from pathlib import Path
 import uuid
 from unittest.mock import patch
 if os.environ.get('COMMULINGO_FRONTEND_CONTAINER') != 'commulingo-python-rpc':
-    raise RuntimeError('isolated RPC container required')
+    raise unittest.SkipTest('opt-in isolated RPC container required')
 sys.path.insert(0, '/home/grass/leninbot')
 source_root = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().parents[1]))
 import db
@@ -50,6 +50,23 @@ class SharedPersonRPC(unittest.TestCase):
             approved = call_person_service({'command': 'review', 'suggestionId': sid, 'approve': True, 'note': 'Compared original source', 'changedBy': 'rpc-test-review'})
             self.assertEqual(approved['status'], 'approved')
             self.assertEqual(people._get_person(person_id)['bio']['ko'], '검토할 주장')
+        # Legacy backfills now pass an explicit spec through the same atomic CLI.
+        from runtime_tools.commulingo_person_service import apply_person_spec
+        import tempfile, json
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as spec:
+            json.dump({'people': [{'id': person_id, 'expectedRevision': people._get_person(person_id)['revision'],
+                'sources': [source], 'epithet': {'ko': '공통 CLI 수정'}}]}, spec)
+            spec.flush()
+            self.assertIn('committed 1 person', apply_person_spec(spec.name))
+        self.assertEqual(people._get_person(person_id)['epithet']['ko'], '공통 CLI 수정')
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as spec:
+            version = people._get_person(person_id)['revision']
+            entries = [{'id': person_id, 'expectedRevision': version, 'sources': [source],
+                        'epithet': {'ko': text}} for text in ['롤백할 첫 수정', '충돌하는 둘째 수정']]
+            json.dump({'people': entries}, spec); spec.flush()
+            with self.assertRaises(RuntimeError): apply_person_spec(spec.name)
+        self.assertEqual(people._get_person(person_id)['epithet']['ko'], '공통 CLI 수정', 'batch failure rolls back prior writes')
+
         with self.assertRaisesRegex(ValueError, 'shared editorial'):
             people.apply_edit(None, 'person', 'update', person_id, {}, 'forbidden-legacy')
 

@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
-"""Bulk-backfill CommuLingo person citizenship from Wikidata.
+"""Read-only nationality research report; inferred suggestions are never auto-applied.
 
-Deterministic and credential-free: reads/writes commulingo_people through the
-sanctioned scripts/psql-main helper, and resolves each person on Wikidata's
-public SPARQL endpoint (no API key). It reads P27 country of citizenship for
-the primary flag. P19 place of birth is used only to disambiguate competing
-citizenship claims; it must never populate nationalOrigin (whose legacy DB
-columns are named origin_*), because birthplace is not evidence of national
-or ethnic background.
-Entities are matched by exact English (then Russian/Cyrillic) label + instance
-of human (P31=Q5) and disambiguated by birth year against years_label.
-
-Usage:
-  python scripts/commulingo_backfill_nationality.py --dry-run        # report only
-  python scripts/commulingo_backfill_nationality.py                  # apply
-  python scripts/commulingo_backfill_nationality.py --limit 50       # first 50 missing
-  python scripts/commulingo_backfill_nationality.py --all            # revisit every person
+Use --apply-spec <reviewed.json> to submit an explicit Admin upsert spec containing
+id, expectedRevision, sources and field-level evidence. This uses the shared
+frontend service and does not apply this script's heuristic report automatically.
 """
 
 from __future__ import annotations
@@ -380,14 +368,6 @@ def sql_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def build_update(pid: str, citizenship: str) -> str:
-    cit_ko, cit_en = FLAG_NAMES.get(citizenship, ("", ""))
-    return (
-        "UPDATE commulingo_people SET "
-        f"citizenship_code={sql_quote(citizenship)}, "
-        f"citizenship_label_ko={sql_quote(cit_ko)}, citizenship_label_en={sql_quote(cit_en)} "
-        f"WHERE id={sql_quote(pid)};"
-    )
 
 
 def main() -> int:
@@ -398,12 +378,20 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="revisit every person, not just those missing citizenship")
     ap.add_argument("--sleep", type=float, default=0.3, help="seconds between claim-fetch batches")
     ap.add_argument("--search-sleep", type=float, default=0.08, help="seconds between entity searches")
+    ap.add_argument("--apply-spec", type=Path, help="explicit sourced and versioned Admin spec")
     args = ap.parse_args()
+    if args.apply_spec:
+        if args.dry_run:
+            ap.error("--apply-spec and --dry-run cannot be combined")
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from runtime_tools.commulingo_person_service import apply_person_spec
+        print(apply_person_spec(args.apply_spec))
+        return 0
 
     people = fetch_people(args.limit, args.all)
     print(f"[backfill] {len(people)} people to process", file=sys.stderr)
 
-    updates: list[str] = []
+    updates: list[dict] = []
     resolved = citizenship_set = 0
     unresolved: list[str] = []
     unmapped_tally: dict[str, int] = {}
@@ -442,9 +430,8 @@ def main() -> int:
         if not citizenship:
             continue
         citizenship_set += 1
-        updates.append(build_update(p["id"], citizenship))
-        if args.dry_run:
-            print(f"  {p['id']:<26} cit={citizenship or '-':<9} origin={origin or '-'}")
+        updates.append({"id": p["id"], "citizenship": citizenship})
+        print(f"  {p['id']:<26} cit={citizenship or '-':<9} origin={origin or '-'}")
 
     print(
         f"[backfill] resolved {resolved}/{len(people)} | citizenship set {citizenship_set} | "
@@ -459,14 +446,7 @@ def main() -> int:
         print(f"[backfill] unresolved ids ({len(unresolved)}): " + ", ".join(unresolved[:40]) +
               (" ..." if len(unresolved) > 40 else ""), file=sys.stderr)
 
-    if args.dry_run:
-        print(f"[backfill] DRY RUN — {len(updates)} updates NOT applied", file=sys.stderr)
-        return 0
-
-    if updates:
-        script = "BEGIN;\n" + "\n".join(updates) + "\nCOMMIT;\n"
-        run_psql(["-q"], stdin=script)
-        print(f"[backfill] applied {len(updates)} updates", file=sys.stderr)
+    print(f"[backfill] REPORT ONLY — {len(updates)} proposals; use --apply-spec after research", file=sys.stderr)
     return 0
 
 

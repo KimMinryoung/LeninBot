@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Fill every missing CommuLingo citizenship and national-origin field.
+"""Read-only nationality research report; inferred suggestions are never auto-applied.
 
-The job is deterministic, restartable, and conservative:
-- existing non-empty values are never overwritten;
-- missing citizenships require an explicit reviewed entry below;
-- national origin defaults to the already-known citizenship, except that Soviet
-  citizenship defaults to Russian background and documented exceptions are
-  listed explicitly;
-- applying uses optimistic WHERE clauses and then requires zero remaining gaps.
-
-Birthplace is deliberately not an input.  ``origin_*`` describes documented
-national/ethnic background, not the modern state containing a birthplace.
-
-Usage:
-  python scripts/commulingo_backfill_person_nationality.py          # dry run
-  python scripts/commulingo_backfill_person_nationality.py --apply # update DB
+Use --apply-spec <reviewed.json> to submit an explicit Admin upsert spec containing
+id, expectedRevision, sources and field-level evidence. This uses the shared
+frontend service and does not apply this script's heuristic report automatically.
 """
 
 from __future__ import annotations
@@ -169,29 +158,6 @@ def plan(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return changes
 
 
-def build_sql(changes: list[dict[str, str]]) -> str:
-    statements = ["BEGIN;"]
-    for item in changes:
-        sets = []
-        if not item["citizenship"]:
-            ko, en = LABELS[item["new_citizenship"]]
-            sets += [f"citizenship_code={sql_quote(item['new_citizenship'])}",
-                     f"citizenship_label_ko={sql_quote(ko)}", f"citizenship_label_en={sql_quote(en)}"]
-        if not item["origin"]:
-            ko, en = LABELS[item["new_origin"]]
-            sets += [f"origin_code={sql_quote(item['new_origin'])}",
-                     f"origin_label_ko={sql_quote(ko)}", f"origin_label_en={sql_quote(en)}"]
-        conditions = [f"id={sql_quote(item['id'])}"]
-        if not item["citizenship"]:
-            conditions.append("COALESCE(citizenship_code,'')=''")
-        if not item["origin"]:
-            conditions.append("COALESCE(origin_code,'')=''")
-        statements.append(
-            "UPDATE commulingo_people SET " + ", ".join(sets + ["updated_at=NOW()"]) +
-            " WHERE " + " AND ".join(conditions) + ";"
-        )
-    statements += ["COMMIT;"]
-    return "\n".join(statements) + "\n"
 
 
 def missing_counts() -> tuple[int, int]:
@@ -208,7 +174,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="apply updates; default is dry-run")
     parser.add_argument("--report", type=Path, help="write the full audit plan as JSON")
+    parser.add_argument("--apply-spec", type=Path, help="explicit sourced and versioned Admin spec")
     args = parser.parse_args()
+    if args.apply and not args.apply_spec:
+        parser.error("--apply requires --apply-spec; inferred nationality is report-only")
+    if args.apply_spec:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from runtime_tools.commulingo_person_service import apply_person_spec
+        print(apply_person_spec(args.apply_spec))
+        return 0
 
     rows = fetch_missing()
     changes = plan(rows)
@@ -226,14 +200,7 @@ def main() -> int:
     for c in changes:
         print(f"{c['id']}\t{c['citizenship'] or '-'}->{c['new_citizenship']}\t{c['origin'] or '-'}->{c['new_origin']}\t{c['origin_reason']}")
 
-    if not args.apply:
-        print("dry-run only; pass --apply to update the database")
-        return 0
-    run_psql(["-v", "ON_ERROR_STOP=1"], build_sql(changes))
-    citizenship_missing, origin_missing = missing_counts()
-    print(f"post_apply citizenship_missing={citizenship_missing} origin_missing={origin_missing}")
-    if citizenship_missing or origin_missing:
-        raise RuntimeError("post-apply invariant failed: nationality gaps remain")
+    print("report only; submit researched claims with --apply-spec <reviewed.json>")
     return 0
 
 

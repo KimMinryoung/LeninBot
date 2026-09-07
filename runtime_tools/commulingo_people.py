@@ -1636,111 +1636,14 @@ def _write_revision(cur, entity_type: str, entity_id: str, note: str, snapshot, 
     )
 
 
-def _replace_patronymic(cur, person_id: str, state: dict):
-    cur.execute("DELETE FROM commulingo_person_patronymics WHERE person_id = %s", (person_id,))
-    ko, en, cyr = state.get("ko", ""), state.get("en", ""), state.get("native", "")
-    if not (ko or en or cyr):
-        return
-    cur.execute(
-        """INSERT INTO commulingo_person_patronymics
-              (person_id, patronymic_ko, patronymic_en, cyrillic_patronymic, updated_at)
-           VALUES (%s, %s, %s, %s, NOW())""",
-        (person_id, ko, en, cyr),
-    )
 
 
-def _replace_aliases(cur, person_id: str, aliases: dict):
-    cur.execute("DELETE FROM commulingo_person_aliases WHERE person_id = %s", (person_id,))
-    # Dedupe on the conflict key keeping the LAST occurrence: a single
-    # execute_values statement may not touch the same row twice
-    # (CardinalityViolation), while the old per-row loop let the later
-    # duplicate win via ON CONFLICT.
-    rows: dict[tuple, tuple] = {}
-    for lang in ("ko", "en"):
-        values = aliases.get(lang) if isinstance(aliases, dict) else None
-        for index, alias in enumerate(values or []):
-            alias = alias.strip() if isinstance(alias, str) else ""
-            if not alias:
-                continue
-            rows[(person_id, lang, alias)] = (person_id, lang, alias, index)
-    if rows:
-        execute_values(
-            cur,
-            """INSERT INTO commulingo_person_aliases (person_id, lang, alias, sort_order)
-               VALUES %s
-               ON CONFLICT (person_id, lang, alias)
-               DO UPDATE SET sort_order = EXCLUDED.sort_order""",
-            list(rows.values()),
-        )
 
 
-def _replace_scenes(cur, person_id: str, scenes: list):
-    cur.execute("DELETE FROM commulingo_person_scenes WHERE person_id = %s", (person_id,))
-    rows = []
-    for index, scene in enumerate(scenes or []):
-        if not isinstance(scene, (list, tuple)) or len(scene) < 2:
-            continue
-        collection_id = scene[0].strip() if isinstance(scene[0], str) else ""
-        episode_id = scene[1].strip() if isinstance(scene[1], str) else ""
-        if not collection_id or not episode_id:
-            continue
-        rows.append((person_id, collection_id, episode_id, index))
-    if rows:
-        execute_values(
-            cur,
-            """INSERT INTO commulingo_person_scenes
-                  (person_id, collection_id, episode_id, sort_order)
-               VALUES %s""",
-            rows,
-        )
 
 
-def _apply_person_role(cur, person_id: str, role):
-    """Upsert (dict) or clear (None) the person's role mapping.
-
-    Only officeId/category are taken from the dict; icon/label render from
-    the linked office or category (legacy per-person icon/label columns are
-    written empty)."""
-    if role is None:
-        cur.execute("DELETE FROM commulingo_person_roles WHERE person_id = %s", (person_id,))
-        return
-    cur.execute(
-        """INSERT INTO commulingo_person_roles
-              (person_id, icon, office_id, category_id, label_ko, label_en, updated_at)
-           VALUES (%s, '', NULLIF(%s, ''), NULLIF(%s, ''), '', '', NOW())
-           ON CONFLICT (person_id) DO UPDATE SET
-              icon = '', office_id = EXCLUDED.office_id,
-              category_id = EXCLUDED.category_id,
-              label_ko = '', label_en = '', updated_at = NOW()""",
-        (
-            person_id,
-            role.get("officeId") or "",
-            role.get("category") or role.get("categoryId") or "",
-        ),
-    )
 
 
-def _replace_career(cur, person_id: str, career: list):
-    cur.execute("DELETE FROM commulingo_person_career_entries WHERE person_id = %s", (person_id,))
-    rows = []
-    for index, entry in enumerate(career or []):
-        if not isinstance(entry, dict):
-            continue
-        label = entry.get("y") or entry.get("period") or ""
-        sy, sm, ey, em = _period_columns(label)
-        role = entry.get("r") or entry.get("role") or {}
-        rows.append((person_id, index, label, sy, sm, ey, em,
-                     _localized(role, "ko"), _localized(role, "en")))
-    if rows:
-        execute_values(
-            cur,
-            """INSERT INTO commulingo_person_career_entries
-                  (person_id, sort_order, period_label, start_year, start_month,
-                   end_year, end_month, role_ko, role_en, updated_at)
-               VALUES %s""",
-            rows,
-            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())",
-        )
 
 
 def _apply_office_row_create(cur, office_id: str, patch: dict) -> int:
@@ -2585,7 +2488,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
 
 def _replace_term_aliases(cur, term_id: str, aliases: dict):
     cur.execute("DELETE FROM commulingo_term_aliases WHERE term_id = %s", (term_id,))
-    # Dedupe keeping the last occurrence — see _replace_aliases.
+    # Dedupe keeping the last occurrence for the term alias conflict key.
     rows: dict[tuple, tuple] = {}
     for lang in ("ko", "en"):
         for index, alias in enumerate((aliases or {}).get(lang) or []):

@@ -51,3 +51,10 @@ frontend migration 176 → 호스트 data 코드 및 frontend 배포 → Python 
 tests/test_commulingo_person_rpc.py는 COMMULINGO_FRONTEND_CONTAINER=commulingo-python-rpc인
 독립 DB 컨테이너에서만 실제 도구 저장·버전 충돌·제안 승인을 실행한다.
 frontend test-commulingo-editorial-db.js는 근거·검토·롤백·상태 전이를 검증한다.
+
+국적 일괄 조사 스크립트 `commulingo_backfill_nationality.py`와
+`commulingo_backfill_person_nationality.py`는 기본적으로 보고서만 만든다.
+추론한 국적/민족을 직접 SQL로 반영하지 않는다. 조사 후 최신 조회 버전과 출처·근거를
+포함한 명시적 Admin spec을 `--apply-spec <reviewed.json>`으로 전달하면
+공통 Admin upsert CLI가 배치 전체를 한 트랜잭션으로 검증·반영한다.
+예전 --apply 단독은 거부된다. 실패 시 배치 앞부분의 쓰기도 롤백한다.
