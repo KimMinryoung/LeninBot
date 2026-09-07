@@ -2066,6 +2066,7 @@ async def bot_main():
     await bot.set_my_commands([
         BotCommand(command="help", description="커맨드 목록"),
         BotCommand(command="task", description="백그라운드 태스크 등록"),
+        BotCommand(command="commulingo_review", description="인물 검토 목록·근거·승인·반려"),
         BotCommand(command="curate", description="링크를 읽고 /hub 큐레이션 발행"),
         BotCommand(command="status", description="시스템 대시보드"),
         BotCommand(command="llm_balance", description="LLM 잔액·비용 조회"),

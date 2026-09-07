@@ -92,6 +92,7 @@ developer MCP clients
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
 | `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --limit 40` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (증분, 7일마다 전체) |
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
+| `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 15분마다 대기 인물 제안 독립 조사·승인/반려; 판단 불가만 소유자 DM과 `/commulingo_review`로 전달 |
 | `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one sourced CommuLingo edit or pending review; shared frontend persistence, topic completion/revisit state and gateway-owned inference policy |
 | `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | independent new-person discovery/create lane |
 | `leninbot-commulingo-enrich.service` | `scripts/commulingo_people_parallel.py --mode enrich` | independent existing-person enrichment lane |

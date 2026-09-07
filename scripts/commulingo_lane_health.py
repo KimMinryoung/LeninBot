@@ -24,12 +24,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The lanes the batch actually wants (gap queue first). enrich came back on
+# Active batch lanes plus the independent review timer. enrich came back on
 # 2026-08-29 (existing-person standard fields); new/terms stay installed but not
 # pulled in — putting a parked unit here would page "no runs recorded" every
 # morning. Change this dict in the same commit that changes the Wants= list in
 # leninbot-commulingo-batch.service.
 LANES = {
+    "review": "leninbot-commulingo-review.service",
     "gap": "leninbot-commulingo-gap.service",
     "enrich": "leninbot-commulingo-enrich.service",
     "events": "leninbot-commulingo-events.service",
@@ -159,6 +160,14 @@ def drain_problems(lane: str, stats: dict) -> list[str]:
 
 def tally(unit: str, since: str) -> dict:
     text = journal(unit, since)
+    if unit == "leninbot-commulingo-review.service":
+        statuses = re.findall(r'^\s*"status": "(approved|rejected|escalated|retry|idle|budget_deferred|busy)"', text, re.M)
+        handled = sum(s in {'approved','rejected','escalated'} for s in statuses)
+        idle = sum(s in {'idle','budget_deferred','busy'} for s in statuses)
+        failed = max(statuses.count('retry'), len(FAILED.findall(text)))
+        return {'applied': handled, 'skipped': idle, 'idle': idle, 'failed': failed,
+                'no_edit': 0, 'fallback': 0, 'total': handled+idle+failed,
+                'cost': sum(float(v) for v in COST.findall(text)), 'rounds': []}
     applied = len(APPLIED.findall(text))
     skipped = len(SKIPPED.findall(text))
     idle = len(IDLE.findall(text))
@@ -347,7 +356,7 @@ def main() -> int:
         stats = tally_drain(unit, args.since) if drain else tally(unit, args.since)
         total_cost += stats["cost"]
         lines.append(
-            f"{lane:7} applied {stats['applied']:4}  skipped {stats['skipped']:3}"
+            f"{lane:7} {'handled' if lane == 'review' else 'applied'} {stats['applied']:4}  skipped {stats['skipped']:3}"
             + (f" (idle {stats['idle']})" if stats.get("idle") else "")
             + f"  failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
             f"fallback {stats['fallback']:3}  "

@@ -224,3 +224,11 @@ This does not make all surfaces share one allow-list. It centralizes the mechani
 - Add smoke coverage when a new tool can write, publish, send, browse, pay, or execute.
 - Treat read-only wallet visibility separately from signing/payment capability; `check_wallet` may be public, but transfer/swap/pay tools may not.
 - Update this document only after verifying names in code.
+
+### CommuLingo 독립 검토
+
+`commulingo_reviewer`는 timer 전용 AgentSpec이며 일반 delegate registry에 등록하지 않는다.
+도구는 wiki_search/wiki_get/web_search/fetch_url/commulingo_people 읽기와 runner-local
+commulingo_review_decision뿐이다. 판단 도구는 검증된 결과를 메모리에 기록할 뿐 DB를 쓰지 않는다.
+실제 승인/반려는 실행기가 원래 제안 ID와 버전을 유지한 채 공통 JS 서비스를 호출한다.
+`/commulingo_review`는 Telegram 소유자 개인 채팅만 허용하는 결정적 명령이며 LLM에 위임하지 않는다.

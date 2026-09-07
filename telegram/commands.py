@@ -192,6 +192,7 @@ _HELP_TEXT = """\
 *태스크*
 /task <내용> — 백그라운드 태스크 등록
 /curate <url> \\[메모] — 외부 글을 읽고 /hub 큐레이션 발행
+/commulingo_review — 인물 검토 목록·근거·승인·반려
 /status — 시스템 대시보드
 /report <id> — 태스크 리포트 재전송
 /llm_balance \\[1~30] — LLM 공식 잔액/비용 및 로컬 감사액
@@ -2791,6 +2792,10 @@ def register_handlers(router: Router, ctx: dict):
     router.message.register(cmd_chat, Command("chat"))
     router.message.register(cmd_task, Command("task"))
     router.message.register(cmd_curate, Command("curate"))
+    from telegram.commulingo_review import cmd_commulingo_review
+    async def review_command(message):
+        await cmd_commulingo_review(message, _ctx)
+    router.message.register(review_command, Command("commulingo_review"))
     router.message.register(cmd_image, Command("image"))
     router.message.register(cmd_stats, Command("stats"))
     router.message.register(cmd_status, Command("status"))

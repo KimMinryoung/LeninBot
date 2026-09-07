@@ -22,6 +22,7 @@ import sys
 # moved to the gap queue on 2026-08-09 the three new lanes were invisible here
 # and the cap would never have bound.
 LANE_UNITS = [
+    "leninbot-commulingo-review",
     "leninbot-commulingo-gap",
     "leninbot-commulingo-events",
     "leninbot-commulingo-links",
