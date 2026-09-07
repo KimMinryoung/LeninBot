@@ -1,8 +1,8 @@
 # MCP Gateway
 
-최종 확인 기준: 2026-06-01 코드 트리.
+2026-09-07 기본 inspect 도구 목록과 profile 경계를 확인했다. SQL·KG mutation을 실행한 검증은 아니다.
 
-`mcp_gateway.server` is an inbound MCP server for local developer/operator clients. Its purpose is to give tools like Codex or Claude Code a typed, narrow path into project state without exposing raw shell, broad DB credentials, filesystem writes, publishing, service restart, payment, or send capabilities.
+`mcp_gateway.server` is an inbound MCP server for local developer/operator clients. Its purpose is to give tools like Codex or Claude Code a typed, narrow path into project state without exposing raw shell, broad DB credentials, filesystem writes, publishing, service restart, payment, or send capabilities. The default `inspect` profile is read-only; `operator` additionally exposes bounded SQL corrections and KG maintenance, including guarded mutations.
 
 The current gateway is a minimal stdio JSON-RPC MCP implementation using standard `Content-Length` framing, with newline-delimited JSON retained for manual probes. It supports `initialize`, `tools/list`, `tools/call`, and `ping`. It deliberately avoids adding a new Python package dependency.
 

@@ -1,6 +1,6 @@
 # 스탠바이 운영
 
-`leninbot-standby`(Hetzner hel1, tailnet `100.124.58.85`)에서 도는 물리 스트리밍 레플리카를 **어떻게 쓰는가**에 대한 문서. 어떻게 구축했는지와 그 과정의 함정은 `db_migration_plan.md` Phase 4-2에 있다.
+`leninbot-standby`(Hetzner hel1, tailnet `100.124.58.85`)에서 도는 물리 스트리밍 레플리카를 **어떻게 쓰는가**에 대한 문서. DB 구성·백업과 접속 경계는 [db_migration_plan.md](db_migration_plan.md)에 있다.
 
 ## 구성
 
@@ -31,8 +31,9 @@ RPO는 사실상 0이다. 절차는 아래 "승격 런북".
 `hot_standby=on`이라 읽기 전용 질의가 된다. 통계 집계, 대량 export, 조사성 스캔을 프로덕션 I/O를 건드리지 않고 돌릴 수 있다.
 
 ```bash
-ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leninbot -tAc "
-  SELECT count(*) FROM tool_audit_log WHERE created_at > now() - interval \"30 days\";"'
+ssh root@100.124.58.85 'docker exec -i leninbot-pg-standby psql -U postgres -d leninbot -At' <<'SQL'
+SELECT count(*) FROM tool_audit_log WHERE created_at > now() - interval '30 days';
+SQL
 ```
 
 **단, 오래 걸리는 쿼리는 복제와 충돌한다.** WAL 재생이 그 쿼리가 읽는 행을 지우려 하면 Postgres가 둘 중 하나를 선택한다 — 기본값(`max_standby_streaming_delay=30s`)에서는 30초까지 재생을 미루고, 그래도 안 되면 **쿼리를 취소한다**. 몇 분짜리 분석을 돌리려면 그 값을 늘려야 하고, 늘린 만큼 복제 지연이 커진다. 2 vCPU / 3.8 GB라 애초에 무거운 분석에는 맞지 않는다.
@@ -43,7 +44,7 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 
 ### 4. 조용한 손상 탐지
 
-primary와 스탠바이의 행수·체크섬을 비교하면 논리적 이상을 잡을 수 있다. 물리 복제는 바이트 단위 사본이므로 **정상이라면 반드시 일치해야 한다.**
+primary와 스탠바이의 행수·체크섬을 비교하면 논리적 이상을 잡을 수 있다. 물리 복제는 바이트 단위 사본이므로 **동일한 WAL 재생 시점의 일관된 snapshot을 비교해야 일치 여부를 판단할 수 있다. primary에 쓰기가 계속되거나 standby에 복제 지연이 있으면 서로 다른 시점의 행수 차이만으로 손상을 단정할 수 없다.**
 
 ```bash
 # 양쪽에서 같은 질의를 돌려 비교

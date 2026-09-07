@@ -1,8 +1,6 @@
-# Vector Corpus Reingestion Handoff
+# Vector Corpus 재등록 운영 가이드
 
-최종 확인 기준: 2026-05-10 운영 DB 관찰.
-
-이 문서는 Stalin 외 `lenin_corpus`를 Windows GPU PC에서 재등록하기 위한 인수인계다. 해당 PC는 BGE-M3가 이미 설치되어 있고 12GB VRAM이 있어 대량 embedding 작업에 더 적합하다.
+2026-09-07 `corpus/store.py`의 chunk 정책을 확인했다. 운영 DB의 현재 행수와 저자별 완료 상태는 별도 감사가 필요하다. GPU 호스트의 하드웨어와 가용성은 실행 전에 확인한다.
 
 ## Current Runtime Policy
 
@@ -60,42 +58,16 @@ If a source is a chapter of a larger work, keep both levels explicit:
 
 Do not store formal work titles only as free-form `source` while leaving `title` empty.
 
-## Current Cleanup Targets
+## 재등록 범위
 
-### Already handled
-
-- Mao was deleted from `core_theory` because its old corpus was extremely over-chunked and lacked reliable metadata.
-- Stalin is being reingested on the server with English/default `3000/300` chunks and corrected metadata.
-- Windows GPU reingestion completed for non-Mao, non-Stalin `core_theory` source files under `docs/`:
-  - `Marx & Engels`: 2,014 chunks / 114 sources
-  - `Lenin`: 2,845 chunks / 327 sources
-  - `Rosa Luxemburg`: 1,553 chunks / 178 sources
-  - `Trotsky`: 1,431 chunks / 75 sources
-  - `Gramsci`: 203 chunks / 46 sources
-- These rows have `title`, `year`, `source_url`, `language`, `chunk_size`, `chunk_overlap`, `chunk_index`, and `chunk_count`. Index, abstract, study-guide, and other non-work rows discovered during reingestion were removed.
-- Mao was intentionally not reingested in this Windows GPU pass because the local Mao crawl remains very large and needs a curated subset/manifest first.
-
-### Already handled: `modern_analysis`
-
-`modern_analysis` was reingested on the Windows GPU host from Korean organization
-documents under `docs/modern_analysis/`:
-
-- Included prefixes: `bolky_`, `diamat_`, `uprising_`
-- Excluded prefixes: `arxiv_`, `bis_`, `mxo_`
-- Result: 5,651 chunks / 492 sources / 492 files
-- Organization distribution:
-  - `Bolky Group (볼셰비키그룹)`: 4,539 chunks / 332 sources
-  - `DIAMAT`: 880 chunks / 116 sources
-  - `Uprising(반란)`: 232 chunks / 44 sources
-- All rows have `title`, `author`, `organization`, `source`, `source_url` when present, `language="ko"`, `chunk_size=1800`, `chunk_overlap=200`, `chunk_index`, `chunk_count`, and `filepath`.
-
-The reingestion used a local ignored helper under `scripts/ingest_oneoff/` with
-a staging layer (`modern_analysis_reingest_next`) and then promoted the
-validated rows to `modern_analysis`.
+- `core_theory`는 정식 저작을 대상으로 하고 index/abstract/study-guide 페이지를 제외한다.
+- Mao 로컬 crawl에는 중복 꼬리가 관찰되었으므로 선별 manifest 없이 전체 재등록하지 않는다.
+- `modern_analysis`의 기존 범위는 한국어 단체 문서 `bolky_`, `diamat_`, `uprising_`이며 `arxiv_`, `bis_`, `mxo_`는 제외한다. 범위 변경은 manifest에 명시한다.
+- 2026-05-10 인수인계의 저자별 완료 수치와 “Stalin 진행 중” 표기는 현재 상태가 아니다. 아래 질의나 MCP `corpus_metadata_audit`로 재확인한다.
 
 ## Recommended Order
 
-1. Build a curated Mao manifest before reingesting Mao. Do not ingest all `docs/theorists/mao_*.txt` files blindly; the local crawl has large repeated-tail artifacts and totals roughly 9.7M cleaned characters even after simple line dedupe.
+1. Build a curated Mao manifest before reingesting Mao. Do not ingest all `docs/theorists/mao_*.txt` files blindly; the local crawl has large repeated-tail artifacts.
 2. Keep `modern_analysis` scoped to Korean organization documents unless the
    layer policy is deliberately changed. Do not re-add arXiv/BIS/MXO material
    without a curated manifest.
@@ -123,7 +95,7 @@ SELECT metadata->>'author', metadata->>'title', metadata->>'chunk_size',
 5. Only then delete old rows for that author/source family.
 6. Reingest the full manifest.
 
-For the Windows GPU host, a local helper was used from `temp_dev/vector_reingest.py` with BGE-M3 loaded in-process on CUDA and shared through `corpus.embeddings.set_shared_embeddings()`. This avoids the HTTP embedding server startup path and uses the local 12GB VRAM directly.
+GPU 전용 ingestion은 BGE-M3를 CUDA에 로드한 뒤 `corpus.embeddings.set_shared_embeddings()`로 공유할 수 있다. 과거 `temp_dev/` 일회성 helper를 배포된 진입점으로 간주하지 않는다. 실행 스크립트와 manifest를 먼저 확인한다.
 
 Prefer deleting narrowly by `layer`, canonical `author`, and either `source_url` or manifest source IDs. Avoid broad deletes unless the manifest is complete and tested.
 

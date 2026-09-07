@@ -98,5 +98,5 @@ venv/bin/python scripts/smoke_tool_allowlists.py
 venv/bin/python scripts/smoke_security_gateway.py
 venv/bin/python scripts/smoke_url_security.py
 venv/bin/python scripts/smoke_mcp_gateway.py
-venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py llm/llm.claude_loop.py llm/llm.openai_tool_loop.py services/web_chat.py services/a2a_handler.py mcp_gateway/tools.py
+venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py llm/claude_loop.py llm/openai_tool_loop.py services/web_chat.py services/a2a_handler.py mcp_gateway/tools.py
 ```

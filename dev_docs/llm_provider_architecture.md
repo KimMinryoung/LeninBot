@@ -53,22 +53,20 @@ Personal fiction writer (/writer)
   -> llm.claude_loop.chat_with_tools(client=..., model="claude-fable-5", writer tools)
   -> Anthropic Messages API or provider-compatible Messages endpoint, no shared provider tier
 
-Local
-  llm.client backend
-  -> llm.openai_tool_loop.chat_with_tools(base_url=...)
-  -> OpenAI-compatible local server
 ```
 
 2026-08-04부터 모든 루프 라운드와 registry 원샷 호출은 LLM 게이트웨이(`llm/gateway.py`)를 지난다. 2026-08-05에는 graphiti Gemini, browser-use 매 step, Telegram vision까지 계측을 확장했다. 모든 provider 실키는 key-injection proxy에만 있고 소비 서비스는 proxy readiness 뒤 시작한다. 계측 지점과 정책은 `llm_gateway.md`.
 
-OpenAI-compatible providers share `llm/llm.openai_tool_loop.py`. Claude uses `llm/llm.claude_loop.py` because Anthropic tool-use message structure is different. Since 2026-08-04 both modules are protocol adapters over the single loop engine `llm.agent_loop.run_tool_loop`, which owns the shared control flow (round loop, cancel checks, budget accounting/warnings, tool-batch execution and the missing-result safety net, terminal-tool short-circuit, length continuation, forced-final with finalization tools and the followup-skip heuristic). Provider mechanics — message shapes, streaming/idle guards, cost math, protocol recovery — stay per-module, so control-flow fixes now land once instead of being mirrored by hand. Tool arguments must decode to an object on normal and forced-final rounds; malformed arguments receive an error tool-result and are never executed. Kimi K3 uses `MOONSHOT_API_KEY`, defaults to `https://api.moonshot.ai/v1`, and sends model ID `kimi-k3`. K3 always reasons and currently accepts only `reasoning_effort=max`; the Kimi path preserves the API's `reasoning_content` in replayed assistant messages across tool and continuation rounds while keeping it out of the user-facing answer, as required by Moonshot's multi-turn/tool-call protocol. Budget accounting uses Moonshot's launch pricing ($3/M cache-miss input, $0.30/M cache-hit input, $15/M output). The official API reference is [Kimi API Quickstart](https://platform.kimi.ai/docs/api/quickstart).
+OpenAI-compatible providers share `llm/openai_tool_loop.py`. Claude uses `llm/claude_loop.py` because Anthropic tool-use message structure is different. Since 2026-08-04 both modules are protocol adapters over the single loop engine `llm.agent_loop.run_tool_loop`, which owns the shared control flow (round loop, cancel checks, budget accounting/warnings, tool-batch execution and the missing-result safety net, terminal-tool short-circuit, length continuation, forced-final with finalization tools and the followup-skip heuristic). Provider mechanics — message shapes, streaming/idle guards, cost math, protocol recovery — stay per-module, so control-flow fixes now land once instead of being mirrored by hand. Tool arguments must decode to an object on normal and forced-final rounds; malformed arguments receive an error tool-result and are never executed. Kimi K3 uses `MOONSHOT_API_KEY`, defaults to `https://api.moonshot.ai/v1`, and sends model ID `kimi-k3`. K3 always reasons and currently accepts only `reasoning_effort=max`; the Kimi path preserves the API's `reasoning_content` in replayed assistant messages across tool and continuation rounds while keeping it out of the user-facing answer, as required by Moonshot's multi-turn/tool-call protocol. Budget accounting uses Moonshot's launch pricing ($3/M cache-miss input, $0.30/M cache-hit input, $15/M output). The official API reference is [Kimi API Quickstart](https://platform.kimi.ai/docs/api/quickstart).
 
 (Kimi content-filter 시 DeepSeek으로 요청 단위 스위칭하던 폴백 계약은 2026-08-04 제거됨 — Kimi 미사용 상태에서 루프 복잡도만 키우고 있었다. Kimi의 `reasoning_effort=max`, `max_tokens`, reasoning replay 옵션은 여전히 `llm.provider_registry.kimi_openai_tool_options()`가 소유하며 Telegram, public web chat, A2A가 같은 설정을 사용한다.)
-Telegram chat, background tasks, A2A (`leninbot-a2a-api.service`), public web chat, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths resolve `thinking_policy=tool_loop` through `tool_gateway.inference`; the current `DEEPSEEK_TOOL_THINKING_MODE` default is off, and operators can enable it centrally without per-call overrides. `llm/llm.claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat and browser automation deliberately keep DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`): web chat does it for lower latency, while browser automation does it because browser-use relies on forced structured tool calls and DeepSeek does not support that path with thinking enabled. DeepSeek Anthropic-compatible messages do not support image content, so browser-use runs DeepSeek as a non-vision DOM/tool controller first and retries with the configured Google/OpenAI vision fallback only if that primary attempt fails.
+Telegram chat, background tasks, A2A (`leninbot-a2a-api.service`), public web chat, browser worker tasks, browser-use automation, and the hourly autonomous project loop use DeepSeek's Anthropic-compatible API when `provider=deepseek`, so tool inputs arrive as structured `tool_use.input` blocks instead of OpenAI-compatible `function.arguments` JSON strings. Agent/task DeepSeek paths resolve `thinking_policy=tool_loop` through `tool_gateway.inference`; the current `DEEPSEEK_TOOL_THINKING_MODE` default is off, and operators can enable it centrally without per-call overrides. `llm/claude_loop.py` preserves `thinking` and `redacted_thinking` assistant content blocks in replayed tool-call turns so DeepSeek receives the reasoning payload it requires on follow-up requests. Public web chat and browser automation deliberately keep DeepSeek Flash in non-thinking mode (`thinking={"type": "disabled"}`): web chat does it for lower latency, while browser automation does it because browser-use relies on forced structured tool calls and DeepSeek does not support that path with thinking enabled. DeepSeek Anthropic-compatible messages do not support image content, so browser-use runs DeepSeek as a non-vision DOM/tool controller first and retries with the configured Google/OpenAI vision fallback only if that primary attempt fails.
 
 The roleplay bot (`leninbot-roleplay.service`, `telegram/roleplay_bot.py`) is a separate runtime, not the Cyber-Lenin orchestrator, and does not read `config.json`'s `provider`/`chat_model` keys. It pins the DeepSeek provider/model while routing through the proxy: `_deepseek_anthropic_client` + `llm.claude_loop.chat_with_tools`, model `deepseek-v4-flash` (via `_resolve_deepseek_model("deepseek_flash")`), with thinking **enabled** (`output_config.effort=high`). Thinking is on for answer quality; because it goes through `claude_loop`, the reasoning stays in replay-only `thinking` blocks and never appears in the user-facing reply — which is why the roleplay bot uses the Anthropic-compatible path rather than the OpenAI-compatible loop (the latter prepends reasoning to the reply). The bot ignores the global `DEEPSEEK_THINKING_MODE` env and sets its thinking inline.
 
 The personal fiction writer (`/writer`, `api_routes/writer.py`, `services/novel_writer_api.py`, `creative_writer.py`) is separate from normal provider selection but not from gateway enforcement. Its role-level inference envelopes are centralized in `writer.config.WRITER_CALL_POLICIES` (input/output ceilings, rounds, output continuations, thinking policy); the heavy `main` and `revision` roles import the shared 160k/32k gateway defaults, while `diagnosis`, `line_edit`, and `research` retain smaller explicit role limits; input overflow uses durable summaries plus chapter-boundary anchor replay rather than silent truncation. It uses the shared `llm.claude_loop.chat_with_tools` path with `model="claude-fable-5"` by default and can route explicitly selected DeepSeek or Kimi K3 writer models through their Anthropic-compatible clients. The Claude writer client uses the proxy's shared `anthropic` route and `ANTHROPIC_API_KEY`. Kimi Writer uses the proxy's Moonshot Anthropic-compatible route, model `kimi-k3`, and K3's default thinking. The dedicated process is `novel-writer-api.service` and starts after the proxy is ready.
+
+코드의 `local` 선택지는 호환 경로로 남아 있다. 현재 운영 대상으로 사용하지 않는다(2026-09-07 사용자 확인).
 
 ## Runtime Config Keys
 
@@ -115,19 +113,7 @@ DeepSeek Anthropic-compatible thinking is controlled by environment variables:
 
 Claude aliases are resolved lazily through Anthropic Models API and cached in-process. OpenAI, DeepSeek, Kimi, and local model IDs resolve synchronously from `llm/provider_registry.py` or local backend config. GPT-5.6 uses the official Sol/Terra/Luna family mapping and does not silently fall back to an older GPT generation when a model is unavailable. Kimi currently has one model in all three tiers, so the tier changes budget/display grouping but not the upstream model ID.
 
-Current registry pricing follows the provider documentation (audited 2026-08-29).
-GPT-5.6 Sol/Terra/Luna Standard short-context uncached input/output rates are
-respectively `$4/$20`, `$2/$12`, `$0.20/$1.20` per million tokens; cached input is
-`$0.40/$0.20/$0.02`, and cache writes are `$5/$2.50/$0.25`. Sol's `$4/$20`
-promotional rate is guaranteed at least through 2026-11-21. Requests above 272K
-input tokens use the long-context rates for the full request: Sol `$8/$30`, Terra
-`$4/$18`, Luna `$0.40/$1.80` (cached input `$0.80/$0.40/$0.04`, cache writes
-`$10/$5/$0.50`). The loop and gateway price `cache_write_tokens` separately and
-select the long tier from total input usage. Sources: [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), [GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol), [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
-
-Claude Opus 5 is `$5/$25` and Sonnet 5 uses its `$2/$10` launch price through
-2026-08-31, then `$3/$15`; the 1-hour cache write/read rows are derived from those
-rates. Sources: [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview), [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+과금 계산의 모델별 요율·캐시·장문 구간은 `llm/provider_registry.py`가 소유한다. 문서에 프로모션 가격표를 복제하지 않는다. 외부 최신 가격 검증과 저장소 계산 정책 확인은 별개다.
 
 Kimi non-secret and secret settings:
 
@@ -193,7 +179,7 @@ For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gat
 
 Provider-facing tool definitions are compacted before API calls: long human-readable `description` strings in tool definitions and nested schemas are shortened, while tool names, schema keys, types, enums, defaults, and required fields are preserved. This reduces prompt overhead without changing execution capabilities.
 
-`llm/llm.openai_tool_loop.py` converts Anthropic-style tool definitions to Chat Completions function tools and normalizes malformed tool-call messages. It also handles:
+`llm/openai_tool_loop.py` converts Anthropic-style tool definitions to Chat Completions function tools and normalizes malformed tool-call messages. It also handles:
 
 - tool-call/result pairing validation
 - text-only recovery only for positively identified tool protocol 400s before any
@@ -204,19 +190,6 @@ Provider-facing tool definitions are compacted before API calls: long human-read
 - result truncation for large tool output, with a larger cap for pagination-capable read tools (`fetch_url`, `read_file`, `read_document`, `read_self`) so their own offset/next-hint contracts remain usable
 - forced final response after budget/round exhaustion
 
-`llm/llm.claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and non-web DeepSeek agent-harness calls. The round/forced-final control flow of both loops is the shared engine `llm.agent_loop.run_tool_loop` (see above); `tests/test_claude_loop_rounds.py`, `tests/test_openai_loop_rounds.py`, and `tests/test_agent_loop_engine.py` pin its contracts. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.
+`llm/claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and non-web DeepSeek agent-harness calls. The round/forced-final control flow of both loops is the shared engine `llm.agent_loop.run_tool_loop` (see above); `tests/test_claude_loop_rounds.py`, `tests/test_openai_loop_rounds.py`, and `tests/test_agent_loop_engine.py` pin its contracts. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.
 
 Both Anthropic-native Claude calls and Anthropic-compatible DeepSeek calls retry transient provider failures at the API-call boundary: connection/timeouts, 408/409/429, 5xx, and 529 are retried up to three attempts with a short backoff. Non-transient protocol/auth/schema errors are not retried. Streaming callers can opt into a provider idle timeout; `/writer` uses it so a DeepSeek stream that returns HTTP 200 but then produces no text/final event is converted into a transient timeout and retried server-side. For streaming callers such as `/writer`, retry progress can be surfaced as `provider_retry`; final `done` still comes from the successful response, and already-executed local tools are not duplicated because retries happen before each model response is processed.
-
-## 2026-07-25 Migration Checklist
-
-- [x] Claude high tier를 `claude-opus-5`로 교체하고 Models API resolution을 확인
-- [x] OpenAI high/medium/low와 browser OpenAI tiers를 각각 GPT-5.6
-  Sol/Terra/Luna로 교체
-- [x] old-generation automatic GPT fallback을 제거해 요청 모델과 과금 모델의
-  불일치를 차단
-- [x] 모델 ID, tier, display name, provider pricing, Kimi tool options를
-  `llm/provider_registry.py`로 중앙화
-- [x] Kimi content-filter fallback을 Telegram, web chat, A2A에 동일하게 적용
-- [x] 네 provider의 current credential에서 Models API 가용성을 확인하고 runtime,
-  gateway, DeepSeek harness smoke를 통과

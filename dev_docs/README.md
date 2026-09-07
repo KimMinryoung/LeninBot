@@ -13,6 +13,9 @@
 | `llm_gateway.md` | 모든 LLM 호출의 정책·감사 seam과 key-injection proxy, 로컬 운영 오버라이드 |
 | `tool_allowlist_current_state.md` | 전역 도구 레지스트리와 채널/에이전트별 도구 가시성 |
 | `tool_gateway.md` | runtime tool visibility, dispatch, security/audit facade |
+| `security_gateway.md` | 실행 시점 인자 검증·권한·rate limit·idempotency·감사 |
+| `llm_call_registry.md` | 원샷 호출 등록과 실행 정책·핫리로드 |
+| `agent_improvement_roadmap.md` | 구현 현황의 설계 문서 연결과 남은 조건부 검토 |
 | `tool_security_gateway_improvements.md` | tool/security gateway 보안 검토 결과와 우선순위별 개선 체크리스트 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
@@ -21,15 +24,16 @@
 
 | 문서 | 용도 |
 |---|---|
+| `writer_runtime.md` | 개인 소설 작업 공간의 도구·문맥·캐시·퇴고 |
 | `api_reference.md` | `services/api.py` FastAPI 라우트와 인증 |
 | `secret_management.md` | systemd credential 기반 시크릿 로딩 |
-| `db_migration_plan.md` | DB 인프라 현황 (로컬 leninbot-pg 구성·백업 체계·스탠바이 구축 기록) + Supabase 이탈 기록과 남은 단계 |
+| `db_migration_plan.md` | 현재 PostgreSQL 구성·백업·복구·쓰기 가드와 이전 후 미확인 항목 (파일명은 기존 참조 유지) |
 | `standby_operations.md` | 스트리밍 스탠바이 활용법, 승격 런북, 재시드 절차 |
 | `monitoring.md` | 감시·알림 체계 — 외부 워치독, 복제 점검, 알림 채널, 사각지대 |
 | `knowledge_graph_design.md` | Neo4j/Graphiti KG 런타임 구조 |
 | `knowledge_graph_schema.md` | KG typed entity/edge schema |
 | `translation_pipeline.md` | 사료(RU/ZH/EN/DE/FR/IT→KO)·사이트(KO→EN) 공통 실행, 검증·캐시·TM, 원문 최신성, DB 적용 상태와 평가 |
-| `vector_corpus_reingestion_handoff.md` | Windows GPU PC에서 vector corpus 재등록 시 필요한 metadata/chunking 인수인계 |
+| `vector_corpus_reingestion.md` | 코퍼스 manifest·metadata·chunking·재등록과 감사 절차 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
 | `autonomous_project.md` | hourly autonomous project loop |
 | `skill_import_design.md` | 외부 skill import/conversion 설계 |
@@ -40,6 +44,8 @@
 - 코드의 현재 ownership을 먼저 확인한다. 주요 진입점은 `services/api.py`, `telegram/bot.py`, `telegram/tasks.py`, `agents/`, `runtime_tools/`, `bot_config.py`, `jobs/autonomous_project.py`, `kg_runtime/`, `graph_memory/`이다.
 - 계획 문서는 구현이 끝나면 완료 기록으로 남기지 말고, 해당 주제의 현재 설계 문서에 흡수한다.
 - 날짜가 붙은 handoff 문서는 장기 보존하지 않는다. 필요한 운영 지식만 주제별 문서로 옮긴다.
+- 메모리는 사용자 선호·현재 미완료 작업·문서 진입점만 간결하게 유지한다. 완료 배포 로그와 코드에서 조회할 모델·요율·행수는 중복 저장하지 않는다.
+- 코드 기본값, 로컬 설정, 당시 운영 관찰을 구분한다. 재확인하지 않은 해지·활성화·승인 대기를 현재 사실처럼 갱신하지 않는다.
 - 실제 라우트, config key, systemd unit, tool name을 쓸 때는 코드에서 다시 확인한다.
 
 ## Top-level Code Layout
