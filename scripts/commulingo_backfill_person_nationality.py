@@ -141,9 +141,10 @@ def plan(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         if citizenship not in LABELS:
             errors.append(f"{row['id']}: unsupported citizenship code {citizenship!r}")
             continue
-        origin = row["origin"] or ORIGIN_OVERRIDES.get(row["id"]) or (
-            "russia" if citizenship == "soviet" else citizenship
-        )
+        origin = row["origin"] or ORIGIN_OVERRIDES.get(row["id"])
+        if not origin or origin in {"soviet", "yugoslavia"}:
+            errors.append(f"{row['id']}: national origin needs a documented, non-citizenship-only override")
+            continue
         if origin not in LABELS:
             errors.append(f"{row['id']}: unsupported origin code {origin!r}")
             continue
@@ -154,9 +155,7 @@ def plan(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "citizenship_reason": "existing" if row["citizenship"] else "reviewed override",
             "origin_reason": (
                 "existing" if row["origin"] else
-                "documented national/family identity" if row["id"] in ORIGIN_OVERRIDES else
-                "Soviet citizen; Russian background default" if citizenship == "soviet" else
-                "national background matches citizenship"
+                "documented national/family identity"
             ),
         })
     if errors:

@@ -265,16 +265,9 @@ MAX_SECTIONS = 12
 
 # Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # The curator must pick citizenship_code / nationalOrigin code from this set or the card shows no flag.
-NATIONALITY_CODES = (
-    "soviet, russia, ukraine, georgia, armenia, azerbaijan, belarus, kazakhstan, "
-    "latvia, lithuania, estonia, uzbekistan, moldova, turkmenistan, tajikistan, "
-    "kyrgyzstan, poland, finland, germany, east-germany, austria, hungary, czechia, "
-    "romania, bulgaria, yugoslavia, serbia, croatia, slovenia, montenegro, bosnia-herzegovina, switzerland, france, italy, spain, uk, netherlands, belgium, usa, "
-    "cuba, argentina, chile, china, japan, india, turkey, greece, vietnam, north-korea, south-korea, "
-    "albania, angola, burkina-faso, congo, ghana, guinea-bissau, indonesia, "
-    "mozambique, peru, trinidad, portugal, brazil, el-salvador, grenada, guyana, "
-    "nicaragua, south-africa, tanzania, ireland, slovakia, czechoslovakia, korea, martinique, israel"
-)
+from runtime_tools.commulingo_people import _NATIONALITY_CODES, _NATIONALITY_POLICY
+
+NATIONALITY_CODES = ", ".join(sorted(_NATIONALITY_CODES))
 
 
 def person_tier(candidate: dict) -> dict:
@@ -394,8 +387,8 @@ CARD_STYLE_GUIDANCE = (
     "(김무정 / Kim Mu-chong, 펑더화이 / Peng Dehuai), everyone else Western order. Do not "
     "pre-assemble an order into the parts.\n"
     "- Every new person requires both citizenship and nationalOrigin. nationalOrigin may equal "
-    "citizenship; never omit it because the two match or because a distinct background is not "
-    "documented. Apply the editorial defaults below instead of storing a blank.\n"
+    "citizenship only when independently documented. If evidence is missing, research or defer "
+    "registration; never fill a default.\n"
     "- The bio states who the person essentially was and why they matter — their core "
     "significance and defining tension. It is NOT a chronological list of posts, dates, and "
     "ministries: the detailed career timeline already lists positions year by year, so do not "
@@ -410,19 +403,7 @@ CARD_STYLE_GUIDANCE = (
     "- The epithet stays a short phrase — one clause. A characterization that needs a second "
     "clause after a dash belongs in the bio. If any field runs long, tighten it rather than pad "
     "it.\n"
-    "- nationalOrigin editorial policy for Koreans: this dictionary treats the DPRK's "
-    "조선민족 and the ROK's 한민족 as one lineage that has separated into distinct national "
-    "bodies. A person who served or was loyal to the DPRK carries nationalOrigin "
-    "`north-korea` — never `south-korea`, and not the undivided `korea` code either. "
-    "`korea` is reserved for figures whose activity ended before the division (김산, "
-    "여운형, 이동휘); Soviet Koreans with soviet citizenship keep the Koryo-saram filing "
-    "(origin `korea`, label 고려인).\n"
-    "- nationalOrigin editorial policy for people born in territory now within Ukraine under the "
-    "Russian Empire or USSR: `ukraine` requires documented Ukrainian self-identification, "
-    "Ukrainian parentage/family, or a substantive tie to Ukrainian national culture or autonomy; "
-    "documented Polish background uses `poland`; otherwise use `russia`. Birthplace and work in "
-    "the Ukrainian SSR alone never suffice. Jewish ancestry alone does not create a separate "
-    "nationalOrigin category in this dictionary."
+    + _NATIONALITY_POLICY["originGuidance"]
 )
 
 
@@ -639,16 +620,15 @@ _STEP_BASIC = """BASIC COMPLETENESS: bio or epithet is empty, career has no rows
 _STEP_NATIONALITY_TEMPLATE = """NATIONALITY: either the citizenship or nationalOrigin flag code is
    unset. Set both in one
    `commulingo_person_update`. Provide `citizenship` — the state whose citizenship the person actually held
-   (for most figures here the Soviet Union `soviet`; use `russian-empire`-era figures' successor
-   state, i.e. still `soviet` if they lived into the USSR, otherwise `russia`; foreign
-   revolutionaries take their own state) — and always provide
+   — and provide
    `nationalOrigin`, the person's documented national or ethnic background (e.g. `georgia` for
    Stalin, `poland` for Dzerzhinsky). Never infer nationalOrigin from birthplace: Karl Radek was
    born in present-day Ukraine but was Polish, and Nikolai Yezhov was born in Lithuania but is
    classified here as Russian. Citizenship is the primary flag and comes first; nationalOrigin is
    secondary. Never omit nationalOrigin: it may equal citizenship when the person's documented
-   background matches their state. If sources do not establish a different background, use the
-   reviewed editorial default rather than leaving it blank. Citizenship
+   background matches their state. Soviet and Yugoslav codes are citizenship-only. Preserve
+   mixed backgrounds in bilingual labels. If evidence is missing, research or use commulingo_no_edit;
+   never guess a default. Citizenship
    is NOT where the person happened to die or emigrate to:
    a Soviet official who died in exile abroad is still `soviet`. It also drives the native-name
    script check, so a wrong code turns the card's own-script name line wrong too. Each value is {{"code": <one of: {NATIONALITY_CODES}>, "label":
@@ -1179,7 +1159,7 @@ documented by commulingo_person_create: givenName, familyName (given
 name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
 aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder,
 including both citizenship and nationalOrigin. Both nationality fields are mandatory for every
-new person; nationalOrigin may equal citizenship but must never be omitted.
+new person; nationalOrigin may equal citizenship only with evidence. If unknown, research or defer registration; never guess.
 The person schema requires citizenship and nationalOrigin.
 nationalOrigin means documented national/ethnic background, never birthplace.
 Never replace a rejected complete card with a minimal placeholder create; correct the invalid field shape and retry the complete card.

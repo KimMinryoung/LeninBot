@@ -91,21 +91,9 @@ _PERSON_PATCH_KEYS = frozenset({
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # Must stay in sync with NATIONALITY_CODES in scripts/commulingo_people_maintainer.py.
-# This vocabulary is states, and it renders as a flag on the card. Stateless
-# ethnicities are therefore absent BY DECISION, not by oversight — do not "fix"
-# them in, and do not file their bearers under a neighbouring state:
-#
-#   Jewish  — the Soviet passport did carry еврей on the fifth line, but tagging
-#             Bolsheviks with it here does not reconstruct that category, it
-#             supplies the 'Jewish Bolshevik' conspiracy its raw material. There
-#             is also no flag that is not an anachronism for a person who died
-#             before 1948.
-#   Tatar, Bashkir, Chechen, Buryat, Ossetian and the other peoples of the
-#             RSFSR — no separate state, so no flag.
-#
-# A card whose prose names one of these keeps origin_code 'russia'; the prose is
-# where that identity is carried. An audit that reports these as a gap has
-# rediscovered the policy, not a bug.
+# Codes map to country flags, not an exhaustive ethnicity taxonomy. Use sourced
+# national background; never assign Russia or a neighbouring state by default.
+# Preserve documented ethnic and mixed backgrounds in bilingual labels.
 # Still code, and knowingly so: a nationality needs a vendored flag SVG under
 # the frontend's public/flags/, which is baked into that image, so a new nation
 # needs a deploy wherever this list lives. The frontend keeps the same set in
@@ -3177,9 +3165,15 @@ _NATIONALITY_SCHEMA = {
     "required": ["code", "label"],
 }
 
+_NATIONALITY_POLICY = json.loads(Path(os.environ.get("COMMULINGO_NATIONALITY_POLICY",
+    "/home/grass/frontend/data/commulingo/nationality-policy.json")).read_text())
+_NATIONAL_ORIGIN_CODES = _NATIONALITY_CODES - set(_NATIONALITY_POLICY["citizenshipOnlyCodes"])
+
 _NATIONAL_ORIGIN_SCHEMA = {
     **_NATIONALITY_SCHEMA,
-    "description": (
+    "properties": {**_NATIONALITY_SCHEMA["properties"],
+        "code": {"type": "string", "enum": sorted(_NATIONAL_ORIGIN_CODES)}},
+    "description": _NATIONALITY_POLICY["originGuidance"] + (
         "National or ethnic background, not birthplace and not place of death. "
         "For example Radek=Poland although born in present-day Ukraine; "
         "Yezhov=Russia although born in Lithuania (an ethnic Russian). The "
@@ -3713,7 +3707,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
             "Read the record and reference lists first. On create, citizenship and "
-            "nationalOrigin are both mandatory; nationalOrigin may equal citizenship. "
+            "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
             "background, never birthplace. Russian-style names must research and include a "
             "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
