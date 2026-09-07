@@ -1,0 +1,216 @@
+{
+  "id": "salt-ii-treaty-1979",
+  "title": "전략무기제한협정 II — 미국과 소련의 전략공격무기 제한 조약, 의정서, 후속 협상 원칙 공동성명, 백파이어 성명 (1979년 6월 18일, 빈)",
+  "byline": "미합중국 / 소비에트 사회주의 공화국 연방",
+  "bylineNote": "1979년 6월 18일 빈에서 카터 대통령과 브레즈네프 서기장이 서명; 합의성명·공통이해는 조약과 함께 서명된 부속 문서",
+  "sourceLang": "en",
+  "headnote": [
+    "1979년 6월 18일 빈에서 서명된 SALT II 협정 문서 네 건이다. 열아홉 개 조의 조약은 전략공격무기 발사대의 총량 상한(2,400기, 1981년부터 2,250기)과 MIRV 탑재 미사일의 소상한, 신형 ICBM 한 종류 제한, 국가 기술적 검증수단의 불간섭을 정했고, 조문마다 두 나라가 함께 서명한 합의성명과 공통이해가 뒤따른다. 여기에 1981년 말까지 이동식 ICBM 발사대와 장거리 순항미사일 배치를 유예한 의정서, 다음 협상의 원칙을 적은 공동성명, 그리고 Tu-22M 「백파이어」의 생산과 개조를 제한한다는 브레즈네프의 서면 성명과 카터의 답변을 더했다. 미국 상원은 이 조약을 비준하지 않았으나 두 나라는 1986년까지 그 한도를 지켰다. 합의성명과 공통이해는 저본대로 해당 조항 바로 아래에 두었고, 데이터 각서의 수량 표는 옮기지 않았다."
+  ],
+  "bibliography": [
+    "원제: Treaty Between the United States of America and the Union of Soviet Socialist Republics on the Limitation of Strategic Offensive Arms, Together with Agreed Statements and Common Understandings Regarding the Treaty; Protocol to the Treaty; Joint Statement of Principles and Basic Guidelines for Subsequent Negotiations on the Limitation of Strategic Arms; Soviet Backfire Statement — Vienna, June 18, 1979 (U.S. Department of State)",
+    "번역 저본: 미국과학자연맹(FAS) 전자판(nuke.fas.org/control/salt2/text). 미국 정부의 조약 공식 텍스트로 저작권 보호 대상이 아니다"
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/salt-ii-treaty-1979.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [
+      "First",
+      "Soviet",
+      "August",
+      "Benjamin",
+      "Second",
+      "Third"
+    ],
+    "extra": {
+      "Parties": "당사국",
+      "Party": "당사국",
+      "strategic offensive arms": "전략공격무기",
+      "ICBM": "대륙간탄도미사일(ICBM)",
+      "ICBMs": "대륙간탄도미사일(ICBM)",
+      "Intercontinental ballistic missile (ICBM) launchers": "대륙간탄도미사일(ICBM) 발사대",
+      "ICBM launchers": "ICBM 발사대",
+      "ICBM launcher": "ICBM 발사대",
+      "fixed ICBM launchers": "고정식 ICBM 발사대",
+      "mobile ICBM launchers": "이동식 ICBM 발사대",
+      "ICBM silo launchers": "ICBM 사일로 발사대",
+      "SLBM": "잠수함발사탄도미사일(SLBM)",
+      "SLBMs": "잠수함발사탄도미사일(SLBM)",
+      "Submarine-launched ballistic missile (SLBM) launchers": "잠수함발사탄도미사일(SLBM) 발사대",
+      "SLBM launchers": "SLBM 발사대",
+      "ASBM": "공중발사탄도미사일(ASBM)",
+      "ASBMs": "공중발사탄도미사일(ASBM)",
+      "Air-to-surface ballistic missiles (ASBMs)": "공중발사탄도미사일(ASBM)",
+      "heavy bombers": "중폭격기",
+      "heavy bomber": "중폭격기",
+      "Heavy ICBMs": "중형 ICBM",
+      "heavy ICBMs": "중형 ICBM",
+      "light ICBMs": "경형 ICBM",
+      "light ICBM": "경형 ICBM",
+      "MIRVs": "다탄두 각개목표 재돌입체(MIRV)",
+      "multiple independently targetable reentry vehicles": "다탄두 각개목표 재돌입체(MIRV)",
+      "reentry vehicles": "재돌입체",
+      "reentry vehicle": "재돌입체",
+      "cruise missiles": "순항미사일",
+      "cruise missile": "순항미사일",
+      "launchers": "발사대",
+      "launcher": "발사대",
+      "launch-weight": "발사중량",
+      "throw-weight": "투사중량",
+      "penetration aids": "돌파 보조 장비",
+      "flight-test": "비행시험",
+      "flight-tested": "비행시험한",
+      "Standing Consultative Commission": "상설협의위원회",
+      "national technical means of verification": "국가 기술적 검증수단",
+      "national technical means": "국가 기술적 검증수단",
+      "deliberate concealment measures": "고의적 은폐 조치",
+      "Agreed Statement": "합의성명",
+      "Common Understanding": "공통이해",
+      "First Agreed Statement": "제1 합의성명",
+      "Second Agreed Statement": "제2 합의성명",
+      "Third Agreed Statement": "제3 합의성명",
+      "Fourth Agreed Statement": "제4 합의성명",
+      "Fifth Agreed Statement": "제5 합의성명",
+      "First Common Understanding": "제1 공통이해",
+      "Second Common Understanding": "제2 공통이해",
+      "Third Common Understanding": "제3 공통이해",
+      "Fourth Common Understanding": "제4 공통이해",
+      "Fifth Common Understanding": "제5 공통이해",
+      "Protocol": "의정서",
+      "aggregate number": "총수",
+      "aggregate numbers": "총수",
+      "test ranges": "시험장",
+      "test range": "시험장",
+      "space vehicle launchers": "우주발사체 발사대",
+      "fractional orbital missiles": "부분궤도 미사일",
+      "Backfire": "백파이어",
+      "Tu-22M": "Tu-22M",
+      "Bear type": "베어형",
+      "Bison type": "바이슨형",
+      "Minuteman III": "미니트맨 III",
+      "Poseidon C-3": "포세이돈 C-3",
+      "Trident C-4": "트라이던트 C-4",
+      "Titan II": "타이탄 II",
+      "Atlas": "아틀라스",
+      "Tupolev-95": "투폴레프-95",
+      "Tupolev-142": "투폴레프-142",
+      "Myasishchev": "먀시셰프",
+      "Treaty on the Non-Proliferation of Nuclear Weapons": "핵무기 비확산 조약",
+      "Basic Principles of Relations": "관계의 기본 원칙",
+      "Interim Agreement": "잠정협정",
+      "Charter of the United Nations": "국제연합 헌장",
+      "General Secretary of the CPSU": "소련공산당 서기장",
+      "Chairman of the Presidium of the Supreme Soviet of the USSR": "소련 최고회의 간부회 의장",
+      "Jimmy Carter": "지미 카터",
+      "JIMMY CARTER": "지미 카터",
+      "L. Brezhnev": "L. 브레즈네프",
+      "L. BREZHNEV": "L. 브레즈네프",
+      "President Brezhnev": "브레즈네프 서기장",
+      "President Carter": "카터 대통령",
+      "Cyrus Vance": "사이러스 밴스",
+      "CYRUS VANCE": "사이러스 밴스",
+      "Vienna": "빈",
+      "DONE at Vienna": "1979년 6월 18일 빈에서 작성",
+      "Brezhnev": "브레즈네프",
+      "Carter": "카터",
+      "Tupolev": "투폴레프"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "Titan I": "타이탄 I"
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "treaty",
+      "titleKo": "미합중국과 소비에트 사회주의 공화국 연방 사이의 전략공격무기 제한 조약, 합의성명과 공통이해 포함 (1979년 6월 18일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
+      },
+      "blocks": [
+        1,
+        291
+      ],
+      "startsWith": "Signed at Vienna June 18, 1979",
+      "endsWith": "General Secretary of the CPSU, Chairman of the Presidium of the Supreme Soviet of the USSR",
+      "register": "한다체. 국가 간 조약 본문이다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 「Article I」…「Article XIX」는 「제1조」…「제19조」로 옮긴다. (2) 조 안의 항 번호 「1.」 「2.」와 호 기호 (a) (b) (c)는 원문 기호를 그대로 둔다. (3) 「First Agreed Statement.」 「Common Understanding.」처럼 단락 첫머리의 표제는 「제1 합의성명.」 「공통이해.」로 옮기고 그 단락의 첫머리에 그대로 둔다. 「Agreed Statement to subparagraph (b).」는 「(b)호에 대한 합의성명.」으로 옮긴다. (4) 전문(前文)의 「Conscious that…」 「Proceeding from…」 같은 분사 구문은 「…을 의식하고,」 「…에서 출발하여,」처럼 이어지는 문장으로 옮기되 단락을 합치지 않는다. (5) 미사일·항공기 형명(Minuteman III, RS-16, Tupolev-95, B-52)은 용어표를 따르고 로마자·숫자는 그대로 둔다. (6) 「-- Missiles of the type…」으로 시작하는 목록 줄은 줄머리의 줄표를 유지한다. (7) 끝의 「DONE at Vienna…」와 서명부(국가명, 이름, 직함)는 각각 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "protocol",
+      "titleKo": "조약 의정서, 합의성명과 공통이해 포함 (1979년 6월 18일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
+      },
+      "blocks": [
+        292,
+        321
+      ],
+      "startsWith": "The United States of America and the Union of Soviet Socialist Republics, hereinafter referred to as the Parties,",
+      "endsWith": "General Secretary of the CPSU, Chairman of the Presidium of the Supreme Soviet of the USSR",
+      "register": "한다체. 조약에 딸린 의정서다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 「Article I」…「Article IV」는 「제1조」…「제4조」로 옮긴다. (2) 항 번호와 호 기호는 원문대로 둔다. (3) 단락 첫머리의 「Agreed Statement.」 「First Common Understanding.」 표제는 「합의성명.」 「제1 공통이해.」로 옮겨 그 자리에 둔다. (4) 끝의 「DONE at Vienna…」와 서명부는 각각 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "joint-statement",
+      "titleKo": "전략무기 제한을 위한 후속 협상의 원칙과 기본 지침에 관한 공동성명 (1979년 6월 18일)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
+      },
+      "blocks": [
+        322,
+        342
+      ],
+      "startsWith": "The United States of America and the Union of Soviet Socialist Republics, hereinafter referred to as the Parties,",
+      "endsWith": "General Secretary for the CPSU, Chairman of the Presidium of the Supreme Soviet of the USSR",
+      "register": "한다체. 두 정부의 공동성명이다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 단락 첫머리의 「First.」 「Second.」 「Third.」 「Fourth.」는 「첫째.」 「둘째.」 「셋째.」 「넷째.」로 옮긴다. (2) 「1)」 「2)」 「3)」 목록 번호는 그대로 둔다. (3) 「Vienna, June 18, 1979」와 서명부는 각각 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "backfire",
+      "titleKo": "소련의 백파이어 성명과 미국의 답변 (1979년 6월 16일)",
+      "heading": true,
+      "band": 3,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
+      },
+      "blocks": [
+        343,
+        348
+      ],
+      "startsWith": "On June 16, 1979, President Brezhnev handed President Carter",
+      "endsWith": "CYRUS VANCE",
+      "register": "한다체. 소련 측 서면 성명과 그에 대한 미국 대통령의 답변을 국무장관이 정리한 기록이다. '~한다/~했다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 첫 단락의 대괄호 「[original Russian text was attached]」는 「[러시아어 원문 첨부]」로 옮긴다. (2) 「President Brezhnev」는 「브레즈네프 서기장」으로 옮긴다. (3) 마지막 「CYRUS VANCE」는 「사이러스 밴스」 한 줄로 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    }
+  ],
+  "frozen": "2026-09-07 번역·조립 검증 후 CommuLingo 참고 문헌에 발행 완료. 수정 시 공개본과 assembly snapshot을 확인한 뒤 잠금을 해제할 것."
+}

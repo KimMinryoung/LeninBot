@@ -1,0 +1,75 @@
+{
+  "id": "japan-national-policy-outline-1941",
+  "title": "정세의 추이에 따른 제국 국책요강 — 어전회의 결정 (1941년 7월 2일)",
+  "byline": "일본 제국 정부 (어전회의)",
+  "bylineNote": "1941년 7월 2일 어전회의 결정; 미국 정부 영역본",
+  "sourceLang": "en",
+  "headnote": [
+    "독소전 개전 열흘 뒤 어전회의가 정한 국책요강이다. 남방 진출을 위해 영미와의 전쟁도 불사한다고 하면서, 독소전에는 「당분간」 개입하지 않되 정세가 유리해지면 「소련 문제를 해결」한다는 북방 선택지를 함께 남겼다. 영역본은 미국 정부가 극동국제군사재판 증거로 제출한 것이다."
+  ],
+  "bibliography": [
+    "원제: 情勢ノ推移ニ伴フ帝國國策要綱 (1941년 7월 2일 어전회의 결정). 영역 An Outline of the Policy of the Imperial Government in View of Present Developments, 극동국제군사재판 증거 제588호 계열",
+    "번역 저본: ibiblio HyperWar 전자판(IR-410702). 미국 정부 번역본으로 저작권 보호 대상이 아니다"
+  ],
+  "output": "/tmp/claude-1000/-home-grass-leninbot/a8e48d95-d1f7-4303-bbf0-4ae42e60a612/scratchpad/japan-national-policy-outline-1941.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [
+      "First",
+      "Soviet",
+      "August",
+      "Benjamin"
+    ],
+    "extra": {
+      "Imperial Government": "제국 정부",
+      "Imperial Conference": "어전회의",
+      "Conference held in the Imperial Presence": "어전회의",
+      "Greater East Asia Co-Prosperity Sphere": "대동아공영권",
+      "China Incident": "중국 사변",
+      "Chiang Regime": "장제스 정권",
+      "southern regions": "남방 지역",
+      "Southern approaches": "남방",
+      "German-Soviet War": "독소전쟁",
+      "Tri-Partite Pact": "삼국동맹",
+      "European War": "유럽 전쟁",
+      "England and America": "영국과 미국",
+      "national security and preservation": "국가의 안전과 보전",
+      "rights of a belligerent": "교전권",
+      "war basis": "전시 체제",
+      "Soviet question": "소련 문제",
+      "northern borders": "북방 국경"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "충칭(Chungking)": "충칭",
+    "태국(Thai)": "태국"
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "outline",
+      "titleKo": "정세의 추이에 따른 제국 국책요강 (1941년 7월 2일 어전회의 결정)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "blockquote",
+        "path": "/home/grass/frontend/docs/japan-national-policy-outline-1941-ibiblio.html",
+        "sha256": "51f8c91496976aa3e228afa64818f1e736918fb716e3f405da3a070637863369"
+      },
+      "blocks": [
+        2,
+        18
+      ],
+      "startsWith": "An Outline of the Policy of the Imperial Government",
+      "endsWith": "Concrete plans covering this program will be drawn up separately.",
+      "register": "한다체. 어전회의가 결정한 국책 문서다. '~한다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 첫 블록의 문서 제목은 「정세의 추이에 따른 제국 국책요강」으로, 둘째 블록의 괄호 「(7월 2일 어전회의에서 이루어진 결정)」은 괄호째 한 줄로 옮긴다. (2) 「I. Policy」 「II. Summary」는 「제1 방침」 「제2 요령」으로 옮긴다. (3) 본문 항목은 원문 단락 단위를 지키고 번호를 보태지 않는다. (4) 저본의 생략 표시 「...」는 그대로 둔다. (5) 「Imperial Government」는 「제국 정부」, 「the nation」은 「국가」로 옮긴다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ],
+  "frozen": "2026-09-07 번역 완료 후 pacific-war-documents-1940-1945.html에 3번째 문서로 끼워 넣음(HTML 병합, 수동 관리). output은 스크래치패드 경로. 고칠 일이 있으면 통합 문헌 쪽을 고칠 것"
+}

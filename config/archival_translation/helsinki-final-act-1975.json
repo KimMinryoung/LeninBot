@@ -1,0 +1,91 @@
+{
+  "id": "helsinki-final-act-1975",
+  "title": "헬싱키 최종의정서 (발췌) — 참가국 관계를 이끄는 원칙 선언(10원칙)과 신뢰구축 조치 문서 (1975년 8월 1일)",
+  "byline": "유럽안보협력회의(CSCE) 참가 35개국",
+  "bylineNote": "1975년 8월 1일 헬싱키에서 채택; 안보 부문(제1바스켓) 발췌",
+  "sourceLang": "en",
+  "headnote": [
+    "1975년 8월 1일 헬싱키에서 35개국 정상이 서명한 최종의정서 가운데 안보 부문을 옮겼다. 서두와 안보 부문 전문, 주권 평등에서 국제법상 의무의 성실한 이행까지 열 가지 원칙을 정한 「참가국 관계를 이끄는 원칙 선언」, 그 이행에 관한 사항, 그리고 대규모 군사 기동훈련의 사전 통보를 정한 신뢰구축 조치 문서다. 경제·과학·환경 협력(제2바스켓), 인도적 협력(제3바스켓), 지중해와 후속 조치 부분은 옮기지 않았다. 최종의정서는 조약이 아니라 정치적 약속이며, 본문의 「참가국」은 이 회의의 참가국을 가리킨다."
+  ],
+  "bibliography": [
+    "원제: Conference on Security and Co-operation in Europe, Final Act, Helsinki, 1 August 1975 — 「Questions relating to Security in Europe」 부문 전문(Declaration on Principles Guiding Relations between Participating States; Document on confidence-building measures and certain aspects of security and disarmament)",
+    "번역 저본: 영어 위키문헌 전사본(미국 정부 간행 텍스트로 저작권 보호 대상이 아니다). OSCE 공식 영어·러시아어본(osce.org)과 대조 가능"
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/helsinki-final-act-1975.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [
+      "First",
+      "Soviet",
+      "August",
+      "Benjamin"
+    ],
+    "extra": {
+      "Final Act": "최종의정서",
+      "Conference on Security and Co-operation in Europe": "유럽안보협력회의",
+      "participating States": "참가국",
+      "participating State": "참가국",
+      "High Representatives": "고위 대표",
+      "Declaration on Principles Guiding Relations between Participating States": "참가국 관계를 이끄는 원칙 선언",
+      "Questions relating to Security in Europe": "유럽의 안보에 관한 문제",
+      "Sovereign equality": "주권 평등",
+      "rights inherent in sovereignty": "주권에 내재하는 권리",
+      "threat or use of force": "무력의 위협 또는 사용",
+      "Inviolability of frontiers": "국경의 불가침",
+      "Territorial integrity of States": "국가의 영토 보전",
+      "Peaceful settlement of disputes": "분쟁의 평화적 해결",
+      "Non-intervention in internal affairs": "내정 불간섭",
+      "human rights and fundamental freedoms": "인권과 기본적 자유",
+      "Equal rights and self-determination of peoples": "민족의 평등권과 자결",
+      "self-determination": "자결",
+      "Co-operation among States": "국가 간 협력",
+      "Fulfilment in good faith of obligations under international law": "국제법상 의무의 성실한 이행",
+      "Charter of the United Nations": "국제연합 헌장",
+      "United Nations": "국제연합",
+      "Universal Declaration of Human Rights": "세계인권선언",
+      "confidence-building measures": "신뢰구축 조치",
+      "confidence-building": "신뢰구축",
+      "major military manoeuvres": "대규모 군사 기동훈련",
+      "military manoeuvres": "군사 기동훈련",
+      "major military movements": "대규모 군사 이동",
+      "prior notification": "사전 통보",
+      "observers": "참관인",
+      "détente": "데탕트",
+      "disarmament": "군축",
+      "Helsinki Consultations": "헬싱키 협의",
+      "Final Recommendations": "최종 권고",
+      "national minorities": "소수민족",
+      "frontiers": "국경",
+      "Mediterranean": "지중해"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "security-basket",
+      "titleKo": "유럽안보협력회의 최종의정서 — 서두와 「유럽의 안보에 관한 문제」 (1975년 8월 1일, 발췌)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#doc",
+        "path": "/home/grass/frontend/docs/helsinki-final-act-1975-prepared.html",
+        "sha256": "552080b45cc50cf2edef8a0cdfd2e3881d043f4ebb6ae2f6f073d2adb01aeea8"
+      },
+      "blocks": [
+        0,
+        115
+      ],
+      "startsWith": "Conference on Security and Co-operation in Europe",
+      "endsWith": "could lead to developing and enlarging measures aimed at strengthening confidence.",
+      "register": "한다체. 국가 간 정치 문서다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 제목 블록(h3)은 짧은 제목으로 옮긴다 — 열 원칙의 제목은 「I. 주권 평등, 주권에 내재하는 권리의 존중」처럼 로마 숫자를 유지한다. (2) 「Reaffirming …」 「Convinced …」 「Recognizing …」으로 시작하는 전문 단락은 「…을 재확인하며,」 「…을 확신하며,」처럼 연결어미로 끝맺어 원문 단락 단위를 지킨다. (3) 「The participating States will …」는 「참가국은 …한다」로 옮긴다. (4) 「participating States」는 언제나 「참가국」이다. (5) 인용부호 안의 문서명은 원문 제목을 살려 옮기고 괄호에 영어 원제를 두지 않는다. (6) 「25,000 troops」 같은 수치는 아라비아 숫자 그대로 둔다.",
+      "tagMap": {
+        "h3": "h3"
+      }
+    }
+  ],
+  "frozen": "2026-09-07 번역·조립 검증 후 CommuLingo 참고 문헌에 발행 완료. 수정 시 공개본과 assembly snapshot을 확인한 뒤 잠금을 해제할 것."
+}
