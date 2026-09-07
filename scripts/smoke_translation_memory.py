@@ -193,6 +193,7 @@ def _validate_checks() -> None:
     import re as _re
 
     from llm import call_registry
+    import translation_runtime
     from runtime_tools.archival_translation import core
     from runtime_tools.archival_translation.core import RUSSIAN, validate
 
@@ -211,23 +212,36 @@ def _validate_checks() -> None:
         def put(self, key, blocks, meta):
             pass
 
-    original = call_registry.generate_sync
+    original = translation_runtime.generate_translation
     calls: list[int] = []
     try:
         # 용어표와 다른 표기라도 형식이 맞으면 1회에 통과
-        call_registry.generate_sync = lambda *a, **k: (calls.append(1) or "[[1|p]]\n동원에 관한 인민내무위원부(НКВД) 명령.")
+        translation_runtime.generate_translation = lambda *a, **k: (calls.append(1) or "[[1|p]]\n동원에 관한 인민내무위원부(НКВД) 명령.")
         stats = core.Stats()
         got = core._translate_chunk(chunk, glossary, _StubCache(), core.Options(retries=2), stats, lambda e: None)
         check("different rendering accepted first try", len(calls) == 1 and stats.translated == 1 and 1 in got)
         # 치명 문제(원문 그대로 반환)는 여전히 실패로 올라온다
-        call_registry.generate_sync = lambda *a, **k: "[[1|p]]\nПриказ НКВД о мобилизации."
+        translation_runtime.generate_translation = lambda *a, **k: "[[1|p]]\nПриказ НКВД о мобилизации."
         try:
             core._translate_chunk(chunk, glossary, _StubCache(), core.Options(retries=1), core.Stats(), lambda e: None)
             check("fatal problems still fail", False)
         except RuntimeError:
             check("fatal problems still fail", True)
     finally:
-        call_registry.generate_sync = original
+        translation_runtime.generate_translation = original
+
+
+def _tm_prefill_checks() -> None:
+    from unittest.mock import patch
+    from runtime_tools.archival_translation import core
+    docs = [{"offset": 0, "blocks": [{"tag": "p", "lines": ["Приказ о мобилизации."]}]}]
+    with patch("runtime_tools.translation_memory.exact_matches",
+               return_value={"Приказ о мобилизации.": "동원에 관한 명령."}):
+        check("TM valid block reused", core._tm_prefill(docs, core.RUSSIAN, lambda e: None)
+              == {0: ["동원에 관한 명령."]})
+    with patch("runtime_tools.translation_memory.exact_matches",
+               return_value={"Приказ о мобилизации.": "სწორედ"}):
+        check("TM invalid block rejected", core._tm_prefill(docs, core.RUSSIAN, lambda e: None) == {})
 
 
 def _prepare_scan_checks() -> None:

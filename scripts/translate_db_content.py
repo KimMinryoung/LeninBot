@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from secrets_loader import get_secret
+from translation_runtime import TranslationProviderError
 from scripts._translation_common import (
     TranslationCallError,
     field_translation_problems,
@@ -145,7 +146,9 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
 
 
 def _parse_json_response(text: str) -> dict[str, str]:
-    data = parse_json_object(text)
+    data = parse_json_object(text, keys=["title_en", "content_en"])
+    if any(not isinstance(value, str) for value in data.values()):
+        raise ValueError("translation JSON values must be strings")
     title = (data.get("title_en") or "").strip()
     content = (data.get("content_en") or "").strip()
     if not title or not content:
@@ -154,7 +157,10 @@ def _parse_json_response(text: str) -> dict[str, str]:
 
 
 def _parse_curation_json_response(text: str) -> dict[str, str]:
-    data = parse_json_object(text)
+    data = parse_json_object(text, keys=["title_en", "source_title_en",
+                                         "selection_rationale_en", "context_en"])
+    if any(not isinstance(value, str) for value in data.values()):
+        raise ValueError("translation JSON values must be strings")
     out = {
         "title_en": (data.get("title_en") or "").strip(),
         "source_title_en": (data.get("source_title_en") or "").strip(),
@@ -189,7 +195,9 @@ def _validate_translated_fields(row: dict[str, Any], translated: dict[str, str])
             continue
         problems.extend(
             field_translation_problems(
-                row.get(src_key) or "", translated.get(en_key) or "", label=en_key
+                row.get(src_key) or "", translated.get(en_key) or "", label=en_key,
+                # source_title_en may stay empty; _update_row keeps the old value then.
+                optional=(src_key == "source_title"),
             )
         )
     return problems
@@ -197,13 +205,8 @@ def _validate_translated_fields(row: dict[str, Any], translated: dict[str, str])
 
 def _generate(system_prompt: str, payload: dict[str, Any]) -> str:
     """게이트웨이를 지나는 원샷 호출. 모델·예산·thinking은 레지스트리가 정한다."""
-    from llm.call_registry import generate_sync
-
-    return generate_sync(
-        FEATURE,
-        json.dumps(payload, ensure_ascii=False),
-        system=system_prompt,
-    ) or ""
+    from scripts._translation_common import generate_translation
+    return generate_translation(FEATURE, json.dumps(payload, ensure_ascii=False), system=system_prompt)
 
 
 def _call_translator(row: dict[str, Any], *, label: str) -> dict[str, str]:
@@ -225,54 +228,11 @@ def _call_translator(row: dict[str, Any], *, label: str) -> dict[str, str]:
             "title": row.get("title") or "",
             "content": row.get("content") or "",
         }
-    # 검증 실패는 위반 항목만 첨부해 1회 재번역한다 — 사료 파이프라인의 교정
-    # 재시도와 같은 패턴이다(인수인계 §2.5). 반복 자기수정 루프는 두지 않는다.
-    problems: list[str] = []
-    parse_error: TranslationCallError | None = None
-    for attempt in (1, 2):
-        system = system_prompt
-        if problems:
-            system = (
-                system_prompt
-                + "\n\nThe previous attempt had these problems; fix them and return the corrected JSON:\n"
-                + "\n".join(f"- {p}" for p in problems)
-            )
-        content = _generate(system, payload)
-        if not content:
-            # generate_sync는 어떤 실패든 None으로 삼킨다. 원인(HTTP 오류, 정책
-            # 거부, 빈 완성)은 llm_gateway.audit 로그와 journald의 registry 경고에
-            # 남으므로, 여기서는 그쪽을 보라고 가리킨다. 빈 응답은 재시도해도
-            # 같은 원인으로 비기 쉬우니 바로 올린다.
-            raise TranslationCallError(
-                f"{FEATURE}: 게이트웨이가 본문을 돌려주지 않았다 "
-                f"(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
-            )
-        try:
-            if "selection_rationale" in row:
-                translated = _parse_curation_json_response(content)
-            else:
-                translated = _parse_json_response(content)
-        except (json.JSONDecodeError, ValueError) as exc:
-            # 잘린 JSON과 안내문으로 시작하는 JSON은 증상이 같다. 앞뒤를 같이
-            # 남겨야 다음 사람이 로그만 보고 어느 쪽인지 안다.
-            parse_error = TranslationCallError(
-                f"could not parse the translation JSON ({exc}); "
-                f"{len(content)} chars, head={content[:200]!r}, tail={content[-200:]!r}"
-            )
-            parse_error.__cause__ = exc
-            problems = [f"the reply was not valid JSON ({exc}); return strict JSON only"]
-            print(f"retrying {label}#{row['id']} (attempt {attempt}): invalid JSON", file=sys.stderr)
-            continue
-        problems = _validate_translated_fields(row, translated)
-        if not problems:
-            return translated
-        print(
-            f"retrying {label}#{row['id']} (attempt {attempt}): " + "; ".join(problems),
-            file=sys.stderr,
-        )
-    if parse_error is not None and problems and problems[0].startswith("the reply was not valid JSON"):
-        raise parse_error
-    raise TranslationCallError("validation failed after retry: " + "; ".join(problems))
+    from translation_runtime import translate_validated
+    parser = _parse_curation_json_response if "selection_rationale" in row else _parse_json_response
+    return translate_validated(
+        generate=lambda correction: _generate(system_prompt + correction, payload),
+        parse=parser, validate=lambda value: _validate_translated_fields(row, value), attempts=2)
 
 
 def _update_row(conn, target_name: str, table: str, row_id: int, translated: dict[str, str], row: dict[str, Any]) -> None:
@@ -285,21 +245,28 @@ def _update_row(conn, target_name: str, table: str, row_id: int, translated: dic
                        source_title_en = COALESCE(NULLIF(%s, ''), source_title_en),
                        selection_rationale_en = %s,
                        context_en = %s
-                 WHERE id = %s
+                 WHERE id = %s AND title IS NOT DISTINCT FROM %s
+                   AND source_title IS NOT DISTINCT FROM %s
+                   AND selection_rationale IS NOT DISTINCT FROM %s
+                   AND context IS NOT DISTINCT FROM %s
                 """,
                 [
                     translated["title_en"],
                     translated.get("source_title_en") or "",
                     translated["selection_rationale_en"],
                     translated["context_en"],
-                    row_id,
+                    row_id, row.get("title"), row.get("source_title"),
+                    row.get("selection_rationale"), row.get("context"),
                 ],
             )
         else:
             cur.execute(
-                f"UPDATE {table} SET title_en = %s, content_en = %s WHERE id = %s",
-                [translated["title_en"], translated["content_en"], row_id],
+                f"UPDATE {table} SET title_en = %s, content_en = %s WHERE id = %s AND title IS NOT DISTINCT FROM %s AND content IS NOT DISTINCT FROM %s",
+                [translated["title_en"], translated["content_en"], row_id, row.get("title"), row.get("content")],
             )
+        if cur.rowcount != 1:
+            conn.rollback()
+            raise RuntimeError("source changed during translation; retry latest row")
     conn.commit()
 
 
@@ -369,11 +336,22 @@ def translate_target(
             except Exception as exc:
                 failures.append(f"{target_name}#{row['id']}: {exc}")
                 print(f"failed {target_name}#{row['id']}: {exc}", file=sys.stderr)
+                if isinstance(exc, TranslationProviderError) and exc.result.error_kind in {
+                        "authentication", "quota", "policy", "configuration"}:
+                    exc.partial_changed = changed
+                    exc.partial_failures = failures[:-1]  # the last entry is this error
+                    exc.cache_pattern = target["cache_pattern"]
+                    raise
                 continue
             if dry_run:
                 print(f"dry-run ok {target_name}#{row['id']}: {translated['title_en']}")
                 continue
-            _update_row(conn, target_name, target["table"], int(row["id"]), translated, row)
+            try:
+                _update_row(conn, target_name, target["table"], int(row["id"]), translated, row)
+            except Exception as exc:
+                conn.rollback()
+                failures.append(f"{target_name}#{row['id']}: {exc}")
+                continue
             _record_tm(target_name, row, translated)
             changed += 1
             print(f"updated {target_name}#{row['id']}: {translated['title_en']}")
@@ -419,7 +397,13 @@ def main() -> int:
             # (DB 연결 실패 등). 개별 줄의 실패는 translate_target 안에서
             # 잡혀 row_failures로 돌아온다.
             print(f"failed {name}: {exc}", file=sys.stderr)
+            failures.extend(getattr(exc, "partial_failures", []))
             failures.append(f"{name}: {exc}")
+            if isinstance(exc, TranslationProviderError):
+                changed_total += getattr(exc, "partial_changed", 0)
+                if getattr(exc, "partial_changed", 0):
+                    cache_patterns.add(exc.cache_pattern)
+                break
 
     # 한 줄이라도 번역됐으면 캐시를 비운다. 실패가 섞여 있어도 성공한 것은
     # 바로 보여야 한다.

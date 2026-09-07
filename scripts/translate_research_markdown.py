@@ -9,6 +9,7 @@ under research/en/*.md and are loaded when the site language cookie is English.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import re
@@ -21,7 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from secrets_loader import get_secret
+from translation_runtime.storage import atomic_write, source_hash
+from translation_runtime.structure import (markdown_problems, markdown_chunks,
+    protect_markdown, restore_markdown, semantic_review)
+from scripts._translation_common import generate_translation
 
 RESEARCH_DIR = ROOT / "research"
 OUTPUT_DIR = RESEARCH_DIR / "en"
@@ -36,6 +40,7 @@ Translate the user's Korean markdown document into polished, publication-quality
 Requirements:
 - Preserve markdown structure exactly: headings, lists, blockquotes, tables, code fences, links, footnotes, and horizontal rules.
 - Translate prose and visible Korean text; keep URLs and markdown link destinations unchanged.
+- Fenced blocks without a language tag are text diagrams: translate the Korean labels inside them, keep exactly the same number of lines, and keep arrows, box characters, and column alignment. Fenced blocks with a language tag and inline code arrive as placeholders; leave those untouched.
 - Do not summarize, omit, expand, fact-check, or add commentary.
 - Preserve the author's Marxist, anti-imperialist analytical stance without softening it.
 - Use domain-aware terminology:
@@ -106,11 +111,20 @@ def normalize_translated_markdown(translated: str) -> str:
 
 
 def _validate_translation(source: str, translated: str, *, max_hangul_ratio: float) -> None:
+    if not isinstance(translated, str):
+        raise ValueError("translation must be text")
     if not translated.strip():
         raise ValueError("empty translation")
     if _heading_signature(source) != _heading_signature(translated):
         raise ValueError("translated heading depth sequence differs from source")
-    ratio = _hangul_ratio(translated)
+    problems = markdown_problems(source, translated)
+    if problems:
+        raise ValueError("; ".join(problems))
+    # Protected code and destinations may legitimately contain Korean.
+    visible, spans = protect_markdown(translated)
+    for marker in spans:
+        visible = visible.replace(marker, "")
+    ratio = _hangul_ratio(visible)
     if ratio > max_hangul_ratio:
         raise ValueError(f"translation still contains too much Hangul ({ratio:.1%}; max {max_hangul_ratio:.1%})")
     source_refs = _RESEARCH_REF_RE.findall(source)
@@ -129,45 +143,71 @@ def _call_translator(markdown: str, *, correction: str = "") -> str:
     correction은 직전 시도의 검증 실패 사유다. 원문에 섞으면 모델이 그 문장까지
     번역할 수 있으므로 시스템 프롬프트 뒤에 붙인다.
     """
-    from llm.call_registry import generate_sync
-
-    text = generate_sync(FEATURE, markdown, system=SYSTEM_PROMPT + correction)
-    if not text:
-        # generate_sync는 실패 원인을 삼키고 None을 준다. HTTP 오류·정책 거부·
-        # 빈 완성 어느 쪽인지는 llm_gateway.audit과 [llm-registry] 경고에 남는다.
-        raise RuntimeError(
-            f"{FEATURE}: 게이트웨이가 본문을 돌려주지 않았다 "
-            f"(원인은 llm_gateway.audit / [llm-registry] 경고 참조)"
-        )
+    text = generate_translation(FEATURE, markdown, system=SYSTEM_PROMPT + correction)
     return _strip_outer_fence(text)
 
 
-def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attempts: int = 2) -> str:
-    """호출→정규화→검증을 한 번에. 검증 실패는 사유를 다음 시도에 알려 재번역한다.
 
-    예전에는 검증 실패가 곧 문서 실패였다: 제목 깊이 하나가 어긋나면 2만 토큰짜리
-    완성본을 통째로 버리고 사람이 다시 돌렸다. 실패 사유는 이미 문장으로 나오므로,
-    그 문장을 다음 호출에 붙여 한 번은 모델이 스스로 고치게 한다 — 사료 파이프라인의
-    교정 재시도와 같은 패턴이다. 반복 자기수정 루프는 두지 않는다(인수인계 §3:
-    reflection 1회).
-    """
-    correction = ""
-    last_error: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        translated = normalize_translated_markdown(_call_translator(source, correction=correction))
+
+def _translate_segment(source: str, *, max_hangul_ratio: float, attempts: int,
+                       cached=None, store=None) -> str:
+    from translation_runtime import translate_validated
+    masked, protected = protect_markdown(source)
+
+    def parse(candidate):
+        for marker in protected:
+            if candidate.count(marker) != masked.count(marker):
+                raise ValueError("protected placeholder count changed")
+        return normalize_translated_markdown(restore_markdown(candidate, protected))
+
+    def validate(candidate):
         try:
-            _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
-            return translated
+            _validate_translation(source, candidate, max_hangul_ratio=max_hangul_ratio)
         except ValueError as exc:
-            last_error = exc
-            correction = (
-                "\n\nThe previous attempt failed validation:\n"
-                f"- {exc}\n"
-                "Re-translate the full document, fixing exactly this problem and changing nothing else."
-            )
-            print(f"validation failed (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
-    assert last_error is not None
-    raise last_error
+            return [str(exc)]
+        return []
+
+    return translate_validated(
+        generate=lambda correction: _call_translator(masked, correction=(
+            "\nPreserve every TRKEEP placeholder exactly, including its number of occurrences."
+            + correction)), parse=parse, validate=validate, attempts=attempts,
+        cached=cached, store=store)
+
+
+def translate_markdown_with_retry(source: str, *, max_hangul_ratio: float, attempts: int = 2,
+                                  cache_dir: Path | None = None, max_chars: int = 8000,
+                                  review_path: Path | None = None) -> str:
+    """Validated structural chunks; reuse successes after a failed document run."""
+    from llm.call_registry import resolve
+    if attempts < 1 or max_chars < 1:
+        raise ValueError("attempts and max_chars must be positive")
+    cache_dir = cache_dir or ROOT / "output" / "site_translation_cache"
+    profile = dataclasses.asdict(resolve(FEATURE))
+    profile.pop("note", None)
+    chunks = markdown_chunks(source, max_chars)
+    translated_chunks = []
+    for source_chunk in chunks:
+        fingerprint = json.dumps({"version": 1, "source": source_chunk, "profile": profile,
+                                  "system": SYSTEM_PROMPT}, sort_keys=True, ensure_ascii=False)
+        key = source_hash(fingerprint)
+        path = cache_dir / f"{key}.json"
+        cached = None
+        if path.is_file():
+            try:
+                cached = json.loads(path.read_text(encoding="utf-8"))["target"]
+            except (ValueError, KeyError, TypeError):
+                pass
+        translated = _translate_segment(source_chunk, max_hangul_ratio=max_hangul_ratio,
+            attempts=attempts, cached=cached,
+            store=lambda value: atomic_write(path, json.dumps({
+                "sourceHash": source_hash(source_chunk), "target": value}, ensure_ascii=False)))
+        translated_chunks.append(translated.strip())
+    translated = "\n\n".join(translated_chunks) + "\n"
+    _validate_translation(source, translated, max_hangul_ratio=max_hangul_ratio)
+    if review_path:
+        atomic_write(review_path, json.dumps({"sourceHash": source_hash(source),
+                     "issues": semantic_review(source, translated)}, ensure_ascii=False, indent=2))
+    return translated
 
 
 def translate_one(
@@ -179,18 +219,39 @@ def translate_one(
     dry_run: bool,
 ) -> Path:
     output_path = output_dir / source_path.name
-    if output_path.exists() and not force:
+    source = source_path.read_text(encoding="utf-8")
+    metadata_path = output_path.with_suffix(".translation.json")
+    metadata = {}
+    if metadata_path.is_file():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    if (output_path.exists() and not force
+            and metadata.get("sourceHash") == source_hash(source)):
+        try:
+            _validate_translation(source, output_path.read_text(encoding="utf-8"),
+                                  max_hangul_ratio=max_hangul_ratio)
+        except ValueError as exc:
+            # A hand-edited translation is never overwritten silently.
+            raise RuntimeError(
+                f"existing translation {output_path} fails validation ({exc}); "
+                "fix it by hand or rerun with --force") from exc
         print(f"skip: {output_path} exists")
         return output_path
 
-    source = source_path.read_text(encoding="utf-8")
     print(f"translating: {source_path.name} ({len(source):,} chars) via {FEATURE}")
-    translated = translate_markdown_with_retry(source, max_hangul_ratio=max_hangul_ratio)
+    translated = translate_markdown_with_retry(source, max_hangul_ratio=max_hangul_ratio,
+        review_path=None if dry_run else output_path.with_suffix(".review.json"))
     if dry_run:
         print(f"dry-run ok: {source_path.stem} ({len(translated):,} chars)")
         return output_path
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(translated, encoding="utf-8")
+    if source_path.read_text(encoding="utf-8") != source:
+        raise RuntimeError("source changed during translation; rerun with the latest source")
+    atomic_write(output_path, translated)
+    atomic_write(metadata_path, json.dumps({"sourceHash": source_hash(source),
+                                          "targetHash": source_hash(translated)}))
     print(f"wrote: {output_path} ({len(translated):,} chars)")
     return output_path
 

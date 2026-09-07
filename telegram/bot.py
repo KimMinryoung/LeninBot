@@ -698,6 +698,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Theory/ideology → vector_search (layer="core_theory")
 - Current events → web_search, cross-ref with KG
 - URL in message → fetch_url to read the page; for x.com/twitter.com status/profile URLs use fetch_x_post
+- Owner asks to curate / register an external link on the hub (큐레이션 등록) → do not delegate and do not attempt it yourself; tell them to send `/curate <url> [메모]`, which runs the hub_curator agent. Corrections to an already published curation still go to analyst.
 - Self-reflection → read_self(content_type="diary"); cross-interface memory → read_self(content_type="chat_logs")
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
@@ -2065,6 +2066,7 @@ async def bot_main():
     await bot.set_my_commands([
         BotCommand(command="help", description="커맨드 목록"),
         BotCommand(command="task", description="백그라운드 태스크 등록"),
+        BotCommand(command="curate", description="링크를 읽고 /hub 큐레이션 발행"),
         BotCommand(command="status", description="시스템 대시보드"),
         BotCommand(command="llm_balance", description="LLM 잔액·비용 조회"),
         BotCommand(command="report", description="태스크 리포트 재전송"),
@@ -2376,6 +2378,13 @@ async def bot_main():
         if agent_type == "diary" and "save_diary" in agent_handlers:
             agent_handlers = dict(agent_handlers)
             agent_handlers["save_diary"] = _make_guarded_diary_save_handler(b, task)
+        if agent_type == "hub_curator" and "publish_hub_curation" in agent_handlers:
+            from telegram.curate import make_guarded_publish_handler
+
+            agent_handlers = dict(agent_handlers)
+            agent_handlers["publish_hub_curation"] = make_guarded_publish_handler(
+                agent_handlers["publish_hub_curation"], task
+            )
 
         # ── Post-hoc verification (Critic) routing ──────────────────
         # The verifier runs on the low tier of a standard provider so the
@@ -2437,7 +2446,17 @@ async def bot_main():
         # ── Orchestrator callback: report result to user via orchestrator ──
         result = result or {}
         is_subtask = result.get("is_subtask", False)
-        if not is_subtask and result.get("status") in ("done", "failed"):
+        if agent_type == "hub_curator" and result.get("status") in ("done", "failed"):
+            # /curate outcome is judged by the hub_curations row, not by the
+            # agent's text, and needs no LLM turn to relay.
+            from telegram.curate import report_curation_outcome
+
+            target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
+            if target_uid:
+                await report_curation_outcome(
+                    b, task, result, chat_id=target_uid, save_system_event=_save_system_event
+                )
+        elif not is_subtask and result.get("status") in ("done", "failed"):
             # Skip the LLM-driven callback for self-delivering scheduled tasks
             # (e.g. diary): spec opts out AND the task came from the cron
             # scheduler. User-delegated calls to the same agent still get the

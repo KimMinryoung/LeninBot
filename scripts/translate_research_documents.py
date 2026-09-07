@@ -21,10 +21,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import research_store
-from db import execute as db_execute, query as db_query
+from translation_runtime import TranslationProviderError
+from db import execute_returning_rowcount, query as db_query
 from scripts.translate_research_markdown import (
     FEATURE,
     translate_markdown_with_retry,
+    source_hash,
 )
 
 
@@ -32,7 +34,7 @@ def _select_rows(*, limit: int, max_chars: int, force: bool) -> list[dict[str, A
     research_store.ensure_research_table()
     where = "status = 'public'"
     if not force:
-        where += " AND NULLIF(BTRIM(COALESCE(markdown_en, '')), '') IS NULL"
+        where += " AND (NULLIF(BTRIM(COALESCE(markdown_en, '')), '') IS NULL OR markdown_en_source_sha256 IS DISTINCT FROM content_sha256)"
     params: list[Any] = []
     limit_sql = ""
     if max_chars > 0:
@@ -43,7 +45,7 @@ def _select_rows(*, limit: int, max_chars: int, force: bool) -> list[dict[str, A
         params.append(limit)
     return db_query(
         f"""
-        SELECT id, slug, filename, title, summary, markdown, updated_at
+        SELECT id, slug, filename, title, summary, markdown, content_sha256, updated_at
           FROM research_documents
          WHERE {where}
          ORDER BY updated_at DESC, id DESC
@@ -56,16 +58,24 @@ def _select_rows(*, limit: int, max_chars: int, force: bool) -> list[dict[str, A
 def _update_translation(row: dict[str, Any], translated_markdown: str) -> None:
     title_en = research_store.extract_title(translated_markdown, row.get("title") or row["slug"])
     summary_en = research_store.extract_excerpt(translated_markdown)
-    db_execute(
+    changed = execute_returning_rowcount(
         """
         UPDATE research_documents
            SET markdown_en = %s,
                title_en = %s,
-               summary_en = %s
-         WHERE id = %s
+               summary_en = %s,
+               markdown_en_source_sha256 = %s
+         WHERE id = %s AND markdown = %s AND status = 'public'
         """,
-        (translated_markdown, title_en, summary_en, row["id"]),
+        # Selection compares against the stored content_sha256, so store that
+        # value — recomputing sha256(markdown) here left rows whose stored hash
+        # had drifted (direct SQL edits) re-selected every night.
+        (translated_markdown, title_en, summary_en,
+         row.get("content_sha256") or source_hash(row["markdown"]),
+         row["id"], row["markdown"]),
     )
+    if changed != 1:
+        raise RuntimeError("source changed or became private during translation; retry latest source")
 
 
 def _clear_frontend_research_cache() -> None:
@@ -107,13 +117,17 @@ def main() -> int:
             print(f"translating {slug} ({len(markdown):,} chars) via {FEATURE}")
             # 검증 실패 시 위반 항목을 첨부해 1회 재번역한다 — 예전에는 제목
             # 깊이 하나가 어긋나면 완성본을 통째로 버렸다.
-            translated = translate_markdown_with_retry(markdown, max_hangul_ratio=args.max_hangul_ratio)
+            translated = translate_markdown_with_retry(markdown, max_hangul_ratio=args.max_hangul_ratio,
+                review_path=ROOT / "output" / "translation_reviews" / f"research-{row['id']}.json")
             _update_translation(row, translated)
             changed += 1
             print(f"updated {slug}: {len(translated):,} English chars")
         except Exception as exc:
             failures += 1
             print(f"failed {slug}: {exc}", file=sys.stderr)
+            if isinstance(exc, TranslationProviderError) and exc.result.error_kind in {
+                    "authentication", "quota", "policy", "configuration"}:
+                break
 
     if changed:
         _clear_frontend_research_cache()

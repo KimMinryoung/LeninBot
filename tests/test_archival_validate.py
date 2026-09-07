@@ -65,7 +65,7 @@ class CacheRevalidation(unittest.TestCase):
             self.assertEqual(_cached_blocks(cache, "missing", chunk, RUSSIAN), (None, []))
 
             events, stats = [], Stats()
-            with mock.patch("llm.call_registry.generate_sync",
+            with mock.patch("translation_runtime.generate_translation",
                             return_value="[[10|p]]\n" + _FULL[0]) as gen, \
                     mock.patch("time.sleep", lambda *_: None):
                 got = _translate_chunk(chunk, [], cache, Options(), stats, events.append,
@@ -78,7 +78,7 @@ class CacheRevalidation(unittest.TestCase):
             self.assertEqual(_cached_blocks(cache, "k", chunk, RUSSIAN), ({10: _FULL}, []))
             reloaded = Cache(Path(d) / "c.jsonl")
             self.assertEqual(_cached_blocks(reloaded, "k", chunk, RUSSIAN), ({10: _FULL}, []))
-            with mock.patch("llm.call_registry.generate_sync") as gen:
+            with mock.patch("translation_runtime.generate_translation") as gen:
                 got = _translate_chunk(chunk, [], reloaded, Options(), Stats(), events.append,
                                        RUSSIAN, prepared=("prompt", "k"))
             self.assertEqual(got, {10: _FULL})

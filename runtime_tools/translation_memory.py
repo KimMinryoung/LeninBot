@@ -110,6 +110,8 @@ def exact_matches(
     lang_pair: str,
     statuses: Sequence[str] | None = None,
     db_path: Path | str | None = None,
+    reject_conflicts: bool = False,
+    decisions: dict | None = None,
 ) -> dict[str, str]:
     """source text → target for exact matches.
 
@@ -117,6 +119,8 @@ def exact_matches(
     이긴다 — 정렬을 그 순서로 두고 dict를 덮어쓰게 해서, 마지막에 남는 행이
     승자다. statuses를 주면 그 상태의 행만 본다(자동 재사용은 검수 등급만
     쓰는 식으로).
+    reject_conflicts=True이면 최고 등급에서 복수 번역이 있는 원문을 보류한다.
+    decisions에는 상태·문서·세그먼트 ID와 충돌 여부를 남긴다.
     """
     out: dict[str, str] = {}
     cleaned = [s.strip() for s in sources if (s or "").strip()]
@@ -132,13 +136,25 @@ def exact_matches(
             batch = cleaned[start : start + 500]
             marks = ",".join("?" for _ in batch)
             rows = conn.execute(
-                f"SELECT source, target FROM segments"
+                f"SELECT source, target, status, doc_id, id FROM segments"
                 f" WHERE lang_pair = ? AND source IN ({marks})" + status_sql +
                 " ORDER BY CASE status WHEN 'reviewed' THEN 2 WHEN 'published' THEN 1 ELSE 0 END, id",
                 [lang_pair, *batch, *status_params],
             ).fetchall()
-            for source, target in rows:
-                out[source] = target
+            candidates: dict[str, list] = {}
+            for source, target, status, doc_id, row_id in rows:
+                group = candidates.setdefault(source, [])
+                if group and group[-1][1] != status:
+                    group.clear()  # SQL is ordered from lower to higher rank.
+                group.append((target, status, doc_id, row_id))
+            for source, group in candidates.items():
+                conflict = len({r[0] for r in group}) > 1
+                target, status, doc_id, row_id = group[-1]
+                if decisions is not None:
+                    decisions[source] = {"status": status, "docId": doc_id,
+                                         "segmentId": row_id, "conflict": conflict}
+                if not (reject_conflicts and conflict):
+                    out[source] = target
     return out
 
 

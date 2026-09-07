@@ -34,6 +34,7 @@ def ensure_research_table() -> None:
           markdown_en TEXT,
           title_en TEXT,
           summary_en TEXT,
+          markdown_en_source_sha256 TEXT,
           status TEXT NOT NULL DEFAULT 'public',
           tags JSONB NOT NULL DEFAULT '[]'::jsonb,
           source_task_id BIGINT,
@@ -50,6 +51,7 @@ def ensure_research_table() -> None:
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS markdown_en TEXT",
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS title_en TEXT",
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS summary_en TEXT",
+        "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS markdown_en_source_sha256 TEXT",
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'public'",
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb",
         "ALTER TABLE research_documents ADD COLUMN IF NOT EXISTS source_task_id BIGINT",
@@ -190,9 +192,10 @@ def upsert_document(
         """
         INSERT INTO research_documents (
           slug, filename, title, markdown, summary, status, source_task_id,
-          markdown_en, title_en, summary_en, content_sha256, published_at, updated_at
+          markdown_en, title_en, summary_en, markdown_en_source_sha256,
+          content_sha256, published_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()))
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()))
         ON CONFLICT (filename) DO UPDATE SET
           slug = EXCLUDED.slug,
           title = EXCLUDED.title,
@@ -200,9 +203,11 @@ def upsert_document(
           summary = EXCLUDED.summary,
           status = EXCLUDED.status,
           source_task_id = COALESCE(EXCLUDED.source_task_id, research_documents.source_task_id),
-          markdown_en = COALESCE(EXCLUDED.markdown_en, research_documents.markdown_en),
-          title_en = COALESCE(EXCLUDED.title_en, research_documents.title_en),
-          summary_en = COALESCE(EXCLUDED.summary_en, research_documents.summary_en),
+          markdown_en = COALESCE(EXCLUDED.markdown_en, CASE WHEN research_documents.markdown = EXCLUDED.markdown THEN research_documents.markdown_en END),
+          title_en = COALESCE(EXCLUDED.title_en, CASE WHEN research_documents.markdown = EXCLUDED.markdown THEN research_documents.title_en END),
+          summary_en = COALESCE(EXCLUDED.summary_en, CASE WHEN research_documents.markdown = EXCLUDED.markdown THEN research_documents.summary_en END),
+          markdown_en_source_sha256 = CASE WHEN EXCLUDED.markdown_en IS NOT NULL THEN EXCLUDED.content_sha256
+            WHEN research_documents.markdown = EXCLUDED.markdown THEN research_documents.markdown_en_source_sha256 END,
           content_sha256 = EXCLUDED.content_sha256,
           published_at = EXCLUDED.published_at,
           updated_at = EXCLUDED.updated_at
@@ -210,7 +215,8 @@ def upsert_document(
         """,
         (
             slug, fname, title, markdown, summary, status, source_task_id,
-            markdown_en, title_en, summary_en, content_hash, published_at, updated_at,
+            markdown_en, title_en, summary_en, content_hash if markdown_en else None,
+            content_hash, published_at, updated_at,
         ),
     )
     return dict(row), existing is not None

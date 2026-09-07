@@ -1,162 +1,218 @@
 # Translation Pipeline
 
-두 개의 독립된 파이프라인이 있다. 공유하는 것은 LLM 호출 경로(`llm/call_registry.py` → gateway/proxy)와 `scripts/_translation_common.py`의 헬퍼뿐이다.
+확인 기준: 2026-09-07 코드와 같은 날 수행한 운영 DB 마이그레이션 검증.
 
-| | A. 사료(archival) 파이프라인 | B. 사이트 콘텐츠 파이프라인 |
+사료 번역과 사이트 영어 번역은 `translation_runtime/`의 실행 함수를 공유하고, 언어·형식별 프롬프트와 검증·조립은 각 어댑터가 맡는다. 이 문서는 현재 구현·운영 경계를 설명한다. 과거 모델 비교와 배치 산출물은 `output/archival_translations/compare-*.md` 등에 있으며, 현재 설정은 `config/llm_call_sites.json`이 기준이다.
+
+## 1. 구성과 소유권
+
+| 대상 | 언어·단위 | 어댑터와 출력 |
 |---|---|---|
-| 방향 | RU→KO, ZH→KO | KO→EN |
-| 엔진 | `runtime_tools/archival_translation/` | `scripts/translate_*.py` 4종 |
-| 단위 | HTML 블록, `[[번호\|태그]]` 마커, 청크(기본 3,500자) | 문서/행 통짜 1회 호출 |
-| 용어집 | CommuLingo 스냅샷 + 스펙 `glossary.extra`, 청크 등장 항목만 주입(상한 60) | 프롬프트 내장 소사전 |
-| 검증 | 결정론 4종(마커·원문반환·한국어부재/문자잔존·길이) + 사유 첨부 교정 재시도. 용어표는 루프에서 검사 안 함 — 별도 LLM 용어 감사(보고 전용) | 결정론 검사 + 교정 재시도 1회 |
-| 캐시/이어하기 | 내용 해시 JSONL, 청크 단위 | 없음(스킵 조건이 재개 역할) |
-| 진입점 | `scripts/translate_archival_documents.py`, `api_routes/archival_translation.py` | systemd `research-document-translation.timer` + 수동 |
+| 사료 | RU/ZH/EN/DE/FR/IT→KO, HTML 블록·마커, 기본 3,500자 청크 | `runtime_tools/archival_translation/`; 스펙의 `output` HTML fragment |
+| 연구문서 DB | KO→EN, Markdown 구조 단위 청크(목표 8,000자) | `scripts/translate_research_documents.py` → Markdown 어댑터; `research_documents` 영어 열 |
+| 연구문서 파일 | KO→EN, 같은 Markdown 어댑터 | `scripts/translate_research_markdown.py`; 기본 `research/en/*.md` |
+| 기타 DB 콘텐츠 | KO→EN, 행 단위 JSON | `scripts/translate_db_content.py`; posts/ai_diary/hub_curations 영어 열 |
+| 정적 페이지 | KO→EN, HTML 또는 문단별 텍스트 노드 | `scripts/static_page_translation_pipeline.py`; 페이지 JSON 영어 필드 |
 
-설계 원칙은 `~/uploads`로 전달된 번역기 인수인계 문서(2026-08-30)를 따른다: LLM은 청크 번역기로만 쓰고, 용어 일관성·연속성·검증은 결정론적 레이어가 책임진다. 모델 호출은 전부 `call_registry`의 feature 단위 설정(`config/llm_call_sites.json`)을 지난다.
+공통 소유권:
 
-## 사료 파이프라인 실행 (2026-08-30 정리)
+- `translation_runtime/__init__.py`: `generate_translation`, `translate_validated`, `validate_cached`, 번역 오류 타입. 사료 `_translate_chunk`, Markdown `_translate_segment`, DB 콘텐츠 `_call_translator`가 같은 검증·교정 루프를 사용한다.
+- `translation_runtime/structure.py`: Markdown 구조·보호 구간, HTML 구조·속성 검사, 숫자·조건 표현 검토 힌트, 청킹·산문 분할.
+- `translation_runtime/storage.py`: 원문 해시와 원자적 파일 교체. 기존 파일 권한을 유지하며 새 파일은 0644로 만든다.
+- `scripts/_translation_common.py`: 사이트 필드 검증·JSON 파싱과 기존 호출부용 호환 import. 별도 번역 실행 루프를 소유하지 않는다.
+- `llm/call_registry.py`: provider 설정 해석, 상세 생성 결과, 정책·사용량 감사. 표준 번역 호출은 registry → LLM gateway → 키 주입 프록시를 지난다.
+- 정적 페이지 DeepL 경로는 별도 HTTP 어댑터다. HTML 검증은 공유하지만 LLM registry와 공통 생성 재시도 루프를 사용하지 않는다. 사료 용어 추출·감사도 `terms.py`의 별도 보고 작업이다.
 
-- **실행**: `venv/bin/python scripts/translate_archival_documents.py --spec <id>`. 프로바이더 호출은 LLM 게이트웨이 프록시(`:8110`)를 지나고 키는 프록시가 주입하므로 **credstore·sudo·systemd-run이 필요 없다** (예전 `run-archival-translation.sh` 래퍼와 `LoadCredentialEncrypted` 안내는 삭제됨). `--plan`은 모델을 부르지 않고 슬라이싱·청킹·견적만 낸다. 같은 실행은 `POST /admin/archival-translation/run`으로도 된다.
-- **모델·max_tokens·thinking은 registry가 결정한다**: `config/llm_call_sites.json`의 `archival_document_translation_{ru,zh,en,de,fr,it}` 항목(또는 `LLM_SITE_ARCHIVAL_DOCUMENT_TRANSLATION_<LANG>_MODEL` — model만 덮고 provider는 못 바꾼다). `call_registry.resolve()`는 항목 값을 호출부 기본값보다 우선하므로 CLI·API·`Options`에는 model 옵션이 **없다** — 예전 `--model`/`--max-tokens`는 조용히 무시되던 죽은 옵션이라 제거했다. 후보 모델은 `--compare provider/model[,+think,+effort=high]`로 같은 청크를 나란히 뽑아 본 뒤 registry 항목을 고친다. `--compare`의 preflight는 변형에 적힌 provider마다 검사한다.
-- **청크당 준비물은 한 번만 만든다**: `_prepare_chunk()`가 (프롬프트, 캐시 키)를 돌려주고, `run()`의 pending 집계와 워커가 같은 것을 쓴다. `Stats` 카운터 갱신은 `Stats.add()`로 락 뒤에서 한다(워커 5개 공유).
-- **캐시 키** = `PROMPT_VERSION` + resolve된 provider·model·thinking + 시스템 프롬프트 해시 + 유저 프롬프트 전문. 프롬프트·용어표·tmExamples·register 변경은 자동으로 키를 바꾼다. `PROMPT_VERSION`은 파서(`parse_response`)가 바뀌어 옛 레코드의 블록 분할을 믿을 수 없을 때만 올린다 — 검증기 강화는 캐시 재심사가 흡수한다.
+### 호출과 재시도
 
-## 모델 교체·재조립·용어표 충돌 경고 (2026-08-31)
+`translate_validated`는 유효한 캐시 재사용 → 생성 → 파싱 → 검증 → 실패 사유를 첨부한 재번역을 수행한다. 파서·검증기와 교정 지시문 렌더러는 콜백으로 전달한다(사료는 한국어 지시문, 사이트는 플레이스홀더 보존을 포함한 영어 기본문). 검증에 실패한 결과는 성공 캐시에 넣지 않는다. 사료는 기본 총 3회, Markdown·DB JSON은 총 2회 번역 시도를 허용한다.
 
-- **프로바이더**: `archival_document_translation_{ru,en,de,fr,it}` = `gemini/gemini-3.1-pro-preview`, `_zh`만 `deepseek_anthropic/deepseek-v4-pro`(thinking on) 유지 — ZH→KO는 DeepSeek 우위라는 사용자 판단. 근거: RU 스펙 2건×2청크 `--compare`(고르바초프 1987 연설·숨가이트 1988 정치국 기록; `output/archival_translations/compare-deepseek-vs-gemini-*.md`). 산문은 Gemini 우위, 표기 규율(이니셜 로마자화·지명 병기·비칭)은 열세였으나 **RU 시스템 프롬프트 말미의 «표기 규칙 보강» 블록**으로 같은 청크 재검증 시 해소(이니셜 45곳 키릴 유지, 지명 병기 0, 비칭 0). Gemini executor는 thinking/output_config 키를 읽지 않으므로 항목에서 뺐다(기본 동적 추론). 모델 id는 프록시 경유 `client.models.list()`로 확인(무료) — "3.5 Pro"는 존재하지 않는다.
-- **캐시 키 단절과 `--reassemble`**: 키에 provider·model·system_hash가 들어가므로 교체 뒤 구 문서의 postEdits 손질을 `run()`으로 돌리면 전체 재번역(=발행문 전면 교체)이다. 발행본 손질은 `translate_archival_documents.py --spec <id> --reassemble` — 캐시 레코드를 **블록 번호로** 조립하고 fragment만 다시 쓴다(LLM 호출 0). 규칙: 블록 집합이 현재 청킹의 어느 청크와 일치하는 레코드만 채택(다른 청킹 시절 고아 배제), 같은 청크 다중 레코드는 나중 것, `run()`과 같이 **TM 프리필이 마지막에 덮는다**(빠뜨리면 발행문이 TM 문구에서 캐시 문구로 바뀐다 — 포스펠로프 00485호 인용부 사례). 포스펠로프에서 `run()` 산출과 바이트 동일 재현 확인. `--max-chars`는 번역 당시와 같아야 한다(기본 3500; 일치하는 레코드가 없으면 고아로 채우고 경고).
-- **캐시 컴팩션(일회성)**: 교체 직전 구 DeepSeek 키(구 프롬프트=git `552beaf^`의 SYSTEM_PROMPT)로 정본 레코드를 판별해 고아를 제거했다 — nko-order-227 6→3, provisional-government-death-penalty 4→2, stalin-1925-xiv-congress 129→69, sto-kronstadt 2→1. 원본은 `output/archival_translations/backup-20260831-precompaction/`. 구 키로도 완전 매칭이 안 된 14건(1924 헌법, 사면령, 부하린 1928, 21개조, 디미트로프, 비밀보고, 자치화, 4월 테제, 독소조약, nkvd 2종, 1920 조약, 1989 조약 결의, 1928 시베리아, 대전환, 얄타)은 용어표 드리프트로 손대지 않았다 — 재조립 시 다중 버전이면 last-wins라 결과를 통독할 것.
-- **용어표 충돌 경고**: `glossary_collision_pairs()` — 남성 성+а(생격·대격 표면)가 한국어 표기가 **다른** 별도 항목(여성형 인물)과 겹치는 쌍. `plan()`이 exclude 적용 뒤, 그 표면이 원문에 실제 있을 때만 stderr로 경고한다(사전 전체가 아니라 이 문서에 해당하는 것만; XXVII съезд/съезда 같은 동일 ko 별칭은 제외). 주입 자체는 건드리지 않는다 — 여성 본인이 등장하지 않는 문서는 `glossary.exclude`에 넣고 시작. 배경: 포스펠로프 보고서에서 인물사전의 예브게니야 예조바가 `Ежова→예조바`로 함께 주입되어 예조프의 생격 8곳이 "예조바"로 발행됨(postEdit로 교정, frontend `f4c9781`). 테스트 `tests/test_glossary_collisions.py`.
-- `compare()`/`probe()`가 executor의 `(text, usage[, truncated])` 튜플 반환(8-30 truncation guard 이후)을 문자열로 취급해 죽던 회귀도 같은 날 수정.
+`generate_translation`은 `generate_detailed`의 결과를 보고 일시적 요청 제한·통신·서버 오류만 최대 3회 호출한다. Retry-After 또는 지수 대기와 지터를 사용하며 대기 상한은 60초다. HTTP 429는 메시지에 `insufficient_quota`가 없는 한 항상 일시적 `rate_limit`이다. Gemini는 분당 제한에도 "Quota exceeded ... billing" 문구를 쓰므로 문자열로 영구 오류를 판정하지 않는다. 인증·정책·할당량 소진(402/456, 잔액 문구)·설정 오류, 빈 응답, 출력 예산 소진은 교정 재시도로 숨기지 않는다. 잘린 텍스트도 번역으로 수락하지 않는다. 이 호출 재시도와 형식 교정 시도, executor 내부 출력 예산 확대는 서로 다른 단계다.
 
-## 첫 EN/DE/IT 배치 (2026-08-31)
+사료는 영구 오류가 나면 실행 중단 플래그로 대기 워커와 통신 재시도의 새 호출을 막는다. 이미 진행 중인 요청은 완료될 수 있다. 연구 DB·기타 DB 배치도 영구 provider 오류에서 멈추며, 성공한 청크·행은 보존한다. 파일 CLI는 대상 파일별 실패를 모아 다음 파일을 처리한다.
 
-- 스펙 12건(`marshall-plan-memoranda-1947`, `italy-surrender-instruments-1943-1945`, `cia-poznan-bulletins-1956`, `cia-ore-29-48-1948`, `carter-byrd-letter-1980`, `kohler-telegram-1964-10-18`, `varkiza-agreement-1945`, `german-constitutions-1949`, `fuehrer-directives-16-17-1940`, `fuehrer-directive-41-1942`, `ddr-travel-regulation-1989-11-09`, `gran-consiglio-documents-1928-1943`)을 포크 에이전트 3개(EN/DE/IT)가 병렬 작성, `--plan`으로 검증 뒤 번역. 언어별 단일 스펙이라 이탈리아 묶음은 연합군 측(EN 정본)과 이탈리아 측(IT)으로 나눴다. CIA 문서는 OCR txt에서 문단을 복원한 `-prepared.html`(제목 인식 병합, 배포처·기밀 표시 제거). 짧은 카터 서한은 `output/archival_translations/merge-staging/`로 번역해 데탕트 문헌에 HTML 병합(스펙 frozen).
-- **라틴 저본에서 드러난 함정과 수정**: (1) `_decode_page`가 cp1251 외 선언 charset을 무시 → 존중. (2) 표 셀 어휘가 키릴 전용 → 글자 있는 셀 전부. (3) `validate`의 잔존 검사가 로마자 「글자」 비율이라 항목 기호·이니셜·약어가 걸림 → 라틴은 낱말(`stray_word`≥4자) 기준. (4) 끊김 검사가 닫는 괄호로 끝나는 서명부를 오판 → 원문 끝 부호를 `.!?`(+닫는 부호)로 한정. (5) `generic_html` 폴백 경로가 원시 줄바꿈을 블록 줄로 넘김(FRUS) → 블록 태그·빈 줄만 문단 경계. (6) `slice_documents` 블록 캐시가 경로 단위 → source 전체 키. FRUS 잡음은 `drop: ["a.tei-pb1","a.note"]`(쪽 표시·각주 번호).
-- **Gemini 선불 크레딧 소진(429 RESOURCE_EXHAUSTED)**: 배치 중반에 크레딧이 떨어져 `german-constitutions-1949`(11청크), `italy-surrender-instruments-1943-1945`(1청크), `marshall-plan-memoranda-1947`(폴백 수정으로 케넌 청크 전부 재번역 필요)이 대기. 충전 후 `--spec <id>`로 재실행하면 성공 청크는 캐시에서 나온다. 빈 응답 재시도 3회는 시간만 쓰므로 429가 보이면 바로 멈추는 게 낫다. **→ 09-01 00:05~00:08 충전 후 `--spec`으로 재실행해 3건 모두 완료·발행(캐시 49/18/9청크 완전, postEdits 반영, frontend `6025df0`). 더 대기 중인 청크 없음.**
-- 발행 뒤 큐 처리는 스크래치 `gaps-done.sql` 형식(UPDATE … status='done', resolved_id, resolution 앞에 처리 메모), manifest 등록은 `manifest-drafts.json` + `publish.py`(HTML이 있는 항목만).
+`GenerationResult`는 `text`, `error_kind`, `error`, `truncated`, `usage`, `attempts`, `latency_ms`, `retry_after`를 반환한다. 기존 `generate_sync()`의 text/None 인터페이스는 유지한다. 출력 예산 확대 과정에서 버린 응답도 각각 감사하며 상세 `usage`는 합계다. 사료 `Stats`에는 `providerCalls`, `tokensIn`, `tokensOut`이 있고 `usage` 이벤트에는 사용량·지연·오류 종류가 나온다. `compare()`도 이 감사 경로를 사용한다. `--probe`는 진단용 executor 직접 호출이므로 같은 상세 감사 계측을 보장하지 않는다.
 
-## 라틴계 프롬프트 «표기 규칙 보강» + 고정 함정 청크 비교 (2026-09-01)
+## 2. 모델과 실행 진입점
 
-- **첫 EN/DE/IT 배치 통독 결과**: 산문은 좋았으나 고유명사·관용어 층에서 반복 실수 — `decreto Reale`→"레알레 칙령"(형용사를 인명으로), `Hessen`→"게센"(러시아어 전사 습관 누출), `Dnjepr`→"드니프로"(1942년 문서에 현대 표기), `Vereine und Gesellschaften`→"사단과 회사", 조항 제목에 임의 낫표 「제25조」(postEdit 29건), 라틴 이니셜 음차 "지. 시안토스 / 제이. 소피아노풀로스". RU 프롬프트의 «표기 규칙 보강» 블록에 상응하는 것이 라틴계 프롬프트에 없었던 것이 원인의 절반.
-- `core._latin_prompt`에 공용 «표기 규칙 보강»(이니셜 로마자 유지, 원어 발음 음차, 원문 시대 지명, 낫표 금지, 관용어≠고유명사)을 붙이고 `_latin(..., notation=)`으로 언어별 함정 예시를 덧붙인다(EN: Khrushchev/Kiev, DE: Vereine/Seestreitkräfte, FR: décret/arrêté/직함, IT: decreto Reale). **시스템 프롬프트 해시가 캐시 키에 들어가므로 EN/DE/FR/IT 청크 캐시는 전부 무효** — 발행된 12건은 `run()`을 다시 돌리면 전면 재번역이 된다. 발행본 손질은 `--reassemble`만 쓰고, 새 스펙부터 새 프롬프트가 적용된다.
-- `--compare-chunk-ids 2,3`: 문서 앞 N청크 대신 지정한 청크(0부터, 현재 청킹)로 비교한다. 함정이 든 청크를 고정 테스트셋으로 쓰기 위한 것(로드맵 1의 첫 조각). 청크 번호는 `plan()`의 `_chunks`에서 원문 문자열로 찾는다.
-- `gran-consiglio-documents-1928-1943`의 `proclama-badoglio` 블록 범위 `[0,2]→[0,4]`: 번역(08-31 23:38)은 `<br>` 재분할 이전 파서로 2블록이었고, 직후 커밋(1f6bce1, 23:39)부터 4블록이라 `plan()`이 "range end moved"로 죽었다. 발행본은 온전하므로 그대로 두되 캐시 레코드는 현 청킹과 안 맞는 고아다(다음 `run()`에서 그 청크만 재번역, `--reassemble`이면 고아 채움 경고).
+아래는 registry 파일의 기본값이다. model 환경변수 오버라이드와 provider의 출력 예산 확대가 적용될 수 있으므로, 실행 시에는 `call_registry.resolve(feature)`로 확인한다.
 
-## 모델 비교 2라운드 — Gemini·GPT·Claude·DeepSeek (2026-09-01)
+| Feature | Provider / model | max_tokens | timeout 설정 | Thinking |
+|---|---|---:|---:|---|
+| `archival_document_translation_{ru,en,de,fr,it}` | gemini / gemini-3.1-pro-preview | 48,000 | 600초 | 별도 설정 없음 |
+| `archival_document_translation_zh` | deepseek_anthropic / deepseek-v4-pro | 48,000 | 600초 | enabled |
+| `research_markdown_translation` | deepseek / deepseek-v4-flash | 20,000 | 240초 | enabled |
+| `db_content_translation` | deepseek / deepseek-v4-flash | 12,000 | 180초 | disabled, JSON mode |
+| `archival_term_extraction` | deepseek / deepseek-v4-flash | 8,000 | 180초 | disabled, JSON mode |
 
-`--compare-chunk-ids`로 16청크 × 5변형(`gemini/gemini-3.1-pro-preview`, `openai/gpt-5.6-terra+effort=high`, `claude/claude-opus-5`, `claude/claude-sonnet-5`, `deepseek_anthropic/deepseek-v4-pro+think`). 1라운드는 표기 함정 청크(기본법 2·3, 지령41 3, 대평의회법 0, 바르키자 3, 고르바초프 0·1, 숨가이트 0·1), 2라운드는 난문(스탈린 1925 결론연설 60·64, 부하린 1926 26, 통합반대파 40, 콜러 전문 1, 케넌 PPS/1 1, 그란디 결의안 2). 보고서 `output/archival_translations/compare-20260901-*.md`, `compare-20260901-hard-*.md`. 판정은 파일마다 원문 대조 통독(포크 3 + 직접 1).
+사료 CLI·API·`Options`에는 model/max_tokens 옵션이 없다. 모델 비교는 `--compare`로 명시적으로 수행하고, 채택할 설정은 registry에 반영한다. 현재 모델 선택은 유지한 상태이며, 공통화·검증 개선을 이유로 자동 교체하지 않는다.
 
-- **표기 함정은 새 라틴 프롬프트로 5모델 전부 통과**(Reale→왕령, Dnjepr→드네프르, 이니셜 로마자 유지, Vereine→결사와 단체). 이 청크들은 더 이상 변별력이 없다. 예외: GPT만 청크 하나에서 「제10조」 낫표 재발, Sonnet은 `왕령(decreto Reale)` 병기.
-- **「게센」의 진짜 원인은 용어표**: 인물사전의 보리스 게센(Hessen) 항목이 라틴 표면 `Hessen`에 걸려 `Hessen→게센`으로 주입됐다. 용어표를 프롬프트 예시보다 우선한 GPT·Opus·Sonnet이 "게센", Gemini·DeepSeek이 "헤센". 스펙 `glossary.exclude: ["Hessen"]`로 처리. 라틴 문서에서 인물 성(姓) 단독 표면 매칭은 같은 사고를 또 낼 수 있다(예조바 사례의 라틴판).
-- **GPT-5.6 Terra(effort=high)는 후보 탈락**: 16청크 중 3청크에서 문장 한가운데 벵골 문자(`তথ তথ…` 뒤 블록 5개 무응답)·조지아 문자(`정치국은 სწორედ 이러한`)를 냈다. 산문·정확성은 이론 산문(부하린)에서 1위였으나 이 급 사고가 나면 검증기 없이 못 쓴다 → **`validate()`에 «대상 밖 문자 혼입» 검사 추가**(`foreign_letters()`: 유니코드 범주 L* 중 한글·로마자·키릴·한자·가나·그리스 밖의 글자. 원문자 ①·분수 ¼는 범주 No라 통과). 전 캐시 13,986블록 재심사 오탐 0.
-- **난문 판정 요약** (파일별 순위):
-  - 스탈린 1925 속기록: Opus > Sonnet > DeepSeek > Gemini > GPT. Gemini는 삽입구 `(Смех, аплодисменты.)` 3곳과 소제목을 키릴로 남김(run()에서는 stray 검사가 재시도로 잡을 유형). GPT는 지노비예프 "전환" 방향 오역 + 청크 붕괴.
-  - 통합반대파: Opus > DeepSeek > Gemini(«подкулачников»→"반쿨라크" 오역) > Sonnet(лишенцы→"피선거권 상실자") > GPT.
-  - 부하린 1926: GPT > Opus > Gemini > Sonnet > DeepSeek(주어·목적어 뒤집은 순환문). «известную полосу»는 5모델 전부 정답 — 이 함정도 소진.
-  - 고르바초프 1987: Opus > Gemini > Sonnet > DeepSeek > GPT. Gemini는 «레닌(Ленин)»·«(ЦК КПСС)» 재병기(어제 재검증에서 0이었던 위반이 재발), Opus는 "동지들/동지 여러분" 혼용·"정치국원/콜호즈원" 용어표 대조 필요.
-  - 콜러 전문·케넌 PPS/1(분석 산문): Opus > GPT > Sonnet > Gemini > DeepSeek. Gemini "Again, paradoxically"→"다시 말해 역설적이게도", "feels"→"느낀다" 직역; DeepSeek "apparent belief"→"표면적으로 지녔던 신념".
-  - 바르키자(조약): Gemini > Sonnet > DeepSeek > GPT > Opus — Opus가 누적 조건("사면법 적용 대상 **중** 점령기 가담자")을 두 집단으로 분리(자격 범위가 달라지는 실질 오역).
-  - 기본법: DeepSeek > Sonnet > Opus("Kein Deutscher"→"어떠한 도이처도") > Gemini(출판의 자유/교육의 자유/망명권 — 법률 관용 표기 약함) > GPT("학문의 자유" 오역, 낫표).
-  - 그란디 결의안(한 문장짜리 5단락): Gemini ≥ Opus > GPT ≈ Sonnet(문장 분해) > DeepSeek(관계절 오결합). 지령 41: 5모델 차이 없음.
-- **결론**: 어느 모델도 무결점이 아니다. 종합하면 **Opus 5가 산문·문맥(속기록 수사, 분석문, 이론 산문)에서 가장 강하고 결함이 용어 관행 층(동무/동지, 총회/전원회의, 도이처)에 몰려 있어 용어표·postEdits로 잡히는 종류**인 반면, Gemini는 산문 좋고 조약·미사여구에 강하나 다의어(반쿨라크, again)와 병기 규율에서 반복 실수, DeepSeek은 법률문에 안정적이나 구문 오결합·직역투와 청크당 5~16분. 값은 Opus $5/$25가 Gemini $2/$12의 2.5배. **사용자 결정(2026-09-01): Gemini 3.1 Pro 유지.** Opus의 산문 우위를 인정하면서도 Claude 특유의 어투(워터마크처럼 각인된 스타일)가 사료 번역문으로는 불편하다는 판단. Opus 전환 제안(RU 속기록·분석 산문만 Opus, 스펙 단위 feature 오버라이드)은 채택되지 않았고, Gemini의 약점(다의어·병기 규율·법률 관용 표기)은 프롬프트·용어표·postEdits로 계속 다룬다.
-- 운영 관찰: `compare()`는 executor를 직접 불러 `llm_audit_log`에 토큰·비용이 안 남는다(프록시 전송 행만 남고 토큰 0). 이번 2라운드 지출은 토큰 실측이 없어 추정치(≈$4~5)만 있다. DeepSeek+think는 청크당 최대 962초 — 스탈린 청크에서 병렬 5워커여도 문서 하나에 시간이 너무 든다.
+### 사료 CLI·API
 
-## 베를린 장벽 1961 배치 (2026-09-01)
-
-- 큐 `berlin-wall` 사건의 저본 확보분 4건을 EN/DE 스펙 2건으로: `berlin-wall-1961-us-documents`(FRUS XIV 문서 105·194·195·197 — 8월 13일 공관 보고 제185호, 10월 27일 톰프슨–그로미코 제1378호·클레이 제856호·국무부 훈령 제620호; 26블록 8,149자 4청크), `berlin-wall-1961-sed-documents`(울브리히트 6월 15일 기자회견 발췌 + 정치국 39/61 의사록; 20블록 4,046자 2청크). 이탈리아 묶음처럼 언어별로 나눠 두 편으로 발행(frontend manifest 89·90번째).
-- **저본 함정**: 미리 받아 둔 FRUS 두 쪽(`berlin-mission-tel-176…`, `frus-xiv-berlin-doc196`)은 전문이 아니라 **편집자 주**였다(합쳐 3,654자). history.state.gov의 장 목차(ch4·ch6)에서 실제 전문 번호를 골라 다시 받았다. FRUS는 `d<번호>` 페이지의 `div.tei-div3#d<번호>`에 본문이 있고 `a.note`가 각주 앵커다. 8월 13일 전문 176호 자체는 FRUS에 실려 있지 않다(NARA Central Files 862.181/8-1361에만).
-- **라틴 표면 인물사전 충돌 재발**: DE 스펙에서 `August`(아우구스트 탈하이머 → "7. August 1961"에 걸림), `Benjamin`(발터 벤야민 → 법무장관 힐데 베냐민에 걸림)을 exclude. EN 스펙에서 `First`(퍼스트라는 인물 → "First reports…"), `Soviet`(→소비에트, 스펙 표기 소련과 충돌) exclude. 어제의 Hessen과 같은 축이며, 라틴 문서에서는 성(姓) 단독 표면 매칭이 상시 위험이다 — 스펙 작성 시 주입 목록 덤프로 확인하는 절차를 유지.
-- 새 라틴 프롬프트의 첫 실전: 이니셜·병기·낫표 위반 0. 남은 손질은 postEdits로 — DE 「임시 회의/비상회의」 통일, `Regelung`→규정·해결, «Bonner Regierung»→「본(Bonn) 정부」("본 정부"는 "이 정부"로 읽힘); EN 「시정부(제나트)」 병기 반복 → 시정부(용어표 항목 자체에 병기가 들어 있으면 조립기의 1회 축약이 못 잡는다 — 병기는 용어표가 아니라 엮은이 주에).
-- 큐 1307(흐루쇼프–울브리히트 8월 1일 통화)은 러시아어 원문이 대통령문서고→독일 연방문서고로 이관돼 독일어·영어 역본만 공개 — 보류 메모만 남김. 처리: `gaps-done-berlin.sql`(1484·1535→us, 1286·1308→sed).
-- EN 4청크에 742초 — 3청크는 1~2분에 끝났고 한 청크가 응답 대기로 10분 가까이 걸렸다(프록시 감사 행은 스트림 종료 시 기록되므로 진행 중 호출은 안 보인다).
-
-## 해제 축약 일괄 작업 + 디코더 회귀 (2026-09-01)
-
-- **해제 길이 규칙**(소유자 지적: 8천 자 전문에 3천 자 해제가 본문 읽을 맛을 떨어뜨림): 해제 상자(`aside.doc-editorial`, 서지 포함) 상한 = 본문 ≤5천 자 450자 / ≤3만 자 650자 / 그 이상 900자. 해제는 한 문단(문서가 무엇인지 + 의의 한 문장 + 필요할 때 일러두기 한 문장), 서지는 원제·번역 저본·저작권 두세 줄. 사건 경위·배경은 사건 카드 몫. frontend `data/commulingo/docs/README.md`에 규칙, 스펙 `headnote`도 같은 상한. 90건 중 58건이 초과해 포크 3개가 일괄 축약(스펙 관리 40건 재조립, 손편집 18건 HTML 직접, frozen 5건 스펙+HTML 병행). 축약 뒤 전수 검사: 상한 초과 0, 해제 밖 번역문은 HEAD와 동일(스페인 문헌집만 예외, 아래).
-- **`--reassemble`은 발행본과 스펙이 어긋난 곳을 드러낸다**: (1) `detente-agreements-1972-1973` — 카터 서한이 merge-staging에서 HTML로 병합돼 스펙에 없어 재조립이 그 절을 통째로 날린다 → 스펙 `frozen` 처리, 손질은 HTML 직접. (2) `spain-1936-two-lines` — 발행본에 남아 있던 「안드레우 닌」이 스펙 postEdit(안드레우→안드레스)보다 오래된 것이었고 「블록는」 오타도 있어, 재조립본이 정본. 채택. (3) `gran-consiglio`(포고 2→4블록 재분할)·`bukharin-1926`(캐시 청킹 불일치)은 재조립 거부 — 캐시 갱신 전까지 HTML 직접. 교훈: 재조립 뒤에는 해제 밖 본문을 HEAD와 diff해서 의도한 변화만 있는지 본다.
-- **`_decode_page` 회귀 수정**: 8-31에 선언 charset을 무조건 따르게 하자 marxists.org(`charset=iso-8859-1` 선언, 실제 UTF-8) 저본이 mojibake로 읽혀 `stalin-1929-great-break`·`spain-1936-two-lines`·`stalin-1928-grain-siberia` 재조립이 "range moved"로 죽었다. 순서를 「엄격 UTF-8(비ASCII 포함 시) → 선언 charset → UTF-8 → cp1251」로 바꿈 — cp1251·latin-1 바이트는 엄격 UTF-8에서 거의 반드시 실패하므로 관보·documentarchiv·der-fuehrer 저본은 그대로 맞는다. 테스트 추가, 전 스펙 `--plan` 스윕 통과.
-
-## 라틴 저본 인물사전 성(姓) 단독 표면 제한 (2026-09-01)
-
-- `anchor_latin_people()`: 라틴 문자 스펙에서 인물사전(people-snapshot)에서 온 성 단독 항목은 **문서 어딘가에 전체 이름(«Boris Hessen», «Lucius Clay», «Lucius D. Clay»)이나 이니셜+성(«L. Clay»)이 한 번은 있을 때만** 주입한다. 없으면 빼고, 그 성이 본문에 표면으로는 있는 항목을 `--plan`이 «안내: … 미주입» 한 줄로 알린다(실제 그 인물이면 스펙 `glossary.extra`에 넣는다). 스펙 extra와 용어(term) 항목은 검사하지 않는다. `plan()`에서 exclude 다음, 충돌 경고 앞에 적용되므로 run/compare/reassemble/scan 모두 같은 목록을 본다.
-- 배경: 이틀 동안 스펙 다섯 건에서 Hessen(→게센)·August·Benjamin·First·Soviet을 손으로 exclude 해야 했다. 전 라틴 스펙 스윕에서 이 규칙이 보류한 것은 Reale(레알레)·First(퍼스트)·Service(서비스)·Deutscher(도이처)·Sorge·Allen·Strong·Murphy·Carter·Stalin·Truman — 앞 여섯은 충돌, 뒤 다섯은 성만 쓰인 실제 인물(모델이 아는 이름이라 주입 없이도 표기가 맞고, 원하면 extra). **비교 판정 정정**: 기본법 비교에서 Opus의 「어떠한 도이처도」(Kein Deutscher)는 모델 결함이 아니라 인물사전 Deutscher(아이작 도이처)→도이처 주입이 원인이었다 — 같은 청크를 받은 다른 모델은 주입을 무시했을 뿐이다.
-- 부작용: `--plan`의 «용어표 N항목»은 이제 문서에 닻이 있는 인물만 세므로 2,9xx→9xx로 보인다(주입 목록은 어차피 청크 등장 항목뿐이라 캐시 키에는 영향이 없고, 기존 exclude는 그대로 둬도 무해). 테스트 `tests/test_glossary_latin_anchor.py`.
-
-## 저본 어댑터
-
-`runtime_tools/archival_translation/sources.py`. 문서고마다 어댑터 하나(`militera`, `wikisource`, `stalinism`, `libru`, `marxists`)가 원칙이고, 2026-08-31에 **셀렉터 범위 범용 어댑터 `html`**을 더했다: 스펙의 `source.selector`(CSS 셀렉터)가 문서를 담은 요소를, `source.drop`(선택)이 먼저 버릴 자식(공유 버튼, 내비게이션)을 지정한다. "일반 HTML 파서는 조용히 잘못 자른다"는 원칙은 유지된다 — 이 어댑터는 추측하지 않고 스펙이 지목한 요소만 읽으며, 셀렉터가 아무것도 못 찾으면 빈 문서가 아니라 오류다. sha256·startsWith/endsWith 가드는 그대로 적용된다. 문서 한두 건씩 흩어져 있는 사이트(hrono.ru, doc20vek.ru, kremlin.ru 법령은행, coldwar.ru)를 위한 것이다. 리프 블록 요소(p·h*·blockquote·li·pre)를 문서 순서대로 뽑고, `<br>`로만 나눈 느슨한 본문이 절반을 넘으면 빈 줄 기준으로 다시 나눈다. 표는 wikisource와 같은 방식(rows + 칸 어휘)이다. 같은 셀렉터가 메뉴 칸과 본문 칸에 함께 걸리는 표 레이아웃 사이트를 위해 `source.nth`(0부터, 몇 번째 일치인지)를 둔다. 저장 페이지는 `core._decode_page`가 선언된 charset(windows-1251 등)을 따라 읽고, 선언이 없으면 UTF-8 → cp1251 순으로 물러선다(1989년 관보 전자판이 cp1251). 디스패치는 `sources.parse(source, raw)`. 2026-08-31 실사용: kremlin.ru 법령은행(`div.reader_act_body`), 1000dokumente.de(`div#tab3 div.text-ru`), vedomosti.sssr.su(`body` + 블록 범위로 관보 한 호에서 한 항목 절단), hrono.ru(`td[valign="top"][align="left"]`), istmat.org HTML 노드(`div.field-name-body`), grachev62.narod.ru(`body`). istmat.org의 "문서" 노드와 docs.historyrussia.org(ЭБИД)는 PDF 스캔·이미지 뷰어라 텍스트 어댑터로는 열 수 없다(2026-08-31 확인).
-
-## 번역 메모리 (TM)
-
-`runtime_tools/translation_memory.py`. SQLite(`output/translation_memory.sqlite3`)의 단일 테이블:
-
+```bash
+venv/bin/python scripts/translate_archival_documents.py --spec <spec-id> --plan
+venv/bin/python scripts/translate_archival_documents.py --spec <spec-id>
+venv/bin/python scripts/translate_archival_documents.py --spec <spec-id> --reassemble
 ```
+
+- `--plan`/`--dry-run`은 저본 슬라이싱·용어집·청킹·견적만 계산하며 모델을 호출하지 않는다. 스펙은 `config/archival_translation/<id>.json`이다.
+- 기본 동시성은 5, `--retries`는 총 시도 수다. `--limit-chunks N`은 앞 N청크만 처리하고 최종 fragment은 쓰지 않는다.
+- `--compare 'provider/model,provider/model'`은 같은 청크를 비교한다. `+think`, `+effort=high` 변형과 `--compare-chunk-ids 2,3`을 지원한다. 번호는 현재 청킹의 0 기반 인덱스이므로 재현 가능한 평가는 아래 고정 평가셋을 사용한다.
+- 키 주입은 LLM 프록시가 맡는다. 사료 번역을 위해 provider 실키를 CLI에 전달하거나 DB 자격증명을 마운트할 필요는 없다.
+- `api_routes/archival_translation.py`는 `/admin/archival-translation/specs`, `/plan`, `/run`을 소유한다. admin 인증, 요청 필드와 NDJSON 이벤트는 [API Reference](api_reference.md#archival-translation)를 따른다.
+
+### 사이트 실행과 타이머
+
+```bash
+venv/bin/python scripts/translate_research_documents.py --limit 2 --dry-run
+venv/bin/python scripts/translate_research_documents.py --limit 2
+venv/bin/python scripts/translate_research_markdown.py <research-slug>
+venv/bin/python scripts/translate_db_content.py --kind all --limit 10 --select-only
+venv/bin/python scripts/static_page_translation_pipeline.py status
+```
+
+`scripts/static_page_translation_pipeline.py`는 `export`, `import`, `translate-deepl`, `deepl-usage`, `status`를 제공한다. `export`는 외부 번역에 쓸 파일을 만들며, `import`는 반환된 JSON을 검증한다. DeepL은 `DEEPL_API_KEY`를 사용하고 기본 대상 언어는 EN-US다. `--html-mode auto`는 HTML 번역 검증 실패 시 태그를 그대로 보존하는 segments 방식으로 재시도한다. segments 방식은 같은 문단·셀의 원문을 `context`로 전달하고, 코드·pre·script·style 본문은 번역하지 않는다. 요청은 항목 수와 바이트 크기로 나눈다.
+
+저장소의 `deploy/systemd/research-document-translation.{service,timer}` 정의:
+
+- 매일 호스트 시간 04:20, 최대 20분 무작위 지연, `Persistent=true`.
+- 연구 DB `--limit 0 --max-chars 0`, 이어서 기타 DB `--kind all --limit 0`을 실행한다. 정적 페이지와 사료는 이 타이머의 대상이 아니다.
+- `--max-chars`는 연구 DB에서 **선택할 원문 전체 길이 제한**이며 청크 크기 옵션이 아니다. CLI 기본은 limit 2/60,000자지만 타이머 정의는 두 제한을 해제한다.
+- 서비스는 DB credential만 마운트하고 LLM provider 실키는 보유하지 않는다. 두 `ExecStart`에 `-`가 있어 명령 실패를 systemd가 무시하므로, 완료 판단은 번역 로그·실패 수를 함께 본다.
+
+`dry-run`의 의미는 스크립트마다 다르다. 연구 DB의 `--dry-run`과 기타 DB의 `--select-only`는 모델 호출 없이 대상을 조회한다(DB 접속 필요). Markdown 파일·기타 DB·DeepL의 `--dry-run`은 실제 번역·검증을 수행하고 최종 대상 저장을 생략한다. Markdown은 이때도 청크 캐시를 사용할 수 있다. 정적 페이지 `import --dry-run`은 반환 JSON 검증만 수행한다.
+
+## 3. 저본·검증·캐시
+
+### 사료
+
+저본은 `sources.py`의 `militera`, `wikisource`, `stalinism`, `libru`, `marxists`, `html` 어댑터가 처리한다. 범용 `html`은 스펙의 CSS `selector`, `nth`, `drop`을 사용하며 대상이 없으면 오류다. 선언 charset을 존중하고 선언이 없으면 UTF-8 → cp1251로 시도한다. 저본 해시와 문서 범위의 startsWith/endsWith를 확인하고, 여러 저본의 ID 충돌·이동을 피하려면 문서 `band`를 고정한다. 표는 원본 구조·숫자와 번역할 칸 어휘를 분리한다. OCR·스캔 PDF는 먼저 텍스트 저본을 준비해야 한다.
+
+`[[번호|태그]]` 응답에서 중복·누락·추가 마커, 태그 불일치, 원문 그대로 반환, 한국어 부재, 잔존 원문 문자, 대상 밖 문자, 지나친 길이 감소, 마지막 블록의 문장 끊김을 검사한다. 문서 전체 잔존 검사인 `strayCyrillic`는 결과에 보고하는 항목이며, 이 목록이 비어 있다고 의미 정확성이 보장되는 것은 아니다.
+
+청크는 제목 이동 시 빈 청크를 만들지 않는다. 크기 초과 블록은 `plan().oversizedBlocks`로 알리고, 문장·공백 경계로 나누어 부분 번역한다(구분할 곳이 없는 긴 문자열은 길이 기준). 부분 결과는 `.parts.jsonl`에 저장하고, 원래 블록으로 합쳐 검증한 뒤에만 정본 청크 캐시에 넣는다.
+
+| 산출물 | 의미 |
+|---|---|
+| `output/archival_translations/<id>.jsonl` | 정본 청크 캐시. `--cache`로 변경 가능 |
+| 같은 경로의 `.parts.jsonl` | 초과 블록 부분 결과. 재조립이 정본으로 오인하지 않도록 분리 |
+| 같은 경로의 `.review.json` | 숫자·조건 검토 힌트와 TM 선택 근거 |
+| 스펙 `output` 또는 `--out` | 모든 청크 성공 후 원자적으로 교체하는 HTML fragment |
+
+정본 키는 `PROMPT_VERSION`, resolve된 provider/model/thinking, 시스템 프롬프트 해시, 유저 프롬프트 전문을 반영한다. `_prepare_chunk()` 결과는 pending 집계와 워커가 공유한다. 캐시는 현재 검증기로 재심사하고 실패한 청크만 다시 번역한다. 단, 과거 JSONL에는 원시 응답이 없으므로 이미 덮어써진 중복 마커 자체는 소급 판별할 수 없다.
+
+`postEdits`는 원문→번역의 오역 수정과 조사 보정을 조립 단계에 적용한다. 병기 중복 축약·따옴표·스펙 `register`도 어댑터 소유다. 프롬프트·모델 교체 후 `run()`은 캐시 미스로 재번역할 수 있다. 발행본 손질은 현재 스펙과 산출물의 대응을 확인한 뒤 `--reassemble`을 사용한다. 재조립은 모델 없이 블록 번호로 캐시를 고르고 TM을 덮어쓰며, 같은 청크의 다중 레코드는 나중 것을 사용한다. 현재 청킹과 맞지 않는 고아 레코드를 쓰면 경고한다. `--max-chars`는 번역 당시와 맞춰야 한다. **frozen 스펙은 run과 reassemble 모두 거부한다.** 스펙 밖 수동 편집·병합을 캐시 조립이 되돌리지 않도록 하는 보호다.
+
+### 연구 Markdown과 기타 사이트 콘텐츠
+
+Markdown은 최상위 문단·목록·표·코드 블록 경계로 나눈다. 목표 8,000자는 하드 상한이 아니며 초대형 단일 표·목록은 더 클 수 있다. 호출 전에 언어 태그가 있는 코드 펜스·들여쓰기 코드·인라인 코드·HTML 태그·링크 목적지·참조 ID를 결정론적 플레이스홀더로 보호하고, 출력의 개수를 검사한 뒤 복원한다. **언어 태그가 없는 펜스(또는 `text`/`plain`)는 ASCII 도식으로 보고 번역 대상에 포함한다.** 연구 코퍼스의 태그 없는 펜스 63개 중 59개가 한국어 도식이었고, 보호하면 영어본에 한국어 도식이 남는다. 이 펜스는 내용 대신 줄 수가 같아야 통과하며, 태그 있는 펜스(python·java·yaml 등)의 한국어 주석은 그대로 둔다. 전체 블록 구조, 모든 링크·이미지 목적지, 참조 정의, 각주 ID, 코드, HTML 구조와 한글 잔존율(도식 포함)을 검사한다. 최종 문서 조립 후에도 전체 검증을 통과해야 한다.
+
+연구 청크 캐시는 `output/site_translation_cache/<hash>.json`이다. 키에 원문 청크, 시스템 프롬프트, resolve된 모델 설정, 버전이 들어간다. 성공 청크는 전체 문서가 실패해도 남아 다음 실행에 재사용한다. `--force`는 최종 출력의 스킵 조건을 해제하며 유효한 청크 캐시까지 지우지는 않는다.
+
+기타 DB JSON은 필수 문자열 필드와 필드별 미번역·HTML·URL 보존을 검사한다. 큐레이션의 `source_title_en`만 비어 있어도 통과하며, 이때 UPDATE는 기존 값을 유지한다. 엄격한 JSON 파싱이 실패하면 알려진 키 순서로 문자열 값을 복구한다(값 안의 이스케이프되지 않은 따옴표, 닫는 중괄호 누락). 일기 #438이 이 형태로 매일 밤 실패했다. 행 전체를 호출하며 연구용 청크 캐시는 사용하지 않는다. 정적 페이지는 필수 영어 필드, 안전한 inner HTML, 구조·속성, 한글 잔존율을 검사한다. HTML 검증에서 `alt`, `title`, `aria-label`, `placeholder` 값은 변경 허용 대상이고 다른 속성은 보존해야 한다. Markdown의 태그 보호는 이 속성들도 원문 그대로 복원한다.
+
+숫자·날짜·금액 차이와 일부 부정/조건 표현은 **검토 힌트**이며 자동 수정이나 재시도 조건이 아니다. 연구 DB는 `output/translation_reviews/research-<id>.json`, 파일 번역은 출력 옆 `.review.json`에 기록한다. 기타 DB·정적 페이지는 이 보고서 저장 경로를 사용하지 않는다. 구조 검사는 문단 내부 누락, 주어·목적어 뒤집힘, 조건 범위 오역까지 판정하지 못한다.
+
+## 4. 용어집과 번역 메모리
+
+CommuLingo 인물·용어 스냅샷과 `glossary.extra`를 결합하고, 청크에 등장하는 항목만 기본 최대 60개 주입한다. 러시아어는 격변화와 단어 경계, 중국어는 전체 이름을 사용한다. 라틴 인물사전의 성 단독 항목은 문서에 전체 이름·이니셜 근거가 있어야 주입한다. 직접 지정한 `extra`는 인물사전의 같은 성 때문에 덮이거나 앵커 필터에서 삭제되지 않는다. `glossary.exclude`로 문서별 다의어·동명이인 충돌을 제외한다. 여성 성과 남성 성의 격변화 충돌은 사전 계획에서 경고한다.
+
+용어표 표면 일치로 번역을 강제 검증하지 않는다. Hessen(지명/인물), Союз(나라/단체), Каменева(인물/격변화)처럼 문맥에 따라 달라지는 표기가 있기 때문이다. 사전 스캔 `scan_archival_terms.py --spec <id> --llm`과 사후 `audit_archival_terms.py --spec <id>`는 LLM으로 지시체·실제 번역 표기를 추출해 **보고서와 스펙 수정 제안만** 만든다. 번역 루프에 자동 적용하지 않는다. 결과는 `.terms.jsonl` 캐시와 `.terms-scan.md`/`.terms-audit.md`에 남으며, `--plan`은 모델 호출을 생략한다.
+
+TM은 `runtime_tools/translation_memory.py`가 관리하는 SQLite `output/translation_memory.sqlite3`다.
+
+```text
 segments(id, lang_pair, source, target, doc_id, block_id,
-         status 'machine'|'reviewed', provider, model, created_at)
+         status, provider, model, created_at)
 UNIQUE(lang_pair, doc_id, source, target)
+status: machine < published < reviewed
 ```
 
-- **상태 3단계** (조회 우선순위 machine < published < reviewed): `machine`은 파이프라인 원출력, `published`는 frozen(발행) 스펙에서 온 쌍 — 문서 통독 검수는 거쳤지만 세그먼트 개별 확인은 아니라는 사실을 그대로 남긴 중간 상태, `reviewed`는 그 쌍 자체를 사람이 확인한 것. 같은 쌍이 더 높은 상태로 다시 오면 승격되고 내려가지는 않는다.
-- **적재 경로**: 사료 파이프라인 `run()`이 성공한 청크의 블록 쌍을 자동 적재한다(`_record_translation_memory`, 실패는 `tmFailed` 이벤트로만 남고 번역을 깨지 않는다). `translate_db_content.py`는 행 갱신 성공 시 짧은 필드(title 등) 쌍을 적재한다.
-- **postEdits 반영**: 캐시에는 모델 원출력이 남지만, 사람이 스펙 `postEdits`로 고친 오역 교정은 적재 전에 같은 치환으로 반영된다(`apply_post_edits`). 따옴표 정규화와 병기 축약은 문서 위치에 묶인 처리라 세그먼트에는 적용하지 않는다.
-- **백필**: `python scripts/backfill_translation_memory.py` — 기존 청크 캐시(JSONL)를 스펙 재계획으로 원문과 재정렬해 적재. frozen 스펙은 `published`로 들어간다. API 호출·자격증명 불필요. `--stats`로 집계 확인.
-- **조회**: `exact_matches(sources, lang_pair=..., statuses=...)` — 상태 우선순위대로 이기고, 같은 상태면 새 행이 이긴다.
-- **완전 일치 재사용**: 사료 `run()`이 시작 전에 검수 등급(published/reviewed) 세그먼트와 완전 일치하는 블록을 모델 없이 채운다(`_tm_prefill`, `tmReuse` 이벤트). machine은 자동 재사용하지 않는다 — 미검수 출력의 자기 강화를 막기 위해서다. 청크 경계는 유지하고 전 블록이 덮인 청크만 건너뛴다: 경계를 다시 자르면 기존 청크 캐시가 무효가 되어 재사용이 비용을 늘리기 때문이다. 유사 세그먼트 예시 주입은 남은 후속이다.
+- 사료 성공 블록과 기타 DB의 짧은 필드 쌍을 적재한다. 사료는 postEdits를 반영하지만 문서 위치에 묶인 병기 축약·따옴표 정규화는 적재하지 않는다. 적재 실패는 번역 자체를 중단하지 않는다.
+- `backfill_translation_memory.py`는 기존 사료 캐시를 정렬해 적재하며 frozen 스펙은 published, 나머지는 machine으로 기록한다. API 호출은 없지만 TM 파일을 쓴다. `--stats`는 집계를 조회한다.
+- 기본 `exact_matches`는 높은 상태 우선, 같은 상태는 최신 행 우선이다. 자동 재사용은 `reject_conflicts=True, decisions={}`로 published/reviewed만 조회하며, 최고 등급 안에서 복수 번역이면 보류하고 현재 블록 검증도 수행한다.
+- 청크 경계를 유지하고 모든 블록이 TM으로 채워진 청크만 호출을 생략한다. 일부만 일치하면 청크를 처리한 뒤 TM이 모델 출력보다 우선한다. 같은 원문도 문맥·문체가 다를 수 있으므로 완전 일치는 무오류 보장이 아니다.
+- 스펙 `tmReuse: {enabled: false}`로 전체 재사용을 끄거나 `excludeSources` 목록으로 정확한 원문을 제외한다. 문서 항목 `tmReuse: false`는 해당 문서만 제외한다. `tmSelected`는 상태·출처·세그먼트 ID를, `tmConflict`/`tmInvalid`는 보류 사유를 보고한다.
+- `suggest_tm_examples.py`의 유사 번역례 추천은 사람이 `tmExamples`에 고정한다. 실행마다 동적으로 주입해 캐시를 흔들지 않는다.
 
-## 검증 레이어
+## 5. 원문 최신성과 DB 적용 상태
 
-- 사료: `validate()`(마커 누락/원문 반환/한국어 부재/원문 문자 잔존/길이 하한/**응답 끊김**) + 문서 전체 `stray_cyrillic()`. 실패 사유를 교정 메시지로 붙여 재시도. 끊김 검사(2026-08-31): 청크의 마지막 비어 있지 않은 블록에서 원문은 문장부호로 끝나는데 번역의 마지막 줄이 그렇지 않으면 실패 — 1925 대회 문서 블록 43·1000017이 "…만들어졌", "…지원"에서 끊긴 채 길이 하한(0.36·0.30 > 0.25)을 통과해 발행된 사고의 후속. 끊김은 마지막 블록에서만 조용히 지나가고(앞에서 끊기면 마커 누락으로 잡힘) 전 스펙 캐시 2,923블록 실측에서 이 제한 아래 오탐 0건. **캐시 재심사**: 캐시에서 꺼낸 청크도 현재 `validate()`를 다시 통과해야 쓰인다(`_cached_blocks`) — 검증기가 엄격해질 때 `PROMPT_VERSION`을 올려 전체를 재번역하는 대신 새 검사에 걸리는 청크만 다시 번역한다(`cacheInvalid` 이벤트, `Stats.revalidated`). **용어표 준수는 검사하지 않는다** (2026-08-30 제거): 표면 일치 검사는 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌(Каменева)을 가릴 수 없고, 그 검사가 교정 재시도로 모델의 옳은 첫 번역을 뒤집어 "소비에트 소유즈 (의원 그룹)", "옥탸브리스키 혁명"을 발행시켰다. 용어표는 프롬프트에 참고로 주입될 뿐이며, 표기 통일은 발행 전 통독 + 스펙 postEdits 몫이다.
-- **LLM 용어 일관성 (보고 전용, 2026-08-31)** — `runtime_tools/archival_translation/terms.py`. 표면 매칭이 못 가리는 다의어·격변화 판정을 LLM(registry `archival_term_extraction`, deepseek-v4-flash·json_mode·추론 off)에 맡기되, 결과는 **보고서와 붙여넣을 스펙 조각**으로만 나온다. 번역 루프·재시도에는 넣지 않는다(어제 제거한 검사가 뒤집은 것이 바로 그 자리다). 채택은 사람이 스펙(`glossary.extra`/`glossary.exclude`/`postEdits`)을 고쳐서 하고, postEdits 변경은 캐시 키가 유효한 동안은 전 청크 캐시 적중이라 재조립만 일어난다 — 모델·프롬프트 교체 뒤에는 `--reassemble`을 쓴다(위 2026-08-31 절).
-  - 사전 스캔 `scripts/scan_archival_terms.py --spec <id> --llm [--plan]`: 번역 청크와 같은 단위로 인명·기관·지명·간행물·정치용어를 lemma+sense로 뽑아 (a) 용어표 미등재 후보 + 제안 표기(`glossary.extra` 조각), (b) 표면 매칭으로 청크에 걸렸지만 그 문맥에서는 뜻이 다른 용어표 항목(misfire — 전 청크 오탐이면 `glossary.exclude` 조각, 일부만이면 두 뜻 공존 표시)을 낸다. 대소문자 신호를 쓰지 않아 **중국어 스펙도 된다**. 정규식 스캔(플래그 없음)은 그대로 남아 있다.
-  - 사후 감사 `scripts/audit_archival_terms.py --spec <id> [--plan]`: 청크 캐시(모델 원출력)를 블록 번호로 원문과 정렬해 (원문, 번역) 쌍을 보이고 항목마다 **번역문이 실제 쓴 표기**를 뽑는다. 결정론 집계로 (a) 한 항목에 표기가 둘 이상(불일치 — 다수/소수, 소수의 sense가 다수와 전혀 안 겹치면 "다의어일 수 있음" 표시), (b) 용어표 항목의 뜻(misfire 아님)인데 표기가 다름(이탈)을 보고하고, 스펙 postEdits가 이미 덮는 블록은 "postEdits 적용됨"으로 구분한다. 미처리분만 `postEdits` 제안 조각으로 낸다. 재번역 없음.
-  - 추출 결과는 `output/archival_translations/<id>.terms.jsonl`에 (프롬프트 버전·모드·provider·model·프롬프트) 키로 캐시 — 같은 문서 재감사는 호출 0회. 보고서는 `<id>.terms-scan.md` / `<id>.terms-audit.md`.
-  - **용어표 연결도 LLM이 한다**: 항목마다 «이 청크에 제시된 용어표 항목 중 같은 것을 가리키는 것»을 `glossary` 필드로 답하게 하고, 이탈 판정·기준 표기는 그 연결이 있을 때만 쓴다. 첫 실행(2026-08-31)에서 정규식으로 lemma를 용어표에 대자 Союз(나라)가 Союз(의원 그룹)에 걸려 "연방 → 소유즈 (의원 그룹)"이 제안됐다 — 표면 매칭을 판정에 쓰면 안 된다는 같은 교훈이다. 기준 표기 = 용어표 표기 > postEdits가 덮고 남은 블록이 가장 많은 표기(동률이면 첫 등장). 다수 표기가 이미 postEdits로 고쳐진 오역("소비에트 소유즈")이면 기준이 되지 않고, 불일치 제안과 이탈 제안이 반대 방향("라린→루리예"/"루리예→라린")으로 나오지 않는다.
-  - 집계 키는 lemma 소문자뿐이다. kind(place/org)와 sense는 같은 지시체에도 청크마다 흔들리므로 집계로만 남기고, sense는 사람이 다의어를 가리는 근거로 쓴다. 모델이 지시를 어기고 붙여 온 원어 병기 괄호(사르키스(Саркис))와 복수 '들'은 파서가 결정론으로 뗀다.
-  - 첫 실검증(1925 대회, deepseek-v4-flash, 67청크 ≈ $0.1): 발행본에 남아 있던 실제 불일치를 잡았다 — 라린이 3블록에서 "루리예"로 남음(postEdits 키 "루리예)"가 병기 형태만 덮음), Косиор→"코시오р"(키릴 р 혼입), кулак 미번역 1건, смычка "결합" ×3, 협상국/앙탕트, 국가계획위원회/고스플란 등.
-- 사이트 공통(`scripts/_translation_common.py`): `field_translation_problems()` — 한글 잔존율(원문이 한국어인 긴 필드), 원문 그대로 반환(짧은 필드), HTML 태그 열 보존, URL 보존. `translate_db_content.py`와 스모크가 사용.
-- research markdown: 제목 깊이 열·한글 잔존율·내부 보고서 링크 보존(`_validate_translation`). `translate_markdown_with_retry()`가 검증 실패 사유를 시스템 프롬프트에 붙여 1회 재번역한다(reflection 1회, 반복 자기수정 없음).
-- 오프라인 스모크: `scripts/smoke_translation_memory.py`(TM + 공용 검증기, 맨 클론에서 실행 가능), `scripts/smoke_archival_translation.py`(frontend 체크아웃 필요).
+`research_documents.markdown_en_source_sha256`는 번역에 사용한 원문의 SHA-256이다. `research_store.upsert_document()`는 원문이 바뀌고 새 영어 번역이 제공되지 않으면 이전 영어 필드와 번역 해시를 무효화한다. 연구 번역기는 public 문서 중 영어 본문이 비었거나 번역 해시가 `content_sha256`과 다른 문서를 선택한다. 이 두 해시를 관리하는 원문 저장 경로가 기준이다.
 
-## 스타일 자산
+저장은 `id + 선택 당시 markdown + status='public'` 조건의 UPDATE다. 번역 중 원문이 바뀌거나 비공개가 됐으면 저장을 거부한다. 기록하는 출처 해시는 선택 당시 행의 `content_sha256` 값이다. 직접 SQL로 원문을 고쳐 `content_sha256`이 어긋난 행에 sha256(markdown)을 다시 계산해 넣으면 선택 조건과 영원히 불일치해 매일 밤 재번역된다. title_en/summary_en은 번역 Markdown에서 추출한다. 기타 DB도 선택 당시 원문 필드 값으로 조건부 UPDATE하지만, 연구용 해시 열이나 자동 변경분 탐지 정책은 공유하지 않는다.
 
-- 번역투 금지 목록(writer/prompts.py에서 이식): ~것이다 반복, ~의 사슬, 되어지다 이중 피동, 그/그녀 남용, 한자어+하다 편중 — 사료 시스템 프롬프트(RU·ZH) 양쪽에 있다. 시스템 프롬프트 해시와 유저 프롬프트 전문이 청크 캐시 키에 포함되므로 프롬프트 수정은 캐시를 자동 무효화한다(frozen 스펙은 애초에 재실행이 거부된다). `PROMPT_VERSION`은 파서·검증기 변경 전용이다.
-- 문장부호 규칙은 한 곳에 있지 않다: ZH 프롬프트(《》·「」·굽은 따옴표·着重号), 조립기의 `quotes:"curly"` 정규화, 스펙별 `register` 문자열, em-dash 정책(`commulingo_strip_em_dashes.py`).
+파일 번역은 출력 옆 `.translation.json`에 sourceHash/targetHash를 기록한다. sourceHash가 같으면 수동 편집도 보존한다. 보존한 파일이 구조 검증에 실패하면 덮어쓰지 않고 오류로 보고하므로 손으로 고치거나 `--force`로 재번역한다. 원문이 달라지거나 메타데이터가 없으면 다시 처리하며, 생성 중 원문 변경을 확인하면 최종 파일 저장을 거부한다. 성공한 DB 변경 후에는 해당 frontend Redis 캐시를 비운다.
 
-## 인수인계 체크리스트 대조 (2026-08-30 기준)
+운영 적용 상태:
 
-✅ 충족 / ⚠️ 부분 / ❌ 미충족. 사료 파이프라인 기준이며 사이트 파이프라인은 괄호로 표시.
+- **2026-09-07 운영 `leninbot` DB에 research-documents 마이그레이션 적용 완료.** `markdown_en_source_sha256`는 nullable TEXT이며 기본값이 없다. 새 선택 쿼리의 실행도 확인했다.
+- 적용 직후 재평가 대상 public 문서는 **173건**(원문 1,639,404자)이었고, 타이머가 워킹트리 스크립트를 그대로 실행하므로 다음 04:31 UTC 실행에서 전부 재번역될 상태였다. 같은 날 검토에서 **기존 번역의 출처 해시를 `content_sha256`으로 백필**(174행, 비공개 1건 포함)하고, 직접 SQL 편집으로 어긋나 있던 `content_sha256` 6행(id 56, 57, 186, 368, 418, 430)을 sha256(markdown)으로 복구했다. 백필 후 재평가 대상은 0건이다.
+- 이 작업에서 번역 배치·유료 비교·서비스 재시작은 실행하지 않았다. 타이머 정의는 전체 대상을 선택하므로 수동 실행량 제한은 `--limit`로 정한다.
+- 새 환경에서는 `venv/bin/python scripts/schema_migrations.py --only research-documents`로 준비한다. DB credential과 승인된 쓰기 경로가 필요하다. 이번 운영 적용은 기존 DB credential과 해당 프로세스에만 설정한 `LENINBOT_ALLOW_WRITE=1`을 사용했으며, 암호나 전역 쓰기 설정을 파일에 추가하지 않았다.
 
-| 항목 | 상태 | 비고 |
-|---|---|---|
-| §2.1 청크 크기 1.5k~3k토큰 | ⚠️ | 문자 기준 3,500자(RU ≈ 1.6k토큰)로 범위 안. 토큰 환산은 `chars_per_token` 추정 (사이트: ❌ 통짜, 60k자 캡) |
-| §2.1 표·각주 경계 보존 | ✅ | 블록 단위 청킹이라 중간 절단이 없고, 표 숫자는 모델을 거치지 않는다 |
-| §2.1 직전 청크 맥락 주입 | ❌ | 의도적 설계: 청크 독립 + 병렬, 문서 간 규칙(주석 병기 1회, 따옴표)은 조립기가 집행. 도입하려면 병렬성 포기 필요 — 테스트셋(§5-5) 이후 판단 |
-| §2.1 청크 ID·재조립·부분 재시도 | ✅ | 마커 + 내용 해시 캐시, 실패분만 재호출 |
-| §2.1 한국어 출력 팽창 | ✅ | `SourceLanguage.output_ratio` (RU 0.9 / ZH 1.8) |
-| §2.2 코퍼스 단위 용어집 | ⚠️ | CommuLingo DB(상태·출처·리비전 있음)가 코퍼스 용어집, 파이프라인은 스냅샷을 읽기 전용 소비. 스냅샷 갱신은 수동 단계 |
-| §2.2 사전 스캔(PREPARE) | ✅ | `scripts/scan_archival_terms.py` — 정규식(RU 전용: 약어·문장 중간 대문자) 또는 `--llm`(RU·ZH: 문맥 포함 추출 + 용어표 오탐 보고). 채택·표기는 사람이 결정 |
-| §2.2 청크 등장 항목만 주입 | ✅ | `glossary_for()` + 상한 60 |
-| §2.2 표기 변형 매칭 | ✅ | 러시아어 곡용 변형 + 경계 가드, 중국어 무경계 |
-| §2.2 다의어 항목 차단 | ✅ | `glossary.exclude` — 이 문서 문맥에서 거의 항상 다른 뜻인 항목은 주입에서 뺀다 (주입 목록이 바뀌므로 캐시 키가 바뀐다) |
-| §2.3 TM 정렬 쌍 저장 | ✅ | 이번 변경. v1은 적재 우선 |
-| §2.3 완전 일치 재사용 | ✅ | 검수 등급 한정, 청크 경계 보존(`_tm_prefill`) |
-| §2.3 유사 세그먼트 예시 주입 | ✅ | 스펙 고정 방식: `scripts/suggest_tm_examples.py`가 검수 세그먼트를 어휘 겹침으로 추천 → 사람이 스펙 `tmExamples`에 채택 → 청크 프롬프트의 «참고 번역례»로 주입. 동적 주입은 캐시 키를 흔들어 의도적으로 배제 |
-| §2.4 번역투 금지 목록 이식 | ✅ | 이번 변경 (RU·ZH 프롬프트) |
-| §2.4 스타일 규칙 캐시 위치 | ✅ | 시스템 프롬프트 고정 + 캐시 키 포함 |
-| §2.5 문장 수/길이 급감 | ⚠️ | 문장 수 대신 실측 기반 길이 하한(RU 0.25 / ZH 0.7) |
-| §2.5 용어집 준수 사후 검사 | ✅ | 루프 안 표면 일치 검사는 제거(2026-08-30, 오탐이 재시도로 옳은 번역을 뒤집음). 대신 `audit_archival_terms.py`가 LLM으로 실제 쓰인 표기를 뽑아 불일치·이탈을 **보고**하고 postEdits 제안을 낸다. 자동 수정·재시도 없음 |
-| §2.5 숫자·마크업 보존 | ⚠️ | 표 숫자는 코드 보존, 사이트는 태그 열·URL 검사(이번 추가). 본문 숫자 대조는 없음 |
-| §2.5 미번역 잔존 검사 | ✅ | 블록 + 문서 전체(키릴·한자), 사이트는 한글 잔존율 |
-| §2.5 위반 항목만 명시 재번역 | ✅ | 사료 원래 있음; research·db_content는 이번 추가 |
-| §2.6 위치 지정 편집 정제 | — | 정제 단계 자체가 없다(P5의 회귀 위험이 없는 상태). 필요해지면 diff 반환으로 설계 |
-| §2.7 단일 어댑터·언어쌍 설정 | ✅ | `call_registry` + feature 단위 JSON, 핫 리로드. 사료는 `archival_document_translation_ru`/`_zh`로 분리되어 언어쌍별 provider·model 교체 가능(`SourceLanguage.feature`). 교체 전 `--compare`로 검증. CLI·API에는 model 옵션이 없다(registry가 이김) |
-| §2.7 Batch API | ❌ | 미지원 — 남은 로드맵(야간 타이머 작업이 후보) |
-| §2.7 토큰·비용 기록 | ✅ | `record_llm_call` 감사 + `plan()` 사전 견적 |
-| §2.8 고정 테스트셋·자동 지표 | ❌ | 없음 — 남은 로드맵 §5-5 (모델 교체 재평가의 전제) |
+## 6. 평가·검증과 남은 한계
 
-## 남은 로드맵 (우선순위 순)
+`tests/fixtures/translation_eval.json`은 기존 RU/ZH/EN/DE/IT 사료 청크 15개와 KO→EN 구조·조건 예제 1개를 원문 해시와 함께 고정한다. 입력·용어 프롬프트를 스냅샷으로 보관해 이후 청크 번호·용어집 변경에 영향받지 않는다. FR 실제 사료는 아직 없다.
 
-1. 언어쌍별 고정 테스트셋 + 청크 크기 실험(1k/3k/8k/통짜) — 모델 라우팅 재평가의 전제. (2026-09-01: `--compare-chunk-ids`와 난문 16청크 목록이 첫 조각. 표기 함정 청크는 프롬프트 보강으로 변별력을 잃었으니 테스트셋은 난문 위주로.)
-2. Batch API 경로(야간 타이머 작업 50% 할인).
-3. 사이트 파이프라인 청킹 — 60k자 캡을 넘는 문서가 생기면 사료 엔진의 마커 방식 재사용.
+```bash
+# 모델 호출 없이 목록 확인 또는 이미 생성된 후보 평가
+venv/bin/python scripts/evaluate_translation.py
+venv/bin/python scripts/evaluate_translation.py --candidates <candidates.json> --output <report.json>
+
+# 오프라인 회귀·스모크
+venv/bin/python -m unittest tests.test_translation_pipeline tests.test_call_registry_output_budget
+venv/bin/python scripts/smoke_translation_memory.py
+venv/bin/python scripts/smoke_archival_translation.py
+```
+
+`--generate`를 명시하면 현재 registry 모델을 실제 호출한다. `--id`로 고정 사례를 선택하고 `--context-chars 0|600|1200`으로 원문 맥락 실험을 할 수 있다. 자동 검사는 구조·형식과 검토 힌트를 제공하며, 사람이 누락·주체/객체·부정/조건·용어·자연스러움을 0~3점으로 평가한다. 미평가 점수는 null이고 자동 정답 점수가 아니다.
+
+사료 스펙의 `sourceContextChars`는 기본 0, 범위 0~2000이다. 활성화하면 제목·절 제목·인접 원문을 출력 금지 참고 맥락으로 주입하고 캐시 키에 반영한다. 앞 청크 번역을 기다리지 않으므로 병렬성은 유지된다. 고정 평가셋에서 효과를 확인하기 전 기본 활성화하지 않는다.
+
+2026-09-07 개선 검증에서 관련 단위 테스트 **177개**, 번역 스모크 **2종**이 통과했다. 범위는 공통 실행·사이트 구조·사료 검증·TM·원문 변경·출력 권한·할당량 중단·호출 계측·게이트웨이 호환성이다. 같은 날 검토 후 429 분류·펜스 왕복·관대한 JSON 복구·큐레이션 선택 필드·사료 교정 문구 테스트를 더해 번역 스위트 **58개**, 전체 허메틱 스위트 **529개**가 통과했다. `research/*.md` 84개 파일로 보호·복원 왕복을 확인했다(수정 전에는 펜스 뒤 빈 줄 때문에 10개가 어긋났다). 사료 스모크는 저본·frontend 체크아웃이 필요하며, 고정 평가셋과 공통 회귀 테스트는 외부 API·운영 DB 없이 수행한다.
+
+남은 항목은 실제 모델 후보의 원문 대조 평가와 FR 사례 확장, 청크 크기·맥락 A/B 측정, 초대형 단일 Markdown 표·목록의 하위 분할, 기타 DB 행의 청킹·번역 최신성 확대다. Batch API는 미구현이다. 모델 선택·추가 비용 최적화는 실측과 의미 품질 평가 후 결정한다.
+
+## 7. 2026-09-07 검토 기록: 의도와 주의점
+
+공통화 리팩터링 직후 코드 검토에서 나온 결정들이다. 코드만 보면 "왜 이렇게 했는지"가 안 보이는 항목을 적는다. 커밋: `5d6b821`(검토 수정), `2e5ff00`(도식 펜스).
+
+### 7.1 타이머는 워킹트리를 실행한다
+
+`research-document-translation.service`는 `/home/grass/leninbot`의 스크립트를 그대로 실행한다. 배포 단계가 없으므로 **커밋하지 않은 수정도 다음 04:31 UTC에 운영 DB에 적용된다.** 이번에 선택 쿼리를 바꾸고 마이그레이션을 먼저 적용했더니, 백필 전에는 public 문서 173건(1.64M자)이 그날 밤 전부 재번역될 상태였다. 선택 조건이나 해시 규칙을 건드리면 커밋 전에 반드시 아래로 대기열을 확인한다.
+
+```sql
+SELECT count(*) FROM research_documents
+ WHERE status='public'
+   AND (NULLIF(BTRIM(COALESCE(markdown_en,'')),'') IS NULL
+        OR markdown_en_source_sha256 IS DISTINCT FROM content_sha256);
+```
+
+### 7.2 해시 두 개의 관계
+
+- `content_sha256`은 원문 저장 경로(`research_store.upsert_document`)가 관리한다. `dedupe_research_headers.py`, `fix_broken_report_links.py`, `demote_research_body_h1.py`처럼 **직접 SQL로 markdown을 고치는 스크립트는 이 열을 갱신하지 않는다.** 7월 24~25일 편집으로 6행이 어긋나 있었고, 이번에 sha256(markdown)으로 복구했다. 그런 스크립트를 다시 쓰면 `content_sha256`도 함께 갱신해야 한다.
+- 번역기는 선택 당시 행의 `content_sha256` 값을 `markdown_en_source_sha256`에 기록한다. sha256(markdown)을 다시 계산하지 않는 이유는, 선택 조건이 저장된 열과 비교하므로 어긋난 행이 매일 밤 재번역되기 때문이다.
+- 특정 문서를 다시 번역하려면 `--force`(전체) 대신 그 행의 `markdown_en_source_sha256`을 NULL로 두면 다음 밤 타이머가 집는다. 이번에 구조 검증 실패 16건(id 45, 52, 53, 81, 194, 235, 263, 276, 299, 303, 315, 322, 331, 337, 340, 418)을 이 방법으로 걸었다.
+
+### 7.3 일괄 재번역을 하지 않은 이유
+
+기존 173건을 새 검증기로 오프라인 점검했더니 143건 통과, 16건 구조 불일치, 14건은 코드 펜스 내용만 달랐다. 모델이 같으므로 산문 품질 향상은 없고, 14건은 펜스 안 ASCII 도식을 영어로 옮긴 좋은 번역이었다. 재번역은 검증기가 실제 결함(단락 누락·제목 깊이·링크·각주)을 잡은 문서로 한정한다. 점검 절차는 §6의 `markdown_problems`를 KO/EN 쌍에 그대로 적용한 것이다(읽기 전용, 모델 호출 없음).
+
+### 7.4 도식 펜스 규칙의 근거와 한계
+
+태그 없는 펜스 63개 중 59개가 한국어 도식이라 번역 대상에 넣었다. 검증은 줄 수 동일이다. 한계:
+- 태그 있는 펜스(python·json 등)의 한국어 주석·문자열은 번역하지 않는다. 기존 번역본 4건(id 5, 9, 27, 39)은 옛 파이프라인이 이를 번역한 상태로 남아 있으며, 새 검증기 기준으로는 실패지만 재번역하면 오히려 한국어로 되돌아가므로 그대로 둔다.
+- 도식 안의 `<...>`는 HTML 태그 정규식에 걸려 플레이스홀더가 된다. 복원은 정확하지만 그 부분의 한국어는 번역되지 않는다.
+- 인라인 코드 마스킹은 줄을 넘지 않는다. DOTALL을 다시 켜면 태그 없는 펜스의 백틱이 한 덩어리로 잡혀 도식이 다시 숨는다.
+
+### 7.5 오류 분류와 중단 플래그
+
+`_error_kind`에서 429는 항상 `rate_limit`이다(메시지에 `insufficient_quota`가 있을 때만 `quota`). Gemini는 분당 제한에도 "Quota exceeded ... billing"이라고 하므로 **문자열로 영구 오류를 판정하면 사료 동시성 5에서 첫 429가 실행 전체를 중단시킨다.** 영구 중단(`abort`)은 authentication·quota·policy·configuration에만 걸리며, 새 종류를 추가할 때는 그 오류가 재시도로 풀리지 않는다는 실제 메시지 근거를 확인한다. 감사 로그 조회: `SELECT error_excerpt FROM llm_audit_log WHERE provider='gemini' AND status='error' ORDER BY id DESC`.
+
+### 7.6 기타 DB JSON의 관대한 복구
+
+`parse_json_object(text, keys=...)`는 엄격 파싱이 실패할 때만 알려진 키 순서로 문자열을 잘라 복구한다. 일기 #438이 9월 5일부터 매일 밤 같은 자리에서 실패해 추가했지만, **실제 모델 출력으로는 검증하지 못했다.** 첫 성공/실패는 타이머 로그(`journalctl -u research-document-translation.service`)에서 확인한다. 복구는 값이 문자열인 평면 객체만 다루며, 키가 아닌 곳에 `"key":` 패턴이 들어 있으면 값이 잘릴 수 있다.
+
+### 7.7 교정 문구의 소유
+
+`translate_validated(correction=...)`는 어댑터가 재번역 지시문을 렌더링한다. 사료는 한국어 지시문을 시스템 프롬프트 뒤에 붙이고, 사이트 어댑터는 플레이스홀더 보존을 포함한 영어 기본문을 쓴다. 공통 엔진에 특정 형식의 문구를 넣지 않는다.

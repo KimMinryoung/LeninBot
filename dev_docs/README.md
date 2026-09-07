@@ -28,7 +28,7 @@
 | `monitoring.md` | 감시·알림 체계 — 외부 워치독, 복제 점검, 알림 채널, 사각지대 |
 | `knowledge_graph_design.md` | Neo4j/Graphiti KG 런타임 구조 |
 | `knowledge_graph_schema.md` | KG typed entity/edge schema |
-| `translation_pipeline.md` | 사료(RU·ZH→KO)·사이트(KO→EN) 번역 파이프라인, 번역 메모리, 검증 레이어 |
+| `translation_pipeline.md` | 사료(RU/ZH/EN/DE/FR/IT→KO)·사이트(KO→EN) 공통 실행, 검증·캐시·TM, 원문 최신성, DB 적용 상태와 평가 |
 | `vector_corpus_reingestion_handoff.md` | Windows GPU PC에서 vector corpus 재등록 시 필요한 metadata/chunking 인수인계 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
 | `autonomous_project.md` | hourly autonomous project loop |
@@ -49,6 +49,7 @@
 | `services/` | FastAPI·embedding 서비스 진입점과 web/A2A/email/image 서비스 구현 |
 | `jobs/` | systemd timer나 수동 명령이 실행하는 autonomous/experience 작업 |
 | `llm/` | provider adapter, 공용 tool-loop engine, gateway, model/runtime profile |
+| `translation_runtime/` | 사료·사이트 번역 공통 실행, 구조 검증, 원자적 파일 저장 |
 | `telegram/`, `agents/`, `runtime_tools/` | Telegram orchestration, agent specs, runtime tool implementations |
 | `scripts/`, `deploy/`, `systemd/` | 운영·검증 스크립트, 배포 자산, unit 원본 |
 

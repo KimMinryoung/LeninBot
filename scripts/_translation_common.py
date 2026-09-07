@@ -37,25 +37,64 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-def parse_json_object(text: str) -> dict[str, Any]:
+def parse_json_object(text: str, keys: list[str] | None = None) -> dict[str, Any]:
     """Parse a JSON object out of a model reply.
 
     Falls back to the outermost {...} slice when the reply carries prose
     around the object — the failure mode of a model that prefixes "Here is
-    the JSON:" despite json_mode.
+    the JSON:" despite json_mode. With ``keys`` (string fields in reply order)
+    it also recovers a flat object whose string values carry unescaped quotes
+    or whose closing brace is missing — diary #438 failed every night that way.
     """
     raw = strip_code_fences(text)
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         start = raw.find("{")
         end = raw.rfind("}")
-        if start < 0 or end <= start:
-            raise
-        data = json.loads(raw[start : end + 1])
+        try:
+            if start < 0 or end <= start:
+                raise
+            data = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            if not keys:
+                raise
+            data = _lenient_json_strings(raw, keys)
+            if data is None:
+                raise exc
     if not isinstance(data, dict):
         raise ValueError("translation output is not a JSON object")
     return data
+
+
+def _lenient_json_strings(raw: str, keys: list[str]) -> dict[str, str] | None:
+    """Recover ``{"k1": "...", "k2": "..."}`` when the strings are not valid JSON.
+
+    Each value runs from its opening quote to the quote that precedes the next
+    known key (or the end of the reply). Unescaped inner quotes are escaped
+    before decoding so real escapes (\\n, \\") survive.
+    """
+    out: dict[str, str] = {}
+    alternatives = "|".join(re.escape(k) for k in keys)
+    for key in keys:
+        match = re.search(r'"%s"\s*:\s*"' % re.escape(key), raw)
+        if not match:
+            continue
+        rest = raw[match.end():]
+        stop = re.search(r'"\s*,\s*"(?:%s)"\s*:' % alternatives, rest)
+        if stop:
+            value = rest[: stop.start()]
+        else:
+            trailing = re.search(r'"\s*\}?\s*$', rest)
+            if not trailing:
+                return None
+            value = rest[: trailing.start()]
+        escaped = re.sub(r'(?<!\\)"', r'\\"', value)
+        try:
+            out[key] = json.loads(f'"{escaped}"')
+        except json.JSONDecodeError:
+            return None
+    return out or None
 
 
 def tag_sequence(html: str) -> list[str]:
@@ -89,6 +128,7 @@ def field_translation_problems(
     label: str,
     max_hangul_ratio: float = 0.05,
     long_text_min: int = 80,
+    optional: bool = False,
 ) -> list[str]:
     """Deterministic checks for one KO→EN translated field (인수인계 §2.5).
 
@@ -102,7 +142,10 @@ def field_translation_problems(
     problems: list[str] = []
     source = (source or "").strip()
     target = (target or "").strip()
-    if not source or not target:
+    if source and not target:
+        # optional: the field may legitimately stay empty (curation source_title).
+        return [] if optional else [f"{label}: missing translation"]
+    if not source:
         return problems
     if hangul_ratio(source) >= 0.3:
         if len(target) >= long_text_min:
@@ -116,15 +159,12 @@ def field_translation_problems(
             problems.append(f"{label}: the source text was returned untranslated")
     if tag_sequence(source) != tag_sequence(target):
         problems.append(f"{label}: HTML tag sequence differs from the source")
+    from translation_runtime.structure import html_problems
+    problems.extend(f"{label}: {p}" for p in html_problems(source, target))
     if url_multiset(source) != url_multiset(target):
         problems.append(f"{label}: URLs differ from the source; copy link destinations verbatim")
     return problems
 
 
-class TranslationCallError(RuntimeError):
-    """제공자가 실제로 무엇을 돌려줬는지 함께 들고 다니는 오류.
-
-    예전에는 빈 응답이 json.loads에서 "Expecting value: line 1 column 1"으로
-    터졌다. 그 문장만 보고는 모델이 거부한 것인지, 응답이 잘린 것인지, 아예
-    비어서 온 것인지 구분할 수 없어서 로그를 봐도 손을 못 댔다.
-    """
+# Compatibility imports for existing script consumers.
+from translation_runtime import TranslationCallError, TranslationProviderError, generate_translation

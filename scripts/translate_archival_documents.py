@@ -44,6 +44,8 @@ def _print_plan(prepared: dict) -> None:
     print(f"용어표   : {prepared['glossaryEntries']:,}항목")
     print(f"청크     : {prepared['chunks']}개")
     print(f"번역 대상: {prepared['chars']:,}자")
+    if prepared.get("oversizedBlocks"):
+        print(f"분할 번역할 초과 블록: {prepared['oversizedBlocks']}")
     think = "추론 on" if prepared.get("thinking") else "추론 off"
     print(f"예상 비용: 약 ${prepared['estimatedUsd']:.2f} ({prepared.get('model')}, {think} 기준)")
 

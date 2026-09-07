@@ -20,6 +20,7 @@ from agents.kollontai import KOLLONTAI
 from agents.autonomous import AUTONOMOUS_PROJECT
 from agents.commulingo_curator import COMMULINGO_CURATOR
 from agents.commulingo_event_curator import COMMULINGO_EVENT_CURATOR
+from agents.hub_curator import HUB_CURATOR
 from agents.runtime_config import apply_agent_runtime_config, reload_agent_runtime_config_if_changed
 
 _REGISTRY: dict[str, AgentSpec] = {
@@ -34,6 +35,7 @@ _REGISTRY: dict[str, AgentSpec] = {
     "autonomous_project": AUTONOMOUS_PROJECT,
     "commulingo_curator": COMMULINGO_CURATOR,
     "commulingo_event_curator": COMMULINGO_EVENT_CURATOR,
+    "hub_curator": HUB_CURATOR,
 }
 
 apply_agent_runtime_config(_REGISTRY)
