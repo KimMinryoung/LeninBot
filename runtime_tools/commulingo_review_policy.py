@@ -1,5 +1,6 @@
 """Pure decision validation. Only source text fetched in this review counts."""
 import re
+import json
 from urllib.parse import urlsplit
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
@@ -7,9 +8,14 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
         "properties": {
             "decision": {"type": "string", "enum": ["approve", "reject", "escalate"]},
             "reason": {"type": "string", "minLength": 20},
-            "resolved_risks": {"type": "array", "items": {"type": "string"}},
+            "resolved_risks": {"type": "array", "description": "Exact strings copied from suggestion.risks; put explanations in reason/findings, not in risk identifiers.", "items": {"type": "string"}},
             "checks": {"type": "array", "maxItems": 30, "items": {"type": "object", "additionalProperties": False,
-                "properties": {key: {"type": "string"} for key in ("citation", "source", "quote", "finding")},
+                "properties": {
+                    "citation": {"type": "string", "description": "Copy one COMPLETE suggestion.source_refs entry verbatim, including its URL and any annotation. Never shorten or rename it."},
+                    "source": {"type": "string", "description": "URL whose text you actually retrieved during this review."},
+                    "quote": {"type": "string", "description": "Exact contiguous quotation from the retrieved body, at least 20 characters. No ellipsis or paraphrase."},
+                    "finding": {"type": "string", "description": "Your Korean explanation of what this quote verifies."},
+                },
                 "required": ["citation", "source", "quote", "finding"]}},
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
@@ -46,9 +52,9 @@ def validate_decision(value, proposal, fetched):
         raise ValueError("approve/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":
         if not set(proposal.get("source_refs") or []).issubset({c["citation"] for c in checks}):
-            raise ValueError("approval must independently verify every cited reference")
+            raise ValueError("approval must independently verify every cited reference; copy these missing source_refs verbatim into checks[].citation: " + json.dumps(sorted(set(proposal.get("source_refs") or []) - {c["citation"] for c in checks}), ensure_ascii=False))
         if not any(not (urlsplit(c["source"]).hostname or "").endswith("wikipedia.org") for c in checks):
             raise ValueError("approval requires an independent source outside Wikipedia")
         if not set(proposal.get("risks") or []).issubset(set(risks)):
-            raise ValueError("approval must resolve every review risk")
+            raise ValueError("approval must resolve every review risk; resolved_risks must include these exact identifiers (explanations belong in reason/findings): " + json.dumps(sorted(set(proposal.get("risks") or []) - set(risks)), ensure_ascii=False))
     return value

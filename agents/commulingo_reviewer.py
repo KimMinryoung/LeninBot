@@ -28,7 +28,12 @@ escalate when sources are inaccessible, identity/disputes remain unresolved, or 
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
 Each check must name its original citation, the fetched source URL, an exact short quotation
 from that fetched text, and a Korean finding. For approval, cover every cited reference and
-list every resolved risk. Explain the final decision in Korean. An escalation must identify
+list every resolved risk. checks[].citation MUST copy the COMPLETE original source_refs
+string verbatim, including its URL and annotation; a replacement label is invalid.
+resolved_risks MUST contain the exact strings from suggestion.risks, without suffixes or
+explanations. Put your explanations in reason and checks[].finding. quote must be a
+contiguous excerpt of the fetched body, not a paraphrase or a quotation with added ellipses.
+Explain the final decision in Korean. An escalation must identify
 what the operator must establish to decide. A valid decision ends the run; never invent evidence.
 """),
     tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people"],

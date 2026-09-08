@@ -31,6 +31,12 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         for change in ({'resolved_risks':[]},{'checks':[]}):
             with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
         with self.assertRaises(ValueError):validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation']},{SOURCE:QUOTE})
+    def test_failed_coverage_reports_exact_missing_identifiers(self):
+        with self.assertRaisesRegex(ValueError, 'original citation with annotation'):
+            validate_decision(DECISION, {**PROPOSAL, 'source_refs': ['original citation with annotation']}, {SOURCE: QUOTE})
+        with self.assertRaisesRegex(ValueError, 'identity_uncertain'):
+            validate_decision({**DECISION, 'resolved_risks': ['identity_uncertain: explanation']}, PROPOSAL, {SOURCE: QUOTE})
+
     def test_uncertainty_can_escalate_without_inventing_evidence(self):
         value={**DECISION,'decision':'escalate','checks':[]}
         validate_decision(value,PROPOSAL,{})
