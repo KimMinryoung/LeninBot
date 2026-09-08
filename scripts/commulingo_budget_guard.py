@@ -5,6 +5,9 @@ systemd ExecCondition helper: exits 0 while today's combined curator spend is
 under the cap (the run proceeds), 1 once the cap is reached (systemd skips the
 run without marking the unit failed).
 
+A non-positive cap disables the daily limit (the default). Per-run LLM budgets
+remain independent.
+
 Spend is read from the lanes' own journal output — every curator run logs a
 result JSON containing "cost_usd", the same field commulingo_lane_health.py
 aggregates for the daily digest.
@@ -50,7 +53,10 @@ LLM_CALL_COST = re.compile(
 
 
 def main() -> int:
-    cap = float(os.environ.get("COMMULINGO_DAILY_CAP_USD", "1.0"))
+    cap = float(os.environ.get("COMMULINGO_DAILY_CAP_USD", "0"))
+    if cap <= 0:
+        print("[budget-guard] daily curator cap disabled — proceeding")
+        return 0
     spent = 0.0
     for unit in LANE_UNITS:
         out = subprocess.run(

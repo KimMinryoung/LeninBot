@@ -64,7 +64,9 @@ frontend test-commulingo-editorial-db.js는 근거·검토·롤백·상태 전�
 `leninbot-commulingo-review.timer`가 15분마다 `scripts/commulingo_person_reviewer.py`를 실행한다.
 `agents/commulingo_reviewer.py`는 작성자 문맥을 물려받지 않는 전용 AgentSpec이다.
 일반 delegate 목록에는 등록하지 않는다. 조사 도구와 실행기 내부의 `commulingo_review_decision`
-만 제공하며, LLM이 인물 저장·승인 API를 직접 호출할 수 없다. 검토 실행기는 검증된 판단을
+만 제공하며, LLM이 인물 저장·승인 API를 직접 호출할 수 없다. 이 내부 판단 도구는
+security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_reviewer 호출자만
+허용한다. 테스트는 handler 직호출 대신 실제 dispatcher를 거쳐 차단 재발을 검사한다. 검토 실행기는 검증된 판단을
 기존 JS 공통 승인 서비스로 전달한다. Telegram 명령도 같은 서비스를 사용한다.
 
 - 승인: 새로 가져온 원문에 실제로 있는 인용, 모든 제안 출처의 확인, 검토 사유의 해소,
@@ -96,8 +98,10 @@ show는 현재 원문·전체 변경안·출처·검토 근거를 JSON으로 첨
 프로세스가 죽으면 알림이 중복될 수 있지만 승인 내용이 중복 반영되지는 않는다.
 
 한 번에 최대 한 제안을 검토하며 기본 LLM 예산은 $0.20, 최대 12라운드다.
-기존 CommuLingo 일일 합산 예산($2.5)에 포함된다. 예산 소진 시 조사는 연기하지만
-운영자 알림 확인은 계속한다. 상태 보고에 review lane을 포함하며 빈 큐는 정상 idle로 집계한다.
+CommuLingo 일일 합산 예산 제한은 해제되어 있다. systemd 원본과 운영 unit은
+COMMULINGO_DAILY_CAP_USD=0을 사용하며 budget guard의 기본값도 0이다.
+0 이하이면 비용 집계 없이 통과한다. 양수를 명시하면 일일 제한을 다시 적용하며,
+예산 소진 시 조사는 연기하지만 운영자 알림 확인은 계속한다. 회당 LLM 예산은 유지한다. 상태 보고에 review lane을 포함하며 빈 큐는 정상 idle로 집계한다.
 
 배포 순서: 177 적용 → Python 코드와 systemd service/timer 설치 → daemon-reload →
 Telegram 재시작(명령 등록) → 검토 서비스 첫 실행 → 타이머 활성화.

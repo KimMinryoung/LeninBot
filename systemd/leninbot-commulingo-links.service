@@ -11,7 +11,7 @@ EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=COMMULINGO_SUGGESTED_BY=commulingo-gap-event-links
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
-Environment=COMMULINGO_DAILY_CAP_USD=2.5
+Environment=COMMULINGO_DAILY_CAP_USD=0
 ExecCondition=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_budget_guard.py
 # Bounded per batch: this is a tail that clears whatever the earlier lanes made,
 # and an unbounded run would spend the window on a backlog nobody is waiting on.

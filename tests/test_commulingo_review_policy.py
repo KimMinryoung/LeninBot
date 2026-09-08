@@ -51,14 +51,15 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             import bot_config
             import runtime_tools.registry as registry
         from tool_gateway.security import get_caller
-        from tool_gateway.validation import validate_tool_arguments
+        from tool_gateway.dispatcher import execute_tool
         async def chat(*args,**kwargs):
             self.assertEqual(get_caller().agent_name,'commulingo_reviewer')
             self.assertEqual(set(kwargs['tool_handlers']),{'wiki_search','wiki_get','web_search','fetch_url','commulingo_people','commulingo_review_decision'})
             self.assertFalse(any(k.startswith('commulingo_person_') for k in kwargs['tool_handlers']))
             await kwargs['tool_handlers']['fetch_url'](url=SOURCE)
-            validate_tool_arguments('commulingo_review_decision',DECISION,schema=worker.DECISION_TOOL,risk_class='uncategorized')
-            await kwargs['tool_handlers']['commulingo_review_decision'](**DECISION)
+            with patch('tool_gateway.security.audit'):
+                result, failed = await execute_tool('commulingo_review_decision', DECISION, kwargs['tool_handlers'], tool_schema=worker.DECISION_TOOL)
+            self.assertFalse(failed, result)
             return 'An irrelevant model summary'
         names=['wiki_search','wiki_get','web_search','fetch_url','commulingo_people']
         reads={name:AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>') for name in names}
@@ -67,6 +68,15 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             decision,fetched=await worker.research({**PROPOSAL,'id':1},{}, {})
         self.assertEqual(decision['decision'],'approve')
         self.assertIn(QUOTE,fetched[SOURCE])
+    def test_review_decision_is_reviewer_only_and_owner_only(self):
+        from security_gateway import CallerContext, authorize
+        from security_gateway import policy
+        with patch.object(policy, 'enforce_mode', return_value='enforce'):
+            for agent, owner, expected in [('commulingo_reviewer', True, True), ('commulingo_curator', True, False), ('commulingo_reviewer', False, False)]:
+                ctx = CallerContext(interface='autonomous', agent_name=agent, is_owner=owner)
+                result = authorize(ctx, 'commulingo_review_decision', {}, consume_rate_limit=False)
+                self.assertEqual(result.allowed, expected, result)
+
     def test_health_digest_treats_empty_review_queue_as_normal(self):
         health_spec=importlib.util.spec_from_file_location('review_health',ROOT/'scripts/commulingo_lane_health.py')
         health=importlib.util.module_from_spec(health_spec);health_spec.loader.exec_module(health)
