@@ -111,3 +111,7 @@ Frontend 국기·지도와 Python 허용 코드에 serbia, croatia, slovenia, mo
 bosnia-herzegovina, switzerland를 함께 등록했다. 유고슬라비아는 소속 국가로 유지하고
 출신 배경은 출생지가 아닌 문헌의 민족·가계·자기인식으로 구분한다. 혼합 배경은
 단일 국가 코드에 가려지지 않도록 한영 라벨과 주장 근거에 함께 기록한다.
+
+## 사전 등록 국가 코드
+
+세계 지도에 사전 등록된 현대 국가도 인물·사건이 없어도 등록 도구에서 선택할 수 있다. `_NATIONALITY_CODES`는 frontend `modern-country-codes.json`과 기존 역사·지역 코드에 대응한다. 신규 코드의 국기 SVG와 영역 등록은 frontend에서 관리하며 `commulingo_people_maintainer.py`도 동일한 Python 코드 집합을 가져온다. 국가 추가 시 양쪽 코드 집합의 일치를 검증한다.
