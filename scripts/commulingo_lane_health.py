@@ -94,6 +94,10 @@ IDLE = re.compile(
 # clean rather than crashing the unit, so it has to be tallied explicitly or it
 # would leave no trace here at all and a dead lane would read as a quiet one.
 NO_EDIT = re.compile(r'^\s*"status": "no_edit"', re.M)
+PENDING_REVIEW = re.compile(r'^\s*"status": "pending_review"', re.M)
+# Older gap workers mislabeled a successful review submission as no_edit.
+LEGACY_PENDING_REVIEW = re.compile(
+    r'^\s*"status": "no_edit",\s*"result": "OK — pending:', re.M)
 FALLBACK = re.compile(r'^\s*"mode": "enrich_fallback"', re.M)
 FAILED = re.compile(r"^(?:\S+ )*(?:RuntimeError|ValueError|Exception):", re.M)
 # Result-JSON line only, like APPLIED above — unanchored it also swept the two
@@ -172,14 +176,17 @@ def tally(unit: str, since: str) -> dict:
     skipped = len(SKIPPED.findall(text))
     idle = len(IDLE.findall(text))
     failed = len(FAILED.findall(text))
-    no_edit = len(NO_EDIT.findall(text))
-    total = applied + skipped + failed + no_edit
+    legacy_pending = len(LEGACY_PENDING_REVIEW.findall(text))
+    pending_review = len(PENDING_REVIEW.findall(text)) + legacy_pending
+    no_edit = len(NO_EDIT.findall(text)) - legacy_pending
+    total = applied + skipped + failed + no_edit + pending_review
     return {
         "applied": applied,
         "skipped": skipped,
         "idle": idle,
         "failed": failed,
         "no_edit": no_edit,
+        "pending_review": pending_review,
         "fallback": len(FALLBACK.findall(text)),
         "total": total,
         "cost": sum(float(v) for v in COST.findall(text)),
@@ -201,15 +208,14 @@ def problems(lane: str, stats: dict) -> list[str]:
     # Runs that had a subject in hand. Idle runs exited on an empty queue and
     # spent nothing, so they are a wait, not a failure to apply.
     busy = stats["total"] - stats["idle"]
-    if stats["applied"] == 0 and busy:
+    if stats["applied"] == 0 and not stats.get("pending_review", 0) and busy:
         found.append(
             f"{lane}: {busy} runs found work, nothing applied"
             + (f" ({stats['idle']} idle, queue empty)" if stats["idle"] else "")
         )
     if stats["no_edit"] / stats["total"] > MAX_FAILURE_RATE:
         found.append(
-            f"{lane}: {stats['no_edit']}/{stats['total']} runs ended with no edit "
-            f"(rounds exhausted before the write)"
+            f"{lane}: {stats['no_edit']}/{stats['total']} runs ended with no edit"
         )
     failure_rate = stats["failed"] / stats["total"]
     if failure_rate > MAX_FAILURE_RATE:
@@ -361,6 +367,7 @@ def main() -> int:
             + f"  failed {stats['failed']:3}  no_edit {stats['no_edit']:3}  "
             f"fallback {stats['fallback']:3}  "
             f"${stats['cost']:.2f}"
+            + (f"  pending_review {stats['pending_review']}" if stats.get("pending_review") else "")
             + (f"  ({stats['total']} runs)" if drain else "")
         )
         alerts.extend(drain_problems(lane, stats) if drain else problems(lane, stats))

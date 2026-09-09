@@ -32,6 +32,16 @@ Workflow:
    `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, or
    `commulingo_term_create`. Never delete anything. Keep `citations` top-level; never put
    citations or confidence inside person/term `fields`.
+   For person create/update, `evidence`, `expectedRevision` and `reviewFlags` go INSIDE
+   `fields`. Copy the current read's revision into fields.expectedRevision on update.
+   Each supplied bio, moment, years, citizenship and nationalOrigin needs a separate
+   evidence item with that exact field name, a supported claim and a page/section locator.
+   Copy one COMPLETE top-level citations string verbatim into each evidence.source,
+   including its description; a URL alone does not match a citation with extra text.
+   Send only changed fields on update and evidence for this edit, not old career evidence.
+   Check all supplied factual fields before the first write so corrections need not be
+   discovered one field per paid retry. Section_save instead takes evidence and
+   expected_revision at top level and requires evidence for body.
 
 Content rules:
 - Every public text field is bilingual `{ko, en}`. Korean should read naturally, not like a

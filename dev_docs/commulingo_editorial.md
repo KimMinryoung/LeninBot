@@ -24,6 +24,16 @@ section_save는 expected_revision이 필수다. 최신 버전의 자동 재대�
 stance는 supports/disputes다. 한영 부분 수정과 aliasEdits/careerEdits/sceneEdits는 Admin과 같다.
 정확한 검증과 분량 원본은 frontend `person-editorial-contract.json`이다.
 Python도 이 파일을 읽는다(`COMMULINGO_PERSON_CONTRACT`로 테스트 파일을 지정 가능).
+인물 도구의 evidence/expectedRevision/reviewFlags는 fields 안에, citations는 최상위에
+둔다. 절 저장은 evidence/expected_revision을 최상위로 받는다. evidence.source는
+설명을 포함한 citations 항목 전체와 정확히 일치해야 하며 URL만 복사하면 안 된다.
+Python RPC 직전 진단은 contract.factFields의 누락 근거와 출처 문자열 불일치,
+현재 수정에 없는 필드 근거를 한 번에 알려준다. 근거를 자동 생성·재매핑하거나
+revision을 갱신하지 않으며 JS 저장소의 최종 검증은 계속 적용된다.
+`tests/test_commulingo_evidence_diagnostics.py`는 이 진단을 DB 없이 검증한다.
+
+lane health는 pending_review와 과거 no_edit/OK — pending 결과를 별도로 집계한다.
+no_edit 상태만으로 라운드 소진을 단정하지 않는다.
 
 ## 검토와 보강
 

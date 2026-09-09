@@ -2910,6 +2910,9 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
             fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
             fields["role"].pop("categoryId")
+        evidence_errors = _person_evidence_errors(fields, sources)
+        if evidence_errors:
+            return "Error: evidence validation: " + "; ".join(evidence_errors)
         try:
             result = call_person_service({"command": "submit", "target": target_type,
                 "action": action, "id": target_id, "fields": fields, "sources": sources,
@@ -3673,7 +3676,7 @@ _EVIDENCE_SCHEMA = {
             ("field", "claim", "source", "locator", "excerpt")},
             "stance": {"type": "string", "enum": ["supports", "disputes"]}},
         "required": ["field", "claim", "source", "locator"]},
-    "description": "For each changed factual field identify a claim and the cited page/section. source must match a citation. Use stance=disputes for conflicting evidence; it stages review.",
+    "description": "For EVERY supplied factual field (bio, moment, years, citizenship, nationalOrigin; body for sections), use a separate item with that exact field name. source must exactly equal one FULL citations string including its description, not merely its URL. locator names the cited page/section. Do not attach old evidence for omitted non-factual fields such as career. Use stance=disputes for conflicting evidence; it stages review.",
 }
 _PAIR_SCHEMA = {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}}
 _COLLECTION_SCHEMAS = {
@@ -3728,6 +3731,35 @@ _CITATIONS_SCHEMA = {
 }
 
 
+def _person_evidence_errors(fields: dict, sources: list[str]) -> list[str]:
+    """Batch actionable evidence diagnostics before RPC; the store still validates."""
+    evidence = fields.get("evidence", [])
+    if not isinstance(evidence, list) or len(evidence) > 50:
+        return ["evidence must be an array of at most 50 claims"]
+    errors = []
+    covered = set()
+    for index, item in enumerate(evidence):
+        path = f"evidence[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        for key in ("field", "claim", "source", "locator"):
+            if not isinstance(item.get(key), str) or not item[key].strip():
+                errors.append(f"{path}.{key} must be non-empty text")
+        field = item.get("field")
+        if isinstance(field, str):
+            covered.add(field)
+            if field not in fields and field not in _EDITORIAL_CONTRACT["factFields"]:
+                errors.append(f"{path}.field={field!r} is not part of this edit; use the field the claim supports")
+        if item.get("source") not in sources:
+            errors.append(f"{path}.source must exactly equal one complete citations entry, including its description; copy the citation verbatim, not just its URL")
+    missing = [field for field in _EDITORIAL_CONTRACT["factFields"]
+               if field in fields and field not in covered]
+    if missing:
+        errors.append("add separate evidence items for every supplied factual field: " + ", ".join(missing))
+    return errors
+
+
 def _person_write_tool(name: str, action: str) -> dict:
     required_fields = (
         "groupId", "epithet", "bio", "career", "role", "citizenship", "nationalOrigin",
@@ -3738,12 +3770,16 @@ def _person_write_tool(name: str, action: str) -> dict:
         "description": (
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
+            "Put evidence, expectedRevision and reviewFlags INSIDE fields. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
             "background, never birthplace. Russian-style names must research and include a "
             "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
-            "Each changed bio/moment/years/nationality needs evidence with claim, source and locator. "
+            "Every supplied bio, moment, years, citizenship and nationalOrigin needs its own "
+            "fields.evidence item with that exact field name, claim, source and locator. "
+            "evidence.source must exactly equal a FULL citations entry including its description, not just the URL. "
+            "For updates send only changed fields; do not copy old evidence for omitted career or other fields. "
             "Conflicting evidence or large deletions are staged for review. A successful call ends the run."
         ),
         "input_schema": {
